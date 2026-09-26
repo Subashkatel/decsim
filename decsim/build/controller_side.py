@@ -22,6 +22,7 @@ import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.detector_error_model.detection_event_formation as formation
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.pauli_frame.decision_dispatch as decision_dispatch_module
 import decsim.ports as ports
@@ -103,7 +104,9 @@ def _decoder_manager(
 
 
 def build_detection_events(
-    settings: machine_settings.MachineSettings, device
+    settings: machine_settings.MachineSettings,
+    device,
+    burst_detector: Optional[ports.BurstDetector] = None,
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
 
@@ -112,12 +115,15 @@ def build_detection_events(
     the first round is packed. Every row is built the same way, with the
     run's former and the controller's own formation cost in cycles. A
     source that does not answer the DetectionEventFormer port forms
-    nothing either way. The decoder pool
+    nothing either way. A burst detector reads every round the former
+    forms. The decoder pool
     is compiled from this seat, so the root builds it before the rest.
     """
     former = None
     if isinstance(device, ports.DetectionEventFormer):
         former = device
+    if burst_detector is not None:
+        former = _observed(former, burst_detector)
     row = tables.row(
         controller_settings.DETECTION_EVENT_FORMATION,
         "controller.detection_events_formed_at",
@@ -306,3 +312,14 @@ def resolved_patches_by_identity(plan) -> dict:
     for patch in plan.run_plan.resolved_patches:
         patch_by_identity[patch.patch_identity] = patch
     return patch_by_identity
+
+
+def _observed(former, burst_detector: ports.BurstDetector):
+    """The former, reporting each round to the burst detector."""
+    if former is None:
+        raise ValueError(
+            "burst_detector counts detection events, and this qpu.kind "
+            "forms none; name a source that forms them, or write "
+            "burst_detector: {kind: none}"
+        )
+    return formation.ObservedDetectionEvents(former, burst_detector)

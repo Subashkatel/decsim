@@ -4,7 +4,7 @@
 
 A pluggable part of decsim is a **table**: a dictionary whose keys are
 the names a yaml file may write and whose values are the classes the
-machine builds. There are eighteen of them, listed with every row in
+machine builds. There are nineteen of them, listed with every row in
 [The plug-in tables](../reference/tables.md). This is the recipe for adding a row to any
 of them.
 
@@ -207,4 +207,4 @@ and its path, so one seed reproduces one shot exactly. See
 - [How to plug a component in without a table row](plug_in_without_a_table_row.md): skip step 2 while the
   class is still changing.
 - [How to add a decoder backend](add_a_decoder_backend.md): the decoder case in full.
-- [The plug-in tables](../reference/tables.md): all eighteen tables and their rows.
+- [The plug-in tables](../reference/tables.md): all nineteen tables and their rows.

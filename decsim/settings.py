@@ -44,6 +44,7 @@ SECTIONS = (
     "strong_decoder",
     "decoder_manager",
     "escalation",
+    "burst_detector",
     "pauli_frame",
     "workload",
     "magic_state_factory",
@@ -103,6 +104,9 @@ class MachineSettings:
     )
     escalation: escalation_settings.EscalationSettings = (
         escalation_settings.EscalationSettings()
+    )
+    burst_detector: escalation_settings.BurstDetectorSettings = (
+        escalation_settings.BurstDetectorSettings()
     )
     pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
     workload: workload_settings.WorkloadSettings = (
@@ -182,6 +186,10 @@ class MachineSettings:
         escalation = escalation_settings.EscalationSettings.from_yaml(
             escalation_section, clocks, base_directory, controller.clock
         )
+        burst_detector_section = sections.get("burst_detector", {})
+        burst_detector = escalation_settings.BurstDetectorSettings.from_yaml(
+            burst_detector_section, clocks
+        )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks
         )
@@ -207,6 +215,7 @@ class MachineSettings:
             strong_decoder=strong_decoder,
             decoder_manager=decoder_manager,
             escalation=escalation,
+            burst_detector=burst_detector,
             pauli_frame=pauli_frame,
             workload=workload,
             magic_state_factory=magic_state_factory,

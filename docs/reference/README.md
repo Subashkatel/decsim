@@ -20,7 +20,7 @@ change one, change the source it reads and run the tool.
 
 ## The shape of the package
 
-- [The plug-in tables](tables.md): the eighteen tables, the file each
+- [The plug-in tables](tables.md): the nineteen tables, the file each
   lives in, the yaml key that names it, and every row. Generated.
 - [The ports](ports.md): every port of `decsim/ports.py` with its
   methods and members, in the order a readout travels. Generated.

@@ -6,7 +6,7 @@ name the type it reads (STYLE.md rule 10).
 """
 
 import dataclasses
-from typing import Any
+from typing import Any, Optional
 
 import decsim.build.decoders as decoder_build
 import decsim.build.plan as plan_build
@@ -22,9 +22,10 @@ class Parts:
     The settings and the engine are every seat's input; the plan, the
     decoder pool and the escalation policy are the records the root
     compiles from them; the detection event placement is the one seat the
-    pool is compiled from, so the root builds it with them. seats holds
-    the rows built so far, and only the magic state factory's row and
-    the primary output's row read it.
+    pool is compiled from, so the root builds it with them, and the
+    burst detector before it, since the placement's former reports to
+    it. seats holds the rows built so far, and only the magic state
+    factory's row and the primary output's row read it.
     """
 
     settings: machine_settings.MachineSettings
@@ -33,4 +34,6 @@ class Parts:
     escalation_policy: Any
     pool: decoder_build.DecoderPool
     detection_events: ports.DetectionEventPlacement
+    # None when burst_detector.kind is none: the run has no detector
+    burst_detector: Optional[ports.BurstDetector] = None
     seats: dict = dataclasses.field(default_factory=dict)

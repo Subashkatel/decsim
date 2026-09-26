@@ -23,7 +23,7 @@ port interface, quoted in
 write and one class the machine builds for it. That is sinter's shape,
 its `BUILT_IN_DECODERS` dictionary plus one abstract class per pluggable
 part, and `decsim/tables.py` is the single function that reads all
-eighteen tables, so a name that is not on a table is refused the same
+nineteen tables, so a name that is not on a table is refused the same
 way everywhere.
 
 **One root wires everything by constructor.** `decsim/machine.py` builds
@@ -107,7 +107,7 @@ why `observe/` can be switched off without a single other line changing.
 
 ## The pluggable parts
 
-Seventeen tables, listed with every row in [The plug-in tables](../reference/tables.md).
+Nineteen tables, listed with every row in [The plug-in tables](../reference/tables.md).
 The parts a study is most likely to change:
 
 - the **syndrome source**, which is what the QPU reads out
@@ -119,7 +119,9 @@ The parts a study is most likely to change:
   (`WINDOWING_SCHEMES`);
 - the **link fabric**, which prices the hops (`LINK_FABRICS`);
 - the **confidence signal** and the **threshold source**, which decide
-  when a window is escalated (`CONFIDENCE_SIGNALS`, `THRESHOLD_SOURCES`).
+  when a window is escalated (`CONFIDENCE_SIGNALS`, `THRESHOLD_SOURCES`);
+- the **burst detector**, which sends the windows a burst of errors
+  covers to the strong tier (`BURST_DETECTORS`).
 
 Every one of them is one class filling one port and one row in a table.
 [How to add a row to a table](../how-to/add_a_table_row.md) is the recipe.

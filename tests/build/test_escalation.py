@@ -13,9 +13,12 @@ import pytest
 
 import decsim.build.escalation as escalation_build
 import decsim.decoders.settings as decoder_settings
+import decsim.engine as engine_module
+import decsim.escalation.burst_detectors as burst_detectors
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 
 
 def test_the_kinds_row_answers_the_tier_when_no_policy_was_built():
@@ -134,3 +137,17 @@ def test_the_confidence_row_is_built_with_the_sections_walk_card():
     signal = escalation_build.confidence_signal(settings, weak)
 
     assert signal.walk_microseconds == 0.25
+
+
+def test_a_burst_detector_beside_a_policy_that_never_escalates_is_refused():
+    """A flagged window goes to the strong tier, which weak_baseline lacks."""
+    row_settings = burst_detectors.EventCountBurstDetector.Settings()
+    section = escalation_settings.BurstDetectorSettings(
+        kind="event_count", row_settings=row_settings
+    )
+    settings = machine_settings.MachineSettings(burst_detector=section)
+    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    engine = engine_module.Engine()
+
+    with pytest.raises(ValueError, match="only escalation.kind switching"):
+        escalation_build.build_burst_detector(settings, engine, None, policy)

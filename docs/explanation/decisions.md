@@ -1225,8 +1225,10 @@ mistake a gap for a result.
   held for store room. The size that is always enough is the union of
   every hold, and an open-ended dynamic stream has none.
 O3, O4, O5 and O10 are closed: the sends name what they carry
-(`QPUReadout.size_bits` on the readout hop, nothing on the escalation
-hop), the backward hand-off of the parallel scheme is priced and tested,
+(`QPUReadout.size_bits` on the readout hop; on the strong request's
+hops the request's name, alone for the selection and in front of the
+region's rounds and the answer's flips), the backward hand-off of the
+parallel scheme is priced and tested,
 the boundary fold is written by the decoder side from the gate's mask
 (`decsim/decoders/decoder_memory_transfer.py`, D11), and a timing-only
 round ends in the decoders' own end for it

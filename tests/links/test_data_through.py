@@ -26,18 +26,20 @@ the first and last rounds of a stream.
 
 The switching shape's strong side is filled by the escalation alone
 (Toshio 2510.25222 lines 1247 to 1250): each escalated window sends its
-selection as zero bits and then the rounds its strong window reads that
-the strong syndrome buffer lacks, so the fifteen rounds cross
-weak_decoder_to_strong_decoder once each and controller_to_strong_buffer
-carries nothing. The strong window is the commit region and one buffer
-ahead, its past face pinned on the neighbour's commit (Bombin
-2303.04846 lines 775-788, 1456-1458), so it reads what the weak window
-read. At d=3 that is 1-6, 4-9, 7-12, 10-15 and 13-15, so four regions
-carry rounds 1-6, 7-9, 10-12 and 13-15 (44, 24, 24 and 28 bits) and the
-fifth window finds its rounds there already; at d=5 it is 1-10, 6-15
-and 11-15, so two regions carry 1-10 and 11-15 (228 and 132 bits). Each
-pinned face crosses decoder_to_decoder beside the weak hand-offs, one
-bulk layer each, so that hop carries twice the hand-offs.
+selection, the request's 64-bit name alone, and then the rounds its
+strong window reads that the strong syndrome buffer lacks behind the
+same name, so the fifteen rounds cross weak_decoder_to_strong_decoder
+once each and controller_to_strong_buffer carries nothing. A strong
+answer is its flip behind that name, 65 bits. The strong window is the
+commit region and one buffer ahead, its past face pinned on the
+neighbour's commit (Bombin 2303.04846 lines 775-788, 1456-1458), so it
+reads what the weak window read. At d=3 that is 1-6, 4-9, 7-12, 10-15
+and 13-15, so four regions carry rounds 1-6, 7-9, 10-12 and 13-15 (44,
+24, 24 and 28 bits of rounds) and the fifth window finds its rounds
+there already; at d=5 it is 1-10, 6-15 and 11-15, so two regions carry
+1-10 and 11-15 (228 and 132 bits of rounds). Each pinned face crosses
+decoder_to_decoder beside the weak hand-offs, one bulk layer each, so
+that hop carries twice the hand-offs.
 """
 
 import collections
@@ -55,9 +57,12 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings_module
 
 ROUNDS = 15
+# what a strong request's name is on a wire
+NAME_BITS = window_records.REQUEST_KEY_WIRE_BITS
 PROBABILITY = 0.008
 SEED = 0
 CODE_TASK = "surface_code:rotated_memory_z"
@@ -123,32 +128,37 @@ EXPECTED = {
         "controller_to_strong_buffer": Traffic(15, 120),
         "strong_buffer_to_strong_decoder": Traffic(4, 192),
         "decoder_to_decoder": Traffic(3, 24),
-        "strong_decoder_to_frame": Traffic(4, 4),
+        # four answers of one flip behind a 64-bit name
+        "strong_decoder_to_frame": Traffic(4, 260),
     },
     ("strong", 5): {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_strong_buffer": Traffic(15, 360),
         "strong_buffer_to_strong_decoder": Traffic(2, 480),
         "decoder_to_decoder": Traffic(1, 24),
-        "strong_decoder_to_frame": Traffic(2, 2),
+        "strong_decoder_to_frame": Traffic(2, 130),
     },
     ("switching", 3): {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_weak_buffer": Traffic(15, 120),
         "weak_buffer_to_weak_decoder": Traffic(5, 220),
-        "weak_decoder_to_strong_decoder": Traffic(9, 120),
+        # nine names of 64 bits, five selections and four regions, and
+        # the regions' 120 bits of rounds
+        "weak_decoder_to_strong_decoder": Traffic(9, 696),
         "strong_buffer_to_strong_decoder": Traffic(5, 220),
         "decoder_to_decoder": Traffic(8, 64),
-        "strong_decoder_to_frame": Traffic(5, 5),
+        "strong_decoder_to_frame": Traffic(5, 325),
     },
     ("switching", 5): {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_weak_buffer": Traffic(15, 360),
         "weak_buffer_to_weak_decoder": Traffic(3, 612),
-        "weak_decoder_to_strong_decoder": Traffic(5, 360),
+        # five names of 64 bits, three selections and two regions, and
+        # the regions' 360 bits of rounds
+        "weak_decoder_to_strong_decoder": Traffic(5, 680),
         "strong_buffer_to_strong_decoder": Traffic(3, 612),
         "decoder_to_decoder": Traffic(4, 96),
-        "strong_decoder_to_frame": Traffic(3, 3),
+        "strong_decoder_to_frame": Traffic(3, 195),
     },
 }
 # The commit extents the sliding scheme lays for the two distances, read
@@ -384,35 +394,112 @@ def test_the_boundary_hop_pays_one_bulk_layer_per_hand_off(distance):
     assert set(sizes) == {bulk_layer}
 
 
-@pytest.mark.parametrize("distance", (3, 5))
-def test_the_escalation_carries_the_selection_bare_and_each_round_once(
-    distance,
-):
-    """The decision names a request; the region carries the rounds' layers.
+def bounded_strong_hops_run() -> dict:
+    """The d=5 switching run with both strong hops at the bounded row's rates.
 
-    Each region's bits are the detector layers of the rounds it names,
-    and no round rides up twice.
+    The row provisions each hop for one escalation a commit region: a
+    selection and a region of fifteen rounds, each behind a name, is
+    488 bits in 5 us, 97.6 bits per us; an answer is 65 bits in 5 us,
+    13 bits per us.
+    """
+    distance = 5
+    syndrome_bits_per_round = distance * distance - 1
+    bounded = link_profiles.bandwidth_limited_profile(
+        syndrome_bits_per_round=syndrome_bits_per_round,
+        round_microseconds=1.0,
+        commit_rounds=distance,
+        buffer_rounds=distance,
+    )
+    settings = machine_settings("switching", distance)
+    links = dataclasses.replace(
+        settings.links,
+        weak_decoder_to_strong_decoder=bounded.weak_decoder_to_strong_decoder,
+        strong_decoder_to_frame=bounded.strong_decoder_to_frame,
+    )
+    settings = dataclasses.replace(settings, links=links)
+    machine = machine_module.Machine.build(settings, SEED)
+    result = machine.run()
+    return transfers_by_path(result)
+
+
+def test_a_bounded_escalation_hop_serializes_the_selections_name():
+    """64 bits at 97.6 bits per us is 0.655738 us on the wire."""
+    grouped = bounded_strong_hops_run()
+    first_selection = grouped["weak_decoder_to_strong_decoder"][0]
+    assert first_selection["payload_bits"] == NAME_BITS
+    assert first_selection["serialization_ticks"] == 655_738
+
+
+def test_a_bounded_answer_hop_serializes_the_answers_name_and_flip():
+    """65 bits at 13 bits per us is 5 us, the one commit region it has."""
+    grouped = bounded_strong_hops_run()
+    first_answer = grouped["strong_decoder_to_frame"][0]
+    assert first_answer["payload_bits"] == NAME_BITS + 1
+    assert first_answer["serialization_ticks"] == 5_000_000
+
+
+def escalation_transfers(distance: int) -> tuple:
+    """(selections, regions) of the switching run's escalation hop.
+
+    A selection is the request's name alone, so its width tells it from
+    a region, which is the same name in front of at least one round.
     """
     _machine, result = run_case("switching", distance)
     grouped = transfers_by_path(result)
     selections = []
-    carried_rounds = []
+    regions = []
     for transfer in grouped["weak_decoder_to_strong_decoder"]:
-        payload_bits = transfer["payload_bits"]
-        if payload_bits == 0:
+        if transfer["payload_bits"] == NAME_BITS:
             selections.append(transfer)
-            continue
-        attribution = transfer["attribution"]
-        first_round = attribution["round_lo"]
-        last_round = attribution["round_hi"]
-        expected = window_detectors(first_round, last_round, ROUNDS, distance)
-        assert payload_bits == expected, attribution
-        past_last = last_round + 1
-        carried_rounds.extend(range(first_round, past_last))
+        else:
+            regions.append(transfer)
+    return selections, regions
+
+
+def bits_beside_the_layers(region: dict, distance: int) -> int:
+    """What one region transfer carries beside its rounds' detector layers."""
+    attribution = region["attribution"]
+    first_round = attribution["round_lo"]
+    last_round = attribution["round_hi"]
+    layers = window_detectors(first_round, last_round, ROUNDS, distance)
+    return region["payload_bits"] - layers
+
+
+def rounds_carried(regions: list) -> list:
+    """Every round the regions carry, in order, a repeat kept as a repeat."""
+    carried = []
+    for region in regions:
+        attribution = region["attribution"]
+        past_last = attribution["round_hi"] + 1
+        carried.extend(range(attribution["round_lo"], past_last))
+    return sorted(carried)
+
+
+@pytest.mark.parametrize("distance", (3, 5))
+def test_every_strong_answer_has_one_selection(distance):
+    """The decision names a request, once, and the answer names it back."""
+    _machine, result = run_case("switching", distance)
+    grouped = transfers_by_path(result)
+    answers = grouped["strong_decoder_to_frame"]
+    selections, _regions = escalation_transfers(distance)
+    assert len(selections) == len(answers)
+
+
+@pytest.mark.parametrize("distance", (3, 5))
+def test_a_region_transfer_is_the_name_and_its_rounds_layers(distance):
+    """Each transfer of a region carries the request's name once."""
+    _selections, regions = escalation_transfers(distance)
+    beside = {bits_beside_the_layers(region, distance) for region in regions}
+    assert beside == {NAME_BITS}
+
+
+@pytest.mark.parametrize("distance", (3, 5))
+def test_every_round_rides_up_once(distance):
+    """The strong side is filled by the escalation alone, no round twice."""
+    _selections, regions = escalation_transfers(distance)
     past_last_round = ROUNDS + 1
     every_round = list(range(1, past_last_round))
-    assert len(selections) == len(grouped["strong_decoder_to_frame"])
-    assert sorted(carried_rounds) == every_round
+    assert rounds_carried(regions) == every_round
 
 
 @pytest.mark.parametrize("distance", (3, 5))

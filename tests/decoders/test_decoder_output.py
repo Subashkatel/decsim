@@ -74,11 +74,11 @@ class _Link:
     """The fabric, answering what a send starting at a tick would pay."""
 
     def __init__(self) -> None:
-        self.asked_at = []
+        self.asked = []
 
     def expected_delay_ticks(self, path, payload_bits, now_ticks) -> int:
-        del path, payload_bits
-        self.asked_at.append(now_ticks)
+        del path
+        self.asked.append((now_ticks, payload_bits))
         return REGION_LINK_TICKS
 
 
@@ -116,6 +116,23 @@ def _request_key(tier) -> window_records.DecoderRequestKey:
     return window_records.DecoderRequestKey(4, 1, tier, 0)
 
 
+def _published_bits(tier, logical_observables: tuple) -> int:
+    """The bits one answer of that tier puts on its output link."""
+    engine = engine_module.Engine()
+    transfers = _Transfers(engine, 4)
+    output = decoder_output_module.DecoderOutput(engine)
+    output.transfers = transfers
+    result = decoding_records.DecodeResult(
+        4, 1, logical_observables=logical_observables
+    )
+    request_key = _request_key(tier)
+    window = _window()
+    operation = _operation(1)
+    output.publish(window, operation, result, request_key, _ignore)
+    ((_path, _key, _tier, payload_bits),) = transfers.sent
+    return payload_bits
+
+
 def test_each_tier_publishes_over_its_own_output_link():
     """A weak result rides weak_decoder_to_frame, a strong one its own."""
     engine = engine_module.Engine()
@@ -141,8 +158,22 @@ def test_each_tier_publishes_over_its_own_output_link():
     ]
 
 
-def test_a_selection_is_sent_as_zero_bits_so_a_bounded_hop_can_carry_it():
-    """A size of None is refused by a bounded wire; a selection has a size."""
+def test_a_strong_answer_is_its_flip_behind_the_requests_name():
+    """It crosses the wall out of order, so it says which request it answers."""
+    one_flip = (1,)
+    strong = window_records.DecoderTier.STRONG
+    assert _published_bits(strong, one_flip) == 64 + 1
+
+
+def test_a_weak_answer_is_its_flip_alone():
+    """It stays on the board with its frame, and no name is priced there."""
+    one_flip = (1,)
+    weak = window_records.DecoderTier.WEAK
+    assert _published_bits(weak, one_flip) == 1
+
+
+def test_a_selection_is_the_requests_name_alone():
+    """A message that only names a request is still 8 bytes on the wire."""
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     output = decoder_output_module.DecoderOutput(engine)
@@ -154,7 +185,7 @@ def test_a_selection_is_sent_as_zero_bits_so_a_bounded_hop_can_carry_it():
     output.send_selection(weak_job, strong_key, _ignore)
     escalation_path = transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
     tiers = window_records.DecoderTier
-    assert transfers.sent == [(escalation_path, "weak", tiers.STRONG, 0)]
+    assert transfers.sent == [(escalation_path, "weak", tiers.STRONG, 64)]
 
 
 def test_a_result_is_one_bit_per_logical_observable():
@@ -239,3 +270,18 @@ def test_an_escalated_region_leaves_when_its_weak_store_read_ends(read_ticks):
     assert output.weak_store.read_keys == [((4, 2), (4, 3))]
     assert transfers.left_at == [100 + read_ticks]
     assert expected_delay == read_ticks + REGION_LINK_TICKS
+
+
+def test_a_region_that_waits_on_its_read_is_priced_as_its_message():
+    """The link is asked about the name and the rounds, from the read's end."""
+    engine = engine_module.Engine()
+    engine.now = 100
+    output = decoder_output_module.DecoderOutput(engine)
+    output.transfers = _RegionTransfers(engine)
+    output.weak_store = _WeakStore(engine, 30)
+    output.link = _Link()
+    region = _region()
+
+    output.send_region(region, _ignore)
+
+    assert output.link.asked == [(130, 64 + 16)]

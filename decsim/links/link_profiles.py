@@ -44,6 +44,12 @@ import decsim.tables as tables
 # error log, Helios's correction port); that is a different card. The
 # window manager supplies the count from the result itself.
 RESULT_PAYLOAD_SOURCE = "DecodeResult.logical_observables bits"
+# A strong answer crosses the wall while other requests are open, so it
+# carries the name of the request it answers in front of those bits
+# (decoders/decoder_output.py ANSWER_NAME_BITS_BY_TIER).
+STRONG_RESULT_PAYLOAD_SOURCE = (
+    "DecodeResult.logical_observables bits behind the request's name"
+)
 
 # A decision crosses the control fabric as one bus word: the decoder
 # sequencer's 32-bit WISHBONE interface (Caune et al., arXiv 2410.05202,
@@ -68,9 +74,10 @@ READOUT_PAYLOAD_SOURCE = "QPUReadout.size_bits"
 # weak syndrome buffer at the width each round left the controller
 # (Toshio et al. 2510.25222 lines 1247 to 1250 assign the region's
 # syndrome data to the strong decoder at the switch; decoders/
-# decoder_output.py send_region). The selection that names the strong
-# request rides the same hop first with no bits.
-ESCALATION_PAYLOAD_SOURCE = "EscalatedRegion.wire_bits"
+# decoder_output.py send_region). The selection rides the same hop first
+# as the request's name alone, and the region carries that name in front
+# of its rounds (records/windows.py REQUEST_KEY_WIRE_BITS).
+ESCALATION_PAYLOAD_SOURCE = "EscalatedRegion.message_bits()"
 
 # The two controller-to-store hops carry the packed round at the width
 # it leaves the controller: the detection events where the controller
@@ -356,7 +363,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         "strong_decoder_to_frame",
         STRONG_STORE_LATENCY_MICROSECONDS,
         STRONG_STORE_SOURCE,
-        RESULT_PAYLOAD_SOURCE,
+        STRONG_RESULT_PAYLOAD_SOURCE,
         off_board_rate,
     )
     frame_to_controller = _default_path(
@@ -431,6 +438,12 @@ def bandwidth_limited_profile(
         commit_rounds, buffer_rounds
     )
     strong_window_bits = strong_window_rounds * syndrome_bits_per_round
+    # one escalation is a selection and a region, each behind the
+    # request's name, and its answer is one flip behind the same name
+    name_bits = window_records.REQUEST_KEY_WIRE_BITS
+    region_message_bits = name_bits + strong_window_bits
+    escalation_bits = name_bits + region_message_bits
+    strong_answer_bits = name_bits + 1
     one_per_region = 1 / commit_region_microseconds
     round_bits_per_microsecond = (
         syndrome_bits_per_round / round_period_microseconds
@@ -440,6 +453,12 @@ def bandwidth_limited_profile(
     )
     strong_window_bits_per_microsecond = (
         strong_window_bits / commit_region_microseconds
+    )
+    escalation_bits_per_microsecond = (
+        escalation_bits / commit_region_microseconds
+    )
+    strong_answer_bits_per_microsecond = (
+        strong_answer_bits / commit_region_microseconds
     )
     # one dense seam layer per commit region: the layer's detectors are
     # the round's syndrome bits (section 2.2 of the layer arithmetic:
@@ -489,9 +508,10 @@ def bandwidth_limited_profile(
     )
     weak_decoder_to_strong_decoder = provisioning.path(
         "weak_decoder_to_strong_decoder",
-        strong_window_bits,
-        strong_window_bits_per_microsecond,
-        "one strong window of rcom+2rbuf rounds per commit region "
+        region_message_bits,
+        escalation_bits_per_microsecond,
+        "one selection and one strong window of rcom+2rbuf rounds per "
+        "commit region, each behind the request's name "
         "(Toshio 2510.25222 Sec. III C, "
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
         ESCALATION_PAYLOAD_SOURCE,
@@ -521,10 +541,11 @@ def bandwidth_limited_profile(
     )
     strong_decoder_to_frame = provisioning.path(
         "strong_decoder_to_frame",
-        1,
-        one_per_region,
-        "one frame-update bit per logical observable per commit region",
-        RESULT_PAYLOAD_SOURCE,
+        strong_answer_bits,
+        strong_answer_bits_per_microsecond,
+        "one frame-update bit per logical observable per commit region, "
+        "behind the request's name",
+        STRONG_RESULT_PAYLOAD_SOURCE,
     )
     frame_to_controller = provisioning.path(
         "frame_to_controller",
@@ -881,7 +902,7 @@ def _roce_v2_strong_paths(
         "strong_decoder_to_frame",
         leg_microseconds,
         reply_source,
-        RESULT_PAYLOAD_SOURCE,
+        STRONG_RESULT_PAYLOAD_SOURCE,
         cable_rate,
     )
     return {

@@ -681,7 +681,13 @@ links:                             # a kind, then one card per path; null = the
                                    #     bits, and a 24 byte RPCResponse in front
                                    #     of a reply, 192 bits (cudaqx
                                    #     decoder_rpc_wire_format.h lines 41-43
-                                   #     and 62-69)
+                                   #     and 62-69). Those bytes hold CUDA-Q's
+                                   #     own ids, an int64 decoder id among the
+                                   #     enqueue's fields and a 32-bit request
+                                   #     id in each header. A strong request's
+                                   #     messages already carry decsim's 64-bit
+                                   #     name, so a run that prices this framing
+                                   #     leaves out the id the name stands for
                                    #   protocol: optional; how the path's
                                    #     channel moves a message (PROTOCOLS,
                                    #     links/fabric.py). Absent is kind
@@ -754,8 +760,15 @@ links:                             # a kind, then one card per path; null = the
   weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # weak syndrome buffer -> weak decoder, one window
   weak_decoder_to_strong_decoder: null
-                                   # weak -> strong: the escalation's selection, then
-                                   # the strong window's rounds, read out of the
+                                   # weak -> strong: the escalation's selection,
+                                   # the request's 64-bit name alone, then that
+                                   # name in front of the strong window's rounds
+                                   # (gem5 sizes a message with no data at
+                                   # control_msg_size, 8 bytes, and one with
+                                   # data at its data plus that size,
+                                   # src/mem/ruby/network/Network.cc; CUDA-Q
+                                   # QEC opens every request with one int64).
+                                   # The rounds are read out of the
                                    # weak syndrome buffer (rcom + 2 rbuf of them)
   strong_buffer_to_strong_decoder: null
                                    # strong syndrome buffer -> strong decoder, one window
@@ -763,7 +776,10 @@ links:                             # a kind, then one card per path; null = the
                                    # decoder -> decoder boundary handoff
   weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # weak decoder -> Pauli frame
-  strong_decoder_to_frame: null    # strong decoder -> Pauli frame
+  strong_decoder_to_frame: null    # strong decoder -> Pauli frame: the flips
+                                   # behind the request's 64-bit name, the same
+                                   # gem5 rule. A weak answer stays on the board
+                                   # and no name is priced on its hop
   frame_to_controller: {latency_cycles: 0, clock: fridge, bits_per_cycle: 32}
                                    # Pauli frame -> controller, a release: one
                                    # 32-bit word with a ready signal (QubiC

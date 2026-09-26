@@ -68,6 +68,25 @@ class DecoderRequestKey:
     run_sequence: int
 
 
+# What a request's name is on a wire. Three kinds of message carry it,
+# once in every transfer: the selection, which is the name alone, a
+# region transfer, which is the name and its rounds, and the strong
+# answer, which is the name and its flips. The rule is gem5's: its
+# network sizes a message with no data at control_msg_size, 8 bytes, and
+# one with data at its data plus that same size (gem5
+# src/mem/ruby/network/Network.cc MessageSizeType_to_int and
+# m_data_msg_size, Network.py control_msg_size). gem5's data size is one
+# configured number; decsim applies the same sum to a region of any
+# size. The name is decsim's own abstraction of whatever identifies the
+# request, not a published layout: CUDA-Q QEC spends an int64 on the
+# decoder's id at the front of every request payload (cudaqx
+# decoder_rpc_wire_format.h EnqueueRequestPayload,
+# GetCorrectionsRequestPayload, ResetRequestPayload) and 32 bits on a
+# request id in every 24-byte header. A path's header frames each
+# transfer beside the name.
+REQUEST_KEY_WIRE_BITS = 64
+
+
 @dataclass
 class Window:
     """One decoder window inside an operation's syndrome stream.

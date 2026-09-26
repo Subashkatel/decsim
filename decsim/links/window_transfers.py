@@ -101,13 +101,12 @@ class WindowTransfers:
         """
         attribution = transfer_records.TransferAttribution.for_region(region)
         now_ticks = self.engine.now
+        message_bits = region.message_bits()
         expected_delay_ticks = self.link.expected_delay_ticks(
-            path, region.wire_bits, now_ticks
+            path, message_bits, now_ticks
         )
         delivered = functools.partial(_run_at_delivery, on_delivered)
-        self.link.send(
-            path, region.wire_bits, now_ticks, attribution, delivered
-        )
+        self.link.send(path, message_bits, now_ticks, attribution, delivered)
         return expected_delay_ticks
 
     def send_boundary(

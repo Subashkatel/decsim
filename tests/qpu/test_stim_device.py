@@ -102,7 +102,7 @@ def test_a_distance_three_round_has_eight_bits_and_the_last_seventeen():
     circuit = memory_circuit(3, 3)
     device = stim_device.StimDevice(seed=1)
     operation = memory_operation(circuit)
-    device.begin_operation(operation, 3, 3)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first = round_payload(device, operation, 1)
     second = round_payload(device, operation, 2)
     third = round_payload(device, operation, 3)
@@ -115,7 +115,7 @@ def test_a_distance_five_round_has_24_bits_and_the_last_49():
     circuit = memory_circuit(5, 3)
     device = stim_device.StimDevice(seed=1)
     operation = memory_operation(circuit)
-    device.begin_operation(operation, 3, 3)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first = round_payload(device, operation, 1)
     third = round_payload(device, operation, 3)
     assert (len(first.bits), len(third.bits)) == (24, 49)
@@ -126,7 +126,7 @@ def test_a_replayed_shot_is_cut_into_the_rounds_it_was_measured_in():
     circuit = memory_circuit(3, 4)
     device = recorded_device(RECORDED_ROW)
     operation = memory_operation(circuit)
-    device.begin_operation(operation, 4, 4)
+    device.begin_operation(operation, 4, 4, round_period_ticks=1_100_000)
     first = round_payload(device, operation, 1)
     second = round_payload(device, operation, 2)
     fourth = round_payload(device, operation, 4)
@@ -148,7 +148,7 @@ def test_a_replayed_shot_forms_the_events_and_truth_stim_forms():
     )
     device = recorded_device(RECORDED_ROW)
     operation = memory_operation(circuit)
-    device.begin_operation(operation, 4, 4)
+    device.begin_operation(operation, 4, 4, round_period_ticks=1_100_000)
     oracle_events = events[0].tolist()
     assert oracle_events == list(RECORDED_EVENTS)
     assert observables[0].tolist() == [True]
@@ -161,7 +161,7 @@ def test_form_round_yields_each_rounds_slice_of_the_shots_events():
     circuit = memory_circuit(3, 4)
     device = recorded_device(RECORDED_ROW)
     operation = memory_operation(circuit)
-    device.begin_operation(operation, 4, 4)
+    device.begin_operation(operation, 4, 4, round_period_ticks=1_100_000)
     first = round_payload(device, operation, 1)
     second = round_payload(device, operation, 2)
     third = round_payload(device, operation, 3)
@@ -200,7 +200,7 @@ def test_a_seeded_shot_is_stims_shot_under_the_hashed_substream_seed():
     oracle_row = shots[0].tolist()
     device = stim_device.StimDevice(seed=7)
     operation = memory_operation(circuit, 1)
-    device.begin_operation(operation, 3, 3)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first = round_payload(device, operation, 1)
     second = round_payload(device, operation, 2)
     third = round_payload(device, operation, 3)
@@ -219,8 +219,8 @@ def test_the_same_seed_samples_the_same_shot_in_another_device():
     operation = memory_operation(circuit)
     first = stim_device.StimDevice(seed=7)
     second = stim_device.StimDevice(seed=7)
-    first.begin_operation(operation, 3, 3)
-    second.begin_operation(operation, 3, 3)
+    first.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
+    second.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first_round = round_payload(first, operation, 3)
     second_round = round_payload(second, operation, 3)
     assert first_round.bits == (
@@ -233,7 +233,7 @@ def test_another_root_seed_samples_another_shot():
     circuit = memory_circuit(3, 3)
     operation = memory_operation(circuit)
     device = stim_device.StimDevice(seed=8)
-    device.begin_operation(operation, 3, 3)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first_round = round_payload(device, operation, 1)
     assert first_round.bits == (0, 0, 0, 0, 0, 1, 0, 1)
 
@@ -242,7 +242,7 @@ def test_another_sample_key_under_the_same_seed_samples_another_shot():
     circuit = memory_circuit(3, 3)
     operation = memory_operation(circuit, 2)
     device = stim_device.StimDevice(seed=7)
-    device.begin_operation(operation, 3, 3)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first_round = round_payload(device, operation, 1)
     assert first_round.bits == (1, 0, 0, 0, 0, 1, 0, 1)
 
@@ -264,7 +264,7 @@ def test_a_run_bound_seed_samples_stims_shot_under_that_root():
     device = stim_device.StimDevice(seed=None)
     reservation = device.reserve_run_seed(3)
     device.commit_run_seed(reservation)
-    device.begin_operation(operation, 3, 3)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first_round = round_payload(device, operation, 1)
     assert first_round.bits == (0, 0, 0, 0, 0, 1, 0, 0)
 
@@ -274,7 +274,7 @@ def test_a_seeded_device_refuses_an_identity_it_cannot_hash_stably():
     operation = memory_operation(circuit, stream_id=("tuple",), stream_offset=0)
     device = stim_device.StimDevice(seed=7)
     with pytest.raises(TypeError, match="int or str"):
-        device.begin_operation(operation, 3, 3)
+        device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
 
 
 def test_a_later_stream_segment_reuses_the_streams_shot():
@@ -282,10 +282,10 @@ def test_a_later_stream_segment_reuses_the_streams_shot():
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
     tail = memory_operation(circuit, 2, stream_id="s", stream_offset=3)
     device = stim_device.StimDevice(seed=5)
-    device.begin_operation(head, 3, 6)
+    device.begin_operation(head, 3, 6, round_period_ticks=1_100_000)
     head_events = device.sampled_detection_events(1)
     head_fourth = round_payload(device, head, 4)
-    device.begin_operation(tail, 3, 6)
+    device.begin_operation(tail, 3, 6, round_period_ticks=1_100_000)
     assert device.sampled_detection_events(2) == head_events
     assert device.sampled_detection_events("s") == head_events
     tail_first = round_payload(device, tail, 1)
@@ -299,8 +299,8 @@ def test_a_segments_observable_truth_is_its_streams_truth():
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
     tail = memory_operation(circuit, 2, stream_id="s", stream_offset=3)
     device = stim_device.StimDevice(seed=5)
-    device.begin_operation(head, 3, 6)
-    device.begin_operation(tail, 3, 6)
+    device.begin_operation(head, 3, 6, round_period_ticks=1_100_000)
+    device.begin_operation(tail, 3, 6, round_period_ticks=1_100_000)
     assert device.logical_observable_truth("s") == (0,)
     assert device.logical_observable_truth(1) == (0,)
     assert device.logical_observable_truth(2) == (0,)
@@ -318,11 +318,11 @@ def test_a_stream_whose_id_equals_a_segments_operation_id_samples_afresh():
     tail = memory_operation(six_rounds, 2, stream_id="a", stream_offset=3)
     other = memory_operation(three_rounds, 3, stream_id=2, stream_offset=0)
     device = stim_device.StimDevice(seed=0)
-    device.begin_operation(head, 3, 6)
-    device.begin_operation(tail, 3, 6)
-    device.begin_operation(other, 3, 3)
+    device.begin_operation(head, 3, 6, round_period_ticks=1_100_000)
+    device.begin_operation(tail, 3, 6, round_period_ticks=1_100_000)
+    device.begin_operation(other, 3, 3, round_period_ticks=1_100_000)
     alone = stim_device.StimDevice(seed=0)
-    alone.begin_operation(other, 3, 3)
+    alone.begin_operation(other, 3, 3, round_period_ticks=1_100_000)
     other_first = round_payload(device, other, 1)
     alone_first = round_payload(alone, other, 1)
     assert other_first.bits == (1, 0, 0, 0, 0, 1, 0, 0)
@@ -336,9 +336,9 @@ def test_a_later_segment_with_another_source_duration_is_refused():
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
     tail = memory_operation(circuit, 2, stream_id="s", stream_offset=1)
     device = stim_device.StimDevice(seed=5)
-    device.begin_operation(head, 1, 6)
+    device.begin_operation(head, 1, 6, round_period_ticks=1_100_000)
     with pytest.raises(ValueError, match="source duration differs"):
-        device.begin_operation(tail, 1, 7)
+        device.begin_operation(tail, 1, 7, round_period_ticks=1_100_000)
 
 
 def test_a_segment_past_the_end_of_its_source_is_refused():
@@ -346,7 +346,7 @@ def test_a_segment_past_the_end_of_its_source_is_refused():
     operation = memory_operation(circuit, 1, stream_id="s", stream_offset=2)
     device = stim_device.StimDevice(seed=5)
     with pytest.raises(ValueError, match="beyond its finite source"):
-        device.begin_operation(operation, 2, 3)
+        device.begin_operation(operation, 2, 3, round_period_ticks=1_100_000)
 
 
 def test_a_standalone_operation_runs_for_its_whole_source():
@@ -354,7 +354,7 @@ def test_a_standalone_operation_runs_for_its_whole_source():
     operation = memory_operation(circuit)
     device = stim_device.StimDevice(seed=5)
     with pytest.raises(ValueError, match="standalone duration must equal"):
-        device.begin_operation(operation, 2, 3)
+        device.begin_operation(operation, 2, 3, round_period_ticks=1_100_000)
 
 
 def test_a_stream_keeps_the_circuit_it_was_bound_to():
@@ -363,16 +363,16 @@ def test_a_stream_keeps_the_circuit_it_was_bound_to():
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
     tail = memory_operation(noisier_circuit, 2, stream_id="s", stream_offset=1)
     device = stim_device.StimDevice(seed=5)
-    device.begin_operation(head, 1, 3)
+    device.begin_operation(head, 1, 3, round_period_ticks=1_100_000)
     with pytest.raises(ValueError, match="circuit differs from the bound"):
-        device.begin_operation(tail, 1, 3)
+        device.begin_operation(tail, 1, 3, round_period_ticks=1_100_000)
 
 
 def test_an_operation_without_a_circuit_is_refused():
     device = stim_device.StimDevice(seed=5)
     operation = program_records.Operation(id=1, name="memory", qubits=(0,))
     with pytest.raises(ValueError, match="require a circuit"):
-        device.begin_operation(operation, 3, 3)
+        device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
 
 
 def test_a_declared_terminal_fragment_holds_back_the_data_readout():
@@ -382,26 +382,66 @@ def test_a_declared_terminal_fragment_holds_back_the_data_readout():
     device = recorded_device(
         THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
     )
-    device.begin_operation(head, 3, 3)
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
     last_round = round_payload(device, head, 3)
     readouts = device.finalize_stream_round(finalizer, 3)
     assert last_round.bits == (0, 0, 0, 0, 1, 0, 0, 1)
     assert readouts == [
         round_records.QPUReadout(
-            "s", 0, 3, bits=(0, 1, 0, 0, 0, 0, 0, 1, 0), size_bits=9
+            "s", (0,), 3, bits=(0, 1, 0, 0, 0, 0, 0, 1, 0), size_bits=9
         )
     ]
+
+
+def test_terminal_emitters_partition_their_own_measurement_groups() -> None:
+    circuit = memory_circuit(3, 3)
+    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
+    finalizer = memory_operation(circuit, 2, stream_id="s", stream_offset=2)
+    syndrome_groups = (
+        round_records.MeasurementPartition((0,), 4),
+        round_records.MeasurementPartition((0,), 4),
+    )
+    data_groups = (
+        round_records.MeasurementPartition((0,), 3),
+        round_records.MeasurementPartition((0,), 6),
+    )
+    device = recorded_device(
+        THREE_ROUND_ROW,
+        terminal_detector_ids={"s": (20,)},
+        readout_partitions={1: {3: syndrome_groups}, 2: {3: data_groups}},
+    )
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
+
+    syndrome = device.round_payloads(head, 3)
+    final = device.finalize_stream_round(finalizer, 3)
+
+    syndrome_bits = [readout.bits for readout in syndrome]
+    assert syndrome_bits == [
+        (0, 0, 0, 0),
+        (1, 0, 0, 1),
+    ]
+    final_bits = [readout.bits for readout in final]
+    assert final_bits == [
+        (0, 1, 0),
+        (0, 0, 0, 0, 1, 0),
+    ]
+    syndrome_ids = [readout.operation_id for readout in syndrome]
+    assert syndrome_ids == ["s", "s"]
+    final_ids = [readout.operation_id for readout in final]
+    assert final_ids == ["s", "s"]
 
 
 def test_an_idle_stream_round_replays_the_shots_packet_of_that_round():
     circuit = memory_circuit(3, 3)
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
     device = recorded_device(THREE_ROUND_ROW)
-    device.begin_operation(head, 3, 3)
-    payloads = device.idle_round_payloads(head, "s", 2, 0)
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
+    payloads = device.idle_round_payloads(
+        head, "s", 2, is_final=False, round_period_ticks=1_100_000
+    )
     assert payloads == [
         round_records.QPUReadout(
-            "s", 0, 2, bits=(0, 0, 0, 0, 1, 0, 0, 0), size_bits=8
+            "s", (0,), 2, bits=(0, 0, 0, 0, 1, 0, 0, 0), size_bits=8
         )
     ]
 
@@ -410,9 +450,11 @@ def test_an_idle_round_outside_the_finite_source_is_refused():
     circuit = memory_circuit(3, 3)
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
     device = recorded_device(THREE_ROUND_ROW)
-    device.begin_operation(head, 3, 3)
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
     with pytest.raises(ValueError, match="outside the finite source"):
-        device.idle_round_payloads(head, "s", 4, 0)
+        device.idle_round_payloads(
+            head, "s", 4, is_final=False, round_period_ticks=1_100_000
+        )
 
 
 def test_a_finalizer_with_another_circuit_is_refused():
@@ -425,7 +467,7 @@ def test_a_finalizer_with_another_circuit_is_refused():
     device = recorded_device(
         THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
     )
-    device.begin_operation(head, 3, 3)
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
     with pytest.raises(RuntimeError, match="circuit differs"):
         device.finalize_stream_round(finalizer, 3)
 
@@ -437,7 +479,7 @@ def test_a_finalizer_before_the_final_round_is_refused():
     device = recorded_device(
         THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
     )
-    device.begin_operation(head, 3, 3)
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
     with pytest.raises(RuntimeError, match="not at the final source round"):
         device.finalize_stream_round(finalizer, 3)
 
@@ -447,7 +489,7 @@ def test_a_finalizer_without_declared_terminal_detectors_is_refused():
     head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
     finalizer = memory_operation(circuit, 2, stream_id="s", stream_offset=2)
     device = recorded_device(THREE_ROUND_ROW)
-    device.begin_operation(head, 3, 3)
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
     with pytest.raises(RuntimeError, match="no declared detector ids"):
         device.finalize_stream_round(finalizer, 3)
 
@@ -468,7 +510,7 @@ def test_a_finalizer_without_folded_readout_bits_is_refused():
         terminal_detector_ids={"s": (20,)},
         measurement_rounds={"s": measurement_rounds},
     )
-    device.begin_operation(head, 3, 3)
+    device.begin_operation(head, 3, 3, round_period_ticks=1_100_000)
     with pytest.raises(RuntimeError, match="no folded readout bits"):
         device.finalize_stream_round(finalizer, 3)
 
@@ -477,9 +519,7 @@ def test_a_registered_stream_is_as_long_as_its_circuit():
     circuit = memory_circuit(3, 4)
     stream = memory_operation(circuit, 5)
     device = stim_device.StimDevice(seed=1)
-    registered = device.register_dynamic_stream(
-        stream, 4, fault_model_requirement=GRAPHLIKE
-    )
+    registered = device.declare_stream(stream, 4)
     assert registered == 4
     device.validate_stream_length(stream, 4)
 
@@ -488,7 +528,7 @@ def test_a_stream_sealed_at_another_length_is_refused():
     circuit = memory_circuit(3, 4)
     stream = memory_operation(circuit, 5)
     device = stim_device.StimDevice(seed=1)
-    device.register_dynamic_stream(stream, 4, fault_model_requirement=GRAPHLIKE)
+    device.declare_stream(stream, 4)
     with pytest.raises(RuntimeError, match="sealed at 5 rounds"):
         device.validate_stream_length(stream, 5)
 

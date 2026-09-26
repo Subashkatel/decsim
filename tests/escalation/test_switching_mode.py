@@ -483,7 +483,6 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
         rounds=9,
         escalated_windows=set(),
         run_both_at_once=True,
-        strong_buffer_microseconds=7.0,
         trace_path=trace_path,
     )
     machine.run()
@@ -494,6 +493,9 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
     held = _events_named(document, "X", "W0 strong window held")
     (slice_row,) = held
     args = slice_row["args"]
+    # the hold opens when the last context round leaves the QPU, 6 rounds
+    # plus qpu_to_controller 2 plus readout_to_bits 3, and ends when
+    # the escalated region lands over weak_decoder_to_strong_decoder, 3
     expected_held = decsim_config.microseconds_to_ticks(15.0)
     expected_released = decsim_config.microseconds_to_ticks(18.0)
 
@@ -581,7 +583,6 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
         rounds=9,
         escalated_windows=set(),
         run_both_at_once=True,
-        strong_buffer_microseconds=2.0,
     )
     machine.run()
     counts = machine.decoder_manager.strong_requests.counts
@@ -605,7 +606,6 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
         rounds=9,
         escalated_windows={0, 1, 2},
         run_both_at_once=True,
-        strong_buffer_microseconds=2.0,
     )
     machine.run()
     counts = machine.decoder_manager.strong_requests.counts
@@ -627,7 +627,6 @@ def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
         rounds=9,
         escalated_windows={0, 1, 2},
         run_both_at_once=False,
-        strong_buffer_microseconds=2.0,
     )
     chip_kinds = set()
     host_kinds = set()

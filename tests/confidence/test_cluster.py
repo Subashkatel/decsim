@@ -161,8 +161,8 @@ def test_a_growth_at_another_weight_step_is_refused():
     assert "reads the decode's own ticks" in str(refusal.value)
 
 
-def test_a_window_with_no_nonzero_logical_row_is_refused():
-    """The walk is a closed walk of odd logical parity: it needs a row."""
+def test_a_growth_no_edge_of_which_crosses_the_logical_has_an_infinite_gap():
+    """No odd closed walk exists, so the minimum over them is infinite."""
     circuit, model = _window_model()
     row = union_find.UnionFindDecoder()
     events, _observables = windows.sampled_shots(circuit, 1, SEED)
@@ -173,10 +173,9 @@ def test_a_window_with_no_nonzero_logical_row_is_refused():
     signal = cluster.ClusterGap()
     silent_result = _result_with_graph(result, silent)
 
-    with pytest.raises(ValueError) as refusal:
-        signal.compute((silent_result,))
+    computation = signal.compute((silent_result,))
 
-    assert "one nonzero logical observable row" in str(refusal.value)
+    assert computation.soft_output.gap == math.inf
 
 
 def test_the_half_ticks_of_the_growth_read_back_as_natural_log_weight():

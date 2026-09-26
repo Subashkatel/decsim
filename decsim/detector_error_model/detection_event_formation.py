@@ -58,7 +58,7 @@ class ControllerSideFormation:
 
     def form_before_departure(self, fragments: tuple) -> tuple:
         """The round's fragments as they leave the controller."""
-        formed = _formed(self.former, fragments)
+        formed = form_round_fragments(self.former, fragments)
         return _at_their_event_width(formed)
 
     def form_before_storage(self, fragments: tuple) -> tuple:
@@ -172,7 +172,7 @@ class WeakSyndromeBufferSideFormation:
 
     def form_before_storage(self, fragments: tuple) -> tuple:
         """The round as the weak syndrome buffer stores it: its events."""
-        formed = _formed(self.former, fragments)
+        formed = form_round_fragments(self.former, fragments)
         return _at_their_event_width(formed)
 
     def decoder_side_former(self) -> Optional[ports.DetectionEventFormer]:
@@ -250,6 +250,48 @@ def sized_by_its_bits(
     return dataclasses.replace(fragment, size_bits=len(fragment.bits))
 
 
+def form_round_fragments(
+    former: Optional[ports.DetectionEventFormer],
+    fragments: tuple[round_records.RetainedSyndromeFragment, ...],
+) -> tuple[round_records.RetainedSyndromeFragment, ...]:
+    """Form one whole round in measurement order, retaining group attribution.
+
+    Stim rec targets span acquisition fragments. The parity conversion must
+    consume the complete round once, irrespective of acquisition ownership.
+    The result is one event vector shared by all contributing patches,
+    sized as the fragments landed: a row that sends the events on
+    narrows them to their own width afterwards, and a tier that forms
+    them after they land keeps the landed size, since its input memory
+    was written the raw round and a memory counts what is written into
+    it: "The decoder computes the syndrome from measurement outcomes"
+    (Caune et al. 2410.05202 lines 1252-1256). The fragments as they
+    landed when there is nothing to form them with or from: no former,
+    or a timing-only round that carries no bits.
+    """
+    if former is None:
+        return fragments
+    has_bits = all(fragment.bits is not None for fragment in fragments)
+    if not has_bits:
+        return fragments
+    ordered = sorted(fragments, key=_fragment_order)
+    raw = ordered[0]
+    bits = []
+    for fragment in ordered:
+        bits.extend(fragment.bits)
+    measurements = tuple(bits)
+    events = former.form_round(raw.operation_id, raw.round_index, measurements)
+    patches = round_records.fragment_patch_ids(ordered)
+    landed_bits = round_records.fragment_wire_bits(ordered)
+    formed = dataclasses.replace(
+        raw, bits=tuple(events), size_bits=landed_bits, patch_ids=patches
+    )
+    return (formed,)
+
+
+def _fragment_order(fragment):
+    return fragment.fragment_index
+
+
 def _remembered(
     former: Optional[ports.DetectionEventFormer],
 ) -> Optional[RememberedDetectionEvents]:
@@ -257,28 +299,6 @@ def _remembered(
     if former is None:
         return None
     return RememberedDetectionEvents(former)
-
-
-def _formed(
-    former: Optional[ports.DetectionEventFormer], fragments: tuple
-) -> tuple:
-    """The round's events in place of its outcomes, at the raw width.
-
-    The fragments as they are when no source forms events, or when a
-    timing-only round carries no bits to form them from.
-    """
-    if former is None:
-        return fragments
-    has_bits = all(fragment.bits is not None for fragment in fragments)
-    if not has_bits:
-        return fragments
-    assert len(fragments) == 1, (
-        "detector formation expects one merged raw fragment per round"
-    )
-    (raw,) = fragments
-    events = former.form_round(raw.operation_id, raw.round_index, raw.bits)
-    events = tuple(events)
-    return (dataclasses.replace(raw, bits=events),)
 
 
 def _at_their_event_width(fragments: tuple) -> tuple:

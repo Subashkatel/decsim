@@ -236,3 +236,30 @@ def test_cards_built_from_the_same_numbers_compare_equal():
     first = card()
     second = card()
     assert first == second
+
+
+@pytest.mark.parametrize("patches", [(True,), (1.0,), ([1],)])
+def test_readout_routes_refuse_unstable_identities(patches: tuple) -> None:
+    with pytest.raises(ValueError, match="must be stable identities"):
+        link_settings.ReadoutRoute(patches, FREE_PATH)
+
+
+@pytest.mark.parametrize("patches", [(), (1, 1)])
+def test_readout_routes_require_distinct_patches(patches: tuple) -> None:
+    with pytest.raises(ValueError, match="nonempty unique patches"):
+        link_settings.ReadoutRoute(patches, FREE_PATH)
+
+
+def test_readout_routes_cannot_repeat_a_complete_footprint() -> None:
+    first = link_settings.ReadoutRoute((1, "left"), FREE_PATH)
+    second = link_settings.ReadoutRoute(("left", 1), FREE_PATH)
+    with pytest.raises(ValueError, match="must have distinct footprints"):
+        card(readout_routes=(first, second))
+
+
+def test_readout_routes_share_the_same_channel_settings_contract() -> None:
+    delayed_channel = channel("free", 5)
+    delayed_path = actual_path(delayed_channel)
+    route = link_settings.ReadoutRoute((1,), delayed_path)
+    with pytest.raises(ValueError, match="declared with different settings"):
+        card(readout_routes=(route,))

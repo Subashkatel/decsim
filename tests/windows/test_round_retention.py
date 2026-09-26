@@ -52,7 +52,7 @@ def _retention(store, round_counts: dict, successors: dict):
 def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=operation_id,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=None,
         size_bits=None,

@@ -36,17 +36,22 @@ class LinkFabric:
         self,
         fabric_settings: link_settings.FabricSettings,
         engine: decsim.engine.Engine,
-    ):
+    ) -> None:
         self.trace = _TraceSources()
         self._channel_by_name: dict[str, channel_module.Channel] = {}
         self._binding_by_path: dict[
             transfer_records.LinkPath, _PathBinding
         ] = {}
+        self._readout_by_footprint: dict[tuple, _PathBinding] = {}
         self._send_count = 0
         for path in transfer_records.LinkPath:
             path_settings = fabric_settings.path_settings(path)
             channel = self._channel_for(path_settings.channel, engine)
             self._binding_by_path[path] = _PathBinding(path_settings, channel)
+        for route in fabric_settings.readout_routes:
+            channel = self._channel_for(route.settings.channel, engine)
+            binding = _PathBinding(route.settings, channel)
+            self._readout_by_footprint[route.patch_ids] = binding
 
     def expected_delay_ticks(
         self,
@@ -55,6 +60,9 @@ class LinkFabric:
         now_ticks: int,
     ) -> int:
         """What a send now would pay if nothing else reached its channel."""
+        is_readout = path is transfer_records.LinkPath.QPU_TO_CONTROLLER
+        if is_readout and self._readout_by_footprint:
+            raise ValueError("a routed readout delay requires a footprint")
         binding = self._binding_by_path[path]
         selected_bits, _selection, _source = _select_payload(
             path, binding.settings, payload_bits
@@ -78,7 +86,7 @@ class LinkFabric:
 
         The payload is selected before the channel moves.
         """
-        binding = self._binding_by_path[path]
+        binding = self._binding_for(path, attribution)
         selected_bits, selection, payload_source = _select_payload(
             path, binding.settings, payload_bits
         )
@@ -101,6 +109,17 @@ class LinkFabric:
             binding.settings.setup_ticks,
             lambda transfer: self._finish(outgoing, transfer),
         )
+
+    def _binding_for(self, path, attribution):
+        """Route the complete footprint, as gem5's xbar routes an address.
+
+        src/mem/xbar.cc findPort keeps the default when no explicit route
+        matches. Channel names, rather than footprint names, own contention.
+        """
+        default = self._binding_by_path[path]
+        if path is not transfer_records.LinkPath.QPU_TO_CONTROLLER:
+            return default
+        return self._readout_by_footprint.get(attribution.patch_ids, default)
 
     def _channel_for(
         self,

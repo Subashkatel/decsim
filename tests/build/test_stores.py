@@ -16,6 +16,7 @@ import decsim.build.parts as build_parts
 import decsim.build.stores as store_build
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
+import decsim.links.settings as link_settings
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.settings as store_settings
@@ -181,6 +182,54 @@ def test_no_readout_cost_asks_nothing_of_the_card():
     settings = _settings_with_readout_cost(
         readout_to_bits_cycles=0, card_excludes_it=False
     )
+
+    store_build.check_readout_cost_is_priced(settings)
+
+
+@pytest.mark.parametrize(
+    "processing_exclusions", [(False, True), (True, False)]
+)
+def test_every_readout_route_must_exclude_separately_charged_processing(
+    processing_exclusions: tuple[bool, bool],
+) -> None:
+    settings = _settings_with_readout_cost(
+        readout_to_bits_cycles=6, card_excludes_it=True
+    )
+    first_path = dataclasses.replace(
+        settings.links.qpu_to_controller,
+        excludes_receiver_processing=processing_exclusions[0],
+    )
+    second_path = dataclasses.replace(
+        settings.links.qpu_to_controller,
+        excludes_receiver_processing=processing_exclusions[1],
+    )
+    first_route = link_settings.ReadoutRoute((0,), first_path)
+    second_route = link_settings.ReadoutRoute((1,), second_path)
+    links = dataclasses.replace(
+        settings.links, readout_routes=(first_route, second_route)
+    )
+    settings = dataclasses.replace(settings, links=links)
+
+    with pytest.raises(ValueError, match="latency excludes that cost"):
+        store_build.check_readout_cost_is_priced(settings)
+
+
+@pytest.mark.parametrize(
+    "readout_cycles, excludes_processing", [(0, False), (6, True)]
+)
+def test_readout_routes_allow_processing_to_be_charged_once(
+    readout_cycles: int, excludes_processing: bool
+) -> None:
+    settings = _settings_with_readout_cost(
+        readout_to_bits_cycles=readout_cycles, card_excludes_it=True
+    )
+    path = dataclasses.replace(
+        settings.links.qpu_to_controller,
+        excludes_receiver_processing=excludes_processing,
+    )
+    route = link_settings.ReadoutRoute((0,), path)
+    links = dataclasses.replace(settings.links, readout_routes=(route,))
+    settings = dataclasses.replace(settings, links=links)
 
     store_build.check_readout_cost_is_priced(settings)
 

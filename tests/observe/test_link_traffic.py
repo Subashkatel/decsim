@@ -227,6 +227,48 @@ def test_counters_reconcile_with_the_transfer_list():
     assert on_qpu_path.plus(on_weak_buffer_path) == shared_channel.counters
 
 
+def test_readout_bindings_reconcile_once_per_shared_channel() -> None:
+    joint = unbounded_path("joint", 7)
+    shared = unbounded_path("shared", 11)
+    left_route = link_settings.ReadoutRoute((1,), shared)
+    right_route = link_settings.ReadoutRoute((2,), shared)
+    run = Run(qpu_to_controller=joint, readout_routes=(left_route, right_route))
+    joint_attribution = round_attribution(1)
+    left = transfer_records.TransferAttribution.for_round(OPERATION_ID, (1,), 2)
+    right = transfer_records.TransferAttribution.for_round(
+        OPERATION_ID, (2,), 2
+    )
+    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, joint_attribution)
+    run.send(PATH.QPU_TO_CONTROLLER, 3, 0, left)
+    run.send(PATH.QPU_TO_CONTROLLER, 5, 0, right)
+    run.engine.run()
+
+    report = run.ledger.traffic_json_value()
+    readout_edges = [
+        edge
+        for edge in report["semantic_edges"]
+        if edge["path"] == "qpu_to_controller"
+    ]
+    transfer_counts = [
+        edge["counters"]["transfer_count"] for edge in readout_edges
+    ]
+    payload_bits = [
+        edge["counters"]["known_payload_bits"] for edge in readout_edges
+    ]
+    assert transfer_counts == [1, 2]
+    assert payload_bits == [8, 8]
+    assert len(report["transfers"]) == 3
+    shared_channel = report["reconciliation"][2]
+    assert shared_channel["member_paths"] == ["qpu_to_controller"]
+    assert shared_channel["physical_counters"]["transfer_count"] == 2
+    assert shared_channel["physical_counters"]["propagation_ticks"] == 22
+    assert (
+        shared_channel["semantic_counter_sum"]
+        == shared_channel["physical_counters"]
+    )
+    assert all(row["reconciles"] for row in report["reconciliation"])
+
+
 def test_the_transfers_are_listed_in_request_order_whatever_delivered_first():
     slow = unbounded_path("slow", 500)
     fast = unbounded_path("fast", 5)

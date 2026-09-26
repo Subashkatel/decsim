@@ -1,7 +1,7 @@
 """The decoder side's end for a timing-only round that lands here.
 
 A feedback-memory round carries no syndrome a decoder reads: it is an
-idle patch's round travelling so that weak syndrome buffer's slot, the link
+idle patch's round travelling so that its primary buffer's slot, the link
 and the decoder's own stream stage are charged for it
 (controller/idle_rounds.py). The stage is real in both stream decoders
 read for it, which take every round of the stream as it arrives, idle or
@@ -18,7 +18,7 @@ import decsim.records.log_sources as log_sources
 
 
 class MemoryRoundArrivals:
-    """The decoders' end of weak_buffer_to_weak_decoder for a memory round."""
+    """The primary decoder's receiving end for timing-only memory rounds."""
 
     windows = ports.Port(ports.WindowInput)
 

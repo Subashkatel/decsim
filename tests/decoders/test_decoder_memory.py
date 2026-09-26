@@ -47,7 +47,7 @@ BITS_PER_ROUND = 2
 def fragment(operation_id, round_index, fragment_index, bits=(0, 1)):
     return round_records.RetainedSyndromeFragment(
         operation_id=operation_id,
-        patch_id=f"patch-{fragment_index}",
+        patch_ids=(f"patch-{fragment_index}",),
         round_index=round_index,
         bits=bits,
         size_bits=len(bits),
@@ -59,7 +59,7 @@ def unsized_fragment(round_index, fragment_index=0):
     """A round as a timing-only device emits it: no bits and no size."""
     return round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=f"patch-{fragment_index}",
+        patch_ids=(f"patch-{fragment_index}",),
         round_index=round_index,
         bits=None,
         size_bits=None,

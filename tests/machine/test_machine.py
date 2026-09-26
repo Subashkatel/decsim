@@ -7,6 +7,10 @@ arrive in cycle order. The table test follows sinter's BUILT_IN_DECODERS
 (sinter/_decoding/_decoding_all_built_in_decoders.py): a new decoder is
 one class and one row.
 
+Strong-primary stream checks compare readout with Stim and terminal
+prediction with PyMatching on the same circuit. They pin the direct strong
+route, bounded storage lifetime and configured service/link timings.
+
 The laws at the end of the file are the ones only the whole machine
 holds: they run a declared card (tests/declared_run.py, whose every
 latency is a number the test states) and read what the composition of
@@ -18,26 +22,35 @@ import functools
 import pathlib
 import re
 
+import ldpc
+import ldpc.ckt_noise.dem_matrices as dem_matrices
 import numpy
+import pymatching
 import pytest
+import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
+import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.detector_error_model.detector_chronology as detector_chronology
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.experiments.experiment as experiment
+import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
+import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.qpu.code_geometry as code_geometry
@@ -46,9 +59,13 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
+import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.results as result_records
+import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -61,6 +78,9 @@ import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
+import tests.qpu.memory_programs as memory_programs
+import tools.deltakit_example as finite_example
+import tools.live_memory_example as live_example
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
@@ -68,9 +88,21 @@ CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 # the syndrome bits of one round of a distance-three patch
 BITS_PER_ROUND = 8
+# The live memory program at distance three, as a six-round window
+# ending on its final round occupies a memory. Raw (formed at the
+# decoder): five rounds of eight check bits and the final round's eight
+# plus the nine data qubits. Formed at the controller: five rounds of
+# eight events and the final round's eight plus the four Z checks the
+# data readout closes.
+SIX_ROUND_WINDOW_BITS = {
+    "decoder": 5 * BITS_PER_ROUND + BITS_PER_ROUND + 9,
+    "controller": 5 * BITS_PER_ROUND + BITS_PER_ROUND + 4,
+}
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
 ENGINE_CLOCK = config.Clock(10_000)
+# The run helpers' default root seed: one call is one repeatable shot.
+RUN_SEED = 17
 
 
 def tier_rows() -> str:
@@ -265,6 +297,539 @@ MEMORY_ROUNDS = 6
 MEMORY_CIRCUIT = workload_settings.memory_circuit(
     "surface_code:rotated_memory_z", MEMORY_ROUNDS, 3, 0.003
 )
+
+
+@pytest.mark.parametrize("producer", ["stim", "deltakit"])
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+@pytest.mark.parametrize("history", ["finite", "live"])
+def test_streams_decode_only_on_the_strong_path_with_actual_truth(
+    producer: str, placement: str, history: str
+) -> None:
+    program = _program(producer)
+    settings = _settings(program, history, placement)
+    run = _run(settings)
+    _assert_direct_strong_path(run)
+    _assert_actual_truth(run)
+    _assert_drained(run)
+    readout_transfers = _transfers(run.result, "qpu_to_controller")
+    store_transfers = _transfers(run.result, "controller_to_strong_buffer")
+    assert len(readout_transfers) == len(run.packets)
+    assert len(store_transfers) == len(run.packets)
+    expected_bits = _stored_bit_count(run, placement)
+    _assert_stored_bit_count(store_transfers, expected_bits)
+
+
+@pytest.mark.parametrize("final_round", [4, 6, 7, 9])
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_zero_delay_terminal_round_uses_its_actual_strong_model(
+    final_round: int, placement: str
+) -> None:
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", placement)
+    workload = _scheduled_workload(final_round)
+    links = _zero_delay_links(settings.links)
+    settings = dataclasses.replace(settings, workload=workload, links=links)
+    run = _run(settings)
+    assert len(run.packets) == final_round
+    assert run.packets[-1].round_index == final_round
+    _assert_direct_strong_path(run)
+    _assert_actual_truth(run)
+    _assert_drained(run)
+
+
+@pytest.mark.parametrize("period_microseconds", [0.7, 1.25])
+def test_strong_settings_price_the_route_and_clock_the_feedback(
+    period_microseconds: float,
+) -> None:
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", "controller", period_microseconds)
+    settings = _declared_timing(settings)
+    run = _run(settings)
+    services = run.machine.observation.decode_records.services
+    first = services[0]
+    period_ticks = config.microseconds_to_ticks(period_microseconds)
+    sixth_round_ticks = 6 * period_ticks
+    expected_dispatch_ticks = sixth_round_ticks + 250_000
+    assert first.dispatch_ticks == expected_dispatch_ticks
+    input_arrival_ticks = expected_dispatch_ticks + 350_000
+    expected_terminal_ticks = input_arrival_ticks + 200_000
+    assert first.terminal_ticks == expected_terminal_ticks
+    arrival = _command_tick(run, "ARRIVED", 3)
+    started = _command_tick(run, "STARTED", 3)
+    clock = config.Clock(period_ticks)
+    assert started == clock.edge(0, arrival)
+    _assert_direct_strong_path(run)
+    _assert_actual_truth(run)
+
+
+def test_longer_strong_feedback_preserves_the_executed_prefix() -> None:
+    program = memory_programs.memory_program()
+    faster = _settings(program, "live", "controller")
+    slower = _settings(program, "live", "controller")
+    feedback = slower.links.frame_to_controller
+    channel = dataclasses.replace(
+        feedback.channel, propagation_latency_ticks=8_000_000
+    )
+    path = dataclasses.replace(feedback, channel=channel)
+    links = dataclasses.replace(slower.links, frame_to_controller=path)
+    slower = dataclasses.replace(slower, links=links)
+    first = _run(faster)
+    second = _run(slower)
+    assert len(second.packets) > len(first.packets)
+    first_prefix = _raw_bits(first.packets[:-1])
+    second_record = _raw_bits(second.packets)
+    assert first_prefix == second_record[: len(first_prefix)]
+    assert (
+        second.result.execution_done_ticks > first.result.execution_done_ticks
+    )
+    _assert_actual_truth(first)
+    _assert_actual_truth(second)
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
+    placement: str,
+) -> None:
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", placement)
+    window_bits = SIX_ROUND_WINDOW_BITS[placement]
+    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    memory = decoder_settings.UnitMemorySettings(bits=window_bits)
+    decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
+    settings = dataclasses.replace(
+        settings, strong_syndrome_buffer=buffer, strong_decoder=decoder
+    )
+    run = _run(settings)
+    assert max(run.strong_occupancies) <= window_bits
+    units = run.machine.decoder_manager.pool.units()
+    memory = units[0].memory.snapshot()
+    assert memory.capacity_bits == window_bits
+    assert memory.peak_occupied_bits == window_bits
+    assert memory.admissions > 1
+    _assert_direct_strong_path(run)
+    _assert_actual_truth(run)
+    _assert_drained(run)
+
+
+def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", "controller")
+    five_rounds_bits = 5 * BITS_PER_ROUND
+    memory = decoder_settings.UnitMemorySettings(bits=five_rounds_bits)
+    decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
+    settings = dataclasses.replace(settings, strong_decoder=decoder)
+    # the first window's events: four from the first round, eight a round
+    first_window_bits = 4 + 5 * BITS_PER_ROUND
+    message = (
+        f"holds {five_rounds_bits} bits; the window needs {first_window_bits}"
+    )
+    with pytest.raises(
+        decoder_memory.DecoderMemoryCapacityError, match=message
+    ):
+        _run(settings)
+
+
+@pytest.mark.parametrize(
+    ("idle_policy", "load_job_count"),
+    [("separate_decode_jobs", 1), ("ignore", 0), ("extend_stream", 0)],
+)
+def test_static_idle_rounds_use_strong_slots_until_the_decoder_arrival(
+    idle_policy: str, load_job_count: int
+) -> None:
+    settings = _static_idle_settings(idle_policy)
+    run, release_ticks_by_round = _run_static(settings)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    arrivals = _memory_arrivals(run)
+    assert len(arrivals) == 4
+    _assert_memory_slot_lifetimes(run, arrivals, release_ticks_by_round)
+    _assert_idle_algorithm_charge(run, load_job_count)
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_single_terminal_window_matches_direct_pymatching(
+    placement: str,
+) -> None:
+    program = memory_programs.memory_program(physical_error_probability=0.08)
+    settings = _settings(program, "live", placement)
+    workload = _scheduled_workload(2)
+    settings = dataclasses.replace(settings, workload=workload)
+    run = _run(settings)
+    circuit = run.shots[0][0].circuit
+    detector_model = circuit.detector_error_model(decompose_errors=True)
+    matching = pymatching.Matching.from_detector_error_model(detector_model)
+    events = run.machine.syndrome_source.sampled_detection_events(100)
+    assert any(events)
+    prediction = matching.decode(events)
+    assert tuple(prediction) == (1,)
+    result = run.result.operation_results[-1]
+    assert result.logical_observables == tuple(prediction)
+    assert result.logical_failure is False
+    assert len(run.machine.observation.decode_records.services) == 1
+    _assert_actual_truth(run)
+
+
+def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", "controller")
+    window_bits = SIX_ROUND_WINDOW_BITS["controller"]
+    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    memory = decoder_settings.UnitMemorySettings(bits=window_bits)
+    decoder = dataclasses.replace(
+        settings.strong_decoder, kind=5.0, unit_memory=memory
+    )
+    links = _price_path(
+        settings.links, "strong_buffer_to_strong_decoder", 1_000_000
+    )
+    settings = dataclasses.replace(
+        settings,
+        strong_syndrome_buffer=buffer,
+        strong_decoder=decoder,
+        links=links,
+    )
+    run = _run(settings)
+    _assert_held_rounds_retried(run)
+    assert max(run.strong_occupancies) <= window_bits
+    _assert_direct_strong_path(run)
+    _assert_actual_truth(run)
+    _assert_drained(run)
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+@pytest.mark.parametrize("is_entangled", [False, True])
+def test_joint_live_rounds_share_one_history_and_one_strong_route(
+    placement: str, is_entangled: bool
+) -> None:
+    program = memory_programs.joint_repetition_program(is_entangled)
+    settings = _joint_settings(program, placement)
+
+    run = _run(settings)
+
+    _assert_direct_strong_path(run)
+    _assert_actual_truth(run)
+    _assert_drained(run)
+    _assert_joint_acquisitions(run)
+
+
+def test_longer_joint_feedback_protects_both_blocks_without_resampling() -> (
+    None
+):
+    program = memory_programs.joint_repetition_program(True)
+    faster = _joint_settings(program, "controller")
+    slower = _joint_settings(program, "controller")
+    feedback = slower.links.frame_to_controller
+    channel = dataclasses.replace(
+        feedback.channel, propagation_latency_ticks=8_000_000
+    )
+    path = dataclasses.replace(feedback, channel=channel)
+    links = dataclasses.replace(slower.links, frame_to_controller=path)
+    slower = dataclasses.replace(slower, links=links)
+
+    first = _run(faster)
+    second = _run(slower)
+
+    assert len(second.packets) > len(first.packets)
+    first_prefix = _raw_bits(first.packets[:-1])
+    second_record = _raw_bits(second.packets)
+    assert first_prefix == second_record[: len(first_prefix)]
+    assert (
+        second.result.execution_done_ticks > first.result.execution_done_ticks
+    )
+    _assert_actual_truth(first)
+    _assert_actual_truth(second)
+    _assert_joint_acquisitions(second)
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_channel_reordering_preserves_live_detector_formation(
+    placement: str,
+) -> None:
+    """Keep channel delays, arrival order and the quantum oracle together.
+
+    This complete scenario stays in one function so each observed timing
+    can be read beside the channel card that causes it.
+    """
+    program = _partitioned_joint_program()
+    settings = _joint_settings(program, placement)
+    base_path = settings.links.qpu_to_controller
+    joint = _readout_route(base_path, ("left", "right"), "joint", 4_500_000)
+    left = _readout_route(base_path, ("left",), "left", 100_000)
+    right = _readout_route(base_path, ("right",), "right", 200_000)
+    links = dataclasses.replace(
+        settings.links, readout_routes=(joint, left, right)
+    )
+    settings = dataclasses.replace(settings, links=links)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    events = run.machine.observation.round_events.events
+    binary_events = [
+        event for event in events if event.kind == "BINARY_AVAILABLE"
+    ]
+    first_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 1
+    ]
+    second_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 2
+    ]
+    last_second_arrival_ticks = max(second_round_arrival_ticks)
+    first_arrival_ticks = min(first_round_arrival_ticks)
+    assert last_second_arrival_ticks < first_arrival_ticks
+    packed = [event.round_index for event in events if event.kind == "PACKED"]
+    after_last_round = len(packed) + 1
+    expected_rounds = list(range(1, after_last_round))
+    assert packed == expected_rounds
+    transfers = run.result.link_traffic["transfers"]
+    readouts = [row for row in transfers if row["path"] == "qpu_to_controller"]
+    delay_ticks = {row["total_delay_ticks"] for row in readouts}
+    assert delay_ticks == {
+        100_000,
+        200_000,
+        4_500_000,
+    }
+    assert len(readouts) == len(run.packets)
+    raw_bits = _raw_bits(run.packets)
+    payload_bits = sum(row["payload_bits"] for row in readouts)
+    assert payload_bits == len(raw_bits)
+
+
+@pytest.mark.parametrize(
+    "basis, has_logical_flips", [("X", False), ("Z", True)]
+)
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
+    basis: str, has_logical_flips: bool, placement: str
+) -> None:
+    pytest.importorskip("deltakit_explorer")
+    program = _bb_memory(basis)
+    settings = _bb_settings(program, placement, commit_round_count=10)
+    workload = _scheduled_workload(3)
+    workload = _bb_logical_qubits(workload)
+    settings = dataclasses.replace(settings, workload=workload)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    expected = _direct_bp_osd_prediction(run)
+    owner = run.result.operation_results[-1]
+    assert len(expected) == 8
+    assert owner.logical_observables == expected
+    assert owner.observable_truth == expected
+    assert any(expected) == has_logical_flips
+    services = run.machine.observation.decode_records.services
+    assert len(services) == 1
+
+
+def test_bb_live_feedback_preserves_the_full_logical_vector() -> None:
+    pytest.importorskip("deltakit_explorer")
+    program = _bb_memory("Z")
+    settings = _bb_settings(program, "controller", commit_round_count=2)
+    rounds = round_policies.PerOperationRounds({100: 0, 1: 2, 2: 0, 3: 1, 4: 0})
+    workload = dataclasses.replace(settings.workload, rounds_policy=rounds)
+    settings = dataclasses.replace(settings, workload=workload)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    owner = run.result.operation_results[-1]
+    assert len(owner.logical_observables) == 8
+    assert len(owner.observable_truth) == 8
+    assert len(run.packets) > 3
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_bb_higher_logical_fault_is_reported_as_a_failure(
+    placement: str,
+) -> None:
+    pytest.importorskip("deltakit_explorer")
+    program = _bb_memory("Z")
+    circuit, mapping = program.assemble(3)
+    measurements = _bb_fault_measurements(program)
+    source = stim_device.RecordedStimDevice(
+        measurements, 0, measurement_rounds={100: mapping}
+    )
+    settings = _bb_settings(program, placement, commit_round_count=10)
+    qpu = dataclasses.replace(settings.qpu, device=source)
+    owner = program_records.Operation(
+        100, "memory", tuple(range(8)), patches=("block",), circuit=circuit
+    )
+    rounds = round_policies.FixedRounds(3)
+    workload = workload_settings.WorkloadSettings(
+        operations=(owner,), rounds_policy=rounds
+    )
+    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    result = run.result.operation_results[0]
+    events = source.sampled_detection_events(100)
+    assert not any(events)
+    assert result.logical_observables == (0,) * 8
+    assert result.observable_truth[1] == 1
+    assert result.logical_failure is True
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_interleaved_joint_recording_matches_complete_stim_conversion(
+    placement: str,
+) -> None:
+    """Keep the physical record, chronology and decoder oracle together.
+
+    The explicit setup shows that three acquisition fragments carry one
+    quantum history, with the same fault and measurement map at both ends.
+    It stays in one function so the complete recorded input and its decoder
+    oracle remain visible beside the declared partitions.
+    """
+    program = memory_programs.joint_repetition_program(True, 0.12)
+    circuit, mapping = program.assemble(3)
+    sampler = circuit.compile_sampler(seed=73)
+    measurements = sampler.sample(shots=1)
+    table = detector_formation.build_formation_table(
+        circuit, 3, measurement_rounds=mapping
+    )
+    detector_rounds = table.detector_rounds()
+    first = round_records.MeasurementPartition(("left",), 1)
+    middle = round_records.MeasurementPartition(("left", "right"), 2)
+    right = round_records.MeasurementPartition(("right",), 1)
+    last = round_records.MeasurementPartition(("left", "right"), 7)
+    partitions = {1: (first, middle, right), 2: (first, middle, right)}
+    partitions[3] = (first, middle, last)
+    source = stim_device.RecordedStimDevice(
+        measurements,
+        0,
+        measurement_rounds={100: mapping},
+        detector_rounds={100: detector_rounds},
+        readout_partitions={100: partitions},
+    )
+    settings = _joint_settings(program, placement)
+    code = finite_example.RepetitionMemory(3, 3)
+    qpu = dataclasses.replace(
+        settings.qpu, device=source, code=code, distance=None
+    )
+    owner = program_records.Operation(
+        100, "joint", (0, 1), patches=("left", "right"), circuit=circuit
+    )
+    rounds = round_policies.FixedRounds(3)
+    workload = workload_settings.WorkloadSettings(
+        operations=(owner,), rounds_policy=rounds
+    )
+    settings = dataclasses.replace(settings, workload=workload, qpu=qpu)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    raw = _raw_bits(run.packets)
+    assert raw == tuple(measurements[0])
+    expected = _direct_matching_prediction(circuit, source)
+    result = run.result.operation_results[0]
+    assert expected == (1,)
+    assert result.logical_observables == expected
+    assert result.observable_truth == expected
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_separate_terminal_emitters_preserve_the_complete_record(
+    placement: str,
+) -> None:
+    settings, measurements, circuit = _terminal_partitioned_settings(placement)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    raw_bits = _raw_bits(run.packets)
+    expected_raw_bits = tuple(measurements[0])
+    assert raw_bits == expected_raw_bits
+    final_packets = [
+        packet for packet in run.packets if packet.round_index == 3
+    ]
+    final_indices = [packet.fragment_index for packet in final_packets]
+    final_fragment_counts = [packet.fragment_count for packet in final_packets]
+    final_width_bits = [packet.size_bits for packet in final_packets]
+    assert final_indices == [0, 1, 2, 3]
+    assert final_fragment_counts == [4, 4, 4, 4]
+    assert final_width_bits == [4, 4, 3, 6]
+    source = settings.qpu.device
+    expected_prediction = _direct_matching_prediction(circuit, source)
+    result = run.result.operation_results[-1]
+    assert result.operation_id == 100
+    assert result.logical_observables == expected_prediction
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+@pytest.mark.parametrize("basis", ["X", "Z"])
+def test_deltakit_bell_memory_uses_shared_live_execution(
+    placement: str,
+    basis: str,
+) -> None:
+    pytest.importorskip("deltakit_explorer")
+    program = deltakit.bell_memory_rounds(
+        3, basis, 0.001, round_period_microseconds=1.1
+    )
+    settings = _joint_settings(program, placement)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    _assert_joint_acquisitions(run)
+    owner = run.result.operation_results[-1]
+    assert len(owner.logical_observables) == 1
+    assert len(owner.observable_truth) == 1
+
+
+def test_joint_segments_can_name_the_same_footprint_in_another_order() -> None:
+    program = memory_programs.joint_repetition_program(True)
+    settings = _joint_settings(program, "controller")
+    operations = _operations_on_group(
+        settings.workload.operations, ("right", "left")
+    )
+    workload = dataclasses.replace(settings.workload, operations=operations)
+    settings = dataclasses.replace(settings, workload=workload)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_joint_acquisitions(run)
+    _assert_drained(run)
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_joint_live_memory_can_use_the_weak_primary_tier(
+    placement: str,
+) -> None:
+    program = memory_programs.joint_repetition_program(True)
+    settings = _joint_settings(program, placement)
+    escalation = escalation_settings.EscalationSettings(kind="weak_baseline")
+    settings = dataclasses.replace(
+        settings, escalation=escalation, weak_decoder=settings.strong_decoder
+    )
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_joint_acquisitions(run)
+    assert run.result.terminal_status == "complete"
+    assert run.result.event_queue_empty
+    assert run.machine.weak_syndrome_buffer.occupancy == 0
+    assert run.weak_writes
+    paths = _transfer_paths(run)
+    assert "controller_to_weak_buffer" in paths
+    assert "controller_to_strong_buffer" not in paths
 
 
 def _memory_on_stim_device(
@@ -1712,3 +2277,746 @@ def test_a_matching_family_predicts_what_qldpcs_sliding_windows_predict(
 
     assert len(predictions) == CAMPAIGN_SHOT_COUNT
     assert predictions == reference_predictions
+
+
+def test_a_sampled_stream_segment_has_no_independent_accuracy_result() -> None:
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 24, 3, 0.001
+    )
+    source = stim_device.StimDevice()
+    settings = _protected_memory_settings(circuit, source)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    prefix = result.operation_results[0]
+    owner = result.operation_results[-1]
+    assert prefix.logical_observables is not None
+    assert prefix.stream_offset == 0
+    assert prefix.observable_truth is None
+    assert prefix.logical_failure is None
+    assert owner.observable_truth is not None
+    assert owner.logical_failure is not None
+
+
+def test_a_recorded_stream_scores_the_full_prediction_against_full_truth() -> (
+    None
+):
+    """Sinter's StimThenDecodeSampler scores equal full-shot output scopes."""
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 24, 3, 0.001
+    )
+    noiseless = circuit.without_noise()
+    sampler = noiseless.compile_sampler(seed=10)
+    measurements = sampler.sample(1)
+    # Stim's first final data bit belongs to logical Z and a final check.
+    measurements[0, -9] ^= True
+    source = stim_device.RecordedStimDevice(measurements, 0)
+    settings = _protected_memory_settings(circuit, source)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    prefix = result.operation_results[0]
+    owner = result.operation_results[-1]
+    assert prefix.logical_observables == (0,)
+    assert prefix.observable_truth is None
+    assert prefix.logical_failure is None
+    assert owner.logical_observables == (1,)
+    assert owner.observable_truth == (1,)
+    assert owner.logical_failure is False
+
+
+def _protected_memory_settings(circuit, source):
+    """One physical stream with a prefix that releases a waiting operation."""
+    owner = program_records.Operation(
+        100, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    prefix = program_records.Operation(
+        1,
+        "prefix",
+        (0,),
+        patches=(0,),
+        circuit=circuit,
+        stream_id=100,
+        stream_offset=0,
+    )
+    begin = program_records.Operation(
+        2,
+        "protect",
+        (0,),
+        patches=(0,),
+        predecessors=(1,),
+        emits_detector_data=False,
+    )
+    resume = program_records.Operation(
+        3,
+        "resume",
+        (0,),
+        patches=(0,),
+        predecessors=(2,),
+        blocked_by=1,
+        emits_detector_data=False,
+    )
+    finish = program_records.Operation(
+        4,
+        "readout",
+        (0,),
+        patches=(0,),
+        predecessors=(3,),
+        scheduled_start_round=24,
+        emits_detector_data=False,
+    )
+    region = program_records.ProtectedRegion(100, 2, 4)
+    policy = round_policies.PerOperationRounds(
+        {100: 24, 1: 3, 2: 0, 3: 1, 4: 0}
+    )
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, begin, resume, finish),
+        dynamic_streams=(owner,),
+        protected_regions=(region,),
+        rounds_policy=policy,
+    )
+    qpu = qpu_settings.QpuSettings(distance=3, device=source)
+    decoder = decoder_settings.DecoderSettings(
+        kind=0.1, engine_clock=ENGINE_CLOCK
+    )
+    return machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=decoder
+    )
+
+
+@dataclasses.dataclass
+class _Run:
+    """One completed run and the public readout/storage observations."""
+
+    machine: machine_module.Machine
+    result: result_records.RunResult
+    packets: list[round_records.QPUReadout]
+    shots: list
+    weak_writes: list
+    strong_occupancies: list[int]
+
+
+def _program(producer: str) -> circuit_records.RepeatedStimCircuit:
+    if producer == "stim":
+        return memory_programs.memory_program()
+    pytest.importorskip("deltakit_explorer")
+    return deltakit.memory_rounds(
+        "rotated_surface", 3, "Z", 0.003, round_period_microseconds=1.1
+    )
+
+
+def _settings(
+    program: circuit_records.RepeatedStimCircuit,
+    history: str,
+    placement: str,
+    period_microseconds: float = 1.1,
+) -> machine_settings.MachineSettings:
+    base = _physical_settings(program, history, period_microseconds)
+    strong = dataclasses.replace(base.weak_decoder, kind=0.2)
+    weak = decoder_settings.DecoderSettings()
+    escalation = escalation_settings.EscalationSettings(kind="strong_only")
+    controller = dataclasses.replace(
+        base.controller, detection_events_formed_at=placement
+    )
+    observation = dataclasses.replace(
+        base.observation, record_switching_windows=True
+    )
+    return dataclasses.replace(
+        base,
+        weak_decoder=weak,
+        strong_decoder=strong,
+        escalation=escalation,
+        controller=controller,
+        observation=observation,
+    )
+
+
+def _physical_settings(
+    program: circuit_records.RepeatedStimCircuit,
+    history: str,
+    period_microseconds: float,
+) -> machine_settings.MachineSettings:
+    if history == "live":
+        source = streaming_stim_device.StreamingStimDevice({100: program})
+        return live_example.live_settings(
+            source,
+            distance=3,
+            round_period_microseconds=period_microseconds,
+            prefix_round_count=3,
+            patch="stream-patch",
+            feedback_microseconds=4.0,
+            decoder_microseconds=0.1,
+        )
+    circuit, mapping = program.assemble(24)
+    workload = finite_example.protection_workload(
+        circuit, 24, 3, "stream-patch"
+    )
+    return finite_example.supplied_settings(
+        circuit,
+        mapping,
+        workload,
+        distance=3,
+        round_count=24,
+        period_microseconds=period_microseconds,
+        feedback_microseconds=4.0,
+    )
+
+
+def _run(
+    settings: machine_settings.MachineSettings, seed: int = RUN_SEED
+) -> _Run:
+    """One run of the machine: one shot of the source at the seed."""
+    source = settings.qpu.device
+    shots = []
+    source.shot_sampled.connect(lambda *sample: shots.append(sample))
+    machine = machine_module.Machine.build(settings, seed)
+    packets = []
+    weak_writes = []
+    strong_occupancies = []
+    machine.qpu.trace.round_emitted.connect(packets.append)
+    machine.weak_syndrome_buffer.trace.round_stored.connect(
+        lambda *event: weak_writes.append(event)
+    )
+    observe = functools.partial(
+        _record_strong_occupancy, machine, strong_occupancies
+    )
+    if machine.strong_syndrome_buffer is not None:
+        machine.strong_syndrome_buffer.trace.round_stored.connect(observe)
+    result = machine.run()
+    return _Run(
+        machine, result, packets, shots, weak_writes, strong_occupancies
+    )
+
+
+def _record_strong_occupancy(
+    machine: machine_module.Machine,
+    counts: list[int],
+    _key: tuple,
+    _packet: round_records.SyndromeRoundPacket,
+) -> None:
+    stored = machine.strong_syndrome_buffer.occupancy
+    in_flight = machine.strong_syndrome_round_receiver.writes_in_flight
+    taken = stored + in_flight
+    counts.append(taken)
+
+
+def _assert_direct_strong_path(run: _Run) -> None:
+    assert run.result.terminal_status == "complete"
+    assert run.result.decode_work_settled
+    assert run.result.event_queue_empty
+    requests = run.machine.observation.decode_records.requests
+    tiers = {request.request_key.tier for request in requests}
+    assert tiers == {window_records.DecoderTier.STRONG}
+    paths = _transfer_paths(run)
+    forbidden = {
+        "controller_to_weak_buffer",
+        "weak_buffer_to_weak_decoder",
+        "weak_decoder_to_frame",
+        "weak_decoder_to_strong_decoder",
+    }
+    assert not paths.intersection(forbidden)
+    assert "controller_to_strong_buffer" in paths
+    assert "strong_buffer_to_strong_decoder" in paths
+    assert "strong_decoder_to_frame" in paths
+    assert run.weak_writes == []
+
+
+def _assert_actual_truth(run: _Run) -> None:
+    assert len(run.shots) == 1
+    operation = run.shots[0][0]
+    circuit = operation.circuit
+    measurements = _raw_bits(run.packets)
+    assert len(measurements) == circuit.num_measurements
+    raw = numpy.array([measurements], dtype=numpy.bool_)
+    converter = circuit.compile_m2d_converter()
+    events, truth = converter.convert(
+        measurements=raw, separate_observables=True
+    )
+    source = run.machine.syndrome_source
+    actual_events = source.sampled_detection_events(100)
+    actual_truth = source.logical_observable_truth(100)
+    numpy.testing.assert_array_equal(actual_events, events[0])
+    numpy.testing.assert_array_equal(actual_truth, truth[0])
+    owner_result = run.result.operation_results[-1]
+    assert owner_result.operation_id == 100
+    assert owner_result.observable_truth == actual_truth
+    assert owner_result.logical_failure is not None
+
+
+def _assert_drained(run: _Run) -> None:
+    assert run.machine.weak_syndrome_buffer.occupancy == 0
+    assert run.machine.strong_syndrome_buffer.occupancy == 0
+    assert run.machine.strong_syndrome_round_receiver.writes_in_flight == 0
+    units = run.machine.decoder_manager.pool.units()
+    occupied = [unit.memory.occupied_bits for unit in units]
+    assert occupied == [0] * len(units)
+
+
+def _stored_bit_count(run: _Run, placement: str) -> int:
+    circuit = run.shots[0][0].circuit
+    if placement == "controller":
+        return circuit.num_detectors
+    return circuit.num_measurements
+
+
+def _raw_bits(packets: list[round_records.QPUReadout]) -> tuple[int, ...]:
+    return tuple(bit for packet in packets for bit in packet.bits)
+
+
+def _transfers(result: result_records.RunResult, path: str) -> list[dict]:
+    return [
+        row for row in result.link_traffic["transfers"] if row["path"] == path
+    ]
+
+
+def _zero_delay_links(
+    links: link_settings.FabricSettings,
+) -> link_settings.FabricSettings:
+    paths_by_name = {}
+    for path in transfer_records.LinkPath:
+        settings = links.path_settings(path)
+        channel = dataclasses.replace(
+            settings.channel, propagation_latency_ticks=0
+        )
+        paths_by_name[path.value] = dataclasses.replace(
+            settings, channel=channel
+        )
+    return dataclasses.replace(links, **paths_by_name)
+
+
+def _declared_timing(
+    settings: machine_settings.MachineSettings,
+) -> machine_settings.MachineSettings:
+    links = _zero_delay_links(settings.links)
+    links = _price_path(links, "controller_to_strong_buffer", 250_000)
+    links = _price_path(links, "strong_buffer_to_strong_decoder", 350_000)
+    links = _price_path(links, "strong_decoder_to_frame", 400_000)
+    decoder = dataclasses.replace(
+        settings.strong_decoder,
+        fetch_cycles_per_round=0,
+        fetch_cycles_per_job=0,
+        release_cycles_per_job=0,
+        release_cycles_per_round=0,
+    )
+    return dataclasses.replace(settings, links=links, strong_decoder=decoder)
+
+
+def _price_path(
+    links: link_settings.FabricSettings, name: str, latency_ticks: int
+) -> link_settings.FabricSettings:
+    path = getattr(links, name)
+    channel = dataclasses.replace(
+        path.channel, propagation_latency_ticks=latency_ticks
+    )
+    priced = dataclasses.replace(path, channel=channel)
+    return dataclasses.replace(links, **{name: priced})
+
+
+def _command_tick(run: _Run, kind: str, operation_id: int) -> int:
+    events = run.machine.observation.command_events.events
+    ticks = [
+        event.tick
+        for event in events
+        if event.command.operation.id == operation_id and event.kind == kind
+    ]
+    assert len(ticks) == 1
+    return ticks[0]
+
+
+def _scheduled_workload(final_round: int) -> workload_settings.WorkloadSettings:
+    owner = program_records.Operation(
+        100, "memory", ("stream-patch",), patches=("stream-patch",)
+    )
+    begin = program_records.Operation(
+        1,
+        "protect",
+        ("stream-patch",),
+        patches=("stream-patch",),
+        emits_detector_data=False,
+    )
+    finish = program_records.Operation(
+        2,
+        "readout",
+        ("stream-patch",),
+        patches=("stream-patch",),
+        predecessors=(1,),
+        scheduled_start_round=final_round,
+        emits_detector_data=False,
+    )
+    region = program_records.ProtectedRegion(100, 1, 2)
+    policy = round_policies.PerOperationRounds({100: 0, 1: 0, 2: 0})
+    return workload_settings.WorkloadSettings(
+        operations=(begin, finish),
+        dynamic_streams=(owner,),
+        protected_regions=(region,),
+        rounds_policy=policy,
+    )
+
+
+def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
+    """Declare the two-patch workload beside the timings it exercises.
+
+    The operation definitions and card remain together so the four idle
+    rounds and the absence of any configured weak decoder are visible.
+    """
+    circuit = memory_programs.memory_circuit(6)
+    first = program_records.Operation(
+        1, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    later = program_records.Operation(
+        2,
+        "memory",
+        (1,),
+        patches=(1,),
+        circuit=circuit,
+        scheduled_start_round=4,
+    )
+    rounds = round_policies.FixedRounds(6)
+    workload = workload_settings.WorkloadSettings(
+        operations=(first, later), rounds_policy=rounds
+    )
+    source = stim_device.StimDevice()
+    qpu = qpu_settings.QpuSettings(distance=3, device=source)
+    clock = config.Clock(4000)
+    strong = decoder_settings.DecoderSettings(kind=0.2, engine_clock=clock)
+    escalation = escalation_settings.EscalationSettings(kind="strong_only")
+    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
+    settings = machine_settings.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        strong_decoder=strong,
+        escalation=escalation,
+        idle_policy=idle,
+    )
+    observation = dataclasses.replace(
+        settings.observation, record_switching_windows=True
+    )
+    links = _price_path(
+        settings.links, "strong_buffer_to_strong_decoder", 350_000
+    )
+    return dataclasses.replace(settings, observation=observation, links=links)
+
+
+def _run_static(
+    settings: machine_settings.MachineSettings, seed: int = RUN_SEED
+) -> tuple[_Run, dict]:
+    machine = machine_module.Machine.build(settings, seed)
+    weak_writes = []
+    machine.weak_syndrome_buffer.trace.round_stored.connect(
+        lambda *event: weak_writes.append(event)
+    )
+    release_ticks_by_round = {}
+    released = functools.partial(
+        _record_release, machine, release_ticks_by_round
+    )
+    machine.strong_syndrome_buffer.trace.round_released.connect(released)
+    result = machine.run()
+    run = _Run(machine, result, [], [], weak_writes, [])
+    return run, release_ticks_by_round
+
+
+def _record_release(
+    machine: machine_module.Machine, release_ticks_by_round: dict, key: tuple
+) -> None:
+    release_ticks_by_round[key] = machine.engine.now
+
+
+def _assert_memory_slot_lifetimes(
+    run: _Run,
+    arrivals: list[round_records.RoundEvent],
+    release_ticks_by_round: dict,
+) -> None:
+    stored = run.machine.observation.round_events.stored_rounds
+    stored_ticks_by_round = {
+        (operation, index): tick for tick, operation, index in stored
+    }
+    for event in arrivals:
+        key = (event.operation_id, event.round_index)
+        assert event.tick == release_ticks_by_round[key]
+        expected_delivery = stored_ticks_by_round[key] + 350_000
+        assert event.tick == expected_delivery
+
+
+def _assert_idle_algorithm_charge(run: _Run, load_job_count: int) -> None:
+    stages = run.machine.observation.stages.records
+    algorithm = [
+        row for row in stages if row.stage == staged_decoder.ALGORITHM_STAGE
+    ]
+    memory = [row for row in algorithm if row.operation_id not in (1, 2)]
+    assert len(memory) == load_job_count
+    durations = [row.end_ticks - row.start_ticks for row in memory]
+    assert durations == [200_000] * load_job_count
+
+
+def _assert_stored_bit_count(transfers: list[dict], expected_bits: int) -> None:
+    stored_bits = sum(row["payload_bits"] for row in transfers)
+    assert stored_bits == expected_bits
+
+
+def _memory_arrivals(run: _Run) -> list[round_records.RoundEvent]:
+    events = run.machine.observation.round_events.events
+    return [
+        event for event in events if event.kind == "FEEDBACK_MEMORY_DELIVERED"
+    ]
+
+
+def _assert_held_rounds_retried(run: _Run) -> None:
+    events = run.machine.observation.round_events.events
+    kinds = {event.kind for event in events}
+    assert "STALLED" in kinds
+    assert "RELEASED" in kinds
+
+
+def _partitioned_joint_program() -> circuit_records.RepeatedStimCircuit:
+    """Keep the first acquisition joint, then separate the two blocks."""
+    program = memory_programs.joint_repetition_program(True, 0.04)
+    left_checks = round_records.MeasurementPartition(("left",), 2)
+    right_checks = round_records.MeasurementPartition(("right",), 2)
+    left_data = round_records.MeasurementPartition(("left",), 3)
+    right_data = round_records.MeasurementPartition(("right",), 3)
+    bulk = (left_checks, right_checks)
+    final = (left_checks, right_checks, left_data, right_data)
+    partitions = {"repeated_round": bulk, "final_round": final}
+    return dataclasses.replace(program, readout_partitions=partitions)
+
+
+def _readout_route(
+    base: link_settings.PathSettings,
+    patches: tuple,
+    channel_name: str,
+    propagation_ticks: int,
+) -> link_settings.ReadoutRoute:
+    channel = dataclasses.replace(
+        base.channel,
+        name=channel_name,
+        propagation_latency_ticks=propagation_ticks,
+    )
+    path = dataclasses.replace(base, channel=channel)
+    return link_settings.ReadoutRoute(patches, path)
+
+
+def _joint_settings(
+    program: circuit_records.RepeatedStimCircuit, placement: str
+) -> machine_settings.MachineSettings:
+    base = _settings(program, "live", placement)
+    patches = ("left", "right")
+    operations = _operations_on_group(base.workload.operations, patches)
+    owners = _operations_on_group(base.workload.dynamic_streams, patches)
+    workload = dataclasses.replace(
+        base.workload, operations=operations, dynamic_streams=owners
+    )
+    return dataclasses.replace(base, workload=workload)
+
+
+def _terminal_partitioned_settings(placement: str) -> tuple:
+    program = memory_programs.memory_program(physical_error_probability=0.12)
+    circuit, _mapping = program.assemble(3)
+    sampler = circuit.compile_sampler(seed=73)
+    measurements = sampler.sample(shots=1)
+    table = detector_formation.build_formation_table(circuit, 3)
+    detector_rounds = table.detector_rounds()
+    terminal_ids = tuple(
+        recipe.detector_index
+        for recipe in table.detectors
+        if recipe.kind is detector_formation.LayerKind.READOUT
+    )
+    syndrome_group = round_records.MeasurementPartition(("stream-patch",), 4)
+    first_data_group = round_records.MeasurementPartition(("stream-patch",), 3)
+    last_data_group = round_records.MeasurementPartition(("stream-patch",), 6)
+    source = stim_device.RecordedStimDevice(
+        measurements,
+        0,
+        detector_rounds={100: detector_rounds},
+        terminal_detector_ids={100: terminal_ids},
+        readout_partitions={
+            2: {3: (syndrome_group, syndrome_group)},
+            3: {3: (first_data_group, last_data_group)},
+        },
+    )
+    settings = _settings(program, "live", placement)
+    qpu = dataclasses.replace(settings.qpu, device=source)
+    workload = _terminal_partitioned_workload(circuit)
+    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    return settings, measurements, circuit
+
+
+def _terminal_partitioned_workload(
+    circuit: stim.Circuit,
+) -> workload_settings.WorkloadSettings:
+    owner = program_records.Operation(
+        100,
+        "memory",
+        ("stream-patch",),
+        patches=("stream-patch",),
+        circuit=circuit,
+    )
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    syndrome = dataclasses.replace(
+        prefix,
+        id=2,
+        name="last syndrome",
+        stream_offset=2,
+        predecessors=(1,),
+        syndrome_fragment_index=0,
+        syndrome_fragment_count=4,
+    )
+    finalizer = dataclasses.replace(
+        syndrome,
+        id=3,
+        name="data readout",
+        predecessors=(2,),
+        finalizes_stream_round=True,
+        syndrome_fragment_index=2,
+    )
+    policy = round_policies.PerOperationRounds({100: 3, 1: 2, 2: 1, 3: 0})
+    return workload_settings.WorkloadSettings(
+        operations=(prefix, syndrome, finalizer),
+        decode_operations=(owner,),
+        rounds_policy=policy,
+    )
+
+
+def _operations_on_group(operations: tuple, patches: tuple) -> tuple:
+    grouped = []
+    for operation in operations:
+        replacement = dataclasses.replace(
+            operation, qubits=patches, patches=patches
+        )
+        grouped.append(replacement)
+    return tuple(grouped)
+
+
+def _assert_joint_acquisitions(run: _Run) -> None:
+    source = run.machine.settings.qpu.device
+    identities = [
+        (packet.operation_id, packet.round_index) for packet in run.packets
+    ]
+    assert len(identities) == len(set(identities))
+    footprints = {packet.patch_ids for packet in run.packets}
+    assert footprints == {("left", "right")}
+    measurements = source.sampled_measurements(100)
+    emitted = _raw_bits(run.packets)
+    assert emitted == measurements
+    assert len(run.shots) == 1
+    paths = run.result.link_traffic["transfers"]
+    acquisitions = [row for row in paths if row["path"] == "qpu_to_controller"]
+    assert len(acquisitions) == len(run.packets)
+
+
+def _bb_memory(basis: str) -> circuit_records.RepeatedStimCircuit:
+    import deltakit_explorer.codes as codes
+
+    code = codes.BivariateBicycleCode(3, 5, [1, 1, 4], [0, 1, 2])
+    return deltakit.css_memory_rounds(
+        code, basis, 0.001, round_period_microseconds=1.1
+    )
+
+
+def _bb_settings(
+    program: circuit_records.RepeatedStimCircuit,
+    placement: str,
+    commit_round_count: int,
+) -> machine_settings.MachineSettings:
+    settings = _settings(program, "live", placement)
+    # Both check matrices have nonzero columns. The public first X logical
+    # has weight two and anticommutes with a Z logical, establishing d=2.
+    code = code_geometry.BivariateBicycleCodeModel(
+        qubit_count=30,
+        logical_qubit_count=8,
+        distance=2,
+        commit_rounds_override=commit_round_count,
+        buffer_rounds_override=2,
+    )
+    qpu = dataclasses.replace(settings.qpu, distance=None, code=code)
+    price = decoders.PresetLatencyDecoder(0.2)
+    backend = belief_propagation_osd.BeliefPropagationOsdDecoder(price)
+    decoder = dataclasses.replace(
+        settings.strong_decoder, kind=None, decoder=backend
+    )
+    workload = _bb_logical_qubits(settings.workload)
+    return dataclasses.replace(
+        settings, qpu=qpu, strong_decoder=decoder, workload=workload
+    )
+
+
+def _bb_logical_qubits(
+    workload: workload_settings.WorkloadSettings,
+) -> workload_settings.WorkloadSettings:
+    logical_qubits = tuple(range(8))
+    operations = tuple(
+        dataclasses.replace(operation, qubits=logical_qubits)
+        for operation in workload.operations
+    )
+    owners = tuple(
+        dataclasses.replace(owner, qubits=logical_qubits)
+        for owner in workload.dynamic_streams
+    )
+    return dataclasses.replace(
+        workload, operations=operations, dynamic_streams=owners
+    )
+
+
+def _direct_bp_osd_prediction(run: _Run) -> tuple[int, ...]:
+    """Ldpc's published Stim converter retains the undecomposed hyperedges."""
+    circuit = run.shots[0][0].circuit
+    model = circuit.detector_error_model(approximate_disjoint_errors=False)
+    matrices = dem_matrices.detector_error_model_to_check_matrices(
+        model, allow_undecomposed_hyperedges=True
+    )
+    backend = ldpc.BpOsdDecoder(
+        matrices.check_matrix,
+        error_channel=list(matrices.priors),
+        max_iter=2,
+        bp_method="product_sum",
+        schedule="serial",
+        osd_method="osd_cs",
+        osd_order=0,
+    )
+    source = run.machine.syndrome_source
+    events = source.sampled_detection_events(100)
+    syndrome = numpy.array(events, dtype=numpy.uint8)
+    correction = backend.decode(syndrome)
+    prediction = matrices.observables_matrix @ correction
+    prediction %= 2
+    return tuple(int(bit) for bit in prediction)
+
+
+def _bb_fault_measurements(
+    program: circuit_records.RepeatedStimCircuit,
+) -> numpy.ndarray:
+    """Apply a public logical X after preparation, with no other faults."""
+    import deltakit_explorer.codes as codes
+
+    code = codes.BivariateBicycleCode(3, 5, [1, 1, 4], [0, 1, 2])
+    qubits = sorted(code.qubits, key=_bb_qubit_identifier)
+    index_by_qubit = {qubit: index for index, qubit in enumerate(qubits)}
+    logical = code.x_logical_operators[1]
+    targets = [index_by_qubit[pauli.qubit] for pauli in logical]
+    first = program.first_round.without_noise()
+    repeated = program.repeated_round.without_noise()
+    final = program.final_round.without_noise()
+    simulator = stim.TableauSimulator(seed=619)
+    simulator.do(first)
+    simulator.x(*targets)
+    simulator.do(repeated)
+    simulator.do(final)
+    measurements = simulator.current_measurement_record()
+    return numpy.array([measurements], dtype=numpy.bool_)
+
+
+def _bb_qubit_identifier(qubit) -> str:
+    return repr(qubit.unique_identifier)
+
+
+def _direct_matching_prediction(
+    circuit: stim.Circuit, source: stim_device.StimDevice
+) -> tuple:
+    model = circuit.detector_error_model(decompose_errors=True)
+    matching = pymatching.Matching.from_detector_error_model(model)
+    events = source.sampled_detection_events(100)
+    prediction = matching.decode(events)
+    return tuple(prediction)
+
+
+def _transfer_paths(run: _Run) -> set[str]:
+    return {row["path"] for row in run.result.link_traffic["transfers"]}

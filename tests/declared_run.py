@@ -68,10 +68,11 @@ def declared_cycles(name):
 
 ROUND_MICROSECONDS = 1.0
 # every path whose latency the card carries, in the order the reference
-# card declares them; controller_to_strong_buffer is set per run
+# card declares them
 DECLARED_EDGE_NAMES = (
     "qpu_to_controller",
     "controller_to_weak_buffer",
+    "controller_to_strong_buffer",
     "weak_buffer_to_weak_decoder",
     "weak_decoder_to_strong_decoder",
     "strong_buffer_to_strong_decoder",
@@ -104,7 +105,7 @@ def declared_edge(base_edge, latency_microseconds):
     )
 
 
-def declared_profile(*, strong_buffer_microseconds=None):
+def declared_profile():
     """The reference card with every latency replaced by a declared tick."""
     base = link_profiles.logical_reference_profile()
     declared_edges = {}
@@ -112,13 +113,6 @@ def declared_profile(*, strong_buffer_microseconds=None):
         base_edge = getattr(base, name)
         latency = DECLARED_MICROSECONDS[name]
         declared_edges[name] = declared_edge(base_edge, latency)
-    strong_latency = strong_buffer_microseconds
-    if strong_latency is None:
-        strong_latency = DECLARED_MICROSECONDS["controller_to_strong_buffer"]
-    strong_store = declared_edge(
-        base.controller_to_strong_buffer, strong_latency
-    )
-    declared_edges["controller_to_strong_buffer"] = strong_store
     # the declared qpu tick is wire time only; readout classification
     # prices the controller processing separately
     declared_edges["qpu_to_controller"] = dataclasses.replace(
@@ -292,7 +286,6 @@ def switching_run(
     io_trace=False,
     probability_for=None,
     record=False,
-    strong_buffer_microseconds=None,
     weak_memory_bits=None,
     round_microseconds=ROUND_MICROSECONDS,
     bulk_strong=False,
@@ -346,9 +339,7 @@ def switching_run(
         threshold_cycles=threshold_cycles,
         switch_cycles=switch_cycles,
     )
-    links = declared_profile(
-        strong_buffer_microseconds=strong_buffer_microseconds
-    )
+    links = declared_profile()
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace, record_switching_windows=record
     )

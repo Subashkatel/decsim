@@ -16,7 +16,8 @@
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
-                                   # | recorded_stim: what the QPU reads out
+                                   # | recorded_stim | streaming_stim:
+                                   # what the QPU reads out
                                    # each round. stim_device samples the
                                    # workload's circuit (real detector data);
                                    # timing_only states each round's size, the
@@ -25,8 +26,10 @@ qpu:
                                    # keeps a size and no data,
                                    # src/proto/packet.proto); syndrome_bits
                                    # fills that size with seeded random bits.
-                                   # The sweep sets the distance and the round
-                                   # period
+                                   # streaming_stim needs Python arguments
+                                   # with repeated circuit records keyed by
+                                   # dynamic stream owner. The sweep sets the
+                                   # distance and the round period
 
 escalation:
   clock: fridge                    # a clocks domain; absent uses controller.clock
@@ -41,14 +44,16 @@ escalation:
                                    # src/mem/XBar.py separates its frontend and
                                    # forwarding cycles
   kind: weak_baseline              # weak_baseline | strong_only | switching.
-                                   # strong_only reads the plan's windows out of
-                                   # the strong syndrome buffer, moves inputs on
-                                   # strong_buffer_to_strong_decoder and returns
-                                   # results on strong_decoder_to_frame.
-                                   # switching adds the keys below (refused for
-                                   # any other kind, so they are documented as
-                                   # comments; two_tiers.yaml is the shortest
-                                   # config that runs them):
+                                   # strong_only reads static and live windows
+                                   # out of the strong syndrome buffer, moves
+                                   # inputs on strong_buffer_to_strong_decoder
+                                   # and returns results on
+                                   # strong_decoder_to_frame; idle rounds use
+                                   # only the strong path. switching adds the
+                                   # keys below (refused for any other kind, so
+                                   # they are documented as comments;
+                                   # two_tiers.yaml is the shortest config
+                                   # that runs them):
 # escalation:
 #   kind: switching
 #   confidence: complementary_gap  # complementary_gap | cluster_gap |

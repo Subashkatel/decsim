@@ -26,9 +26,9 @@ import dataclasses
 from typing import Optional
 
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.detector_error_model.detection_event_formation as formation
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
-import decsim.records.rounds as round_records
 
 
 class TierFormation:
@@ -50,10 +50,20 @@ class TierFormation:
 
     def form(self, payloads: list) -> list:
         """One job's rounds, their detection events in place of outcomes."""
-        formed = []
+        if self.former is None:
+            return payloads
+        fragments_by_round = {}
         for fragment in payloads:
-            converted = self._formed_fragment(fragment)
-            formed.append(converted)
+            key = (fragment.operation_id, fragment.round_index)
+            fragments = fragments_by_round.setdefault(key, [])
+            fragments.append(fragment)
+        formed = []
+        for fragments in fragments_by_round.values():
+            round_fragments = tuple(fragments)
+            converted = formation.form_round_fragments(
+                self.former, round_fragments
+            )
+            formed.extend(converted)
         return formed
 
     def rounds_to_form(self, job: decoding_records.DecodeJob) -> tuple:
@@ -87,27 +97,6 @@ class TierFormation:
             return
         self.formed_round_keys.difference_update(claimed)
         job.detection_event_rounds = None
-
-    def _formed_fragment(
-        self, fragment: round_records.RetainedSyndromeFragment
-    ) -> round_records.RetainedSyndromeFragment:
-        """One round's fragment carrying its events, sized as it landed.
-
-        The unit's input memory was written the raw round, and a memory
-        counts what is written into it, so the size stays the landed
-        one: "The decoder computes the syndrome from measurement
-        outcomes" (Caune et al. 2410.05202 lines 1252-1256). The
-        fragment as it landed when there is nothing to form it with or
-        from: no former, or a timing-only round that carries no bits.
-        """
-        if self.former is None:
-            return fragment
-        if fragment.bits is None:
-            return fragment
-        events = self.former.form_round(
-            fragment.operation_id, fragment.round_index, fragment.bits
-        )
-        return dataclasses.replace(fragment, bits=events)
 
 
 @dataclasses.dataclass(frozen=True)

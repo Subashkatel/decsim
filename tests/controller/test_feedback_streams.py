@@ -16,13 +16,127 @@ and the seal are cadence changes, and the runtime that holds operations
 for them hears each one.
 """
 
+import dataclasses
 import functools
+from typing import Any, Optional
 
 import pytest
 
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.engine as engine_module
 import decsim.records.program as program_records
+
+
+def test_a_protected_group_emits_and_releases_once_per_shared_cycle() -> None:
+    program = _group_program()
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine)
+    windows = _Windows()
+    streams = _streams(
+        program,
+        regions=program.protected_regions,
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+    )
+    streams.runtime = _Runtime()
+    first, final = program.operations
+    streams.begin(first)
+    assert streams.is_live_protected_patch("A")
+    assert streams.is_live_protected_patch("B")
+    close = functools.partial(streams.request_closes, final)
+    engine.schedule(2000, close)
+    engine.run()
+    assert qpu.emissions == [(7, 1, 1000, False), (7, 2, 2000, True)]
+    assert windows.seals == [(7, 2)]
+    assert not streams.is_live_protected_patch("A")
+    assert not streams.is_live_protected_patch("B")
+
+
+def test_a_group_endpoint_must_hold_every_owner_patch() -> None:
+    program = _group_program()
+    first, final = program.operations
+    partial = dataclasses.replace(final, patches=("B",))
+    program = dataclasses.replace(program, operations=(first, partial))
+    with pytest.raises(ValueError, match="protected stream 7 invalid end"):
+        _streams(program, regions=program.protected_regions)
+
+
+def test_a_protected_group_requires_one_common_cadence() -> None:
+    program = _group_program()
+    first_patch = _resolved_patch("A")
+    second_patch = _resolved_patch("B")
+    second_patch = dataclasses.replace(second_patch, round_ticks=2000)
+    patches = (first_patch, second_patch)
+    with pytest.raises(ValueError, match="patches require a common cadence"):
+        _streams(program, regions=program.protected_regions, patches=patches)
+
+
+@pytest.mark.parametrize("patches", [(), ("A", "A")])
+def test_a_protected_owner_requires_nonempty_unique_patches(
+    patches: tuple,
+) -> None:
+    program = _group_program()
+    owner = dataclasses.replace(program.dynamic_streams[0], patches=patches)
+    program = dataclasses.replace(program, dynamic_streams=(owner,))
+    with pytest.raises(ValueError, match="requires nonempty unique patches"):
+        _streams(program, regions=program.protected_regions)
+
+
+def test_a_new_group_waits_while_any_member_is_protected() -> None:
+    program = _overlapping_group_program()
+    engine = engine_module.Engine()
+    streams = _streams(
+        program, regions=program.protected_regions, engine=engine
+    )
+    streams.begin(program.operations[0])
+    assert streams.blocks_start(program.operations[2])
+
+
+def test_per_patch_idle_callbacks_advance_a_joint_stream_only_once() -> None:
+    program = _unprotected_group_program()
+    operation = program.operations[0]
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program,
+        regions=(),
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+    )
+    streams.begin(operation)
+    assert streams.extend_live_stream(operation)
+    assert streams.extend_live_stream(operation)
+    extend = functools.partial(streams.extend_live_stream, operation)
+    engine.schedule(1000, extend)
+    engine.run()
+    assert qpu.emissions == [(7, 7, 0, False), (7, 8, 1000, False)]
+    assert qpu.emission_owner_ids == [7, 7]
+
+
+def test_a_partial_idle_group_cannot_advance_its_joint_physical_history() -> (
+    None
+):
+    program = _unprotected_group_program()
+    operation = program.operations[0]
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A",)))
+    windows = _Windows()
+    streams = _streams(
+        program,
+        regions=(),
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+    )
+    streams.begin(operation)
+    with pytest.raises(
+        RuntimeError, match="cannot extend a partially idle patch group"
+    ):
+        streams.extend_live_stream(operation)
+    assert qpu.emissions == []
 
 
 def _operation(
@@ -46,6 +160,8 @@ def _streams(
     program, *, regions, engine=None, qpu=None, window_manager=None, patches=()
 ):
     """A FeedbackStreams over the program, already loaded."""
+    if not patches:
+        patches = _owner_patch_records(program)
     resolved_operations = []
     for operation in program.operations:
         resolved = _resolved_operation(operation.id)
@@ -82,9 +198,8 @@ def _resolved_operation(operation_id: int):
     )
 
 
-def _region(stream_id: int, patch_id, start: int, end: int):
+def _region(stream_id: int, start: int, end: int):
     return program_records.ProtectedRegion(
-        patch_id=patch_id,
         stream_id=stream_id,
         start_operation_id=start,
         end_operation_id=end,
@@ -94,7 +209,7 @@ def _region(stream_id: int, patch_id, start: int, end: int):
 def test_a_region_whose_stream_no_dynamic_stream_owns_is_refused():
     first = _operation(1, patches=("p0",))
     program = program_records.ExecutionProgram(operations=(first,))
-    regions = (_region(7, "p0", 1, 1),)
+    regions = (_region(7, 1, 1),)
 
     with pytest.raises(ValueError) as refusal:
         _streams(program, regions=regions)
@@ -102,19 +217,19 @@ def test_a_region_whose_stream_no_dynamic_stream_owns_is_refused():
     assert "protected stream 7 owner/patch mismatch" in str(refusal.value)
 
 
-def test_an_owner_that_holds_another_patch_is_refused():
-    """The region's patch is the one its owning stream runs on."""
+def test_an_endpoint_that_omits_its_owner_patch_is_refused() -> None:
+    """The owning stream defines the protected footprint."""
     owner = _operation(7, patches=("p1",))
     first = _operation(1, patches=("p0",))
     program = program_records.ExecutionProgram(
         operations=(first,), dynamic_streams=(owner,)
     )
-    regions = (_region(7, "p0", 1, 1),)
+    regions = (_region(7, 1, 1),)
 
     with pytest.raises(ValueError) as refusal:
         _streams(program, regions=regions)
 
-    assert "protected stream 7 owner/patch mismatch" in str(refusal.value)
+    assert "protected stream 7 invalid start" in str(refusal.value)
 
 
 def test_two_regions_on_one_stream_are_refused():
@@ -124,8 +239,8 @@ def test_two_regions_on_one_stream_are_refused():
         operations=(first,), dynamic_streams=(owner,)
     )
     two_on_one_stream = (
-        _region(7, "p0", 1, 1),
-        _region(7, "p0", 1, 1),
+        _region(7, 1, 1),
+        _region(7, 1, 1),
     )
 
     with pytest.raises(ValueError) as refusal:
@@ -140,7 +255,7 @@ def test_an_endpoint_that_is_no_operation_is_refused():
     program = program_records.ExecutionProgram(
         operations=(first,), dynamic_streams=(owner,)
     )
-    regions = (_region(7, "p0", 1, 99),)
+    regions = (_region(7, 1, 99),)
 
     with pytest.raises(ValueError) as refusal:
         _streams(program, regions=regions)
@@ -155,7 +270,7 @@ def test_an_endpoint_that_does_not_hold_the_regions_patch_is_refused():
     program = program_records.ExecutionProgram(
         operations=(first, other_patch), dynamic_streams=(owner,)
     )
-    regions = (_region(7, "p0", 1, 2),)
+    regions = (_region(7, 1, 2),)
 
     with pytest.raises(ValueError) as refusal:
         _streams(program, regions=regions)
@@ -170,7 +285,7 @@ def test_a_dynamic_stream_that_feeds_a_protected_patch_is_refused():
     program = program_records.ExecutionProgram(
         operations=(blocked,), dynamic_streams=(owner,)
     )
-    regions = (_region(7, "p0", 1, 1),)
+    regions = (_region(7, 1, 1),)
 
     with pytest.raises(ValueError) as refusal:
         _streams(program, regions=regions)
@@ -189,7 +304,7 @@ def test_a_decode_operation_that_feeds_a_protected_patch_is_refused():
         decode_operations=(decode_only,),
         dynamic_streams=(owner,),
     )
-    regions = (_region(7, "p0", 1, 1),)
+    regions = (_region(7, 1, 1),)
 
     with pytest.raises(ValueError) as refusal:
         _streams(program, regions=regions)
@@ -204,7 +319,7 @@ def test_a_well_formed_region_is_indexed_at_both_of_its_endpoints():
     program = program_records.ExecutionProgram(
         operations=(first, second), dynamic_streams=(owner,)
     )
-    region = _region(7, "p0", 1, 2)
+    region = _region(7, 1, 2)
 
     streams = _streams(program, regions=(region,))
 
@@ -224,7 +339,7 @@ def test_every_cadence_change_of_a_protected_region_reaches_the_runtime():
     program = program_records.ExecutionProgram(
         operations=(first, second), dynamic_streams=(owner,)
     )
-    region = _region(7, "p0", 1, 2)
+    region = _region(7, 1, 2)
     engine = engine_module.Engine()
     patch = _resolved_patch("p0")
     qpu = _Qpu()
@@ -248,6 +363,60 @@ def test_every_cadence_change_of_a_protected_region_reaches_the_runtime():
     assert runtime.retries == 2
 
 
+def test_region_release_waits_for_other_same_tick_protected_rounds() -> None:
+    """Keep the crossing regions together to expose their release ordering."""
+    first_begin = _operation(1, patches=(0,), emits_detector_data=False)
+    first_end = _operation(2, patches=(0,), emits_detector_data=False)
+    second_begin = _operation(3, patches=(1,), emits_detector_data=False)
+    joint = _operation(4, patches=(0, 1), emits_detector_data=False)
+    third_end = _operation(5, patches=(0,), emits_detector_data=False)
+    first_owner = _operation(100, patches=(0,))
+    second_owner = _operation(200, patches=(1,))
+    third_owner = _operation(300, patches=(0,))
+    regions = (
+        _region(100, 1, 2),
+        _region(200, 3, 4),
+        _region(300, 4, 5),
+    )
+    program = program_records.ExecutionProgram(
+        operations=(first_begin, first_end, second_begin, joint, third_end),
+        dynamic_streams=(first_owner, second_owner, third_owner),
+        protected_regions=regions,
+    )
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine)
+    windows = _Windows()
+    first_patch = _resolved_patch(0)
+    second_patch = _resolved_patch(1)
+    patches = (first_patch, second_patch)
+    streams = _streams(
+        program,
+        regions=regions,
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+        patches=patches,
+    )
+    runtime = _CrossingRegionRuntime(engine, streams, joint)
+    streams.runtime = runtime
+    streams.begin(first_begin)
+    streams.begin(second_begin)
+    close_first = functools.partial(streams.request_closes, first_end)
+    close_third = functools.partial(streams.request_closes, third_end)
+    engine.schedule(1000, close_first)
+    engine.schedule(4000, close_third)
+    engine.run()
+
+    assert runtime.started_ticks == [2000]
+    assert qpu.emissions == [
+        (100, 1, 1000, True),
+        (200, 1, 1000, False),
+        (200, 2, 2000, True),
+        (300, 1, 3000, False),
+        (300, 2, 4000, True),
+    ]
+
+
 def test_the_empty_row_answers_every_call_the_real_one_does():
     """A run with no streams must not tell a caller which row it holds."""
     real_names = _public_names(feedback_streams.FeedbackStreams)
@@ -267,7 +436,7 @@ def test_the_empty_row_holds_no_operation_and_seals_nothing():
     assert empty.binding_for(1) is None
     assert empty.blocks_start(operation) is False
     assert empty.is_live_protected_patch("p0") is False
-    assert empty.extend_live_stream(operation, "p0") is False
+    assert empty.extend_live_stream(operation) is False
 
 
 def _resolved_patch(patch_identity):
@@ -299,10 +468,21 @@ class _Runtime:
 
 
 class _Qpu:
-    """The QPU the protected round is emitted on."""
+    """The protected-round QPU, with opaque stream and patch identities."""
+
+    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+        """The protected fixture owns no ordinary idle group."""
+        del operation_id
+        del patches
+        return False
 
     def emit_idle_stream_round(
-        self, operation, stream_id, stream_round, patch
+        self,
+        operation: program_records.Operation,
+        stream_id: Any,
+        stream_round: int,
+        *,
+        is_final: bool,
     ) -> None:
         """One protected round."""
 
@@ -310,8 +490,78 @@ class _Qpu:
 class _Windows:
     """The window side the seal reaches."""
 
+    def __init__(self) -> None:
+        self.seals: list[tuple] = []
+
+    def bind_stream_operation(
+        self, operation_id: Any, stream_id: Any, stream_offset: int
+    ) -> None:
+        """Accept the controller's public binding declaration."""
+        del operation_id
+        del stream_id
+        del stream_offset
+
+    def has_dynamic_stream(self, stream_id: Any) -> bool:
+        """The fixture declares stream seven."""
+        return stream_id == 7
+
     def seal_stream(self, stream_id, stream_round_count: int) -> None:
         """One sealed stream."""
+        self.seals.append((stream_id, stream_round_count))
+
+
+class _RoundLogQpu:
+    """Observe emissions with opaque stream and patch identities."""
+
+    def __init__(
+        self, engine: engine_module.Engine, idle_group: Optional[tuple] = None
+    ) -> None:
+        self.engine = engine
+        self.emissions: list[tuple] = []
+        self.emission_owner_ids: list[int] = []
+        self.idle_group = idle_group
+
+    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+        """Only the explicitly declared group is idle after that operation."""
+        return (operation_id, patches) == self.idle_group
+
+    def emit_idle_stream_round(
+        self,
+        operation: program_records.Operation,
+        stream_id: Any,
+        stream_round: int,
+        *,
+        is_final: bool,
+    ) -> None:
+        """The physical round exposes its ordering through the QPU port."""
+        self.emission_owner_ids.append(operation.id)
+        emission = (stream_id, stream_round, self.engine.now, is_final)
+        self.emissions.append(emission)
+
+
+class _CrossingRegionRuntime:
+    """Start the joint endpoint when both protected patches permit it."""
+
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        streams: feedback_streams.FeedbackStreams,
+        joint: program_records.Operation,
+    ) -> None:
+        self.engine = engine
+        self.streams = streams
+        self.joint = joint
+        self.started_ticks: list[int] = []
+
+    def retry_ready_operations(self) -> None:
+        """A released patch can start a region only at the shared boundary."""
+        if self.started_ticks:
+            return
+        if self.streams.blocks_start(self.joint):
+            return
+        self.started_ticks.append(self.engine.now)
+        self.streams.begin(self.joint)
+        self.streams.request_closes(self.joint)
 
 
 def _public_names(row) -> set:
@@ -321,3 +571,47 @@ def _public_names(row) -> set:
         if not name.startswith("_"):
             names.add(name)
     return names
+
+
+def _owner_patch_records(program: program_records.ExecutionProgram) -> tuple:
+    records_by_patch = {}
+    for owner in program.dynamic_streams:
+        for patch in owner.patches:
+            records_by_patch[patch] = _resolved_patch(patch)
+    records = records_by_patch.values()
+    return tuple(records)
+
+
+def _group_program() -> program_records.ExecutionProgram:
+    owner = _operation(7, patches=("A", "B"))
+    first = _operation(1, patches=("A", "B"), emits_detector_data=False)
+    final = _operation(2, patches=("A", "B"), emits_detector_data=False)
+    region = _region(7, 1, 2)
+    return program_records.ExecutionProgram(
+        operations=(first, final),
+        dynamic_streams=(owner,),
+        protected_regions=(region,),
+    )
+
+
+def _overlapping_group_program() -> program_records.ExecutionProgram:
+    first = _group_program()
+    second_owner = _operation(8, patches=("B", "C"))
+    second_begin = _operation(3, patches=("B", "C"), emits_detector_data=False)
+    second_end = _operation(4, patches=("B", "C"), emits_detector_data=False)
+    second_region = _region(8, 3, 4)
+    operations = first.operations + (second_begin, second_end)
+    owners = first.dynamic_streams + (second_owner,)
+    regions = first.protected_regions + (second_region,)
+    return program_records.ExecutionProgram(
+        operations=operations, dynamic_streams=owners, protected_regions=regions
+    )
+
+
+def _unprotected_group_program() -> program_records.ExecutionProgram:
+    owner = _operation(7, patches=("A", "B"))
+    operation = _operation(1, patches=("A", "B"))
+    operation = dataclasses.replace(operation, stream_id=7, stream_offset=0)
+    return program_records.ExecutionProgram(
+        operations=(operation,), dynamic_streams=(owner,)
+    )

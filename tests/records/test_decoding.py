@@ -13,7 +13,7 @@ import decsim.records.rounds as round_records
 def make_payload(round_index, size_bits=100):
     return round_records.RetainedSyndromeFragment(
         operation_id=3,
-        patch_id="patch-a",
+        patch_ids=("patch-a",),
         round_index=round_index,
         bits=(0, 1),
         size_bits=size_bits,
@@ -31,7 +31,7 @@ def test_distinct_round_count_separates_the_rounds_of_two_operations():
     """A round index is only distinct within its own operation."""
     other_operation = round_records.RetainedSyndromeFragment(
         operation_id=4,
-        patch_id="patch-a",
+        patch_ids=("patch-a",),
         round_index=1,
         bits=(0, 1),
         size_bits=100,

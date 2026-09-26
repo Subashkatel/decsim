@@ -35,3 +35,7 @@ __pycache__/
 
 # Core dumps
 core.[0-9]*
+
+# The Deltakit Explorer client writes its log into the working directory
+# whenever it is imported.
+client.log

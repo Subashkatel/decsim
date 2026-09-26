@@ -636,8 +636,8 @@ def _dynamic_streams(task_count: int, generations: list) -> tuple:
 
 def _protected_regions(dynamic_streams: tuple, generations: list) -> tuple:
     regions = []
-    for owner, (patch, start, end) in zip(dynamic_streams, generations):
-        region = program_records.ProtectedRegion(patch, owner.id, start, end)
+    for owner, (_patch, start, end) in zip(dynamic_streams, generations):
+        region = program_records.ProtectedRegion(owner.id, start, end)
         regions.append(region)
     return tuple(regions)
 

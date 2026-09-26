@@ -14,6 +14,7 @@ import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.stim_device as stim_device
+import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 
 # qpu.kind names one of these rows: the device that emits the readout.
@@ -22,6 +23,7 @@ SYNDROME_SOURCES = {
     "timing_only": syndrome_devices.TimingOnlyDevice,
     "syndrome_bits": syndrome_devices.SyndromeBitDevice,
     "recorded_stim": stim_device.RecordedStimDevice,
+    "streaming_stim": streaming_stim_device.StreamingStimDevice,
 }
 # MachineSettings.magic_state_factory names one of these rows from
 # Python: what supplies the T states an operation consumes. No yaml
@@ -41,15 +43,19 @@ class QpuSettings:
     samples the operation's circuit), timing_only (payloads of the
     code's size with no values), syndrome_bits (seeded random bits
     shaped like the code's syndrome), recorded_stim (a released
-    experiment's measurements replayed). The round period is the
-    device's physical cadence, a quantum-device number, not a classical
-    clock's cycles: Google 921 ns (2207.06431) and 1.1 us (2408.13687),
-    Krinner 1.1 us (2112.03708), Yang 1.25 us (2605.04892). The code
-    card is a rotated surface code of the distance, with the windows
-    section's commit and buffer sizes; a Python-built code, layout,
-    device or error-model provider is used as it is. The arguments are
-    the source row's keyword arguments (a seed, a recorded shot's
-    measurements).
+    experiment's measurements replayed), streaming_stim (repeated Stim
+    fragments executed as the controller requests rounds). The round
+    period is the device's physical cadence, a quantum-device number,
+    not a classical clock's cycles: Google 921 ns (2207.06431) and
+    1.1 us (2408.13687), Krinner 1.1 us (2112.03708), Yang 1.25 us
+    (2605.04892). The code card is a rotated surface code of the
+    distance, with the windows section's commit and buffer sizes; a
+    Python-built code, layout, device or error-model provider is used as
+    it is. The card provisions the links and sizes the circuit-less
+    sources' rounds; a circuit source's payloads carry the circuit's own
+    widths, so a card and a circuit at different distances run links
+    provisioned for the wrong code. The arguments are the source row's
+    keyword arguments (a seed, a recorded shot's measurements).
     """
 
     kind: str = "timing_only"

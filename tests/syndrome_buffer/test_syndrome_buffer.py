@@ -44,7 +44,7 @@ def packet(
 ) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=operation_id,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
         size_bits=2,
@@ -66,7 +66,7 @@ def unsized_packet(round_index: int) -> round_records.SyndromeRoundPacket:
     """A timing-only round: it carries no bits and states no size."""
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=None,
         size_bits=None,

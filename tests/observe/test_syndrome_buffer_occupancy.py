@@ -21,7 +21,7 @@ import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 def packet(round_index: int) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=(1,),
         size_bits=1,

@@ -106,16 +106,31 @@ class QPUDevice:
             raise ValueError("QPU boundary query tick must be nonnegative")
         return self.clock.edge(0, tick)
 
+    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+        """Every group member is idle after the same completed operation."""
+        for patch in patches:
+            idle = self._live.idle_by_patch.get(patch)
+            if idle is None:
+                return False
+            if idle.operation_id != operation_id:
+                return False
+        return True
+
     def emit_idle_stream_round(
         self,
         operation: program_records.Operation,
         stream_id: Any,
         global_round: int,
-        patch: Any,
+        *,
+        is_final: bool,
     ) -> None:
         """Produce and deliver one idle round of a live stream."""
         payloads = self.syndrome_source.idle_round_payloads(
-            operation, stream_id, global_round, patch
+            operation,
+            stream_id,
+            global_round,
+            is_final=is_final,
+            round_period_ticks=self.clock.period_ticks,
         )
         self._deliver(payloads, operation)
 
@@ -124,7 +139,7 @@ class QPUDevice:
     ) -> None:
         """Deliver the timing-only round of an idle patch."""
         payload = round_records.QPUReadout(
-            ("idle", operation_id, patch), patch, round_index
+            ("idle", operation_id, patch), (patch,), round_index
         )
         route = round_records.SyndromePacketRoute.feedback_memory_round(
             operation_id
@@ -205,7 +220,10 @@ class QPUDevice:
             return
         if command.emits_detector_data:
             self.syndrome_source.begin_operation(
-                operation, command.round_count, command.source_round_count
+                operation,
+                command.round_count,
+                command.source_round_count,
+                round_period_ticks=self.clock.period_ticks,
             )
         running = _RunningOperation(command, 0)
         self._live.running_by_operation_id[operation.id] = running
@@ -241,23 +259,9 @@ class QPUDevice:
             raise ValueError(
                 "a detector-emitting round must emit at least one readout"
             )
-        fragment_index = operation.syndrome_fragment_index
-        declared_count = operation.syndrome_fragment_count
-        if fragment_index is not None and len(payloads) != 1:
-            raise ValueError(
-                "an explicit syndrome fragment slot must emit one payload"
-            )
-        fragment_count = declared_count
-        if declared_count is None:
-            fragment_count = len(payloads)
-        elif fragment_index is None and declared_count != len(payloads):
-            raise ValueError(
-                "declared syndrome fragment count must match emitted readouts"
-            )
+        fragment_count, first_index = _fragment_slots(operation, len(payloads))
         for local_index, payload in enumerate(payloads):
-            index = local_index
-            if fragment_index is not None:
-                index = fragment_index
+            index = first_index + local_index
             readout = dataclasses.replace(
                 payload, fragment_count=fragment_count, fragment_index=index
             )
@@ -274,10 +278,29 @@ class QPUDevice:
             readout.operation_id,
             readout.round_index,
             route,
-            readout.patch_id,
+            readout.patch_ids,
         )
         self.trace.round_event.fire(emitted)
         self.readout_receiver.accept_qpu_readout(readout, route)
+
+
+def _fragment_slots(operation, payload_count: int) -> tuple[int, int]:
+    first_index = operation.syndrome_fragment_index
+    fragment_count = operation.syndrome_fragment_count
+    if fragment_count is None:
+        fragment_count = payload_count
+    if first_index is None:
+        if fragment_count != payload_count:
+            raise ValueError(
+                "declared syndrome fragment count must match emitted readouts"
+            )
+        return fragment_count, 0
+    after_last_index = first_index + payload_count
+    if after_last_index > fragment_count:
+        raise ValueError(
+            "readout group exceeds the declared syndrome fragment count"
+        )
+    return fragment_count, first_index
 
 
 @dataclasses.dataclass

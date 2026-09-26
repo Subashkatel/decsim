@@ -77,7 +77,7 @@ The strong syndrome buffer's receiving end, as its two senders see it.
 | --- | --- |
 | `has_room` | Whether a write of that many bits can land. |
 | `reserve_write` | Take the bits one crossing round will need, before it leaves. |
-| `receive_round` | Take one round that landed here and keep it on arrival. |
+| `receive_round` | Store a landed round and deliver it on its canonical route. |
 | `reserve_region` | Take the room an escalated region's rounds will need, or refuse. |
 | `receive_region` | Take an escalated region that landed here: every round its slot. |
 
@@ -409,7 +409,8 @@ The QPU, as the controller sees it.
 | `issue` | Queue one operation body; it starts on the next cycle boundary. |
 | `next_boundary` | The cycle boundary at or after now, where an issue would start. |
 | `finish` | The program is complete: idle patches stop after this cycle. |
-| `emit_idle_stream_round` | Produce and deliver one idle round of a live stream. |
+| `are_patches_idle` | Every patch is idle after this same operation, as the QPU owns it. |
+| `emit_idle_stream_round` | Deliver one protection round, including readout when it is final. |
 | `emit_feedback_memory_round` | Deliver the timing-only round of an idle patch. |
 
 ### `SyndromeSource`
@@ -424,10 +425,12 @@ What the QPU reads out each round for an operation.
 
 | Method | What it does |
 | --- | --- |
-| `begin_operation` | Prepare the operation's rounds (a Stim source samples its shot). |
-| `round_payloads` | The readouts of one round, one per patch or fragment. |
-| `finalize_stream_round` | The stream's final data readout, as its own fragment. |
-| `idle_round_payloads` | The readouts of one idle round on a patch of a live stream. |
+| `declare_stream` | Bind physical provenance without sampling or building decode models. |
+| `validate_stream_length` | Require a sealed length consistent with the physical history. |
+| `begin_operation` | Prepare the operation's rounds at the resolved QPU cadence. |
+| `round_payloads` | The round's acquisitions in measurement order. |
+| `finalize_stream_round` | Final data readout, ordered by the round_payloads contract. |
+| `idle_round_payloads` | The protection round the controller requests, possibly its last. |
 | `logical_observable_truth` | The observable flips the source drew, or None when it draws none. |
 
 ### `DetectionEventFormer`
@@ -458,12 +461,16 @@ Where the machine forms a round's detection events.
 
 Who builds the decoder-facing error model of one window.
 
+| Member | Type |
+| --- | --- |
+| `operation_circuit_scope` | `str` |
+
 | Method | What it does |
 | --- | --- |
 | `window_models_for_operation` | One model per window of a planned operation, in window order. |
 | `window_model_for_stream` | The model of one window of a dynamic stream, laid at runtime. |
 | `register_dynamic_stream` | Note a dynamic stream; the rounds it can supply, or None. |
-| `validate_stream_length` | Refuse a stream longer than this source can supply. |
+| `finalize_stream_models` | Bind the terminal boundary; return whether pending models changed. |
 | `strong_window_model_for_operation` | One strong window's model, with one non-owned range excluded. |
 | `strong_window_model_for_operation_with_exclusions` | The same, with several non-owned ranges excluded. |
 

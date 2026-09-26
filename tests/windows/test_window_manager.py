@@ -110,7 +110,7 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
         register_window=lambda _key, _window: None
     )
     stream = program_records.Operation("stream", "stream", (0,))
-    manager.planner.register_stream(stream)
+    manager.planner.register_stream(stream, None)
 
     manager._grow_stream("stream", 4, None)
 
@@ -237,7 +237,7 @@ def test_a_round_arriving_after_the_last_window_committed_is_refused():
     machine = _weak_run()
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=0,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=2,
         bits=None,
         size_bits=None,

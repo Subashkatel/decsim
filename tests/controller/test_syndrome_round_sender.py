@@ -13,8 +13,8 @@ order when a slot frees (gem5 src/mem/cache/base.cc:255-257 setBlocked,
 tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473
 release_blocked_individual), or is dropped under the drop knob (ns-3
 point-to-point-net-device.cc Send: Enqueue false, packet dropped). A
-strong-primary plan takes one hop, into the strong store; a
-feedback-memory round still takes a weak syndrome buffer slot. A
+strong-primary plan takes one hop into the strong store for both window
+input and feedback-memory rounds. A
 weak-primary plan's round goes into the weak syndrome buffer only:
 what the strong tier needs of it rides the escalation (Battistel
 2303.00054 lines 342 to 347, a cold first stage keeps the rounds off
@@ -57,7 +57,7 @@ MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
 def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE):
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
         size_bits=BITS_PER_ROUND,
@@ -103,9 +103,8 @@ class RecordingStrongReceiver:
         self.reserved += 1
         self.reserved_bits += bits
 
-    def receive_round(self, packet, packet_bits):
-        del packet_bits
-        self.written.append(packet.round_index)
+    def receive_round(self, packed: round_records.PackedRound) -> None:
+        self.written.append(packed.packet.round_index)
 
 
 def sender_with(
@@ -181,7 +180,7 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     assert stalled == [2]
 
 
-def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
+def test_strong_primary_rounds_use_only_the_strong_store() -> None:
     engine = engine_module.Engine()
     strong_receiver = RecordingStrongReceiver()
     sender, weak_receiver, transmitter, _recorder = sender_with(
@@ -197,8 +196,8 @@ def test_a_strong_primary_window_round_takes_one_hop_into_the_strong_store():
     engine.run()
 
     assert strong_receiver.written == [1, 2]
-    assert weak_receiver.writes_in_flight == 1
-    assert transmitter.sent == [2]
+    assert weak_receiver.writes_in_flight == 0
+    assert transmitter.sent == []
 
 
 def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():

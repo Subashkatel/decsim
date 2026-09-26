@@ -36,8 +36,7 @@ def load_program(
         window_manager.register_operation(operation)
     run_plan = plan.run_plan
     window_manager.install_planned_holds(run_plan.buffering)
-    for stream in plan.dynamic_streams:
-        window_manager.register_stream(stream)
+    _register_streams(plan, window_manager)
     program = program_records.ExecutionProgram(
         plan.operations,
         plan.decode_operations,
@@ -49,3 +48,21 @@ def load_program(
         window_manager.register_operation(operation)
     idle_rounds.load(program)
     execution_runtime.load_program(program)
+
+
+def _register_streams(plan, window_manager):
+    """Declare physical state independently of decoder model selection.
+
+    gem5's AbstractMemory owns its backing state independently of timing
+    policy; selecting a model likewise cannot create or reset this history.
+    """
+    resolved_by_id = {
+        resolved.operation_id: resolved
+        for resolved in plan.run_plan.resolved_operations
+    }
+    for stream in plan.dynamic_streams:
+        resolved = resolved_by_id[stream.id]
+        source_round_limit = plan.device.declare_stream(
+            stream, resolved.round_count
+        )
+        window_manager.register_stream(stream, source_round_limit)

@@ -60,7 +60,7 @@ class _Gate:
 def _job(index, gate=None, deps_remaining=0):
     payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id="p",
+        patch_ids=("p",),
         round_index=index,
         bits=(0, 1),
         size_bits=2,

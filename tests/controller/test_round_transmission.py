@@ -93,7 +93,7 @@ class DispatchingWindows:
 def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE, wire_bits=2):
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
         size_bits=2,

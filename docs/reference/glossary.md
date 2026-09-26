@@ -14,8 +14,8 @@ part any reader can follow.
 
 ## The words this code means precisely
 
-- **round**: one cycle of syndrome measurement on one patch. The round
-  key is `(operation_id, round_index)`, and rounds are numbered from 1.
+- **round**: one cycle of syndrome measurement on an operation's patch group.
+  The round key is `(operation_id, round_index)`, and rounds are numbered from 1.
 - **syndrome**: the classical bits one round measures. They are parity
   checks on the encoded qubits, not the qubits' state.
 - **detection event**: a check whose value changed from the round

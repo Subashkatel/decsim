@@ -96,9 +96,8 @@ class RunOperationBody:
 
 @dataclass(frozen=True)
 class ProtectedRegion:
-    """One patch allocation generation with inclusive operation endpoints."""
+    """One owner patch group protected between inclusive operation endpoints."""
 
-    patch_id: Any
     stream_id: int
     start_operation_id: int
     end_operation_id: int
@@ -147,6 +146,7 @@ class Operation:
     scheduled_start_round: int = 0
     emits_detector_data: bool = True
     finalizes_stream_round: bool = False
+    # First slot of this operation's contiguous readout group in the round.
     syndrome_fragment_index: Optional[int] = None
     syndrome_fragment_count: Optional[int] = None
     blocked_by: Optional[int] = (

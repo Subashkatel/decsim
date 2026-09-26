@@ -9,9 +9,13 @@ order law is LILLIPUT's: a detector compares a round against the one
 before it, so the rounds of an operation are formed in order.
 """
 
+import dataclasses
+from collections.abc import Callable
+
 import pytest
 
 import decsim.detector_error_model.detection_event_formation as formation
+import decsim.ports as ports
 import decsim.records.rounds as round_records
 
 
@@ -30,7 +34,7 @@ class DeviceTable:
 def fragment(round_index, bits=(1, 0, 1, 1)):
     return round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=bits,
         size_bits=len(bits),
@@ -118,7 +122,7 @@ def test_a_timing_only_round_is_handed_on_as_it_is():
     row = formation.ControllerSideFormation(table, 0)
     timing_only = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=1,
         bits=None,
         size_bits=12,
@@ -203,3 +207,30 @@ def test_each_operation_is_formed_from_its_own_first_round():
     events = former.form_round(2, 1, (0, 1, 0, 1))
 
     assert events == (1, 1, 0)
+
+
+@pytest.mark.parametrize(
+    "placement",
+    [
+        formation.ControllerSideFormation,
+        formation.WeakSyndromeBufferSideFormation,
+    ],
+)
+def test_joint_round_is_formed_once_in_measurement_order(
+    placement: Callable[..., ports.DetectionEventPlacement],
+) -> None:
+    table = DeviceTable()
+    row = placement(table, 0)
+    first = fragment(1, bits=(1,))
+    middle = fragment(1, bits=(0,))
+    middle = dataclasses.replace(middle, patch_ids=("other",), fragment_index=1)
+    last = fragment(1, bits=(1,))
+    last = dataclasses.replace(last, fragment_index=2)
+
+    leaving = row.form_before_departure((last, first, middle))
+    (formed,) = row.form_before_storage(leaving)
+
+    assert table.asked == [(1, 1, (1, 0, 1))]
+    assert formed.patch_ids == (0, "other")
+    assert formed.bits == (1, 1, 0)
+    assert formed.size_bits == 3

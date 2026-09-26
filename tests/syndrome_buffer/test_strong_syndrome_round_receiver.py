@@ -39,7 +39,7 @@ BITS_PER_ROUND = 3
 def packet(round_index: int) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0, 1),
         size_bits=BITS_PER_ROUND,
@@ -100,7 +100,11 @@ def region(*round_indices) -> round_records.EscalatedRegion:
     return round_records.EscalatedRegion.of(request_key, packets)
 
 
-def cross(engine, receiver, round_index: int) -> None:
+def cross(
+    engine: engine_module.Engine,
+    receiver: strong_syndrome_round_receiver.StrongSyndromeRoundReceiver,
+    round_index: int,
+) -> None:
     """One round on its way over the crossing, landing after 0.5 us.
 
     The controller reserves the room and sends; the send itself is the
@@ -110,10 +114,10 @@ def cross(engine, receiver, round_index: int) -> None:
     """
     receiver.reserve_write(BITS_PER_ROUND)
     landing = packet(round_index)
-    engine.schedule(
-        LANDING_TICKS,
-        lambda: receiver.receive_round(landing, BITS_PER_ROUND),
+    packed = round_records.PackedRound(
+        landing, round_records.WINDOW_INPUT_ROUTE, BITS_PER_ROUND
     )
+    engine.schedule(LANDING_TICKS, lambda: receiver.receive_round(packed))
 
 
 def test_a_write_lands_after_the_crossing_and_the_listener_hears_it_once():
@@ -290,3 +294,32 @@ def test_a_strong_primary_window_is_ready_on_the_room_side_landing():
     assert record.tier == "strong"
     assert record.accepted_ticks == expected_accepted
     assert record.committed_ticks == expected_committed
+
+
+def test_arrival_can_create_a_windows_first_round_hold() -> None:
+    """gem5 base.cc services response targets before freeing their entry."""
+    engine = engine_module.Engine()
+    receiver = room_side(engine, bits=BITS_PER_ROUND)
+    receiver.store.open_operation(1)
+    receiver.windows = _ArrivalConsumer(receiver.store)
+
+    cross(engine, receiver, 1)
+    engine.run()
+
+    fragments = receiver.store.retained_fragments((1, 1))
+    assert fragments is not None
+    assert fragments[0].bits == (1, 0, 1)
+    assert receiver.store.publication_tick((1, 1)) == LANDING_TICKS
+    assert receiver.has_room(BITS_PER_ROUND) is False
+
+
+class _ArrivalConsumer:
+    """A window consumer whose first claim is created by the arrival."""
+
+    def __init__(self, store: syndrome_buffer_module.SyndromeBuffer) -> None:
+        self.store = store
+
+    def accept_room_round(self, operation_id: int, round_index: int) -> None:
+        reads = decoding_records.WindowReads((operation_id, 0))
+        round_key = (operation_id, round_index)
+        self.store.register_hold(reads, [round_key])

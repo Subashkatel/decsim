@@ -21,6 +21,7 @@ import fractions
 import math
 from typing import Optional, Union
 
+import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 
 
@@ -185,6 +186,29 @@ class PathSettings:
 
 
 @dataclasses.dataclass(frozen=True)
+class ReadoutRoute:
+    """The readout path setting for one complete physical patch footprint.
+
+    A joint acquisition stays one transfer. A route never splits its bits
+    or selects a channel from only one of its contributing patches.
+    """
+
+    patch_ids: tuple
+    settings: PathSettings
+
+    def __post_init__(self) -> None:
+        patches = tuple(self.patch_ids)
+        if not identity_records.is_stable_identity(patches):
+            raise ValueError("readout route patches must be stable identities")
+        if not patches or len(set(patches)) != len(patches):
+            raise ValueError("a readout route needs nonempty unique patches")
+        ordered = sorted(
+            patches, key=identity_records.stable_identity_order_key
+        )
+        object.__setattr__(self, "patch_ids", tuple(ordered))
+
+
+@dataclasses.dataclass(frozen=True)
 class FabricSettings:
     """A fabric card: one path setting per hop, a profile name and a kind.
 
@@ -196,7 +220,10 @@ class FabricSettings:
     LINK_FABRICS (link_profiles.py) that supplied these numbers and
     builds the run's fabric from them with build(card, engine);
     profile_name is the same row's name with the yaml's own file
-    appended, for the traffic report.
+    appended, for the traffic report. Python callers can set readout_routes
+    to choose a path card by the complete contributing patch footprint.
+    Unmatched footprints use qpu_to_controller. Equal channel names share
+    the same setup engine and serializer, including across routed cards.
     """
 
     qpu_to_controller: PathSettings
@@ -212,11 +239,17 @@ class FabricSettings:
     controller_to_strong_buffer: PathSettings
     profile_name: str
     kind: str = "logical_reference"
+    readout_routes: tuple[ReadoutRoute, ...] = ()
 
     def __post_init__(self) -> None:
+        routes = tuple(self.readout_routes)
+        object.__setattr__(self, "readout_routes", routes)
+        footprints = [route.patch_ids for route in routes]
+        if len(set(footprints)) != len(footprints):
+            raise ValueError("readout routes must have distinct footprints")
         channel_by_name = {}
-        for path in transfer_records.LinkPath:
-            path_settings = self.path_settings(path)
+        bindings = self.path_bindings()
+        for _path, path_settings in bindings:
             channel = path_settings.channel
             known = channel_by_name.setdefault(channel.name, channel)
             if known != channel:
@@ -228,6 +261,18 @@ class FabricSettings:
     def path_settings(self, path: transfer_records.LinkPath) -> PathSettings:
         """The setting of one path."""
         return getattr(self, path.value)
+
+    def path_bindings(self) -> tuple:
+        """Every semantic path's channel bindings, including readout routes."""
+        bindings = []
+        for path in transfer_records.LinkPath:
+            settings = self.path_settings(path)
+            bindings.append((path, settings))
+        for route in self.readout_routes:
+            bindings.append(
+                (transfer_records.LinkPath.QPU_TO_CONTROLLER, route.settings)
+            )
+        return tuple(bindings)
 
 
 def _check_capacity_matches_payload(

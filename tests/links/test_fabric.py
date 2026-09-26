@@ -171,6 +171,87 @@ def test_two_paths_on_one_channel_share_its_queue():
     assert on_weak_buffer_path.physical_sequence == 1
 
 
+def test_readout_footprints_select_independent_channel_queues() -> None:
+    engine = decsim.engine.Engine()
+    left = bounded_path("left-wire", 1000.0, 300)
+    right = bounded_path("right-wire", 2000.0, 100)
+    routes = (
+        link_settings.ReadoutRoute(("left",), left),
+        link_settings.ReadoutRoute(("right",), right),
+    )
+    fabric = fabric_with(engine, readout_routes=routes)
+    first = transfer_records.TransferAttribution.for_round(1, ("left",), 1)
+    second = transfer_records.TransferAttribution.for_round(1, ("right",), 1)
+    delivered = []
+    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first, delivered)
+    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, second, delivered)
+
+    engine.run()
+
+    delivery_ticks = [transfer.delivery_ticks for transfer in delivered]
+    assert delivery_ticks == [4100, 8300]
+    queue_wait_ticks = [transfer.queue_wait_ticks for transfer in delivered]
+    assert queue_wait_ticks == [0, 0]
+
+
+def test_readout_routes_with_one_channel_name_share_the_wire() -> None:
+    engine = decsim.engine.Engine()
+    shared = bounded_path("shared-readout", 1000.0, 300)
+    routes = (
+        link_settings.ReadoutRoute(("left",), shared),
+        link_settings.ReadoutRoute(("right",), shared),
+    )
+    fabric = fabric_with(engine, readout_routes=routes)
+    first = transfer_records.TransferAttribution.for_round(1, ("left",), 1)
+    second = transfer_records.TransferAttribution.for_round(1, ("right",), 1)
+    delivered = []
+    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first, delivered)
+    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 4, 0, second, delivered)
+
+    engine.run()
+
+    delivery_ticks = [transfer.delivery_ticks for transfer in delivered]
+    assert delivery_ticks == [8300, 12300]
+    assert delivered[1].queue_wait_ticks == 8000
+
+
+def test_a_joint_footprint_uses_its_whole_route_or_the_default() -> None:
+    engine = decsim.engine.Engine()
+    left = unbounded_path("left-wire", 100)
+    joint = unbounded_path("joint-wire", 200)
+    default = unbounded_path("default-wire", 300)
+    routes = (
+        link_settings.ReadoutRoute(("left",), left),
+        link_settings.ReadoutRoute(("right", "left"), joint),
+    )
+    fabric = fabric_with(
+        engine, qpu_to_controller=default, readout_routes=routes
+    )
+    pair = transfer_records.TransferAttribution.for_round(
+        1, ("left", "right"), 1
+    )
+    other_pair = transfer_records.TransferAttribution.for_round(
+        2, ("left", "other"), 1
+    )
+    delivered = []
+    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, pair, delivered)
+    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, other_pair, delivered)
+
+    engine.run()
+
+    delivery_ticks = [transfer.delivery_ticks for transfer in delivered]
+    assert delivery_ticks == [200, 300]
+
+
+def test_a_routed_readout_estimate_without_attribution_is_refused() -> None:
+    engine = decsim.engine.Engine()
+    route = link_settings.ReadoutRoute(("left",), FREE_PATH)
+    fabric = fabric_with(engine, readout_routes=(route,))
+
+    with pytest.raises(ValueError, match="readout delay requires a footprint"):
+        fabric.expected_delay_ticks(PATH.QPU_TO_CONTROLLER, 8, 0)
+
+
 def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
     engine = decsim.engine.Engine()
     first_wire = bounded_path("first", 1000.0, 0)

@@ -22,7 +22,7 @@ class _Planner:
         self.round_counts = round_counts
         self.successors_by_operation = successors
         self.models = types.SimpleNamespace(
-            check_stream_length=lambda _operation, _count: None
+            finalize_stream_models=lambda _operation, _count: False
         )
 
     def round_count_of(self, operation_id) -> int:

@@ -78,7 +78,7 @@ class WindowInteraction(Protocol):
 class DefaultWindowInteraction:
     """decsim's defect-mask boundary and forward strong region.
 
-    The boundary is a mask per (round, patch) or per round, XORed into
+    The boundary is a mask per (round, patch_ids) or per round, XORed into
     the landed rounds when the decode starts; a same-operation A/B
     delivery is mapped by stable detector identity.
     `restart_reread_buffer_regions` is how many of the strong region's
@@ -158,8 +158,8 @@ class DefaultWindowInteraction:
         A timing-only payload (no bits) takes the mask as its bits.
         """
         state = state or {}
-        patch_mask = state.get((round_key, payload.patch_id))
-        mask = patch_mask
+        footprint_mask = state.get((round_key, payload.patch_ids))
+        mask = footprint_mask
         if mask is None:
             mask = state.get(round_key)
         if mask is None:
@@ -392,15 +392,15 @@ def _map_shifted_defects(defects: dict, shift: int, destination) -> dict:
     mapped = {}
     for key, mask in defects.items():
         round_index = key
-        patch = None
+        patch_ids = None
         if isinstance(key, tuple):
-            round_index, patch = key
+            round_index, patch_ids = key
         round_index += shift
         if not destination.start_round <= round_index <= destination.buffer_hi:
             continue
         destination_key = round_index
-        if patch is not None:
-            destination_key = (round_index, patch)
+        if patch_ids is not None:
+            destination_key = (round_index, patch_ids)
         mapped[destination_key] = list(mask)
     return mapped
 

@@ -61,6 +61,10 @@ def _error_model_provider(parts):
     return parts.plan.error_model_provider
 
 
+def _syndrome_source(parts):
+    return parts.plan.device
+
+
 def _router(parts):
     return parts.pool.router
 
@@ -75,6 +79,7 @@ SEATS = (
     ("window_interaction", _window_interaction),
     ("boundary_policy", _boundary_policy),
     ("error_model_provider", _error_model_provider),
+    ("syndrome_source", _syndrome_source),
     ("router", _router),
     ("detection_events", _detection_events),
     ("conditional_release", controller_side.build_conditional_release),
@@ -157,6 +162,8 @@ WIRES = (
     ("weak_syndrome_round_receiver.detection_events", "detection_events"),
     ("strong_syndrome_round_receiver.store", "strong_syndrome_buffer"),
     ("strong_syndrome_round_receiver.windows", "window_manager"),
+    ("strong_syndrome_round_receiver.output", "strong_output"),
+    ("strong_syndrome_round_receiver.memory_arrivals", "memory_arrivals"),
     # the window side
     ("models.provider", "error_model_provider"),
     ("models.router", "router"),
@@ -164,6 +171,7 @@ WIRES = (
     ("planner.models", "models"),
     ("tracker.scheme", "scheme"),
     ("tracker.planner", "planner"),
+    ("tracker.source", "syndrome_source"),
     ("retention.weak_store", "weak_syndrome_buffer"),
     ("retention.strong_store", "strong_syndrome_buffer"),
     ("retention.planner", "planner"),

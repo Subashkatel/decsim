@@ -131,13 +131,11 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """A job's transfer: its payloads' patches, its window's rounds."""
         payloads = job.payloads or ()
-        patches = {}
-        for payload in payloads:
-            patch_id = payload.patch_id
-            order_key = identity_records.stable_identity_order_key(patch_id)
-            patches[order_key] = patch_id
-        ordered_keys = sorted(patches)
-        patch_ids = tuple(patches[key] for key in ordered_keys)
+        patches = round_records.fragment_patch_ids(payloads)
+        ordered_patches = sorted(
+            patches, key=identity_records.stable_identity_order_key
+        )
+        patch_ids = tuple(ordered_patches)
         window = job.window
         assert window is not None, (
             "window-scoped transport requires a DecodeJob window"
@@ -159,14 +157,15 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """An escalated region's transfer: its rounds, in its request's name.
 
-        The patches are the first packet's, the round range the packets'
-        first and last.
+        The footprint covers every packet; the round range names the first
+        and last packets.
         """
         first_packet = region.packets[0]
         last_packet = region.packets[-1]
-        patch_ids = tuple(
-            fragment.patch_id for fragment in first_packet.fragments
-        )
+        fragments = []
+        for packet in region.packets:
+            fragments.extend(packet.fragments)
+        patch_ids = round_records.fragment_patch_ids(fragments)
         ordered_patch_ids = tuple(
             sorted(patch_ids, key=identity_records.stable_identity_order_key)
         )
@@ -185,7 +184,7 @@ class TransferAttribution:
         cls, packet: round_records.SyndromeRoundPacket
     ) -> "TransferAttribution":
         """The packed round's transfer: every patch of the round."""
-        patch_ids = tuple(fragment.patch_id for fragment in packet.fragments)
+        patch_ids = round_records.fragment_patch_ids(packet.fragments)
         return cls.for_round(packet.operation_id, patch_ids, packet.round_index)
 
 

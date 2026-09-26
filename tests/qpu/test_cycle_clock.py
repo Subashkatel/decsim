@@ -8,6 +8,7 @@ arrival, the boundary itself included); validation matrix row C4. One
 microsecond is 1_000_000 ticks.
 """
 
+import functools
 import random
 
 import pytest
@@ -43,7 +44,7 @@ class ReadoutLog:
             (
                 self.engine.now,
                 payload.operation_id,
-                payload.patch_id,
+                payload.patch_ids,
                 payload.round_index,
             )
         )
@@ -62,7 +63,7 @@ class FinalizingSource(syndrome_devices.TimingOnlyDevice):
 
     def finalize_stream_round(self, operation, source_round_count):
         readout = round_records.QPUReadout(
-            operation.stream_id, 0, source_round_count, bits=(1, 0, 1)
+            operation.stream_id, (0,), source_round_count, bits=(1, 0, 1)
         )
         return [readout]
 
@@ -76,8 +77,14 @@ class RecordingSource(syndrome_devices.TimingOnlyDevice):
         self.begun = []
 
     def begin_operation(
-        self, operation, segment_round_count, source_round_count
-    ):
+        self,
+        operation: program_records.Operation,
+        segment_round_count: int,
+        source_round_count: int,
+        *,
+        round_period_ticks: int,
+    ) -> None:
+        del round_period_ticks
         self.begun.append(
             (operation.id, segment_round_count, source_round_count)
         )
@@ -90,7 +97,7 @@ class SplitSource(syndrome_devices.TimingOnlyDevice):
         self.payload_count = payload_count
 
     def round_payloads(self, operation, round_index):
-        payload = round_records.QPUReadout(operation.id, 0, round_index)
+        payload = round_records.QPUReadout(operation.id, (0,), round_index)
         return [payload] * self.payload_count
 
 
@@ -118,6 +125,32 @@ def memory_body(operation_id, round_count, cycle_ticks, patch=0, **changes):
     return program_records.RunOperationBody(
         operation, cycle_ticks, round_count, round_count
     )
+
+
+def test_group_idle_ownership_excludes_busy_and_reassigned_members() -> None:
+    engine, qpu, _log = clocked_qpu(10)
+    owner = program_records.Operation(
+        1, "joint", ("A", "B"), patches=("A", "B")
+    )
+    body = program_records.RunOperationBody(owner, 10, 1, 1)
+    qpu.issue(body)
+    observations = []
+    observe = functools.partial(
+        _observe_group_idleness, qpu, engine, observations
+    )
+    next_body = memory_body(2, 2, 10, patch="B")
+    claim_second = functools.partial(qpu.issue, next_body)
+    engine.schedule(15, observe)
+    engine.schedule(20, claim_second)
+    engine.schedule(25, observe)
+    engine.schedule(45, observe)
+    engine.schedule(50, qpu.finish)
+    engine.run()
+    assert observations == [
+        (15, True, False),
+        (25, False, False),
+        (45, False, True),
+    ]
 
 
 def test_every_round_lands_on_a_boundary_of_the_1100_ns_cycle():
@@ -289,7 +322,7 @@ def test_a_zero_round_finalizer_delivers_the_final_readout_and_completes():
     engine.schedule(5, qpu.finish)
     engine.run()
     payload, route = log.readouts[0]
-    assert payload == round_records.QPUReadout("s", 0, 3, bits=(1, 0, 1))
+    assert payload == round_records.QPUReadout("s", (0,), 3, bits=(1, 0, 1))
     assert route == round_records.WINDOW_INPUT_ROUTE
     assert log.completion_ticks == [(0, 2)]
     assert log.round_ticks == [(0, 3)]
@@ -306,7 +339,7 @@ def test_a_declared_fragment_slot_is_stamped_on_the_one_payload():
     payload, route = log.readouts[0]
     assert payload == round_records.QPUReadout(
         1,
-        0,
+        (0,),
         1,
         size_bits=BITS_PER_ROUND,
         fragment_count=3,
@@ -325,22 +358,43 @@ def test_undeclared_fragments_are_numbered_in_emission_order():
     first, _ = log.readouts[0]
     second, _ = log.readouts[1]
     assert first == round_records.QPUReadout(
-        1, 0, 1, fragment_count=2, fragment_index=0
+        1, (0,), 1, fragment_count=2, fragment_index=0
     )
     assert second == round_records.QPUReadout(
-        1, 0, 1, fragment_count=2, fragment_index=1
+        1, (0,), 1, fragment_count=2, fragment_index=1
     )
 
 
-def test_a_declared_fragment_slot_refuses_two_payloads():
+def test_a_declared_fragment_slot_starts_a_contiguous_payload_group() -> None:
     source = SplitSource(2)
     engine, qpu, log = clocked_qpu(10, source)
     body = memory_body(
-        1, 1, 10, syndrome_fragment_index=0, syndrome_fragment_count=2
+        1, 1, 10, syndrome_fragment_index=1, syndrome_fragment_count=4
     )
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError, match="must emit one payload"):
+    engine.run()
+    first, _ = log.readouts[0]
+    second, _ = log.readouts[1]
+    expected_first = round_records.QPUReadout(
+        1, (0,), 1, fragment_count=4, fragment_index=1
+    )
+    assert first == expected_first
+    expected_second = round_records.QPUReadout(
+        1, (0,), 1, fragment_count=4, fragment_index=2
+    )
+    assert second == expected_second
+
+
+def test_a_payload_group_cannot_exceed_the_declared_round_size() -> None:
+    source = SplitSource(2)
+    engine, qpu, log = clocked_qpu(10, source)
+    body = memory_body(
+        1, 1, 10, syndrome_fragment_index=1, syndrome_fragment_count=2
+    )
+    qpu.issue(body)
+    engine.schedule(10, qpu.finish)
+    with pytest.raises(ValueError, match="exceeds the declared syndrome"):
         engine.run()
 
 
@@ -371,11 +425,11 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
     operation = program_records.Operation(
         id=1, name="stream", qubits=(0,), patches=(0,), stream_id="s"
     )
-    qpu.emit_idle_stream_round(operation, "s", 4, 0)
+    qpu.emit_idle_stream_round(operation, "s", 4, is_final=False)
     payload, route = log.readouts[0]
     assert payload == round_records.QPUReadout(
         "s",
-        0,
+        (0,),
         4,
         bits=[0, 0, 1, 0, 1, 1, 1, 1],
         code="rotated surface code (d=3)",
@@ -416,7 +470,7 @@ def test_a_feedback_memory_round_is_routed_to_its_source_operation():
     engine, qpu, log = clocked_qpu(10)
     qpu.emit_feedback_memory_round(7, "A", 4)
     payload, route = log.readouts[0]
-    assert payload == round_records.QPUReadout(("idle", 7, "A"), "A", 4)
+    assert payload == round_records.QPUReadout(("idle", 7, "A"), ("A",), 4)
     assert route == round_records.SyndromePacketRoute.feedback_memory_round(7)
 
 
@@ -617,7 +671,8 @@ def observed_schedule(log, schedule):
     for patch in schedule:
         observed_rounds[patch] = []
         observed_idle[patch] = []
-    for tick, operation_id, patch, round_index in log.rounds:
+    for tick, operation_id, patch_ids, round_index in log.rounds:
+        (patch,) = patch_ids
         observed_rounds[patch].append((tick, operation_id, round_index))
     for tick, patch, _round_index in log.idle_ticks:
         observed_idle[patch].append(tick)
@@ -736,8 +791,8 @@ def test_a_silent_body_takes_the_patch_from_the_idle_rounds_and_gives_it_back():
     assert log.completion_ticks == [(20, 1), (60, 2), (80, 3)]
 
 
-def test_a_two_patch_body_reads_out_on_one_patch_and_idles_on_both():
-    """A merge is one round per cycle, named by the operation's first patch.
+def test_a_two_patch_body_reads_out_as_one_group_and_idles_on_both() -> None:
+    """A merge emits one round per cycle carrying both patch identities.
 
     The timing-only source merges the patches into one readout, and once
     the body completes each patch idles for itself, so the boundaries
@@ -752,13 +807,9 @@ def test_a_two_patch_body_reads_out_on_one_patch_and_idles_on_both():
     engine.schedule(45, qpu.finish)
     engine.run()
 
-    read_out = []
-    for tick, _operation_id, patch, _round_index in log.rounds:
-        read_out.append((tick, patch))
-    idle_pairs = []
-    for tick, patch, _round_index in log.idle_ticks:
-        idle_pairs.append((tick, patch))
-    assert read_out == [(10, 0), (20, 0)]
+    read_out = _readout_patch_ticks(log)
+    idle_pairs = _idle_patch_ticks(log)
+    assert read_out == [(10, (0, 1)), (20, (0, 1))]
     assert sorted(idle_pairs) == [
         (30, 0),
         (30, 1),
@@ -767,3 +818,22 @@ def test_a_two_patch_body_reads_out_on_one_patch_and_idles_on_both():
         (50, 0),
         (50, 1),
     ]
+
+
+def _observe_group_idleness(
+    qpu: cycle_clock.QPUDevice, engine: decsim.engine.Engine, observations: list
+) -> None:
+    joint_idle = qpu.are_patches_idle(1, ("A", "B"))
+    second_idle = qpu.are_patches_idle(2, ("B",))
+    observations.append((engine.now, joint_idle, second_idle))
+
+
+def _readout_patch_ticks(log: ReadoutLog) -> list:
+    return [
+        (tick, patches)
+        for tick, _operation_id, patches, _round_index in log.rounds
+    ]
+
+
+def _idle_patch_ticks(log: ReadoutLog) -> list:
+    return [(tick, patch) for tick, patch, _round_index in log.idle_ticks]

@@ -23,9 +23,14 @@ crossed is dropped at the door instead of stored, since no reader can
 ever name it (_drop_landing): a strong-primary run's last rounds, or
 the region of a parallel strong sibling that a confident weak result
 cancelled while the region was on the wire.
+
+Controller packets retain their canonical route. Window input wakes the
+window manager; timing-only idle input occupies a slot until the store's
+own decoder hop delivers it, without creating a window.
 """
 
 import dataclasses
+import functools
 from typing import Optional
 
 import decsim.ports as ports
@@ -52,13 +57,16 @@ class StrongSyndromeRoundReceiver:
     Trace source: copy_made(round_key, bits, source, "strong syndrome
     buffer") at every landing, the crossing's copy (data_path.md hops 3
     and 5); the source is the controller assembler or the weak syndrome
-    buffer, whichever the round left.
+    buffer, whichever the round left. round_event reports
+    FEEDBACK_MEMORY_DELIVERED at the idle round's decoder-side delivery.
     """
 
     # a receiver built with no window side stores its rounds for a reader
     # that never asks
     windows = ports.Port(ports.WindowInput, optional=True)
     store = ports.Port(ports.SyndromeBuffer)
+    output = ports.Port(ports.SyndromeBufferOutput)
+    memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
 
     def __init__(self, engine) -> None:
         self.engine = engine
@@ -79,15 +87,15 @@ class StrongSyndromeRoundReceiver:
         self.writes_in_flight += 1
         self.reserved_bits += round_records.stated_bits(bits)
 
-    def receive_round(
-        self,
-        packet: round_records.SyndromeRoundPacket,
-        packet_bits: Optional[int],
-    ) -> None:
+    def receive_round(self, packed: round_records.PackedRound) -> None:
         """Take one round that landed here: its room is now its slot."""
         self.writes_in_flight -= 1
-        self.reserved_bits -= round_records.stated_bits(packet_bits)
-        self._land(packet, packet_bits, CONTROLLER_WRITE)
+        self.reserved_bits -= round_records.stated_bits(packed.wire_bits)
+        window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
+        if packed.route.kind is window_input:
+            self._land(packed.packet, packed.wire_bits, CONTROLLER_WRITE)
+            return
+        self._forward_memory_round(packed)
 
     def reserve_region(self, round_count: int, bits: Optional[int]) -> None:
         """Take the room an escalated region needs, before it leaves the chip.
@@ -120,6 +128,35 @@ class StrongSyndromeRoundReceiver:
             f"strong_syndrome_buffer.bits {capacity}"
         )
 
+    def _forward_memory_round(self, packed: round_records.PackedRound) -> None:
+        """A timing-only round holds a slot until its decoder hop delivers."""
+        self.store.accept_packed_round(packed.packet, publication_tick=None)
+        self.trace.copy_made.fire(
+            packed.round_key,
+            packed.wire_bits,
+            CONTROLLER_WRITE.source_name,
+            "strong syndrome buffer",
+        )
+        self.engine.log_io(
+            log_sources.STRONG_BUFFER,
+            lambda: self._received_text(packed.packet, CONTROLLER_WRITE),
+        )
+        delivered = functools.partial(self._deliver_memory_round, packed)
+        self.output.send_memory_round(packed, delivered)
+
+    def _deliver_memory_round(self, packed: round_records.PackedRound) -> None:
+        source_operation_id = packed.route.source_operation_id
+        self.memory_arrivals.receive_memory_round(source_operation_id)
+        operation_id, round_index = packed.round_key
+        event = round_records.RoundEvent.of(
+            "FEEDBACK_MEMORY_DELIVERED",
+            self.engine.now,
+            operation_id,
+            round_index,
+            packed.route,
+        )
+        self.trace.round_event.fire(event)
+
     def _land(
         self,
         packet: round_records.SyndromeRoundPacket,
@@ -140,9 +177,6 @@ class StrongSyndromeRoundReceiver:
     ) -> None:
         self.store.accept_packed_round(packet, publication_tick=self.engine.now)
         round_key = (packet.operation_id, packet.round_index)
-        # a round whose every reader resolved while it crossed the link
-        # is dropped at the door: nobody can ever read it
-        self.store.release_round_if_unheld(round_key)
         self.trace.copy_made.fire(
             round_key, packet_bits, hop.source_name, "strong syndrome buffer"
         )
@@ -154,6 +188,10 @@ class StrongSyndromeRoundReceiver:
             self.windows.accept_room_round(
                 packet.operation_id, packet.round_index
             )
+        # Arrival can create a live window's first hold. Publish before
+        # reclamation, as gem5 services targets before freeing an entry
+        # (src/mem/cache/base.cc:637-656).
+        self.store.release_round_if_unheld(round_key)
 
     def _drop_landing(
         self,
@@ -221,3 +259,4 @@ class _TraceSources:
     """
 
     copy_made: trace_source.TraceSource = trace_source.new_source()
+    round_event: trace_source.TraceSource = trace_source.new_source()

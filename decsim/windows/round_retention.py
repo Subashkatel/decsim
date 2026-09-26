@@ -24,7 +24,7 @@ that allocates a miss buffer and the queue that holds the entry
 """
 
 import functools
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -55,7 +55,7 @@ class RoundRetention:
     # ---- the stores
 
     @property
-    def primary_store(self):
+    def primary_store(self) -> ports.RetainedRounds:
         """The store the primary tier reads.
 
         The weak syndrome buffer for the weak lane, strong syndrome buffer for
@@ -65,10 +65,12 @@ class RoundRetention:
             return self.strong_store
         return self.weak_store
 
-    def store_for(self, store):
-        """The given store, or the weak syndrome buffer when none is named."""
+    def store_for(
+        self, store: Optional[ports.RetainedRounds]
+    ) -> ports.RetainedRounds:
+        """The given store, or the store the primary tier reads."""
         if store is None:
-            return self.weak_store
+            return self.primary_store
         return store
 
     def install_planned_holds(self, buffering_plan) -> None:
@@ -88,15 +90,15 @@ class RoundRetention:
     def register_window(
         self, key: tuple, window: window_records.Window
     ) -> None:
-        """Register the weak and possible-strong holds of a new window."""
-        weak = self.read_keys_for_bounds(
+        """Register the primary read and any possible escalation context."""
+        primary_reads = self.read_keys_for_bounds(
             window.operation_id, window.start_round, window.buffer_hi, window
         )
-        strong = self.strong_context_read_keys(window, weak)
+        strong_context = self.strong_context_read_keys(window, primary_reads)
         reads = decoding_records.WindowReads(key)
-        self.weak_store.register_hold(reads, weak)
+        self.primary_store.register_hold(reads, primary_reads)
         potential = decoding_records.PotentialStrong(key)
-        held = weak + strong
+        held = primary_reads + strong_context
         for store in self._strong_context_stores():
             store.register_hold(potential, held)
 
@@ -105,27 +107,27 @@ class RoundRetention:
     ) -> None:
         """Re-point the window's live holds at its reads.
 
-        The potential strong read moves first, so a shrinking weak read
+        The potential strong read moves first, so a shrinking primary read
         stays in strong retention before its release. A re-sliced
         restart window whose own hold already moved to its request
         keeps its potential restart hold, which now names the rounds
         the fresh request reads, the re-read range among them.
         """
-        weak = self.read_keys_for_bounds(
+        primary_reads = self.read_keys_for_bounds(
             window.operation_id, window.start_round, window.buffer_hi, window
         )
-        strong = self.strong_context_read_keys(window, weak)
+        strong_context = self.strong_context_read_keys(window, primary_reads)
         potential = decoding_records.PotentialStrong(key)
-        held = weak + strong
+        held = primary_reads + strong_context
         for store in self._strong_context_stores():
             if store.has_hold(potential):
                 store.replace_hold(potential, held)
         reads = decoding_records.WindowReads(key)
-        if self.weak_store.has_hold(reads):
-            self.weak_store.replace_hold(reads, weak)
+        if self.primary_store.has_hold(reads):
+            self.primary_store.replace_hold(reads, primary_reads)
         restart = decoding_records.PotentialRestart(key)
         if self.weak_store.has_hold(restart):
-            self.weak_store.replace_hold(restart, weak)
+            self.weak_store.replace_hold(restart, primary_reads)
 
     def release_restart_reads(self, key: tuple) -> None:
         """No earlier escalation can re-slice the window: its claim ends."""
@@ -133,14 +135,13 @@ class RoundRetention:
         self.release_hold_if_live(restart)
 
     def reset_clipped_window_reads(self, window: window_records.Window) -> None:
-        """After clipping a live tail, retain only the weak commit range."""
+        """After clipping a live tail, retain only its primary commit range."""
         stop_round = window.commit_hi + 1
         new_reads = []
         for round_index in range(window.start_round, stop_round):
             new_reads.append((window.operation_id, round_index))
-        new_reads.sort()
         reads = decoding_records.WindowReads(window.key)
-        self.weak_store.replace_hold(reads, new_reads)
+        self.primary_store.replace_hold(reads, new_reads)
 
     def read_keys_for_bounds(
         self,
@@ -186,34 +187,18 @@ class RoundRetention:
 
     # ---- holds moving between owners
 
-    def transfer_hold(self, previous, replacement, store=None) -> tuple:
-        """Move a live hold to a new owner; returns the rounds it keeps."""
-        store = self.store_for(store)
-        keys = store.hold_round_identities(previous)
-        store.transfer_hold(previous, replacement)
-        return keys
-
     def release_hold_if_live(self, owner, store=None) -> None:
         """Drop a hold that is still live; nothing for one already gone."""
         store = self.store_for(store)
         if store.has_hold(owner):
             store.release_hold(owner)
 
-    def transfer_potential_to_pending(self, window_key, request_key) -> tuple:
-        """A window's possible strong read becomes an admitted request's."""
-        potential = decoding_records.PotentialStrong(window_key)
-        pending = decoding_records.PendingStrong(request_key)
-        keys = ()
-        for store in self._strong_context_stores():
-            keys = self.transfer_hold(potential, pending, store)
-        return keys
-
     def holds_input(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether the job's hold already lives in the weak syndrome buffer."""
+        """Whether the job's input is held in the primary tier's store."""
         if job.request_key is None:
             return False
         owner = decoding_records.DecoderInputHold(job.request_key)
-        return self.weak_store.has_hold(owner)
+        return self.primary_store.has_hold(owner)
 
     def bind_input_hold(
         self, job: decoding_records.DecodeJob, previous_owner, store=None
@@ -248,13 +233,14 @@ class RoundRetention:
 
     # ---- what a strong window holds
 
-    def open_operation_store(self, operation_id) -> None:
+    def open_operation_store(self, operation_id: Any) -> None:
         """Open the operation's rounds in the store its windows read."""
-        self.weak_store.open_operation(operation_id)
+        # Operation identities are opaque to retention.
+        self.primary_store.open_operation(operation_id)
 
-    def has_operation_store(self, operation_id) -> bool:
+    def has_operation_store(self, operation_id: Any) -> bool:
         """Whether the operation's syndrome RAM is still open."""
-        return self.weak_store.has_operation(operation_id)
+        return self.primary_store.has_operation(operation_id)
 
     def strong_window_input(self, builder, window) -> list:
         """The room-side payloads of a strong window, its first round stamped.
@@ -319,13 +305,19 @@ class RoundRetention:
         return tuple(packets)
 
     def hold_strong_context(
-        self, key: tuple, strong_request_key, context_keys
+        self,
+        key: tuple,
+        strong_request_key: window_records.DecoderRequestKey,
+        context_keys: tuple,
     ) -> None:
         """The window's potential strong read becomes the request's hold."""
-        self.transfer_potential_to_pending(key, strong_request_key)
+        potential_hold = decoding_records.PotentialStrong(key)
         pending_hold = decoding_records.PendingStrong(strong_request_key)
-        for store in self._strong_context_stores():
-            store.replace_hold(pending_hold, list(context_keys))
+        stores = self._strong_context_stores()
+        for store in stores:
+            store.transfer_hold(potential_hold, pending_hold)
+        for store in stores:
+            store.replace_hold(pending_hold, context_keys)
 
     def guard_restart_reads(
         self,
@@ -492,10 +484,10 @@ class RoundRetention:
         potential = decoding_records.PotentialStrong(job.strong_decode_for)
         pending = decoding_records.PendingStrong(job.request_key)
         if store.has_hold(potential):
-            self.transfer_hold(potential, in_flight, store)
+            store.transfer_hold(potential, in_flight)
             return
         if store.has_hold(pending):
-            self.transfer_hold(pending, in_flight, store)
+            store.transfer_hold(pending, in_flight)
             return
         round_identities = round_identities_of(job.payloads)
         store.register_hold(in_flight, round_identities)

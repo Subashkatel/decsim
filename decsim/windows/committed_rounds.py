@@ -317,9 +317,12 @@ def _check_inside_interval(
         if contribution.logical_observables is None:
             return
         raise RuntimeError(
-            f"functional logical contribution "
-            f"{contribution.owner_key} crosses stream-segment "
-            f"boundary {commit_lo}-{commit_hi}"
+            f"functional logical contribution {contribution.owner_key} "
+            f"spans rounds {contribution.commit_lo}-"
+            f"{contribution.commit_hi} and crosses the stream segment "
+            f"{commit_lo}-{commit_hi}: a segment ends on a window "
+            f"boundary, so its round count is a whole number of the "
+            f"card's commit rounds"
         )
     raise RuntimeError(
         f"logical contribution {contribution.owner_key} crosses "

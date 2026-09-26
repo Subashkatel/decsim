@@ -65,6 +65,7 @@ def declared_cycles(name):
 DECLARED_EDGE_NAMES = (
     "qpu_to_controller",
     "controller_to_weak_buffer",
+    "controller_to_strong_buffer",
     "weak_buffer_to_weak_decoder",
     "weak_decoder_to_strong_decoder",
     "strong_buffer_to_strong_decoder",
@@ -94,7 +95,6 @@ def switching_machine(
     strong_window: str = "two_sided_context",
     run_both_at_once: bool = False,
     round_microseconds: float = 1.0,
-    strong_buffer_microseconds: float = 7.0,
     escalation_microseconds: Optional[float] = None,
     record: bool = False,
     escalation=None,
@@ -152,9 +152,7 @@ def switching_machine(
         escalation = escalation_settings.EscalationSettings(
             policy=policy, strong_window=strong_window
         )
-    links = declared_profile(
-        strong_buffer_microseconds, escalation_microseconds
-    )
+    links = declared_profile(escalation_microseconds)
     readout_cycles = declared_cycles("readout_to_bits")
     controller = controller_settings.ControllerSettings(
         clock=DECLARED_CLOCK,
@@ -191,15 +189,14 @@ def switching_machine(
     return machine_module.Machine.build(settings, 0)
 
 
-def declared_profile(
-    strong_buffer_microseconds: float,
-    escalation_microseconds: Optional[float] = None,
-):
+def declared_profile(escalation_microseconds: Optional[float] = None):
     """The reference card with every latency replaced by a declared tick.
 
     escalation_microseconds replaces the declared 3 us of
     weak_decoder_to_strong_decoder, the hop an escalated window's
-    rounds ride up on.
+    rounds ride up on. A switching run never takes the controller's hop
+    into the strong syndrome buffer, so that latency is the declared one
+    and no knob.
     """
     base = link_profiles.logical_reference_profile()
     declared_edges = {}
@@ -207,10 +204,6 @@ def declared_profile(
         base_edge = getattr(base, name)
         latency = DECLARED_MICROSECONDS[name]
         declared_edges[name] = _declared_edge(base_edge, latency)
-    strong_store = _declared_edge(
-        base.controller_to_strong_buffer, strong_buffer_microseconds
-    )
-    declared_edges["controller_to_strong_buffer"] = strong_store
     if escalation_microseconds is not None:
         declared_edges["weak_decoder_to_strong_decoder"] = _declared_edge(
             base.weak_decoder_to_strong_decoder, escalation_microseconds

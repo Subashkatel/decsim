@@ -92,7 +92,7 @@ def _window(index, deps_remaining):
 def _job(index, label, deps_remaining, gate=None, input_key=None, window=None):
     payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id="p",
+        patch_ids=("p",),
         round_index=index,
         bits=(0, 1),
         size_bits=2,

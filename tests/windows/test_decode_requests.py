@@ -74,7 +74,7 @@ def _ignore_result(_job, _result) -> None:
 def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
     return round_records.RetainedSyndromeFragment(
         operation_id=1,
-        patch_id=0,
+        patch_ids=(0,),
         round_index=round_index,
         bits=bits,
         size_bits=None,

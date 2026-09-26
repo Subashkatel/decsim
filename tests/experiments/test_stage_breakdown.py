@@ -11,11 +11,8 @@ import csv
 import matplotlib.pyplot
 import pytest
 
+import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
-from decsim.experiments.plots import (
-    STAGE_BREAKDOWN_STAGES,
-    stage_breakdown_plot,
-)
 
 
 def shots_csv_row(distance, stage_us, stage_columns):
@@ -28,7 +25,7 @@ def shots_csv_row(distance, stage_us, stage_columns):
 def write_shots_csv(run_dir, rows):
     """rows: (distance, {stage column: us}) pairs; other columns filled."""
     run_dir.mkdir()
-    stage_columns = [column for column, _ in STAGE_BREAKDOWN_STAGES]
+    stage_columns = [column for column, _ in plots.STAGE_BREAKDOWN_STAGES]
     field_names = ["distance", "algorithm"] + stage_columns
     shots_csv_path = run_dir / "shots.csv"
     with open(shots_csv_path, "w", newline="") as handle:
@@ -43,21 +40,21 @@ def flat_stages(algorithm_us):
     return {"algorithm_mean_us": algorithm_us}
 
 
-def bar_lengths_by_row(axis) -> dict:
-    """Each stacked bar's whole length in ms, by its row on the axis."""
-    lengths = {}
-    for patch in axis.patches:
-        middle = patch.get_y() + patch.get_height() / 2
-        row = round(middle)
-        lengths[row] = lengths.get(row, 0.0) + patch.get_width()
-    return lengths
+def stage_widths(axis, stage_label) -> list:
+    """One stage's segment width in ms, one per bar, in the bars' order."""
+    (segments,) = [
+        container
+        for container in axis.containers
+        if container.get_label() == stage_label
+    ]
+    return [segment.get_width() for segment in segments]
 
 
 def test_stage_widths_are_medians_over_shots(tmp_path, monkeypatch):
-    """Only the algorithm stage takes time, so a bar is its median.
+    """The algorithm segment of each bar is that stage's median.
 
-    Rows 0 and 1 are d = 3 and d = 5. The 1000 us outlier shot would
-    move a mean to 343 us; the median stays at 20 us, 0.020 ms.
+    The bars are d = 3 and d = 5. The 1000 us outlier shot would move a
+    mean to 343 us; the median stays at 20 us, 0.020 ms.
     """
     run_dir = tmp_path / "run"
     shot_rows = [
@@ -71,12 +68,12 @@ def test_stage_widths_are_medians_over_shots(tmp_path, monkeypatch):
     drawn = []
     monkeypatch.setattr(matplotlib.pyplot, "close", drawn.append)
 
-    stage_breakdown_plot(run_dir, figure_path)
+    plots.stage_breakdown_plot(run_dir, figure_path)
 
     (figure,) = drawn
     (axis,) = figure.axes
-    lengths = bar_lengths_by_row(axis)
-    assert lengths == pytest.approx({0: 0.020, 1: 0.040})
+    algorithm_widths = stage_widths(axis, "algorithm")
+    assert algorithm_widths == pytest.approx([0.020, 0.040])
 
 
 def test_figure_is_written_per_distance(tmp_path):
@@ -87,7 +84,7 @@ def test_figure_is_written_per_distance(tmp_path):
     ]
     write_shots_csv(run_dir, shot_rows)
     figure_path = tmp_path / "stage_breakdown.png"
-    stage_breakdown_plot(run_dir, figure_path)
+    plots.stage_breakdown_plot(run_dir, figure_path)
     assert figure_path.exists()
     figure_status = figure_path.stat()
     assert figure_status.st_size > 0
@@ -98,4 +95,4 @@ def test_a_run_without_shots_csv_is_refused(tmp_path):
     empty_run.mkdir()
     figure_path = tmp_path / "figure.png"
     with pytest.raises(refusal.RefusalError, match="shots.csv"):
-        stage_breakdown_plot(empty_run, figure_path)
+        plots.stage_breakdown_plot(empty_run, figure_path)

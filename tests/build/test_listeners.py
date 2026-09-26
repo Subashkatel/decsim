@@ -17,6 +17,7 @@ import decsim.build.plan as plan_build
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.seeds as seed_records
 import decsim.settings as machine_settings
@@ -119,6 +120,9 @@ class _PhysicalDevice:
         self.order.append("physical_device.declare_stream")
         self.declared_streams.append((stream, round_count))
         return self.round_limit
+
+    def window_model_source(self) -> syndrome_devices.NoWindowModels:
+        return syndrome_devices.NO_WINDOW_MODELS
 
 
 class _Recorder:

@@ -565,7 +565,10 @@ def test_read_cycles_delay_submission_and_later_reaction_points(decoder_input):
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "read_cycles": 3}
     settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks
+        section,
+        "weak_syndrome_buffer",
+        clocks,
+        syndrome_buffer_module.SYNDROME_BUFFERS,
     )
     free = declared_run.weak_only_run(decoder_input=decoder_input)
     charged = declared_run.weak_only_run(

@@ -206,9 +206,9 @@ period and receive the selected idle noise exactly once.
 The BB example is one [[30,8,2]] block with eight logical outputs. Use one
 physical resource patch and eight logical qubit identities: the owner's
 `qubits` are `range(8)` and its `patches` the one block. Its code card is
-`code_geometry.BivariateBicycleCodeModel(qubit_count=30,
-logical_qubit_count=8, distance=2)` with the window overrides the run
-wants, and its decoder a full-model one such as BP-OSD: the noisy model
+`code_geometry.BivariateBicycleCodeModel(settings=..., distance=2)`, its
+`Settings(qubit_count=30, logical_qubit_count=8)`, with the window
+overrides the run wants, and its decoder a full-model one such as BP-OSD: the noisy model
 contains hyperedges that graphlike matching cannot represent exactly.
 `_bb_settings` in `tests/machine/test_machine.py` is the runnable
 assembly of those pieces. Patch count never sizes these logical outputs.

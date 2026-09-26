@@ -59,7 +59,11 @@ fails on a module that tests against a row's class).
 
 One entry in `DECODERS` (`decsim/decoders/settings.py`), one folder or
 one module beside the other rows, and the key in
-`configs/reference.yaml` in the same commit.
+`configs/reference.yaml` in the same commit. A knob of your backend's
+own (a step size, an iteration cap) is a field of a nested `Settings`
+on your class, written in the tier's section beside `kind`, as
+`union_find`'s `weight_step` is; your constructor takes the record as
+`settings`.
 [How to add a row to a table](add_a_table_row.md) is the general recipe with the refusal
 a typo gets.
 

@@ -21,7 +21,8 @@ CLOCK = config.Clock(CYCLE_TICKS)
 def test_the_checked_decoder_holds_the_unit_for_the_inner_rows_count():
     pytest.importorskip("tesseract_decoder")
     count = cycle_count_module.CycleCount(CLOCK, delay_cycles=3)
-    inner = union_find.UnionFindDecoder(cycle_count=count)
+    settings = union_find.UnionFindDecoder.Settings(cycle_count=count)
+    inner = union_find.UnionFindDecoder(settings=settings)
     checked = verify_windows.TesseractCheckedDecoder(inner)
     graph = evidence_records.UnionFindGraph(
         detector_count=1,

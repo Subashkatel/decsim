@@ -12,8 +12,12 @@ Find the package that owns the section. `decsim/settings.py`, `SECTIONS`,
 lists every section in the order the root reads them, and each section's
 record is built by its own package's `settings.py`.
 
-Add the field to the dataclass, with a default, and read it in the
-section's `from_yaml`:
+Add the field to the dataclass, with a default, read it in the
+section's `from_yaml`, and add its name to the tuple of keys the
+section shares (`WINDOWS_KEYS` here; `DECODER_KEYS`,
+`SYNDROME_BUFFER_KEYS`, `QPU_KEYS` and `WORKLOAD_KEYS` beside the other
+tables). A key off that tuple is handed to the kind's row, and a row
+that does not declare it refuses it:
 
 ```python
 @dataclasses.dataclass(frozen=True)
@@ -21,6 +25,11 @@ class WindowSettings:
     ...
     my_key: int = 0
 ```
+
+A key only one row reads is that row's, not the section's: it goes on
+the row's nested `Settings` instead
+([How to add a row to a table](add_a_table_row.md)), as `union_find`'s
+`weight_step` does.
 
 Name the field so the name carries the unit: a duration ends in
 `_microseconds` or `_ticks`, a count ends in `_count`, a number of
@@ -44,12 +53,14 @@ decsim: my.yaml: decoder_manager does not know ['nonsense']; its keys
 are ['bulk_strong', 'clock', 'dispatch_cycles']
 ```
 
-Not every section does yet. A key the `weak_decoder` section does not
-know is currently ignored in silence, so a typo there runs the default
-without saying so; the `windows`, `controller` and `pauli_frame`
-sections read the same way. A section no package owns is always
-refused, with the fifteen sections listed, and so is a yaml that leaves
-out a section every run needs.
+The sections with a table of rows (`qpu`, both syndrome buffers,
+`windows`, both decoder tiers, `workload`) refuse a key that neither the
+section nor the kind's row declares, in that shape, through
+`decsim/tables.py`'s `row_settings`. Not every section does yet: the
+`controller` and `pauli_frame` sections ignore a key they do not know,
+so a typo there runs the default without saying so. A section no
+package owns is always refused, with the fifteen sections listed, and
+so is a yaml that leaves out a section every run needs.
 
 ## 3. Document it in `configs/reference.yaml`, in the same commit
 

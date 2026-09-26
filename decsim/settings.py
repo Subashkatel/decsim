@@ -24,6 +24,7 @@ import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.settings as window_settings
 
 # The yaml sections, in the order MachineSettings reads them. Each
@@ -154,10 +155,12 @@ class MachineSettings:
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
         buffer_settings = syndrome_buffer_settings.SyndromeBufferSettings
+        buffer_rows = syndrome_buffer_module.SYNDROME_BUFFERS
         weak_syndrome_buffer = buffer_settings.from_yaml(
             sections["weak_syndrome_buffer"],
             "weak_syndrome_buffer",
             clocks,
+            buffer_rows,
             controller.clock,
         )
         strong_section = sections["strong_syndrome_buffer"]
@@ -165,7 +168,7 @@ class MachineSettings:
             strong_section
         )
         strong_syndrome_buffer = buffer_settings.from_yaml(
-            strong_section, "strong_syndrome_buffer", clocks
+            strong_section, "strong_syndrome_buffer", clocks, buffer_rows
         )
         windows = window_settings.WindowSettings.from_yaml(
             sections["windows"], clocks, controller.clock

@@ -3,7 +3,7 @@
 A syndrome source fills the SyndromeSource port (decsim/ports.py) and
 is driven by the QPU cycle clock (cycle_clock.py): one payload list per
 operation round, one per idle stream round. Neither source here has a
-circuit, so both answer every detector-error-model question with nothing.
+circuit, so neither builds a detector error model.
 
 TimingOnlyDevice emits payloads that carry no bit values and state the
 code card's syndrome width, for runs that price timing alone; it is the
@@ -14,7 +14,9 @@ network tester says "No need to do functional simulation / We just do
 timing simulation of the network" (gem5 src/cpu/testers/
 garnet_synthetic_traffic/GarnetSyntheticTraffic.cc). SyndromeBitDevice
 emits seeded random bits sized by the same width, to exercise the
-payload path end to end without Stim.
+payload path end to end without Stim. Both name NO_WINDOW_MODELS as
+their window model source, which answers every model question with
+nothing.
 """
 
 import random
@@ -116,15 +118,6 @@ class TimingOnlyDevice:
     ) -> None:
         """No physical circuit constrains this stream's length."""
 
-    def register_dynamic_stream(
-        self,
-        stream_operation: program_records.Operation,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-    ) -> None:
-        """No circuit, so no fixed stream length."""
-
     def validate_stream_length(
         self,
         stream_operation: program_records.Operation,
@@ -132,59 +125,9 @@ class TimingOnlyDevice:
     ) -> None:
         """No circuit, so any length is fine."""
 
-    def finalize_stream_models(
-        self,
-        stream_operation: program_records.Operation,
-        stream_round_count: int,
-    ) -> bool:
-        """No decoder model has a terminal boundary to fix."""
-        del stream_operation
-        del stream_round_count
-        return False
-
-    def window_models_for_operation(
-        self,
-        operation: program_records.Operation,
-        windows: list[window_records.Window],
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        fault_exclusion_ranges: tuple,
-        window_protocol: window_records.WindowProtocol,
-    ) -> list[fault_models.WindowErrorModel]:
-        """No circuit, so no window has an error model."""
-        del operation, windows, round_count
-        del fault_model_requirement, fault_exclusion_ranges, window_protocol
-        return []
-
-    def window_model_for_stream(
-        self, stream_id: Any, window: window_records.Window
-    ) -> None:
-        """No circuit, so no stream window has an error model."""
-
-    def strong_window_model_for_operation(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        exclude_faults_touching: Optional[tuple] = None,
-        prior_faults: Optional[dict] = None,
-    ) -> None:
-        """No circuit, so no strong re-decode has an error model."""
-
-    def strong_window_model_for_operation_with_exclusions(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        fault_exclusion_ranges: tuple,
-        prior_faults: Optional[dict] = None,
-    ) -> None:
-        """No circuit, so no strong re-decode has an error model."""
+    def window_model_source(self) -> "NoWindowModels":
+        """No circuit, so no window has a model to build."""
+        return NO_WINDOW_MODELS
 
 
 class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
@@ -283,6 +226,82 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     ) -> None:
         """No physical circuit constrains this stream's length."""
 
+    def validate_stream_length(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> None:
+        """No circuit, so any length is fine."""
+
+    def window_model_source(self) -> "NoWindowModels":
+        """No circuit, so no window has a model to build."""
+        return NO_WINDOW_MODELS
+
+    def _install_run_seed_state(self, prepared_state) -> None:
+        self._seed = prepared_state
+
+    def _fake_bits(
+        self, target: Any, global_round: int, patches: tuple, patch_count: int
+    ) -> list:
+        bit_count = self.code.syndrome_bits_per_round(patch_count)
+        self._mark_stochastic_use()
+        generator = self._payload_generator(target, global_round, patches)
+        return [generator.randint(0, 1) for _ in range(bit_count)]
+
+    def _payload_generator(
+        self, target: Any, global_round: int, patches: tuple
+    ) -> random.Random:
+        """The generator of one payload; an unseeded device draws entropy.
+
+        random.Random hashes a text seed with SHA-512, so the same text
+        gives the same bits in every process (Python's random module,
+        seed version 2).
+        """
+        if self._seed is None:
+            return random.Random()
+        payload_identity = f"{self._seed}|{target!r}|{global_round}|{patches!r}"
+        return random.Random(payload_identity)
+
+    def _payload(
+        self, target: Any, patches: tuple, global_round: int, bits: list
+    ) -> round_records.QPUReadout:
+        return round_records.QPUReadout(
+            target,
+            patches,
+            global_round,
+            bits=bits,
+            size_bits=len(bits),
+        )
+
+    def _payload_per_patch(
+        self,
+        operation: program_records.Operation,
+        target: Any,
+        global_round: int,
+    ) -> list[round_records.QPUReadout]:
+        patches = operation.patches
+        if not patches:
+            patches = operation.qubits
+        payloads = []
+        for patch in patches:
+            patch_ids = (patch,)
+            bits = self._fake_bits(target, global_round, patch_ids, 1)
+            payload = self._payload(target, patch_ids, global_round, bits)
+            payloads.append(payload)
+        return payloads
+
+
+class NoWindowModels:
+    """The window model source of a source with no circuit: no model at all.
+
+    One shared component answers every model question with nothing, so a
+    circuit-less source fills SyndromeSource alone and names this for its
+    models (ports.SyndromeSource.window_model_source).
+    """
+
+    # nothing here reads an operation's circuit
+    operation_circuit_scope = "none"
+
     def register_dynamic_stream(
         self,
         stream_operation: program_records.Operation,
@@ -291,13 +310,6 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
     ) -> None:
         """No circuit, so no fixed stream length."""
-
-    def validate_stream_length(
-        self,
-        stream_operation: program_records.Operation,
-        stream_round_count: int,
-    ) -> None:
-        """No circuit, so any length is fine."""
 
     def finalize_stream_models(
         self,
@@ -353,58 +365,9 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
-    def _install_run_seed_state(self, prepared_state) -> None:
-        self._seed = prepared_state
 
-    def _fake_bits(
-        self, target: Any, global_round: int, patches: tuple, patch_count: int
-    ) -> list:
-        bit_count = self.code.syndrome_bits_per_round(patch_count)
-        self._mark_stochastic_use()
-        generator = self._payload_generator(target, global_round, patches)
-        return [generator.randint(0, 1) for _ in range(bit_count)]
-
-    def _payload_generator(
-        self, target: Any, global_round: int, patches: tuple
-    ) -> random.Random:
-        """The generator of one payload; an unseeded device draws entropy.
-
-        random.Random hashes a text seed with SHA-512, so the same text
-        gives the same bits in every process (Python's random module,
-        seed version 2).
-        """
-        if self._seed is None:
-            return random.Random()
-        payload_identity = f"{self._seed}|{target!r}|{global_round}|{patches!r}"
-        return random.Random(payload_identity)
-
-    def _payload(
-        self, target: Any, patches: tuple, global_round: int, bits: list
-    ) -> round_records.QPUReadout:
-        return round_records.QPUReadout(
-            target,
-            patches,
-            global_round,
-            bits=bits,
-            size_bits=len(bits),
-        )
-
-    def _payload_per_patch(
-        self,
-        operation: program_records.Operation,
-        target: Any,
-        global_round: int,
-    ) -> list[round_records.QPUReadout]:
-        patches = operation.patches
-        if not patches:
-            patches = operation.qubits
-        payloads = []
-        for patch in patches:
-            patch_ids = (patch,)
-            bits = self._fake_bits(target, global_round, patch_ids, 1)
-            payload = self._payload(target, patch_ids, global_round, bits)
-            payloads.append(payload)
-        return payloads
+# The one no-model component every circuit-less source names.
+NO_WINDOW_MODELS = NoWindowModels()
 
 
 def _stream_target_and_global_round(

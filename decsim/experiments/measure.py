@@ -702,9 +702,7 @@ def _measurement(
     """
     samples = collect_samples(observation, result)
     verdicts = _logical_verdicts(observation, result)
-    throughput = _throughput_per_microsecond(
-        observation, settings, samples, distance
-    )
+    throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
     load = chain_load(samples, settings, distance, round_period_us)
@@ -840,15 +838,16 @@ def _logical_verdicts(
 
 
 def _throughput_per_microsecond(
-    observation: observation_module.Observation,
-    settings: machine_settings.MachineSettings,
-    samples: dict,
-    distance: int,
+    observation: observation_module.Observation, samples: dict
 ) -> _Throughput:
-    """Windows and rounds over the span from first round to last commit."""
+    """Windows and rounds over the span from first round to last commit.
+
+    The rounds are the ones the QPU read out, each (operation, round)
+    once (the EMITTED rows, qpu/cycle_clock.py), so the number holds for
+    any workload row, not only the one that declares rounds_per_shot.
+    """
     decoded_windows = len(samples["service"])
-    rounds_per_shot = settings.workload.rounds_per_shot
-    rounds_this_shot = rounds_per_shot.rounds_for(distance)
+    rounds_this_shot = _emitted_round_count(observation)
     span_us = _decoded_span_microseconds(observation)
     windows_per_us = decoded_windows / span_us
     rounds_per_us = rounds_this_shot / span_us
@@ -856,6 +855,16 @@ def _throughput_per_microsecond(
         windows_per_microsecond=windows_per_us,
         rounds_per_microsecond=rounds_per_us,
     )
+
+
+def _emitted_round_count(observation: observation_module.Observation) -> int:
+    """The rounds the QPU read out this shot, each (operation, round) once."""
+    emitted = set()
+    for event in observation.round_events.events:
+        if event.kind != "EMITTED":
+            continue
+        emitted.add((event.operation_id, event.round_index))
+    return len(emitted)
 
 
 def _referee_counts(

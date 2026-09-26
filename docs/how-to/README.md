@@ -14,7 +14,7 @@ row in a table, and nothing else changes. These four are that recipe
 and its variants.
 
 - [How to add a row to a table](add_a_table_row.md): the general recipe
-  for any of the seventeen tables, the refusal a typo gets, and the
+  for any of the eighteen tables, the refusal a typo gets, and the
   worked examples in the tests.
 - [How to add a decoder backend](add_a_decoder_backend.md): the decoder
   case, with the fault model contract and the check against PyMatching.

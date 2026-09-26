@@ -85,7 +85,8 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
     )
     machine = machine_module.Machine.build(settings)
     machine.run()
-    period_ticks = settings.weak_decoder.cycle_count.clock.period_ticks
+    cycle_count = settings.weak_decoder.row_settings.cycle_count
+    period_ticks = cycle_count.clock.period_ticks
     records = machine.observation.stages.records
     algorithm = [
         record

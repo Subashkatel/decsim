@@ -16,10 +16,9 @@ import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.tesseract.decoder as tesseract
-import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
-import decsim.records.decoder_evidence as evidence_records
+import decsim.tables as tables
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -44,6 +43,18 @@ DECODERS = {
     "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
 }
+
+# The keys every row of a <tier>_decoder section shares; any other key
+# is the row's own (its Settings, decsim/tables.py row_settings).
+DECODER_KEYS = (
+    "kind",
+    "units",
+    "input",
+    "boundary_fold",
+    "result_blocks_unit",
+    "unit_memory",
+    "engine",
+)
 
 DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 
@@ -192,22 +203,15 @@ class DecoderSettings:
     20 ns (5 FPGA clock cycles)", which is the latency default; the rate
     default is one round a clock. A null latency is uncharged and the
     rate is then read by nobody.
-    cycle_count is the union_find row's own timing: its decode's growth
-    steps priced in cycles of a named clock (union_find/cycle_count.py),
-    in place of the host wall clock; the build refuses it on any other
-    kind. weight_step is the union_find row's growth resolution, the
-    natural-log units of weight one tick of an edge length is (Huang,
-    Newman and Brown 2004.04693): the smaller it is, the longer every
-    edge and the more growth iterations a decode spans, which under a
-    cycle count is the engine's own time.
+    row_settings is the row's own Settings, read from the section's keys
+    outside DECODER_KEYS (union_find's weight_step and cycle_count), or
+    None for a row that declares none; the tier never reads it.
     kind None is no decoder at all, right for a run that plans no
     windows. A Python-built decoder is routed as it is, with no engine
     stages around it.
     """
 
     kind: Union[str, float, None] = None
-    cycle_count: Optional[cycle_count_module.CycleCount] = None
-    weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
     units: int = 1
     input: str = "copy"
     boundary_fold: str = "copy"
@@ -223,6 +227,8 @@ class DecoderSettings:
     detection_event_cycles_per_round: int = DETECTION_EVENT_CYCLES_PER_ROUND
     engine_clock: Optional[config.Clock] = None
     decoder: Optional[ports.Decoder] = None
+    # the row's own Settings record, opaque to the tier
+    row_settings: Optional[Any] = None
 
     def __post_init__(self) -> None:
         config.check_cycles(
@@ -253,6 +259,11 @@ class DecoderSettings:
         section_name: str,
     ) -> "DecoderSettings":
         """A tier section: kind, units, unit memory and the engine card."""
+        kind = section["kind"]
+        row = _decoder_row(kind, section_name)
+        row_settings = tables.row_settings(
+            row, section_name, section, DECODER_KEYS, clocks
+        )
         engine = section["engine"]
         engine_clock = clocks.clock(engine["clock"])
         unit_memory = UnitMemorySettings.from_yaml(
@@ -265,13 +276,8 @@ class DecoderSettings:
         formation_rate = _formation_cycles_per_round(engine)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
-        cycle_count_block = section.get("cycle_count")
-        cycle_count = _cycle_count(cycle_count_block, clocks)
-        weight_step = _weight_step(section)
         return cls(
-            kind=section["kind"],
-            cycle_count=cycle_count,
-            weight_step=weight_step,
+            kind=kind,
             units=section["units"],
             input=input_kind,
             boundary_fold=boundary_fold,
@@ -281,6 +287,7 @@ class DecoderSettings:
             detection_event_latency_cycles=formation_latency,
             detection_event_cycles_per_round=formation_rate,
             engine_clock=engine_clock,
+            row_settings=row_settings,
         )
 
 
@@ -402,16 +409,13 @@ def _check_boolean(section_name: str, key: str, value) -> None:
     )
 
 
-def _cycle_count(
-    block: Optional[Mapping], clocks: config.ClockSettings
-) -> Optional[cycle_count_module.CycleCount]:
-    if block is None:
+def _decoder_row(kind, section_name: str):
+    """The row a tier's kind names; None for a number or no decoder.
+
+    A number is a fixed core latency on the MWPM path
+    (decsim/build/decoders.py), so it is no row and takes no keys.
+    """
+    if not isinstance(kind, str):
         return None
-    return cycle_count_module.CycleCount.from_yaml(block, clocks)
-
-
-def _weight_step(section: Mapping) -> float:
-    """The union_find row's growth resolution; absent is the shipped one."""
-    if "weight_step" not in section:
-        return evidence_records.DEFAULT_WEIGHT_STEP
-    return evidence_records.normalized_weight_step(section["weight_step"])
+    key = f"{section_name}.kind"
+    return tables.row(DECODERS, key, kind)

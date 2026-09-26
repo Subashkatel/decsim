@@ -152,7 +152,7 @@ def build_plan(
     device = _syndrome_source(settings.qpu, code)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
-        error_model_provider = device
+        error_model_provider = device.window_model_source()
     _install_operation_circuits(device, error_model_provider, all_operations)
     idle_policy = _idle_policy(settings.idle_policy)
     return Plan(
@@ -300,7 +300,10 @@ def _scheme(windows: window_settings.WindowSettings, escalation_policy):
 
 
 def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
-    """The Python-built scheme, or the kind's row on the section's card."""
+    """The Python-built scheme, or the kind's row on the section's card.
+
+    A row with keys of its own is built with its Settings record too.
+    """
     if windows.scheme is not None:
         return windows.scheme
     row = tables.row(
@@ -308,7 +311,9 @@ def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
     )
     terminal_policy = _terminal_policy(windows, escalation_policy)
     card = window_records.WindowingSchemeCard(terminal_policy=terminal_policy)
-    return row(card)
+    if windows.row_settings is None:
+        return row(card)
+    return row(card, settings=windows.row_settings)
 
 
 def _terminal_policy(
@@ -415,14 +420,17 @@ def _syndrome_source(settings: qpu_settings.QpuSettings, code):
     """The device of the qpu kind, or the Python-built one.
 
     A row that shapes its payloads by the code card is built with the
-    run's card, so a yaml that names it needs no argument of its own.
+    run's card, so a yaml that names it needs no argument of its own; a
+    row with keys of its own is built with its Settings record too.
     """
     if settings.device is not None:
         return settings.device
     row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
-    arguments = dict(settings.arguments)
+    arguments = {}
     if row.takes_code_card:
-        arguments.setdefault("code", code)
+        arguments["code"] = code
+    if settings.row_settings is not None:
+        arguments["settings"] = settings.row_settings
     return row(**arguments)
 
 

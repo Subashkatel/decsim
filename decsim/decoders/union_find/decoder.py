@@ -5,8 +5,11 @@ The growth evidence it returns on every result feeds the cluster gap
 (AFS 2001.06598, Helios 2301.08419).
 """
 
+import dataclasses
+from collections.abc import Mapping
 from typing import Optional
 
+import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.window_decoder as window_decoder
@@ -37,16 +40,52 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
     decoder_evidence = decoding_records.CLUSTER_GROWTH_EVIDENCE
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row's own keys in its tier section.
+
+        weight_step is the growth resolution, the natural-log units of
+        weight one tick of an edge length is (Huang, Newman and Brown
+        2004.04693): the smaller it is, the longer every edge and the
+        more growth iterations a decode spans, which under a cycle count
+        is the engine's own time. cycle_count prices the decode's growth
+        steps in cycles of a named clock (cycle_count.py), in place of
+        the host wall clock.
+        """
+
+        weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
+        cycle_count: Optional[cycle_count_module.CycleCount] = None
+
+        @classmethod
+        def from_yaml(
+            cls, section: Mapping, clocks: config.ClockSettings
+        ) -> "UnionFindDecoder.Settings":
+            """Both keys, checked where they enter; absent is the default."""
+            weight_step = section.get(
+                "weight_step", evidence_records.DEFAULT_WEIGHT_STEP
+            )
+            normalized_step = evidence_records.normalized_weight_step(
+                weight_step
+            )
+            block = section.get("cycle_count")
+            if block is None:
+                return cls(weight_step=normalized_step)
+            cycle_count = cycle_count_module.CycleCount.from_yaml(block, clocks)
+            return cls(weight_step=normalized_step, cycle_count=cycle_count)
+
     def __init__(
         self,
         latency_model: Optional[decoder_module.DecoderBase] = None,
-        weight_step=evidence_records.DEFAULT_WEIGHT_STEP,
-        cycle_count: Optional[cycle_count_module.CycleCount] = None,
+        settings: Optional["UnionFindDecoder.Settings"] = None,
     ) -> None:
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
+        if settings is None:
+            settings = UnionFindDecoder.Settings()
         # absolute natural-log units represented by one weight tick
-        self.weight_step = evidence_records.normalized_weight_step(weight_step)
-        self.cycle_count = cycle_count
+        self.weight_step = evidence_records.normalized_weight_step(
+            settings.weight_step
+        )
+        self.cycle_count = settings.cycle_count
 
     def ticks_after_decode(
         self,

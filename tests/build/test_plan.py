@@ -7,6 +7,8 @@ Both are pinned here through build_plan, on settings shaped as a yaml
 would leave them.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.build.escalation as escalation_build
@@ -15,11 +17,13 @@ import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
@@ -68,6 +72,20 @@ def test_a_row_shaped_by_the_code_card_is_built_with_the_runs_card():
     plan = _plan(qpu=named_by_kind)
 
     assert plan.device.code is plan.code
+
+
+def test_a_stim_source_is_its_own_window_model_source():
+    stim_source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+
+    plan = _plan(qpu=stim_source)
+
+    assert plan.error_model_provider is plan.device
+
+
+def test_a_circuit_less_source_wires_the_model_source_that_builds_nothing():
+    plan = _plan()
+
+    assert plan.error_model_provider is syndrome_devices.NO_WINDOW_MODELS
 
 
 def test_a_run_that_never_escalates_gets_the_flush_tail():
@@ -133,6 +151,32 @@ def test_a_windows_kind_that_names_no_row_is_refused():
         _plan(windows=windows)
 
     assert "windows.kind" in str(refusal.value)
+
+
+class _SettingsRecordingScheme(sliding_scheme.SlidingWindowScheme):
+    """A sliding scheme that keeps the Settings record it is built with."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        stride_rounds: int = 1
+
+    def __init__(self, card, settings) -> None:
+        sliding_scheme.SlidingWindowScheme.__init__(self, card)
+        self.settings = settings
+
+
+def test_a_scheme_row_with_settings_is_built_with_its_record(monkeypatch):
+    monkeypatch.setitem(
+        window_settings.WINDOWING_SCHEMES, "recording", _SettingsRecordingScheme
+    )
+    own_settings = _SettingsRecordingScheme.Settings(stride_rounds=2)
+    windows = window_settings.WindowSettings(
+        kind="recording", row_settings=own_settings
+    )
+
+    plan = _plan(windows=windows)
+
+    assert plan.scheme.settings is own_settings
 
 
 def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():
@@ -273,10 +317,16 @@ def test_a_row_that_fixes_its_rounds_refuses_a_second_rounds_policy():
     silence, since no circuit is there to disagree.
     """
     seven_rounds = round_policies.FixedRounds(7)
+    fifteen_rounds = workload_settings.RoundsPerShot(fixed=15)
+    memory = workload_settings.MemoryCircuitWorkload.Settings(
+        code_task="surface_code:rotated_memory_z",
+        rounds_per_shot=fifteen_rounds,
+    )
     workload = workload_settings.WorkloadSettings(
         kind="memory_circuit",
         physical_error_probability=0.001,
         rounds_policy=seven_rounds,
+        row_settings=memory,
     )
     qpu = declared_run.declared_qpu()
     settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)

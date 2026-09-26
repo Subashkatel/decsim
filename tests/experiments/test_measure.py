@@ -1016,6 +1016,26 @@ def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
     assert two_streams.load == one_stream.load
 
 
+def test_throughput_counts_the_rounds_the_shot_read_out():
+    """Two streams of thirty rounds each are sixty rounds, whatever the row.
+
+    The rounds come from the QPU's EMITTED rows, one per operation round,
+    so a Python-built workload with no rounds_per_shot key is measured on
+    what it ran.
+    """
+    two_stream_run = seam_streams_shot(2)
+    two_streams = measure.measure_shot(two_stream_run)
+    decoded_windows = len(two_streams.samples["service"])
+
+    rounds_per_window = (
+        two_streams.throughput_rounds_per_us
+        / two_streams.throughput_windows_per_us
+    )
+
+    assert decoded_windows == 18
+    assert rounds_per_window * decoded_windows == pytest.approx(60)
+
+
 def test_every_streams_window_is_measured_against_its_own_frame_record():
     """Two streams commit eighteen corrections and none is dropped.
 

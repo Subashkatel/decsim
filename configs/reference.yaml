@@ -27,11 +27,32 @@ qpu:
                                    # keeps a size and no data,
                                    # src/proto/packet.proto); syndrome_bits
                                    # fills that size with seeded random bits.
-                                   # streaming_stim needs Python arguments
-                                   # with repeated circuit records keyed by
-                                   # dynamic stream owner. kind is the
-                                   # section's one key: the sweep sets the
-                                   # distance and the round period
+                                   # streaming_stim takes repeated circuit
+                                   # records keyed by dynamic stream owner,
+                                   # which no yaml key carries: build it in
+                                   # Python (QpuSettings(device=...)). A
+                                   # source row with keys of its own reads
+                                   # them here (its Settings); the sweep
+                                   # sets the distance and the round period,
+                                   # so neither is a key here
+  code_card: rotated_surface       # rotated_surface | bivariate_bicycle: the
+                                   # code card the run prices, at the sweep's
+                                   # distance, with windows.commit_rounds and
+                                   # buffer_rounds as its window sizes.
+                                   # rotated_surface, the default, is Stim's
+                                   # generated surface_code:rotated_memory_z:
+                                   # d*d - 1 measure qubits read out every
+                                   # round (Stim src/stim/gen/
+                                   # gen_surface_code.cc); bivariate_bicycle is
+                                   # Bravyi et al. 2308.07915, n/2 X and n/2 Z
+                                   # checks a round. CUDA-Q QEC names its codes
+                                   # the same way (code.h get_code(name,
+                                   # options)). A card with keys of its own
+                                   # reads them here; bivariate_bicycle's two,
+                                   # with their defaults, the [[144, 12, 12]]
+                                   # gross code's:
+  # qubit_count: 144               # n, the physical qubits of one block
+  # logical_qubit_count: 12        # k, the logical qubits it encodes
 
 escalation:
   clock: fridge                    # a clocks domain; absent uses controller.clock
@@ -684,7 +705,10 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # decodes; a window larger than the memory
                                    # stops the run. A bounded memory needs
                                    # rounds that state their size
-  weight_step: 0.1                 # the union_find row's growth resolution: the
+  # A row's own keys sit in this section beside the shared keys above
+  # (its Settings, decsim/tables.py row_settings), and any other kind
+  # refuses them. union_find's two, with their defaults:
+  # weight_step: 0.1               # the union_find row's growth resolution: the
                                    # natural-log units of weight one tick of an
                                    # edge length is (Huang, Newman and Brown
                                    # 2004.04693, weighted growth). An edge of
@@ -695,12 +719,10 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the engine's cycles directly. Helios's own
                                    # weights run 2 to 16 (2301.08419 lines
                                    # 1242-1254, the weight resolution wmax).
-                                   # Read on any kind and used by union_find
-  cycle_count: null                # the union_find row's own timing, in place of
+  # cycle_count: null             # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
                                    # count per growth tick, on a named clock.
-                                   # null = the wall clock. Refused on any other
-                                   # kind. The count is
+                                   # null = the wall clock. The count is
                                    #   1
                                    #   + setup_cycles
                                    #   + setup_cycles_per_vertex x detectors
@@ -833,10 +855,8 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # is the copy row
   unit_memory:
     bits: null                     # as above
-  weight_step: 0.1                 # as above; the union_find row's growth
-                                   # resolution
-  cycle_count: null                # as above; the union_find row's own
-                                   # timing
+                                   # a union_find strong tier takes
+                                   # weight_step and cycle_count here, as above
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

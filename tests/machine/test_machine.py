@@ -2938,9 +2938,11 @@ def _bb_settings(
     settings = _settings(program, "live", placement)
     # Both check matrices have nonzero columns. The public first X logical
     # has weight two and anticommutes with a Z logical, establishing d=2.
+    card_settings = code_geometry.BivariateBicycleCodeModel.Settings(
+        qubit_count=30, logical_qubit_count=8
+    )
     code = code_geometry.BivariateBicycleCodeModel(
-        qubit_count=30,
-        logical_qubit_count=8,
+        settings=card_settings,
         distance=2,
         commit_rounds_override=commit_round_count,
         buffer_rounds_override=2,

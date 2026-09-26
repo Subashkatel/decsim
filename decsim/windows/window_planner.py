@@ -31,7 +31,7 @@ class WindowModels:
     every question answers None or nothing.
     """
 
-    # a timing-only device supplies no models at all
+    # a circuit-less source names one that answers every model with None
     provider = ports.Port(ports.WindowModelSource, optional=True)
     # the routing table answers what a model must offer for a code
     router = ports.Port(ports.DecoderRouter)

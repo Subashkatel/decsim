@@ -99,10 +99,19 @@ class ClusterGap:
         escalation: escalation_settings.EscalationSettings,
         weak_decoder: decoder_settings.DecoderSettings,
     ) -> "ClusterGap":
-        """The row at the weak decoder's weight step, priced by the card."""
+        """The row at the weak decoder's weight step, priced by the card.
+
+        A weak row with no Settings keeps no weight step and grows no
+        clusters, so the row takes the shipped step and the build refuses
+        the pairing by name (build/decoders.py).
+        """
+        walk_microseconds = escalation.confidence_walk_microseconds
+        row_settings = weak_decoder.row_settings
+        if row_settings is None:
+            return cls(walk_microseconds=walk_microseconds)
         return cls(
-            weight_step=weak_decoder.weight_step,
-            walk_microseconds=escalation.confidence_walk_microseconds,
+            weight_step=row_settings.weight_step,
+            walk_microseconds=walk_microseconds,
         )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:

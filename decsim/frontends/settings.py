@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional
+from typing import Any, Optional
 
 import stim
 
@@ -14,8 +14,9 @@ import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
-# The workload keys the memory_circuit row reads beside kind.
-_MEMORY_CIRCUIT_KEYS = ("code_task", "rounds_per_shot")
+# The keys every row of the workload section shares; any other key is the
+# row's own (its Settings, decsim/tables.py row_settings).
+WORKLOAD_KEYS = ("kind",)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -65,21 +66,21 @@ class WorkloadSettings:
 
     Table rows (WORKLOADS, below): memory_circuit (Stim's generated
     memory circuit for the code task, one physical error probability on
-    all four of Stim's noise channels, rounds_per_shot rounds),
-    circuit_list (a Python-built operation list), surgery_ir (the
-    line-based text IR), qlx (a lowered QLX program). The other fields
-    are Python-only: the decode owners, the dynamic streams and
-    protected regions of a feedback workload, the round policy
+    all four of Stim's noise channels, rounds_per_shot rounds, both keys
+    its own Settings), circuit_list (a Python-built operation list),
+    surgery_ir (the line-based text IR), qlx (a lowered QLX program).
+    The other fields are Python-only: the decode owners, the dynamic
+    streams and protected regions of a feedback workload, the round policy
     (GateRounds by default; the memory circuit fixes its rounds and
     refuses one), the feedback boundary mode every operation takes
     unless it names its own, and the window error models a task built
     once for all of its shots (built_window_models; a Machine built
-    alone gets none and builds its own).
+    alone gets none and builds its own). row_settings is the row's own
+    Settings, read from the section's keys beside kind, or None for a
+    row that declares none.
     """
 
     kind: str = "circuit_list"
-    code_task: str = "surface_code:rotated_memory_z"
-    rounds_per_shot: RoundsPerShot = RoundsPerShot(fixed=15)
     physical_error_probability: Optional[float] = None
     operations: tuple = ()
     text: str = ""
@@ -91,6 +92,8 @@ class WorkloadSettings:
     rounds_policy: Optional[ports.RoundsPolicy] = None
     feedback_boundary_mode: str = "trailing_buffer"
     built_models: Optional[built_window_models.BuiltWindowModels] = None
+    # the row's own Settings record, opaque to the section
+    row_settings: Optional[Any] = None
 
     def __post_init__(self) -> None:
         if self.feedback_boundary_mode not in FEEDBACK_BOUNDARY_MODES:
@@ -109,8 +112,10 @@ class WorkloadSettings:
         """
         kind = section.get("kind")
         row = tables.row(WORKLOADS, "workload.kind", kind)
-        fields = row.from_yaml(section)
-        return cls(kind=kind, **fields)
+        row_settings = tables.row_settings(
+            row, "workload", section, WORKLOAD_KEYS
+        )
+        return cls(kind=kind, row_settings=row_settings)
 
 
 def memory_circuit(
@@ -140,26 +145,32 @@ class MemoryCircuitWorkload:
 
     has_frontend = False
 
-    @staticmethod
-    def from_yaml(section: Mapping) -> dict:
-        """The `workload` keys this row reads, as settings fields.
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row's own keys: Stim's code task and the rounds a shot runs."""
 
-        The row reads exactly its two keys, so a misspelt or a missing
-        one is refused here rather than run on a default.
-        """
-        given = set(section) - {"kind"}
-        if given != set(_MEMORY_CIRCUIT_KEYS):
-            listed = sorted(given)
-            raise ValueError(
-                "workload.kind memory_circuit reads the keys "
-                f"{list(_MEMORY_CIRCUIT_KEYS)} beside kind; the section "
-                f"has {listed}"
+        code_task: str
+        rounds_per_shot: RoundsPerShot
+
+        @classmethod
+        def from_yaml(
+            cls, section: Mapping
+        ) -> "MemoryCircuitWorkload.Settings":
+            """Both keys; a missing one is refused rather than defaulted."""
+            missing = []
+            for field in dataclasses.fields(cls):
+                if field.name not in section:
+                    missing.append(field.name)
+            if missing:
+                raise ValueError(
+                    f"workload.kind memory_circuit needs {missing} beside kind"
+                )
+            rounds_per_shot = RoundsPerShot.from_yaml(
+                section["rounds_per_shot"]
             )
-        rounds_per_shot = RoundsPerShot.from_yaml(section["rounds_per_shot"])
-        return {
-            "code_task": section["code_task"],
-            "rounds_per_shot": rounds_per_shot,
-        }
+            return cls(
+                code_task=section["code_task"], rounds_per_shot=rounds_per_shot
+            )
 
     @staticmethod
     def operations(settings: "WorkloadSettings", code) -> tuple:
@@ -169,9 +180,11 @@ class MemoryCircuitWorkload:
                 "a memory_circuit workload needs physical_error_probability; "
                 "the sweep sets it per point"
             )
-        rounds = settings.rounds_per_shot.rounds_for(code.distance)
+        row_settings = settings.row_settings
+        rounds_per_shot = row_settings.rounds_per_shot
+        rounds = rounds_per_shot.rounds_for(code.distance)
         circuit = memory_circuit(
-            settings.code_task,
+            row_settings.code_task,
             rounds,
             code.distance,
             settings.physical_error_probability,
@@ -187,15 +200,19 @@ class CircuitListWorkload:
 
     has_frontend = False
 
-    @staticmethod
-    def from_yaml(section: Mapping) -> dict:
-        """Refused: this row's operations are Operation records."""
-        del section
-        raise ValueError(
-            "workload.kind circuit_list takes a list of Operation records "
-            "with their Stim circuits, which a yaml scalar cannot carry; "
-            "build it in Python (WorkloadSettings(operations=...))"
-        )
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """No key: the yaml cannot name this row at all."""
+
+        @classmethod
+        def from_yaml(cls, section: Mapping):
+            """Refused: this row's operations are Operation records."""
+            del section
+            raise ValueError(
+                "workload.kind circuit_list takes a list of Operation records "
+                "with their Stim circuits, which a yaml scalar cannot carry; "
+                "build it in Python (WorkloadSettings(operations=...))"
+            )
 
     @staticmethod
     def operations(settings: "WorkloadSettings", code) -> tuple:
@@ -209,16 +226,20 @@ class SurgeryIRWorkload:
 
     has_frontend = True
 
-    @staticmethod
-    def from_yaml(section: Mapping) -> dict:
-        """Refused: this row needs the caller's qubit-to-patch mapping."""
-        del section
-        raise ValueError(
-            "workload.kind surgery_ir takes the IR text and the "
-            "qubit_to_patch mapping the caller allocated its patches "
-            "with, which no yaml key carries today; build it in Python "
-            "(WorkloadSettings(text=..., qubit_to_patch=...))"
-        )
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """No key: the yaml cannot name this row at all."""
+
+        @classmethod
+        def from_yaml(cls, section: Mapping):
+            """Refused: this row needs the caller's qubit-to-patch mapping."""
+            del section
+            raise ValueError(
+                "workload.kind surgery_ir takes the IR text and the "
+                "qubit_to_patch mapping the caller allocated its patches "
+                "with, which no yaml key carries today; build it in Python "
+                "(WorkloadSettings(text=..., qubit_to_patch=...))"
+            )
 
     @staticmethod
     def operations(settings: "WorkloadSettings", code) -> tuple:
@@ -236,15 +257,19 @@ class QlxWorkload:
 
     has_frontend = True
 
-    @staticmethod
-    def from_yaml(section: Mapping) -> dict:
-        """Refused: this row takes a lowered program object."""
-        del section
-        raise ValueError(
-            "workload.kind qlx takes a lowered QLX program object, which "
-            "a yaml cannot carry; lower it and build it in Python "
-            "(WorkloadSettings(program=...))"
-        )
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """No key: the yaml cannot name this row at all."""
+
+        @classmethod
+        def from_yaml(cls, section: Mapping):
+            """Refused: this row takes a lowered program object."""
+            del section
+            raise ValueError(
+                "workload.kind qlx takes a lowered QLX program object, which "
+                "a yaml cannot carry; lower it and build it in Python "
+                "(WorkloadSettings(program=...))"
+            )
 
     @staticmethod
     def operations(settings: "WorkloadSettings", code) -> tuple:
@@ -269,10 +294,10 @@ def _is_per_distance_text(value) -> bool:
 
 
 # workload.kind names one of these rows: a row reads its own section
-# keys at the yaml boundary, declares whether an operation chain is
-# built in front of the run (has_frontend), and turns its settings and
-# the run's code into the operations and, when the row fixes them, the
-# rounds policy.
+# keys at the yaml boundary through its Settings, declares whether an
+# operation chain is built in front of the run (has_frontend), and turns
+# its settings and the run's code into the operations and, when the row
+# fixes them, the rounds policy.
 WORKLOADS = {
     "memory_circuit": MemoryCircuitWorkload,
     "circuit_list": CircuitListWorkload,

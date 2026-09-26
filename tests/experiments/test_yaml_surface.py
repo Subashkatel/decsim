@@ -6,6 +6,8 @@ refused with a sentence, the swept distance reaches the rounds policy,
 and a run writes its manifest and its per-shot records.
 """
 
+import dataclasses
+
 import pytest
 import yaml
 
@@ -14,6 +16,9 @@ import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
+import decsim.machine as machine_module
+import decsim.qpu.settings as qpu_settings
+import decsim.qpu.syndrome_devices as syndrome_devices
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
@@ -180,11 +185,91 @@ def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
 
 
 def test_a_qpu_key_other_than_kind_is_refused(tmp_path):
+    """The sweep sets the distance, so the section refuses one written here."""
     qpu = {"kind": "stim_device", "distance": 5}
     config_path = write_config(tmp_path, {"qpu": qpu})
-    sentence = r"the qpu section takes one key, kind, and was given"
+    sentence = (
+        r"qpu does not know \['distance'\]; its keys are "
+        r"\['kind', 'code_card'\]"
+    )
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
+
+
+class _SplitBits(syndrome_devices.SyndromeBitDevice):
+    """A source with a key of its own, for the section's split."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        one_payload_per_patch: bool = False
+
+        @classmethod
+        def from_yaml(cls, section):
+            return cls(**section)
+
+    def __init__(self, code, settings) -> None:
+        syndrome_devices.SyndromeBitDevice.__init__(
+            self, code, one_payload_per_patch=settings.one_payload_per_patch
+        )
+        self.settings = settings
+
+
+def test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys(
+    tmp_path,
+):
+    """CUDA-Q QEC's get_code(name, options): a card by name, its own keys."""
+    qpu = {
+        "kind": "timing_only",
+        "code_card": "bivariate_bicycle",
+        "qubit_count": 30,
+        "logical_qubit_count": 8,
+    }
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=2, round_period_us=1.0
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    code = machine.syndrome_source.code
+    assert code.name == "bivariate-bicycle code [[30,8,2]]"
+    assert code.syndrome_bits_per_round(1) == 30
+
+
+def test_a_card_key_on_a_card_that_declares_none_is_refused(tmp_path):
+    qpu = {"kind": "timing_only", "qubit_count": 30}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    sentence = (
+        r"qpu does not know \['qubit_count'\]; its keys are "
+        r"\['kind', 'code_card'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_code_card_off_its_table_is_refused_when_the_yaml_loads(tmp_path):
+    qpu = {"kind": "timing_only", "code_card": "color"}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    sentence = "qpu.code_card 'color' is not a row of its table"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
+    monkeypatch.setitem(qpu_settings.SYNDROME_SOURCES, "split", _SplitBits)
+    qpu = {"kind": "split", "one_payload_per_patch": True}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    own_settings = _SplitBits.Settings(one_payload_per_patch=True)
+    assert machine.syndrome_source.settings == own_settings
+    assert machine.syndrome_source.one_payload_per_patch is True
 
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):
@@ -202,8 +287,6 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
 
 
 def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
-    from decsim.machine import Machine
-
     unknown_algorithm = write_config(
         tmp_path,
         {
@@ -213,14 +296,10 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
             }
         },
     )
-    config = experiment.load_experiment(unknown_algorithm)
-    settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
-    )
     with pytest.raises(
         ValueError, match="weak_decoder.kind 'lookup_table' is not a row"
     ):
-        Machine.build(settings)
+        experiment.load_experiment(unknown_algorithm)
 
     old_flat_decoder = write_config(
         tmp_path,
@@ -281,8 +360,11 @@ def test_a_qpu_kind_off_its_table_is_refused_when_the_yaml_loads(tmp_path):
 
 
 def test_a_cycle_count_on_a_kind_that_is_not_union_find_is_refused(tmp_path):
-    from decsim.machine import Machine
+    """cycle_count is the union_find row's own key: pymatching declares none.
 
+    The refusal names the keys the pymatching tier does read, so the
+    yaml is refused when it loads, before a machine is built.
+    """
     counted_matching = write_config(
         tmp_path,
         {
@@ -293,14 +375,13 @@ def test_a_cycle_count_on_a_kind_that_is_not_union_find_is_refused(tmp_path):
             }
         },
     )
-    config = experiment.load_experiment(counted_matching)
-    settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    sentence = (
+        r"weak_decoder does not know \['cycle_count'\]; its keys are "
+        r"\['kind', 'units', 'input', 'boundary_fold', 'result_blocks_unit', "
+        r"'unit_memory', 'engine'\]"
     )
-    with pytest.raises(
-        ValueError, match="weak_decoder.cycle_count is the union_find row's"
-    ):
-        Machine.build(settings)
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(counted_matching)
 
 
 def test_engine_clock_must_name_a_clock_domain(tmp_path):
@@ -365,7 +446,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    rounds_per_shot = config.settings.workload.rounds_per_shot
+    rounds_per_shot = config.settings.workload.row_settings.rounds_per_shot
     assert rounds_per_shot.rounds_for(3) == 30
     assert rounds_per_shot.rounds_for(5) == 50
     assert str(rounds_per_shot) == "10d"

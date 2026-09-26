@@ -79,11 +79,9 @@ def test_the_surface_card_is_named_by_its_distance():
 
 def test_the_bicycle_card_is_the_gross_code_by_default():
     card = code_geometry.BivariateBicycleCodeModel()
-    assert (card.qubit_count, card.logical_qubit_count, card.distance) == (
-        144,
-        12,
-        12,
-    )
+    qubit_count = card.settings.qubit_count
+    logical_qubit_count = card.settings.logical_qubit_count
+    assert (qubit_count, logical_qubit_count, card.distance) == (144, 12, 12)
 
 
 def test_the_gross_code_card_reads_out_all_144_checks_per_round():
@@ -136,21 +134,24 @@ def test_a_card_cadence_is_kept_as_a_float():
 
 def test_more_logical_than_physical_qubits_is_refused_for_a_bicycle_code():
     with pytest.raises(ValueError, match="logical_qubit_count must not exceed"):
-        code_geometry.BivariateBicycleCodeModel(
-            qubit_count=24, logical_qubit_count=30, distance=6
+        code_geometry.BivariateBicycleCodeModel.Settings(
+            qubit_count=24, logical_qubit_count=30
         )
 
 
 def test_a_distance_above_the_qubit_count_is_refused_for_a_bicycle_code():
+    small_code = code_geometry.BivariateBicycleCodeModel.Settings(
+        qubit_count=24, logical_qubit_count=4
+    )
     with pytest.raises(ValueError, match="distance must not exceed"):
         code_geometry.BivariateBicycleCodeModel(
-            qubit_count=24, logical_qubit_count=4, distance=30
+            settings=small_code, distance=30
         )
 
 
 def test_a_bicycle_code_without_qubits_is_refused():
     with pytest.raises(ValueError, match="qubit_count must be positive"):
-        code_geometry.BivariateBicycleCodeModel(qubit_count=0)
+        code_geometry.BivariateBicycleCodeModel.Settings(qubit_count=0)
 
 
 def test_a_negative_buffer_override_is_refused_for_a_bicycle_code():
@@ -160,7 +161,7 @@ def test_a_negative_buffer_override_is_refused_for_a_bicycle_code():
 
 def test_an_odd_qubit_count_is_refused_for_a_bicycle_code():
     with pytest.raises(ValueError, match="qubit_count must be even"):
-        code_geometry.BivariateBicycleCodeModel(qubit_count=143)
+        code_geometry.BivariateBicycleCodeModel.Settings(qubit_count=143)
 
 
 def test_a_zero_commit_override_is_refused_for_a_bicycle_code():

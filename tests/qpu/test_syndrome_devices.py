@@ -10,6 +10,7 @@ src/proto/packet.proto).
 
 import pytest
 
+import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
@@ -138,3 +139,20 @@ def test_the_fake_bit_device_names_its_code_card_as_its_seed_child():
     children = device.run_seed_children()
     assert len(children) == 1
     assert children[0].child is code
+
+
+def test_a_circuit_less_source_names_a_model_source_that_builds_nothing():
+    """The model port is its own fact: no circuit, no model, and no methods.
+
+    sinter derives a decoder's model from the circuit only when one is
+    given (sinter/_data/_task.py lines 71 and 87-89); a source with no
+    circuit names the shared component that answers with nothing.
+    """
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    source = syndrome_devices.TimingOnlyDevice(code)
+
+    models = source.window_model_source()
+
+    assert models is syndrome_devices.NO_WINDOW_MODELS
+    assert isinstance(models, ports.WindowModelSource)
+    assert not isinstance(source, ports.WindowModelSource)

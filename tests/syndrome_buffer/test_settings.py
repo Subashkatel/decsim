@@ -6,10 +6,15 @@ src/dev/net/Ethernet.py); the access cycles follow gem5's clock and
 cycle law.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.config as config
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+
+BUFFER_ROWS = syndrome_buffer_module.SYNDROME_BUFFERS
 
 
 def test_a_charged_store_cost_needs_its_clock():
@@ -24,7 +29,7 @@ def test_the_chips_formation_charge_is_read_from_the_section():
     section = {"clock": "fridge", "detection_event_cycles_per_round": 5}
 
     settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks
+        section, "weak_syndrome_buffer", clocks, BUFFER_ROWS
     )
 
     assert settings.detection_event_cycles_per_round == 5
@@ -39,8 +44,34 @@ def test_a_store_capacity_that_is_not_whole_bits_is_refused_by_name(capacity):
         ValueError, match="weak_syndrome_buffer.bits must be at least one bit"
     ):
         syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-            section, "weak_syndrome_buffer", clocks
+            section, "weak_syndrome_buffer", clocks, BUFFER_ROWS
         )
+
+
+class _BankedBuffer(syndrome_buffer_module.SyndromeBuffer):
+    """A store with a key of its own, for the section's split."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        bank_count: int = 1
+
+        @classmethod
+        def from_yaml(cls, section):
+            return cls(**section)
+
+
+def test_a_buffer_rows_own_key_reaches_its_settings():
+    """The section keeps its shared keys and hands the row the rest."""
+    clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
+    rows = {"banked": _BankedBuffer}
+    section = {"kind": "banked", "bits": 400, "bank_count": 4}
+
+    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
+        section, "weak_syndrome_buffer", clocks, rows
+    )
+
+    assert settings.bits == 400
+    assert settings.row_settings == _BankedBuffer.Settings(bank_count=4)
 
 
 def test_an_unknown_key_under_a_store_section_is_refused_by_name():
@@ -52,7 +83,7 @@ def test_an_unknown_key_under_a_store_section_is_refused_by_name():
         match=r"strong_syndrome_buffer does not know \['rounds'\]",
     ):
         syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-            section, "strong_syndrome_buffer", clocks
+            section, "strong_syndrome_buffer", clocks, BUFFER_ROWS
         )
 
 

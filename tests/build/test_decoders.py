@@ -19,6 +19,7 @@ import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.escalation.settings as escalation_settings
 import decsim.records.decoding as decoding_records
@@ -103,8 +104,11 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     """The growth resolution the yaml names reaches the row that grows."""
     period_ticks = config.microseconds_to_ticks(0.01)
     clock = config.Clock(period_ticks)
+    union_find_settings = union_find.UnionFindDecoder.Settings(weight_step=0.25)
     weak = decoder_settings.DecoderSettings(
-        kind="union_find", weight_step=0.25, engine_clock=clock
+        kind="union_find",
+        engine_clock=clock,
+        row_settings=union_find_settings,
     )
     settings = _settings(weak=weak)
     policy = escalation_build.build_escalation_policy(

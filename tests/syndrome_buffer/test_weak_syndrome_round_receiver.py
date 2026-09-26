@@ -286,7 +286,10 @@ def test_write_cycles_move_every_reaction_point_by_the_store_periods():
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "write_cycles": 3}
     settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks
+        section,
+        "weak_syndrome_buffer",
+        clocks,
+        syndrome_buffer_module.SYNDROME_BUFFERS,
     )
     free = declared_run.weak_only_run()
     charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)

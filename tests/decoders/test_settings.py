@@ -252,8 +252,10 @@ def test_the_weight_step_is_read_and_absent_is_the_shipped_one():
         without, clocks, "weak_decoder"
     )
 
-    assert settings.weight_step == 0.5
-    assert plain.weight_step == evidence_records.DEFAULT_WEIGHT_STEP
+    assert settings.row_settings.weight_step == 0.5
+    assert plain.row_settings.weight_step == (
+        evidence_records.DEFAULT_WEIGHT_STEP
+    )
 
 
 def test_a_weight_step_that_is_not_positive_is_refused_with_a_sentence():
@@ -303,6 +305,7 @@ def test_the_cycle_count_block_is_read_and_absent_is_none():
         without, clocks, "weak_decoder"
     )
 
-    assert settings.cycle_count.setup_cycles == 11
-    assert settings.cycle_count.clock == clocks.clock("helios")
-    assert plain.cycle_count is None
+    cycle_count = settings.row_settings.cycle_count
+    assert cycle_count.setup_cycles == 11
+    assert cycle_count.clock == clocks.clock("helios")
+    assert plain.row_settings.cycle_count is None

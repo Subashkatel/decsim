@@ -17,6 +17,7 @@ Z checks, the [[144, 12, 12]] gross code by default.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from typing import Optional, Protocol, runtime_checkable
 
 
@@ -118,11 +119,41 @@ class BivariateBicycleCodeModel:
 
     One modeled round is one complete extraction cycle: n/2 X checks and
     n/2 Z checks. The detector error model owns the exact window-local
-    detector rows.
+    detector rows. The qubit counts are the card's own keys (Settings);
+    the distance comes from the sweep, as the surface card's does.
     """
 
-    qubit_count: int = 144
-    logical_qubit_count: int = 12
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The card's own keys: n and k of the [[n, k, d]] code."""
+
+        qubit_count: int = 144
+        logical_qubit_count: int = 12
+
+        def __post_init__(self) -> None:
+            _require_positive_int(self.qubit_count, "qubit_count")
+            _require_positive_int(
+                self.logical_qubit_count, "logical_qubit_count"
+            )
+            if self.qubit_count % 2:
+                raise ValueError(
+                    f"qubit_count must be even; got {self.qubit_count!r}"
+                )
+            if self.logical_qubit_count > self.qubit_count:
+                raise ValueError(
+                    "logical_qubit_count must not exceed qubit_count; got "
+                    f"logical_qubit_count={self.logical_qubit_count!r}, "
+                    f"qubit_count={self.qubit_count!r}"
+                )
+
+        @classmethod
+        def from_yaml(
+            cls, section: Mapping
+        ) -> "BivariateBicycleCodeModel.Settings":
+            """The qpu section's qubit counts; absent is the gross code's."""
+            return cls(**section)
+
+    settings: Settings = dataclasses.field(default_factory=Settings)
     distance: int = 12
     # None: the run's cadence.
     round_microseconds: Optional[float] = None
@@ -130,23 +161,12 @@ class BivariateBicycleCodeModel:
     buffer_rounds_override: Optional[int] = None
 
     def __post_init__(self) -> None:
-        _require_positive_int(self.qubit_count, "qubit_count")
-        _require_positive_int(self.logical_qubit_count, "logical_qubit_count")
         _require_positive_int(self.distance, "distance")
-        if self.qubit_count % 2:
-            raise ValueError(
-                f"qubit_count must be even; got {self.qubit_count!r}"
-            )
-        if self.logical_qubit_count > self.qubit_count:
-            raise ValueError(
-                "logical_qubit_count must not exceed qubit_count; got "
-                f"logical_qubit_count={self.logical_qubit_count!r}, "
-                f"qubit_count={self.qubit_count!r}"
-            )
-        if self.distance > self.qubit_count:
+        qubit_count = self.settings.qubit_count
+        if self.distance > qubit_count:
             raise ValueError(
                 "distance must not exceed qubit_count; got "
-                f"distance={self.distance!r}, qubit_count={self.qubit_count!r}"
+                f"distance={self.distance!r}, qubit_count={qubit_count!r}"
             )
         _check_window_overrides(
             self.commit_rounds_override, self.buffer_rounds_override
@@ -157,9 +177,11 @@ class BivariateBicycleCodeModel:
     @property
     def name(self) -> str:
         """The routing and readout identity of this card."""
+        qubit_count = self.settings.qubit_count
+        logical_qubit_count = self.settings.logical_qubit_count
         return (
-            f"bivariate-bicycle code [[{self.qubit_count},"
-            f"{self.logical_qubit_count},{self.distance}]]"
+            f"bivariate-bicycle code [[{qubit_count},"
+            f"{logical_qubit_count},{self.distance}]]"
         )
 
     def rounds_per_logical_cycle(self) -> int:
@@ -184,11 +206,11 @@ class BivariateBicycleCodeModel:
 
     def spatial_nodes(self, num_patches: int) -> int:
         """Per-round graph size for a latency model: n per patch."""
-        return num_patches * self.qubit_count
+        return num_patches * self.settings.qubit_count
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Bits read out per round: the n X-plus-Z checks of every patch."""
-        return num_patches * self.qubit_count
+        return num_patches * self.settings.qubit_count
 
 
 def _check_window_overrides(

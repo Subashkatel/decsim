@@ -30,6 +30,17 @@ import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
 import tests.experiments.yaml_configs as yaml_configs
 
+# the three hops a strong-node card prices as a cable or chassis crossing
+STRONG_NODE_CROSSINGS = (
+    transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
+    transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
+    transfer_records.LinkPath.STRONG_DECODER_TO_FRAME,
+)
+INSTRUCTION_PATHS = (
+    transfer_records.LinkPath.FRAME_TO_CONTROLLER,
+    transfer_records.LinkPath.CONTROLLER_TO_QPU,
+)
+
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent.parent
@@ -115,11 +126,7 @@ def test_the_reference_card_leaves_unbounded_only_the_parallel_hops():
     764-769), so those two hops carry no rate.
     """
     profile = link_profiles.logical_reference_profile()
-    unbounded = []
-    for path in transfer_records.LinkPath:
-        path_settings = profile.path_settings(path)
-        if path_settings.channel.capacity is None:
-            unbounded.append(path.value)
+    unbounded = _unbounded_paths(profile)
     assert unbounded == ["qpu_to_controller", "decoder_to_decoder"]
     assert profile.profile_name == "logical_reference"
     assert profile.qpu_to_controller.excludes_receiver_processing is False
@@ -167,6 +174,16 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
     assert profile.strong_decoder_to_frame.actual_payload_source == (
         "DecodeResult.logical_observables bits behind the request's name"
     )
+
+
+def _unbounded_paths(profile) -> list:
+    """The names of the paths whose channel carries no rate."""
+    unbounded = []
+    for path in transfer_records.LinkPath:
+        path_settings = profile.path_settings(path)
+        if path_settings.channel.capacity is None:
+            unbounded.append(path.value)
+    return unbounded
 
 
 def payload_sources_of(profile) -> list:
@@ -236,6 +253,14 @@ def _add_assigned_names(statement: ast.Assign, names: set) -> None:
             names.add(target.id)
 
 
+def _unknown_fields(sources: list, declared: dict) -> dict:
+    """Each source that names a field the tree does not have: its class."""
+    unknown = {}
+    for source in sources:
+        _add_unknown_field(source, declared, unknown)
+    return unknown
+
+
 def _add_unknown_field(source: str, declared: dict, unknown: dict) -> None:
     """Record a payload source that names a field the tree does not have."""
     match = NAMED_FIELD.match(source)
@@ -268,9 +293,7 @@ def test_every_payload_source_that_names_a_field_names_a_real_one():
     measured_gpu = link_profiles.roce_v2_measured_profile("gpu")
     measured_on_the_gpu_path = payload_sources_of(measured_gpu)
     stated.extend(measured_on_the_gpu_path)
-    unknown = {}
-    for source in stated:
-        _add_unknown_field(source, declared, unknown)
+    unknown = _unknown_fields(stated, declared)
     assert unknown == {}
 
 
@@ -410,9 +433,10 @@ def test_the_reference_weak_loop_is_yangs_control_electronics():
         profile.weak_decoder_to_frame,
         profile.controller_to_qpu,
     )
-    loop_ticks = 0
-    for path_settings in loop_paths:
-        loop_ticks += path_settings.channel.propagation_latency_ticks
+    loop_ticks = sum(
+        path_settings.channel.propagation_latency_ticks
+        for path_settings in loop_paths
+    )
     control_electronics_microseconds = 0.180
     backplane_logic_microseconds = 0.008
     loop_microseconds = (
@@ -421,19 +445,15 @@ def test_the_reference_weak_loop_is_yangs_control_electronics():
     assert loop_ticks == config.microseconds_to_ticks(loop_microseconds)
 
 
-def test_every_hop_to_or_from_the_strong_node_is_one_chassis_crossing():
+@pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)
+def test_every_hop_to_or_from_the_strong_node_is_one_chassis_crossing(path):
     """Caune 2410.05202 Fig. 1a F, the inter-chassis hop, at 260 ns."""
     profile = link_profiles.logical_reference_profile()
-    crossings = (
-        profile.controller_to_strong_buffer,
-        profile.weak_decoder_to_strong_decoder,
-        profile.strong_decoder_to_frame,
-    )
+    path_settings = profile.path_settings(path)
+    channel = path_settings.channel
     crossing_ticks = config.microseconds_to_ticks(0.26)
-    for path_settings in crossings:
-        channel = path_settings.channel
-        assert channel.propagation_latency_ticks == crossing_ticks
-        assert "Caune 2410.05202 Fig. 1a F" in channel.configuration_source
+    assert channel.propagation_latency_ticks == crossing_ticks
+    assert "Caune 2410.05202 Fig. 1a F" in channel.configuration_source
 
 
 def test_a_run_without_a_card_uses_the_reference_card():
@@ -533,6 +553,25 @@ def sources_of(profile):
     return sources
 
 
+def _capacity_sources(profile) -> list:
+    """The source of each rate the card declares, in path order."""
+    sources = []
+    for path in transfer_records.LinkPath:
+        path_settings = profile.path_settings(path)
+        capacity = path_settings.channel.capacity
+        if capacity is not None:
+            sources.append(capacity.source)
+    return sources
+
+
+def _uncited(sources: list) -> list:
+    uncited = []
+    for source in sources:
+        if not _cites_a_paper(source):
+            uncited.append(source)
+    return uncited
+
+
 def _cites_a_paper(source: str) -> bool:
     """Whether one source carries an arXiv identifier."""
     found = ARXIV.search(source)
@@ -560,16 +599,9 @@ def test_every_reference_number_cites_a_paper():
     profile = link_profiles.logical_reference_profile()
     sources_by_path = sources_of(profile)
     path_sources = sources_by_path.values()
-    sources = list(path_sources)
-    for path in transfer_records.LinkPath:
-        path_settings = profile.path_settings(path)
-        capacity = path_settings.channel.capacity
-        if capacity is not None:
-            sources.append(capacity.source)
-    uncited = []
-    for source in sources:
-        if not _cites_a_paper(source):
-            uncited.append(source)
+    capacity_sources = _capacity_sources(profile)
+    sources = [*path_sources, *capacity_sources]
+    uncited = _uncited(sources)
     assert uncited == []
 
 
@@ -725,22 +757,19 @@ def test_the_gpu_rows_strong_side_sources_cite_backline():
     assert declared == []
 
 
-def test_an_instruction_hop_moves_its_word_in_one_cycle():
+@pytest.mark.parametrize("path", INSTRUCTION_PATHS)
+def test_an_instruction_hop_moves_its_word_in_one_cycle(path):
     """QubiC 2404.15260: a 32-bit result word, a 128-bit instruction.
 
     Each word crosses its hop whole, one per 250 MHz cycle, 4000 ticks.
     """
     profile = link_profiles.logical_reference_profile()
-    instruction_paths = (
-        profile.frame_to_controller,
-        profile.controller_to_qpu,
-    )
-    for path_settings in instruction_paths:
-        word_bits = path_settings.default_payload.input_bits
-        capacity = path_settings.channel.capacity
-        rate = capacity.exact_aggregate_bits_per_microsecond()
-        word_ticks = word_bits * config.TICKS_PER_MICROSECOND / rate
-        assert word_ticks == 4000
+    path_settings = profile.path_settings(path)
+    word_bits = path_settings.default_payload.input_bits
+    capacity = path_settings.channel.capacity
+    rate = capacity.exact_aggregate_bits_per_microsecond()
+    word_ticks = word_bits * config.TICKS_PER_MICROSECOND / rate
+    assert word_ticks == 4000
 
 
 def test_a_coprocessor_backline_did_not_echo_from_is_refused():
@@ -845,20 +874,14 @@ def test_the_nvqlink_rows_strong_side_retransmits_nothing():
     assert protocols == ["ideal"] * 4
 
 
-def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps():
+@pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)
+def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps(path):
     """NVQLink's 100 Gb Ethernet link (2510.25213 line 382, Fig. 2)."""
     profile = link_profiles.nvqlink_measured_profile()
-    cable_legs = (
-        profile.controller_to_strong_buffer,
-        profile.weak_decoder_to_strong_decoder,
-        profile.strong_decoder_to_frame,
-    )
-    rates = []
-    for path in cable_legs:
-        capacity = path.channel.capacity
-        rate = capacity.exact_aggregate_bits_per_microsecond()
-        rates.append(rate)
-    assert rates == [100000] * 3
+    path_settings = profile.path_settings(path)
+    capacity = path_settings.channel.capacity
+    rate = capacity.exact_aggregate_bits_per_microsecond()
+    assert rate == 100000
 
 
 def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():

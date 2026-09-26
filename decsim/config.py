@@ -71,6 +71,43 @@ def check_cycles(name: str, cycles: int) -> None:
         )
 
 
+def whole_count(
+    section: Mapping, section_name: str, key: str, default: int, unit: str
+) -> int:
+    """A count of at least one, read from a yaml section's key.
+
+    A bool is refused though Python counts it an int, so true never
+    stands for one.
+    """
+    value = section.get(key, default)
+    is_whole = isinstance(value, int) and not isinstance(value, bool)
+    if is_whole and value >= 1:
+        return value
+    raise ValueError(
+        f"{section_name}.{key} must be a whole number of {unit}, at least "
+        f"one (got {value!r})"
+    )
+
+
+def boolean(section: Mapping, section_name: str, key: str) -> bool:
+    """An on-or-off knob, off when the yaml is silent.
+
+    The test is the type, because 1 == True and 0 == False would let a
+    count stand in for a knob (bool is a subtype of int).
+    """
+    value = section.get(key, False)
+    if isinstance(value, bool):
+        return value
+    raise ValueError(
+        f"{section_name}.{key} must be true or false, got {value!r}"
+    )
+
+
+def is_number(value) -> bool:
+    """Whether a yaml value is a number; a bool is not one."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 @dataclasses.dataclass(frozen=True)
 class Clock:
     """One clock domain's period, and the edges its component charges on.

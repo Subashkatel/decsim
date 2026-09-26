@@ -162,3 +162,52 @@ def test_a_negative_cycle_count_is_refused_by_name():
     sentence = "packing_cycles must not be negative: cycles must be nonnegative"
     with pytest.raises(ValueError, match=sentence):
         config.check_cycles("packing_cycles", -1)
+
+
+def test_a_whole_count_is_read_or_defaulted():
+    section = {"window_rounds": 4}
+
+    written = config.whole_count(section, "detector", "window_rounds", 9, "")
+    silent = config.whole_count(section, "detector", "hold_rounds", 9, "")
+
+    assert written == 4
+    assert silent == 9
+
+
+@pytest.mark.parametrize("value", [0, True, 2.0, "3"])
+def test_a_whole_count_is_an_integer_of_at_least_one(value):
+    section = {"window_rounds": value}
+
+    with pytest.raises(ValueError) as refusal:
+        config.whole_count(section, "detector", "window_rounds", 4, "rounds")
+
+    assert str(refusal.value) == (
+        "detector.window_rounds must be a whole number of rounds, at least "
+        f"one (got {value!r})"
+    )
+
+
+def test_a_knob_is_read_or_off():
+    section = {"trace": True}
+
+    assert config.boolean(section, "observation", "trace") is True
+    assert config.boolean(section, "observation", "log") is False
+
+
+def test_a_knob_is_true_or_false_and_never_a_count():
+    section = {"trace": 1}
+
+    with pytest.raises(ValueError) as refusal:
+        config.boolean(section, "observation", "trace")
+
+    assert str(refusal.value) == (
+        "observation.trace must be true or false, got 1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "is_number"),
+    [(3, True), (0.5, True), (True, False), ("3", False)],
+)
+def test_a_number_is_an_int_or_a_float_and_not_a_bool(value, is_number):
+    assert config.is_number(value) is is_number

@@ -155,20 +155,30 @@ class EventCountBurstDetector:
             cls, section: Mapping, clocks: config.ClockSettings
         ) -> "EventCountBurstDetector.Settings":
             """A priced count names its clock; an unpriced one needs none."""
-            patch_window = _whole_count(
-                section, "patch_window_rounds", 4, "rounds"
+            patch_window = config.whole_count(
+                section, "burst_detector", "patch_window_rounds", 4, "rounds"
             )
-            detector_window = _whole_count(
-                section, "detector_window_rounds", 20, "rounds"
+            detector_window = config.whole_count(
+                section,
+                "burst_detector",
+                "detector_window_rounds",
+                20,
+                "rounds",
             )
             false_alarms = _false_alarms_per_round(section)
-            tracking = _whole_count(
-                section, "rate_tracking_rounds", 10_000, "rounds"
+            tracking = config.whole_count(
+                section,
+                "burst_detector",
+                "rate_tracking_rounds",
+                10_000,
+                "rounds",
             )
             cycles = section.get("cycles_per_round", 0)
             config.check_cycles("burst_detector.cycles_per_round", cycles)
             clock = _count_clock(section, clocks, cycles)
-            raise_priors = _boolean(section, "raise_strong_priors")
+            raise_priors = config.boolean(
+                section, "burst_detector", "raise_strong_priors"
+            )
             return cls(
                 patch_window_rounds=patch_window,
                 detector_window_rounds=detector_window,
@@ -283,12 +293,16 @@ class MaskedRegionalCusumBurstDetector:
             """The timing card prices on a clock; a null mask_count is none."""
             method = _method_keys(section)
             clock = _bank_clock(section, clocks)
-            datapaths = _whole_count(section, "datapaths", 1, "datapaths")
+            datapaths = config.whole_count(
+                section, "burst_detector", "datapaths", 1, "datapaths"
+            )
             pipeline_cycles = section.get("pipeline_cycles", 30)
             config.check_cycles(
                 "burst_detector.pipeline_cycles", pipeline_cycles
             )
-            raise_priors = _boolean(section, "raise_strong_priors")
+            raise_priors = config.boolean(
+                section, "burst_detector", "raise_strong_priors"
+            )
             return cls(
                 clock=clock,
                 datapaths=datapaths,
@@ -1863,46 +1877,33 @@ def _extend_runs(runs: list, flag: _Flag, round_index: int) -> None:
 def _method_keys(section: Mapping) -> dict:
     """The CUSUM's method numbers, each checked once at the yaml."""
     return {
-        "mask_window_rounds": _whole_count(
-            section, "mask_window_rounds", 64, "rounds"
+        "mask_window_rounds": config.whole_count(
+            section, "burst_detector", "mask_window_rounds", 64, "rounds"
         ),
         "mask_count": _mask_count(section),
-        "mask_hold_rounds": _whole_count(
-            section, "mask_hold_rounds", 100, "rounds"
+        "mask_hold_rounds": config.whole_count(
+            section, "burst_detector", "mask_hold_rounds", 100, "rounds"
         ),
         "region_radii": _radii(section),
         "fault_rate_multipliers": _multipliers(section),
-        "rate_tracking_rounds": _whole_count(
-            section, "rate_tracking_rounds", 5000, "rounds"
+        "rate_tracking_rounds": config.whole_count(
+            section, "burst_detector", "rate_tracking_rounds", 5000, "rounds"
         ),
         "unmasked_share_floor": _share_floor(section),
         "false_alarms_per_second": _false_alarms_per_second(section),
-        "calibration_shots": _whole_count(
-            section, "calibration_shots", 20_000, "shots"
+        "calibration_shots": config.whole_count(
+            section, "burst_detector", "calibration_shots", 20_000, "shots"
         ),
     }
-
-
-def _whole_count(section: Mapping, key: str, default: int, unit: str) -> int:
-    value = section.get(key, default)
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and value >= 1:
-        return value
-    raise ValueError(
-        f"burst_detector.{key} must be a whole number of {unit}, at least "
-        f"one (got {value!r})"
-    )
 
 
 def _mask_count(section: Mapping) -> Optional[int]:
     """The mask's count; null never masks, the plain regional CUSUM."""
     if section.get("mask_count", 8) is None:
         return None
-    return _whole_count(section, "mask_count", 8, "firings")
-
-
-def _is_number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return config.whole_count(
+        section, "burst_detector", "mask_count", 8, "firings"
+    )
 
 
 def _is_list_at_least(values, bound: float) -> bool:
@@ -1910,7 +1911,7 @@ def _is_list_at_least(values, bound: float) -> bool:
     if not isinstance(values, list):
         return False
     for value in values:
-        if not _is_number(value):
+        if not config.is_number(value):
             return False
         if value < bound:
             return False
@@ -1943,7 +1944,7 @@ def _multipliers(section: Mapping) -> tuple:
 
 def _share_floor(section: Mapping) -> float:
     value = section.get("unmasked_share_floor", 0.2)
-    if _is_number(value) and 0 <= value < 1:
+    if config.is_number(value) and 0 <= value < 1:
         return float(value)
     raise ValueError(
         "burst_detector.unmasked_share_floor must be a share from 0 up to, "
@@ -1953,7 +1954,7 @@ def _share_floor(section: Mapping) -> float:
 
 def _false_alarms_per_second(section: Mapping) -> float:
     value = section.get("false_alarms_per_second", 0.03)
-    if _is_number(value) and value > 0:
+    if config.is_number(value) and value > 0:
         return float(value)
     raise ValueError(
         "burst_detector.false_alarms_per_second must be a rate above zero, "
@@ -1963,7 +1964,7 @@ def _false_alarms_per_second(section: Mapping) -> float:
 
 def _false_alarms_per_round(section: Mapping) -> float:
     value = section.get("false_alarms_per_round", 1e-6)
-    if _is_number(value) and 0 < value < 1:
+    if config.is_number(value) and 0 < value < 1:
         return float(value)
     raise ValueError(
         "burst_detector.false_alarms_per_round must be a probability "
@@ -1996,10 +1997,3 @@ def _bank_clock(section: Mapping, clocks: config.ClockSettings):
                 "a clock: name the clocks domain its cycles are counted in"
             )
     return None
-
-
-def _boolean(section: Mapping, key: str) -> bool:
-    value = section.get(key, False)
-    if isinstance(value, bool):
-        return value
-    raise ValueError(f"burst_detector.{key} must be true or false")

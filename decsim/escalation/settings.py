@@ -511,7 +511,7 @@ def _switching_settings(
     named_confidence = section.get("confidence", "complementary_gap")
     confidence = str(named_confidence)
     walk_microseconds = _confidence_walk_microseconds(section)
-    run_both_at_once = _switching_boolean(section, "run_both_at_once")
+    run_both_at_once = config.boolean(section, "escalation", "run_both_at_once")
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, threshold_row, strong_window)
     reread_regions = _restart_reread_buffer_regions(section)
@@ -536,20 +536,6 @@ def _switching_settings(
         restart_reread_buffer_regions=reread_regions,
         base_directory=base_directory,
     )
-
-
-def _switching_boolean(section: Mapping, key: str) -> bool:
-    """One of the switching section's on-or-off knobs, off when silent.
-
-    The test is the type, because 1 == True and 0 == False would let a
-    count stand in for a flag.
-    """
-    value = section.get(key, False)
-    if not isinstance(value, bool):
-        raise ValueError(
-            f"escalation.{key} must be true or false, got {value!r}"
-        )
-    return value
 
 
 def _restart_reread_buffer_regions(section: Mapping) -> int:

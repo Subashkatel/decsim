@@ -74,8 +74,7 @@ class SyndromeBuffer:
     """The store: rounds by key, their holds, and the operations it serves.
 
     Its state is the settings, the engine its accesses are timed on,
-    the rounds, the bits they hold, the holds, the operations and its
-    events (trace).
+    the rounds, the holds, the operations and its events (trace).
     """
 
     # a store built with no waiting line in front of it frees its slots
@@ -120,8 +119,6 @@ class SyndromeBuffer:
         self.settings = settings
         self.engine = engine
         self.round_by_key: dict = {}
-        # the bits the stored rounds hold, summed as they land and leave
-        self._occupied_bits = 0
         self.holds = round_holds.RoundHolds()
         # operation id -> True while it may receive rounds, False once
         # closed; a closed identity never reopens
@@ -152,7 +149,7 @@ class SyndromeBuffer:
             self._refuse_round_wider_than_store(round_key, bits, capacity)
         reserved_widths = reserved_bits_by_round.values()
         reserved_bits = sum(reserved_widths)
-        taken = self._occupied_bits + reserved_bits
+        taken = self.occupied_bits + reserved_bits
         return taken + bits <= capacity
 
     def accept_packed_round(
@@ -175,7 +172,6 @@ class SyndromeBuffer:
         stored = _StoredRound(packet, held_bits)
         stored.publication_tick = publication_tick
         self.round_by_key[round_key] = stored
-        self._occupied_bits += held_bits
         self.trace.round_stored.fire(round_key, packet)
         if publication_tick is not None:
             self.trace.round_published.fire(round_key, publication_tick)
@@ -228,8 +224,12 @@ class SyndromeBuffer:
 
     @property
     def occupied_bits(self) -> int:
-        """The bits stored now; a round that states no size holds none."""
-        return self._occupied_bits
+        """The bits stored now; a round that states no size holds none.
+
+        Summed over the stored rounds on each ask, as the decoder memory
+        sums its inputs, so the rounds are the one record of what is held.
+        """
+        return self._stored_bits_of(self.round_by_key)
 
     def retained_fragments(self, round_key) -> Optional[tuple]:
         """The stored round's fragments, or None before and after storage."""
@@ -399,7 +399,7 @@ class SyndromeBuffer:
         ]
         raise RuntimeError(
             f"the syndrome buffer still holds rounds {held} at the end, "
-            f"{self._occupied_bits} of its {capacity} bits: its widest live "
+            f"{self.occupied_bits} of its {capacity} bits: its widest live "
             f"hold {widest_holder!r} keeps {kept_bits} bits of them and "
             f"waits for {never_stored}, which never found room; a bounded "
             "store must hold its widest hold's rounds at once"
@@ -494,8 +494,7 @@ class SyndromeBuffer:
         )
 
     def _free_round(self, round_key) -> None:
-        stored = self.round_by_key.pop(round_key)
-        self._occupied_bits -= stored.held_bits
+        self.round_by_key.pop(round_key)
         self.trace.round_released.fire(round_key)
         if self.held_rounds is not None:
             self.held_rounds.retry()

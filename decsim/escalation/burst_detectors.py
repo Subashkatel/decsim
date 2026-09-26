@@ -61,14 +61,15 @@ BISECTION_STEPS = 60
 
 
 class EventCountBurstDetector:
-    """Fires when a patch's detection events outrun its usual rates.
+    """Fires when a patch's or a position's event count outruns its usual rate.
 
-    One counter set per operation, calibrated at build from that
-    operation's own circuit, the calibration Q3DE assumes is known in
-    advance (2501.00331 lines 1078-1080). Each position's usual rate is
-    then tracked as an exponential average of its events and frozen
-    while the detector fires, as Q3DE removes the flagged positions from
-    its count for the burst's lifetime (lines 730-733).
+    The simple count baseline. One counter set per operation, calibrated
+    at build from that operation's own circuit, the calibration Q3DE
+    assumes is known in advance (2501.00331 lines 1078-1080). Each
+    position's usual rate is then tracked as an exponential average of
+    its events and frozen while the detector fires, as Q3DE removes the
+    flagged positions from its count for the burst's lifetime (lines
+    730-733).
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -103,11 +104,11 @@ class EventCountBurstDetector:
             detector_window = _whole_count(
                 section, "detector_window_rounds", 20
             )
-            false_alarms = _false_alarms(section)
+            false_alarms = _false_alarms_per_round(section)
             tracking = _whole_count(section, "rate_tracking_rounds", 10_000)
             cycles = section.get("cycles_per_round", 0)
             config.check_cycles("burst_detector.cycles_per_round", cycles)
-            clock = _clock(section, clocks, cycles)
+            clock = _count_clock(section, clocks, cycles)
             raise_priors = _boolean(section, "raise_strong_priors")
             return cls(
                 patch_window_rounds=patch_window,
@@ -124,11 +125,14 @@ class EventCountBurstDetector:
         settings: "EventCountBurstDetector.Settings",
         engine: engine_module.Engine,
         circuits: Mapping,
+        round_period_microseconds: float,
     ) -> None:
         """Counters for each operation: circuits maps an id to its circuit.
 
-        Each entry is the operation's circuit and its round count.
+        Each entry is the operation's circuit and its round count. The
+        budget is per round, so the round period does not enter.
         """
+        del round_period_microseconds
         self.settings = settings
         self.engine = engine
         self.counts_by_operation = _counts_by_operation(circuits, settings)
@@ -138,13 +142,19 @@ class EventCountBurstDetector:
     ) -> None:
         """Count one round; its verdict is published after the row's cost."""
         counts = self.counts_by_operation[operation_id]
-        published_tick = self._published_tick(counts)
+        newest = counts.flags.newest_published_tick()
+        published_tick = _publication_tick(
+            self.engine,
+            newest,
+            self.settings.clock,
+            self.settings.cycles_per_round,
+        )
         counts.count_round(round_index, events, published_tick)
 
     def is_burst_window(self, window: window_records.Window) -> bool:
         """Whether a flag published by now meets the window's rounds."""
         counts = self.counts_by_operation[window.operation_id]
-        episode = counts.episode_meeting(window, self.engine.now)
+        episode = counts.flags.episode_meeting(window, self.engine.now)
         return episode is not None
 
     def with_burst_priors(self, window: window_records.Window, model):
@@ -152,27 +162,11 @@ class EventCountBurstDetector:
         if not self.settings.raise_strong_priors:
             return model
         counts = self.counts_by_operation[window.operation_id]
-        episode = counts.episode_meeting(window, self.engine.now)
+        episode = counts.flags.episode_meeting(window, self.engine.now)
         if episode is None:
             return model
         region = counts.region_of(episode)
         return region.raised(model)
-
-    def _published_tick(self, counts: "_OperationCounts") -> int:
-        """One counter bank serves the rounds in order, each on its clock.
-
-        A round's count starts when it is formed or when the round
-        before it is published, whichever is later, and takes
-        cycles_per_round of the row's clock, charged from the edge at
-        or after that tick (gem5's Clocked, decsim/config.py Clock).
-        """
-        now = self.engine.now
-        newest = counts.newest_published_tick()
-        start = max(now, newest)
-        cycles = self.settings.cycles_per_round
-        if cycles == 0:
-            return start
-        return self.settings.clock.edge(cycles, start)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -265,7 +259,7 @@ def tail_law(priors: Any, incidence: Any, smallest_false_alarms: float):
 
 @dataclasses.dataclass(frozen=True)
 class _Fault:
-    """One error mechanism, as the counters see it."""
+    """One error mechanism, as the detector sees it."""
 
     prior: float
     # (round, position index) of every bulk detector it flips
@@ -273,21 +267,20 @@ class _Fault:
 
 
 @dataclasses.dataclass(frozen=True)
-class _Calibration:
-    """What the counters know of one operation before its first round.
+class _Layout:
+    """Where one operation's checks sit, and their usual rates.
 
     positions are the stabiliser positions, a bulk detector's first two
     Stim coordinates; position_by_value maps each round's events, in
     formation order, onto them, -1 for a detector that is not bulk.
-    calibrated_rates and position_priors are one round's detection
+    usual_rates and position_priors are one round's detection
     probability at each position and the priors of the faults behind it.
     """
 
     positions: tuple
     position_by_value: dict
-    patch_law: TailLaw
-    position_laws: tuple
-    calibrated_rates: Any
+    first_bulk_round: int
+    usual_rates: Any
     position_priors: tuple
 
     def position_counts(self, round_index: int, events: Sequence[int]):
@@ -314,8 +307,8 @@ class _Calibration:
         measured over the flagged rounds.
         """
         region_priors = self._region_priors(is_in_region)
-        # a flag the patch count raised may leave no position anomalous
-        # on its own: there is then no region whose priors to raise
+        # a count flag may leave no position anomalous on its own: there
+        # is then no region whose priors to raise
         if not region_priors:
             return 1.0
         usual_rate = _mean_detection_probability(region_priors, 1.0)
@@ -340,22 +333,67 @@ class _Calibration:
 
 
 @dataclasses.dataclass(frozen=True)
+class _Flag:
+    """A firing round's estimated onset, and the region that fired.
+
+    region is the CUSUM's leading chart's region; a count flag has none
+    of its own and takes its region when the priors ask.
+    """
+
+    onset_round: int
+    region: Optional[int] = None
+
+
+@dataclasses.dataclass(frozen=True)
 class _Episode:
     """One run of firing rounds, from the estimated onset.
 
     is_open says the newest published round still fires, so the flag
-    covers every later round too.
+    covers every later round too; region is the flag's region at the
+    run's newest firing round.
     """
 
     first_round: int
     last_firing_round: int
     is_open: bool
+    region: Optional[int]
 
     def meets(self, first_round: int, last_round: int) -> bool:
         """Whether the flag covers any round of [first_round, last_round]."""
         if self.first_round > last_round:
             return False
         return self.is_open or self.last_firing_round >= first_round
+
+
+class _FlagLog:
+    """One operation's verdicts and when each was published."""
+
+    def __init__(self, first_round: int) -> None:
+        self.first_round = first_round
+        self.flags: list = []
+        self.published_ticks: list = []
+
+    def record(self, flag: Optional[_Flag], published_tick: int) -> None:
+        self.flags.append(flag)
+        self.published_ticks.append(published_tick)
+
+    def newest_published_tick(self) -> int:
+        """The tick the previous round was published at; 0 before any."""
+        if not self.published_ticks:
+            return 0
+        return self.published_ticks[-1]
+
+    def episode_meeting(
+        self, window: window_records.Window, now: int
+    ) -> Optional[_Episode]:
+        """The newest published flag that meets the window, or None."""
+        published_count = bisect.bisect_right(self.published_ticks, now)
+        published = self.flags[:published_count]
+        episodes = _episodes(published, self.first_round)
+        for episode in reversed(episodes):
+            if episode.meets(window.start_round, window.buffer_hi):
+                return episode
+        return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -375,7 +413,7 @@ class _BurstRegion:
         entries of the prior vector ... No reconstruction of the Tanner
         graph" (IonQ 2608.25027 lines 334-340).
         """
-        if not self.positions or self.prior_scale == 1.0:
+        if self.prior_scale == 1.0:
             return model
         region_rows = self._region_rows(model)
         graphlike = self._raised_faults(model.graphlike_faults, region_rows)
@@ -417,56 +455,76 @@ class _BurstRegion:
         return dataclasses.replace(faults, priors=priors)
 
 
+def _publication_tick(
+    engine: engine_module.Engine,
+    newest_tick: int,
+    clock: Optional[config.Clock],
+    cycles: int,
+) -> int:
+    """One unit serves the rounds in order, each for cycles of its clock.
+
+    A round starts when it is formed or when the round before it is
+    published, whichever is later, and is published cycles later,
+    charged from the edge at or after that tick (gem5's Clocked,
+    decsim/config.py Clock). A unit with no clock or no cycles publishes
+    at once.
+    """
+    start = max(engine.now, newest_tick)
+    if clock is None or cycles == 0:
+        return start
+    return clock.edge(cycles, start)
+
+
+@dataclasses.dataclass(frozen=True)
+class _CountCalibration:
+    """What the counters know of one operation before its first round.
+
+    Its layout, and the tail laws of the patch count and each position's.
+    """
+
+    layout: _Layout
+    patch_law: TailLaw
+    position_laws: tuple
+
+
 class _OperationCounts:
     """The counters of one operation, and what they published when."""
 
     def __init__(
         self,
-        calibration: _Calibration,
+        calibration: _CountCalibration,
         settings: EventCountBurstDetector.Settings,
     ) -> None:
         self.calibration = calibration
         self.settings = settings
         # one array of per-position event counts per counted round
         self.rows: list = []
-        self.tracked_rates = numpy.array(calibration.calibrated_rates)
-        self.published_ticks: list = []
-        # per round, the longest window of a statistic firing on it; 0
-        # when none fires
-        self.firing_windows: list = []
-
-    def newest_published_tick(self) -> int:
-        """The tick the previous round was published at; 0 before any."""
-        if not self.published_ticks:
-            return 0
-        return self.published_ticks[-1]
+        self.tracked_rates = numpy.array(calibration.layout.usual_rates)
+        self.flags = _FlagLog(first_round=1)
 
     def count_round(
         self, round_index: int, events: Sequence[int], published_tick: int
-    ) -> None:
-        """Add one round to the counters and decide whether it fires."""
+    ) -> bool:
+        """Add one round to the counters; whether it fires.
+
+        A firing round's onset is the round less the longest window of
+        a statistic firing on it, never before the first round.
+        """
         assert round_index == len(self.rows) + 1, (
             "an operation's rounds are counted in order"
         )
-        row = self.calibration.position_counts(round_index, events)
+        layout = self.calibration.layout
+        row = layout.position_counts(round_index, events)
         self.rows.append(row)
         firing_window = self._firing_window()
-        self.firing_windows.append(firing_window)
-        self.published_ticks.append(published_tick)
         if firing_window == 0:
+            self.flags.record(None, published_tick)
             self._track(row)
-
-    def episode_meeting(
-        self, window: window_records.Window, now: int
-    ) -> Optional[_Episode]:
-        """The newest published flag that meets the window, or None."""
-        published_count = bisect.bisect_right(self.published_ticks, now)
-        published = self.firing_windows[:published_count]
-        episodes = _episodes(published)
-        for episode in reversed(episodes):
-            if episode.meets(window.start_round, window.buffer_hi):
-                return episode
-        return None
+            return False
+        onset = round_index - firing_window + 1
+        flag = _Flag(max(onset, 1))
+        self.flags.record(flag, published_tick)
+        return True
 
     def region_of(self, episode: _Episode) -> _BurstRegion:
         """The positions anomalous at the flag's newest round, and their rate.
@@ -475,6 +533,7 @@ class _OperationCounts:
         passes its threshold (2501.00331 lines 729-731); the rate is
         measured over the flagged rounds inside the counter's window.
         """
+        layout = self.calibration.layout
         newest_round = episode.last_firing_round
         position_counts = self._position_counts(newest_round)
         region_thresholds = self._position_thresholds(REGION_FALSE_ALARMS)
@@ -484,8 +543,8 @@ class _OperationCounts:
         first_counted = max(episode.first_round, window_start)
         flagged_rows = self.rows[first_counted - 1 : newest_round]
         measured_rate = _mean_rate(flagged_rows, is_in_region)
-        prior_scale = self.calibration.prior_scale(is_in_region, measured_rate)
-        positions = _positions_where(self.calibration.positions, is_in_region)
+        prior_scale = layout.prior_scale(is_in_region, measured_rate)
+        positions = _positions_where(layout.positions, is_in_region)
         last_round = episode.last_firing_round
         if episode.is_open:
             last_round = None
@@ -509,8 +568,9 @@ class _OperationCounts:
         recent = self.rows[-patch_window:]
         patch_count = numpy.sum(recent)
         tracked_total = numpy.sum(self.tracked_rates)
-        calibrated_total = numpy.sum(self.calibration.calibrated_rates)
-        rate_scale = _rate_scales(tracked_total, calibrated_total)
+        usual_rates = self.calibration.layout.usual_rates
+        usual_total = numpy.sum(usual_rates)
+        rate_scale = _rate_scales(tracked_total, usual_total)
         false_alarms = self.settings.false_alarms_per_round / 2
         law = self.calibration.patch_law
         threshold = law.threshold(false_alarms, rate_scale)
@@ -520,7 +580,7 @@ class _OperationCounts:
         """Statistic (b): any position's events over the last c_win rounds."""
         newest_round = len(self.rows)
         position_counts = self._position_counts(newest_round)
-        position_count = len(self.calibration.positions)
+        position_count = len(self.calibration.layout.positions)
         budget = self.settings.false_alarms_per_round / 2
         false_alarms = budget / position_count
         thresholds = self._position_thresholds(false_alarms)
@@ -537,8 +597,8 @@ class _OperationCounts:
 
     def _position_thresholds(self, false_alarms: float):
         """Each position's threshold at its own tracked rate."""
-        calibrated_rates = self.calibration.calibrated_rates
-        rate_scales = _rate_scales(self.tracked_rates, calibrated_rates)
+        usual_rates = self.calibration.layout.usual_rates
+        rate_scales = _rate_scales(self.tracked_rates, usual_rates)
         thresholds = []
         for law, rate_scale in zip(
             self.calibration.position_laws, rate_scales, strict=True
@@ -557,17 +617,41 @@ def _counts_by_operation(circuits: Mapping, settings) -> dict:
     """One calibrated counter set per operation."""
     counts_by_operation = {}
     for operation_id, (circuit, round_count) in circuits.items():
+        _refuse_a_short_operation(operation_id, round_count, settings)
         circuit_text = str(circuit)
-        calibration = _calibrate(circuit_text, round_count, settings)
+        calibration = _count_calibration(circuit_text, round_count, settings)
         counts_by_operation[operation_id] = _OperationCounts(
             calibration, settings
         )
     return counts_by_operation
 
 
+def _refuse_a_short_operation(
+    operation_id: Any, round_count: int, settings
+) -> None:
+    """A law is read off a slab of bulk rounds inside the operation.
+
+    Round one has no bulk detector and the last round is kept off the
+    slab, so the longer window needs two rounds more than itself.
+    """
+    longest_window = max(
+        settings.patch_window_rounds, settings.detector_window_rounds
+    )
+    fewest_rounds = longest_window + 2
+    if round_count >= fewest_rounds:
+        return
+    raise ValueError(
+        f"operation {operation_id} has {round_count} rounds; the burst "
+        f"detector's windows need at least {fewest_rounds}, two more "
+        "than its longer window"
+    )
+
+
 @functools.lru_cache(maxsize=64)
-def _calibrate(circuit_text: str, round_count: int, settings):
-    """The positions, the laws and the usual rates of one circuit.
+def _count_calibration(
+    circuit_text: str, round_count: int, settings
+) -> _CountCalibration:
+    """The layout and the laws of one circuit.
 
     Each law is read off one slab of bulk rounds centred in the
     operation, where a memory circuit's rounds are alike. The result
@@ -577,108 +661,12 @@ def _calibrate(circuit_text: str, round_count: int, settings):
     circuit = stim.Circuit(circuit_text)
     table = _formation_table(circuit, round_count)
     positions, slot_by_detector = _bulk_slots(table)
-    position_by_value = _position_by_value(table, slot_by_detector)
     faults = _faults(circuit, slot_by_detector)
-    patch_law = _patch_law(faults, round_count, settings)
     faults_by_position = _faults_by_position(faults, len(positions))
+    layout = _layout(table, positions, slot_by_detector, faults_by_position)
+    patch_law = _patch_law(faults, round_count, settings)
     position_laws = _position_laws(faults_by_position, round_count, settings)
-    middle_round = (round_count + 1) // 2
-    position_priors = _position_priors(faults_by_position, middle_round)
-    calibrated_rates = _detection_probabilities(position_priors)
-    return _Calibration(
-        positions=positions,
-        position_by_value=position_by_value,
-        patch_law=patch_law,
-        position_laws=position_laws,
-        calibrated_rates=calibrated_rates,
-        position_priors=position_priors,
-    )
-
-
-def _formation_table(circuit: stim.Circuit, round_count: int):
-    """The recipes a Stim source forms this circuit's rounds by.
-
-    StimDevice builds the same table from the same circuit
-    (qpu/stim_device.py _bind_source and _sample_shot), so the values
-    a seat forms sit in this table's detector order.
-    """
-    detector_rounds = detector_chronology.resolve_detector_rounds(
-        circuit, None, round_count
-    )
-    return detector_formation.build_formation_table(
-        circuit, round_count, detector_rounds=detector_rounds
-    )
-
-
-def _bulk_slots(table: detector_formation.FormationTable) -> tuple:
-    """The positions, and each bulk detector's (round, position index)."""
-    bulk = detector_formation.LayerKind.BULK
-    planar_by_detector = {}
-    for recipe in table.detectors:
-        if recipe.kind is bulk:
-            planar_by_detector[recipe.detector_index] = _planar(recipe)
-    planar_positions = planar_by_detector.values()
-    distinct = set(planar_positions)
-    positions = tuple(sorted(distinct))
-    index_by_position = {}
-    for index, position in enumerate(positions):
-        index_by_position[position] = index
-    rounds = table.detector_rounds()
-    slot_by_detector = {}
-    for detector, planar in planar_by_detector.items():
-        position_index = index_by_position[planar]
-        slot_by_detector[detector] = (rounds[detector], position_index)
-    return positions, slot_by_detector
-
-
-def _planar(recipe: detector_formation.DetectorRecipe) -> tuple:
-    """A detector's position: its first two Stim coordinates."""
-    if len(recipe.coordinates) < 2:
-        raise ValueError(
-            f"detector {recipe.detector_index} has no position: the burst "
-            "detector keys a counter by a detector's first two Stim "
-            "coordinates, so the circuit must give every bulk detector them"
-        )
-    return (recipe.coordinates[0], recipe.coordinates[1])
-
-
-def _position_by_value(table, slot_by_detector: dict) -> dict:
-    """Each round's formation order mapped onto positions, -1 if not bulk."""
-    position_by_value = {}
-    after_last_round = table.round_count + 1
-    for round_index in range(1, after_last_round):
-        recipes = table.detectors_of_round(round_index)
-        positions = []
-        for recipe in recipes:
-            slot = slot_by_detector.get(recipe.detector_index, (0, -1))
-            positions.append(slot[1])
-        position_by_value[round_index] = numpy.asarray(positions)
-    return position_by_value
-
-
-def _faults(circuit: stim.Circuit, slot_by_detector: dict) -> list:
-    """Every error mechanism of the circuit's model, with its bulk slots."""
-    model = circuit.detector_error_model(decompose_errors=False)
-    flattened = model.flattened()
-    faults = []
-    for instruction in flattened:
-        if instruction.type != "error":
-            continue
-        fault = _fault(instruction, slot_by_detector)
-        faults.append(fault)
-    return faults
-
-
-def _fault(instruction, slot_by_detector: dict) -> _Fault:
-    arguments = instruction.args_copy()
-    slots = []
-    for target in instruction.targets_copy():
-        slot = None
-        if target.is_relative_detector_id():
-            slot = slot_by_detector.get(target.val)
-        if slot is not None:
-            slots.append(slot)
-    return _Fault(arguments[0], tuple(slots))
+    return _CountCalibration(layout, patch_law, position_laws)
 
 
 def _patch_law(faults: list, round_count: int, settings) -> TailLaw:
@@ -688,20 +676,6 @@ def _patch_law(faults: list, round_count: int, settings) -> TailLaw:
     priors, incidence = _slab(faults, first_round, last_round, None)
     false_alarms = settings.false_alarms_per_round / 2
     return tail_law(priors, incidence, false_alarms)
-
-
-def _faults_by_position(faults: list, position_count: int) -> list:
-    """Each position's faults: those that flip one of its detectors."""
-    faults_by_position = []
-    for _ in range(position_count):
-        faults_by_position.append([])
-    for fault in faults:
-        touched = set()
-        for _round, position_index in fault.slots:
-            touched.add(position_index)
-        for position_index in touched:
-            faults_by_position[position_index].append(fault)
-    return faults_by_position
 
 
 def _position_laws(
@@ -839,6 +813,151 @@ def _drawn_tail(
     return at_least / DRAWS_PER_FAULT_COUNT
 
 
+def _rate_scales(tracked_rates, calibrated_rates):
+    """Each tracked rate over its calibrated one; one where that is zero.
+
+    A calibrated rate of zero is a detector no fault reaches, whose law
+    is the faultless one at any scale.
+    """
+    tracked = numpy.asarray(tracked_rates, dtype=numpy.float64)
+    calibrated = numpy.asarray(calibrated_rates, dtype=numpy.float64)
+    scales = numpy.ones_like(tracked)
+    is_calibrated = calibrated > 0
+    numpy.divide(tracked, calibrated, out=scales, where=is_calibrated)
+    return scales
+
+
+def _formation_table(circuit: stim.Circuit, round_count: int):
+    """The recipes a Stim source forms this circuit's rounds by.
+
+    StimDevice builds the same table from the same circuit
+    (qpu/stim_device.py _bind_source and _sample_shot), so the values
+    a seat forms sit in this table's detector order.
+    """
+    detector_rounds = detector_chronology.resolve_detector_rounds(
+        circuit, None, round_count
+    )
+    return detector_formation.build_formation_table(
+        circuit, round_count, detector_rounds=detector_rounds
+    )
+
+
+def _bulk_slots(table: detector_formation.FormationTable) -> tuple:
+    """The positions, and each bulk detector's (round, position index)."""
+    bulk = detector_formation.LayerKind.BULK
+    planar_by_detector = {}
+    for recipe in table.detectors:
+        if recipe.kind is bulk:
+            planar_by_detector[recipe.detector_index] = _planar(recipe)
+    if not planar_by_detector:
+        raise ValueError(
+            f"a circuit of {table.round_count} rounds has no bulk detector, "
+            "a check compared with its round before, so the burst detector "
+            "has no round to read; give the operation at least two rounds"
+        )
+    planar_positions = planar_by_detector.values()
+    distinct = set(planar_positions)
+    positions = tuple(sorted(distinct))
+    index_by_position = {}
+    for index, position in enumerate(positions):
+        index_by_position[position] = index
+    rounds = table.detector_rounds()
+    slot_by_detector = {}
+    for detector, planar in planar_by_detector.items():
+        position_index = index_by_position[planar]
+        slot_by_detector[detector] = (rounds[detector], position_index)
+    return positions, slot_by_detector
+
+
+def _planar(recipe: detector_formation.DetectorRecipe) -> tuple:
+    """A detector's position: its first two Stim coordinates."""
+    if len(recipe.coordinates) < 2:
+        raise ValueError(
+            f"detector {recipe.detector_index} has no position: the burst "
+            "detector keys a counter by a detector's first two Stim "
+            "coordinates, so the circuit must give every bulk detector them"
+        )
+    return (recipe.coordinates[0], recipe.coordinates[1])
+
+
+def _layout(
+    table, positions: tuple, slot_by_detector: dict, faults_by_position: list
+) -> _Layout:
+    """The positions, the value map, and one bulk round's usual rates.
+
+    The rates are read at the operation's middle round, where a memory
+    circuit's bulk rounds are alike.
+    """
+    position_by_value = _position_by_value(table, slot_by_detector)
+    slots = slot_by_detector.values()
+    first_slot = min(slots)
+    first_bulk_round = first_slot[0]
+    middle_round = (table.round_count + 1) // 2
+    usual_round = max(middle_round, first_bulk_round)
+    position_priors = _position_priors(faults_by_position, usual_round)
+    usual_rates = _detection_probabilities(position_priors)
+    return _Layout(
+        positions=positions,
+        position_by_value=position_by_value,
+        first_bulk_round=first_bulk_round,
+        usual_rates=usual_rates,
+        position_priors=position_priors,
+    )
+
+
+def _position_by_value(table, slot_by_detector: dict) -> dict:
+    """Each round's formation order mapped onto positions, -1 if not bulk."""
+    position_by_value = {}
+    after_last_round = table.round_count + 1
+    for round_index in range(1, after_last_round):
+        recipes = table.detectors_of_round(round_index)
+        positions = []
+        for recipe in recipes:
+            slot = slot_by_detector.get(recipe.detector_index, (0, -1))
+            positions.append(slot[1])
+        position_by_value[round_index] = numpy.asarray(positions)
+    return position_by_value
+
+
+def _faults(circuit: stim.Circuit, slot_by_detector: dict) -> list:
+    """Every error mechanism of the circuit's model, with its bulk slots."""
+    model = circuit.detector_error_model(decompose_errors=False)
+    flattened = model.flattened()
+    faults = []
+    for instruction in flattened:
+        if instruction.type != "error":
+            continue
+        fault = _fault(instruction, slot_by_detector)
+        faults.append(fault)
+    return faults
+
+
+def _fault(instruction, slot_by_detector: dict) -> _Fault:
+    arguments = instruction.args_copy()
+    slots = []
+    for target in instruction.targets_copy():
+        slot = None
+        if target.is_relative_detector_id():
+            slot = slot_by_detector.get(target.val)
+        if slot is not None:
+            slots.append(slot)
+    return _Fault(arguments[0], tuple(slots))
+
+
+def _faults_by_position(faults: list, position_count: int) -> list:
+    """Each position's faults: those that flip one of its detectors."""
+    faults_by_position = []
+    for _ in range(position_count):
+        faults_by_position.append([])
+    for fault in faults:
+        touched = set()
+        for _round, position_index in fault.slots:
+            touched.add(position_index)
+        for position_index in touched:
+            faults_by_position[position_index].append(fault)
+    return faults_by_position
+
+
 def _position_priors(faults_by_position: list, round_index: int) -> tuple:
     """The priors of the faults behind each position's detector that round."""
     arrays = []
@@ -875,20 +994,6 @@ def _odd_probability(priors, scale: float) -> float:
     return (1.0 - product) / 2.0
 
 
-def _rate_scales(tracked_rates, calibrated_rates):
-    """Each tracked rate over its calibrated one; one where that is zero.
-
-    A calibrated rate of zero is a detector no fault reaches, whose law
-    is the faultless one at any scale.
-    """
-    tracked = numpy.asarray(tracked_rates, dtype=numpy.float64)
-    calibrated = numpy.asarray(calibrated_rates, dtype=numpy.float64)
-    scales = numpy.ones_like(tracked)
-    is_calibrated = calibrated > 0
-    numpy.divide(tracked, calibrated, out=scales, where=is_calibrated)
-    return scales
-
-
 def _mean_detection_probability(region_priors: list, scale: float) -> float:
     probabilities = []
     for priors in region_priors:
@@ -923,7 +1028,10 @@ def _bisected_scale(region_priors: list, measured_rate, largest_scale) -> float:
 
 
 def _mean_rate(flagged_rows: list, is_in_region) -> float:
-    """Events per region position per round over the flagged rows."""
+    """Events per region position per round over the flagged rows.
+
+    A count flag may leave the region empty, which measures nothing.
+    """
     region_size = numpy.count_nonzero(is_in_region)
     if region_size == 0:
         return 0.0
@@ -941,27 +1049,39 @@ def _positions_where(positions: tuple, is_in_region) -> frozenset:
     return frozenset(members)
 
 
-def _episodes(firing_windows: list) -> list:
-    """The runs of firing rounds, each from its estimated onset."""
-    first_rounds = []
-    last_rounds = []
-    for index, firing_window in enumerate(firing_windows):
-        if firing_window == 0:
+def _episodes(flags: list, first_round: int) -> list:
+    """The runs of firing rounds, each from its first round's onset.
+
+    flags[i] is round first_round + i's flag, None when it did not fire.
+    """
+    runs = []
+    for index, flag in enumerate(flags):
+        if flag is None:
             continue
-        round_index = index + 1
-        if last_rounds and last_rounds[-1] == index:
-            last_rounds[-1] = round_index
-            continue
-        onset = round_index - firing_window + 1
-        first_rounds.append(max(onset, 1))
-        last_rounds.append(round_index)
-    newest_round = len(firing_windows)
-    episodes = []
-    for first_round, last_round in zip(first_rounds, last_rounds, strict=True):
-        is_open = last_round == newest_round
-        episode = _Episode(first_round, last_round, is_open)
-        episodes.append(episode)
-    return episodes
+        round_index = first_round + index
+        _extend_runs(runs, flag, round_index)
+    newest_round = first_round + len(flags) - 1
+    _open_the_newest_run(runs, newest_round)
+    return runs
+
+
+def _extend_runs(runs: list, flag: _Flag, round_index: int) -> None:
+    """A firing round joins the run it follows, or starts a run."""
+    if runs and runs[-1].last_firing_round == round_index - 1:
+        runs[-1] = dataclasses.replace(
+            runs[-1], last_firing_round=round_index, region=flag.region
+        )
+        return
+    run = _Episode(flag.onset_round, round_index, False, flag.region)
+    runs.append(run)
+
+
+def _open_the_newest_run(runs: list, newest_round: int) -> None:
+    """A run still firing on the newest round covers every later round."""
+    if not runs:
+        return
+    if runs[-1].last_firing_round == newest_round:
+        runs[-1] = dataclasses.replace(runs[-1], is_open=True)
 
 
 def _whole_count(section: Mapping, key: str, default: int) -> int:
@@ -975,7 +1095,7 @@ def _whole_count(section: Mapping, key: str, default: int) -> int:
     )
 
 
-def _false_alarms(section: Mapping) -> float:
+def _false_alarms_per_round(section: Mapping) -> float:
     value = section.get("false_alarms_per_round", 1e-6)
     is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
     if is_number and 0 < value < 1:
@@ -986,7 +1106,8 @@ def _false_alarms(section: Mapping) -> float:
     )
 
 
-def _clock(section: Mapping, clocks: config.ClockSettings, cycles: int):
+def _count_clock(section: Mapping, clocks: config.ClockSettings, cycles: int):
+    """event_count's clock; a priced count needs one."""
     name = section.get("clock")
     if name is not None:
         return clocks.clock(name)

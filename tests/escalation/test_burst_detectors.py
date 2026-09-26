@@ -48,7 +48,9 @@ def _detector(settings, engine=None):
         engine = engine_module.Engine()
     circuit = _circuit()
     circuits = {1: (circuit, ROUNDS)}
-    return burst_detectors.EventCountBurstDetector(settings, engine, circuits)
+    return burst_detectors.EventCountBurstDetector(
+        settings, engine, circuits, 1.0
+    )
 
 
 def _table():
@@ -204,6 +206,21 @@ def test_a_flag_is_not_seen_before_the_detector_publishes_it():
     assert detector.is_burst_window(window)
 
 
+def test_an_operation_shorter_than_the_windows_is_refused():
+    """The laws are read off a slab two rounds longer than a window."""
+    settings = burst_detectors.EventCountBurstDetector.Settings()
+    circuit = workload_settings.memory_circuit(
+        CODE_TASK, 21, DISTANCE, PHYSICAL_ERROR_PROBABILITY
+    )
+    engine = engine_module.Engine()
+    circuits = {7: (circuit, 21)}
+
+    with pytest.raises(ValueError, match="operation 7 has 21 rounds"):
+        burst_detectors.EventCountBurstDetector(
+            settings, engine, circuits, 1.0
+        )
+
+
 def test_the_row_none_takes_no_keys():
     section = {"kind": "none", "patch_window_rounds": 4}
     with pytest.raises(ValueError, match="burst_detector does not know"):
@@ -335,7 +352,9 @@ def _noiseless_detector(settings):
     circuit = workload_settings.memory_circuit(CODE_TASK, ROUNDS, DISTANCE, 0.0)
     circuits = {1: (circuit, ROUNDS)}
     engine = engine_module.Engine()
-    return burst_detectors.EventCountBurstDetector(settings, engine, circuits)
+    return burst_detectors.EventCountBurstDetector(
+        settings, engine, circuits, 1.0
+    )
 
 
 @pytest.mark.filterwarnings("error")

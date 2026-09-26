@@ -35,20 +35,19 @@ class WindowSlicer:
             fault_model_contracts.DecoderFaultModelRequirement
         ),
     ):
-        self.catalogs, self.catalog_link = (
-            stim_fault_catalog.prepare_fault_catalogs(
-                circuit, fault_model_requirement
-            )
+        self.catalogs = stim_fault_catalog.prepare_fault_catalogs(
+            circuit, fault_model_requirement
         )
         self.observable_count = circuit.num_observables
         self.chronology = _index_chronology(
             circuit, detector_rounds, round_count
         )
         self.fault_index = _index_faults(
-            self.catalogs, self.chronology.round_by_detector
+            self.catalogs.by_representation, self.chronology.round_by_detector
         )
         self.committed_elsewhere = {
-            representation: set() for representation in self.catalogs
+            representation: set()
+            for representation in self.catalogs.by_representation
         }
         # (type by detector, type by observable), read only when the
         # decoder splits a region by type
@@ -93,7 +92,7 @@ class WindowSlicer:
             is_last,
         )
         placed = {}
-        for representation, catalog in self.catalogs.items():
+        for representation, catalog in self.catalogs.by_representation.items():
             owned = _for_representation(explicitly_owned_faults, representation)
             prior = _for_representation(explicitly_prior_faults, representation)
             placed[representation] = self._place(
@@ -179,9 +178,9 @@ class WindowSlicer:
             fault_model_contracts.FaultRepresentation.PHYSICAL
         )
         local_link = None
-        if self.catalog_link is not None:
+        if self.catalogs.link is not None:
             local_link = window_placement.local_link_projection(
-                graphlike, physical, self.catalog_link
+                graphlike, physical, self.catalogs.link
             )
         coordinates = detector_chronology.coordinates_for_rows(
             self.chronology.detector_coordinates, rows

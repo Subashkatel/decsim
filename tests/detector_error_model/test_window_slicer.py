@@ -166,7 +166,7 @@ def test_a_windows_rows_are_the_detectors_of_its_buffer_rounds():
 
 def test_a_windows_columns_are_the_catalog_faults_that_flip_one_of_its_rows():
     slicer = surface_code_slicer(6)
-    catalog = slicer.catalogs[GRAPHLIKE]
+    catalog = slicer.catalogs.by_representation[GRAPHLIKE]
     model = slicer.slice_window(1, 1, 2, 3, is_last=False)
     faults = model.require_faults(GRAPHLIKE)
     assert faults.source_fault_ids == faults_touching(
@@ -178,7 +178,7 @@ def test_a_windows_columns_are_the_catalog_faults_that_flip_one_of_its_rows():
 
 def test_the_window_matrices_agree_with_the_catalog_fault_by_fault():
     slicer = surface_code_slicer(6)
-    catalog = slicer.catalogs[GRAPHLIKE]
+    catalog = slicer.catalogs.by_representation[GRAPHLIKE]
     model = slicer.slice_window(1, 1, 2, 3, is_last=False)
     faults = model.require_faults(GRAPHLIKE)
     dense_check = faults.check.toarray()
@@ -198,7 +198,7 @@ def test_the_window_matrices_agree_with_the_catalog_fault_by_fault():
 
 def test_a_fault_touching_a_commit_round_is_owned_and_a_buffer_one_is_not():
     slicer = surface_code_slicer(6)
-    catalog = slicer.catalogs[GRAPHLIKE]
+    catalog = slicer.catalogs.by_representation[GRAPHLIKE]
     model = slicer.slice_window(1, 1, 2, 3, is_last=False)
     faults = model.require_faults(GRAPHLIKE)
     expected_owned = expected_ownership(6, catalog, faults, {1, 2})
@@ -238,7 +238,7 @@ def test_the_last_window_owns_everything_it_sees():
 
 def test_every_fault_is_owned_by_exactly_one_window_of_a_sliding_plan():
     slicer = surface_code_slicer(6)
-    catalog = slicer.catalogs[GRAPHLIKE]
+    catalog = slicer.catalogs.by_representation[GRAPHLIKE]
     first = slicer.slice_window(1, 1, 2, 3, is_last=False)
     second = slicer.slice_window(3, 3, 4, 5, is_last=False)
     last = slicer.slice_window(5, 5, 6, 6, is_last=True)
@@ -267,7 +267,7 @@ def test_a_terminal_window_owns_every_column_it_sees():
 
 def test_an_owned_column_hands_off_its_whole_detector_effect():
     slicer = surface_code_slicer(4)
-    catalog = slicer.catalogs[GRAPHLIKE]
+    catalog = slicer.catalogs.by_representation[GRAPHLIKE]
     model = slicer.slice_window(1, 1, 3, 3, is_last=False)
     faults = model.require_faults(GRAPHLIKE)
     assert model.detector_ids == tuple(range(20))
@@ -294,8 +294,8 @@ def test_a_linked_window_projects_each_physical_column_onto_its_components():
     slicer = surface_code_slicer(
         4, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
     )
-    graphlike_catalog = slicer.catalogs[GRAPHLIKE]
-    physical_catalog = slicer.catalogs[PHYSICAL]
+    graphlike_catalog = slicer.catalogs.by_representation[GRAPHLIKE]
+    physical_catalog = slicer.catalogs.by_representation[PHYSICAL]
     model = slicer.slice_window(1, 1, 2, 3, is_last=False)
     graphlike = model.require_faults(GRAPHLIKE)
     physical = model.require_faults(PHYSICAL)
@@ -317,7 +317,7 @@ def test_a_physical_only_window_keeps_hyperedges_and_has_no_projection():
     slicer = surface_code_slicer(
         4, fault_model_contracts.PHYSICAL_FAULT_MODEL_REQUIRED
     )
-    catalog = slicer.catalogs[PHYSICAL]
+    catalog = slicer.catalogs.by_representation[PHYSICAL]
     model = slicer.slice_window(1, 1, 2, 3, is_last=False)
     physical = model.require_faults(PHYSICAL)
     assert model.graphlike_faults is None
@@ -434,8 +434,8 @@ def test_a_slicer_asked_for_no_fault_model_builds_no_catalog_and_no_link():
         fault_model_requirement=requirement,
     )
     window = slicer.slice_window(1, 1, 2, 2, is_last=False)
-    assert slicer.catalogs == {}
-    assert slicer.catalog_link is None
+    assert slicer.catalogs.by_representation == {}
+    assert slicer.catalogs.link is None
     assert window.graphlike_faults is None
     assert window.physical_faults is None
     assert window.physical_to_graphlike_detector_projection is None

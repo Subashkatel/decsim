@@ -135,10 +135,10 @@ def test_a_sliding_plan_owns_every_fault_exactly_once():
 
 def test_the_windows_match_qldpcs_sliding_window_rule_window_by_window():
     circuit = surface_code_circuit(8)
-    catalogs, _ = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, GRAPHLIKE_REQUIRED
     )
-    catalog = catalogs[GRAPHLIKE]
+    catalog = catalogs.by_representation[GRAPHLIKE]
     models = window_model_builders.build_window_error_models(
         circuit,
         [(1, 2, 3), (3, 4, 5), (5, 8, 8)],

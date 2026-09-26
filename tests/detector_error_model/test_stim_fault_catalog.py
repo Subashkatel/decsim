@@ -120,12 +120,12 @@ def test_a_component_that_flips_an_observable_but_no_detector_is_refused():
 
 def test_only_the_requested_representations_are_built():
     circuit = surface_code_circuit(2)
-    catalogs, link = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
     )
-    assert set(catalogs) == {GRAPHLIKE}
-    assert link is None
-    graphlike = catalogs[GRAPHLIKE]
+    assert set(catalogs.by_representation) == {GRAPHLIKE}
+    assert catalogs.link is None
+    graphlike = catalogs.by_representation[GRAPHLIKE]
     assert graphlike.representation is GRAPHLIKE
     assert len(graphlike.detector_sets) == 44
     assert graphlike.detector_sets[:4] == ((0,), (0, 1), (0, 8), (1, 2))
@@ -133,35 +133,35 @@ def test_only_the_requested_representations_are_built():
 
 def test_the_physical_catalog_keeps_hyperedges():
     circuit = surface_code_circuit(2)
-    catalogs, link = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, fault_model_contracts.PHYSICAL_FAULT_MODEL_REQUIRED
     )
-    assert set(catalogs) == {PHYSICAL}
-    assert link is None
-    physical = catalogs[PHYSICAL]
+    assert set(catalogs.by_representation) == {PHYSICAL}
+    assert catalogs.link is None
+    physical = catalogs.by_representation[PHYSICAL]
     assert len(physical.detector_sets) == 107
     assert physical.detector_sets[4] == (1, 4, 5)
 
 
 def test_a_linked_physical_column_is_the_parity_of_its_graphlike_columns():
     circuit = surface_code_circuit(2)
-    catalogs, link = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
     )
-    graphlike = catalogs[GRAPHLIKE]
-    physical = catalogs[PHYSICAL]
-    assert link.shape == (44, 134)
+    graphlike = catalogs.by_representation[GRAPHLIKE]
+    physical = catalogs.by_representation[PHYSICAL]
+    assert catalogs.link.shape == (44, 134)
     assert physical.detector_sets[0] == (0,)
-    assert link_rows(link, 0) == [0]
+    assert link_rows(catalogs.link, 0) == [0]
     assert graphlike.detector_sets[0] == (0,)
     assert physical.detector_sets[5] == (1, 4, 5)
     assert physical.observable_sets[5] == ()
-    assert link_rows(link, 5) == [4, 5]
+    assert link_rows(catalogs.link, 5) == [4, 5]
     assert graphlike.detector_sets[4] == (1, 5)
     assert graphlike.detector_sets[5] == (4,)
     assert physical.detector_sets[32] == (1, 4)
     assert physical.observable_sets[32] == (0,)
-    assert link_rows(link, 32) == [5, 7]
+    assert link_rows(catalogs.link, 32) == [5, 7]
     assert graphlike.detector_sets[7] == (1,)
     assert graphlike.observable_sets[7] == (0,)
     assert graphlike.observable_sets[5] == ()
@@ -195,11 +195,11 @@ def test_a_graphlike_catalog_refuses_a_hyperedge():
 
 def test_two_physical_errors_with_the_same_identity_merge_as_independent():
     circuit = StandInCircuit("", "error(0.1) D0 D1 D2\nerror(0.2) D2 D1 D0\n")
-    catalogs, link = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, fault_model_contracts.PHYSICAL_FAULT_MODEL_REQUIRED
     )
-    physical = catalogs[PHYSICAL]
-    assert link is None
+    physical = catalogs.by_representation[PHYSICAL]
+    assert catalogs.link is None
     assert physical.detector_sets == ((0, 1, 2),)
     assert physical.observable_sets == ((),)
     assert physical.priors == (pytest.approx(0.26),)
@@ -230,10 +230,10 @@ def test_two_faults_on_one_detector_pair_stay_apart_by_their_observables():
         "error(0.1) D0 D1\nerror(0.2) D0 D1 L0\n",
         "error(0.1) D0 D1\nerror(0.2) D0 D1 L0\n",
     )
-    catalogs, _link = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
     )
-    graphlike = catalogs[GRAPHLIKE]
+    graphlike = catalogs.by_representation[GRAPHLIKE]
     assert graphlike.detector_sets == ((0, 1), (0, 1))
     assert graphlike.observable_sets == ((), (0,))
     assert graphlike.priors == (0.1, 0.2)
@@ -252,15 +252,15 @@ def test_two_decompositions_of_one_identity_stay_two_physical_columns():
         "error(0.2) D1 D2 ^ D2 D3\nerror(0.3) D1 D0 ^ D0 D3\n",
         "error(0.38) D1 D3\n",
     )
-    catalogs, link = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
     )
-    physical = catalogs[PHYSICAL]
+    physical = catalogs.by_representation[PHYSICAL]
     assert physical.detector_sets == ((1, 3), (1, 3))
     assert physical.priors == (0.2, 0.3)
-    assert link.shape[1] == 2
-    assert link_rows(link, 0) == [0, 1]
-    assert link_rows(link, 1) == [2, 3]
+    assert catalogs.link.shape[1] == 2
+    assert link_rows(catalogs.link, 0) == [0, 1]
+    assert link_rows(catalogs.link, 1) == [2, 3]
 
 
 def test_the_two_models_priors_agree_to_a_fixed_absolute_bound():
@@ -275,10 +275,10 @@ def test_the_two_models_priors_agree_to_a_fixed_absolute_bound():
     circuit = StandInCircuit(
         "error(0.2) D1 D2 ^ D2 D3\n", f"error({perturbed!r}) D1 D3\n"
     )
-    catalogs, _link = stim_fault_catalog.prepare_fault_catalogs(
+    catalogs = stim_fault_catalog.prepare_fault_catalogs(
         circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
     )
-    assert catalogs[PHYSICAL].priors == (0.2,)
+    assert catalogs.by_representation[PHYSICAL].priors == (0.2,)
 
 
 def test_a_prior_disagreement_just_above_the_bound_is_refused():

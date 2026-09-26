@@ -91,17 +91,8 @@ def detector_error_model_to_faults(
 def prepare_fault_catalogs(
     circuit: stim.Circuit,
     requirement: fault_model_contracts.DecoderFaultModelRequirement,
-) -> tuple[
-    dict[
-        fault_model_contracts.FaultRepresentation,
-        fault_model_contracts.FaultCatalog,
-    ],
-    Optional[scipy.sparse.csc_matrix],
-]:
-    """The catalogs a requirement asks for, and the link when it asks for it.
-
-    Returns (catalog by representation, link or None).
-    """
+) -> fault_model_contracts.FaultCatalogs:
+    """The catalogs a requirement asks for, and the link when it asks for it."""
     if requirement.require_physical_to_graphlike_link:
         return _linked_catalogs(circuit)
     catalogs: dict = {}
@@ -119,7 +110,9 @@ def prepare_fault_catalogs(
         catalogs[physical] = _catalog_from_detector_error_model(
             undecomposed_model, physical
         )
-    return catalogs, None
+    return fault_model_contracts.FaultCatalogs(
+        by_representation=catalogs, link=None
+    )
 
 
 def merge_probability(current: float, incoming: float) -> float:
@@ -129,14 +122,8 @@ def merge_probability(current: float, incoming: float) -> float:
 
 def _linked_catalogs(
     circuit: stim.Circuit,
-) -> tuple[
-    dict[
-        fault_model_contracts.FaultRepresentation,
-        fault_model_contracts.FaultCatalog,
-    ],
-    scipy.sparse.csc_matrix,
-]:
-    """Both catalogs and their link, keyed by representation."""
+) -> fault_model_contracts.FaultCatalogs:
+    """Both catalogs and their link."""
     decomposed_model = circuit.detector_error_model(decompose_errors=True)
     undecomposed_model = circuit.detector_error_model(decompose_errors=False)
     graphlike, physical, link = _prepare_linked_fault_catalogs(
@@ -146,7 +133,9 @@ def _linked_catalogs(
         fault_model_contracts.FaultRepresentation.GRAPHLIKE: graphlike,
         fault_model_contracts.FaultRepresentation.PHYSICAL: physical,
     }
-    return catalogs, link
+    return fault_model_contracts.FaultCatalogs(
+        by_representation=catalogs, link=link
+    )
 
 
 def _canonical_error_instruction(

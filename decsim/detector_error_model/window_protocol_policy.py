@@ -86,7 +86,7 @@ def _check_window_cuts_no_fault(
     window_index: int,
 ) -> None:
     local_detector_ids = set(model.detector_ids)
-    for representation, catalog in slicer.catalogs.items():
+    for representation, catalog in slicer.catalogs.by_representation.items():
         faults = model.require_faults(representation)
         for source_fault_id in faults.source_fault_ids:
             global_detector_ids = set(catalog.detector_sets[source_fault_id])

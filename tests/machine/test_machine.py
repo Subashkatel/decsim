@@ -1359,11 +1359,10 @@ class _SilentFactoryTrace:
 class AlwaysReadyFactory:
     """A factory row written outside decsim: the collaborators alone.
 
-    Its constructor is InfiniteFactory's own shape, one parameter, which
-    is the shape the root refused before every row was built from one
-    collaborators record. It declares the decode queue port the root
-    binds on every factory row, and the trace source the port declares,
-    silent because no request waits.
+    Its constructor is InfiniteFactory's own shape, one parameter: the
+    collaborators record every row is built from. It declares the decode
+    queue port the root binds on every factory row, and the trace source
+    the port declares, silent because no request waits.
     """
 
     decode_queue = ports.Port(ports.DecodeQueue)

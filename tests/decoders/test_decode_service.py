@@ -466,7 +466,7 @@ class _MisdeclaredDepth(decoders.PresetLatencyDecoder):
 
 
 def test_a_declared_depth_that_its_timing_denies_is_refused():
-    """C4 item 6: the two halves of one fact are held against each other.
+    """The two halves of one fact are held against each other.
 
     The port declares pipeline_depth, and a unit runs the pipelined
     model when it accepts work on its own interval. A row that declares

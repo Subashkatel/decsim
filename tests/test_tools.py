@@ -148,8 +148,8 @@ def test_the_one_action_check_fails_a_call_or_sum_passed_as_an_argument(
 def test_a_checkout_under_a_folder_named_tmp_is_still_checked(tmp_path, capsys):
     """Only the part below the target names a skipped folder.
 
-    A clone under /tmp, as on a CI runner, was skipped whole, and a
-    folder named tmp inside the target is still skipped.
+    A clone under /tmp, as on a CI runner, is checked, and a folder
+    named tmp inside the target is skipped.
     """
     tool = _tool("check_one_action")
     checkout = tmp_path / "tmp" / "checkout"
@@ -387,8 +387,7 @@ def test_the_slurm_runner_starts_from_a_clean_tree(tmp_path):
 def test_the_check_script_runs_the_active_environments_python(tmp_path):
     """With DECSIM_PYTHON unset, check.sh runs the python on PATH.
 
-    A fresh clone has no .venv of its own, so a default naming one
-    refused to start in every environment but the maintainer's.
+    A fresh clone has no .venv of its own, so the default names none.
     """
     _stub, recorded = _stub_python(tmp_path)
     environment = dict(os.environ)

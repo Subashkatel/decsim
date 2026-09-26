@@ -11,10 +11,9 @@ carries (d*d - 1)/2 events on the first round, d*d - 1 in the middle and
 d*d - 1 + d*d on the last.
 
 Those are the numbers the store hop and the tier's input link are priced
-at (C1 finding 5, C7 finding 8), and nothing pinned them. They are read
-here off stim.Circuit.generated, so a Stim release that changed the
-layout would fail this file rather than a payload arithmetic test
-somewhere else.
+at. They are read here off stim.Circuit.generated, so a Stim release
+that changed the layout would fail this file rather than a payload
+arithmetic test somewhere else.
 """
 
 import collections

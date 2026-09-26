@@ -1103,14 +1103,10 @@ def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
     """Two streams each have a window 3, and each paid one 0.5 us seam.
 
     dd_per_window is the decoder-to-decoder hop a window's own boundary
-    rode. Keyed by the window index alone the two streams' windows of
-    that index landed on one entry and every window read both seams, so
-    the point doubled with the stream count and load went with it: 0.484
-    at one stream, 0.632 at two, 1.521 at eight, a chain busier than its
-    windows arrive with nothing physical behind it. Keyed by the window,
-    which is its operation and its index, each of the eighteen windows
-    reads the one card it crossed, and the last window of a stream reads
-    nothing because no window follows it.
+    rode. It is keyed by the window, which is its operation and its
+    index, not by the index alone, which two streams share, so each of
+    the eighteen windows reads the one card it crossed, and the last
+    window of a stream reads nothing because no window follows it.
     """
     one_stream_run = seam_streams_shot(1)
     two_stream_run = seam_streams_shot(2)

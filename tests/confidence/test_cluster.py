@@ -118,7 +118,7 @@ def test_the_cluster_gap_and_the_complementary_gap_agree_on_one_window():
 
 
 def test_the_gap_walks_against_an_oracle_built_from_the_paper_alone():
-    """C5 rule 2: decsim's per-node Dijkstra with a cutoff, against scipy.
+    """The per-node Dijkstra with a cutoff, against scipy.
 
     independent_cluster_gap.py is an independent reading of Meister et
     al. 2405.07433 Definitions 1 and 9 and Algorithm 1 line 6, written

@@ -1,12 +1,10 @@
-"""`decsim trace follow` against the worked example of the trace note.
+"""`decsim trace follow` on gate point 1's own trace.
 
-The reader prints one round's and
-one window's path from gate point 1's own trace (weak_decoder_baseline
-d 3 p 0.003 seed 0), and its corrections fix two of the example's
-statements against the code: the controller's intake copy is at 1.000,
-the send tick, and the weak syndrome buffer holds detection events, so round 1's
-residence there carries 4 bits and not the link's 8. The rows below are
-the note's, at the hops that exist today.
+The reader prints one round's and one window's path from gate point 1's
+trace (weak_decoder_baseline d 3 p 0.003 seed 0). The controller's
+intake copy is at 1.000, the send tick, and the weak syndrome buffer
+holds detection events, so round 1's residence there carries 4 bits and
+not the link's 8.
 """
 
 import pytest
@@ -45,7 +43,7 @@ def _row_of(path, where, what):
     raise AssertionError(f"no {where} hop saying {what}")
 
 
-def test_round_ones_hops_are_the_notes_table(traced):
+def test_round_ones_first_hops_are_its_emission_move_and_intake(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
     emitted = _row_of(followed, "QPU", "emitted round 1")
@@ -108,7 +106,7 @@ def test_a_bounded_unit_memory_residence_states_its_room_in_bits():
     assert hop.what == "residence, of 96 bits"
 
 
-def test_round_ones_counts_are_the_notes_counts(traced):
+def test_round_ones_counts_name_four_copies_and_three_moves(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
     counts = followed.counts
@@ -197,7 +195,7 @@ def test_the_table_prints_one_line_per_hop_under_a_header(traced):
     assert len(lines) == len(followed.hops) + 1
 
 
-def test_the_counts_read_as_the_notes_sentence(traced):
+def test_the_counts_read_as_one_sentence(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
     lines = trace_follow.count_lines(followed.counts)

@@ -448,9 +448,9 @@ def test_an_outside_escalation_row_is_measured_over_its_tiers_links(
 ):
     """The tier is read off the row, so a row off the table measures.
 
-    The experiments layer used to index its link tables by the
-    escalation's name, so `decsim collect` raised KeyError on any name
-    but the three shipped ones while the machine ran the row fine.
+    The experiments layer reads the tier the row declares, never the
+    escalation's name, so `decsim collect` measures any row the machine
+    runs.
     """
     shipped_directory = tmp_path / "shipped"
     shipped_directory.mkdir()

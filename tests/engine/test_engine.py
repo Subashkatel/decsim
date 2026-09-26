@@ -17,6 +17,8 @@ import ast
 import pathlib
 import random
 
+import pytest
+
 import decsim.engine as engine_module
 from decsim.engine import Engine
 
@@ -91,12 +93,8 @@ def test_actions_scheduled_while_running_join_the_same_order():
 
 def test_a_negative_delay_is_refused():
     engine = Engine()
-    try:
+    with pytest.raises(ValueError, match="past"):
         engine.schedule(-1, lambda: None)
-    except ValueError as error:
-        assert "past" in str(error)
-    else:
-        raise AssertionError("a negative delay was accepted")
 
 
 def test_action_done_carries_the_tick_after_every_action():
@@ -153,12 +151,9 @@ def test_an_action_that_raises_stops_the_run_and_leaves_the_rest_queued():
 
     engine.schedule(2, failing_action)
     engine.schedule(3, lambda: ran.append("later"))
-    try:
+    with pytest.raises(RuntimeError) as raised:
         engine.run()
-    except RuntimeError as error:
-        assert error is failure
-    else:
-        raise AssertionError("the exception did not reach the caller")
+    assert raised.value is failure
     assert ran == ["failing"]
     assert engine.now == 2
     engine.run()

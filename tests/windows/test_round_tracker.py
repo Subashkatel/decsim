@@ -9,6 +9,8 @@ into the next window, lines 275-278).
 
 import types
 
+import pytest
+
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.round_tracker as round_tracker
@@ -123,12 +125,8 @@ def test_a_finite_stream_refuses_a_boundary_inside_its_circuit():
     tracker = _tracker({}, {"stream": []})
     operation_stream = _operation("stream")
     tracker.register_stream(operation_stream, 5)
-    try:
+    with pytest.raises(RuntimeError, match="destructive boundary"):
         tracker.close_boundary("stream", 4)
-    except RuntimeError as error:
-        assert "destructive boundary" in str(error)
-    else:
-        raise AssertionError("an internal boundary was accepted")
     tracker.close_boundary("stream", 6)
 
 

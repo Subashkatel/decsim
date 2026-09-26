@@ -239,12 +239,19 @@ def test_a_cards_lanes_multiply_its_lane_rate():
     assert capacity.exact_aggregate_bits_per_microsecond() == 8 * 250
 
 
-def test_a_boolean_header_in_a_card_is_refused():
-    card = dict(GOOD_CARD, header_bits_per_transfer=True)
+@pytest.mark.parametrize("header_bits", [True, -8, 448.5, "448"])
+def test_a_header_that_is_not_whole_bits_is_refused_naming_the_card(
+    header_bits,
+):
+    card = dict(GOOD_CARD, header_bits_per_transfer=header_bits)
     with pytest.raises(ValueError) as refusal:
         _load_readout_card(card)
     message = str(refusal.value)
-    assert message == "header_bits_per_transfer must be a finite whole number"
+    assert message == (
+        f"links.qpu_to_controller.header_bits_per_transfer is "
+        f"{header_bits!r}; it is the whole number of framing bits every "
+        f"transfer of the path carries, zero or more"
+    )
 
 
 @pytest.mark.parametrize(

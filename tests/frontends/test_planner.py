@@ -626,12 +626,13 @@ def one_window_with_a_successor():
     )
 
 
-def test_a_strong_context_hold_is_one_buffer_region_on_each_side():
+def test_a_strong_context_hold_starts_at_the_commit():
     """The strong syndrome buffer keeps the rounds an escalation would read.
 
-    Toshio 2510.25222 Sec. III C: the strong decoder is given the
-    committed region with a buffer region on each side, so the plan
-    places that hold on the strong syndrome buffer whether or not the window
+    A strong redo pins its past face on the committed neighbour and
+    reads no round behind its commit (Bombin et al. 2303.04846 lines
+    1456-1458), and one buffer region past it, so the plan holds rounds
+    3 to 6 of the window committing 3 and 4, whether or not it
     escalates.
     """
     execution = one_window_with_a_successor()
@@ -645,11 +646,17 @@ def test_a_strong_context_hold_is_one_buffer_region_on_each_side():
 
     owner, held_rounds = buffering.potential_holds[0]
     assert owner == decoding_records.PotentialStrong((1, 0))
-    assert held_rounds == tuple((1, index) for index in range(1, 7))
+    assert held_rounds == tuple((1, index) for index in range(3, 7))
 
 
-def test_a_forward_windows_strong_hold_reaches_into_the_successor():
-    """The wider region runs past the operation's end onto its successor."""
+def test_a_forward_windows_strong_hold_ends_at_the_operations_end():
+    """The forward region is clamped at the operation's last round.
+
+    It commits the window's two rounds and two buffers of two from round
+    3, clamped at round 7, and reads no round past its commit
+    (escalation/strong_regions.py, forward_seam_region), so no successor
+    round is held for it.
+    """
     execution = one_window_with_a_successor()
 
     buffering = planner._plan_syndrome_buffering(
@@ -660,24 +667,14 @@ def test_a_forward_windows_strong_hold_reaches_into_the_successor():
     )
 
     held_rounds = buffering.potential_holds[0][1]
-    assert held_rounds == (
-        (1, 1),
-        (1, 2),
-        (1, 3),
-        (1, 4),
-        (1, 5),
-        (1, 6),
-        (1, 7),
-        (2, 1),
-        (2, 2),
-    )
+    assert held_rounds == tuple((1, index) for index in range(3, 8))
 
 
 def test_the_strong_union_counts_a_shared_round_once():
     """The store's sufficient set is the union of holds, not their sum.
 
     Overlapping strong contexts do not each allocate a packet, so four
-    windows whose contexts total thirty three round reads keep fifteen
+    windows whose contexts total twenty four round reads keep fifteen
     rounds alive, once each.
     """
     execution = chained_sliding_windows()
@@ -696,7 +693,7 @@ def test_the_strong_union_counts_a_shared_round_once():
     every_round = set()
     for index in range(1, 16):
         every_round.add((1, index))
-    assert read_count == 33
+    assert read_count == 24
     assert len(sufficient) == 15
     assert set(sufficient) == every_round
 

@@ -676,7 +676,7 @@ def shipped_shot(config_name: str):
     """One seeded shot of a config this repository ships.
 
     p 0.008, distance 3, one microsecond rounds, seed 0: the point the
-    component validation of 2026-09-11 reads, so what these assertions
+    component validation reads, so what these assertions
     walk is a run folder a reader can build from the shipped yaml.
     """
     config_path = CONFIGS_DIR / config_name

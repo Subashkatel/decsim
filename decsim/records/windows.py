@@ -349,32 +349,18 @@ def strong_region_round_count(
 
 
 def strong_context_bounds(window: "Window") -> tuple:
-    """(context_lo, commit_lo, commit_hi, context_hi) a strong read may span.
+    """(context_lo, commit_lo, commit_hi, context_hi) a strong redo reads.
 
-    One buffer region of context on each side of this window's commit
-    rounds, clipped at round 1, which the round retention keeps for a
-    strong window starting at this window's commit. Both shipped rows
-    pin their past face and read no round before the commit
-    (escalation/strong_window_shapes.py), so the region kept behind it
-    is wider than any row reads.
-    """
-    buffer_span = window.buffer_hi - window.commit_hi
-    buffer_rounds = max(0, buffer_span)
-    context_start = window.commit_lo - buffer_rounds
-    context_lo = max(1, context_start)
-    context_hi = window.commit_hi + buffer_rounds
-    return context_lo, window.commit_lo, window.commit_hi, context_hi
-
-
-def near_pinned_bounds(window: "Window") -> tuple:
-    """(context_lo, commit_lo, commit_hi, context_hi) of a near-pinned redo.
-
-    A strong redo whose past face is pinned on the earlier neighbour's
-    committed correction commits the same rounds as the window it
-    replaces and reads no round before them: a fixed boundary condition
-    replaces the buffer that would otherwise open the face (Bombin et
-    al. 2303.04846 lines 1456-1458). Its future face is open, so it
-    keeps one buffer region of raw context there (lines 850-852).
+    A strong redo of this window reads its commit rounds and one buffer
+    region past them, and no round before them: every row pins its past
+    face on the earlier neighbour's committed correction, and a fixed
+    boundary condition replaces the buffer that would otherwise open
+    that face (Bombin et al. 2303.04846 lines 1456-1458), while the
+    future face stays open over one buffer region of raw context (lines
+    850-852). The near-seam row reads exactly this; the forward row
+    reads from the same first round on, further forward
+    (escalation/strong_regions.py). The round retention keeps this span
+    for a window the strong tier may redo.
     """
     buffer_span = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, buffer_span)

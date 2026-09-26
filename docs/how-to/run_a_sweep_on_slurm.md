@@ -50,9 +50,9 @@ The commit and the dirty flag go into every folder's `manifest.json`, so
 a result names its code. Two things to get right:
 
 - **The interpreter decides which tree is imported, not the directory
-  you submit from.** In this sandbox `.venv/bin/python` is a container
-  wrapper that pins the main checkout on `PYTHONPATH`, so a worktree
-  needs to come first: `DECSIM_PYTHON` pointing at the worktree's own
+  you submit from.** Where `.venv/bin/python` is a container wrapper
+  that pins the main checkout on `PYTHONPATH`, a worktree needs to come
+  first: `DECSIM_PYTHON` pointing at the worktree's own
   wrapper, or `PYTHONPATH` naming the worktree. The line the runner
   prints is the check: it is the tree the interpreter actually imported.
 - **`RUN` must be an absolute path.** The tasks `cd` to the directory

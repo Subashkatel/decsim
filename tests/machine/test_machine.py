@@ -2143,7 +2143,7 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
     assert priced_result.logical_observables == free_result.logical_observables
 
 
-# IBM's verification rule on the 2026-09 campaign families: the priced,
+# IBM's verification rule on the experiments_2026_09 families: the priced,
 # windowed, timed run's correction beside an untimed software model's,
 # window by window.
 
@@ -2189,7 +2189,7 @@ ESCALATED_WEAK_REQUEST = (
 
 
 def campaign_point_task(family):
-    """The distance-3 point of one shipped 2026-09 family, at its smallest p."""
+    """The distance-3 point of one shipped family, at its smallest p."""
     config_path = CAMPAIGN_DIRECTORY / f"{family}_d3.yaml"
     config = experiment.load_experiment(config_path)
     return config.point_task(

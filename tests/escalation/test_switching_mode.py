@@ -712,48 +712,37 @@ def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
     assert host.strong_requests.counts.needed == 3
 
 
-def first_decrease_tick(timeline):
-    """The tick at which an occupancy timeline first falls."""
-    previous = timeline[0][1]
-    for tick, occupancy in timeline[1:]:
-        if occupancy < previous:
-            return tick
-        previous = occupancy
-    raise AssertionError("the occupancy timeline never falls")
+def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
+    """No reader is left once the strong unit holds the escalated input.
 
-
-def test_the_strong_context_lives_until_the_escalated_window_commits():
-    """The strong syndrome buffer frees a context at the commit, not the read.
-
-    Toshio arXiv:2510.25222 Sec. III A: the strong decoder re-decodes
-    the escalated window's whole context, and its result is the
-    window's only Pauli-frame write, so the context has to survive
-    until that write lands. The escalated window reads all six rounds
-    of the operation, and its strong input transfer lands long before
-    the commit; a store that freed the rounds at the transfer would
-    show a fall before the committed tick. The declared fabric gives
-    the release its exact tick as well, 87.5 us here: 74.0 for the
-    commit and the declared hops back to the store after it.
+    The escalated window 0 commits rounds 1 to 3 and reads to round 6;
+    window 1 commits 4 to 6. A strong redo reads no round behind its
+    commit (Bombin et al. 2303.04846 lines 1456-1458), so window 1's
+    potential strong read starts at round 4, and rounds 1 to 3 have no
+    holder once window 0's strong input lands in the unit, 39.0 us here:
+    the weak commit at 30.0, the escalation hop of 3.0 and the strong
+    buffer's hop of 6.0. Rounds 4 to 6 stay for window 1 until its own
+    commit releases them at 87.5 us, after the strong commit at 74.0.
     """
     machine = fabric.switching_machine(rounds=6, escalated_windows={0})
     probe = declared_run.OccupancyProbe(machine.window_manager)
     machine.engine.action_done.connect(probe.observe)
     machine.run()
     timeline = probe.strong_timeline
-    occupancies = [occupancy for _, occupancy in timeline]
-    peak = max(occupancies)
-    first_fall = first_decrease_tick(timeline)
     snapshot = machine.pauli_frame.snapshot()
     strong_record = snapshot.records[0]
     expected_committed = decsim_config.microseconds_to_ticks(74.0)
-    expected_released = decsim_config.microseconds_to_ticks(87.5)
+    expected_timeline = [
+        (decsim_config.microseconds_to_ticks(0.0), 0),
+        (decsim_config.microseconds_to_ticks(33.0), 6),
+        (decsim_config.microseconds_to_ticks(39.0), 3),
+        (decsim_config.microseconds_to_ticks(87.5), 0),
+    ]
 
     assert strong_record.window_key == (1, 0)
     assert strong_record.tier == "strong"
     assert strong_record.committed_ticks == expected_committed
-    assert peak == 6
-    assert first_fall > expected_committed
-    assert first_fall == expected_released
+    assert timeline == expected_timeline
 
 
 def _walk_card(microseconds, weak_kind: str, confidence: str) -> dict:

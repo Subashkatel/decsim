@@ -455,28 +455,38 @@ def _hold_strong_context(
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
 ) -> None:
-    """A possible strong redo reads one buffer of context on each side."""
+    """The rounds a possible strong redo of the window reads, from its commit.
+
+    No row reads behind the commit (records/windows.py,
+    strong_context_bounds). The near-seam redo reads one buffer past the
+    commit; the forward region reads its own rounds, commit plus two
+    buffers clamped at the operation's end, and no round past them
+    (escalation/strong_regions.py, forward_seam_region).
+    """
     if not retain_strong_context:
         return
-    round_count = execution.rounds_by_operation[operation_id]
-    look_ahead = window.buffer_hi - window.commit_hi
-    buffer_rounds = max(0, look_ahead)
-    commit_hi = window.commit_hi
+    bounds = window_records.strong_context_bounds(window)
+    lower, _commit_lo, _commit_hi, upper = bounds
     if absorbs_weak_windows:
-        commit_round_count = window.commit_hi - window.commit_lo + 1
-        strong_rounds = window_records.strong_region_round_count(
-            commit_round_count, buffer_rounds
-        )
-        extended = window.commit_lo + strong_rounds - 1
-        commit_hi = min(round_count, extended)
-    context_start = window.commit_lo - buffer_rounds
-    lower = max(1, context_start)
-    upper = commit_hi + buffer_rounds
+        round_count = execution.rounds_by_operation[operation_id]
+        upper = _forward_region_end(window, round_count)
     potential = _read_keys(execution, operation_id, lower, upper)
     owner = decoding_records.PotentialStrong(
         (operation_id, window.window_index)
     )
     strong.add(owner, potential)
+
+
+def _forward_region_end(window, round_count: int) -> int:
+    """The last round of the forward strong region starting at the window."""
+    commit_round_count = window.commit_hi - window.commit_lo + 1
+    look_ahead = window.buffer_hi - window.commit_hi
+    buffer_rounds = max(0, look_ahead)
+    strong_rounds = window_records.strong_region_round_count(
+        commit_round_count, buffer_rounds
+    )
+    extended = window.commit_lo + strong_rounds - 1
+    return min(round_count, extended)
 
 
 def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:

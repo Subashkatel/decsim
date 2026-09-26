@@ -1,4 +1,4 @@
-# The 2026-09 experiments: the plan
+# The sixteen decoder experiments: the plan
 
 Sixteen experiments on one shot table, every run differing from every
 other in its decoders and nothing else: weak alone, strong alone, and

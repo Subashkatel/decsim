@@ -61,7 +61,7 @@ class PauliFrameConfig:
 
     def __post_init__(self) -> None:
         cycles = self.write_cycles
-        config.check_cycles("write_cycles", cycles)
+        config.check_cycles("pauli_frame.write_cycles", cycles)
         is_free = cycles == 0
         if not is_free and self.clock is None:
             raise ValueError("a charged write needs the clock it is priced on")

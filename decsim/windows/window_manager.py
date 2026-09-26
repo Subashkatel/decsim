@@ -143,6 +143,7 @@ class WindowManager:
         if self.tracker.is_sealed(operation_id):
             return
         if self.tracker.reaches_source_limit(operation_id):
+            # the source declared this limit, so it needs no attesting
             limit = self.tracker.source_round_limit(operation_id)
             self.seal_stream(operation_id, limit)
 
@@ -190,8 +191,9 @@ class WindowManager:
         """Close a dynamic stream once its full length has arrived."""
         if self.tracker.is_sealed(stream_id):
             return
-        models_changed = self.tracker.finalize_stream_models(
-            stream_id, stream_round_count
+        stream_operation = self.tracker.operation(stream_id)
+        models_changed = self.planner.models.finalize_stream_models(
+            stream_operation, stream_round_count
         )
         self._grow_stream(stream_id, stream_round_count, stream_round_count)
         if not self.planner.is_finite_stream(stream_id):

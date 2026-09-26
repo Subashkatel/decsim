@@ -842,6 +842,8 @@ def _check_card(path_name: str, card) -> None:
     lane_count = card.get("channels", 1)
     _check_lane_count(card_name, lane_count)
     _check_cycle_counts(card_name, card)
+    header_bits = card.get("header_bits_per_transfer", 0)
+    _check_header_bits(card_name, header_bits)
 
 
 def _check_cycle_counts(card_name: str, card: Mapping) -> None:
@@ -881,13 +883,31 @@ def _check_lane_count(card_name: str, lane_count) -> None:
     )
 
 
+def _check_header_bits(card_name: str, header_bits) -> None:
+    """A card's framing is a whole number of bits, zero or more."""
+    if _is_whole_number(header_bits):
+        return
+    raise ValueError(
+        f"{card_name}.header_bits_per_transfer is {header_bits!r}; it is "
+        f"the whole number of framing bits every transfer of the path "
+        f"carries, zero or more"
+    )
+
+
 def _is_positive_whole_number(value) -> bool:
     """A whole number above zero, never a yaml boolean."""
+    if not _is_whole_number(value):
+        return False
+    return value > 0
+
+
+def _is_whole_number(value) -> bool:
+    """A whole number of zero or more, never a yaml boolean."""
     if isinstance(value, bool):
         return False
     if not isinstance(value, int):
         return False
-    return value > 0
+    return value >= 0
 
 
 def _is_positive_number(value) -> bool:

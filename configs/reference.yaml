@@ -1022,7 +1022,9 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # times the iterations decsim's own
                                    # Relay-BP ran, a line measured with
                                    # NVIDIA's nv-qldpc-decoder (cudaq-qec
-                                   # 0.8.0) on that GPU, one decode at a time
+                                   # 0.8.0) on that GPU, one decode at a time,
+                                   # never under the fastest decode measured
+                                   # there
                                    # (decoders/measured_table/measurements.py)
   # partition: whole               # how the GPU was shared when measured:
                                    # whole | mps | 3g.40gb | 1g.10gb, the

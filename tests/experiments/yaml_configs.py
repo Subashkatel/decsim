@@ -1,6 +1,6 @@
 """A complete runnable yaml, small enough for a functional test.
 
-The shape is the owner's 2026-08-26 ruling: the algorithm is structure
+The shape is a design rule: the algorithm is structure
 on a per-tier unit card (weak_decoder / strong_decoder), never a sweep
 axis, mirroring the tiered architecture itself (Toshio arXiv 2510.25222:
 lightweight decoders decode constantly, a separate accurate decoder is

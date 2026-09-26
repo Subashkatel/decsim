@@ -633,7 +633,7 @@ the identity claim.
 **Decided.** The package that holds the yaml experiment, the sweep, the
 collected rows, the figures, the trace viewer and the `decsim` command
 is `decsim/experiments`, its tests are `tests/experiments`, the sixteen
-decoder runs of 2026-09 are `configs/experiments_2026_09`, and the
+decoder runs are `configs/experiments_2026_09`, and the
 Slurm array script is `slurm/experiment_run.sh`. Nothing inside any of
 them moved: every module, class and function keeps its name, every yaml
 key and every number is what it was, and a run charges exactly what it
@@ -642,7 +642,7 @@ charged before.
 **Why.** A name should say what the thing is for. `front` said only
 where the package sat in the uses order, and it collided with
 `decsim/frontends`, the program readers and the planner, which is a
-different thing at a different level. The 2026-09 folder and its Slurm
+different thing at a different level. The runs' folder and its Slurm
 script carried a second word for what the tree already calls an
 experiment, one yaml and the shards it is cut into, and two words for
 one thing make a reader ask what the difference is when there is none.
@@ -1006,7 +1006,9 @@ blocks finish" (CUDA C++ Programming Guide, preemption).
 **The first row.** `measured_table` answers with decsim's own Relay-BP
 decode and prices it from a line measured on a GPU: intercept plus slope
 times the iterations decsim's decode ran, per device, partition,
-decodes running and region size (`decsim/decoders/measured_table/`).
+decodes running and region size, and never less than the fastest decode
+the cell measured, since below it a line extrapolates to times the
+device never showed (`decsim/decoders/measured_table/`).
 The line is fitted on NVIDIA's nv-qldpc-decoder run on decsim's own
 regions, one decode at a time; the time follows decsim's iteration count
 rather than a draw from the samples because the two implementations

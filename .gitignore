@@ -29,8 +29,7 @@ __pycache__/
 
 # Run output. gem5 never tracks m5out and sinter writes its csv where the
 # user points it: a run folder is evidence, not code. The five folders
-# this repository used to track are archived in the sandbox at
-# archive/2026-09-06-results-out-of-tree/.
+# this repository used to track are archived outside it.
 /results/
 
 # Core dumps

@@ -51,8 +51,8 @@ GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 REQUIREMENT = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 WEIGHT_STEP = 0.1
 
-# the four distances the 2026-09 grid runs below eleven, each with as
-# many rounds as its distance, at three of the grid's error rates
+# the four distances the experiments_2026_09 grid runs below eleven, each
+# with as many rounds as its distance, at three of the grid's error rates
 CORPUS_DISTANCES = (3, 5, 7, 9)
 CORPUS_PROBABILITIES = (0.001, 0.005, 0.01)
 CORPUS_SHOTS = 300

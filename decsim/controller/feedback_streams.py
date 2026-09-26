@@ -234,7 +234,7 @@ class FeedbackStreams:
                 continue
             if not self.windows.has_dynamic_stream(stream_id):
                 continue
-            self.windows.seal_stream(stream_id, live.next_round)
+            self._seal(stream_id, live.next_round)
 
     # ---- idle rounds
 
@@ -267,6 +267,18 @@ class FeedbackStreams:
             owner, stream_id, live.next_round, is_final=False
         )
         return True
+
+    def _seal(self, stream_id, stream_round_count: int) -> None:
+        """The QPU attests the stream's length, then the windows close it.
+
+        The controller decides where a stream ends and only the QPU's
+        source saw the rounds it executed, so the controller asks its
+        neighbour on the data path before the seal travels on; a gem5
+        port has one peer (gem5 src/sim/port.hh:59 and :82-84).
+        """
+        owner = self.table.owner_of(stream_id)
+        self.qpu.validate_stream_length(owner, stream_round_count)
+        self.windows.seal_stream(stream_id, stream_round_count)
 
     def _live(self, stream_id) -> _LiveStream:
         live = self.live_by_stream_id.get(stream_id)
@@ -499,7 +511,7 @@ class FeedbackStreams:
         live.last_emission_tick = self.engine.now
         if live.is_close_requested:
             live.next_boundary_tick = None
-            self.windows.seal_stream(stream_id, live.next_round)
+            self._seal(stream_id, live.next_round)
             release = functools.partial(
                 self._release_protected_region, stream_id
             )

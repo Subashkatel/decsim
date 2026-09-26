@@ -1354,6 +1354,17 @@ class Qpu(Protocol):
     ) -> None:
         """Deliver the timing-only round of an idle patch."""
 
+    def validate_stream_length(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> None:
+        """Refuse a seal whose length differs from the rounds executed.
+
+        The controller asks before it seals a stream: only the QPU's
+        source can attest that the stream physically ended there.
+        """
+
 
 @runtime_checkable
 class SyndromeSource(Protocol):
@@ -1834,8 +1845,8 @@ class EscalationPolicy(Protocol):
     # link) follows from this one declaration.
     primary_tier: window_records.DecoderTier
     # Whether the policy may escalate a window, so the run keeps the
-    # strong syndrome buffer, one buffer of context on each side of every
-    # window, and the strong tier's window side.
+    # strong syndrome buffer, every window's rounds a strong redo would
+    # read, and the strong tier's window side.
     requires_strong_context: bool
     # Whether the policy reads a confidence to decide keep, so the
     # escalation section carries the confidence keys, the weak decoder

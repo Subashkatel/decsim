@@ -81,6 +81,12 @@ class IdleRoundAccounting:
         idle.unclaimed += 1
         self.trace.idle_round_emitted.fire(operation_id, patch, round_index)
 
+    def bind_at_start(
+        self, command: program_records.RunOperationBody
+    ) -> program_records.RunOperationBody:
+        """The streams bind a continuation after its patches' idle rounds."""
+        return self.streams.bind_at_start(command)
+
     def claim(self, operation) -> int:
         """The idle rounds on the operation's patches since the last claim."""
         patches = operation.patches

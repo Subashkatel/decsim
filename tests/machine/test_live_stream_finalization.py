@@ -314,6 +314,129 @@ def _finite_group_workload() -> tuple:
     return workload, device
 
 
+def test_an_issued_continuation_takes_the_streams_next_round():
+    """A continuation follows the idle round read out as it starts.
+
+    The continuation is issued at round 8, before that cycle's edge; the
+    edge reads the idle patch's round 8 out first, so the continuation
+    runs rounds 9 to 11 and the stream executes every cycle, in order.
+    """
+    program = memory_programs.memory_program()
+    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    workload = _continuation_workload()
+    machine = _stim_machine(workload, source)
+    rounds = _emitted_rounds(machine)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    assert rounds == list(range(1, 16))
+
+
+def test_a_second_continuation_follows_the_idle_rounds_before_it():
+    """The patch idles on its stream between two start-bound segments.
+
+    The first continuation runs rounds 9 to 11; the patch then reads
+    rounds 12 and 13 out while it idles, so the second, started at
+    round 13, runs rounds 14 to 16.
+    """
+    program = memory_programs.memory_program()
+    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    workload = _continuation_workload((8, 13), 20, blocks_protect=False)
+    machine = _stim_machine(workload, source)
+    rounds = _emitted_rounds(machine)
+
+    result = machine.run()
+
+    binding = machine.issuer.stream_binding_for(5)
+    assert result.terminal_status == "complete"
+    assert rounds == list(range(1, 21))
+    assert binding.stream_offset == 13
+
+
+def test_a_continuation_gives_its_decision_the_stream_s_buffer():
+    """The patch idles on its stream after a start-bound continuation.
+
+    Protect waits for the continuation's decision, and the continuation's
+    last window reads its buffer from the rounds the idle patch reads
+    out, so the decision arrives and the run ends.
+    """
+    program = memory_programs.memory_program()
+    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    workload = _continuation_workload((6,), 15, blocks_protect=True)
+    machine = _stim_machine(workload, source)
+    guard = _refuse_past(100_000_000)
+    machine.engine.action_done.connect(guard)
+    rounds = _emitted_rounds(machine)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    assert rounds == list(range(1, 16))
+
+
+def _continuation_workload(
+    start_rounds: tuple = (8,),
+    readout_round: int = 15,
+    *,
+    blocks_protect: bool = False,
+) -> workload_settings.WorkloadSettings:
+    """A three-round prefix, three-round continuations, then a region.
+
+    The continuations, operations 2, 5, 6 and on, start at the start
+    rounds; a blocked protect waits for operation 2's decision.
+    """
+    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    operations = [prefix]
+    counts = {100: 0, 1: 3, 3: 0, 4: 0}
+    last = prefix
+    for index, start_round in enumerate(start_rounds):
+        operation_id = 4 + index
+        if index == 0:
+            operation_id = 2
+        last = dataclasses.replace(
+            owner,
+            id=operation_id,
+            name=f"resumed{operation_id}",
+            stream_id=100,
+            predecessors=(last.id,),
+            scheduled_start_round=start_round,
+        )
+        operations.append(last)
+        counts[operation_id] = 3
+    blocked_by = None
+    if blocks_protect:
+        blocked_by = 2
+    protect = program_records.Operation(
+        3,
+        "protect",
+        (0,),
+        patches=(0,),
+        predecessors=(last.id,),
+        blocked_by=blocked_by,
+        emits_detector_data=False,
+    )
+    readout = dataclasses.replace(
+        protect,
+        id=4,
+        name="readout",
+        predecessors=(3,),
+        blocked_by=None,
+        scheduled_start_round=readout_round,
+    )
+    region = program_records.ProtectedRegion(100, 3, 4)
+    policy = round_policies.PerOperationRounds(counts)
+    return workload_settings.WorkloadSettings(
+        operations=(*operations, protect, readout),
+        dynamic_streams=(owner,),
+        protected_regions=(region,),
+        rounds_policy=policy,
+    )
+
+
 def _stim_machine(
     workload: workload_settings.WorkloadSettings, device
 ) -> machine_module.Machine:

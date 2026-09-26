@@ -138,6 +138,15 @@ class IdleRoundReceiver(Protocol):
     def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
         """Take one idle cycle of a patch nobody is operating on."""
 
+    def bind_at_start(
+        self, command: program_records.RunOperationBody
+    ) -> program_records.RunOperationBody:
+        """The command as it starts after its patches' idle rounds.
+
+        A segment that declares no stream offset continues its stream
+        after every round the stream has had, idle ones included.
+        """
+
 
 # --------------------------------------- the store holds the packed round
 

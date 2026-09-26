@@ -45,6 +45,11 @@ class Streams(Protocol):
     def begin(self, operation) -> None:
         """Open the region this operation starts, if it starts one."""
 
+    def bind_at_start(
+        self, command: program_records.RunOperationBody
+    ) -> program_records.RunOperationBody:
+        """The command as it starts, a continuation at its stream round."""
+
     def request_closes(self, operation) -> None:
         """Ask the region this operation ends to close at its boundary."""
 
@@ -89,6 +94,12 @@ class NoFeedbackStreams:
         """Nothing to activate."""
         del operation
 
+    def bind_at_start(
+        self, command: program_records.RunOperationBody
+    ) -> program_records.RunOperationBody:
+        """No stream to continue."""
+        return command
+
     def request_closes(self, operation) -> None:
         """Nothing to close."""
         del operation
@@ -126,6 +137,9 @@ class _LiveStream:
     is_close_requested: bool = False
     last_emission_tick: Optional[int] = None
     is_sealed: bool = False
+    # the last segment issued at a declared offset, until another
+    # operation claims its patches
+    pending_segment_id: Optional[int] = None
     # an operation took part of the stream's patch group
     is_group_split: bool = False
 
@@ -202,6 +216,31 @@ class FeedbackStreams:
         else:
             self._bind_protected_feedback_source(operation, protected_stream_id)
         self._hold_patches(operation)
+
+    def bind_at_start(
+        self, command: program_records.RunOperationBody
+    ) -> program_records.RunOperationBody:
+        """A continuation takes its stream's next round as it starts.
+
+        A segment that declares no offset follows every round of its
+        stream, the idle rounds its patches read out while it waited to
+        start among them; the QPU starts it only after its boundary's
+        idle rounds (qpu/cycle_clock.py _cross_boundary). The segment
+        issued before it has run, so its patches may continue the
+        stream after it.
+        """
+        operation = command.operation
+        stream_id = operation.stream_id
+        stream_offset = self._next_round(stream_id)
+        self._bind(operation.id, stream_id, stream_offset)
+        live = self._live(stream_id)
+        live.next_round = stream_offset + command.round_count
+        live.pending_segment_id = None
+        bound = dataclasses.replace(operation, stream_offset=stream_offset)
+        source_round_count = self.table.round_count_of(stream_id)
+        return dataclasses.replace(
+            command, operation=bound, source_round_count=source_round_count
+        )
 
     # ---- ending an operation
 
@@ -324,20 +363,32 @@ class FeedbackStreams:
         history; an operation without detector data leaves them as they
         are. An operation that claims only part of a stream's patch group
         first ends the hold of the whole group (_release_split_groups).
+        Any other operation also means the stream's issued segment has
+        run, so the patches may continue the stream again.
         """
         patches = program_records.patches_of(operation)
         self._release_split_groups(patches)
-        binding = self.bindings.get(operation.id)
-        if binding is not None:
+        stream_id, _ = self._declared_stream(operation)
+        if stream_id is not None:
             for patch in patches:
-                self.stream_by_patch[patch] = binding.stream_id
-            live = self._live(binding.stream_id)
+                self.stream_by_patch[patch] = stream_id
+            live = self._live(stream_id)
             live.is_group_split = False
             return
+        for patch in patches:
+            self._end_pending_segment(patch)
         if not operation.emits_detector_data:
             return
         for patch in patches:
             self.stream_by_patch.pop(patch, None)
+
+    def _end_pending_segment(self, patch) -> None:
+        """Another operation claims the patch, so its segment has run."""
+        stream_id = self.stream_by_patch.get(patch)
+        if stream_id is None:
+            return
+        live = self._live(stream_id)
+        live.pending_segment_id = None
 
     def _release_split_groups(self, patches) -> None:
         """End the hold of every stream group the patches claim part of.
@@ -373,7 +424,9 @@ class FeedbackStreams:
 
         A segment leaves its own stream until the next operation starts,
         even when that one is already issued; any other operation leaves
-        what the patch holds. A sealed stream holds nothing.
+        what the patch holds. A sealed stream holds nothing, and neither
+        does one whose next segment is issued at a declared offset: that
+        segment's rounds are the stream's next.
         """
         stream_id = self.stream_by_patch.get(patch)
         binding = self.bindings.get(operation.id)
@@ -381,6 +434,8 @@ class FeedbackStreams:
             stream_id = binding.stream_id
         live = self.live_by_stream_id.get(stream_id)
         if live is None or live.is_sealed:
+            return None
+        if live.pending_segment_id not in (None, operation.id):
             return None
         return stream_id
 
@@ -530,8 +585,8 @@ class FeedbackStreams:
     def _reserve_stream_rounds(self, operation) -> None:
         """Give an unprotected stream segment its rounds.
 
-        A segment that declares no offset is bound at the next free
-        round; an offset already reserved is refused.
+        A segment that declares no offset is bound as it starts
+        (bind_at_start); an offset already reserved is refused.
         """
         stream_id, stream_offset = self._declared_stream(operation)
         if stream_id is None:
@@ -544,9 +599,8 @@ class FeedbackStreams:
                 )
             return
         if stream_offset is None:
-            stream_offset = next_round
-            self._bind(operation.id, stream_id, stream_offset)
-        elif stream_offset < next_round:
+            return
+        if stream_offset < next_round:
             first_round = stream_offset + 1
             raise RuntimeError(
                 f"{operation.name} starts at stream round {first_round}, "
@@ -557,6 +611,7 @@ class FeedbackStreams:
         operation_end = stream_offset + round_count
         live = self._live(stream_id)
         live.next_round = max(next_round, operation_end)
+        live.pending_segment_id = operation.id
 
     # ---- private: the protected cycle, boundary, round, seal
 

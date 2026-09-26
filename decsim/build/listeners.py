@@ -36,14 +36,14 @@ def load_program(
         window_manager.register_operation(operation)
     run_plan = plan.run_plan
     window_manager.install_planned_holds(run_plan.buffering)
-    source_round_limits = _register_streams(plan, window_manager)
+    source_round_limit_by_stream = _register_streams(plan, window_manager)
     program = program_records.ExecutionProgram(
         plan.operations,
         plan.decode_operations,
         plan.dynamic_streams,
         plan.protected_regions,
     )
-    streams.load(program, source_round_limits)
+    streams.load(program, source_round_limit_by_stream)
     for operation in program.operations:
         window_manager.register_operation(operation)
     idle_rounds.load(program)
@@ -61,12 +61,12 @@ def _register_streams(plan, window_manager) -> dict:
         resolved.operation_id: resolved
         for resolved in plan.run_plan.resolved_operations
     }
-    source_round_limits = {}
+    source_round_limit_by_stream = {}
     for stream in plan.dynamic_streams:
         resolved = resolved_by_id[stream.id]
         source_round_limit = plan.device.declare_stream(
             stream, resolved.round_count
         )
         window_manager.register_stream(stream, source_round_limit)
-        source_round_limits[stream.id] = source_round_limit
-    return source_round_limits
+        source_round_limit_by_stream[stream.id] = source_round_limit
+    return source_round_limit_by_stream

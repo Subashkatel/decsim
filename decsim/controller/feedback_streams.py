@@ -6,11 +6,13 @@ is bound to which stream round, the next free round of every stream, and the
 protected regions: a protected region keeps one live stream on its owner group
 between a start and an end operation, emits one round of it per QEC cycle
 at the cycle boundary, holds operations that need the patch until that
-boundary, and seals the stream only after its final round. Each stream's
-state is one record (_LiveStream); the program's regions and the
-resolved plan are one table. Nothing here schedules decoding; the window
-manager learns about bindings, closed boundaries and seals through the
-calls below.
+boundary, and seals the stream only after its final round. An idle
+patch continues the stream it holds (extend_live_stream), and a segment
+that declares no offset is bound as the QPU starts it (bind_at_start).
+Each stream's state is one record (_LiveStream, its protected cycle in
+_ProtectedCycle); the program's regions and the resolved plan are one
+table. Nothing here schedules decoding; the window manager learns about
+bindings, closed boundaries and seals through the calls below.
 
 NoFeedbackStreams is what a run without streams gets: every method is a
 no-op with the same interface.
@@ -53,7 +55,9 @@ class Streams(Protocol):
     def request_closes(self, operation) -> None:
         """Ask the region this operation ends to close at its boundary."""
 
-    def close_feedback_boundary(self, operation) -> None:
+    def close_feedback_boundary(
+        self, operation: program_records.Operation
+    ) -> None:
         """Close the boundary the operation's last round reached."""
 
     def seal_finished_streams(self) -> None:
@@ -63,7 +67,7 @@ class Streams(Protocol):
         """True when a live protected region already emits this patch."""
 
     def extend_live_stream(
-        self, operation: program_records.Operation, patch
+        self, operation: program_records.Operation, patch: Any
     ) -> bool:
         """Emit one more round of the stream the idle patch holds."""
 
@@ -76,9 +80,13 @@ class NoFeedbackStreams:
     qpu = ports.Port(ports.Qpu)
     windows = ports.Port(ports.WindowInput)
 
-    def load(self, program, source_round_limits: dict) -> None:
+    def load(
+        self,
+        program: program_records.ExecutionProgram,
+        source_round_limit_by_stream: dict,
+    ) -> None:
         """Nothing to index."""
-        del program, source_round_limits
+        del program, source_round_limit_by_stream
 
     def binding_for(self, operation_id):
         """No operation is bound to a stream."""
@@ -104,7 +112,9 @@ class NoFeedbackStreams:
         """Nothing to close."""
         del operation
 
-    def close_feedback_boundary(self, operation) -> None:
+    def close_feedback_boundary(
+        self, operation: program_records.Operation
+    ) -> None:
         """No boundary to close."""
         del operation
 
@@ -117,31 +127,12 @@ class NoFeedbackStreams:
         return False
 
     def extend_live_stream(
-        self, operation: program_records.Operation, patch
+        self, operation: program_records.Operation, patch: Any
     ) -> bool:
         """No stream to extend."""
         del operation
         del patch
         return False
-
-
-@dataclasses.dataclass
-class _LiveStream:
-    """One stream's state: its next round and, when protected, its cycle."""
-
-    next_round: int = 0
-    # the active protected region, None while the stream is unprotected
-    region: object = None
-    next_boundary_tick: Optional[int] = None
-    is_boundary_open: bool = False
-    is_close_requested: bool = False
-    last_emission_tick: Optional[int] = None
-    is_sealed: bool = False
-    # the last segment issued at a declared offset, until another
-    # operation claims its patches
-    pending_segment_id: Optional[int] = None
-    # an operation took part of the stream's patch group
-    is_group_split: bool = False
 
 
 class FeedbackStreams:
@@ -170,14 +161,18 @@ class FeedbackStreams:
         # patch -> the stream of the last segment that ran on it
         self.stream_by_patch: dict = {}
         # stream id -> the rounds its source has, None when open-ended
-        self.source_round_limits: dict = {}
+        self.source_round_limit_by_stream: dict = {}
 
     # ---- program load
 
-    def load(self, program, source_round_limits: dict) -> None:
+    def load(
+        self,
+        program: program_records.ExecutionProgram,
+        source_round_limit_by_stream: dict,
+    ) -> None:
         """Index the regions, the stream bindings and the source limits."""
         self.table.index(program)
-        self.source_round_limits = dict(source_round_limits)
+        self.source_round_limit_by_stream = dict(source_round_limit_by_stream)
         for operation in program.operations:
             has_stream = operation.stream_id is not None
             has_offset = operation.stream_offset is not None
@@ -224,10 +219,12 @@ class FeedbackStreams:
 
         A segment that declares no offset follows every round of its
         stream, the idle rounds its patches read out while it waited to
-        start among them; the QPU starts it only after its boundary's
-        idle rounds (qpu/cycle_clock.py _cross_boundary). The segment
-        issued before it has run, so its patches may continue the
-        stream after it.
+        start among them: a live source executes each round once, in
+        order, on one retained state (Stim's TableauSimulator.do;
+        docs/explanation/decisions.md D24), and the QPU starts the
+        segment only after its boundary's idle rounds
+        (qpu/cycle_clock.py _cross_boundary). The segment issued before
+        it has run, so its patches may continue the stream after it.
         """
         operation = command.operation
         stream_id = operation.stream_id
@@ -251,9 +248,11 @@ class FeedbackStreams:
             self._check_region_ends_on_boundary(region)
         for region in ending_regions:
             live = self._live(region.stream_id)
-            live.is_close_requested = True
+            live.cycle.is_close_requested = True
 
-    def close_feedback_boundary(self, operation) -> None:
+    def close_feedback_boundary(
+        self, operation: program_records.Operation
+    ) -> None:
         """Close the stream boundary at the body measurement.
 
         Only in measurement_closed mode, and only for a feedback source:
@@ -293,7 +292,7 @@ class FeedbackStreams:
         return patch in live_patches
 
     def extend_live_stream(
-        self, operation: program_records.Operation, patch
+        self, operation: program_records.Operation, patch: Any
     ) -> bool:
         """Advance the stream the idle patch holds, once per tick.
 
@@ -441,12 +440,12 @@ class FeedbackStreams:
 
     def _is_past_source(self, stream_id, live) -> bool:
         """The stream has had every round its source holds."""
-        source_round_limit = self.source_round_limits.get(stream_id)
+        source_round_limit = self.source_round_limit_by_stream.get(stream_id)
         if source_round_limit is None:
             return False
         return live.next_round >= source_round_limit
 
-    def _live(self, stream_id) -> _LiveStream:
+    def _live(self, stream_id) -> "_LiveStream":
         live = self.live_by_stream_id.get(stream_id)
         if live is None:
             live = _LiveStream()
@@ -462,7 +461,7 @@ class FeedbackStreams:
     def _live_protected_patches(self) -> set:
         patches = set()
         for stream_id, live in self.live_by_stream_id.items():
-            if live.region is not None:
+            if live.cycle.region is not None:
                 owner_patches = self.table.patches_of_stream(stream_id)
                 patches.update(owner_patches)
         return patches
@@ -470,14 +469,14 @@ class FeedbackStreams:
     def _boundary_open_patches(self) -> set:
         patches = set()
         for stream_id, live in self.live_by_stream_id.items():
-            if live.region is not None and live.is_boundary_open:
+            if live.cycle.region is not None and live.cycle.is_boundary_open:
                 owner_patches = self.table.patches_of_stream(stream_id)
                 patches.update(owner_patches)
         return patches
 
     def _active_stream_id_of(self, patch):
         for stream_id, live in self.live_by_stream_id.items():
-            if live.region is None:
+            if live.cycle.region is None:
                 continue
             owner_patches = self.table.patches_of_stream(stream_id)
             if patch in owner_patches:
@@ -572,7 +571,7 @@ class FeedbackStreams:
 
     def _activate_region(self, region) -> None:
         live = self._live(region.stream_id)
-        live.region = region
+        live.cycle.region = region
         self._schedule_next_boundary(region, boundary_round=1)
 
     def _bind_protected_feedback_source(self, operation, stream_id) -> None:
@@ -632,7 +631,7 @@ class FeedbackStreams:
         next_edge = self.qpu.next_boundary()
         if next_edge == self.engine.now:
             next_edge += cadence
-        live.next_boundary_tick = next_edge
+        live.cycle.next_boundary_tick = next_edge
         delay = next_edge - self.engine.now
         open_boundary = functools.partial(
             self._open_protected_boundary, stream_id
@@ -646,17 +645,17 @@ class FeedbackStreams:
     def _open_protected_boundary(self, stream_id) -> None:
         """The cycle boundary: held operations may start, then the round."""
         live = self._live(stream_id)
-        assert live.region is not None, (
+        assert live.cycle.region is not None, (
             f"protected stream {stream_id} is not active"
         )
-        assert live.next_boundary_tick == self.engine.now, (
+        assert live.cycle.next_boundary_tick == self.engine.now, (
             f"protected stream {stream_id} boundary tick mismatch: "
-            f"{live.next_boundary_tick} != {self.engine.now}"
+            f"{live.cycle.next_boundary_tick} != {self.engine.now}"
         )
-        assert not live.is_boundary_open, (
+        assert not live.cycle.is_boundary_open, (
             f"protected stream {stream_id} boundary already open"
         )
-        live.is_boundary_open = True
+        live.cycle.is_boundary_open = True
         self.runtime.retry_ready_operations()
         next_round = live.next_round + 1
         emit_round = functools.partial(self._emit_protected_round, stream_id)
@@ -674,23 +673,23 @@ class FeedbackStreams:
         scheduled.
         """
         live = self._live(stream_id)
-        region = live.region
+        region = live.cycle.region
         assert region is not None, f"protected stream {stream_id} is not active"
-        assert live.is_boundary_open, (
+        assert live.cycle.is_boundary_open, (
             f"protected stream {stream_id} boundary is not open"
         )
-        live.is_boundary_open = False
+        live.cycle.is_boundary_open = False
         live.next_round += 1
         owner = self.table.owner_of(stream_id)
         self.qpu.emit_idle_stream_round(
             owner,
             stream_id,
             live.next_round,
-            is_final=live.is_close_requested,
+            is_final=live.cycle.is_close_requested,
         )
         live.last_emission_tick = self.engine.now
-        if live.is_close_requested:
-            live.next_boundary_tick = None
+        if live.cycle.is_close_requested:
+            live.cycle.next_boundary_tick = None
             self._seal(stream_id, live.next_round)
             release = functools.partial(
                 self._release_protected_region, stream_id
@@ -707,32 +706,58 @@ class FeedbackStreams:
 
     def _release_protected_region(self, stream_id) -> None:
         live = self._live(stream_id)
-        assert live.region is not None, (
+        assert live.cycle.region is not None, (
             f"protected stream {stream_id} is not active"
         )
-        assert live.is_close_requested, (
+        assert live.cycle.is_close_requested, (
             f"protected stream {stream_id} was not closed"
         )
-        assert live.next_boundary_tick is None, (
+        assert live.cycle.next_boundary_tick is None, (
             f"protected stream {stream_id} has a pending boundary"
         )
         assert live.last_emission_tick == self.engine.now, (
             f"protected stream {stream_id} lacks final-round evidence"
         )
-        live.region = None
-        live.is_close_requested = False
+        live.cycle.region = None
+        live.cycle.is_close_requested = False
         live.last_emission_tick = None
         self.runtime.retry_ready_operations()
 
     def _check_region_ends_on_boundary(self, region) -> None:
         stream_id = region.stream_id
         live = self._live(stream_id)
-        assert live.region is region, (
+        assert live.cycle.region is region, (
             f"protected stream {stream_id} ended while inactive"
         )
-        assert live.next_boundary_tick == self.engine.now, (
+        assert live.cycle.next_boundary_tick == self.engine.now, (
             f"protected stream {stream_id} ended off boundary"
         )
+
+
+@dataclasses.dataclass
+class _ProtectedCycle:
+    """A protected stream's cycle: its region and its next boundary."""
+
+    # the active protected region, None while the stream is unprotected
+    region: object = None
+    next_boundary_tick: Optional[int] = None
+    is_boundary_open: bool = False
+    is_close_requested: bool = False
+
+
+@dataclasses.dataclass
+class _LiveStream:
+    """One stream's state: its next round and, when protected, its cycle."""
+
+    next_round: int = 0
+    cycle: _ProtectedCycle = dataclasses.field(default_factory=_ProtectedCycle)
+    last_emission_tick: Optional[int] = None
+    is_sealed: bool = False
+    # the last segment issued at a declared offset, until another
+    # operation claims its patches
+    pending_segment_id: Optional[int] = None
+    # an operation took part of the stream's patch group
+    is_group_split: bool = False
 
 
 class _StreamTable:

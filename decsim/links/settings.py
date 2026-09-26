@@ -44,13 +44,13 @@ class QuantityBasis(str, enum.Enum):
 class CapacitySettings:
     """Bandwidth of one channel in bits per microsecond, aggregate or per lane.
 
-    The rate is kept as written. The serialization arithmetic reads it as
-    the decimal on the card and multiplies by the lane count exactly
-    (exact_aggregate_bits_per_microsecond); the reported aggregate is the
-    input times the lane count in the input's own arithmetic.
+    The rate is kept as written, a decimal from a Python card or an exact
+    Fraction from the yaml and the bandwidth card. The serialization
+    arithmetic reads it as the decimal on the card and multiplies by the
+    lane count exactly (exact_aggregate_bits_per_microsecond).
     """
 
-    input_bits_per_microsecond: float
+    input_bits_per_microsecond: Union[float, fractions.Fraction]
     basis: QuantityBasis
     lane_count: Optional[int]
     source: str
@@ -63,15 +63,6 @@ class CapacitySettings:
             raise ValueError("input_bits_per_microsecond must be positive")
         lane_count = _lane_count_for(self.basis, self.lane_count, "capacity")
         object.__setattr__(self, "lane_count", lane_count)
-
-    @property
-    def aggregate_bits_per_microsecond(
-        self,
-    ) -> Union[int, float, fractions.Fraction]:
-        """The whole channel's rate: the input times the lane count."""
-        if self.basis is QuantityBasis.AGGREGATE:
-            return self.input_bits_per_microsecond
-        return self.input_bits_per_microsecond * self.lane_count
 
     def exact_aggregate_bits_per_microsecond(self) -> fractions.Fraction:
         """The whole channel's rate as an exact Fraction of the card's text.
@@ -291,8 +282,11 @@ def _check_capacity_matches_payload(
 def _as_whole_number(value, name: str) -> int:
     """A value as an exact int, or a ValueError naming the field.
 
-    3.0 is fine; 3.5, NaN and None are not.
+    3.0 is fine; 3.5, NaN and None are not, nor a boolean, which Python
+    would read as 0 or 1 and a yaml writes as a flag.
     """
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite whole number")
     try:
         whole = int(value)
     except (OverflowError, ValueError, TypeError):
@@ -311,11 +305,13 @@ def _as_count(value, name: str) -> int:
 
 
 def _require_finite_number(value, name: str) -> None:
-    """Refuse NaN and infinity.
+    """Refuse NaN, infinity and a boolean.
 
     A Python int of any size is finite: math.isfinite overflows converting
     it to float, and that overflow reads as finite.
     """
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
     try:
         is_finite = math.isfinite(value)
     except OverflowError:

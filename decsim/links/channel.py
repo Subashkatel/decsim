@@ -82,7 +82,9 @@ class Channel:
         )
         self._last_request_ticks = now_ticks
         ready_ticks = self._ready_ticks(now_ticks, setup_ticks)
-        request = _Request(framed, now_ticks, ready_ticks, on_delivered)
+        request = _Request(
+            framed, now_ticks, setup_ticks, ready_ticks, on_delivered
+        )
         if ready_ticks == now_ticks:
             self._take_wire(request)
             return
@@ -164,14 +166,16 @@ class Channel:
             self._wire_free_ticks = end_ticks
         propagation_ticks = self._settings.propagation_latency_ticks
         delivery_ticks = end_ticks + propagation_ticks
-        setup_ticks = request.ready_ticks - request.request_ticks
+        setup_span_ticks = request.ready_ticks - request.request_ticks
+        setup_wait_ticks = setup_span_ticks - request.setup_ticks
         queue_wait_ticks = start_ticks - request.ready_ticks
         total_delay_ticks = delivery_ticks - request.request_ticks
         transfer = transfer_records.Transfer(
             payload_bits=request.framed.payload_bits,
             header_bits=request.framed.header_bits,
             request_ticks=request.request_ticks,
-            setup_ticks=setup_ticks,
+            setup_wait_ticks=setup_wait_ticks,
+            setup_ticks=request.setup_ticks,
             send_ticks=request.ready_ticks,
             queue_wait_ticks=queue_wait_ticks,
             serialization_ticks=serialization_ticks,
@@ -197,6 +201,7 @@ class _Request:
 
     framed: FramedPayload
     request_ticks: int
+    setup_ticks: int
     ready_ticks: int
     on_delivered: OnDelivered
 

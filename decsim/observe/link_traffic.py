@@ -175,7 +175,10 @@ class TrafficLedger:
         Counters per path with the setup ticks itemized (setup is
         engine-side work before the wire and never enters a channel's
         counters), counters per channel, every transfer, and the
-        reconciliation of each channel against its member paths.
+        reconciliation of each channel against its member paths. A
+        transfer's wait for the setup engine is not a key of its own: it
+        is the span from the request to send_ticks less its setup, and
+        the request is delivery_ticks less total_delay_ticks.
         """
         snapshot = self.snapshot()
         setup_ticks_by_binding = self._setup_ticks_by_binding(snapshot)

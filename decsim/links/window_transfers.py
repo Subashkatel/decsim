@@ -12,6 +12,7 @@ store's own business and never reaches this module.
 import functools
 from typing import Callable, Optional
 
+import decsim.engine
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
@@ -25,7 +26,7 @@ class WindowTransfers:
 
     link = ports.Port(ports.Link)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: decsim.engine.Engine) -> None:
         self.engine = engine
 
     def send_for_window(
@@ -129,5 +130,7 @@ class WindowTransfers:
         )
 
 
-def _run_at_delivery(on_delivered: Callable[[], None], _transfer) -> None:
+def _run_at_delivery(
+    on_delivered: Callable[[], None], _transfer: transfer_records.Transfer
+) -> None:
     on_delivered()

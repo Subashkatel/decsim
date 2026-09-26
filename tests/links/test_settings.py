@@ -62,11 +62,6 @@ def card(**paths):
     return link_settings.FabricSettings(profile_name="test", **wiring)
 
 
-def test_a_per_lane_rate_reports_the_input_times_the_lane_count():
-    per_lane = capacity(2.0, PER_LANE, 4)
-    assert per_lane.aggregate_bits_per_microsecond == 8.0
-
-
 def test_a_per_lane_rate_is_multiplied_exactly():
     per_lane = capacity(0.7, PER_LANE, 3)
     exact = per_lane.exact_aggregate_bits_per_microsecond()
@@ -154,6 +149,20 @@ def test_a_negative_header_is_refused():
         ValueError, match="header_bits_per_transfer must be nonnegative"
     ):
         actual_path(FREE_CHANNEL, header_bits=-8)
+
+
+def test_a_boolean_header_is_refused_as_no_whole_number():
+    with pytest.raises(
+        ValueError, match="header_bits_per_transfer must be a finite whole"
+    ):
+        actual_path(FREE_CHANNEL, header_bits=True)
+
+
+def test_a_boolean_capacity_is_refused_as_no_number():
+    with pytest.raises(
+        ValueError, match="input_bits_per_microsecond must be a finite number"
+    ):
+        capacity(True)
 
 
 def test_a_fractional_setup_cost_is_refused():

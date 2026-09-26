@@ -59,10 +59,14 @@ class LinkFabric:
         payload_bits: Optional[int],
         now_ticks: int,
     ) -> int:
-        """What a send now would pay if nothing else reached its channel."""
+        """What a send now would pay if nothing else reached its channel.
+
+        A routed readout is priced by its footprint, which an estimate is
+        not given, so asking for one is a caller's bug.
+        """
         is_readout = path is transfer_records.LinkPath.QPU_TO_CONTROLLER
         if is_readout and self._readout_by_footprint:
-            raise ValueError("a routed readout delay requires a footprint")
+            raise RuntimeError("a routed readout delay requires a footprint")
         binding = self._binding_by_path[path]
         selected_bits, _selection, _source = _select_payload(
             path, binding.settings, payload_bits
@@ -110,7 +114,11 @@ class LinkFabric:
             lambda transfer: self._finish(outgoing, transfer),
         )
 
-    def _binding_for(self, path, attribution):
+    def _binding_for(
+        self,
+        path: transfer_records.LinkPath,
+        attribution: transfer_records.TransferAttribution,
+    ) -> "_PathBinding":
         """Route the complete footprint, as gem5's xbar routes an address.
 
         src/mem/xbar.cc findPort keeps the default when no explicit route
@@ -217,7 +225,7 @@ class _TraceSources:
     """Every event the link fabric reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

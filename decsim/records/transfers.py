@@ -200,18 +200,22 @@ class PayloadSelection(Enum):
 class Transfer:
     """One transfer's timing on its channel, complete at delivery.
 
-    The sender asked at request_ticks. The setup ended at send_ticks, when
-    the transfer reached the wire's queue; the wire took it at
-    serializer_start_ticks and let its last bit go at
+    The sender asked at request_ticks. The transfer waited
+    setup_wait_ticks for the channel's setup engine to finish the setups
+    ahead of it, paid its own path's setup_ticks, and reached the wire's
+    queue at send_ticks; the wire took it at serializer_start_ticks
+    (queue_wait_ticks later) and let its last bit go at
     serializer_end_ticks; the receiver has it at delivery_ticks, one
-    propagation later. total_delay_ticks counts from the request.
-    header_bits is the path's framing, which the wire serialized with
-    the payload and which is no part of it.
+    propagation later. total_delay_ticks counts from the request and is
+    the sum of the two setup spans, the queue wait, the serialization
+    and the propagation. header_bits is the path's framing, which the
+    wire serialized with the payload and which is no part of it.
     """
 
     payload_bits: Optional[int]
     header_bits: int
     request_ticks: int
+    setup_wait_ticks: int
     setup_ticks: int
     send_ticks: int
     queue_wait_ticks: int

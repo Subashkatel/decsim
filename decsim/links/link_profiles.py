@@ -15,20 +15,24 @@ off-board path priced by Backline's measured RoCE v2 round trip; it is
 the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
 on any path; with_transfer_overhead adds a setup cost to any fabric.
 
-Every number carries a source string that travels into the traffic
-report; paper locators are arXiv numbers and sections. To
+Every number carries a source string on the settings record it sets,
+and a payload's source also travels into the traffic report with every
+transfer; paper locators are arXiv numbers and sections. To
 change a number, copy a card into your own file and edit it, then pass
 it as the machine's links setting.
 """
 
 import dataclasses
 import fractions
+import math
 from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.engine
 import decsim.links.fabric as fabric
 import decsim.links.settings as settings
+import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.tables as tables
@@ -141,12 +145,12 @@ ROCE_V2_GPU_SOURCE = (
 
 # decsim prices one number per hop, so each leg of the round trip is
 # charged half of it and the coprocessor's own poll is charged nothing.
-# The legs the measurement covers are the controller's write into the
-# ring (paper lines 1611-1613), the coprocessor's poll of the slot
-# (1616-1618, the Catalyst runtime's poll_message_arrival spinning on
-# seq_num) and the reply's write back (1618-1620).
+# The legs the measurement covers are the controller's one-sided write
+# into the coprocessor's memory (paper lines 1610-1612), the coprocessor's
+# poll "on the expected memory buffer" (1616-1617) and the reply's
+# one-sided write back (1617-1620).
 ROCE_V2_WRITE_LEG = (
-    "the controller's one-sided write into the coprocessor's ring, one "
+    "the controller's one-sided write into the coprocessor's memory, one "
     "half of the measured round trip; the paper gives no per-direction "
     "split"
 )
@@ -156,12 +160,22 @@ ROCE_V2_ESCALATION_LEG = (
     "gives no per-direction split"
 )
 ROCE_V2_POLL_LEG = (
-    "zero: the coprocessor polls its own memory for the slot the write "
-    "landed in"
+    "zero: the coprocessor polls the buffer in its own memory that the "
+    "write landed in"
 )
 ROCE_V2_REPLY_LEG = (
     "the reply's one-sided write back to the controller, one half of the "
     "measured round trip; the paper gives no per-direction split"
+)
+
+
+# The keys a path's card writes: the first three on every card, the rest
+# only when the path has lanes, a setup or a header to price.
+_REQUIRED_CARD_KEYS = ("latency_cycles", "clock", "bits_per_cycle")
+_CARD_KEYS = _REQUIRED_CARD_KEYS + (
+    "channels",
+    "setup_cycles_per_transfer",
+    "header_bits_per_transfer",
 )
 
 
@@ -444,12 +458,12 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     RoCE v2 with a one-sided RDMA write, the coprocessor polls that
     buffer and writes the reply back, and the controller times the whole
     round trip in its own clock. The paper gives no per-direction
-    number, and neither does the published code, so the split below is
-    decsim's rule rather than a measurement: the controller's write into
-    strong syndrome buffer, the escalation request and the strong decoder's
-    reply to the frame are each one half of the round trip, and the
+    number, so the split below is decsim's rule rather than a
+    measurement: the controller's write into strong syndrome buffer, the
+    escalation request and the strong decoder's reply to the frame are
+    each one half of the round trip, and the
     strong store's read into the strong decoder is zero because the
-    coprocessor polls a slot in its own memory. The escalation round
+    coprocessor polls a buffer in its own memory. The escalation round
     trip on this card, weak_decoder_to_strong_decoder plus
     strong_buffer_to_strong_decoder plus strong_decoder_to_frame, is
     therefore the measured median exactly.
@@ -491,7 +505,9 @@ class LogicalReferenceFabric:
         return logical_reference_profile()
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 
@@ -499,9 +515,10 @@ class LogicalReferenceFabric:
 class BandwidthLimitedFabric:
     """The same fabric with finite rates, provisioned from the geometry.
 
-    Every channel carries exactly its nominal traffic in one round, so
-    contention becomes measurable and capacity_scale sweeps the whole
-    fabric. Its numbers come from the run's own geometry, not from the
+    Every channel carries exactly its nominal traffic in one commit
+    region (the readout and store hops: one round's bits in one round
+    period), so contention becomes measurable and capacity_scale sweeps
+    the whole fabric. Its numbers come from the run's own geometry, not from the
     links section, which is why base_card refuses a yaml and names what
     a caller has to give it.
     """
@@ -520,7 +537,9 @@ class BandwidthLimitedFabric:
         )
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 
@@ -541,7 +560,9 @@ class RoceV2CpuFabric:
         return roce_v2_measured_profile("cpu")
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 
@@ -564,7 +585,9 @@ class RoceV2GpuFabric:
         return roce_v2_measured_profile("gpu")
 
     @staticmethod
-    def build(card: settings.FabricSettings, engine):
+    def build(
+        card: settings.FabricSettings, engine: decsim.engine.Engine
+    ) -> ports.Link:
         """The object that carries this run's transfers."""
         return fabric.LinkFabric(card, engine)
 
@@ -604,6 +627,7 @@ def from_yaml(
             continue
         if card is None:
             continue
+        _check_card(path_name, card)
         path_settings = getattr(profile, path_name)
         carded = _carded_path(path_name, path_settings, card, clocks, source)
         replacements[path_name] = dataclasses.replace(
@@ -615,21 +639,6 @@ def from_yaml(
         kind=kind,
         profile_name=f"{name}.yaml",
     )
-
-
-def _check_section_names(section: Mapping) -> None:
-    """The links section names the kind and paths, and nothing else."""
-    path_names = []
-    for path in transfer_records.LinkPath:
-        path_names.append(path.value)
-    for section_name in section:
-        if section_name == "kind":
-            continue
-        if section_name not in path_names:
-            raise ValueError(
-                f"links names {section_name!r}, which is not a path; the "
-                f"paths are {path_names}"
-            )
 
 
 def with_transfer_overhead(
@@ -716,6 +725,108 @@ def _roce_v2_strong_paths(
     }
 
 
+def _check_section_names(section: Mapping) -> None:
+    """The links section names the kind and paths, and nothing else."""
+    path_names = []
+    for path in transfer_records.LinkPath:
+        path_names.append(path.value)
+    for section_name in section:
+        if section_name == "kind":
+            continue
+        if section_name not in path_names:
+            raise ValueError(
+                f"links names {section_name!r}, which is not a path; the "
+                f"paths are {path_names}"
+            )
+
+
+def _check_card(path_name: str, card) -> None:
+    """A path's card is a mapping of the card keys, the first three written.
+
+    Refused here, once, with the card's yaml name, so a card never reaches
+    the arithmetic below as a list or with a key missing, and a misspelt
+    key is never read as the default of the key it meant.
+    """
+    card_name = f"links.{path_name}"
+    if not isinstance(card, Mapping):
+        raise ValueError(
+            f"{card_name} holds {card!r}; a path's card is a mapping of "
+            f"{list(_CARD_KEYS)}, or null for the row's own numbers"
+        )
+    unknown = [key for key in card if key not in _CARD_KEYS]
+    if unknown:
+        raise ValueError(
+            f"{card_name} does not know {unknown}; its keys are "
+            f"{list(_CARD_KEYS)}"
+        )
+    missing = [key for key in _REQUIRED_CARD_KEYS if key not in card]
+    if missing:
+        raise ValueError(
+            f"{card_name} needs {missing}; a card writes "
+            f"{list(_REQUIRED_CARD_KEYS)}, with bits_per_cycle null for an "
+            f"unbounded wire"
+        )
+    _check_bits_per_cycle(card_name, card["bits_per_cycle"])
+    lane_count = card.get("channels", 1)
+    _check_lane_count(card_name, lane_count)
+    _check_cycle_counts(card_name, card)
+
+
+def _check_cycle_counts(card_name: str, card: Mapping) -> None:
+    """The latency and the setup, when written, are whole cycle counts."""
+    config.check_cycles(f"{card_name}.latency_cycles", card["latency_cycles"])
+    setup_cycles = card.get("setup_cycles_per_transfer")
+    if setup_cycles is None:
+        return
+    setup_name = f"{card_name}.setup_cycles_per_transfer"
+    config.check_cycles(setup_name, setup_cycles)
+
+
+def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
+    """A lane's rate is a positive finite number, or null for no bound.
+
+    A yaml `true` is a boolean, which Python would read as the number 1,
+    so it is refused with the rest rather than priced as one bit.
+    """
+    if bits_per_cycle is None:
+        return
+    if _is_positive_number(bits_per_cycle):
+        return
+    raise ValueError(
+        f"{card_name}.bits_per_cycle is {bits_per_cycle!r}; it is the "
+        f"positive number of bits each lane moves per cycle, or null for "
+        f"an unbounded wire"
+    )
+
+
+def _check_lane_count(card_name: str, lane_count) -> None:
+    """A card's lanes are a positive whole number, never a yaml boolean."""
+    if _is_positive_whole_number(lane_count):
+        return
+    raise ValueError(
+        f"{card_name}.channels is {lane_count!r}; it is the positive whole "
+        f"number of parallel lanes the path's wire has"
+    )
+
+
+def _is_positive_whole_number(value) -> bool:
+    """A whole number above zero, never a yaml boolean."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, int):
+        return False
+    return value > 0
+
+
+def _is_positive_number(value) -> bool:
+    """A finite number above zero, never a yaml boolean."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    return 0 < value < math.inf
+
+
 def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
     """(latency ticks, aggregate rate, setup ticks) of one card.
 
@@ -728,7 +839,6 @@ def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
     clock = clocks.clock(card["clock"])
     period_ticks = clock.period_ticks
     latency_cycles = card["latency_cycles"]
-    config.check_cycles("latency_cycles", latency_cycles)
     latency_ticks = latency_cycles * period_ticks
     bits_per_cycle = card["bits_per_cycle"]
     lane_count = card.get("channels", 1)
@@ -741,7 +851,6 @@ def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
     setup_cycles = card.get("setup_cycles_per_transfer")
     setup_ticks = 0
     if setup_cycles is not None:
-        config.check_cycles("setup_cycles_per_transfer", setup_cycles)
         setup_ticks = setup_cycles * period_ticks
     return latency_ticks, bits_per_microsecond, setup_ticks
 

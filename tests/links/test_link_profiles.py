@@ -62,7 +62,8 @@ def capacities_of(profile):
     for path in transfer_records.LinkPath:
         path_settings = profile.path_settings(path)
         capacity = path_settings.channel.capacity
-        capacities[path.value] = capacity.aggregate_bits_per_microsecond
+        rate = capacity.exact_aggregate_bits_per_microsecond()
+        capacities[path.value] = rate
     return capacities
 
 

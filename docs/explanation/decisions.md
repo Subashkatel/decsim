@@ -363,7 +363,7 @@ the reserve at `:87-93`), its cache blocking the port when the write
 buffer fills (`src/mem/cache/base.cc:255-257`, `:266-271`) and the
 refusal being the receiver's answer (`src/mem/port.hh:244-255`); and
 Ruby's `areNSlotsAvailable`, which sums the queue and the stalled
-messages (`MessageBuffer.cc:181`, the two sizes read at `:155-158`).
+messages (`MessageBuffer.cc:181`, the two sizes read at `:159-177`).
 
 **Where to see it.** `decsim/syndrome_buffer/weak_syndrome_round_receiver.py`, the
 `SyndromeBuffer` and `WeakSyndromeRoundReceiver` ports in `decsim/ports.py`,

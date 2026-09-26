@@ -1,7 +1,7 @@
 """The syndrome buffers: a finished round kept until its last reader is done.
 
 syndrome_buffer.py is the store itself, the one row of SYNDROME_BUFFERS: rounds
-by key, bounded to the count settings.py gives it or unbounded, each
+by key, bounded to the bits settings.py gives it or unbounded, each
 round kept while any hold on it is live (round_holds.py). A machine
 always builds the weak syndrome buffer, which the tier that decodes as the
 rounds arrive reads; it builds the strong syndrome buffer as well when a tier

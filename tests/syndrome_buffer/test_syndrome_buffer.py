@@ -12,13 +12,16 @@ folder, one slot standing for one round's bits. gem5's packet store
 answers `avail()` against the packet's own length before it lands (gem5
 src/dev/net/pktfifo.hh) and its blocked port retries the requester
 (src/mem/cache/base.cc: clearBlocked, processSendRetry); the store
-never refuses a write.
+never refuses a write. Over rounds of unequal width, the last the
+widest, held by several readers, the occupied bits and the room answer
+follow that packet store with a holder set per round.
 
 The two whole-run laws at the end of the file place the store in the
 pipeline: its publication tick is what makes a weak window ready, on
 the declared card of tests/declared_run.py.
 """
 
+import collections
 import functools
 import random
 
@@ -203,6 +206,137 @@ def test_ciw_blocks_at_the_same_ticks_over_random_holds():
         ours = run_trace(arrivals, holds, capacity)
         theirs = ciw_trace(arrivals, holds, capacity)
         assert [float(tick) for tick in ours] == theirs, seed
+
+
+class PacketStoreWithHoldCounts:
+    """The reference: gem5's packet store plus a holder set per round.
+
+    Room is `avail() = _maxsize - _size` against the round's own length
+    (src/dev/net/pktfifo.hh:104), a push adds that length (:125-138)
+    and a pop takes it back (:143-152). A round is popped at the call
+    that drops its last holder, and on arrival when nobody holds it.
+    """
+
+    def __init__(self, capacity_bits: int) -> None:
+        self.capacity_bits = capacity_bits
+        self.occupied_bits = 0
+        self.bits_by_round = {}
+        self.holders_by_round = collections.defaultdict(set)
+        self.rounds_by_holder = {}
+
+    def has_room(self, bits: int) -> bool:
+        available = self.capacity_bits - self.occupied_bits
+        return available >= bits
+
+    def accept(self, round_key, bits: int) -> None:
+        self.bits_by_round[round_key] = bits
+        self.occupied_bits += bits
+        if not self.holders_by_round[round_key]:
+            self.pop(round_key)
+
+    def hold(self, holder, round_keys) -> None:
+        self.rounds_by_holder[holder] = round_keys
+        for round_key in round_keys:
+            self.holders_by_round[round_key].add(holder)
+
+    def release(self, holder) -> None:
+        round_keys = self.rounds_by_holder.pop(holder)
+        for round_key in round_keys:
+            holders = self.holders_by_round[round_key]
+            holders.discard(holder)
+            if not holders:
+                self.pop(round_key)
+
+    def pop(self, round_key) -> None:
+        bits = self.bits_by_round.pop(round_key, 0)
+        self.occupied_bits -= bits
+
+
+def sized_packet(round_key, bits: int) -> round_records.SyndromeRoundPacket:
+    operation_id, round_index = round_key
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=operation_id,
+        patch_ids=(0,),
+        round_index=round_index,
+        bits=None,
+        size_bits=bits,
+        fragment_index=0,
+    )
+    return round_records.SyndromeRoundPacket(
+        operation_id, round_index, (fragment,)
+    )
+
+
+def random_hold_program(generator: random.Random) -> list:
+    """Holds, releases and in-order writes of rounds of unequal width.
+
+    The last round of a memory is the widest (it closes on the data
+    readout), so it is drawn wider than the rest.
+    """
+    round_count = 12
+    past_the_last_round = round_count + 1
+    steps = []
+    for round_index in range(1, past_the_last_round):
+        bits = generator.randint(1, 12)
+        if round_index == round_count:
+            bits += 8
+        steps.append(("write", (1, round_index), bits))
+    reader_count = generator.randint(1, 5)
+    for reader in range(reader_count):
+        holder = decoding_records.WindowReads((1, reader))
+        first = generator.randint(1, round_count)
+        span = generator.randint(1, 6)
+        past_the_span = first + span
+        last = min(past_the_span, past_the_last_round)
+        round_keys = tuple((1, index) for index in range(first, last))
+        register_at = generator.randint(0, len(steps))
+        steps.insert(register_at, ("hold", holder, round_keys))
+        first_release_place = register_at + 1
+        release_at = generator.randint(first_release_place, len(steps))
+        steps.insert(release_at, ("release", holder, None))
+    return steps
+
+
+def run_on_both(steps: list, capacity_bits: int) -> tuple:
+    """Each side's occupied bits and room answers after every step."""
+    the_store = store(bits=capacity_bits)
+    reference = PacketStoreWithHoldCounts(capacity_bits)
+    ours = []
+    theirs = []
+    for kind, subject, detail in steps:
+        if kind == "hold":
+            the_store.register_hold(subject, detail)
+            reference.hold(subject, detail)
+        if kind == "release":
+            the_store.release_hold(subject)
+            reference.release(subject)
+        if kind == "write":
+            write_if_room(the_store, reference, subject, detail)
+        our_room = the_store.has_room(9)
+        their_room = reference.has_room(9)
+        ours.append((the_store.occupied_bits, our_room))
+        theirs.append((reference.occupied_bits, their_room))
+    return ours, theirs
+
+
+def write_if_room(the_store, reference, round_key, bits: int) -> None:
+    """Both sides answer room for themselves; a refused round is skipped."""
+    if the_store.has_room(bits):
+        written = sized_packet(round_key, bits)
+        the_store.accept_packed_round(written, publication_tick=0)
+        the_store.release_round_if_unheld(round_key)
+    if reference.has_room(bits):
+        reference.accept(round_key, bits)
+
+
+def test_occupancy_and_room_follow_the_packet_store_over_random_holds():
+    """A property test: 300 random programs against the reference store."""
+    for seed in range(300):
+        generator = random.Random(seed)
+        capacity_bits = generator.choice([24, 40, 64, 100])
+        steps = random_hold_program(generator)
+        ours, theirs = run_on_both(steps, capacity_bits)
+        assert ours == theirs, seed
 
 
 def test_a_full_store_answers_no_room_and_is_unchanged():

@@ -22,9 +22,13 @@ from typing import Any, Optional
 
 import pytest
 
+import decsim.config as config
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.engine as engine_module
 import decsim.records.program as program_records
+
+# the fixture's 1000-tick controller cycle
+CYCLE = config.Clock(1000)
 
 
 def test_a_protected_group_emits_and_releases_once_per_shared_cycle() -> None:
@@ -189,6 +193,33 @@ def test_an_idle_group_continues_the_stream_its_last_segment_left(
     streams.begin(follower)
 
     assert streams.extend_live_stream(follower, "A") is is_held
+
+
+def test_a_segment_issued_at_a_declared_offset_holds_the_stream() -> None:
+    """Only the declared segment's patches continue the stream after it.
+
+    Its rounds are the stream's next, so an idle patch of the segment
+    before it holds no stream, and the declared one continues after its
+    own last round.
+    """
+    program = _unprotected_group_program()
+    segment = program.operations[0]
+    declared = _operation(2, patches=("A", "B"))
+    declared = dataclasses.replace(declared, stream_id=7, stream_offset=6)
+    operations = (segment, declared)
+    program = dataclasses.replace(program, operations=operations)
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(2, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(segment)
+    streams.begin(declared)
+
+    assert streams.extend_live_stream(segment, "A") is False
+    assert streams.extend_live_stream(declared, "A") is True
+    assert qpu.emissions == [(7, 13, 0, False)]
 
 
 def test_a_sealed_stream_is_continued_by_no_idle_patch() -> None:
@@ -609,8 +640,7 @@ class _Qpu:
 
     def next_boundary(self) -> int:
         """The cycle edge at or after now, on the fixture's 1000-tick cycle."""
-        whole_cycles = -(-self.engine.now // 1000)
-        return whole_cycles * 1000
+        return CYCLE.edge(0, self.engine.now)
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """The protected fixture owns no ordinary idle group."""
@@ -673,8 +703,7 @@ class _RoundLogQpu:
 
     def next_boundary(self) -> int:
         """The cycle edge at or after now, on the fixture's 1000-tick cycle."""
-        whole_cycles = -(-self.engine.now // 1000)
-        return whole_cycles * 1000
+        return CYCLE.edge(0, self.engine.now)
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """Only the explicitly declared group is idle after that operation."""

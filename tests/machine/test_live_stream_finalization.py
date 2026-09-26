@@ -5,6 +5,7 @@ seal boundary, using Stim's generated memory and functional PyMatching.
 """
 
 import dataclasses
+from typing import Optional
 
 import numpy
 import pytest
@@ -12,6 +13,7 @@ import pytest
 import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -25,6 +27,9 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
 import tests.qpu.memory_programs as memory_programs
+
+# the default QPU round period, 1.1 microseconds, in ticks
+ROUND_TICKS = 1_100_000
 
 
 @pytest.mark.parametrize("final_round", [4, 5, 6, 7, 8, 9])
@@ -85,6 +90,24 @@ def test_a_region_a_released_operation_starts_keeps_the_qpu_cycle(
     cycle reads one round out on its edge, and the executed record is
     Stim's own memory circuit of that many rounds.
     """
+    workload = _released_region_workload(readout_round)
+    machine, source = _machine(workload, 0)
+    emission_ticks = []
+    listener = _emission_recorder(machine, emission_ticks)
+    machine.qpu.trace.round_emitted.connect(listener)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    after_last_round = readout_round + 1
+    cycles = range(1, after_last_round)
+    every_cycle_edge = [cycle * 1_000_000 for cycle in cycles]
+    assert emission_ticks == every_cycle_edge
+    _assert_complete_record(source, readout_round)
+
+
+def _released_region_workload(
+    readout_round: int,
+) -> workload_settings.WorkloadSettings:
+    """A prefix, then a region its decision starts and a readout ends."""
     owner = program_records.Operation(100, "memory", (0,), patches=(0,))
     prefix = _segment(1, 0, ())
     waiting = program_records.Operation(
@@ -107,23 +130,12 @@ def test_a_region_a_released_operation_starts_keeps_the_qpu_cycle(
     )
     region = program_records.ProtectedRegion(100, 2, 3)
     policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 1, 3: 0})
-    workload = workload_settings.WorkloadSettings(
+    return workload_settings.WorkloadSettings(
         operations=(prefix, waiting, readout),
         dynamic_streams=(owner,),
         protected_regions=(region,),
         rounds_policy=policy,
     )
-    machine, source = _machine(workload, 0)
-    emission_ticks = []
-    listener = _emission_recorder(machine, emission_ticks)
-    machine.qpu.trace.round_emitted.connect(listener)
-    result = machine.run()
-    assert result.terminal_status == "complete"
-    after_last_round = readout_round + 1
-    cycles = range(1, after_last_round)
-    every_cycle_edge = [cycle * 1_000_000 for cycle in cycles]
-    assert emission_ticks == every_cycle_edge
-    _assert_complete_record(source, readout_round)
 
 
 def _emission_recorder(machine: machine_module.Machine, emission_ticks: list):
@@ -182,6 +194,13 @@ def _finite_windows(round_count: int, distance: int, mode: str) -> list:
         rounds_policy=policy,
         feedback_boundary_mode=mode,
     )
+    return _committed_windows(workload, distance)
+
+
+def _committed_windows(
+    workload: workload_settings.WorkloadSettings, distance: int
+) -> list:
+    """The spans of the windows a Stim run of the workload commits."""
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     clock = config.Clock(1000)
@@ -277,14 +296,15 @@ def test_a_finite_group_stream_gives_its_last_round_once():
 def _finite_group_workload() -> tuple:
     """(workload, source) of a nine-round two-patch circuit, three fed back.
 
-    A feedback-blocked operation on a third patch waits for the prefix.
+    A feedback-blocked operation on a third patch waits for the prefix;
+    the detectors' rounds are the ones Stim's own record gives them.
     """
     program = memory_programs.joint_repetition_program(False)
     circuit, measurement_rounds = program.assemble(9)
-    detector_rounds = {}
-    for detector in range(circuit.num_detectors):
-        detector_round = detector // 4 + 1
-        detector_rounds[detector] = min(detector_round, 9)
+    table = detector_formation.build_formation_table(
+        circuit, 9, measurement_rounds=measurement_rounds
+    )
+    detector_rounds = table.detector_rounds()
     group = (0, 1)
     owner = program_records.Operation(
         100, "memory", group, patches=group, circuit=circuit
@@ -314,6 +334,88 @@ def _finite_group_workload() -> tuple:
     return workload, device
 
 
+def _live_stream() -> tuple:
+    """(owner, owner round count, source) of an open-ended live stream."""
+    program = memory_programs.memory_program()
+    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
+    return owner, 0, source
+
+
+def _finite_stream() -> tuple:
+    """(owner, owner round count, source) of a 24-round Stim circuit."""
+    circuit = memory_programs.memory_circuit(24, 3)
+    owner = program_records.Operation(
+        100, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    source = stim_device.StimDevice()
+    return owner, 24, source
+
+
+def _continuation(
+    owner: program_records.Operation,
+    operation_id: int,
+    predecessor_id: int,
+    *,
+    scheduled_start_round: int = 0,
+    blocked_by: Optional[int] = None,
+) -> program_records.Operation:
+    """A segment of the owner's stream that declares no offset."""
+    return dataclasses.replace(
+        owner,
+        id=operation_id,
+        name=f"resumed{operation_id}",
+        stream_id=100,
+        predecessors=(predecessor_id,),
+        scheduled_start_round=scheduled_start_round,
+        blocked_by=blocked_by,
+    )
+
+
+def _protected_tail(
+    last_id: int, blocked_by: Optional[int], readout_round: int
+) -> tuple:
+    """(protect, readout): the region that reads stream 100 out."""
+    protect = program_records.Operation(
+        3,
+        "protect",
+        (0,),
+        patches=(0,),
+        predecessors=(last_id,),
+        blocked_by=blocked_by,
+        emits_detector_data=False,
+    )
+    readout = dataclasses.replace(
+        protect,
+        id=4,
+        name="readout",
+        predecessors=(3,),
+        blocked_by=None,
+        scheduled_start_round=readout_round,
+    )
+    return protect, readout
+
+
+def _region_workload(
+    owner: program_records.Operation, later: tuple, counts: dict
+) -> workload_settings.WorkloadSettings:
+    """A three-round prefix of the owner's stream, then the later operations.
+
+    Protect (3) and readout (4) bound the stream's protected region.
+    """
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    region = program_records.ProtectedRegion(100, 3, 4)
+    policy = round_policies.PerOperationRounds(counts)
+    return workload_settings.WorkloadSettings(
+        operations=(prefix, *later),
+        dynamic_streams=(owner,),
+        protected_regions=(region,),
+        rounds_policy=policy,
+    )
+
+
 def test_an_issued_continuation_takes_the_streams_next_round():
     """A continuation follows the idle round read out as it starts.
 
@@ -321,9 +423,12 @@ def test_an_issued_continuation_takes_the_streams_next_round():
     edge reads the idle patch's round 8 out first, so the continuation
     runs rounds 9 to 11 and the stream executes every cycle, in order.
     """
-    program = memory_programs.memory_program()
-    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
-    workload = _continuation_workload()
+    owner, owner_round_count, source = _live_stream()
+    resumed = _continuation(owner, 2, 1, scheduled_start_round=8)
+    protect, readout = _protected_tail(2, None, 15)
+    counts = {100: owner_round_count, 1: 3, 2: 3, 3: 0, 4: 0}
+    later = (resumed, protect, readout)
+    workload = _region_workload(owner, later, counts)
     machine = _stim_machine(workload, source)
     rounds = _emitted_rounds(machine)
 
@@ -340,9 +445,13 @@ def test_a_second_continuation_follows_the_idle_rounds_before_it():
     rounds 12 and 13 out while it idles, so the second, started at
     round 13, runs rounds 14 to 16.
     """
-    program = memory_programs.memory_program()
-    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
-    workload = _continuation_workload((8, 13), 20, blocks_protect=False)
+    owner, owner_round_count, source = _live_stream()
+    resumed = _continuation(owner, 2, 1, scheduled_start_round=8)
+    again = _continuation(owner, 5, 2, scheduled_start_round=13)
+    protect, readout = _protected_tail(5, None, 20)
+    counts = {100: owner_round_count, 1: 3, 2: 3, 3: 0, 4: 0, 5: 3}
+    later = (resumed, again, protect, readout)
+    workload = _region_workload(owner, later, counts)
     machine = _stim_machine(workload, source)
     rounds = _emitted_rounds(machine)
 
@@ -361,9 +470,12 @@ def test_a_continuation_gives_its_decision_the_stream_s_buffer():
     last window reads its buffer from the rounds the idle patch reads
     out, so the decision arrives and the run ends.
     """
-    program = memory_programs.memory_program()
-    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
-    workload = _continuation_workload((6,), 15, blocks_protect=True)
+    owner, owner_round_count, source = _live_stream()
+    resumed = _continuation(owner, 2, 1, scheduled_start_round=6)
+    protect, readout = _protected_tail(2, 2, 15)
+    counts = {100: owner_round_count, 1: 3, 2: 3, 3: 0, 4: 0}
+    later = (resumed, protect, readout)
+    workload = _region_workload(owner, later, counts)
     machine = _stim_machine(workload, source)
     guard = _refuse_past(100_000_000)
     machine.engine.action_done.connect(guard)
@@ -375,15 +487,20 @@ def test_a_continuation_gives_its_decision_the_stream_s_buffer():
     assert rounds == list(range(1, 16))
 
 
-@pytest.mark.parametrize("is_finite", [False, True])
-def test_a_released_continuation_s_result_is_its_own_windows(is_finite: bool):
+@pytest.mark.parametrize("stream_of", [_live_stream, _finite_stream])
+def test_a_released_continuation_s_result_is_its_own_windows(stream_of):
     """A continuation after idle rounds starts a window of its stream.
 
     The prefix's decision releases the continuation at round 7, after
     four idle rounds, so it runs rounds 8 to 10; protect waits for its
     result, which is the sum over the windows of those rounds alone.
     """
-    workload, source = _released_continuation(is_finite)
+    owner, owner_round_count, source = stream_of()
+    resumed = _continuation(owner, 2, 1, blocked_by=1)
+    protect, readout = _protected_tail(2, 2, 24)
+    counts = {100: owner_round_count, 1: 3, 2: 3, 3: 0, 4: 0}
+    later = (resumed, protect, readout)
+    workload = _region_workload(owner, later, counts)
     machine = _stim_machine(workload, source)
     guard = _refuse_past(100_000_000)
     machine.engine.action_done.connect(guard)
@@ -397,63 +514,6 @@ def test_a_released_continuation_s_result_is_its_own_windows(is_finite: bool):
     assert binding.stream_offset == 7
 
 
-def _released_continuation(is_finite: bool) -> tuple:
-    """(workload, source): a prefix's decision releases its continuation.
-
-    Protect waits for the continuation's decision, and the region reads
-    the stream out at round 24; a finite source's circuit has 24 rounds.
-    """
-    circuit = None
-    owner_rounds = 0
-    program = memory_programs.memory_program()
-    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
-    if is_finite:
-        circuit = memory_programs.memory_circuit(24, 3)
-        owner_rounds = 24
-        source = stim_device.StimDevice()
-    owner = program_records.Operation(
-        100, "memory", (0,), patches=(0,), circuit=circuit
-    )
-    prefix = dataclasses.replace(
-        owner, id=1, name="prefix", stream_id=100, stream_offset=0
-    )
-    resumed = dataclasses.replace(
-        owner,
-        id=2,
-        name="resumed",
-        stream_id=100,
-        predecessors=(1,),
-        blocked_by=1,
-    )
-    protect = program_records.Operation(
-        3,
-        "protect",
-        (0,),
-        patches=(0,),
-        predecessors=(2,),
-        blocked_by=2,
-        emits_detector_data=False,
-    )
-    readout = dataclasses.replace(
-        protect,
-        id=4,
-        name="readout",
-        predecessors=(3,),
-        blocked_by=None,
-        scheduled_start_round=24,
-    )
-    region = program_records.ProtectedRegion(100, 3, 4)
-    counts = {100: owner_rounds, 1: 3, 2: 3, 3: 0, 4: 0}
-    policy = round_policies.PerOperationRounds(counts)
-    workload = workload_settings.WorkloadSettings(
-        operations=(prefix, resumed, protect, readout),
-        dynamic_streams=(owner,),
-        protected_regions=(region,),
-        rounds_policy=policy,
-    )
-    return workload, source
-
-
 def test_a_continuation_s_last_round_ends_a_window_of_its_source():
     """A continuation's result is its own windows though idle rounds follow.
 
@@ -462,7 +522,27 @@ def test_a_continuation_s_last_round_ends_a_window_of_its_source():
     last window the scheme lays over rounds 20 to 24; readout waits for
     the continuation's result and then idles out the source.
     """
-    workload, source = _late_continuation()
+    owner, owner_round_count, source = _finite_stream()
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    resumed = _continuation(owner, 2, 1, blocked_by=1)
+    readout = program_records.Operation(
+        4,
+        "readout",
+        (0,),
+        patches=(0,),
+        predecessors=(2,),
+        blocked_by=2,
+        emits_detector_data=False,
+    )
+    counts = {100: owner_round_count, 1: 15, 2: 3, 4: 0}
+    policy = round_policies.PerOperationRounds(counts)
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, resumed, readout),
+        dynamic_streams=(owner,),
+        rounds_policy=policy,
+    )
     machine = _stim_machine(workload, source)
     guard = _refuse_past(100_000_000)
     machine.engine.action_done.connect(guard)
@@ -476,108 +556,10 @@ def test_a_continuation_s_last_round_ends_a_window_of_its_source():
     assert binding.stream_offset == 19
 
 
-def _late_continuation() -> tuple:
-    """(workload, source): readout waits for a late continuation's result."""
-    circuit = memory_programs.memory_circuit(24, 3)
-    owner = program_records.Operation(
-        100, "memory", (0,), patches=(0,), circuit=circuit
-    )
-    prefix = dataclasses.replace(
-        owner, id=1, name="prefix", stream_id=100, stream_offset=0
-    )
-    resumed = dataclasses.replace(
-        owner,
-        id=2,
-        name="resumed",
-        stream_id=100,
-        predecessors=(1,),
-        blocked_by=1,
-    )
-    readout = program_records.Operation(
-        4,
-        "readout",
-        (0,),
-        patches=(0,),
-        predecessors=(2,),
-        blocked_by=2,
-        emits_detector_data=False,
-    )
-    counts = {100: 24, 1: 15, 2: 3, 4: 0}
-    policy = round_policies.PerOperationRounds(counts)
-    workload = workload_settings.WorkloadSettings(
-        operations=(prefix, resumed, readout),
-        dynamic_streams=(owner,),
-        rounds_policy=policy,
-    )
-    return workload, stim_device.StimDevice()
-
-
-def _continuation_workload(
-    start_rounds: tuple = (8,),
-    readout_round: int = 15,
-    *,
-    blocks_protect: bool = False,
-) -> workload_settings.WorkloadSettings:
-    """A three-round prefix, three-round continuations, then a region.
-
-    The continuations, operations 2, 5, 6 and on, start at the start
-    rounds; a blocked protect waits for operation 2's decision.
-    """
-    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
-    prefix = dataclasses.replace(
-        owner, id=1, name="prefix", stream_id=100, stream_offset=0
-    )
-    operations = [prefix]
-    counts = {100: 0, 1: 3, 3: 0, 4: 0}
-    last = prefix
-    for index, start_round in enumerate(start_rounds):
-        operation_id = 4 + index
-        if index == 0:
-            operation_id = 2
-        last = dataclasses.replace(
-            owner,
-            id=operation_id,
-            name=f"resumed{operation_id}",
-            stream_id=100,
-            predecessors=(last.id,),
-            scheduled_start_round=start_round,
-        )
-        operations.append(last)
-        counts[operation_id] = 3
-    blocked_by = None
-    if blocks_protect:
-        blocked_by = 2
-    protect = program_records.Operation(
-        3,
-        "protect",
-        (0,),
-        patches=(0,),
-        predecessors=(last.id,),
-        blocked_by=blocked_by,
-        emits_detector_data=False,
-    )
-    readout = dataclasses.replace(
-        protect,
-        id=4,
-        name="readout",
-        predecessors=(3,),
-        blocked_by=None,
-        scheduled_start_round=readout_round,
-    )
-    region = program_records.ProtectedRegion(100, 3, 4)
-    policy = round_policies.PerOperationRounds(counts)
-    return workload_settings.WorkloadSettings(
-        operations=(*operations, protect, readout),
-        dynamic_streams=(owner,),
-        protected_regions=(region,),
-        rounds_policy=policy,
-    )
-
-
 def _stim_machine(
     workload: workload_settings.WorkloadSettings, device
 ) -> machine_module.Machine:
-    """A d=3 run of the workload on a Stim source, 1 us rounds."""
+    """A d=3 run of the workload on a Stim source, one-microsecond rounds."""
     qpu = qpu_settings.QpuSettings(
         distance=3, device=device, round_period_microseconds=1.0
     )
@@ -608,8 +590,7 @@ def test_a_stream_group_shrunk_to_one_patch_runs_to_completion(
     """A stream on patches 0 and 1, then an operation on patch 0 alone.
 
     Once the operation starts, patch 1 holds no stream and idles for the
-    policy, so the run ends as it did before idle patches continued
-    their streams.
+    policy, and the run completes.
     """
     ticks = _shrunk_group_run(None, idle_policy)
     assert ("started", 2) in ticks
@@ -626,7 +607,9 @@ def test_a_shrunk_group_gives_the_waiting_decision_its_buffer(
     """
     ticks = _shrunk_group_run(1, idle_policy)
     wait_ticks = ticks[("released", 2)] - ticks[("finished", 1)]
-    assert 3 * 1_100_000 < wait_ticks < 4 * 1_100_000
+    three_rounds = 3 * ROUND_TICKS
+    four_rounds = 4 * ROUND_TICKS
+    assert three_rounds < wait_ticks < four_rounds
 
 
 def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
@@ -654,7 +637,7 @@ def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
     )
     machine = machine_module.Machine.build(settings, 0)
     events, _ = _events_and_end(machine)
-    return {(kind, operation): tick for kind, operation, tick in events}
+    return _ticks_by_event(events)
 
 
 def _segment(
@@ -692,17 +675,21 @@ def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
     rounds its idle patch kept producing, so it ends later.
     """
     closed = "measurement_closed"
+    stream_prefix = _stream_prefix()
+    finite_prefix = _finite_prefix()
     stream_run = _feedback_run(
-        True, idle_policy, waiting_patch, closed, distance
+        stream_prefix, idle_policy, waiting_patch, closed, distance
     )
     finite_run = _feedback_run(
-        False, idle_policy, waiting_patch, closed, distance
+        finite_prefix, idle_policy, waiting_patch, closed, distance
     )
     stream_events, stream_done_tick = stream_run
     finite_events, finite_done_tick = finite_run
+    stream_ticks = _ticks_by_event(stream_events)
+    finite_ticks = _ticks_by_event(finite_events)
     closing_ticks = _closing_layer_ticks(distance)
-    expected_events = _released_later(stream_events, 2, closing_ticks)
-    assert expected_events == finite_events
+    stream_ticks[("released", 2)] += closing_ticks
+    assert stream_ticks == finite_ticks
     assert stream_done_tick > finite_done_tick
 
 
@@ -712,18 +699,16 @@ def _closing_layer_ticks(distance: int) -> int:
     The controller-to-buffer and buffer-to-decoder links move 8000 bits
     a microsecond (link_profiles.logical_reference_profile).
     """
-    closing_events = (distance * distance - 1) // 2
-    return 2 * closing_events * 125
+    data_qubit_count = distance * distance
+    check_count = data_qubit_count - 1
+    closing_events = check_count // 2
+    link_bits = 2 * closing_events
+    return link_bits * 125
 
 
-def _released_later(events: tuple, operation_id: int, ticks: int) -> tuple:
-    """The events with one operation's release moved later by ticks."""
-    moved = []
-    for kind, identity, tick in events:
-        if (kind, identity) == ("released", operation_id):
-            tick += ticks
-        moved.append((kind, identity, tick))
-    return tuple(moved)
+def _ticks_by_event(events: tuple) -> dict:
+    """The tick of each (kind, operation) event."""
+    return {(kind, operation): tick for kind, operation, tick in events}
 
 
 def _recorder(events: list, kind: str):
@@ -747,15 +732,17 @@ def test_a_waiting_stream_decision_reads_its_buffer_from_the_idle_patch(
     the release follows the third idle round, under both policies alike.
     """
     trailing = "trailing_buffer"
+    stream_prefix = _stream_prefix()
     charged = _feedback_run(
-        True, "separate_decode_jobs", waiting_patch, trailing
+        stream_prefix, "separate_decode_jobs", waiting_patch, trailing
     )
-    ignored = _feedback_run(True, "ignore", waiting_patch, trailing)
+    ignored = _feedback_run(stream_prefix, "ignore", waiting_patch, trailing)
     events = charged[0]
     assert events == ignored[0]
-    ticks = {(kind, operation): tick for kind, operation, tick in events}
+    ticks = _ticks_by_event(events)
     wait_ticks = ticks[("released", 2)] - ticks[("finished", 1)]
-    assert wait_ticks > 3 * 1_100_000
+    three_rounds = 3 * ROUND_TICKS
+    assert wait_ticks > three_rounds
 
 
 @pytest.mark.parametrize("waiting_patch", [0, 1])
@@ -768,8 +755,10 @@ def test_a_zero_round_step_does_not_hide_the_blocked_operation(
     releases leaves the release where it is without that step.
     """
     closed = "measurement_closed"
-    direct = _prefix_run("direct", waiting_patch, closed)
-    stepped = _prefix_run("stepped", waiting_patch, closed)
+    direct_operations = _direct_operations(waiting_patch)
+    stepped_operations = _stepped_operations(waiting_patch)
+    direct = _prefix_run(direct_operations, closed)
+    stepped = _prefix_run(stepped_operations, closed)
     assert stepped == direct
     release_wait_ticks, _ = stepped
     assert release_wait_ticks < 1_100_000
@@ -784,48 +773,14 @@ def test_an_operation_blocked_elsewhere_leaves_the_boundary_open(
     The prefix is no feedback source, so measurement_closed leaves its
     window as trailing_buffer does: the release and the commit agree.
     """
-    closed = _prefix_run("elsewhere", waiting_patch, "measurement_closed")
-    trailing = _prefix_run("elsewhere", waiting_patch, "trailing_buffer")
+    operations = _elsewhere_operations(waiting_patch)
+    closed = _prefix_run(operations, "measurement_closed")
+    trailing = _prefix_run(operations, "trailing_buffer")
     assert closed == trailing
 
 
-def _prefix_run(shape: str, waiting_patch: int, mode: str) -> tuple:
-    """Ticks from the prefix's end to the release, and to its commit.
-
-    shape direct: the waiting operation follows the prefix; stepped: a
-    zero-round operation sits between them; elsewhere: the waiting
-    operation is blocked by a third operation, not by the prefix.
-    """
-    prefix = program_records.Operation(
-        1, "prefix", (0,), patches=(0,), stream_id=100, stream_offset=0
-    )
-    step = program_records.Operation(
-        2,
-        "step",
-        (0,),
-        patches=(0,),
-        predecessors=(1,),
-        emits_detector_data=False,
-    )
-    other = program_records.Operation(4, "other", (2,), patches=(2,))
-    patches = (waiting_patch,)
-    waiting = program_records.Operation(
-        3,
-        "waiting",
-        patches,
-        patches=patches,
-        predecessors=(1,),
-        blocked_by=1,
-    )
-    operations = (prefix, waiting)
-    if shape == "stepped":
-        waiting = dataclasses.replace(waiting, predecessors=(2,))
-        operations = (prefix, step, waiting)
-    if shape == "elsewhere":
-        waiting = dataclasses.replace(
-            waiting, predecessors=(1, 4), blocked_by=4
-        )
-        operations = (prefix, other, waiting)
+def _prefix_run(operations: tuple, mode: str) -> tuple:
+    """Ticks from the prefix's end to the release, and to its commit."""
     stream = program_records.Operation(100, "memory", (0,), patches=(0,))
     policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 0, 3: 1, 4: 3})
     workload = workload_settings.WorkloadSettings(
@@ -841,45 +796,82 @@ def _prefix_run(shape: str, waiting_patch: int, mode: str) -> tuple:
         workload=workload, weak_decoder=decoder
     )
     machine = machine_module.Machine.build(settings, 0)
-    commit_ticks = []
+    commit_ticks = {}
     sources = machine.window_manager.window_sources()
     recorder = _commit_recorder(machine, commit_ticks)
     sources.window_committed.connect(recorder)
     events, _ = _events_and_end(machine)
-    ticks = {(kind, operation): tick for kind, operation, tick in events}
+    ticks = _ticks_by_event(events)
     prefix_end_tick = ticks[("finished", 1)]
     release_wait_ticks = ticks[("released", 3)] - prefix_end_tick
-    commit_wait_ticks = commit_ticks[0] - prefix_end_tick
+    commit_wait_ticks = commit_ticks[(100, 0)] - prefix_end_tick
     return release_wait_ticks, commit_wait_ticks
 
 
-def _commit_recorder(machine: machine_module.Machine, commit_ticks: list):
-    """A listener that records when the stream's first window commits."""
+def _prefix_and_waiting(waiting_patch: int) -> tuple:
+    """(prefix, waiting): the waiting operation follows the prefix."""
+    prefix = program_records.Operation(
+        1, "prefix", (0,), patches=(0,), stream_id=100, stream_offset=0
+    )
+    patches = (waiting_patch,)
+    waiting = program_records.Operation(
+        3,
+        "waiting",
+        patches,
+        patches=patches,
+        predecessors=(1,),
+        blocked_by=1,
+    )
+    return prefix, waiting
+
+
+def _direct_operations(waiting_patch: int) -> tuple:
+    """The waiting operation, blocked by the prefix, follows it."""
+    return _prefix_and_waiting(waiting_patch)
+
+
+def _stepped_operations(waiting_patch: int) -> tuple:
+    """A zero-round step sits between the prefix and the waiting one."""
+    prefix, waiting = _prefix_and_waiting(waiting_patch)
+    step = program_records.Operation(
+        2,
+        "step",
+        (0,),
+        patches=(0,),
+        predecessors=(1,),
+        emits_detector_data=False,
+    )
+    waiting = dataclasses.replace(waiting, predecessors=(2,))
+    return prefix, step, waiting
+
+
+def _elsewhere_operations(waiting_patch: int) -> tuple:
+    """The waiting operation is blocked by a third operation."""
+    prefix, waiting = _prefix_and_waiting(waiting_patch)
+    other = program_records.Operation(4, "other", (2,), patches=(2,))
+    waiting = dataclasses.replace(waiting, predecessors=(1, 4), blocked_by=4)
+    return prefix, other, waiting
+
+
+def _commit_recorder(machine: machine_module.Machine, commit_ticks: dict):
+    """A listener that records when each window first commits."""
 
     def listener(window, contribution) -> None:
         del contribution
-        if window.key == (100, 0):
-            commit_ticks.append(machine.engine.now)
+        commit_ticks.setdefault(window.key, machine.engine.now)
 
     return listener
 
 
 def _feedback_run(
-    is_stream: bool,
+    prefix_shape: tuple,
     idle_policy: str,
     waiting_patch: int,
     mode: str,
     distance: int = 3,
 ) -> tuple:
     """When the prefix ends, the release lands and the run finishes."""
-    prefix = program_records.Operation(1, "prefix", (0,), patches=(0,))
-    streams = ()
-    counts = {1: 3, 2: 1}
-    if is_stream:
-        prefix = dataclasses.replace(prefix, stream_id=100, stream_offset=0)
-        stream = program_records.Operation(100, "memory", (0,), patches=(0,))
-        streams = (stream,)
-        counts[100] = 0
+    prefix, streams, counts = prefix_shape
     patches = (waiting_patch,)
     waiting = program_records.Operation(
         2, "waiting", patches, patches=patches, predecessors=(1,), blocked_by=1
@@ -901,6 +893,21 @@ def _feedback_run(
     )
     machine = machine_module.Machine.build(settings, 0)
     return _events_and_end(machine)
+
+
+def _stream_prefix() -> tuple:
+    """(prefix, streams, round counts): a prefix on stream 100."""
+    prefix = program_records.Operation(
+        1, "prefix", (0,), patches=(0,), stream_id=100, stream_offset=0
+    )
+    stream = program_records.Operation(100, "memory", (0,), patches=(0,))
+    return prefix, (stream,), {100: 0, 1: 3, 2: 1}
+
+
+def _finite_prefix() -> tuple:
+    """(prefix, streams, round counts): an ordinary three-round prefix."""
+    prefix = program_records.Operation(1, "prefix", (0,), patches=(0,))
+    return prefix, (), {1: 3, 2: 1}
 
 
 def _events_and_end(machine: machine_module.Machine) -> tuple:
@@ -927,8 +934,7 @@ def _refuse_past(limit_ticks: int):
     """
 
     def listener(now: int) -> None:
-        if now > limit_ticks:
-            raise AssertionError(f"the run did not end by tick {limit_ticks}")
+        assert now <= limit_ticks, f"the run did not end by tick {limit_ticks}"
 
     return listener
 

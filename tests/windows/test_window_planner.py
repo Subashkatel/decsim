@@ -310,7 +310,8 @@ def test_a_closed_boundary_ends_a_commit_region_and_restarts_the_stride(
         for window in planner.windows_of("stream")
     ]
     after = [commit for commit in commits if commit[0] > boundary]
-    assert after[0][0] == boundary + 1
+    first_round_after = boundary + 1
+    assert after[0][0] == first_round_after
     covered = []
     for commit_lo, commit_hi in commits:
         stop = commit_hi + 1
@@ -319,7 +320,9 @@ def test_a_closed_boundary_ends_a_commit_region_and_restarts_the_stride(
     every_round = range(1, after_last_round)
     assert covered == list(every_round)
     stride_ends = [commit_hi for _, commit_hi in after[:-1]]
-    assert stride_ends == [boundary + 3, boundary + 6]
+    first_stride_end = boundary + 3
+    second_stride_end = boundary + 6
+    assert stride_ends == [first_stride_end, second_stride_end]
 
 
 @pytest.mark.parametrize("known_round", [4, 7])
@@ -365,13 +368,19 @@ def test_a_cut_on_a_window_edge_leaves_the_stride():
     assert commits == [(1, 3), (4, 6), (7, 9)]
 
 
-def test_a_finite_stream_cut_replans_the_rounds_after_it():
-    """The scheme lays the rounds after the cut as their own stretch."""
+@pytest.mark.parametrize("known_round", [1, 4])
+def test_a_finite_stream_cut_replans_the_rounds_after_it(
+    known_round: int,
+) -> None:
+    """The scheme lays the rounds after the cut as their own stretch.
+
+    Laid or not yet laid, the window holding round 4 commits through it.
+    """
     source = _FiniteSource(12)
     planner = _planner(source)
     stream = _stream()
     planner.register_stream(stream, None)
-    planner.grow_stream("stream", 1, None)
+    planner.grow_stream("stream", known_round, None)
     planner.cut_stream_after("stream", 4)
     planner.grow_stream("stream", 12, None)
     commits = [

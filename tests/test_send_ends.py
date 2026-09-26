@@ -68,13 +68,18 @@ def _named_paths(path: pathlib.Path) -> list:
 
 
 def test_every_component_that_names_a_hop_is_an_end_of_it():
+    wrong_end = _wrong_ends_of_the_tree()
+    assert wrong_end == {}
+
+
+def _wrong_ends_of_the_tree() -> dict:
     wrong_end = {}
     for package in COMPONENT_PACKAGES:
         directory = DECSIM_ROOT / package
         modules = directory.glob("*.py")
         for module in sorted(modules):
             _add_wrong_ends(module, package, wrong_end)
-    assert wrong_end == {}
+    return wrong_end
 
 
 def _add_wrong_ends(module: pathlib.Path, package: str, wrong: dict) -> None:
@@ -90,14 +95,19 @@ def test_the_table_of_ends_covers_every_hop():
     """A new hop joins the table, so the law never silently shrinks."""
     text = (DECSIM_ROOT / "records" / "transfers.py").read_text()
     tree = ast.parse(text)
+    members = _members_of_class(tree, "LinkPath")
+    assert sorted(members) == sorted(ENDS_OF_PATH)
+
+
+def _members_of_class(tree: ast.Module, class_name: str) -> list:
     members = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        if node.name != "LinkPath":
+        if node.name != class_name:
             continue
         members = _member_names(node)
-    assert sorted(members) == sorted(ENDS_OF_PATH)
+    return members
 
 
 def _member_names(node: ast.ClassDef) -> list:
@@ -175,9 +185,8 @@ def test_every_delivery_callback_leaves_the_landing_to_the_receiving_end():
     builtin, a record's own method or a foreign object's, and this law
     says nothing about those.
     """
-    wrong_end = {}
-    for site in _delivery_sites_of_the_tree():
-        _add_wrong_receivers(site, wrong_end)
+    sites = _delivery_sites_of_the_tree()
+    wrong_end = _gathered(sites, _add_wrong_receivers)
     assert wrong_end == {}
 
 
@@ -187,17 +196,15 @@ def test_one_call_at_the_other_end_per_delivery_callback():
     A sender that makes two calls at the other end is deciding what the
     landing does; that decision is the receiving end's own method.
     """
-    too_many = {}
-    for site in _delivery_sites_of_the_tree():
-        _add_second_calls(site, too_many)
+    sites = _delivery_sites_of_the_tree()
+    too_many = _gathered(sites, _add_second_calls)
     assert too_many == {}
 
 
 def test_the_table_of_delivery_callbacks_matches_the_tree():
     """A new send, or a callback that stops resolving, is visible here."""
-    found = {}
-    for site in _delivery_sites_of_the_tree():
-        _add_found_callback(site, found)
+    sites = _delivery_sites_of_the_tree()
+    found = _gathered(sites, _add_found_callback)
     assert _as_tuples(found) == DELIVERY_CALLBACKS
 
 
@@ -222,6 +229,14 @@ class _DeliverySite:
         if self.callback is None:
             return None
         return self.callback.name
+
+
+def _gathered(sites: list, add_site) -> dict:
+    """What add_site files into one mapping over every site."""
+    gathered = {}
+    for site in sites:
+        add_site(site, gathered)
+    return gathered
 
 
 def _delivery_sites_of_the_tree() -> list:

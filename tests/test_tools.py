@@ -165,6 +165,16 @@ def test_a_checkout_under_a_folder_named_tmp_is_still_checked(tmp_path, capsys):
     assert "skipped.py" not in captured.out
 
 
+def _classes_tested_against(tool, root) -> set:
+    tested = set()
+    for path in tool.source_paths(root):
+        text = path.read_text()
+        tree = ast.parse(text)
+        for _line, name in tool.tested_classes(tree):
+            tested.add(name)
+    return tested
+
+
 def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
     """The list stays honest: a name nobody tests against is deleted.
 
@@ -174,12 +184,7 @@ def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
     """
     tool = _tool("check_row_recognition")
     root = PACKAGE_ROOT / "decsim"
-    tested = set()
-    for path in tool.source_paths(root):
-        text = path.read_text()
-        tree = ast.parse(text)
-        for _line, name in tool.tested_classes(tree):
-            tested.add(name)
+    tested = _classes_tested_against(tool, root)
     stale = tool.ALLOWED - tested
     assert stale == set()
 

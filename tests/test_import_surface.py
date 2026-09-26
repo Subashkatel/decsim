@@ -41,7 +41,8 @@ def is_python_module(module_name):
     return origin.endswith(".py")
 
 
-def test_every_module_imports():
+def import_failures() -> list:
+    """(module, error) for every decsim source module that fails to import."""
     failures = []
     walked = pkgutil.walk_packages(decsim.__path__, prefix="decsim.")
     for info in walked:
@@ -50,4 +51,9 @@ def test_every_module_imports():
         failure = import_failure(info.name)
         if failure is not None:
             failures.append(failure)
+    return failures
+
+
+def test_every_module_imports():
+    failures = import_failures()
     assert failures == []

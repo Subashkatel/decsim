@@ -114,6 +114,11 @@ def _base_name(node) -> str:
     return ""
 
 
+def _collect_calls_of(paths, references: tuple, sites: dict) -> None:
+    for path in paths:
+        _collect_calls(path, references, sites)
+
+
 def _undeclared(called: dict, ports: tuple, exempt: tuple = ()) -> dict:
     """The reached names no listed port declares, with their sites."""
     declared = set(exempt)
@@ -241,9 +246,9 @@ def test_the_code_card_port_declares_what_the_tree_calls_on_a_card():
     a Deltakit code `code` too.
     """
     called = _called_on(("code",), ("qpu", "build"))
-    for module in ("planner.py", "settings.py"):
-        path = DECSIM_ROOT / "frontends" / module
-        _collect_calls(path, ("code",), called)
+    frontends = DECSIM_ROOT / "frontends"
+    paths = (frontends / "planner.py", frontends / "settings.py")
+    _collect_calls_of(paths, ("code",), called)
     assert _undeclared(called, ("CodeModel",)) == {}
 
 
@@ -368,8 +373,14 @@ def test_every_protocol_outside_the_port_file_is_one_packages_seam():
     learns it and the package may change it alone. decsim/seeding.py is
     the named exception.
     """
-    crossing = {}
     protocols = _local_protocols()
+    crossing = _protocols_named_outside(protocols)
+    assert crossing == {}
+
+
+def _protocols_named_outside(protocols: dict) -> dict:
+    """Each package-local Protocol named outside its package: where."""
+    crossing = {}
     for name, path in protocols.items():
         package = _package_of(path)
         if package == SHARED_PROTOCOL_MODULE:
@@ -377,7 +388,7 @@ def test_every_protocol_outside_the_port_file_is_one_packages_seam():
         sites = _named_outside(name, package, path)
         if sites:
             crossing[name] = sites
-    assert crossing == {}
+    return crossing
 
 
 class _Sender:

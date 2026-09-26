@@ -317,6 +317,10 @@ def test_the_generated_reference_pages_are_what_the_source_generates_now():
     """map, ports, tables and cli are the tool's output, not a stale copy."""
     tool = _docs_map()
     generated = tool.pages(CHECKOUT)
+    _check_generated_pages(generated)
+
+
+def _check_generated_pages(generated: dict) -> None:
     for name, text in generated.items():
         path = DOCS / "reference" / name
         assert path.exists(), f"{name} is not committed; run tools/docs_map.py"
@@ -329,7 +333,12 @@ def test_the_generated_reference_pages_are_what_the_source_generates_now():
 def test_every_module_opens_with_one_sentence_saying_what_it_is():
     """The map is made of first sentences, so every module has a short one."""
     tool = _docs_map()
-    for path in _module_paths():
+    paths = _module_paths()
+    _check_first_sentences(tool, paths)
+
+
+def _check_first_sentences(tool, paths) -> None:
+    for path in paths:
         source = path.read_text()
         tree = ast.parse(source)
         text = ast.get_docstring(tree)
@@ -348,16 +357,29 @@ def test_every_plug_in_table_is_on_the_tables_page():
     assert len(entries) == TABLE_COUNT
     page = DOCS / "reference" / "tables.md"
     text = page.read_text()
-    for name, _, _ in entries:
-        assert f"## `{name}`" in text
+    headings = [f"## `{name}`" for name, _, _ in entries]
+    assert all(heading in text for heading in headings)
 
 
 def test_every_path_in_backticks_in_the_docs_exists_in_the_tree():
     """A page names a file a reader can open, or the page is wrong."""
+    quoted_on_pages = _quoted_on_prose_pages()
+    _check_each_quoted(quoted_on_pages, _check_one_path)
+
+
+def _quoted_on_prose_pages() -> list:
+    """(quoted text, page) for every backticked span of every page."""
+    quoted_on_pages = []
     for page in _prose_files():
         text = page.read_text()
         for quoted in BACKTICKED.findall(text):
-            _check_one_path(quoted, page)
+            quoted_on_pages.append((quoted, page))
+    return quoted_on_pages
+
+
+def _check_each_quoted(quoted_on_pages: list, check_one) -> None:
+    for quoted, page in quoted_on_pages:
+        check_one(quoted, page)
 
 
 def _check_one_path(quoted: str, page: pathlib.Path) -> None:
@@ -377,13 +399,12 @@ def _check_one_path(quoted: str, page: pathlib.Path) -> None:
 def test_every_test_named_in_the_docs_is_a_test_pytest_collects():
     """A page that sends a reader to a test sends them to one that exists."""
     collected = _collected_tests()
-    for page in _prose_files():
-        text = page.read_text()
-        for quoted in BACKTICKED.findall(text):
-            _check_one_test(quoted, collected, page)
+    quoted_on_pages = _quoted_on_prose_pages()
+    check_one = functools.partial(_check_one_test, collected=collected)
+    _check_each_quoted(quoted_on_pages, check_one)
 
 
-def _check_one_test(quoted: str, collected: frozenset, page) -> None:
+def _check_one_test(quoted: str, page, collected: frozenset) -> None:
     """One backticked word, when it reads as a test identifier."""
     if "::" not in quoted:
         return
@@ -397,13 +418,12 @@ def _check_one_test(quoted: str, collected: frozenset, page) -> None:
 def test_every_uppercase_name_in_the_docs_is_a_name_the_package_defines():
     """A page names a table or a constant this tree has, or names a referent."""
     defined = _module_level_names()
-    for page in _prose_files():
-        text = page.read_text()
-        for quoted in BACKTICKED.findall(text):
-            _check_one_name(quoted, defined, page)
+    quoted_on_pages = _quoted_on_prose_pages()
+    check_one = functools.partial(_check_one_name, defined=defined)
+    _check_each_quoted(quoted_on_pages, check_one)
 
 
-def _check_one_name(quoted: str, defined: frozenset, page) -> None:
+def _check_one_name(quoted: str, page, defined: frozenset) -> None:
     """One backticked word, when it reads as an uppercase name."""
     if not UPPER_NAME.match(quoted):
         return
@@ -418,7 +438,12 @@ def test_every_diagram_edge_in_the_docs_is_a_port_call_that_happens():
     """A diagram's arrows are the calls the code makes, checked, not drawn."""
     ports = _port_methods()
     calls = _called_methods()
-    for page in _prose_files():
+    pages = _prose_files()
+    _check_every_page_of_diagrams(pages, ports, calls)
+
+
+def _check_every_page_of_diagrams(pages, ports, calls) -> None:
+    for page in pages:
         text = page.read_text()
         _check_one_page_of_diagrams(text, ports, calls, page)
 
@@ -455,10 +480,20 @@ def _check_one_edge(edge: tuple, nodes, ports, calls, page) -> None:
 
 def test_no_em_dash_in_the_prose_or_in_any_docstring():
     """The owner's rule, held over the pages and over every docstring."""
-    for page in _prose_files():
+    pages = _prose_files()
+    paths = _docstring_files()
+    _check_no_em_dash_on(pages)
+    _check_every_docstring(paths)
+
+
+def _check_no_em_dash_on(pages) -> None:
+    for page in pages:
         text = page.read_text()
         assert EM_DASH not in text, f"{page} carries an em dash"
-    for path in _docstring_files():
+
+
+def _check_every_docstring(paths) -> None:
+    for path in paths:
         _check_docstrings(path)
 
 
@@ -501,7 +536,12 @@ DOCUMENTED = (
 
 def test_every_relative_link_in_the_docs_opens_a_heading_of_a_page():
     """A link a reader clicks lands on a file, and on the heading it names."""
-    for page in _prose_files():
+    pages = _prose_files()
+    _check_every_link(pages)
+
+
+def _check_every_link(pages) -> None:
+    for page in pages:
         text = page.read_text()
         for target, anchor in RELATIVE_LINK.findall(text):
             _check_one_link(page, target, anchor)
@@ -543,16 +583,28 @@ def test_the_front_page_links_to_every_page():
     """docs/README.md is the one page from which every other is reachable."""
     front = DOCS / "README.md"
     text = front.read_text()
+    linked = _pages_linked_from(text)
+    unlinked = _pages_not_in(linked)
+    assert unlinked == [], f"docs/README.md does not link to {unlinked}"
+
+
+def _pages_linked_from(text: str) -> set:
     linked = set()
     for target, _anchor in RELATIVE_LINK.findall(text):
         resolved = (DOCS / target).resolve()
         linked.add(resolved)
+    return linked
+
+
+def _pages_not_in(linked: set) -> list:
+    """The names of the pages other than a README that linked leaves out."""
+    unlinked = []
     for page in DOCS.rglob("*.md"):
         if page.name == "README.md":
             continue
-        assert page.resolve() in linked, (
-            f"docs/README.md does not link to {page.name}"
-        )
+        if page.resolve() not in linked:
+            unlinked.append(page.name)
+    return unlinked
 
 
 def test_every_page_names_the_python_floor_pyproject_declares():
@@ -561,7 +613,12 @@ def test_every_page_names_the_python_floor_pyproject_declares():
     declaration = pyproject.read_text()
     required = REQUIRED_PYTHON.search(declaration)
     floor = required.group(1)
-    for page in _prose_files():
+    pages = _prose_files()
+    _check_every_python_floor(pages, floor)
+
+
+def _check_every_python_floor(pages, floor: str) -> None:
+    for page in pages:
         text = page.read_text()
         named = NAMED_PYTHON.findall(text)
         _check_one_python_floor(named, floor, page)
@@ -581,10 +638,7 @@ def test_the_constraints_file_pins_every_package_the_extras_name():
     pyproject = CHECKOUT / "pyproject.toml"
     declaration = pyproject.read_text()
     extras = PINNED_EXTRA.findall(declaration)
-    named = set()
-    for listed in extras:
-        names = REQUIREMENT_NAME.findall(listed)
-        named.update(names)
+    named = _requirement_names(extras)
     constraints = CHECKOUT / "constraints.txt"
     pinned_text = constraints.read_text()
     pinned = PINNED_NAME.findall(pinned_text)
@@ -596,12 +650,30 @@ def test_the_constraints_file_pins_every_package_the_extras_name():
     )
 
 
+def _requirement_names(extras: list) -> set:
+    named = set()
+    for listed in extras:
+        names = REQUIREMENT_NAME.findall(listed)
+        named.update(names)
+    return named
+
+
 def test_no_page_names_a_maintainers_private_environment():
     """A reader has the README's install and nothing only one host has."""
-    for page in _markdown_pages():
+    pages = _markdown_pages()
+    named_by_page = _private_names_by_page(pages)
+    assert named_by_page == {}
+
+
+def _private_names_by_page(pages) -> dict:
+    """Each page that names a private environment: the names it uses."""
+    named_by_page = {}
+    for page in pages:
         text = page.read_text()
         named = PRIVATE_ENVIRONMENT.findall(text)
-        assert named == [], f"{page.name} names {named}"
+        if named:
+            named_by_page[page.name] = named
+    return named_by_page
 
 
 def _markdown_pages() -> tuple:
@@ -615,7 +687,12 @@ def _markdown_pages() -> tuple:
 
 def test_every_config_listing_in_the_docs_is_the_file_it_names():
     """A page that copies a config shows the one its results come from."""
-    for page in _markdown_pages():
+    pages = _markdown_pages()
+    _check_every_config_listing(pages)
+
+
+def _check_every_config_listing(pages) -> None:
+    for page in pages:
         text = page.read_text()
         for name, listing in CONFIG_LISTING.findall(text):
             config = CHECKOUT / name
@@ -629,7 +706,12 @@ def test_every_yaml_block_of_a_tutorial_names_its_config():
     """An unnamed listing would escape the check above."""
     tutorials = DOCS / "tutorials"
     pages = tutorials.glob("*.md")
-    for page in sorted(pages):
+    ordered = sorted(pages)
+    _check_every_yaml_fence(ordered)
+
+
+def _check_every_yaml_fence(pages) -> None:
+    for page in pages:
         text = page.read_text()
         for named in YAML_FENCE.findall(text):
             assert named.startswith(" configs/"), (

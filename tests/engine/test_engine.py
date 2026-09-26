@@ -41,7 +41,7 @@ def record_arrival(ran, arrival_index):
     return action
 
 
-def test_random_programs_run_in_time_priority_arrival_order():
+def test_random_programs_run_in_time_priority_arrival_order_property():
     rng = random.Random(7)
     for _ in range(200):
         engine = Engine()

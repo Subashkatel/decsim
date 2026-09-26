@@ -52,6 +52,52 @@ def _weak_run():
     return machine
 
 
+def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
+    """Two nine-round d=3 memories, the second after the first."""
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 9, 3, 0.001
+    )
+    first = program_records.Operation(
+        1, "first", (0,), patches=(0,), circuit=circuit
+    )
+    second = program_records.Operation(
+        2,
+        "second",
+        (0,),
+        patches=(0,),
+        circuit=circuit,
+        predecessors=(1,),
+        decoder_boundary_predecessors=(1,),
+    )
+    nine_rounds = round_policies.FixedRounds(9)
+    workload = workload_settings.WorkloadSettings(
+        operations=(first, second),
+        rounds_policy=nine_rounds,
+        physical_error_probability=0.001,
+    )
+    device = stim_device.StimDevice()
+    qpu = qpu_settings.QpuSettings(
+        distance=3, device=device, round_period_microseconds=1.0
+    )
+    decoder = decoders.PresetLatencyDecoder(2.0)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder, units=1)
+    windows = window_settings.WindowSettings(terminal_policy=terminal_policy)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder, windows=windows
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def test_a_modelled_window_never_reads_the_next_operations_rounds():
+    """Its model ends at its own last round, so the plan refuses it."""
+    with pytest.raises(ValueError, match="first window 2 reads rounds 10"):
+        _chained_stim_run("lookahead")
+    machine = _chained_stim_run("flush")
+    machine.run()
+
+    assert machine.window_manager.planner.total_windows == 4
+
+
 def test_a_committed_window_publishes_the_request_that_decoded_it():
     machine = _weak_run()
     windows = machine.observation.windows.windows

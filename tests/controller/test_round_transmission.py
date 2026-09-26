@@ -2,8 +2,9 @@
 
 A window-input round rides controller_to_weak_buffer and reaches Buffer
 0's incoming port at delivery, which publishes it. A feedback-memory
-round tells the windows at delivery and frees its slot. The sender never
-waits for a landing:
+round rides the same hop into the store, as the strong route's rounds
+ride controller_to_strong_buffer, then tells the windows at its delivery
+to the decoder and frees its slot. The sender never waits for a landing:
 two memory rounds one QEC cycle apart on a 5 us weak_buffer_to_weak_decoder
 land one cycle apart (Yang et al. 2605.04892 and Google 2408.13687 stream
 every round; gem5 src/dev/dma_device.cc transmitList; ns-3
@@ -23,6 +24,7 @@ import decsim.config as config
 import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -127,12 +129,7 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
     edge = reference.weak_buffer_to_weak_decoder
     capacity = None
     if bits_per_microsecond is not None:
-        capacity = link_settings.CapacitySettings(
-            bits_per_microsecond,
-            link_settings.QuantityBasis.AGGREGATE,
-            None,
-            "test",
-        )
+        capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     channel = link_settings.ChannelSettings(
         edge.channel.name, WBD_TICKS, capacity, "test"
     )
@@ -151,12 +148,13 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
     )
 
 
-def transmitter_with(engine, profile, windows=None):
+def transmitter_with(engine, profile, windows=None, settings=None):
     ledger = link_traffic.TrafficLedger(profile)
-    links = fabric_module.LinkFabric(profile, engine)
+    links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
     links.trace.transfer_delivered.connect(ledger.on_transfer)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings()
-    store = syndrome_buffer_module.SyndromeBuffer(settings)
+    if settings is None:
+        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if windows is None:
         windows = RecordingWindows(engine)
     else:
@@ -165,11 +163,13 @@ def transmitter_with(engine, profile, windows=None):
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
     store_output = round_output.SyndromeBufferOutput(
+        engine,
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
     )
     store_output.transfers = transfers
     store_output.store = store
+    store_output.link = links
     weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
         engine, settings
     )
@@ -186,6 +186,12 @@ def transmitter_with(engine, profile, windows=None):
     return transmitter, store, windows, recorder, ledger
 
 
+def reserve_and_send(transmitter, packed) -> None:
+    """The sender's two steps: the room is reserved, then the round leaves."""
+    transmitter.weak_receiver.reserve_write(packed)
+    transmitter.send(packed)
+
+
 def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
     engine = engine_module.Engine()
     profile = priced_cwb_profile()
@@ -194,7 +200,7 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
     )
     first = packed(1)
 
-    transmitter.send(first)
+    reserve_and_send(transmitter, first)
     engine.run()
 
     assert store.publication_tick((1, 1)) == CWB_TICKS
@@ -204,7 +210,40 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
     assert transmitter.in_flight == 0
 
 
-def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
+def test_a_window_round_is_in_flight_until_its_write_publishes_it():
+    """The packing stage's bound holds a round until the windows hear of it.
+
+    A five-cycle write on a 1 MHz clock publishes the round microseconds
+    after its 0.25 us landing, and the count holds it until then.
+    """
+    engine = engine_module.Engine()
+    profile = priced_cwb_profile()
+    clock = config.Clock(CYCLE_TICKS)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=5)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        clock=clock, row_settings=costs
+    )
+    transmitter, _store, windows, _recorder, _ledger = transmitter_with(
+        engine, profile, settings=settings
+    )
+    counts_after_the_landing = []
+    first = packed(1)
+    probe_ticks = CWB_TICKS + 1
+
+    reserve_and_send(transmitter, first)
+    engine.schedule(
+        probe_ticks,
+        lambda: counts_after_the_landing.append(transmitter.in_flight),
+    )
+    engine.run()
+    publication_tick, _round_index = windows.published[0]
+
+    assert counts_after_the_landing == [1]
+    assert publication_tick > probe_ticks
+    assert transmitter.in_flight == 0
+
+
+def test_a_memory_round_crosses_the_store_hop_then_tells_the_windows():
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile()
     transmitter, store, windows, recorder, _ledger = transmitter_with(
@@ -212,13 +251,14 @@ def test_a_memory_round_tells_the_windows_at_delivery_and_frees_its_slot():
     )
     memory_round = packed(1, route=MEMORY_ROUTE)
 
-    transmitter.send(memory_round)
+    reserve_and_send(transmitter, memory_round)
     engine.run()
 
-    assert windows.memory_rounds == [(WBD_TICKS, 7)]
+    delivery_ticks = STORE_HOP_TICKS + WBD_TICKS
+    assert windows.memory_rounds == [(delivery_ticks, 7)]
     assert store.occupancy == 0
     kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
-    assert kinds_and_ticks == [("FEEDBACK_MEMORY_DELIVERED", WBD_TICKS)]
+    assert kinds_and_ticks == [("FEEDBACK_MEMORY_DELIVERED", delivery_ticks)]
 
 
 def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
@@ -231,22 +271,23 @@ def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
     second = packed(2, route=MEMORY_ROUTE)
 
     def send(memory_round):
-        transmitter.send(memory_round)
+        reserve_and_send(transmitter, memory_round)
 
     engine.schedule(0, lambda: send(first))
     engine.schedule(CYCLE_TICKS, lambda: send(second))
     engine.run()
 
+    delivery_ticks = STORE_HOP_TICKS + WBD_TICKS
     assert windows.memory_rounds == [
-        (WBD_TICKS, 7),
-        (CYCLE_TICKS + WBD_TICKS, 7),
+        (delivery_ticks, 7),
+        (CYCLE_TICKS + delivery_ticks, 7),
     ]
 
 
 @pytest.mark.parametrize(
     "memory_send_ticks, memory_delivery, input_delivery, wire_order",
     [
-        (0, 5_064_000, 5_128_000, [1, 9]),
+        (0, 5_104_000, 5_168_000, [1, 9]),
         (STORE_HOP_TICKS, 5_168_000, 5_104_000, [9, 1]),
     ],
 )
@@ -257,15 +298,16 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
 
     A memory round and a decode input share a bandwidth-bounded
     weak_buffer_to_weak_decoder (5 us, 1000 bits per microsecond,
-    64-bit rounds, so 0.064 us on the wire). The window round crosses
-    controller_to_weak_buffer into the weak syndrome buffer first, so the
-    decode input the windows send at its publication reaches the shared wire one
-    store hop after the round was sent: a memory round sent with the
-    window round is ahead of it, and one sent at the publication tick
-    is behind it. gem5's DmaPort queues at the request
-    (src/dev/dma_device.cc transmitList) and ns-3's device starts the
-    next packet at TransmitComplete (point-to-point-net-device.cc): no
-    arbitration event between the routes.
+    64-bit rounds, so 0.064 us on the wire). Both rounds cross
+    controller_to_weak_buffer into the weak syndrome buffer first, and the
+    decode input the windows send at the window round's publication
+    reaches the shared wire one store hop after that round was sent: a
+    memory round sent just before the window round is ahead of it, and
+    one sent at the publication tick is behind it. gem5's DmaPort
+    queues at the request (src/dev/dma_device.cc transmitList) and
+    ns-3's device starts the next packet at TransmitComplete
+    (point-to-point-net-device.cc): no arbitration event between the
+    routes.
     """
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile(bits_per_microsecond=1000.0)
@@ -276,10 +318,10 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     window_round = packed(2, wire_bits=ROUND_BITS)
 
     def send(finished):
-        transmitter.send(finished)
+        reserve_and_send(transmitter, finished)
 
-    engine.schedule(0, lambda: send(window_round))
     engine.schedule(memory_send_ticks, lambda: send(memory_round))
+    engine.schedule(0, lambda: send(window_round))
     engine.run()
 
     assert windows.memory_rounds == [(memory_delivery, 7)]

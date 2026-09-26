@@ -16,7 +16,6 @@ import dataclasses
 from typing import Optional
 
 import decsim.ports as ports
-import decsim.qpu.code_geometry as code_geometry
 import decsim.records.program as program_records
 
 
@@ -33,7 +32,7 @@ class FixedRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The fixed count."""
         del operation, code
@@ -67,7 +66,7 @@ class PerOperationRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The operation's own count, or the fallback policy's."""
         if operation.id in self.rounds_by_operation:
@@ -84,7 +83,7 @@ class CodeRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The scaled logical cycle, rounded, never below one."""
         del operation
@@ -98,12 +97,18 @@ class CodeRounds:
 class GateRounds:
     """Lattice-surgery round counts by operation kind, proportional to d.
 
-    A measurement or an injection costs one round; a merge costs
-    merge_step_count steps of d rounds; idle and memory cost d rounds; a
-    generic operation on two or more qubits counts as a merge, on one qubit
-    as memory. The default merge_step_count of two, the qubit-count
-    convention for GENERIC, and the one-round MEASURE and INJECT cost are
-    project coefficients that the cited sections do not establish.
+    A merge costs merge_step_count steps of d rounds, two by default: a
+    merge and the split that follows it. Horsman et al. 1111.4022 merge
+    two surfaces by "performing d rounds of error correction, treating
+    the entire system as a single data surface" (Sec. 3.1, text lines
+    253-255), and after a split the two surfaces "are then individually
+    stabilized, as before for a total of d rounds of error correction"
+    (Sec. 3.2, lines 358-363), so merge plus split is 2d. Idle and
+    memory cost d rounds; a generic operation on two or more qubits
+    counts as a merge, on one qubit as memory; a measurement or an
+    injection costs one round. The qubit-count convention for GENERIC
+    and the one-round MEASURE and INJECT cost are project coefficients
+    that the cited sections do not establish.
     """
 
     merge_step_count: int = 2
@@ -117,7 +122,7 @@ class GateRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The kind's cost in rounds of the code's distance."""
         distance = code.distance
@@ -159,7 +164,7 @@ class TemporalRounds:
     def rounds_for(
         self,
         operation: program_records.OperationPlanningView,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The temporal distance for surgery, else the base policy's count."""
         kind = operation.kind

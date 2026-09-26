@@ -101,7 +101,7 @@ class StrongWindowPorts:
     own layout needs and ignores the rest. This is gem5's params object,
     where a SimObject's collaborators arrive as one structure rather
     than as a signature per subclass
-    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205). The courier
+    (gem5 src/python/m5/SimObject.py:204-205). The courier
     is what a row with a pinned face reads: the committed boundary of
     the neighbour it pins on, and the hop that carries it.
     """
@@ -132,7 +132,11 @@ class StrongWindowShape(Protocol):
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
-    yaml flag. default_boundary_policy is the row of BOUNDARY_POLICIES a
+    yaml flag. pins_the_far_face is its declaration that the far face is
+    pinned on the restart window's weak commit, which the escalation
+    section reads to refuse a restart window that re-reads the region
+    (escalation/settings.py). default_boundary_policy is the row of
+    BOUNDARY_POLICIES a
     run gets when windows.boundaries is null and the escalation may
     escalate: an absorbing region needs the weak chain to keep
     committing, so it names eager, and a region that absorbs nothing
@@ -145,6 +149,7 @@ class StrongWindowShape(Protocol):
     """
 
     absorbs_weak_windows: bool
+    pins_the_far_face: bool
     default_boundary_policy: str
     window_absorbed: Any
 
@@ -597,12 +602,9 @@ class ForwardWindow(StrongWindowPorts):
         buffer of raw context per face, owning nothing that touches
         rounds before its extent.
         """
-        key = held.key
-        weak_job = held.weak_job
-        strong_window = held.strong_window
         payloads = strong_job_payloads(
             self,
-            strong_window,
+            held.strong_window,
             held.strong_model,
             held.operation,
             held.strong_request_key,
@@ -612,27 +614,15 @@ class ForwardWindow(StrongWindowPorts):
         self.retention.require_rounds_retained(
             held.label, payloads, plan.context_lo, plan.context_hi
         )
-        payload_round_count = decoding_records.distinct_round_count(payloads)
-        job = decoding_records.DecodeJob(
-            operation_id=key[0],
-            window_id=key[1],
-            round_count=payload_round_count,
-            ready_time=self.engine.now,
-            label=held.label,
-            kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-            spatial_nodes=weak_job.spatial_nodes,
-            code=weak_job.code,
-            detector_error_model=held.strong_model,
-            payloads=payloads,
-            attempt=1,
-            window=strong_window,
-            strong_decode_for=key,
-            request_key=held.strong_request_key,
-            request_created_ticks=held.strong_request_created_ticks,
-            gate=self.builder.gate,
+        return _strong_redecode_job(
+            self,
+            held.weak_job,
+            held.strong_window,
+            held.strong_model,
+            payloads,
+            held.strong_request_key,
+            held.strong_request_created_ticks,
         )
-        self.retention.hold_strong_input(job)
-        return job
 
 
 class ForwardSeamWindow(ForwardWindow):
@@ -680,11 +670,12 @@ class ForwardSeamWindow(ForwardWindow):
     there is no earlier commit to pin on.
 
     The row needs escalation.restart_reread_buffer_regions 0, the
-    paper's value: with a re-read the restart window shares rounds with
-    the strong region, and pinning the far face on a correction that
-    explains rounds inside the region is the double count Bombin's
-    input adaptation rules out. The escalation section refuses the
-    pairing at load.
+    default (Fig. 12 step 5 draws a re-read of one buffer region, which
+    this row does not take): with a re-read the restart window shares
+    rounds with the strong region, and pinning the far face on a
+    correction that explains rounds inside the region is the double
+    count Bombin's input adaptation rules out. The escalation section
+    refuses the pairing at load.
     """
 
     pins_the_far_face = True
@@ -845,7 +836,6 @@ def _strong_job_of(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> decoding_records.DecodeJob:
     """The row's job: the rounds its store holds, the faces it pins."""
-    weak_job = held.weak_job
     payloads = strong_job_payloads(
         shape,
         held.strong_window,
@@ -854,23 +844,49 @@ def _strong_job_of(
         held.request_key,
         held.folded_boundaries,
     )
+    return _strong_redecode_job(
+        shape,
+        held.weak_job,
+        held.strong_window,
+        held.model,
+        payloads,
+        held.request_key,
+        held.request_created_ticks,
+    )
+
+
+def _strong_redecode_job(
+    shape: StrongWindowPorts,
+    weak_job: decoding_records.DecodeJob,
+    strong_window: window_records.Window,
+    model,
+    payloads: list,
+    request_key: window_records.DecoderRequestKey,
+    request_created_ticks: int,
+) -> decoding_records.DecodeJob:
+    """The strong job every row submits, its input held until it lands.
+
+    It re-decodes the escalated weak window, priced for the rounds its
+    payloads carry.
+    """
+    key = (weak_job.operation_id, weak_job.window_id)
     payload_round_count = decoding_records.distinct_round_count(payloads)
     job = decoding_records.DecodeJob(
-        operation_id=held.key[0],
-        window_id=held.key[1],
+        operation_id=key[0],
+        window_id=key[1],
         round_count=payload_round_count,
         ready_time=shape.engine.now,
-        label=held.label,
+        label=weak_job.strong_label,
         kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
         spatial_nodes=weak_job.spatial_nodes,
         code=weak_job.code,
-        detector_error_model=held.model,
+        detector_error_model=model,
         payloads=payloads,
         attempt=1,
-        window=held.strong_window,
-        strong_decode_for=held.key,
-        request_key=held.request_key,
-        request_created_ticks=held.request_created_ticks,
+        window=strong_window,
+        strong_decode_for=key,
+        request_key=request_key,
+        request_created_ticks=request_created_ticks,
         gate=shape.builder.gate,
     )
     shape.retention.hold_strong_input(job)

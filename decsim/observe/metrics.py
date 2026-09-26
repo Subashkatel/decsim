@@ -8,8 +8,8 @@ still samples, after every action, because the rounds waiting to be
 decoded are spread over the window manager and the queues.
 DecoderUtilization is always built, since every run's pool columns read
 each tier's busy fraction off it; the other two are built only when the
-observation section asks, the D7 harness reading DecodeBacklog and the
-memory sweep DecoderMemoryOccupancy.
+observation section asks, backlog_trace for DecodeBacklog and
+decoder_memory_occupancy for DecoderMemoryOccupancy.
 """
 
 from collections.abc import Mapping

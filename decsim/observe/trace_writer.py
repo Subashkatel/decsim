@@ -19,6 +19,7 @@ list.
 """
 
 import dataclasses
+import gzip
 import json
 from typing import Optional
 
@@ -66,7 +67,7 @@ HELD_ROUNDS_COUNTER = "controller rounds held for store room"
 
 
 def round_text(round_key) -> str:
-    """A round key as the flow id and the args carry it: `op:index`."""
+    """A round key as the args carry it: `op:index`."""
     operation_id, round_index = round_key
     return f"{operation_id}:{round_index}"
 
@@ -146,7 +147,7 @@ class TraceWriter:
     # ---- the QPU and the controller
 
     def round_emitted(self, readout: round_records.QPUReadout) -> None:
-        """One readout leaves the QPU."""
+        """One readout, at the boundary the QPU reads it out at."""
         round_key = (readout.operation_id, readout.round_index)
         args = {"round": round_text(round_key), "bits": readout.size_bits}
         name = f"emitted round {readout.round_index}"
@@ -309,6 +310,30 @@ class TraceWriter:
         """A hold ends; rounds with no other holder are freed next."""
         args = {"holder": _holder_text(holder)}
         self._instant(store_name, "hold released", "hold", args)
+
+    def access_served(
+        self,
+        store_name: str,
+        direction: str,
+        port_index: int,
+        round_keys: tuple,
+        arrival_tick: int,
+        start_tick: int,
+        completion_tick: int,
+    ) -> None:
+        """One write or read on a store's port, from its start to its data.
+
+        The span on the port's own lane shows the port's occupancy; the
+        wait for the port is its start less its arrival.
+        """
+        thread = f"{store_name} port {port_index}"
+        duration = completion_tick - start_tick
+        args = {
+            "rounds": _rounds_text(round_keys),
+            "arrival": arrival_tick,
+            "waited_ticks": start_tick - arrival_tick,
+        }
+        self._complete(thread, direction, "access", start_tick, duration, args)
 
     # ---- the window side
 
@@ -778,7 +803,8 @@ class TraceWriter:
             if is_flowing:
                 phase = "t"
             else:
-                self._open.flowing_rounds.add(round_key)
+                flow_id = self._next_flow_id()
+                self._open.flowing_rounds[round_key] = flow_id
             self._round_flow(phase, thread, round_key, transfer.send_ticks)
 
     def _step_flow(self, thread: str, round_key) -> None:
@@ -791,16 +817,29 @@ class TraceWriter:
             if round_key not in self._open.flowing_rounds:
                 continue
             self._round_flow("f", thread, round_key, self.engine.now)
-            self._open.flowing_rounds.discard(round_key)
+            del self._open.flowing_rounds[round_key]
+
+    def _next_flow_id(self) -> int:
+        """A new chain's id: a number, in the order the chains start.
+
+        The spec's ids are numbers (Trace Event Format, Async Events,
+        "id": 0x100, which flow events share), and Perfetto's trace
+        processor drops a flow whose id does not read as one, counting
+        it under flow_invalid_id, so the round or window a chain follows
+        is named in its args instead.
+        """
+        self._open.flows_started += 1
+        return self._open.flows_started
 
     def _flow(
         self,
         phase: str,
         thread: str,
-        flow_id: str,
+        flow_id: int,
         name: str,
         category: str,
         tick: int,
+        identity: dict,
     ) -> None:
         row = {
             "ph": phase,
@@ -810,7 +849,7 @@ class TraceWriter:
             "ts": _microseconds(tick),
             "pid": PROCESS_ID,
             "tid": self._tid(thread),
-            "args": {"tick": tick},
+            "args": dict(identity, tick=tick),
         }
         if phase == "f":
             row["bp"] = "e"
@@ -820,17 +859,19 @@ class TraceWriter:
         self, phase: str, thread: str, round_key, tick: int
     ) -> None:
         """One hop of a round's own chain, from the QPU to a unit's memory."""
-        flow_id = round_text(round_key)
+        flow_id = self._open.flowing_rounds[round_key]
         name = f"round {round_key[1]}"
-        self._flow(phase, thread, flow_id, name, "round", tick)
+        identity = {"round": round_text(round_key)}
+        self._flow(phase, thread, flow_id, name, "round", tick, identity)
 
     def _window_flow(
         self, phase: str, thread: str, window_key, tick: int
     ) -> None:
         """One hop of a window's chain, from its queue to the frame."""
-        flow_id = _window_flow_id(window_key)
+        flow_id = self._open.flowing_windows[window_key]
         name = f"W{window_key[1]}"
-        self._flow(phase, thread, flow_id, name, "window", tick)
+        identity = {"window": window_text(window_key)}
+        self._flow(phase, thread, flow_id, name, "window", tick, identity)
 
     def _start_window_flow(self, thread: str, window_key) -> None:
         """A window's chain begins where its request joins the queue.
@@ -842,7 +883,8 @@ class TraceWriter:
         if window_key in self._open.flowing_windows:
             self._step_window_flow(thread, window_key, self.engine.now)
             return
-        self._open.flowing_windows.add(window_key)
+        flow_id = self._next_flow_id()
+        self._open.flowing_windows[window_key] = flow_id
         self._window_flow("s", thread, window_key, self.engine.now)
 
     def _step_window_flow(self, thread: str, window_key, tick: int) -> None:
@@ -856,7 +898,7 @@ class TraceWriter:
         if window_key not in self._open.flowing_windows:
             return
         self._window_flow("f", thread, window_key, tick)
-        self._open.flowing_windows.discard(window_key)
+        del self._open.flowing_windows[window_key]
 
 
 def _complete_event(
@@ -912,8 +954,6 @@ def _thread_sort_event(tid: int) -> dict:
 def _open_for(path: str):
     """A gzip file when the path says so, a plain one otherwise."""
     if path.endswith(".gz"):
-        import gzip
-
         return gzip.open
     return open
 
@@ -954,12 +994,6 @@ def _unit_thread(unit_name: str) -> str:
     return f"Decoder unit {unit_name}"
 
 
-def _window_flow_id(window_key) -> str:
-    """A window's flow id, kept apart from a round key's own text."""
-    text = window_text(window_key)
-    return f"window {text}"
-
-
 def _dispatch_tick(job: decoding_records.DecodeJob) -> Optional[int]:
     """When the unit took the job's slot; None for a windowless job."""
     window = job.window
@@ -973,16 +1007,14 @@ def _copied_identity(key) -> dict:
 
     A round key is a round; a decode job is a window, and the rounds it
     reads, so a round's own path can be followed through the copy into a
-    unit's memory.
+    unit's memory. Every copy_made source fires one or the other.
     """
-    if isinstance(key, tuple) and len(key) == 2:
+    if isinstance(key, tuple):
         return {"round": round_text(key)}
-    if isinstance(key, decoding_records.DecodeJob):
-        window_key = (key.operation_id, key.window_id)
-        window = window_text(window_key)
-        rounds = _job_rounds_text(key)
-        return {"window": window, "rounds": rounds}
-    return {"key": str(key)}
+    window_key = (key.operation_id, key.window_id)
+    window = window_text(window_key)
+    rounds = _job_rounds_text(key)
+    return {"window": window, "rounds": rounds}
 
 
 def _job_rounds_text(job: decoding_records.DecodeJob) -> str:
@@ -1098,18 +1130,20 @@ class _OpenSlices:
 
     A residence or a service that has begun and not ended sits under
     (thread, key) and writes one X event at its end; flowing_rounds and
-    flowing_windows are the flows whose start has been written, so a
-    step never precedes its start; unit_thread_by_window says which
+    flowing_windows hold the id of each flow whose start has been
+    written, so a step never precedes its start, and flows_started is
+    how many ids have been given; unit_thread_by_window says which
     unit's lane a stage lands on, because a stage record names the
     window and not the unit. gem5 groups a component's many members the
-    same way (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    same way (gem5 src/base/stats/group.hh:60-92).
     """
 
     tid_by_thread: dict = dataclasses.field(default_factory=dict)
     open_residence: dict = dataclasses.field(default_factory=dict)
     open_service: dict = dataclasses.field(default_factory=dict)
-    flowing_rounds: set = dataclasses.field(default_factory=set)
-    flowing_windows: set = dataclasses.field(default_factory=set)
+    flowing_rounds: dict = dataclasses.field(default_factory=dict)
+    flowing_windows: dict = dataclasses.field(default_factory=dict)
     unit_thread_by_window: dict = dataclasses.field(default_factory=dict)
     counter_value: dict = dataclasses.field(default_factory=dict)
     unnamed_threads: int = 0
+    flows_started: int = 0

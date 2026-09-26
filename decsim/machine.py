@@ -163,6 +163,7 @@ class Machine:
             settings, escalation_policy, detection_events
         )
         store_build.check_readout_cost_is_priced(settings)
+        store_build.check_one_price_for_a_read(settings)
         store_build.check_store_kinds(settings)
         controller_side.check_strong_route(escalation_policy, pool.router)
         parts = build_parts.Parts(
@@ -232,7 +233,7 @@ class Machine:
         event queues it here, in build order. That is gem5's split
         between the constructor and startup, "the appropriate place to
         schedule initial event(s)"
-        (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+        (gem5 src/sim/sim_object.hh lines 194 and 280).
         """
         self.factory.start()
         self.execution_runtime.start()
@@ -252,11 +253,13 @@ class Machine:
             self.strong_decoder_manager.check_decode_work_settled()
         self.window_manager.check_settled()
         self.assembler.check_settled()
-        self.syndrome_round_sender.check_settled()
-        self.transmitter.check_settled()
+        # the stores before the waiting line: a round held for room is
+        # the symptom, the hold that keeps the store full is the cause
         self.weak_syndrome_round_receiver.check_settled()
         if self.strong_syndrome_round_receiver is not None:
             self.strong_syndrome_round_receiver.check_settled()
+        self.syndrome_round_sender.check_settled()
+        self.transmitter.check_settled()
         return _capture_result(self)
 
 
@@ -308,13 +311,17 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
         rows.append(row)
     link_traffic = machine.observation.traffic.traffic_json_value()
     data_movement = _data_movement_value(machine.observation)
+    stamps = machine.observation.runtime_stamps
+    waits = stamps.magic_state_wait.values()
+    magic_state_stall_ticks = sum(waits)
     return result_records.RunResult(
         terminal_status="complete",
         event_queue_empty=True,
         decode_work_settled=True,
         execution_workload_complete=True,
-        execution_done_ticks=machine.observation.runtime_stamps.last_finish,
+        execution_done_ticks=stamps.last_finish,
         fully_done_ticks=engine.now,
+        magic_state_stall_ticks=magic_state_stall_ticks,
         operation_results=tuple(rows),
         link_traffic=link_traffic,
         data_movement=data_movement,

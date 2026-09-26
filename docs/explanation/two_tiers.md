@@ -153,7 +153,11 @@ window absorbs the weak windows it covers, the weak chain has to resume
 somewhere, and where it resumes is the **restart window**
 (`PotentialRestart`). How far back into the strong region that restarted
 weak decode reads is `restart_reread_buffer_regions`, which defaults to
-the paper's value.
+0, reading nothing inside the region. The paper's text resumes the weak
+decoder once commit plus buffer rounds are stored after the region
+(Toshio 2510.25222 lines 1229-1235), which both values meet, and its
+Fig. 12 step 5 draws the restart window re-reading one buffer region,
+which is 1.
 
 This is also why the weak syndrome buffer holds rounds past their weak
 decode. It streams to the weak tier round by round as the rounds arrive,

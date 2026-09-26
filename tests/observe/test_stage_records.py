@@ -20,11 +20,10 @@ class _Record:
         self.stage = stage
 
 
-def test_a_run_with_no_stage_holds_no_record_and_names_no_window():
+def test_a_run_with_no_stage_holds_no_record():
     ledger = stage_records.StageLedger()
 
     assert ledger.records == []
-    assert ledger.windows() == ()
     assert ledger.records_for(1, 0) == ()
 
 
@@ -50,20 +49,6 @@ def test_one_windows_records_come_back_in_stage_order():
     ledger.stage_recorded(second)
 
     assert ledger.records_for(1, 0) == (first, second)
-
-
-def test_the_windows_that_recorded_a_stage_come_back_in_key_order():
-    ledger = stage_records.StageLedger()
-
-    last_key = _Record(2, 0, "fetch")
-    middle_key = _Record(1, 1, "fetch")
-    first_key = _Record(1, 0, "fetch")
-
-    ledger.stage_recorded(last_key)
-    ledger.stage_recorded(middle_key)
-    ledger.stage_recorded(first_key)
-
-    assert ledger.windows() == ((1, 0), (1, 1), (2, 0))
 
 
 def test_the_ledger_asks_nothing_about_a_rows_stage_names():

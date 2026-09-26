@@ -47,11 +47,12 @@ class ObservationSettings:
     every window with the Tesseract referee and counts disagreements,
     never priced. record_switching_windows keeps every request and
     service record for the switching views; syndrome_buffer_occupancy builds
-    the L5 listener on the weak syndrome buffer; backlog_trace builds the
-    decode backlog sampler the D7 harness reads; decoder_memory_occupancy
-    builds the memory sweep's sampler (the decoder utilization is always
-    integrated, every run's pool columns read it); data_movement builds
-    the copy, reference and move counters the RunResult carries.
+    the occupancy listener on the weak syndrome buffer; backlog_trace
+    builds the sampler of the rounds waiting to be decoded;
+    decoder_memory_occupancy builds the memory sweep's sampler (the
+    decoder utilization is always integrated, every run's pool columns
+    read it); data_movement builds the copy, reference and move counters
+    the RunResult carries.
     """
 
     log: str = "off"
@@ -153,8 +154,10 @@ def _log_mode(section: Mapping) -> str:
 def _window_check(section: Mapping) -> str:
     """The referee that re-decodes every window, or none."""
     check_windows_with = section.get("check_windows_with", "none")
+    # a list of names, not the table: a yaml list or block is unhashable
+    # and a dictionary lookup would raise TypeError before the sentence
     rows = sorted(WINDOW_CHECKS)
-    if check_windows_with not in WINDOW_CHECKS:
+    if check_windows_with not in rows:
         raise ValueError(
             "observation.check_windows_with must be one of "
             f"{rows}, got {check_windows_with!r}"
@@ -172,6 +175,11 @@ def _trace_word_or_path(section: Mapping) -> str:
             "observation.trace must be off, chrome, or a path, got "
             f"{trace!r}; yaml reads a bare `on` as true, so quote a path "
             "that looks like a word"
+        )
+    if not trace:
+        raise ValueError(
+            "observation.trace is empty, which names no file; write off, "
+            "chrome, or a path"
         )
     if trace in NARRATOR_MODES:
         raise ValueError(
@@ -209,9 +217,14 @@ def _refuse_a_shot_that_is_not_a_count(shot) -> None:
 
 
 def _boolean(section: Mapping, key: str) -> bool:
-    """One of the section's on-or-off knobs, off when the yaml is silent."""
+    """One of the section's on-or-off knobs, off when the yaml is silent.
+
+    The check is by identity: 1 == True and 0 == False in Python (the
+    language reference, "The standard type hierarchy", bool is a subtype
+    of int), so a membership test would let a count through as a knob.
+    """
     value = section.get(key, False)
-    if value not in (True, False):
+    if value is not True and value is not False:
         raise ValueError(
             f"observation.{key} must be true or false, got {value!r}"
         )

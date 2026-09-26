@@ -3,11 +3,13 @@
 Delfosse and Nickerson 1709.06218:
 every odd cluster grows by one half-edge per round (Algorithm 1, step
 4), clusters that meet fuse, and the peeling decoder reads the
-correction off a spanning forest of the grown erasure (Algorithm 2).
-The weighted variant is Huang, Newman and Brown 2004.04693 (same
-folder): an edge of log-odds weight w has the integer length
-round(w / weight_step), never below one tick, so a likelier fault is
-crossed sooner; that quantization is _quantize_weight_ticks.
+correction off a spanning forest of the grown erasure (Algorithm 1,
+step 8). The edge lengths are Huang, Newman and Brown's 2004.04693: an
+edge of log-odds weight w has the integer length round(w /
+weight_step), at least one tick when w is not zero, so a likelier
+fault is crossed sooner; that quantization is _quantize_weight_ticks.
+A fault of probability one half has weight zero and length zero, an
+edge the growth starts closed.
 
 This module builds the graph of one placed model and turns one
 syndrome into the evidence a decode returns. The growth, the forest
@@ -118,7 +120,10 @@ def _natural_log_odds(residual_probability: float) -> float:
 
 
 def _quantize_weight_ticks(weight: float, weight_step: float) -> int:
-    """The edge length in weight ticks: round(weight / weight_step), at least 1.
+    """The edge length in weight ticks: round(weight / weight_step).
+
+    At least one tick for a nonzero weight, and zero for weight zero,
+    which is a fault of probability one half.
 
     Exact in rational arithmetic, so equal weights get equal lengths on
     every platform (Huang, Newman and Brown 2004.04693: integer edge

@@ -1,13 +1,12 @@
 """The Pauli frame behaves like a real frame and charges what it says.
 
 Sources: PECOS pauli_frame.rs (a stream's frame is the XOR of its
-corrections; folding is non-destructive); Riesebos, "Pauli Frames for
-Quantum Computer Architectures", TU Delft MSc thesis CE-MS-2016,
-Sec. 3.2 Table 3.1 (a flush applies a Pauli record's gates once and
-resets the record to I); Yang et al. 2605.04892 Fig. 1 (one frame update
-costs one cycle, 4 ns at 250 MHz, and the loop waits for it). The write
+corrections; folding is non-destructive); Skoric et al. 2209.08552
+lines 102-105 (a window commits its final correction once); Yang et al.
+2605.04892 Fig. 1 (one frame update costs one cycle, 4 ns at 250 MHz,
+and the loop waits for it). The write
 is charged from the frame clock's next edge, gem5's clockEdge
-(tmp/resources/gem5/src/sim/clocked_object.hh lines 174-186).
+(gem5 src/sim/clocked_object.hh lines 174-186).
 """
 
 import dataclasses
@@ -205,6 +204,35 @@ def test_a_charged_write_without_a_clock_is_refused():
         PauliFrameConfig(write_cycles=1)
 
 
+@pytest.mark.parametrize("key", ["clock", "write_cycles"])
+def test_a_section_without_a_required_key_is_refused_by_name(key):
+    """A sweep that leaves a key out reads a sentence, not a KeyError."""
+    clocks = config.ClockSettings({"fridge": 250.0})
+    section = {"kind": "logical_register", "clock": "fridge"}
+    section["write_cycles"] = 1
+    del section[key]
+
+    with pytest.raises(ValueError) as refusal:
+        PauliFrameConfig.from_yaml(section, clocks)
+    assert str(refusal.value) == (
+        f"pauli_frame needs the keys ['{key}']; configs/reference.yaml "
+        "holds every key with its unit"
+    )
+
+
+def test_a_key_the_section_does_not_have_is_refused_by_name():
+    """A misspelt key would otherwise leave its default silently."""
+    clocks = config.ClockSettings({"fridge": 250.0})
+    section = {"clock": "fridge", "write_cycles": 1, "write_cycle": 2}
+
+    with pytest.raises(ValueError) as refusal:
+        PauliFrameConfig.from_yaml(section, clocks)
+    assert str(refusal.value) == (
+        "pauli_frame does not know ['write_cycle']; its keys are "
+        "['kind', 'clock', 'write_cycles']"
+    )
+
+
 def test_a_free_write_is_accepted_and_needs_no_clock():
     settings = PauliFrameConfig(write_cycles=0)
     assert settings.write_cycles == 0
@@ -248,7 +276,9 @@ def test_a_frame_row_written_outside_decsim_runs_from_a_yaml(
     config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
     experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -268,7 +298,7 @@ def test_a_frame_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
 
 
 def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
-    """C7 finding 8: the frame's parallel-write rule, never pinned.
+    """Two windows' writes overlap: the frame is a register, not a queue.
 
     A write is one XOR into a register, one clock cycle of the frame unit
     (Yang et al. 2605.04892 Fig. 1 measures 4 ns inside a 550 ns loop,
@@ -307,3 +337,35 @@ def test_every_write_is_stamped_with_its_own_arrival_and_its_own_end():
 
     assert (first.accepted_ticks, first.committed_ticks) == (10, 14)
     assert (second.accepted_ticks, second.committed_ticks) == (10, 14)
+
+
+def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
+    """What the frame holds is what the run reports, escalations included.
+
+    The frame takes one final correction per window, the strong answer
+    for an escalated window and never its provisional weak one; the
+    report folds the windows' contributions with the strong answer
+    replacing the weak (Skoric et al. 2209.08552 lines 444-445: a
+    stream's logical correction is the sum of its committed windows'
+    effects). Both folds must agree.
+    """
+    config_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"
+    experiment_config = experiment.load_experiment(config_path)
+    settings = experiment_config.point_settings(
+        physical_error_probability=0.01,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    (operation_result,) = result.operation_results
+    snapshot = machine.pauli_frame.snapshot()
+    strong_flips = [
+        record.logical_observables
+        for record in snapshot.records
+        if record.tier == "strong"
+    ]
+    frame = machine.pauli_frame.frame_for_stream(operation_result.operation_id)
+
+    assert (1,) in strong_flips
+    assert frame == tuple(operation_result.logical_observables)

@@ -29,8 +29,3 @@ class StageLedger:
         key = (operation_id, window_id)
         window_records = self._by_window.get(key, ())
         return tuple(window_records)
-
-    def windows(self) -> tuple:
-        """Every (operation, window) that recorded a stage, in key order."""
-        keys = self._by_window.keys()
-        return tuple(sorted(keys))

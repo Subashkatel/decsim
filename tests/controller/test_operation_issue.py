@@ -15,6 +15,7 @@ import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.log_writers as log_writers
@@ -52,6 +53,9 @@ class RecordingIdleRounds:
     def end_idle_period(self, operation, patch):
         self.ended.append((operation.id, patch))
 
+    def end_every_idle_period(self):
+        self.ended.append("every idle patch")
+
     def claim(self, operation):
         del operation
         return self.claimed
@@ -76,7 +80,9 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
 def issuer_with(engine, qpu, idle_rounds, windows, recorder):
     reference = link_profiles.logical_reference_profile()
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
-    output.link = fabric_module.LinkFabric(reference, engine)
+    output.link = fabric_module.LinkFabric(
+        reference, engine, channel_module.Channel
+    )
     output.qpu = qpu
     if recorder is not None:
         output.trace.output_event.connect(recorder.output)
@@ -180,3 +186,19 @@ def test_the_last_release_stops_the_qpu():
 
     assert running is False
     assert qpu.finished is True
+
+
+def test_the_last_release_settles_every_idle_patch():
+    engine = engine_module.Engine()
+    qpu = RecordingQpu()
+    idle_rounds = RecordingIdleRounds()
+    windows = RecordingWindows()
+    issuer = issuer_with(engine, qpu, idle_rounds, windows, None)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+
+    issuer.after_successor_release(operation, False, False)
+    settled_before_the_end = list(idle_rounds.ended)
+    issuer.after_successor_release(operation, False, True)
+
+    assert settled_before_the_end == []
+    assert idle_rounds.ended == ["every idle patch"]

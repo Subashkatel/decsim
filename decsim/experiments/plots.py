@@ -154,7 +154,7 @@ def ler_groups(rows: list) -> list:
     distance.
     """
     distances = _column_values(rows, "distance")
-    periods = _column_values(rows, "round_period_us")
+    periods = _column_values(rows, "round_period_microseconds")
     groups = []
     for distance in distances:
         at_distance = _curves_at_distance(rows, distance, periods)
@@ -370,12 +370,12 @@ def latency_plot(config, measurements: list, path: Path) -> None:
 
     pooled = latency_samples_by_distance(measurements)
     distances = list(pooled)
-    round_period_us = measurements[0].round_period_us
+    round_period_microseconds = measurements[0].round_period_microseconds
     probability = measurements[0].physical_error_probability
     algorithm = config.active_decoder.kind
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     _latency_violins(axis, pooled, distances, 1.4, "C0", algorithm)
-    _deadline_line(axis, distances, round_period_us)
+    _deadline_line(axis, distances, round_period_microseconds)
     log_values = _log_values_of(pooled)
     _log_decade_axis(axis, log_values)
     axis.set_xticks(distances)
@@ -405,21 +405,21 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
 
     figure, axis = plt.subplots(figsize=(5.6, 3.8))
     all_log_values = []
-    round_period_us = None
+    round_period_microseconds = None
     distances = []
     for file_index, sample_file in enumerate(sample_files):
         rows = _csv_rows(sample_file)
         pooled = _samples_by_distance(rows)
         seen = set(distances) | set(pooled)
         distances = sorted(seen)
-        round_period_us = float(rows[0]["round_period_us"])
+        round_period_microseconds = float(rows[0]["round_period_microseconds"])
         algorithm = rows[0]["algorithm"]
         color = f"C{file_index}"
         positions = list(pooled)
         _latency_violins(axis, pooled, positions, 1.4, color, algorithm)
         log_values = _log_values_of(pooled)
         all_log_values.extend(log_values)
-    _deadline_line(axis, distances, round_period_us)
+    _deadline_line(axis, distances, round_period_microseconds)
     _log_decade_axis(axis, all_log_values)
     axis.set_xticks(distances)
     axis.set_xlabel("Code distance")
@@ -564,7 +564,7 @@ class _TimelineWindow:
 class _TimelineShot:
     """Everything the timeline draws, read off one trace document."""
 
-    round_period_us: float
+    round_period_microseconds: float
     moves_by_round: dict  # (channel, round number) -> _Span
     moves_by_window: dict  # (channel, window id) -> _Span
     windows: dict  # window id -> _TimelineWindow
@@ -648,9 +648,9 @@ def _timeline_shot(document) -> _TimelineShot:
     windows = _timeline_windows(document)
     stages = _timeline_stages(document)
     frame = _frame_spans(document)
-    round_period_us = _round_period_microseconds(moves_by_round)
+    round_period_microseconds = _round_period_microseconds(moves_by_round)
     return _TimelineShot(
-        round_period_us=round_period_us,
+        round_period_microseconds=round_period_microseconds,
         moves_by_round=moves_by_round,
         moves_by_window=moves_by_window,
         windows=windows,
@@ -817,9 +817,9 @@ def _draw_rounds(
         if round_number % 2:
             shade = "0.55"
         sent = qpu_link[round_number].start_us
-        round_start = sent - shot.round_period_us
+        round_start = sent - shot.round_period_microseconds
         timeline.round_bar(
-            "qpu round", round_start, shot.round_period_us, shade
+            "qpu round", round_start, shot.round_period_microseconds, shade
         )
         link_time = qpu_link[round_number].end_us - sent
         timeline.round_bar("qc link", sent, link_time, shade)
@@ -1014,7 +1014,7 @@ def _timeline_subtitle(document, shot: _TimelineShot) -> str:
     return (
         f"{point_text}"
         f" · windows: commit {commit_rounds}, buffer {buffer_rounds} rounds"
-        f" · rounds every {shot.round_period_us:g} µs"
+        f" · rounds every {shot.round_period_microseconds:g} µs"
     )
 
 
@@ -1078,7 +1078,7 @@ def _rows_at(rows: list, distance: int, period: float) -> list:
     for row in rows:
         if row["distance"] != distance:
             continue
-        if row["round_period_us"] != period:
+        if row["round_period_microseconds"] != period:
             continue
         selected.append(row)
     return selected
@@ -1528,7 +1528,9 @@ def _latency_violins(
     )
 
 
-def _deadline_line(axis, distances: list, round_period_us: float) -> None:
+def _deadline_line(
+    axis, distances: list, round_period_microseconds: float
+) -> None:
     """The deadline: a new window arrives every d rounds.
 
     The code's default commit region is d rounds, so decode must beat
@@ -1536,7 +1538,7 @@ def _deadline_line(axis, distances: list, round_period_us: float) -> None:
     """
     deadline_log_us = []
     for distance in distances:
-        deadline_us = distance * round_period_us
+        deadline_us = distance * round_period_microseconds
         log_deadline = math.log10(deadline_us)
         deadline_log_us.append(log_deadline)
     axis.plot(
@@ -1544,7 +1546,7 @@ def _deadline_line(axis, distances: list, round_period_us: float) -> None:
         deadline_log_us,
         "--",
         color="grey",
-        label=f"window generation ({round_period_us:g} µs rounds)",
+        label=f"window generation ({round_period_microseconds:g} µs rounds)",
     )
 
 

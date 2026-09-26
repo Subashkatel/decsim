@@ -96,24 +96,18 @@ def test_every_study_config_sweeps_the_same_points_on_priced_cards():
 
 
 def test_reading_the_input_in_place_and_folding_in_place_is_refused(tmp_path):
-    """The pair the note's table cannot name, refused where it is asked.
+    """The pair the note's table cannot name, refused where the yaml enters.
 
     Folding into the unit's memory needs the unit's own copy of the
     rounds, and a tier that reads its input in place has none, so no
-    study config names that pair and the machine says why.
+    study config names that pair and the load says why.
     """
-    import decsim.collect as collect
-
     both_path = _both_in_place_config(tmp_path)
-    config = experiment.load_experiment(both_path)
-    task = config.point_task(
-        physical_error_probability=0.01,
-        distance=3,
-        round_period_us=1.0,
-        shots=1,
-    )
-    with pytest.raises(RuntimeError, match="boundary_fold in_place"):
-        collect.run_shot(task, 0)
+
+    with pytest.raises(
+        ValueError, match="weak_decoder.boundary_fold in_place needs"
+    ):
+        experiment.load_experiment(both_path)
 
 
 def _both_in_place_config(tmp_path):
@@ -131,7 +125,7 @@ def _both_in_place_config(tmp_path):
         {
             "physical_error_probability": [0.01],
             "distance": [3],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 1,
         }
     ]

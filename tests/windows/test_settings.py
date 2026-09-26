@@ -1,4 +1,4 @@
-"""The windows section: the tables it resolves and the two keys it refuses.
+"""The windows section: the tables it resolves and the keys it refuses.
 
 STYLE.md rule 7: a pluggable component's section carries one kind key
 naming a row of the root's table. This section carries four such keys,
@@ -66,6 +66,17 @@ def test_a_boundaries_key_that_names_no_row_is_refused():
     assert "lazy" in sentence
 
 
+def test_a_boundary_payload_that_names_no_row_is_refused_at_load():
+    section = _section(boundary_payload="bitmap")
+
+    with pytest.raises(ValueError) as refusal:
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    sentence = str(refusal.value)
+    assert "windows.boundary_payload" in sentence
+    assert "bitmap" in sentence
+
+
 def test_both_boundary_policy_rows_are_reachable_by_name():
     for name in window_settings.BOUNDARY_POLICIES:
         section = _section(boundaries=name)
@@ -81,6 +92,38 @@ def test_both_keys_default_to_null_so_the_plan_decides_them():
 
     assert settings.terminal_policy is None
     assert settings.boundaries is None
+
+
+def test_a_section_without_its_sizes_is_refused_by_name():
+    section = {"kind": "sliding"}
+
+    with pytest.raises(ValueError) as refusal:
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    assert str(refusal.value) == (
+        "windows needs the keys ['buffer_rounds', 'commit_rounds']; "
+        "configs/reference.yaml holds every key with its meaning"
+    )
+
+
+def test_a_window_size_is_a_whole_count_of_rounds():
+    """F >= 1 and B >= 0, refused at load, never as a TypeError at build."""
+    refused = (
+        ("commit_rounds", 0),
+        ("commit_rounds", True),
+        ("commit_rounds", "3"),
+        ("commit_rounds", 2.5),
+        ("buffer_rounds", -1),
+        ("buffer_rounds", False),
+    )
+    for key, rounds in refused:
+        section = _section(**{key: rounds})
+        with pytest.raises(ValueError, match=f"windows.{key} is a whole"):
+            window_settings.WindowSettings.from_yaml(section, CLOCKS)
+    section = _section(commit_rounds=1, buffer_rounds=0)
+    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+    assert (settings.commit_rounds, settings.buffer_rounds) == (1, 0)
 
 
 def test_a_charged_window_decision_needs_its_clock():

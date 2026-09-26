@@ -16,6 +16,7 @@ import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.records.rounds as round_records
@@ -65,7 +66,7 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay() -> (
 ):
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
-    links = fabric_module.LinkFabric(reference, engine)
+    links = fabric_module.LinkFabric(reference, engine, channel_module.Channel)
     assembler = RecordingAssembler(engine)
     controller = controller_with(engine, links, assembler)
     readout = round_records.QPUReadout(
@@ -93,7 +94,7 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay() -> (
 def test_a_readout_landing_mid_cycle_is_charged_from_the_next_edge():
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
-    links = fabric_module.LinkFabric(reference, engine)
+    links = fabric_module.LinkFabric(reference, engine, channel_module.Channel)
     assembler = RecordingAssembler(engine)
     controller = controller_with(
         engine, links, assembler, settings=SLOW_SETTINGS
@@ -114,7 +115,7 @@ def test_a_readout_landing_mid_cycle_is_charged_from_the_next_edge():
 def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
-    links = fabric_module.LinkFabric(reference, engine)
+    links = fabric_module.LinkFabric(reference, engine, channel_module.Channel)
     assembler = RecordingAssembler(engine)
     controller = controller_with(
         engine, links, assembler, settings=FREE_SETTINGS

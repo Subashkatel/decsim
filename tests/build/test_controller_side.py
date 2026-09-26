@@ -156,18 +156,22 @@ def test_two_distinct_decoders_pass_the_strong_route_check():
     controller_side.check_strong_route(escalating, router)
 
 
+_DISTILLATION = magic_state_factories.DistillationFactory
+_MULTI_LEVEL = magic_state_factories.MultiLevelDistillationFactory
+
+
 def test_two_rows_with_different_cards_are_built_by_the_one_call():
-    """One constructor signature, so a row's own keys ride in arguments."""
+    """One constructor signature, so a row's own keys ride in its Settings."""
     plan = _PlanWithRoundTicks(1000)
     no_card = qpu_settings.FactorySettings(kind="infinite")
+    card = _DISTILLATION.Settings(
+        unit_count=1,
+        attempt_ticks=1000,
+        correction_round_count=1,
+        correction_decode_count=0,
+    )
     with_a_card = qpu_settings.FactorySettings(
-        kind="distillation",
-        arguments={
-            "unit_count": 1,
-            "attempt_ticks": 1000,
-            "correction_round_count": 1,
-            "correction_decode_count": 0,
-        },
+        kind="distillation", row_settings=card
     )
 
     without_a_card = _parts(no_card, plan)
@@ -180,40 +184,38 @@ def test_two_rows_with_different_cards_are_built_by_the_one_call():
 
 
 _ONE_LEVEL = magic_state_factories.DistillLevel(unit_count=1, distance=3)
+_NO_DECODE_CARD = _DISTILLATION.Settings(
+    unit_count=1,
+    attempt_ticks=1000,
+    correction_round_count=1,
+    correction_decode_count=0,
+)
+_ELEVEN_DECODE_CARD = _DISTILLATION.Settings(
+    unit_count=1, attempt_ticks=1000, correction_round_count=1
+)
+_ONE_LEVEL_CARD = _MULTI_LEVEL.Settings(levels=(_ONE_LEVEL,))
 _ROOT_BUILT_FACTORIES = (
     qpu_settings.FactorySettings(kind="infinite"),
     qpu_settings.FactorySettings(
-        kind="distillation",
-        arguments={
-            "unit_count": 1,
-            "attempt_ticks": 1000,
-            "correction_round_count": 1,
-            "correction_decode_count": 0,
-        },
+        kind="distillation", row_settings=_NO_DECODE_CARD
     ),
     qpu_settings.FactorySettings(
-        kind="distillation",
-        arguments={
-            "unit_count": 1,
-            "attempt_ticks": 1000,
-            "correction_round_count": 1,
-        },
+        kind="distillation", row_settings=_ELEVEN_DECODE_CARD
     ),
     qpu_settings.FactorySettings(
-        kind="multi_level",
-        arguments={"levels": [_ONE_LEVEL]},
+        kind="multi_level", row_settings=_ONE_LEVEL_CARD
     ),
 )
 
 
 @pytest.mark.parametrize("factory_settings", _ROOT_BUILT_FACTORIES)
-def test_every_factory_row_builds_from_the_decode_queue_the_root_hands_it(
+def test_every_factory_row_builds_and_binds_the_decode_queue_the_root_wires(
     factory_settings,
 ):
     """A row reads the collaborators it needs and ignores the rest.
 
-    The root hands every row the run's decoder manager, so a row whose
-    card asks for no correction decode builds beside it.
+    The root binds every row's decode queue to the run's decoder manager,
+    so a row whose card asks for no correction decode runs beside it.
     """
     settings = machine_settings.MachineSettings(
         magic_state_factory=factory_settings
@@ -237,21 +239,18 @@ def test_a_factory_kind_that_names_no_row_is_refused():
     assert "magic_state_factory.kind" in str(refusal.value)
 
 
-def test_the_collaborators_record_carries_the_runs_round_and_arguments():
+def test_the_collaborators_record_carries_the_runs_round_and_the_rows_keys():
     plan = _PlanWithRoundTicks(1234)
+    card = _MULTI_LEVEL.Settings(levels=(_ONE_LEVEL,))
     settings = qpu_settings.FactorySettings(
-        kind="infinite", arguments={"count": 2}
+        kind="multi_level", row_settings=card
     )
+    parts = _parts(settings, plan)
 
-    collaborators = magic_state_factories.FactoryCollaborators(
-        engine=None,
-        decode_service=None,
-        round_ticks=plan.round_ticks,
-        arguments=settings.arguments,
-    )
+    factory = controller_side.build_factory(parts)
 
-    assert collaborators.round_ticks == 1234
-    assert collaborators.arguments == {"count": 2}
+    assert factory.card is card
+    assert factory.preparation_ticks == 2 * 3 * 1234
 
 
 def test_the_process_name_says_which_point_a_trace_is_of():
@@ -311,7 +310,6 @@ def _parts(factory_settings, plan):
         pool=None,
         detection_events=None,
     )
-    parts.seats["decoder_manager"] = None
     return parts
 
 

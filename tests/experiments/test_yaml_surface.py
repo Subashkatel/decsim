@@ -91,7 +91,9 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     assert controller.clock.period_ticks == 2000
 
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     completed = Machine.build(settings, 0)
     built = completed.controller.settings
@@ -237,6 +239,60 @@ class _EveryNthIdlePolicy:
             return cls(**section)
 
 
+def test_a_factory_row_named_in_the_yaml_is_built_with_its_own_keys(
+    tmp_path,
+):
+    """The magic_state_factory section reads its row's keys like any other."""
+    factory = {
+        "kind": "multi_level",
+        "levels": [{"unit_count": 2, "distance": 5}],
+        "preparation_unit_count": 4,
+    }
+    config_path = write_config(tmp_path, {"magic_state_factory": factory})
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    built = machine.factory
+    level = built.levels[0]
+    assert built.card.preparation_unit_count == 4
+    assert (level.unit_count, level.distance) == (2, 5)
+    assert level.logical_cycles_per_round == 13
+
+
+def test_a_key_no_factory_row_declares_is_refused(tmp_path):
+    factory = {"kind": "infinite", "unit_count": 2}
+    config_path = write_config(tmp_path, {"magic_state_factory": factory})
+    sentence = (
+        r"magic_state_factory does not know \['unit_count'\]; its keys are "
+        r"\['kind'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_distillation_row_without_its_three_counts_is_refused(tmp_path):
+    factory = {"kind": "distillation", "unit_count": 2}
+    config_path = write_config(tmp_path, {"magic_state_factory": factory})
+    sentence = (
+        r"magic_state_factory kind distillation needs "
+        r"\['attempt_ticks', 'correction_round_count'\]"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
+def test_a_yaml_without_a_factory_section_runs_the_infinite_row(tmp_path):
+    config_path = write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    assert config.settings.magic_state_factory.kind == "infinite"
+
+
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
     config_path = write_config(
         tmp_path, {"decoder_manager": {"bulk_strong": True}}
@@ -251,11 +307,13 @@ def test_the_default_decoder_manager_does_not_batch(tmp_path):
     assert config.settings.decoder_manager.bulk_strong is False
 
 
-def test_a_bulk_strong_that_is_not_a_flag_is_refused(tmp_path):
+@pytest.mark.parametrize("value", ["batch", 1, 0])
+def test_a_bulk_strong_that_is_not_a_flag_is_refused(tmp_path, value):
+    """A one or a zero equals a flag in Python and is still no flag."""
     config_path = write_config(
-        tmp_path, {"decoder_manager": {"bulk_strong": "batch"}}
+        tmp_path, {"decoder_manager": {"bulk_strong": value}}
     )
-    sentence = "decoder_manager.bulk_strong must be true or false, got 'batch'"
+    sentence = f"decoder_manager.bulk_strong {value!r} is not a boolean"
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
 
@@ -282,7 +340,7 @@ def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
     block = {
         "physical_error_probability": [0.001],
         "distance": 3,
-        "round_period_us": [1.0],
+        "round_period_microseconds": [1.0],
         "shots": 1,
     }
     config_path = write_config(tmp_path, {"sweep": [block]})
@@ -333,7 +391,9 @@ def test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys(
     config_path = write_config(tmp_path, {"qpu": qpu})
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=2, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=2,
+        round_period_microseconds=1.0,
     )
 
     machine = machine_module.Machine.build(settings, 0)
@@ -368,7 +428,9 @@ def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
     config_path = write_config(tmp_path, {"qpu": qpu})
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
 
     machine = machine_module.Machine.build(settings, 0)
@@ -386,7 +448,9 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
     )  # only weak_decoder is defined
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     with pytest.raises(ValueError, match="strong tier, which names no decoder"):
         Machine.build(settings)
@@ -433,7 +497,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "algorithm_latency_us": [0.028],
                     "shots": 1,
                 }
@@ -449,7 +513,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
             "sweep": [
                 {
                     "physical_error_probability": [0.001],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ]
@@ -518,7 +582,7 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
             config,
             physical_error_probability=0.001,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
             seed=seed,
         )
         for seed in range(2)
@@ -545,7 +609,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3, 5],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ],
@@ -560,7 +624,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         config,
         physical_error_probability=0.001,
         distance=5,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
     assert measurement.distance == 5

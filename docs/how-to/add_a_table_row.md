@@ -14,7 +14,8 @@ which `python tools/docs_map.py` rewrites from the tables. If it takes
 more, something is wrong with the port rather than with your class.
 
 A row with yaml keys of its own declares them on a nested frozen
-dataclass named `Settings`: its fields are the keys, its classmethod
+dataclass named `Settings`, which fills the `RowSettings` port in
+`decsim/ports.py`: its fields are the keys, its classmethod
 `from_yaml(section)` reads and checks the ones the yaml wrote, and your
 constructor takes the record as `settings`. The section keeps the keys
 every row of its table shares and hands your row the rest
@@ -33,7 +34,8 @@ class MyDecoder(decoder_module.WindowDecoderBase):
         def from_yaml(cls, section, clocks):
             return cls(**section)
 
-    def __init__(self, latency_model=None, settings=None):
+    def __init__(self, settings=None):
+        decoder_module.WindowDecoderBase.__init__(self)
         ...
 ```
 
@@ -71,15 +73,15 @@ study most often extends:
 
 | Table | The root builds your row as | Where |
 | --- | --- | --- |
-| `DECODERS` | `row(latency_model=None)`, or `row(latency_model=None, settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
+| `DECODERS` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
-| `CODE_CARDS` | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
-| `WORKLOADS` | not built: the root calls `row.operations(settings, code)` for the operations and the rounds policy the row fixes (or None), with the row's own `Settings` on `settings.row_settings`, and reads `row.has_frontend` | `decsim/build/plan.py`, `_operations` |
+| `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
+| `WORKLOADS` | not built (the `WorkloadRow` port): the root calls `row.operations(settings, code)` for the operations and the rounds policy the row fixes (or None), with the row's own `Settings` on `settings.row_settings`, and reads `row.has_frontend` | `decsim/build/plan.py`, `_operations` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
 | `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
-| `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root calls `row.build(card, engine)` for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/build/stores.py`, `build_links` |
+| `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root calls `row.build(card, engine)` for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger; a row that keeps the fabric and changes how a wire times its bits hands `LinkFabric` its own `Channel` class instead | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/build/stores.py`, `build_links` |
 
 A syndrome source also says where the run's window models come from,
 through its `window_model_source` method, unless Python names another
@@ -130,8 +132,8 @@ name, with the rows printed:
 
 ```
 weak_decoder.kind 'my_decodr' is not a row of its table; the rows are
-['belief_matching', 'bposd', 'pymatching', 'relay_bp', 'tesseract',
-'union_find', 'unweighted_pymatching']
+['belief_matching', 'bposd', 'measured_table', 'pymatching', 'relay_bp',
+'tesseract', 'union_find', 'unweighted_pymatching']
 ```
 
 One function does that for every table (`decsim/tables.py`, `row`), so
@@ -143,8 +145,7 @@ same way, with the keys the section reads and your row's own listed:
 
 ```
 weak_syndrome_buffer does not know ['banks']; its keys are ['kind',
-'bits', 'clock', 'write_cycles', 'read_cycles',
-'detection_event_cycles_per_round', 'bank_count']
+'bits', 'clock', 'detection_event_cycles_per_round', 'bank_count']
 ```
 
 A yaml section that no package owns is refused the same way, with the

@@ -1,11 +1,11 @@
 """How often a run copied bits, referenced them and moved them.
 
-The counters of the data path's hop table, so a
-study reads the data path without the trace file. gem5's vocabulary
-(section 2 of that note): a copy duplicates bits into a structure the
-receiver owns (mem/cache/cache_blk.hh 97-104), a reference is a handle
-to bits that stay where they are (mem/packet.hh 1163-1171), a move
-crosses a link (dev/dma_device.cc 194-213).
+The counters of the data path's hops (docs/explanation/data_path.md),
+so a study reads the data path without the trace file. gem5's
+vocabulary: a copy duplicates bits into a structure the receiver owns
+(mem/cache/cache_blk.hh 97-104), a reference is a handle to bits that
+stay where they are (mem/packet.hh 1163-1171), a move crosses a link
+(dev/dma_device.cc 194-213).
 
 A listener on copy_made on every component that copies, on the fabric's
 transfer_delivered for the moves, and on the stores' hold_registered
@@ -193,13 +193,6 @@ class DataMovement:
     def rounds(self) -> int:
         """The rounds the QPU emitted."""
         return len(self.rounds_seen)
-
-    @property
-    def copies_per_round(self) -> float:
-        """Copies over rounds; zero when the run emitted none."""
-        if not self.rounds_seen:
-            return 0.0
-        return self.copies.total.events / len(self.rounds_seen)
 
     def json_value(self) -> dict:
         """The counters as the RunResult carries them."""

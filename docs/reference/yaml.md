@@ -20,7 +20,7 @@ sections, in the order the root reads them:
 `clocks`, `qpu`, `controller`, `idle_policy`, `links`, `weak_syndrome_buffer`,
 `strong_syndrome_buffer`, `windows`, `weak_decoder`, `strong_decoder`,
 `decoder_manager`, `escalation`, `pauli_frame`, `workload`,
-`observation`.
+`magic_state_factory`, `observation`.
 
 A section a component owns carries a `kind` key naming a row of that
 component's table, and [The plug-in tables](tables.md) lists every table with
@@ -35,10 +35,9 @@ Both refusals are checked by `tests/machine/test_machine.py`.
 Read it top to bottom as the pipeline: `qpu` is where a readout starts
 and `observation` is where the run is watched. Each key carries its unit
 in its name (`_microseconds`, `_cycles` for clock cycles, `_rounds` for
-rounds, `_count` for a count; the sweep axis `round_period_us` is the
-one key still spelled short), and the comment beside it
-says what the key means and, where the value came from a paper or a
-reference implementation, which one. A key whose comment cites, for
+rounds, `_count` for a count), and the comment beside it says what the
+key means and, where the value came from a paper or a reference
+implementation, which one. A key whose comment cites, for
 example, `Toshio 2510.25222 Sec. III C`, has that section as its source,
 and you can change it knowing what you are departing from.
 
@@ -52,7 +51,8 @@ Three conventions are worth knowing before you read:
   row with keys of its own declares them on a nested `Settings` record,
   and they sit in its section beside the keys every row of that table
   shares (`decsim/tables.py`, `row_settings`): `union_find`'s
-  `weight_step` and `cycle_count` in a decoder tier, and the
+  `weight_step` and `cycle_count` in a decoder tier, `measured_table`'s
+  `device` and `partition` in a decoder tier, and the
   `bivariate_bicycle` code card's `qubit_count` and
   `logical_qubit_count` in the `qpu` section, which names its card
   with `code_card` (default `rotated_surface`, Stim's generated
@@ -111,7 +111,8 @@ an `extends` chain says what you meant.
 | `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
 | `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |
 | `configs/data_movement_switching.yaml` | the same under the switching escalation |
-| `configs/experiments_2026_09/` | the sixteen 2026-09 decoder experiments: one shared base, sixteen experiment files that differ only in their decoder rows, one file per experiment and distance for the Slurm arrays, and `configs/experiments_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
+| `configs/experiments_2026_09/` | the sixteen 2026-09 decoder experiments: sixteen experiment files that differ only in their decoder rows, one file per experiment and distance for the Slurm arrays, and `configs/experiments_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
+| `configs/common/experiments_2026_09_base.yaml` | the shared base those sixteen extend; it names no decoder, so it is not run by itself |
 
 ## Read next
 

@@ -381,10 +381,12 @@ coprocessor, 4.5 microseconds. The controller's write into the strong
 syndrome buffer (hop 3), the escalation request (hop 5) and the strong
 decoder's reply to the frame (hop 9) are each half of the round trip; the strong
 store's read into the strong decoder (hop 6) is zero, because the
-coprocessor polls a slot in its own memory. On either row the escalation
-round trip, hops 5, 6 and 9, is the measured median exactly. Every other
-hop keeps the default card's number and source, and the default row is
-unchanged.
+coprocessor polls a slot in its own memory. On either row the latencies
+of the escalation round trip, hops 5, 6 and 9, sum to the measured
+median exactly, and the three hops that cross Backline's 100 Gb cable
+(lines 1229 to 1230) serialize their bits at its rate, so every row
+prices latency plus bits. Every other hop keeps the default card's
+number and source, and the default row is unchanged.
 
 **Why.** The default card prices the strong node as one more chassis of
 the control system, Caune's stage F on each crossing. A measured cable is a better kind of fact for
@@ -966,6 +968,59 @@ do not schedule separate analog acquisition resources or move measurements withi
 a round. Unequal round durations, arbitrary decoded conditional gates and dynamic
 composition of retained histories remain separate work.
 
+## D28. A strong decode runs on a backend behind one port of four methods
+
+**Decided.** `StrongBackend` in `decsim/ports.py` is the device a strong
+decode runs on: `capacity()` is how many decodes it runs at once,
+`submit(request, running)` starts one region with the count already
+running and returns a ticket, `service_ticks(ticket)` is the decode's
+time beyond the echo on the same path, and `result(ticket)` is its
+correction, observables and convergence. `StrongBackendDecoder`
+(`decsim/decoders/strong_backend.py`) is the Decoder port over one: a
+first-come first-served queue in front of the capacity. A table of
+measured times and a live device process answer the same four methods.
+
+**Why.** Every strong decode is the same steps on any device: the link
+in, the landing, the notice, the wait, the decode, the write back and
+the link out. The link cards already price the links from echo round
+trips, and an echo holds the landing, the notice and the write back
+with no work done (Backline arXiv:2609.09270 lines 2355-2360, NVQLink
+arXiv:2510.25213 lines 528-533), so a backend that reported its whole
+round trip would count them twice. It reports the time beyond the echo,
+the launch folded in, since the device path has no separate launch to
+price. The wait is not the backend's number: it follows from the
+capacity and the arrivals, so the queue lives in decsim, and a table
+cannot hide a wait inside a time. The count of decodes already running
+is an argument because a device's time depends on it: IonQ times every
+decode with all twelve decoder processes running (arXiv:2608.25027
+lines 550-554). A ticket lets a live device answer after its own call
+returns, so a live row plugs in without changing the port.
+
+**Sources.** The queue discipline is arrival order, as IonQ's cores serve
+their blocks (lines 509-511) and a CUDA-Q dispatcher its ring's slots
+(cuda-quantum realtime/lib/daemon/dispatcher/dispatch_kernel.cu:213-265).
+A cancelled running decode holds the device until it ends, because a
+GPU starts other work only "as the currently running ... kernel's thread
+blocks finish" (CUDA C++ Programming Guide, preemption).
+
+**The first row.** `measured_table` answers with decsim's own Relay-BP
+decode and prices it from a line measured on a GPU: intercept plus slope
+times the iterations decsim's decode ran, per device, partition,
+decodes running and region size (`decsim/decoders/measured_table/`).
+The line is fitted on NVIDIA's nv-qldpc-decoder run on decsim's own
+regions, one decode at a time; the time follows decsim's iteration count
+rather than a draw from the samples because the two implementations
+agree on iteration counts in distribution, and it keeps a hard region
+slow on the device. Its capacity is one: one chip's regions reach one
+dispatcher. Several decodes on one GPU are not priced, because their
+times follow the other decodes' work rather than their own iterations.
+
+**Where to see it.** `tests/decoders/test_strong_backend.py` holds the
+queue against the Kiefer and Wolfowitz first-come first-served
+recursion and the two cancels; `tests/decoders/test_measured_table_decoder.py`
+holds the line against relay-bp's own iteration count and the answer
+against the relay_bp row under one run seed.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not
@@ -977,7 +1032,8 @@ mistake a gap for a result.
   microsecond round, which is the whole source of order and queue-depth
   variance between two runs of one seed. The proposal on the table is a
   latency key on the decoder section, with the two points priced at
-  Toshio's generation time and ten times it.
+  Toshio's generation time and ten times it. A strong tier that names
+  `measured_table` is priced by a GPU's measured line instead (D28).
 - **O2. The `bandwidth_limited` link row cannot be named from a yaml.**
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside

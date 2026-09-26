@@ -14,7 +14,8 @@ with several targets on one fill (src/mem/cache/mshr.hh).
 That is the copy rule, and it is a tier's setting: with
 <tier>.input in_place the unit reads the rounds where the store keeps
 them, so nothing is deposited in the unit's memory, nothing crosses the
-input link, and the store's hold is kept for the whole decode. AFS's
+input link, and the store's hold is kept for the whole decode; the
+store's read still takes its time. AFS's
 processing elements "can directly access the data stored on-chip"
 (2001.06598 lines 528-531); Collision Clustering's Init unit loads the
 syndrome into the storage elements instead (2309.05558 lines 268-271),
@@ -23,6 +24,7 @@ data (Toshio 2510.25222 lines 1248-1250).
 """
 
 import dataclasses
+import functools
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.decoders.decoder_memory as decoder_memory_module
@@ -121,26 +123,9 @@ class DecoderInputStaging:
             return
         send_input = job.send_input
         job.send_input = None
-
-        def land(_delivered: decoding_records.DecodeJob) -> None:
-            job.input_landing_ticks = self.engine.now
-            # the width that crossed the link is the width that left the
-            # store, before this tier forms anything out of it
-            bits = job.payload_bits()
-            self._form_detection_events(job)
-            job.decoder_input = memory.deposit(job)
-            job.payloads = []
-            job.memory = memory
-            if job.decoder_input.rounds:
-                source_name = job.input_source_name
-                self.trace.copy_made.fire(job, bits, source_name, memory.name)
-            hold = job.input_hold
-            if hold is not None:  # the weak buffer may drop the rounds now
-                hold()
-                job.input_hold = None
-            self._land_joined(landing_key, memory)
-            on_landed(job)
-
+        land = functools.partial(
+            self._land, job, memory, landing_key, on_landed
+        )
         awaited = _AwaitedLanding(memory, self.engine.now, [])
         self.awaited_by_input[landing_key] = awaited
         expected_delay_ticks = self.transport.deliver(job, send_input, land)
@@ -224,6 +209,34 @@ class DecoderInputStaging:
             return
         job.payloads = formation.form(job.payloads)
 
+    def _land(
+        self,
+        job: decoding_records.DecodeJob,
+        memory,
+        landing_key: tuple,
+        on_landed: Callable[[decoding_records.DecodeJob], None],
+        delivered: decoding_records.DecodeJob,
+    ) -> None:
+        """The input's transfer landed: deposit it, drop the store's hold."""
+        del delivered
+        job.input_landing_ticks = self.engine.now
+        # the width that crossed the link is the width that left the
+        # store, before this tier forms anything out of it
+        bits = job.payload_bits()
+        self._form_detection_events(job)
+        job.decoder_input = memory.deposit(job)
+        job.payloads = []
+        job.memory = memory
+        if job.decoder_input.rounds:
+            source_name = job.input_source_name
+            self.trace.copy_made.fire(job, bits, source_name, memory.name)
+        hold = job.input_hold
+        if hold is not None:  # the weak buffer may drop the rounds now
+            hold()
+            job.input_hold = None
+        self._land_joined(landing_key, memory)
+        on_landed(job)
+
     def _read_in_place(
         self,
         job: decoding_records.DecodeJob,
@@ -231,11 +244,27 @@ class DecoderInputStaging:
     ) -> None:
         """The unit reads the rounds where the store keeps them.
 
-        No link move, no deposit, and the store's hold is kept until the
-        decode releases the job, because the rounds it reads are the
-        store's own (<tier>.input in_place).
+        No deposit, and the store's hold is kept until the decode
+        releases the job, because the rounds it reads are the store's
+        own (<tier>.input in_place). The store's end reads them and
+        lands the job at the read's end with no link crossed
+        (syndrome_buffer/round_output.py), so a cancel before then
+        suppresses the landing as it does a transfer's.
         """
+        send_input = job.send_input
         job.send_input = None
+        land = functools.partial(self._land_in_place, job, on_landed)
+        expected_delay_ticks = self.transport.deliver(job, send_input, land)
+        job.input_landing_ticks = self.engine.now + expected_delay_ticks
+
+    def _land_in_place(
+        self,
+        job: decoding_records.DecodeJob,
+        on_landed: Callable[[decoding_records.DecodeJob], None],
+        delivered: decoding_records.DecodeJob,
+    ) -> None:
+        """The read completed: the unit reads the store's rounds now."""
+        del delivered
         job.input_landing_ticks = self.engine.now
         self._form_detection_events(job)
         decoder_input = decoder_memory_module.materialize_decoder_input(job)
@@ -426,7 +455,7 @@ class _TraceSources:
     """Every event the decoder input staging reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

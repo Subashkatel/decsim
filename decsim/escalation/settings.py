@@ -51,12 +51,13 @@ THRESHOLD_SOURCES = {
 }
 # How many of the strong region's buffer regions the restarted weak
 # window re-reads under the forward strong window (Toshio 2510.25222
-# Sec. III C, Fig. 12). 0, the default, is the paper: the weak decoder
-# resumes on the commit plus buffer rounds stored after the strong
-# region and reads nothing inside it. 1 reads one buffer region of the
-# strong region as
-# the restart window's far-boundary context, which is what decsim's
-# forward window did until 2026-09-07.
+# Sec. III C). The text has the weak decoder resume once r_com + r_buf
+# rounds are stored after the strong region (lines 1229-1235), which
+# both values meet. 0, the default, reads nothing inside the region. 1
+# reads its last buffer region as the restart window's past context,
+# which is how Fig. 12 step 5 draws the restart window: that block is
+# half assigned to the strong decoder and half the weak decoder's
+# buffer.
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
@@ -98,8 +99,10 @@ class OnlineThresholdSettings:
     windows; one revised audit multiplies the target by adjust_factor,
     and only ceil(3 / kept_bad_budget) consecutive clean audits divide it
     back. The target stays inside [min_escalation_rate,
-    max_escalation_rate]; the max is the Theorem 1 backlog cap. Defaults
-    are the validated drift-replay configuration.
+    max_escalation_rate]. The audits reach the strong tier on top of the
+    target, so the strong duty is at most max_escalation_rate plus
+    audit_rate (threshold_sources.py, OnlineThresholdController).
+    Defaults are the validated drift-replay configuration.
     """
 
     target_escalation_rate: float = 1e-3
@@ -113,6 +116,11 @@ class OnlineThresholdSettings:
     @classmethod
     def from_yaml(cls, section: Mapping) -> "OnlineThresholdSettings":
         """The `online` card, every key optional."""
+        if not isinstance(section, Mapping):
+            raise ValueError(
+                "escalation.online must be a mapping of the calibrator's "
+                f"knobs (got {section!r})"
+            )
         unknown = set(section) - set(ONLINE_KEYS)
         if unknown:
             listed = sorted(unknown)
@@ -316,10 +324,12 @@ class EscalationSettings:
         """The sweep point's threshold in nats, per threshold_source.
 
         fixed and online read the card (online starts there and adapts);
-        table looks the point up in the calibration csv
-        (calibrate_threshold.py's calibration_table.csv: one row per
-        distance and p, thresholds in dB) and refuses a point the table
-        does not certify, instead of guessing.
+        table looks the point up in the calibration csv (columns
+        distance and p, then one threshold column per method, in dB;
+        Toshio et al. 2510.25222 Sec. III B sets g_th by brute force
+        over P_L(g_th), lines 855-863, or as the smallest g_th with
+        P_L,th(g_th) <= epsilon P_L,strong, Eq. (4) at line 890) and
+        refuses a point the table does not certify, instead of guessing.
         """
         if not self._decides_on_a_confidence():
             return None
@@ -469,9 +479,13 @@ def _switching_settings(
 
 
 def _switching_boolean(section: Mapping, key: str) -> bool:
-    """One of the switching section's on-or-off knobs, off when silent."""
+    """One of the switching section's on-or-off knobs, off when silent.
+
+    The test is the type, because 1 == True and 0 == False would let a
+    count stand in for a flag.
+    """
     value = section.get(key, False)
-    if value not in (True, False):
+    if not isinstance(value, bool):
         raise ValueError(
             f"escalation.{key} must be true or false, got {value!r}"
         )
@@ -484,10 +498,10 @@ def _restart_reread_buffer_regions(section: Mapping) -> int:
     is_a_count = type(regions) is int
     if not is_a_count or regions not in RESTART_REREAD_BUFFER_REGIONS:
         raise ValueError(
-            "escalation.restart_reread_buffer_regions must be 0, the "
-            "paper's restart on the rounds stored after the strong "
-            "region, or 1, decsim's re-read of one buffer region of it "
-            f"for the far boundary; got {regions!r}"
+            "escalation.restart_reread_buffer_regions must be 0, a "
+            "restart on the rounds stored after the strong region, or 1, "
+            "a re-read of the region's last buffer region as Toshio "
+            f"2510.25222 Fig. 12 step 5 draws it; got {regions!r}"
         )
     return int(regions)
 
@@ -511,7 +525,13 @@ def _gap_threshold_decibels(
             "escalation.kind switching needs gap_threshold_db, the keep "
             "threshold in decibels"
         )
-    return float(section["gap_threshold_db"])
+    value = section["gap_threshold_db"]
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(
+            "escalation.gap_threshold_db must be a number of decibels "
+            f"(got {value!r})"
+        )
+    return _checked_decibels(float(value), "escalation.gap_threshold_db")
 
 
 def _calibrated_threshold(
@@ -544,7 +564,9 @@ def _online_settings(
         )
     if not learns_across_a_point:
         return None
-    raw_online = section.get("online") or {}
+    raw_online = section.get("online")
+    if raw_online is None:
+        raw_online = {}
     return OnlineThresholdSettings.from_yaml(raw_online)
 
 
@@ -565,8 +587,9 @@ def _check_far_pin_reread(strong_window: str, reread_regions: int) -> None:
 
     A row that pins its far face on the restart window's commit needs
     the restart window to share no round with the strong region, which
-    is escalation.restart_reread_buffer_regions 0, the paper's value
-    (Toshio et al. 2510.25222 Sec. III C, Fig. 12). With a re-read the
+    is escalation.restart_reread_buffer_regions 0, the default (Toshio
+    et al. 2510.25222 Fig. 12 step 5 draws the restart window re-reading
+    one buffer region, which is 1). With a re-read the
     restart window commits rounds inside the region, so pinning on its
     correction would carry an explanation of those rounds into an input
     that already holds them raw, the double count Bombin et al.
@@ -604,8 +627,22 @@ def _check_serial_only(
 
 
 def _online_float(section: Mapping, key: str, default: float) -> float:
+    """One knob of the online card: a finite number, never a flag.
+
+    A string is read as a number, because YAML 1.1 loads `1e-3`, the
+    way reference.yaml writes the target, as text.
+    """
     raw = section.get(key, default)
-    return float(raw)
+    sentence = f"escalation.online.{key} must be a finite number (got {raw!r})"
+    if isinstance(raw, bool):
+        raise ValueError(sentence)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(sentence) from None
+    if not math.isfinite(value):
+        raise ValueError(sentence)
+    return value
 
 
 def _listed(keys: tuple) -> str:
@@ -650,8 +687,34 @@ def _certified_nats(
             f"p={physical_error_probability}: the {column} entry is empty "
             "(not enough evidence at calibration time)"
         )
-    gap_threshold_decibels = float(cell)
-    return decibels_to_nats(gap_threshold_decibels)
+    entry = (
+        f"threshold_table {table_path} entry {column} at d={distance} "
+        f"p={physical_error_probability}"
+    )
+    try:
+        gap_threshold_decibels = float(cell)
+    except ValueError:
+        raise ValueError(
+            f"{entry} must be a number of decibels (got {cell!r})"
+        ) from None
+    checked_decibels = _checked_decibels(gap_threshold_decibels, entry)
+    return decibels_to_nats(checked_decibels)
+
+
+def _checked_decibels(decibels: float, name: str) -> float:
+    """A keep threshold is finite and not negative, wherever it is read.
+
+    Every signal's gap is a weight difference or a growth spent, never
+    below zero, so a negative threshold keeps every window, as 0 dB
+    already does, and an infinite or undefined one is no likelihood
+    ratio (Toshio et al. 2510.25222 Sec. III A, step 3: keep at g >=
+    g_th, with g_th in decibels).
+    """
+    if not math.isfinite(decibels) or decibels < 0.0:
+        raise ValueError(
+            f"{name} must be finite and not negative (got {decibels!r})"
+        )
+    return decibels
 
 
 def _confidence_walk_microseconds(section: Mapping) -> Optional[float]:

@@ -18,7 +18,6 @@ import decsim.qpu.stim_stream_models as stream_models
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
-import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.trace_source as trace_source
@@ -62,7 +61,9 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         del round_count
         program = self._program_for(stream_operation)
         stream_id = stream_operation.id
-        seed = _stream_seed(self._seed, stream_id)
+        seed = None
+        if self._seed is not None:
+            seed = seeding.substream_seed(self._seed, (stream_id,))
         history = _History(seed)
         period_ticks = _declared_round_period(program)
         self._streams_by_id[stream_id] = _Stream(
@@ -96,7 +97,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         """Bind a segment to its live stream without sampling ahead."""
         del segment_round_count
         del source_round_count
-        stream_id = _stream_id_of(operation)
+        stream_id = program_records.decode_identity(operation)
         if stream_id not in self._streams_by_id:
             raise ValueError("live Stim memory requires a registered stream")
         stream = self._streams_by_id[stream_id]
@@ -111,11 +112,8 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """Execute a segment round without introducing a physical boundary."""
-        stream_id = _stream_id_of(operation)
-        stream_offset = operation.stream_offset
-        if stream_offset is None:
-            stream_offset = 0
-        global_round = stream_offset + round_index
+        stream_id = program_records.decode_identity(operation)
+        global_round = program_records.global_round(operation, round_index)
         return self._emit(stream_id, global_round, False)
 
     def idle_round_payloads(
@@ -162,6 +160,13 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         if not truth:
             return None
         return truth
+
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The readout leaves the chip at the boundary it was read out at."""
+        del readout
+        return readout_tick
 
     def window_model_source(self) -> "StreamingStimDevice":
         """This source: the fragments it executes grow the window models."""
@@ -276,7 +281,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         """Keep strong priors in the stream's stable fault namespace."""
         del round_count
         del fault_model_requirement
-        stream_id = _stream_id_of(operation)
+        stream_id = program_records.decode_identity(operation)
         models = self._models_by_stream_id[stream_id]
         return models.for_strong_window(
             window, fault_exclusion_ranges, prior_faults
@@ -405,22 +410,6 @@ def _copied_programs(programs):
             raise ValueError("live Stim stream identities must be int or str")
         copied[stream_id] = dataclasses.replace(program)
     return copied
-
-
-def _stream_seed(seed, stream_id):
-    if seed is None:
-        return None
-    kind = "string_key"
-    if type(stream_id) is int:
-        kind = "integer_key"
-    segment = seed_records.RunSeedPathSegment(kind, stream_id)
-    return seeding.derive_component_seed(seed, (segment,))
-
-
-def _stream_id_of(operation):
-    if operation.stream_id is not None:
-        return operation.stream_id
-    return operation.id
 
 
 def _declared_round_period(program):

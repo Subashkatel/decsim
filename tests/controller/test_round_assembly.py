@@ -49,6 +49,7 @@ def rounds_in_flight(capacity, held=0, on_route=0):
     bound = round_assembly.RoundsInFlight(capacity)
     bound.held_rounds = types.SimpleNamespace(count=held)
     bound.transmitter = types.SimpleNamespace(in_flight=on_route)
+    bound.syndrome_round_sender = types.SimpleNamespace(strong_crossing_count=0)
     return bound
 
 

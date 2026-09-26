@@ -16,7 +16,6 @@ are where they enter decsim.
 """
 
 import dataclasses
-import enum
 import fractions
 import math
 from typing import Optional, Union
@@ -25,34 +24,20 @@ import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 
 
-class QuantityBasis(str, enum.Enum):
-    """Whether a rate or a payload is stated for the whole link or per lane.
-
-    A link made of several parallel bit lanes is one wire with aggregate
-    bandwidth (a PCIe x4 link stripes one transfer over four lanes). Every
-    card decsim ships states the aggregate, and a yaml card folds its
-    `channels` count into the rate before the setting is built, so
-    PER_LANE is the shape a card that states a per-lane number would take
-    and nothing constructs it today.
-    """
-
-    AGGREGATE = "direct_aggregate"
-    PER_LANE = "per_channel"
-
-
 @dataclasses.dataclass(frozen=True)
 class CapacitySettings:
-    """Bandwidth of one channel in bits per microsecond, aggregate or per lane.
+    """Bandwidth of one whole channel in bits per microsecond.
 
-    The rate is kept as written, a decimal from a Python card or an exact
-    Fraction from the yaml and the bandwidth card. The serialization
-    arithmetic reads it as the decimal on the card and multiplies by the
-    lane count exactly (exact_aggregate_bits_per_microsecond).
+    A link of several parallel bit lanes is one wire with aggregate
+    bandwidth (a PCIe x4 link stripes one transfer over four lanes), so
+    a yaml card folds its `channels` count into this rate before the
+    setting is built. The rate is kept as written, a decimal from a
+    Python card or an exact Fraction from the yaml and the bandwidth
+    card, and the serialization arithmetic reads it exactly
+    (exact_aggregate_bits_per_microsecond).
     """
 
     input_bits_per_microsecond: Union[float, fractions.Fraction]
-    basis: QuantityBasis
-    lane_count: Optional[int]
     source: str
 
     def __post_init__(self) -> None:
@@ -61,8 +46,6 @@ class CapacitySettings:
         )
         if self.input_bits_per_microsecond <= 0:
             raise ValueError("input_bits_per_microsecond must be positive")
-        lane_count = _lane_count_for(self.basis, self.lane_count, "capacity")
-        object.__setattr__(self, "lane_count", lane_count)
 
     def exact_aggregate_bits_per_microsecond(self) -> fractions.Fraction:
         """The whole channel's rate as an exact Fraction of the card's text.
@@ -72,19 +55,14 @@ class CapacitySettings:
         expansion.
         """
         rate_text = str(self.input_bits_per_microsecond)
-        rate = fractions.Fraction(rate_text)
-        if self.basis is QuantityBasis.AGGREGATE:
-            return rate
-        return rate * self.lane_count
+        return fractions.Fraction(rate_text)
 
 
 @dataclasses.dataclass(frozen=True)
 class PayloadSettings:
-    """Default payload of one path in bits, aggregate or per lane."""
+    """Default payload of one path: the whole transfer's bits."""
 
     input_bits: int
-    basis: QuantityBasis
-    lane_count: Optional[int]
     source: str
 
     def __post_init__(self) -> None:
@@ -92,15 +70,6 @@ class PayloadSettings:
         object.__setattr__(self, "input_bits", input_bits)
         if self.input_bits < 0:
             raise ValueError("input_bits must be nonnegative")
-        lane_count = _lane_count_for(self.basis, self.lane_count, "payload")
-        object.__setattr__(self, "lane_count", lane_count)
-
-    @property
-    def aggregate_bits(self) -> int:
-        """The whole transfer's bits: the input bits times the lane count."""
-        if self.basis is QuantityBasis.AGGREGATE:
-            return self.input_bits
-        return self.input_bits * self.lane_count
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,9 +102,7 @@ class PathSettings:
     """One path: its channel, its payload rule, and its setup cost.
 
     At least one of the default payload and the actual payload source is
-    given. A default payload on a bounded channel is stated on the same
-    basis as the channel's capacity, so the two describe the same lanes.
-    setup_ticks is paid on the channel's setup engine before every
+    given. setup_ticks is paid on the channel's setup engine before every
     transfer of the path; zero means the path programs nothing.
     header_bits is the framing every transfer of the path carries beside
     its payload, serialized with it and counted apart from it; zero
@@ -171,9 +138,6 @@ class PathSettings:
         object.__setattr__(self, "setup_ticks", setup_ticks)
         header_bits = _as_count(self.header_bits, "header_bits_per_transfer")
         object.__setattr__(self, "header_bits", header_bits)
-        _check_capacity_matches_payload(
-            self.channel.capacity, self.default_payload
-        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -266,19 +230,6 @@ class FabricSettings:
         return tuple(bindings)
 
 
-def _check_capacity_matches_payload(
-    capacity: Optional[CapacitySettings],
-    default_payload: Optional[PayloadSettings],
-) -> None:
-    """A bounded channel and a sized payload share one basis and lane count."""
-    if capacity is None or default_payload is None:
-        return
-    if capacity.basis is not default_payload.basis:
-        raise ValueError("capacity and payload bases must match")
-    if capacity.lane_count != default_payload.lane_count:
-        raise ValueError("capacity and payload lane counts must match")
-
-
 def _as_whole_number(value, name: str) -> int:
     """A value as an exact int, or a ValueError naming the field.
 
@@ -318,21 +269,3 @@ def _require_finite_number(value, name: str) -> None:
         is_finite = True
     if not is_finite:
         raise ValueError(f"{name} must be a finite number")
-
-
-def _lane_count_for(
-    basis: QuantityBasis, lane_count, name: str
-) -> Optional[int]:
-    """The lane count a quantity's basis allows.
-
-    An aggregate quantity has no lane count; a per-lane one needs a
-    positive count.
-    """
-    if basis is QuantityBasis.AGGREGATE:
-        if lane_count is not None:
-            raise ValueError(f"an aggregate {name} has no lane count")
-        return None
-    whole_count = _as_whole_number(lane_count, f"per-lane {name} count")
-    if whole_count <= 0:
-        raise ValueError(f"per-lane {name} count must be positive")
-    return whole_count

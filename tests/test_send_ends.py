@@ -1,7 +1,7 @@
 """Every send is executed at an end of the hop it rides.
 
 OMNeT++ enforces this at runtime, refusing a module that sends a message
-it does not own (tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334,
+it does not own (omnetpp src/sim/csimplemodule.cc:333-334,
 omnetpp-6.1.0), and gem5 bills a transfer to the port it left by rather
 than to whoever arranged it (packet.hh:424-431).
 decsim has no runtime check for it, so the rule is read out of the tree:
@@ -131,11 +131,13 @@ DELIVERY_CALLBACKS = {
     ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): ("delivered",),
     ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
         "_publish",
+        "_write_feedback_memory",
     ),
     ("controller/syndrome_round_sender.py", "CONTROLLER_TO_STRONG_BUFFER"): (
         "_land_in_strong_store",
     ),
     ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (
+        None,
         None,
         None,
     ),
@@ -162,7 +164,7 @@ def test_every_delivery_callback_leaves_the_landing_to_the_receiving_end():
     """The receiving end handles the landing; the sender only hears it.
 
     gem5's requesting port hands the packet to the peer's own receive
-    method (tmp/resources/gem5/src/mem/port.hh:603-614, whose
+    method (gem5 src/mem/port.hh:603-614, whose
     protocol/timing.cc:49-53 calls peer->recvTimingReq), OMNeT++ moves
     the message to the destination module before that module's
     handleMessage runs (csimplemodule.cc:777-799), and ns-3 schedules

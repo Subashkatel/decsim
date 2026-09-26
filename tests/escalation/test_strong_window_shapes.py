@@ -286,10 +286,11 @@ def _gate_forward_window_machine(
 ) -> machine_module.Machine:
     """The gate's switching card with the forward window, both tiers priced.
 
-    The gate's point: p 0.008, d 3, 1 us rounds, 30 rounds, seed 0. The
-    weak tier at 40 us per window against 3 us of rounds is the backlog
-    regime: every later window is requested, and staged as units free,
-    long before the escalated window's verdict.
+    The gate's card at p 0.008, d 3, 1 us rounds, 30 rounds, seed 1,
+    a shot whose first escalation is W3. The weak tier at 40 us per
+    window against 3 us of rounds is the backlog regime: every later
+    window is requested, and staged as units free, long before the
+    escalated window's verdict.
     """
     sections = copy.deepcopy(GATE_SWITCHING_CARD)
     sections["windows"]["commit_rounds"] = commit_rounds
@@ -312,7 +313,7 @@ def _gate_forward_window_machine(
         settings.workload, physical_error_probability=0.008
     )
     settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
-    return machine_module.Machine.build(settings, 0)
+    return machine_module.Machine.build(settings, 1)
 
 
 def _run_statuses(result) -> list:
@@ -437,14 +438,14 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
     ]
 
 
-def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
-    """The eaa316d reproduction at re-read width 0, two weak units.
+def test_width_zero_restarts_on_the_round_after_the_strong_region():
+    """Re-read width 0 with two weak units, both restart inputs landed.
 
     The absorbed W5 and the restart W6 land in unit memory before W3's
     verdict. With no re-read W6 begins at round 19, the round after the
     strong region, and owns the faults of the rounds it reads (Toshio
-    2510.25222 Sec. III C, Fig. 12); the run completes as it does with
-    one buffer region of re-read, and W9 keeps its weak result.
+    2510.25222 Sec. III C); the run completes, and commits the
+    same tiers, as it does with one buffer region of re-read.
     """
     machine = _gate_forward_window_machine(3, 3, 40.0, 5.0, 2, 0)
     result = machine.run()
@@ -459,7 +460,7 @@ def test_the_paper_width_restarts_on_the_round_after_the_strong_region():
         ((1, 1), "weak"),
         ((1, 2), "weak"),
         ((1, 3), "strong"),
-        ((1, 9), "weak"),
+        ((1, 9), "strong"),
         ((1, 6), "strong"),
     ]
 
@@ -510,6 +511,28 @@ class RecordingContextWindow(strong_window_shapes.ContextWindow):
         assignment = context.plan(self, weak_job)
         self.assignments.append(assignment)
         return assignment
+
+
+def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
+    """The escalation section reads a row's facts off the port alone."""
+    port_facts = strong_window_shapes.StrongWindowShape.__annotations__
+    facts = dict.fromkeys(port_facts, False)
+    row = type("PortOnlyShape", (), facts)
+    table = escalation_settings.STRONG_WINDOW_SHAPES
+    table["port_only"] = row
+    section = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "port_only",
+    }
+    clocks = config.ClockSettings({})
+    try:
+        settings = escalation_settings.EscalationSettings.from_yaml(
+            section, clocks
+        )
+    finally:
+        del table["port_only"]
+    assert settings.strong_window == "port_only"
 
 
 def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
@@ -1071,8 +1094,7 @@ def test_a_pinned_far_face_refuses_a_re_reading_restart_window():
     With escalation.restart_reread_buffer_regions 1 the restart window
     commits rounds inside the strong region, so pinning the far face on
     its correction would carry an explanation of rounds the input holds
-    raw: the double count Bombin 2303.04846 lines 775-788 rule out. 0 is
-    the paper's value (Toshio 2510.25222 Sec. III C, Fig. 12), and the
+    raw: the double count Bombin 2303.04846 lines 775-788 rule out. The
     section refuses the pairing at load rather than reconciling it.
     """
     clocks = config.ClockSettings({})

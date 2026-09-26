@@ -11,8 +11,7 @@ A landed job whose window still owes a boundary parks in its slot and
 releases its compute claim (Tomasulo's rule at the boundary hazard), so
 a dependent that fills early never deadlocks the unit against its own
 predecessor. A pipelined unit issues one decode per initiation interval
-and keeps at most its depth in flight (Hennessy and Patterson App. C;
-rowD4).
+and keeps at most its depth in flight (Hennessy and Patterson App. C).
 """
 
 import dataclasses
@@ -240,25 +239,7 @@ class DecodeService:
         if job.window is not None:
             job.window.service_began = True
             job.window.t_compute_start = self.engine.now
-        decoder = self.pool.decoder_for(job)
-        self.engine.log(
-            log_sources.DECODER_MANAGER, f"START DECODE {job.label}"
-        )
-        self.trace.job_started.fire(job, job.unit)
-        self._predict_compute_free(job)
-        pipeline = self._pipeline_of(decoder, job)
-        if job.decoder_input is not None:
-            # the decoder reads this unit's memory now
-            job.payloads = job.decoder_input.fragments()
-        decoder.start(
-            job,
-            self.engine,
-            lambda result: self.manager.on_completed(job, result),
-        )
-        if pipeline is None:
-            return
-        interval_ticks, latency_ticks, depth = pipeline
-        self._track_pipelined_start(job, latency_ticks, interval_ticks, depth)
+        self._start_decoder(job)
 
     def restart_parked(self, job: decoding_records.DecodeJob) -> None:
         """A released job takes the unit's compute if it can have it now."""
@@ -403,6 +384,10 @@ class DecodeService:
             raise RuntimeError(
                 f"run ended with parked decodes never released: {parked}"
             )
+        self._check_pipelines_settled()
+
+    def _check_pipelines_settled(self) -> None:
+        """No unit ends the run with a decode in flight or its intake open."""
         in_flight = []
         busy = []
         for unit in self.pool.units():
@@ -422,6 +407,28 @@ class DecodeService:
             )
 
     # ------------------------------------------------- dispatch, private
+
+    def _start_decoder(self, job: decoding_records.DecodeJob) -> None:
+        """Hand the started job to its routed decoder on this unit."""
+        decoder = self.pool.decoder_for(job)
+        self.engine.log(
+            log_sources.DECODER_MANAGER, f"START DECODE {job.label}"
+        )
+        self.trace.job_started.fire(job, job.unit)
+        self._predict_compute_free(job)
+        pipeline = self._pipeline_of(decoder, job)
+        if job.decoder_input is not None:
+            # the decoder reads this unit's memory now
+            job.payloads = job.decoder_input.fragments()
+        decoder.start(
+            job,
+            self.engine,
+            lambda result: self.manager.on_completed(job, result),
+        )
+        if pipeline is None:
+            return
+        interval_ticks, latency_ticks, depth = pipeline
+        self._track_pipelined_start(job, latency_ticks, interval_ticks, depth)
 
     def _assign_service_key(self, job: decoding_records.DecodeJob) -> None:
         """One service key per decode, shared by every request it serves."""
@@ -770,12 +777,7 @@ def job_defects_text(job: decoding_records.DecodeJob) -> str:
     The set detection-event indices of the rounds now in this unit's
     memory (the algorithm stage reads the same fragments).
     """
-    if job.decoder_input is not None:
-        fragments = job.decoder_input.fragments()
-    else:
-        fragments = job.payloads
-        if fragments is None:
-            fragments = []
+    fragments = _landed_fragments(job)
     bit_arrays = []
     for fragment in fragments:
         if fragment.bits is None:
@@ -795,12 +797,21 @@ def job_defects_text(job: decoding_records.DecodeJob) -> str:
     return f"defects {{{listed}}}"
 
 
+def _landed_fragments(job: decoding_records.DecodeJob) -> list:
+    """What the job reads: its landed input, else the payloads it carries."""
+    if job.decoder_input is not None:
+        return job.decoder_input.fragments()
+    if job.payloads is None:
+        return []
+    return job.payloads
+
+
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
     """Every event the decode service reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

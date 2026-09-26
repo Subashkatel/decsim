@@ -478,18 +478,9 @@ def _context_window_of(
     own module docstring forbids.
     """
     bounds = window_records.strong_context_bounds(weak_window)
-    context_lo, commit_lo, commit_hi, context_hi = bounds
-    round_count = context_hi - context_lo + 1
-    strong_window = window_records.Window(
-        operation_id=weak_window.operation_id,
-        window_index=weak_window.window_index,
-        commit_lo=commit_lo,
-        commit_hi=commit_hi,
-        buffer_hi=context_hi,
-        buffer_lo=context_lo,
-        round_count=round_count,
+    return _window_over(
+        weak_window.operation_id, weak_window.window_index, bounds
     )
-    return strong_window
 
 
 def _near_pinned_window_of(
@@ -497,16 +488,8 @@ def _near_pinned_window_of(
 ) -> window_records.Window:
     """The weak window's commit rounds plus one trailing buffer region."""
     bounds = window_records.near_pinned_bounds(weak_window)
-    context_lo, commit_lo, commit_hi, context_hi = bounds
-    round_count = context_hi - context_lo + 1
-    return window_records.Window(
-        operation_id=weak_window.operation_id,
-        window_index=weak_window.window_index,
-        commit_lo=commit_lo,
-        commit_hi=commit_hi,
-        buffer_hi=context_hi,
-        buffer_lo=context_lo,
-        round_count=round_count,
+    return _window_over(
+        weak_window.operation_id, weak_window.window_index, bounds
     )
 
 
@@ -531,14 +514,27 @@ def _context_round_keys(
 def _strong_window_of(
     key: tuple, plan: window_records.StrongRegionPlan
 ) -> window_records.Window:
-    round_count = plan.context_hi - plan.context_lo + 1
+    bounds = (plan.context_lo, plan.commit_lo, plan.commit_hi, plan.context_hi)
+    return _window_over(key[0], key[1], bounds)
+
+
+def _window_over(
+    operation_id, window_index: int, bounds: tuple
+) -> window_records.Window:
+    """The strong window over (context_lo, commit_lo, commit_hi, context_hi).
+
+    It reads its whole context and starts with the empty boundary state
+    a Window is given.
+    """
+    context_lo, commit_lo, commit_hi, context_hi = bounds
+    round_count = context_hi - context_lo + 1
     return window_records.Window(
-        operation_id=key[0],
-        window_index=key[1],
-        commit_lo=plan.commit_lo,
-        commit_hi=plan.commit_hi,
-        buffer_hi=plan.context_hi,
-        buffer_lo=plan.context_lo,
+        operation_id=operation_id,
+        window_index=window_index,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=context_hi,
+        buffer_lo=context_lo,
         round_count=round_count,
     )
 

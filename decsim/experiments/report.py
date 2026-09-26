@@ -163,7 +163,13 @@ def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:
 
 
 def percentile_of_counts(multiset: dict, fraction: float) -> float:
-    """The value at `fraction` of the samples, nearest rank.
+    """The value at `fraction` of the samples, numpy's nearest method.
+
+    The index is round((n - 1) * fraction) into the sorted samples, which
+    is numpy.percentile(method="nearest"); a position half way between
+    two samples takes the even index, so the median of an even count is
+    the lower middle for 2 or 6 samples and the upper for 4. It is not
+    the classical nearest rank, ceil(n * fraction).
 
     multiset maps a microsecond value to how many samples carry it.
     Expanding it and sorting gives the list this walks in place, so a
@@ -192,7 +198,7 @@ def sweep_point_of(row: dict) -> tuple:
         fold.number_of(row["distance"]),
         fold.number_of(row["physical_error_probability"]),
         fold.number_of(row["algorithm"]),
-        fold.number_of(row["round_period_us"]),
+        fold.number_of(row["round_period_microseconds"]),
     )
 
 
@@ -202,24 +208,34 @@ def measured_point(measurement) -> tuple:
         measurement.distance,
         measurement.physical_error_probability,
         measurement.algorithm,
-        measurement.round_period_us,
+        measurement.round_period_microseconds,
     )
 
 
 def point_columns(point: tuple) -> dict:
     """The four columns that name a sweep point."""
-    distance, physical_error_probability, algorithm, round_period_us = point
+    (
+        distance,
+        physical_error_probability,
+        algorithm,
+        round_period_microseconds,
+    ) = point
     return {
         "distance": distance,
         "physical_error_probability": physical_error_probability,
         "algorithm": algorithm,
-        "round_period_us": round_period_us,
+        "round_period_microseconds": round_period_microseconds,
     }
 
 
 def summarize_point(point: tuple, totals, counts: dict) -> dict:
     """One sweep point: means over seeds of per-shot means, max of maxes."""
-    distance, physical_error_probability, algorithm, round_period_us = point
+    (
+        distance,
+        physical_error_probability,
+        algorithm,
+        round_period_microseconds,
+    ) = point
     failures = totals.true_counts["logical_failure"]
     shot_count = totals.rows
     ler_low, ler_high = wilson_interval(failures, shot_count)
@@ -227,7 +243,7 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
         "distance": distance,
         "physical_error_probability": physical_error_probability,
         "algorithm": algorithm,
-        "round_period_us": round_period_us,
+        "round_period_microseconds": round_period_microseconds,
         "shots": shot_count,
         "windows_per_shot": totals.mean("windows"),
         "logical_failures": failures,
@@ -248,10 +264,10 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
         "load": totals.mean("load"),
         "sim_wall_seconds_per_shot": totals.mean("sim_wall_seconds"),
     }
-    _add_pool_columns(row, totals, distance, round_period_us)
+    _add_pool_columns(row, totals, distance, round_period_microseconds)
     for name in _points_held(totals.means):
         multiset = counts.get((point, name), {})
-        _addpoint_columns(row, totals, name, multiset)
+        _add_latency_point_columns(row, totals, name, multiset)
     return row
 
 
@@ -345,12 +361,13 @@ def data_movement_rows(shot_data_movement: list) -> list:
 def shot_data_movement_rows(measurements: list) -> list:
     """One row per shot per path: that shot's own copy and move counters.
 
-    A path is a copy's source and target (`controller intake -> Buffer
-    0`) or a link's own name, and each row names the memory class that
-    path crosses, which observe/data_movement.py places from the
-    sources. A shot whose run had observation.data_movement off writes
-    no row at all: a run that counted nothing has no counts, which is
-    not the same fact as a run whose counts were zero.
+    A path is a copy's source and target (`controller assembler -> weak
+    syndrome buffer`) or a link's own name, and each row names the
+    memory class that path crosses, which observe/data_movement.py
+    places from the sources. A shot whose run had
+    observation.data_movement off writes no row at all: a run that
+    counted nothing has no counts, which is not the same fact as a run
+    whose counts were zero.
     """
     rows = []
     for measurement in measurements:
@@ -430,7 +447,9 @@ def latency_sample_rows(measurements: list) -> list:
                 "physical_error_probability": (
                     measurement.physical_error_probability
                 ),
-                "round_period_us": measurement.round_period_us,
+                "round_period_microseconds": (
+                    measurement.round_period_microseconds
+                ),
                 "algorithm": measurement.algorithm,
                 "seed": measurement.seed,
                 "algorithm_us": sample_us,
@@ -718,7 +737,7 @@ def _folder_files(folders: list, name: str) -> list:
 
 
 def _add_pool_columns(
-    row: dict, totals, distance: int, round_period_us: float
+    row: dict, totals, distance: int, round_period_microseconds: float
 ) -> None:
     """The pool columns and Toshio's bound, when the shots hold them.
 
@@ -734,13 +753,13 @@ def _add_pool_columns(
     row["escalated_windows"] = totals.sums["escalated_windows"]
     row["strong_service_mean_us"] = totals.mean("strong_service_mean_us")
     row["strong_service_bound_us"] = strong_service_bound_us(
-        totals, distance, round_period_us
+        totals, distance, round_period_microseconds
     )
     row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
 
 
 def strong_service_bound_us(
-    totals, distance: int, round_period_us: float
+    totals, distance: int, round_period_microseconds: float
 ) -> float:
     """Toshio's Theorem 1 bound on the strong decode time, per point.
 
@@ -754,7 +773,7 @@ def strong_service_bound_us(
     if strong_rounds == 0:
         return math.inf
     windows = totals.sums["windows"]
-    return round_period_us * distance * windows / strong_rounds
+    return round_period_microseconds * distance * windows / strong_rounds
 
 
 def _shot_totals(row: dict) -> fold.RowTotals:
@@ -1198,7 +1217,8 @@ def _refuse_the_folders(row: dict, run_dirs: list) -> None:
     shot = (
         f"d {row['distance']}, p {row['physical_error_probability']}, "
         f"algorithm {row['algorithm']}, "
-        f"round period {row['round_period_us']} us, seed {row['seed']}"
+        f"round period {row['round_period_microseconds']} us, "
+        f"seed {row['seed']}"
     )
     raise refusal.RefusalError(
         f"the shot {shot} is in more than one of {listed}; a shot is one "
@@ -1263,7 +1283,7 @@ def _row_task_and_seed(positions: dict, row: dict) -> tuple:
     point = (
         fold.number_of(row["physical_error_probability"]),
         fold.number_of(row["distance"]),
-        fold.number_of(row["round_period_us"]),
+        fold.number_of(row["round_period_microseconds"]),
     )
     position = positions[point]
     seed = fold.number_of(row["seed"])
@@ -1293,17 +1313,24 @@ def _shot_link_row(point: tuple, measurement, path: str) -> dict:
 
 def _sweep_point_order(point: tuple) -> tuple:
     """distance, then p, then the algorithm's text, then the fastest round."""
-    distance, physical_error_probability, algorithm, round_period_us = point
+    (
+        distance,
+        physical_error_probability,
+        algorithm,
+        round_period_microseconds,
+    ) = point
     algorithm_text = str(algorithm)
     return (
         distance,
         physical_error_probability,
         algorithm_text,
-        -round_period_us,
+        -round_period_microseconds,
     )
 
 
-def _addpoint_columns(row: dict, totals, name: str, multiset: dict) -> None:
+def _add_latency_point_columns(
+    row: dict, totals, name: str, multiset: dict
+) -> None:
     """One latency point's mean, median, p99 and max columns.
 
     The mean averages the per-shot means and the max takes the largest
@@ -1330,7 +1357,7 @@ def _terminal_block(row: dict) -> str:
         f"distance: {row['distance']}",
         f"physical error rate: {row['physical_error_probability']:g}",
         f"algorithm: {algorithm_text}",
-        f"round period: {row['round_period_us']:g} us",
+        f"round period: {row['round_period_microseconds']:g} us",
         f"load (service per window / window inter-arrival): {row['load']:.2f}",
         f"logical failures: {row['logical_failures']} of {row['shots']} shots",
         f"mismatches vs direct PyMatching: "

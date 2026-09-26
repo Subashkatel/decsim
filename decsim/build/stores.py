@@ -7,14 +7,15 @@ file's (decsim/assembly.py).
 
 import decsim.build.parts as build_parts
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
+import decsim.decoders.settings as decoder_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.tables as tables
 from decsim.syndrome_buffer import (
     strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
@@ -47,11 +48,11 @@ def build_weak_syndrome_buffer(
     """The weak syndrome buffer, where every finished round is published."""
     settings = parts.settings.weak_syndrome_buffer
     row = tables.row(
-        syndrome_buffer_module.SYNDROME_BUFFERS,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
         "weak_syndrome_buffer.kind",
         settings.kind,
     )
-    return row(settings)
+    return row(settings, parts.engine)
 
 
 def build_strong_syndrome_buffer(
@@ -60,11 +61,11 @@ def build_strong_syndrome_buffer(
     """The strong syndrome buffer."""
     settings = parts.settings.strong_syndrome_buffer
     row = tables.row(
-        syndrome_buffer_module.SYNDROME_BUFFERS,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
         "strong_syndrome_buffer.kind",
         settings.kind,
     )
-    return row(settings)
+    return row(settings, parts.engine)
 
 
 def check_store_kinds(settings: machine_settings.MachineSettings) -> None:
@@ -75,12 +76,12 @@ def check_store_kinds(settings: machine_settings.MachineSettings) -> None:
     is a mistake in the file either way.
     """
     tables.row(
-        syndrome_buffer_module.SYNDROME_BUFFERS,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
         "weak_syndrome_buffer.kind",
         settings.weak_syndrome_buffer.kind,
     )
     tables.row(
-        syndrome_buffer_module.SYNDROME_BUFFERS,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
         "strong_syndrome_buffer.kind",
         settings.strong_syndrome_buffer.kind,
     )
@@ -97,10 +98,12 @@ def build_weak_output(
     parts: build_parts.Parts,
 ) -> round_output.SyndromeBufferOutput:
     """The weak syndrome buffer's outgoing end, which executes every send."""
-    del parts
+    reads_in_place = _reads_in_place(parts.settings.weak_decoder, "weak")
     return round_output.SyndromeBufferOutput(
+        parts.engine,
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
+        reads_in_place,
     )
 
 
@@ -108,10 +111,12 @@ def build_strong_output(
     parts: build_parts.Parts,
 ) -> round_output.SyndromeBufferOutput:
     """The strong syndrome buffer's outgoing end."""
-    del parts
+    reads_in_place = _reads_in_place(parts.settings.strong_decoder, "strong")
     return round_output.SyndromeBufferOutput(
+        parts.engine,
         transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
         "strong syndrome buffer",
+        reads_in_place,
     )
 
 
@@ -199,6 +204,28 @@ def check_weak_syndrome_buffer_formation(
         )
 
 
+def check_one_price_for_a_read(
+    settings: machine_settings.MachineSettings,
+) -> None:
+    """A ported weak store prices its reads; the link out of it may not.
+
+    The store's read port moves the bits by words, so a rate on
+    weak_buffer_to_weak_decoder as well would charge the same bits twice.
+    The link keeps its latency.
+    """
+    if settings.weak_syndrome_buffer.kind != "ported_syndrome_buffer":
+        return
+    path = settings.links.weak_buffer_to_weak_decoder
+    if path.channel.capacity is None:
+        return
+    raise ValueError(
+        "weak_syndrome_buffer kind ported_syndrome_buffer prices the read "
+        "out of the store by its words, and links.weak_buffer_to_weak_decoder "
+        "has a rate that would charge the same bits again; set its "
+        "bits_per_cycle to null"
+    )
+
+
 def check_readout_cost_is_priced(
     settings: machine_settings.MachineSettings,
 ) -> None:
@@ -222,3 +249,19 @@ def check_readout_cost_is_priced(
                 "a separate controller readout cost requires a "
                 "qpu_to_controller card whose latency excludes that cost"
             )
+
+
+def _reads_in_place(tier_settings, tier: str) -> bool:
+    """Whether the tier a store feeds reads the rounds where they sit.
+
+    The rule is the tier's input row (<tier>.input); a run without that
+    tier builds the store's end and never sends on it.
+    """
+    if tier_settings is None:
+        return False
+    copies = tables.row(
+        decoder_settings.DECODER_INPUTS,
+        f"{tier}_decoder.input",
+        tier_settings.input,
+    )
+    return not copies

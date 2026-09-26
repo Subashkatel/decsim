@@ -11,7 +11,7 @@ the machine has no use for a seat in has no row for it, and a wire that
 names a seat the run did not build, a port its class does not declare,
 or a peer that does not answer that port is refused rather than
 silently bound, which is gem5's PortRef.connect refusing by name
-(tmp/resources/gem5/src/python/m5/params/port_params.py:109-114).
+(gem5 src/python/m5/params/port_params.py:109-114).
 """
 
 import pytest

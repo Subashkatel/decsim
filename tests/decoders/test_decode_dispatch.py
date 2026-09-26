@@ -129,7 +129,7 @@ def _manager(engine, unit_count):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=unit_count,
+        unit_pools={"default": unit_count},
         escalation_policy=policy,
     )
 

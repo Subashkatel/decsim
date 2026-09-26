@@ -24,7 +24,7 @@ COUNTING_SWEEP = {
         {
             "physical_error_probability": [0.001],
             "distance": [3],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 2,
         }
     ],
@@ -55,7 +55,7 @@ ESCALATING_SWEEP = {
         {
             "physical_error_probability": [0.005],
             "distance": [3],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 8,
         }
     ],
@@ -71,7 +71,7 @@ def measured_shots(config_path, count, probability=0.001):
             config,
             physical_error_probability=probability,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
             seed=seed,
         )
         measurements.append(measurement)
@@ -227,7 +227,7 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
                 {
                     "physical_error_probability": [0.001],
                     "distance": [3],
-                    "round_period_us": [1.0],
+                    "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ]

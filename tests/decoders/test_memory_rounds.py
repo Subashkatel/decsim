@@ -6,7 +6,7 @@ decoders read for this hop run per round as the stream fills (LILLIPUT
 2108.06569, Yang et al. 2605.04892), and tell the window side, which
 counts the operation's idle rounds for window readiness. The receiving
 end handles the landing: gem5's requesting port hands the packet to the
-peer's own receive method (tmp/resources/gem5/src/mem/port.hh:603-614
+peer's own receive method (gem5 src/mem/port.hh:603-614
 into src/mem/protocol/timing.cc:49-53).
 """
 

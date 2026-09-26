@@ -21,13 +21,9 @@ import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.settings as link_settings
 
-AGGREGATE = link_settings.QuantityBasis.AGGREGATE
-
 
 def bounded_channel(engine, bits_per_microsecond, latency_ticks):
-    capacity = link_settings.CapacitySettings(
-        bits_per_microsecond, AGGREGATE, None, "test"
-    )
+    capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     settings = link_settings.ChannelSettings(
         "test", latency_ticks, capacity, "test"
     )
@@ -214,20 +210,6 @@ def test_serialization_uses_the_decimal_rate_written_on_the_card():
     engine.run()
     transfer = delivered[0]
     assert transfer.serialization_ticks == 1_920_321_845_917_683
-
-
-def test_a_per_lane_rate_serializes_at_the_aggregate_rate():
-    engine = decsim.engine.Engine()
-    capacity = link_settings.CapacitySettings(
-        0.7, link_settings.QuantityBasis.PER_LANE, 3, "test"
-    )
-    settings = link_settings.ChannelSettings("test", 0, capacity, "test")
-    channel = channel_module.Channel(settings, engine)
-    delivered = []
-    send_at(engine, channel, 0, 21, 0, delivered)
-    engine.run()
-    transfer = delivered[0]
-    assert transfer.serialization_ticks == 10_000_000
 
 
 def test_a_setup_waits_for_the_previous_setup_on_the_channel():

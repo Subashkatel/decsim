@@ -5,17 +5,17 @@ The link landing starts that write; a zero write cost completes at the
 landing tick. Every referent that models storage writes it there: ns-3's
 channel schedules the destination device's own Receive after the
 transmission and the propagation
-(`tmp/resources/l5_buffers/ns3-point-to-point/point-to-point-channel.cc:88-92`,
+(`ns-3 src/point-to-point/model/point-to-point-channel.cc:88-92`,
 "Simulator::ScheduleWithContext(m_link[wire].m_dst->GetNode()->GetId(),
 txTime + m_delay, &PointToPointNetDevice::Receive, ...)", whose method
 is `point-to-point-net-device.cc:324`); OMNeT++ takes ownership into the
 destination module and inserts inside that module's handler
-(`tmp/resources/omnetpp/src/sim/csimplemodule.cc:782-783` "// get
+(`omnetpp src/sim/csimplemodule.cc:782-783` "// get
 ownership" then "take(msg);", `:799` "handleMessage(msg);", with
-`tmp/resources/l5_buffers/omnetpp-queueing/queueinglib/Queue.cc:84-94`
+`omnetpp samples/queueinglib/Queue.cc:84-94`
 checking "queue.length() >= capacity" and then "queue.insert( job );"
 inside it); Ciw counts the individual in the destination's own accept
-(`tmp/resources/l5_buffers/Ciw/ciw/node.py:602` "next_node.accept(
+(`Ciw ciw/node.py:602` "next_node.accept(
 next_individual)" into `:102-103` "self.individuals[...].append(
 next_individual)" and "self.number_of_individuals += 1"). The quantum
 control papers put the store on the far side of the wire too: Caune
@@ -34,7 +34,7 @@ room with the bits of the writes it has in flight counted as taken,
 gem5's `_reserved` bytes in `avail() = _maxsize - _size - _reserved`
 (src/dev/net/pktfifo.hh, `reserve(len)` before the data lands). gem5's
 entry-counted cache queue holds its reserve against its size the same way
-(`tmp/resources/gem5/src/mem/cache/queue.hh:150-153` "bool isFull() const
+(`gem5 src/mem/cache/queue.hh:150-153` "bool isFull() const
 { return (allocated >= numEntries - numReserve); }", the reserve declared
 at `:87-93`), its cache blocks the port the moment the write buffer fills
 (`src/mem/cache/base.cc:255-257` "if (writeBuffer.isFull()) { setBlocked(
@@ -42,7 +42,7 @@ at `:87-93`), its cache blocks the port the moment the write buffer fills
 it drains), a refusal being the receiver's answer to the sender
 (`src/mem/port.hh:244-255`, "If the send does not succeed ... the sender
 must wait for a recvReqRetry"); and Ruby sums the same two counts
-(`tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:181`
+(`gem5 src/mem/ruby/network/MessageBuffer.cc:181`
 "if (current_size + current_stall_size + n <= m_max_size)", the two sizes
 read at `:159-177`). This is the shape of the strong syndrome buffer's end
 (strong_syndrome_round_receiver.py, has_room and reserve_write), so both
@@ -53,11 +53,11 @@ packed round lands over controller_to_weak_buffer: this end stores it as the
 run's detection event placement says the store holds it, the landed outcomes or
 the events formed from them here (controller.detection_events_formed_at),
 narrates the copy and the intake, and announces the published round to the
-window manager. And a timing-only feedback-memory round is handed over to be
-sent: it takes its slot here, because the weak syndrome buffer is where it
-waits, and it leaves by the store's own outgoing port (round_output.py), which
-frees the slot at the delivery. A timing-only round is never published: no
-window reads it.
+window manager. And a timing-only feedback-memory round lands over the same
+hop to be sent on: the store writes it, it takes its slot once written,
+because the weak syndrome buffer is where it waits, and it leaves by the
+store's own outgoing port (round_output.py), which frees the slot at the
+delivery. A timing-only round is never published: no window reads it.
 """
 
 import dataclasses
@@ -94,31 +94,38 @@ class WeakSyndromeRoundReceiver:
     ) -> None:
         self.engine = engine
         self.settings = settings
-        self.writes_in_flight = 0
-        # the bits the crossing rounds will take, held against the store
-        self.reserved_bits = 0
+        # the bits each crossing round will take, by its key, held
+        # against the store until its write completes
+        self.reserved_bits_by_round: dict = {}
         self.trace = _TraceSources()
 
-    def has_room(self, bits: Optional[int]) -> bool:
+    def has_room(self, packed: round_records.PackedRound) -> bool:
         """A write can land: the store weighs it against what is reserved."""
-        return self.store.has_room(bits, self.reserved_bits)
+        return self.store.has_room(
+            packed.round_key, packed.wire_bits, self.reserved_bits_by_round
+        )
 
-    def reserve_write(self, bits: Optional[int]) -> None:
+    def reserve_write(self, packed: round_records.PackedRound) -> None:
         """Take the bits one crossing round will need, before it leaves."""
-        assert self.has_room(bits), "a round was written into a full store"
-        self.writes_in_flight += 1
-        self.reserved_bits += round_records.stated_bits(bits)
+        assert self.has_room(packed), "a round was written into a full store"
+        bits = round_records.stated_bits(packed.wire_bits)
+        self.reserved_bits_by_round[packed.round_key] = bits
 
-    def receive_round(self, packed: round_records.PackedRound) -> None:
-        """Start one landed round's write, retaining its reservation until done.
+    def receive_round(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        """Form one landed round, then write it, retaining its reservation.
 
         The store and the publication are one call at one tick, because
         the bits become readable when they are here and not before, and
         the announcement follows the record, so the window manager never
-        hears of a round the store does not yet call readable
-        (validation buffer_contract.md, the weak syndrome buffer). The
-        delay is the chip's formation cycles and the write cycles on one
-        clock edge: a round is readable once it is formed and written.
+        hears of a round the store does not yet call readable. The
+        chip's formation cycles come first, on the buffer's clock, then
+        the store is asked when the write of the width it keeps
+        completes: a round is readable once it is formed and written.
+        on_published runs after the announcement.
 
         A round whose operation closed while it crossed is dropped at the
         door on the strong side (strong_syndrome_round_receiver.py,
@@ -130,56 +137,95 @@ class WeakSyndromeRoundReceiver:
         is no drop to make here.
         """
         formation_cycles = self.settings.detection_event_cycles_per_round
-        write_cycles = self.settings.write_cycles
-        cycles = formation_cycles + write_cycles
-        if cycles == 0:
-            self._finish_write(packed)
+        if formation_cycles == 0:
+            self._write(packed, on_published)
             return
-        edge = self.settings.clock.edge(cycles, self.engine.now)
+        edge = self.settings.clock.edge(formation_cycles, self.engine.now)
         delay = edge - self.engine.now
-        finish = functools.partial(self._finish_write, packed)
-        self.engine.schedule(delay, finish, label="syndrome buffer write")
+        write = functools.partial(self._write, packed, on_published)
+        self.engine.schedule(delay, write, label="detection event formation")
 
     def send_memory_round(
         self,
         packed: round_records.PackedRound,
         on_delivered: Callable[[], None],
     ) -> None:
-        """Take one timing-only round and send it to the store's decoder.
+        """Write one landed timing-only round, then send it to the decoder.
 
-        The round waits in the weak syndrome buffer until the wire takes it, so
-        it takes its slot here, where the store has it; the outgoing port frees
-        that slot at the delivery. It is not published: no window reads
-        a timing-only round, so nothing may be told it is readable.
+        The round waits in the weak syndrome buffer until the wire takes it,
+        so it takes its slot here once the store's write of it completes;
+        the outgoing port frees that slot at the delivery. It is not
+        published: no window reads a timing-only round, so nothing may be
+        told it is readable. It carries no outcomes to form.
         """
-        self._give_back_reservation(packed)
-        self._take_slot(packed, "packing", None)
-        self.output.send_memory_round(packed, on_delivered)
+        stored_bits = round_records.fragment_wire_bits(packed.packet.fragments)
+        written_tick = self.store.book_write(packed.round_key, stored_bits)
+        send_on = functools.partial(
+            self._send_memory_round_on, packed, on_delivered
+        )
+        if written_tick == self.engine.now:
+            send_on()
+            return
+        delay = written_tick - self.engine.now
+        self.engine.schedule(delay, send_on, label="syndrome buffer write")
 
     def check_settled(self) -> None:
-        """At the end of a run no write may still be on the wire.
+        """At the end of a run no write is on the wire and no bit is stored.
 
-        What the store itself still holds is not asked here: a run that
-        ends with nothing delivered is a legal end, and the law that
-        covers it is the callback law (tests/test_callback_law.py).
+        A round still stored is a leak, or a store too small for its
+        widest hold, and the store names which. Holds on rounds that
+        never came are not asked here: a run that ends with nothing
+        delivered is a legal end, and the law that covers it is the
+        callback law (tests/test_callback_law.py).
         """
-        if self.writes_in_flight:
+        if self.reserved_bits_by_round:
+            in_flight = len(self.reserved_bits_by_round)
             raise RuntimeError(
-                f"weak syndrome buffer ended with {self.writes_in_flight} "
+                f"weak syndrome buffer ended with {in_flight} "
                 f"controller_to_weak_buffer writes in flight"
             )
+        if self.store.occupied_bits:
+            self.store.check_settled()
 
-    def _finish_write(self, landed: round_records.PackedRound) -> None:
-        self._give_back_reservation(landed)
+    def _write(
+        self,
+        landed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        """Ask the store when the formed round's write completes."""
         packed = self._as_stored(landed)
+        stored_bits = round_records.fragment_wire_bits(packed.packet.fragments)
+        written_tick = self.store.book_write(packed.round_key, stored_bits)
+        if written_tick == self.engine.now:
+            self._finish_write(packed, on_published)
+            return
+        delay = written_tick - self.engine.now
+        finish = functools.partial(self._finish_write, packed, on_published)
+        self.engine.schedule(delay, finish, label="syndrome buffer write")
+
+    def _finish_write(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        self._give_back_reservation(packed)
         self._take_slot(packed, "controller_to_weak_buffer", self.engine.now)
         self._fire_published(packed)
         self.windows.accept_window_input(packed.packet)
+        on_published()
+
+    def _send_memory_round_on(
+        self,
+        packed: round_records.PackedRound,
+        on_delivered: Callable[[], None],
+    ) -> None:
+        self._give_back_reservation(packed)
+        self._take_slot(packed, "controller_to_weak_buffer", None)
+        self.output.send_memory_round(packed, on_delivered)
 
     def _give_back_reservation(self, packed: round_records.PackedRound) -> None:
         """The crossing is over: it gives back exactly what it reserved."""
-        self.writes_in_flight -= 1
-        self.reserved_bits -= round_records.stated_bits(packed.wire_bits)
+        del self.reserved_bits_by_round[packed.round_key]
 
     def _as_stored(
         self, landed: round_records.PackedRound
@@ -243,7 +289,7 @@ class _TraceSources:
     """Every event the receiver reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

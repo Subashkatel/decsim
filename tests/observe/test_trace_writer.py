@@ -8,6 +8,7 @@ narrates the same log and returns the same results as one with it off.
 """
 
 import dataclasses
+import gzip
 import hashlib
 import json
 
@@ -16,6 +17,7 @@ import pytest
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.observe.gate_point as gate_point
 
 SEED = gate_point.SEED
@@ -62,10 +64,13 @@ def _by_phase(document, phase) -> list:
     return [row for row in document if row["ph"] == phase]
 
 
-def _flow_of(document, flow_id) -> list:
+def _flow_of(document, kind, key_text) -> list:
+    """The events of the chain that follows that round or that window."""
     rows = []
     for row in document:
-        if row["ph"] in ("s", "t", "f") and row["id"] == flow_id:
+        if row["ph"] not in ("s", "t", "f"):
+            continue
+        if row["args"].get(kind) == key_text:
             rows.append(row)
     return rows
 
@@ -121,6 +126,18 @@ def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
     assert traced_result.data_movement is None
 
 
+def test_a_path_ending_in_gz_holds_the_same_trace_compressed(traced, tmp_path):
+    """The reference yaml's own promise: .gz compresses."""
+    machine, _result, document = traced
+    path = tmp_path / "point1.trace.json.gz"
+
+    machine.observation.trace_writer.write(str(path))
+
+    with gzip.open(path, "rt") as handle:
+        compressed = json.load(handle)
+    assert compressed == document
+
+
 def test_every_event_carries_the_fields_its_phase_declares(traced):
     """The JSON schema of the trace note's section 2, checked row by row."""
     _machine, _result, document = traced
@@ -154,6 +171,30 @@ def test_every_flow_event_lies_inside_a_complete_event_on_its_thread(traced):
         spans = spans_by_tid.get(row["tid"], ())
         covered = any(start <= tick <= end for start, end in spans)
         assert covered, row
+
+
+def test_every_flow_chain_has_a_number_of_its_own(traced):
+    """A flow's id is a number and one chain's events share it.
+
+    The spec's ids are numbers (Trace Event Format, Async Events, which
+    flow events follow), and Perfetto's trace processor drops a flow
+    whose id does not read as one (its stat flow_invalid_id), so the
+    round or window a chain follows is in its args.
+    """
+    _machine, _result, document = traced
+    chains_by_id = {}
+    for row in document:
+        if row["ph"] not in ("s", "t", "f"):
+            continue
+        args = row["args"]
+        followed = (row["cat"], args.get("round"), args.get("window"))
+        chains = chains_by_id.setdefault(row["id"], set())
+        chains.add(followed)
+
+    starts = _by_phase(document, "s")
+    assert all(isinstance(flow_id, int) for flow_id in chains_by_id)
+    assert len(chains_by_id) == len(starts)
+    assert all(len(chains) == 1 for chains in chains_by_id.values())
 
 
 def test_round_ones_first_hops_are_the_notes_worked_example(traced):
@@ -253,7 +294,7 @@ def test_one_rounds_flow_chain_equals_the_round_events_recorded(traced):
             continue
         recorded.append((event.kind, event.tick))
 
-    flow = _flow_of(document, "1:1")
+    flow = _flow_of(document, "round", "1:1")
     assert [row["ph"] for row in flow] == ["s", "t", "t", "t", "f"]
     flow_ticks = [row["args"]["tick"] for row in flow]
     assert flow_ticks == [1_000_000, 1_004_000, 1_008_000, 6_008_000, 6_012_000]
@@ -343,7 +384,7 @@ def test_a_windows_flow_joins_its_queue_its_moves_its_unit_and_the_frame(
     """
     _machine, _result, document = traced
     threads = _thread_names(document)
-    flow = _flow_of(document, "window 1:0")
+    flow = _flow_of(document, "window", "1:0")
     lanes = []
     for row in flow:
         lanes.append((row["ph"], threads[row["tid"]], row["args"]["tick"]))
@@ -448,7 +489,7 @@ def _check_row(row) -> None:
     if row["ph"] == "i":
         assert row["s"] == "t"
     if row["ph"] in ("s", "t", "f"):
-        assert isinstance(row["id"], str)
+        assert isinstance(row["id"], int)
     if row["ph"] == "f":
         assert row["bp"] == "e"
 
@@ -563,3 +604,42 @@ def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
         assert "tick" not in row["args"]
         for value in row["args"].values():
             assert isinstance(value, int)
+
+
+def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
+    """A ported store's port serves one access at a time, in arrival order.
+
+    gem5's SimpleMemory is busy for an access's duration and refuses the
+    next until it frees (src/mem/simple_mem.cc:136-161), so the spans on
+    one port's lane never overlap.
+    """
+    path = tmp_path / "ported.trace.json"
+    point = _settings(path)
+    row_settings = ported_syndrome_buffer.PortedSyndromeBuffer.Settings()
+    ported = dataclasses.replace(
+        point.weak_syndrome_buffer,
+        kind="ported_syndrome_buffer",
+        row_settings=row_settings,
+    )
+    point = dataclasses.replace(point, weak_syndrome_buffer=ported)
+    machine = machine_module.Machine.build(point, SEED)
+    machine.run()
+    machine.observation.trace_writer.write(str(path))
+    text = path.read_text()
+    document = json.loads(text)
+
+    accesses = [row for row in document if row.get("cat") == "access"]
+    names = {row["name"] for row in accesses}
+    tids = {row["tid"] for row in accesses}
+    first_port, second_port = sorted(tids)
+    assert names == {"read", "write"}
+    assert _lane_spans_overlap(accesses, first_port) is False
+    assert _lane_spans_overlap(accesses, second_port) is False
+
+
+def _lane_spans_overlap(accesses, tid) -> bool:
+    """Whether a span on this lane starts before the one before it ends."""
+    spans = [row for row in accesses if row["tid"] == tid]
+    ends = [row["ts"] + row["dur"] for row in spans[:-1]]
+    starts = [row["ts"] for row in spans[1:]]
+    return any(start < end for start, end in zip(starts, ends))

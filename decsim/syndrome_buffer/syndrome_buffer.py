@@ -20,12 +20,18 @@ runs with no listener: round_stored(round_key, packet) when a slot is
 taken, round_published(round_key, tick) when the round's data is ready
 for the windows, round_released(round_key) when the slot frees;
 hold_registered(holder, round_keys), hold_transferred(old_holder,
-new_holder) and hold_released(holder) for the consumers' tokens.
+new_holder) and hold_released(holder) for the consumers' tokens;
+access_served(direction, port_index, round_keys, arrival_tick,
+start_tick, completion_tick) for every write and read a row with ports
+books (ported_syndrome_buffer.py). This row holds no port and fires none.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from typing import Optional
 
+import decsim.config as config
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
@@ -39,7 +45,7 @@ class _TraceSources:
     """Every event the store reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through store.trace.
     """
@@ -50,6 +56,7 @@ class _TraceSources:
     hold_registered: trace_source.TraceSource = trace_source.new_source()
     hold_transferred: trace_source.TraceSource = trace_source.new_source()
     hold_released: trace_source.TraceSource = trace_source.new_source()
+    access_served: trace_source.TraceSource = trace_source.new_source()
 
 
 class _StoredRound:
@@ -66,19 +73,52 @@ class _StoredRound:
 class SyndromeBuffer:
     """The store: rounds by key, their holds, and the operations it serves.
 
-    Its state is the settings, the rounds, the bits they hold, the
-    holds, the operations and its events (trace).
+    Its state is the settings, the engine its accesses are timed on,
+    the rounds, the bits they hold, the holds, the operations and its
+    events (trace).
     """
 
     # a store built with no waiting line in front of it frees its slots
     # with nobody to tell
     held_rounds = ports.Port(ports.HeldRounds, optional=True)
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row's own keys: a flat cost per write and per read, in cycles.
+
+        A write of a round costs write_cycles and a read of a decode's
+        rounds read_cycles, on the section's clock, whatever their width,
+        and no access waits for another: SimpleMemory's latency with no
+        bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174).
+        A row built on this store with keys of its own answers book_write
+        and book_read itself, or declares these two keys too.
+        """
+
+        write_cycles: int = 0
+        read_cycles: int = 0
+
+        def __post_init__(self) -> None:
+            config.check_cycles(
+                "weak_syndrome_buffer.write_cycles", self.write_cycles
+            )
+            config.check_cycles(
+                "weak_syndrome_buffer.read_cycles", self.read_cycles
+            )
+
+        @classmethod
+        def from_yaml(cls, section: Mapping) -> "SyndromeBuffer.Settings":
+            """Both costs, zero when absent."""
+            write_cycles = section.get("write_cycles", 0)
+            read_cycles = section.get("read_cycles", 0)
+            return cls(write_cycles=write_cycles, read_cycles=read_cycles)
+
     def __init__(
         self,
         settings: syndrome_buffer_settings.SyndromeBufferSettings,
+        engine: engine_module.Engine,
     ) -> None:
         self.settings = settings
+        self.engine = engine
         self.round_by_key: dict = {}
         # the bits the stored rounds hold, summed as they land and leave
         self._occupied_bits = 0
@@ -87,21 +127,31 @@ class SyndromeBuffer:
         # closed; a closed identity never reopens
         self.operations: dict = {}
         self.trace = _TraceSources()
+        self._check_costs_have_a_clock()
 
     # ---- the port
 
-    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
+    def has_room(
+        self,
+        round_key: tuple,
+        bits: Optional[int],
+        reserved_bits_by_round: Mapping[tuple, int],
+    ) -> bool:
         """Whether a round of that many bits fits beside what is taken.
 
-        reserved_bits is the room a crossing round has already taken,
-        gem5's `_reserved` in `avail() = _maxsize - _size - _reserved`
-        (src/dev/net/pktfifo.hh).
+        The reserved bits are the room the crossing rounds have already
+        taken, gem5's `_reserved` in `avail() = _maxsize - _size -
+        _reserved` (src/dev/net/pktfifo.hh).
         """
         capacity = self.settings.bits
         if capacity is None:
             return True
         if bits is None:
             self._refuse_unsized_round(capacity)
+        if bits > capacity:
+            self._refuse_round_wider_than_store(round_key, bits, capacity)
+        reserved_widths = reserved_bits_by_round.values()
+        reserved_bits = sum(reserved_widths)
         taken = self._occupied_bits + reserved_bits
         return taken + bits <= capacity
 
@@ -113,10 +163,10 @@ class SyndromeBuffer:
     ) -> None:
         """Keep one landed round, readable at that tick; None publishes none."""
         packet_bits = round_records.fragment_wire_bits(packet.fragments)
-        assert self.has_room(packet_bits), (
+        round_key = (packet.operation_id, packet.round_index)
+        assert self.has_room(round_key, packet_bits, {}), (
             "a round was written into a full store"
         )
-        round_key = (packet.operation_id, packet.round_index)
         assert round_key not in self.round_by_key, (
             f"round {round_key!r} was written twice"
         )
@@ -129,6 +179,28 @@ class SyndromeBuffer:
         self.trace.round_stored.fire(round_key, packet)
         if publication_tick is not None:
             self.trace.round_published.fire(round_key, publication_tick)
+
+    def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
+        """The tick this round's write completes: write_cycles on its clock.
+
+        This row holds no port, so a write never waits for another
+        access: it takes write_cycles from the clock edge at or after
+        now, gem5 SimpleMemory's latency with no bandwidth term
+        (src/mem/simple_mem.cc:174), and a zero cost completes now.
+        """
+        del round_key, bits
+        costs = _costs(self.settings)
+        return self._access_completion_tick(costs.write_cycles)
+
+    def book_read(self, round_keys: tuple) -> int:
+        """The tick a read of these rounds completes: read_cycles on its clock.
+
+        One read of a job's rounds costs read_cycles whatever their
+        width, and never waits for another access (book_write).
+        """
+        del round_keys
+        costs = _costs(self.settings)
+        return self._access_completion_tick(costs.read_cycles)
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
@@ -194,28 +266,18 @@ class SyndromeBuffer:
 
     def close_operation(self, operation_id) -> None:
         """Retire an operation once none of its rounds or holds are live."""
-        live_rounds = []
-        for round_key in self.round_by_key:
-            if identity_records.same_stable_identity(
-                round_key[0], operation_id
-            ):
-                live_rounds.append(round_key)
+        live_rounds = self._stored_rounds_of(operation_id)
         if live_rounds:
-            ordered = sorted(
-                live_rounds, key=identity_records.stable_identity_order_key
-            )
             raise RuntimeError(
-                f"operation {operation_id!r} has live buffer rounds {ordered!r}"
+                f"operation {operation_id!r} has live buffer rounds "
+                f"{live_rounds!r}"
             )
         if self.holds.references(operation_id):
             raise RuntimeError(
                 f"operation {operation_id!r} has live consumer holds"
             )
         self.operations[operation_id] = False
-        open_ids = set()
-        for candidate, is_open in self.operations.items():
-            if is_open:
-                open_ids.add(candidate)
+        open_ids = self._open_operation_ids()
         self.holds.forget_released_outside(open_ids)
 
     def has_live_operation_reference(self, operation_id) -> bool:
@@ -267,12 +329,19 @@ class SyndromeBuffer:
     # ---- settlement and the trace
 
     def check_settled(self) -> None:
-        """At the end of a run nothing may still be held: a leak is a bug."""
+        """At the end of a run nothing may still be held: a leak is a bug.
+
+        A bounded store that ends with rounds under a live hold is too
+        small for that hold: the hold waits for a round that needs the
+        room its own stored rounds keep, so nothing ever frees. The stop
+        names the widest such hold, as gem5 stops a run on a deadlock it
+        detects rather than let it idle ("Possible Deadlock detected",
+        src/mem/ruby/system/Sequencer.cc:236-239); the size a store needs
+        is its widest hold's rounds together, and restart and seam
+        re-reads place holds only at run time.
+        """
         if self.round_by_key:
-            held = list(self.round_by_key)
-            raise RuntimeError(
-                f"the syndrome buffer still holds rounds {held} at the end"
-            )
+            self._refuse_rounds_left()
         held_keys = self.holds.held_round_keys()
         if held_keys:
             raise RuntimeError(
@@ -300,11 +369,83 @@ class SyndromeBuffer:
 
     # ---- private
 
+    def _check_costs_have_a_clock(self) -> None:
+        costs = _costs(self.settings)
+        charged = costs.write_cycles + costs.read_cycles
+        if charged > 0 and self.settings.clock is None:
+            raise ValueError("charged weak_syndrome_buffer costs need a clock")
+
+    def _access_completion_tick(self, cycles: int) -> int:
+        """The access's end, cycles after now's edge; a zero cost is now."""
+        now = self.engine.now
+        if cycles == 0:
+            return now
+        return self.settings.clock.edge(cycles, now)
+
+    def _refuse_rounds_left(self) -> None:
+        held = list(self.round_by_key)
+        capacity = self.settings.bits
+        widest_holder = self._widest_live_hold()
+        if capacity is None or widest_holder is None:
+            raise RuntimeError(
+                f"the syndrome buffer still holds rounds {held} at the end"
+            )
+        round_keys = self.holds.round_keys_of(widest_holder)
+        kept_bits = self._stored_bits_of(round_keys)
+        never_stored = [
+            round_key
+            for round_key in round_keys
+            if round_key not in self.round_by_key
+        ]
+        raise RuntimeError(
+            f"the syndrome buffer still holds rounds {held} at the end, "
+            f"{self._occupied_bits} of its {capacity} bits: its widest live "
+            f"hold {widest_holder!r} keeps {kept_bits} bits of them and "
+            f"waits for {never_stored}, which never found room; a bounded "
+            "store must hold its widest hold's rounds at once"
+        )
+
+    def _widest_live_hold(self):
+        """The live holder whose stored rounds take the most bits, or None."""
+        widest_holder = None
+        widest_bits = 0
+        for holder, record in self.holds.record_by_holder.items():
+            kept_bits = self._stored_bits_of(record.round_keys)
+            if kept_bits > widest_bits:
+                widest_holder = holder
+                widest_bits = kept_bits
+        return widest_holder
+
+    def _stored_bits_of(self, round_keys) -> int:
+        kept_bits = 0
+        for round_key in round_keys:
+            stored = self.round_by_key.get(round_key)
+            if stored is not None:
+                kept_bits += stored.held_bits
+        return kept_bits
+
     def _open(self, operation_id) -> None:
         is_open = self.operations.get(operation_id)
         if is_open is False:
             raise RuntimeError("closed operation identities cannot be reused")
         self.operations[operation_id] = True
+
+    def _stored_rounds_of(self, operation_id) -> list:
+        """The operation's stored rounds, in stable identity order."""
+        stored = []
+        for round_key in self.round_by_key:
+            if identity_records.same_stable_identity(
+                round_key[0], operation_id
+            ):
+                stored.append(round_key)
+        return sorted(stored, key=identity_records.stable_identity_order_key)
+
+    def _open_operation_ids(self) -> set:
+        open_ids = set()
+        for operation_id, is_open in self.operations.items():
+            if is_open:
+                open_ids.add(operation_id)
+        return open_ids
 
     def _hold_record(self, holder, round_keys) -> round_holds.HoldRecord:
         """The record of a hold; a hold may name rounds not yet written.
@@ -336,12 +477,37 @@ class SyndromeBuffer:
             "states no size; a bounded syndrome buffer needs sized rounds"
         )
 
+    def _refuse_round_wider_than_store(
+        self, round_key, bits: int, capacity: int
+    ) -> None:
+        """A round wider than the whole store waits for room forever.
+
+        gem5 refuses a message wider than the block that must hold it
+        (src/mem/ruby/network/Network.cc:64-65, "data message size >
+        cache line size"); round widths come from the source as it runs,
+        so the refusal comes at the first ask rather than at the load.
+        """
+        raise RuntimeError(
+            f"the syndrome buffer holds {capacity} bits and round "
+            f"{round_key!r} states {bits}: no round leaving it makes room, "
+            "so a bounded syndrome buffer holds at least its widest round"
+        )
+
     def _free_round(self, round_key) -> None:
         stored = self.round_by_key.pop(round_key)
         self._occupied_bits -= stored.held_bits
         self.trace.round_released.fire(round_key)
         if self.held_rounds is not None:
             self.held_rounds.retry()
+
+
+def _costs(
+    settings: syndrome_buffer_settings.SyndromeBufferSettings,
+) -> "SyndromeBuffer.Settings":
+    """The default row's costs; a section built with none charges nothing."""
+    if settings.row_settings is None:
+        return SyndromeBuffer.Settings()
+    return settings.row_settings
 
 
 def _round_ranges_text(sorted_round_indices: list) -> str:
@@ -363,11 +529,3 @@ def _range_text(low: int, high: int) -> str:
     if low == high:
         return f"{low}"
     return f"{low}..{high}"
-
-
-# weak_syndrome_buffer.kind and strong_syndrome_buffer.kind name one of these
-# rows. The table sits beside the class rather than in the package's
-# settings.py, which this module imports for SyndromeBufferSettings.
-SYNDROME_BUFFERS = {
-    "syndrome_buffer": SyndromeBuffer,
-}

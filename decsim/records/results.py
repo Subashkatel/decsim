@@ -29,6 +29,9 @@ class RunResult:
     execution_workload_complete: bool
     execution_done_ticks: int
     fully_done_ticks: int
+    # the ticks operations waited for a magic state, summed: the
+    # factories' supply stall
+    magic_state_stall_ticks: int
     operation_results: tuple
     link_traffic: dict
     # the copies, references and moves of the data path; None unless the

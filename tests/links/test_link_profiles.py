@@ -6,8 +6,7 @@ txTime, bits over the DataRate (point-to-point-net-device.cc:243), for
 its law; Caune et al. 2410.05202 (a 32-bit bus word) and Fruitwala et al.
 2404.15260 (a 128-bit instruction word) for the default payloads; the
 provisioning rule of the bandwidth card (each path carries its nominal
-traffic in one commit region, ns-3's per-device DataRate); gem5-Aladdin's
-setup cost (Shao et al., MICRO 2016) for with_transfer_overhead; Backline
+traffic in one commit region, ns-3's per-device DataRate); Backline
 2609.09270 Table III, the CPU and GPU echo rows, for the two measured
 RoCE v2 rows.
 """
@@ -128,8 +127,8 @@ def test_the_reference_card_leaves_unbounded_only_the_parallel_hops():
 
 def test_the_reference_card_prices_a_bus_word_and_an_instruction_word():
     profile = link_profiles.logical_reference_profile()
-    assert profile.frame_to_controller.default_payload.aggregate_bits == 32
-    assert profile.controller_to_qpu.default_payload.aggregate_bits == 128
+    assert profile.frame_to_controller.default_payload.input_bits == 32
+    assert profile.controller_to_qpu.default_payload.input_bits == 128
 
 
 def test_the_reference_card_prices_a_boundary_on_the_seam_it_updates():
@@ -336,20 +335,16 @@ def test_the_bandwidth_card_keeps_the_reference_latencies():
 
 def test_the_bandwidth_cards_default_payloads_are_one_regions_traffic():
     profile = link_profiles.bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
-    assert profile.qpu_to_controller.default_payload.aggregate_bits == 24
+    assert profile.qpu_to_controller.default_payload.input_bits == 24
+    assert profile.weak_buffer_to_weak_decoder.default_payload.input_bits == 240
     assert (
-        profile.weak_buffer_to_weak_decoder.default_payload.aggregate_bits
-        == 240
-    )
-    assert (
-        profile.strong_buffer_to_strong_decoder.default_payload.aggregate_bits
+        profile.strong_buffer_to_strong_decoder.default_payload.input_bits
         == 360
     )
     assert (
-        profile.weak_decoder_to_strong_decoder.default_payload.aggregate_bits
-        == 360
+        profile.weak_decoder_to_strong_decoder.default_payload.input_bits == 360
     )
-    assert profile.decoder_to_decoder.default_payload.aggregate_bits == 24
+    assert profile.decoder_to_decoder.default_payload.input_bits == 24
 
 
 def test_the_capacity_scale_multiplies_every_rate():
@@ -395,23 +390,6 @@ def test_a_cards_cycles_cost_its_clocks_period_in_whole_ticks():
     assert path.channel.propagation_latency_ticks == 9999
     assert path.setup_ticks == 9999
     assert transfer.serialization_ticks == 3333
-
-
-def test_the_setup_cost_lands_on_the_two_decoder_input_paths():
-    reference = link_profiles.logical_reference_profile()
-    profile = link_profiles.with_transfer_overhead(
-        reference, overhead_microseconds=0.4
-    )
-    assert (
-        profile.weak_buffer_to_weak_decoder.setup_ticks
-        == config.microseconds_to_ticks(0.4)
-    )
-    assert (
-        profile.strong_buffer_to_strong_decoder.setup_ticks
-        == config.microseconds_to_ticks(0.4)
-    )
-    assert profile.qpu_to_controller.setup_ticks == 0
-    assert profile.profile_name == "logical_reference+transfer_overhead"
 
 
 def test_the_reference_weak_loop_is_yangs_control_electronics():
@@ -483,7 +461,7 @@ class CountingFabric:
     @staticmethod
     def build(card, engine):
         """One LinkFabric, with every send counted on the way through."""
-        return _CountingLinkFabric(card, engine)
+        return _CountingLinkFabric(card, engine, channel_module.Channel)
 
 
 class _CountingLinkFabric(fabric_module.LinkFabric):
@@ -507,7 +485,9 @@ def test_a_fabric_row_written_outside_decsim_runs_from_a_yaml(
     config_path = yaml_configs.write_config(tmp_path, {"links": links})
     experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     built = machine.Machine.build(settings, 0)
     result = built.run()
@@ -674,6 +654,29 @@ def test_the_gpu_row_charges_half_the_measured_round_trip_on_each_leg():
     assert escalation_round_trip == config.microseconds_to_ticks(4.5)
 
 
+@pytest.mark.parametrize("coprocessor", ["cpu", "gpu"])
+def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
+    coprocessor,
+):
+    """Backline 2609.09270 lines 1229-1230: a 100 Gb direct-attach cable.
+
+    The write, the escalation and the reply cross it at 100000 bits per
+    microsecond; the poll reads the coprocessor's own memory, so it
+    crosses no cable and is unbounded.
+    """
+    profile = link_profiles.roce_v2_measured_profile(coprocessor)
+    write = profile.controller_to_strong_buffer.channel.capacity
+    escalation = profile.weak_decoder_to_strong_decoder.channel.capacity
+    reply = profile.strong_decoder_to_frame.channel.capacity
+    poll = profile.strong_buffer_to_strong_decoder.channel.capacity
+    write_rate = write.exact_aggregate_bits_per_microsecond()
+    escalation_rate = escalation.exact_aggregate_bits_per_microsecond()
+    reply_rate = reply.exact_aggregate_bits_per_microsecond()
+
+    assert (write_rate, escalation_rate, reply_rate) == (100000,) * 3
+    assert poll is None
+
+
 def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
     """Only the four strong-side hops move: the rest is the default card."""
     reference = link_profiles.logical_reference_profile()
@@ -730,7 +733,7 @@ def test_an_instruction_hop_moves_its_word_in_one_cycle():
         profile.controller_to_qpu,
     )
     for path_settings in instruction_paths:
-        word_bits = path_settings.default_payload.aggregate_bits
+        word_bits = path_settings.default_payload.input_bits
         capacity = path_settings.channel.capacity
         rate = capacity.exact_aggregate_bits_per_microsecond()
         word_ticks = word_bits * config.TICKS_PER_MICROSECOND / rate
@@ -760,7 +763,9 @@ def test_the_measured_cpu_row_runs_from_a_yaml(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {"links": links})
     experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     built = machine.Machine.build(settings, 0)
     result = built.run()
@@ -777,7 +782,9 @@ def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {"links": links})
     experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     built = machine.Machine.build(settings, 0)
     result = built.run()

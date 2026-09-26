@@ -184,3 +184,22 @@ def test_the_charged_policy_costs_one_job_per_region_and_the_remainder():
         (3, "mem(memory,r4)"),
         (2, "mem(memory,r5)"),
     ]
+
+
+def test_the_workload_end_charges_every_patchs_remaining_idle_rounds():
+    charged = policies.SeparateDecodeJobs()
+    accounting, _qpu, demand = accounting_with(charged)
+
+    for round_index in (1, 2, 3):
+        accounting.emit_idle_round(7, "patch-a", round_index)
+    accounting.emit_idle_round(8, "patch-b", 1)
+    accounting.end_every_idle_period()
+
+    rounds_and_labels = [
+        (job["rounds"], job["label"]) for job in demand.demands
+    ]
+    assert rounds_and_labels == [
+        (3, "mem(memory,r2)"),
+        (2, "mem(memory,r3)"),
+        (2, "mem(other,r1)"),
+    ]

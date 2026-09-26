@@ -9,7 +9,7 @@ component matrix (row X1); this test pins the same law with a sorted-list
 oracle so the suite needs no SimPy install.
 
 The priority a component passes is one of the engine's named ones, the
-way gem5's events name theirs (tmp/resources/gem5/src/sim/eventq.hh
+way gem5's events name theirs (gem5 src/sim/eventq.hh
 lines 138-244), which the last test below reads the package to check.
 """
 
@@ -169,7 +169,7 @@ def test_no_scheduled_action_in_the_package_names_a_bare_priority_number():
     """A call site says which event it is scheduling, not which number.
 
     gem5 gives every priority a name beside the reason for it
-    (tmp/resources/gem5/src/sim/eventq.hh lines 138-244); a bare integer
+    (gem5 src/sim/eventq.hh lines 138-244); a bare integer
     at the call says nothing about what must run before what, and two
     call sites that share a number look unrelated.
     """

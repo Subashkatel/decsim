@@ -84,7 +84,7 @@ class WindowManager:
         The plan and the interaction come from ports, so the first
         boundaries are written once the root has bound them, which is
         gem5's split between the constructor and startup
-        (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+        (gem5 src/sim/sim_object.hh lines 194 and 280).
         """
         for window in self.planner.windows_by_key.values():
             window_info = window_records.WindowInfo.from_window(window)

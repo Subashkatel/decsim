@@ -52,9 +52,9 @@ strong_decoder:
 sweep:
   - physical_error_probability: [0.008]   # the paired accuracy study, d=3
     distance: [3]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 2000
   - physical_error_probability: [0.008]   # the same study at d=5
     distance: [5]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 2000

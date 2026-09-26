@@ -11,17 +11,26 @@ its wire and its setup engine. The shape is gem5's: a SimObject owns its
 parameters and its children and is reached through its ports
 (src/sim/sim_object.hh, src/mem/port.hh); the trace source is ns-3's
 TracedCallback fired at the device's transition
-(point-to-point-net-device.cc TransmitComplete).
+(point-to-point-net-device.cc TransmitComplete). The channels are the
+class the row's build names (the Channel port in decsim/ports.py), one
+per channel name.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Callable, Optional
 
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.settings as link_settings
+import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
+
+# What a Link row's build hands the fabric: called once per channel name
+# with that channel's settings and the run's engine.
+ChannelClass = Callable[
+    [link_settings.ChannelSettings, decsim.engine.Engine], ports.Channel
+]
 
 
 class LinkFabric:
@@ -36,9 +45,10 @@ class LinkFabric:
         self,
         fabric_settings: link_settings.FabricSettings,
         engine: decsim.engine.Engine,
+        channel_class: ChannelClass,
     ) -> None:
         self.trace = _TraceSources()
-        self._channel_by_name: dict[str, channel_module.Channel] = {}
+        self._channel_by_name: dict[str, ports.Channel] = {}
         self._binding_by_path: dict[
             transfer_records.LinkPath, _PathBinding
         ] = {}
@@ -46,10 +56,14 @@ class LinkFabric:
         self._send_count = 0
         for path in transfer_records.LinkPath:
             path_settings = fabric_settings.path_settings(path)
-            channel = self._channel_for(path_settings.channel, engine)
+            channel = self._channel_for(
+                path_settings.channel, engine, channel_class
+            )
             self._binding_by_path[path] = _PathBinding(path_settings, channel)
         for route in fabric_settings.readout_routes:
-            channel = self._channel_for(route.settings.channel, engine)
+            channel = self._channel_for(
+                route.settings.channel, engine, channel_class
+            )
             binding = _PathBinding(route.settings, channel)
             self._readout_by_footprint[route.patch_ids] = binding
 
@@ -133,10 +147,12 @@ class LinkFabric:
         self,
         channel_settings: link_settings.ChannelSettings,
         engine: decsim.engine.Engine,
-    ) -> channel_module.Channel:
+        channel_class: ChannelClass,
+    ) -> ports.Channel:
+        """The named channel, built of the row's class on its first path."""
         channel = self._channel_by_name.get(channel_settings.name)
         if channel is None:
-            channel = channel_module.Channel(channel_settings, engine)
+            channel = channel_class(channel_settings, engine)
             self._channel_by_name[channel_settings.name] = channel
         return channel
 
@@ -163,7 +179,7 @@ class _PathBinding:
     """One wired path: its settings and the channel it rides."""
 
     settings: link_settings.PathSettings
-    channel: channel_module.Channel
+    channel: ports.Channel
 
 
 @dataclasses.dataclass(frozen=True)
@@ -204,7 +220,7 @@ def _select_payload(
     default_payload = path_settings.default_payload
     if default_payload is not None:
         return (
-            default_payload.aggregate_bits,
+            default_payload.input_bits,
             transfer_records.PayloadSelection.CONFIGURED_DEFAULT,
             default_payload.source,
         )

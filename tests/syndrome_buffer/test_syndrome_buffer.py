@@ -40,6 +40,8 @@ import tests.declared_run as declared_run
 STALL = controller_settings.PackingOverflowPolicy.STALL
 # every round this file stores carries one fragment of two bits
 BITS_PER_ROUND = 2
+# the key the random programs ask room for; no program writes it
+PROBE_ROUND = ("probe", 0)
 
 
 def packet(
@@ -85,7 +87,8 @@ def held_rounds() -> syndrome_round_sender.HeldRounds:
 
 def store(bits=None, waiting_line=None, listener=None):
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
-    the_store = syndrome_buffer_module.SyndromeBuffer(settings)
+    engine = engine_module.Engine()
+    the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if waiting_line is not None:
         the_store.held_rounds = waiting_line
     if listener is not None:
@@ -141,7 +144,7 @@ def run_trace(arrivals, holds, capacity):
     enters = {}
 
     def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room(round.wire_bits):
+        if not the_store.has_room(round.round_key, round.wire_bits, {}):
             return False
         the_store.accept_packed_round(round.packet, publication_tick=engine.now)
         round_index = round.packet.round_index
@@ -312,7 +315,7 @@ def run_on_both(steps: list, capacity_bits: int) -> tuple:
             reference.release(subject)
         if kind == "write":
             write_if_room(the_store, reference, subject, detail)
-        our_room = the_store.has_room(9)
+        our_room = the_store.has_room(PROBE_ROUND, 9, {})
         their_room = reference.has_room(9)
         ours.append((the_store.occupied_bits, our_room))
         theirs.append((reference.occupied_bits, their_room))
@@ -321,7 +324,7 @@ def run_on_both(steps: list, capacity_bits: int) -> tuple:
 
 def write_if_room(the_store, reference, round_key, bits: int) -> None:
     """Both sides answer room for themselves; a refused round is skipped."""
-    if the_store.has_room(bits):
+    if the_store.has_room(round_key, bits, {}):
         written = sized_packet(round_key, bits)
         the_store.accept_packed_round(written, publication_tick=0)
         the_store.release_round_if_unheld(round_key)
@@ -347,7 +350,7 @@ def test_a_full_store_answers_no_room_and_is_unchanged():
     the_store.accept_packed_round(first, publication_tick=10)
     the_store.accept_packed_round(second, publication_tick=11)
 
-    assert the_store.has_room(BITS_PER_ROUND) is False
+    assert the_store.has_room((1, 3), BITS_PER_ROUND, {}) is False
     assert the_store.occupied_bits == two_rounds_bits
     assert the_store.occupancy == 2
     assert the_store.publication_tick((1, 1)) == 10
@@ -360,7 +363,7 @@ def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
     entered = []
 
     def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room(round.wire_bits):
+        if not the_store.has_room(round.round_key, round.wire_bits, {}):
             return False
         the_store.accept_packed_round(round.packet, publication_tick=0)
         entered.append(round.packet.round_index)
@@ -468,6 +471,28 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
         the_store.check_settled()
 
 
+def test_a_bounded_store_ending_under_a_live_hold_names_its_widest_hold():
+    """The hold waits for a round its own stored rounds leave no room for."""
+    two_rounds_bits = 2 * BITS_PER_ROUND
+    the_store = store(bits=two_rounds_bits)
+    wide = decoding_records.WindowReads((1, 0))
+    narrow = decoding_records.WindowReads((1, 1))
+    the_store.register_hold(wide, [(1, 1), (1, 2), (1, 3)])
+    the_store.register_hold(narrow, [(1, 2)])
+    first = packet(1)
+    second = packet(2)
+    the_store.accept_packed_round(first, publication_tick=0)
+    the_store.accept_packed_round(second, publication_tick=0)
+
+    with pytest.raises(RuntimeError) as stop:
+        the_store.check_settled()
+
+    sentence = str(stop.value)
+    assert "4 of its 4 bits" in sentence
+    assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
+    assert "keeps 4 bits of them and waits for [(1, 3)]" in sentence
+
+
 def test_the_hold_sources_carry_the_token_and_its_rounds():
     heard = []
     the_store = store()
@@ -504,11 +529,11 @@ def test_a_bounded_store_has_room_while_the_bits_fit_beside_what_is_taken():
     first = packet(1)
     the_store.accept_packed_round(first, publication_tick=0)
 
-    fits_beside_the_stored = the_store.has_room(BITS_PER_ROUND)
+    fits_beside_the_stored = the_store.has_room((1, 2), BITS_PER_ROUND, {})
     fits_beside_the_reserved = the_store.has_room(
-        BITS_PER_ROUND, one_round_reserved
+        (1, 3), BITS_PER_ROUND, {(1, 2): one_round_reserved}
     )
-    exceeds_the_capacity = the_store.has_room(three_rounds_bits)
+    exceeds_the_capacity = the_store.has_room((1, 2), three_rounds_bits, {})
 
     assert fits_beside_the_stored is True
     assert fits_beside_the_reserved is True
@@ -523,7 +548,19 @@ def test_a_bounded_store_refuses_a_round_that_states_no_size():
     with pytest.raises(
         RuntimeError, match="a bounded syndrome buffer needs sized rounds"
     ):
-        the_store.has_room(None)
+        the_store.has_room((1, 1), None, {})
+
+
+def test_a_bounded_store_refuses_a_round_wider_than_itself():
+    """No free makes room for it (gem5 Network.cc:64-65 refuses the same)."""
+    the_store = store(bits=BITS_PER_ROUND)
+    wide_bits = BITS_PER_ROUND + 1
+
+    with pytest.raises(RuntimeError) as refusal:
+        the_store.has_room((1, 4), wide_bits, {})
+
+    sentence = str(refusal.value)
+    assert f"holds {BITS_PER_ROUND} bits and round (1, 4) states 3" in sentence
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():
@@ -594,3 +631,20 @@ def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
     assert published == expected_data_complete
     assert room_side_landings == []
     assert machine.strong_syndrome_buffer.occupancy == 0
+
+
+def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():
+    """gem5's clockEdge then the latency (src/mem/simple_mem.cc:174).
+
+    From tick 1 on a 10-tick clock the edge is 10, and 3 cycles end at 40.
+    """
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        clock=clock, row_settings=costs
+    )
+    the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
+
+    assert the_store.book_write((1, 1), BITS_PER_ROUND) == 40

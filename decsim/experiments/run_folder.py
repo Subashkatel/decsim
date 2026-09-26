@@ -268,7 +268,7 @@ def _git_state() -> dict:
 
     gem5 prints its version, its build date, the host and the command
     line at every start, so a result says what produced it
-    (tmp/resources/gem5/src/python/m5/main.py:524-537), and sinter
+    (gem5 src/python/m5/main.py:524-537), and sinter
     carries the decoder and the task's metadata in every row of its csv
     for the same reason (sinter/_data/_task_stats.py:196-204 through
     _data/_csv_out.py:56-65). decsim's run folder is where that belongs
@@ -295,7 +295,7 @@ def _tree_reading() -> tuple:
     Both referents record provenance before the work and not after.
     gem5 prints its version, its build date, its host, its pid and its
     command line at :524-556 of
-    tmp/resources/gem5/src/python/m5/main.py, then executes the
+    gem5 src/python/m5/main.py, then executes the
     simulation script at :687. sinter writes its csv header into the
     save file before the collect loop
     (sinter/_collection/_collection.py:385-397 against the loop at

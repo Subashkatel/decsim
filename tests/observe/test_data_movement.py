@@ -56,7 +56,6 @@ def test_a_run_that_moved_nothing_counts_nothing():
     counted = movement.json_value()
 
     assert movement.rounds == 0
-    assert movement.copies_per_round == 0.0
     assert counted["copies"] == 0
 
 
@@ -136,22 +135,6 @@ def test_handing_a_live_reference_on_copies_nothing():
 
     assert counted["hold_events"] == 3
     assert counted["copies"] == 0
-
-
-def test_copies_per_round_has_the_rounds_the_qpu_emitted_as_denominator():
-    movement = data_movement.DataMovement()
-
-    first = _Readout(1, 1)
-    second = _Readout(1, 2)
-
-    movement.round_emitted(first)
-    movement.round_emitted(second)
-    movement.copy_made(
-        ("op", 1), 8, "controller intake", "weak syndrome buffer"
-    )
-
-    assert movement.rounds == 2
-    assert movement.copies_per_round == 0.5
 
 
 def test_the_same_round_emitted_twice_is_one_round():

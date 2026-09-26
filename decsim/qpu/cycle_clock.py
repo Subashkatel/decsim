@@ -20,7 +20,6 @@ from typing import Any
 import decsim.config as config
 import decsim.engine
 import decsim.ports as ports
-import decsim.qpu.code_geometry as code_geometry
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -44,14 +43,22 @@ class QPUDevice:
     """Runs issued operation bodies on one QEC cycle clock.
 
     Every cycle emits one syndrome round per running operation and per
-    idle patch, and the three ends that output reaches are ports. Trace
-    sources: command_event(QPUCommandEvent) when a command arrives and
-    when it starts; round_emitted(readout) for every readout a round
-    hands to the controller, and round_event(RoundEvent) with kind
-    EMITTED for the same instant on the readout path's own ledger. The
-    event is the emitter's own: gem5's SimObject reports its statistics
-    from the object the event happened in
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    idle patch, and the three ends that output reaches are ports. A
+    readout leaves at the tick its syndrome source names
+    (SyndromeSource.readout_departure_tick), never before an earlier
+    readout of one of its patches: it waits behind that one, as gem5's
+    packet queue with forceOrder schedules a packet after the last one
+    to the same address rather than ahead of it
+    (gem5 src/mem/packet_queue.cc:134-147), and a tick
+    before the readout is refused, as that queue asserts
+    (packet_queue.cc:114). Trace sources: command_event(QPUCommandEvent)
+    when a command arrives and when it starts; round_emitted(readout)
+    for every readout a round produces, at the boundary it is read out;
+    and round_event(RoundEvent) with kind EMITTED when a readout leaves
+    for the controller, on the readout path's own ledger. The event is
+    the emitter's own: gem5's SimObject reports its statistics from the
+    object the event happened in
+    (gem5 src/base/stats/group.hh:60-92).
     """
 
     readout_receiver = ports.Port(ports.ReadoutReceiver)
@@ -67,7 +74,7 @@ class QPUDevice:
         engine: decsim.engine.Engine,
         syndrome_source: ports.SyndromeSource,
         clock: config.Clock,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
     ):
         self.engine = engine
         self.syndrome_source = syndrome_source
@@ -156,7 +163,7 @@ class QPUDevice:
         route = round_records.SyndromePacketRoute.feedback_memory_round(
             operation_id
         )
-        self._hand_to_the_controller(payload, route)
+        self._send(payload, route)
 
     def _schedule_boundary(self, boundary: int) -> None:
         if boundary in self._live.scheduled_boundaries:
@@ -278,9 +285,47 @@ class QPUDevice:
                 payload, fragment_count=fragment_count, fragment_index=index
             )
             self.trace.round_emitted.fire(readout)
-            self._hand_to_the_controller(
-                readout, round_records.WINDOW_INPUT_ROUTE
+            self._send(readout, round_records.WINDOW_INPUT_ROUTE)
+
+    def _send(self, readout: round_records.QPUReadout, route) -> None:
+        """Hand the readout on at its departure tick, behind its patches'.
+
+        A readout that leaves now, with no readout of its patches still
+        waiting, is handed on at once, so a source that names the
+        boundary sends in the order the cycle produced its readouts.
+        """
+        now = self.engine.now
+        stated_tick = self.syndrome_source.readout_departure_tick(readout, now)
+        if stated_tick < now:
+            raise RuntimeError(
+                f"the syndrome source sends readout {readout.round_index} "
+                f"of operation {readout.operation_id!r} at tick "
+                f"{stated_tick}, before tick {now} it was read out at"
             )
+        waiting_until = self._last_departure_of(readout.patch_ids)
+        if stated_tick == now and waiting_until < now:
+            self._hand_to_the_controller(readout, route)
+            return
+        departure_tick = max(stated_tick, waiting_until)
+        for patch in readout.patch_ids:
+            self._live.departure_tick_by_patch[patch] = departure_tick
+        delay = departure_tick - now
+        self.engine.schedule(
+            delay,
+            lambda: self._hand_to_the_controller(readout, route),
+            label=f"qpu-readout-departs({readout.round_index})",
+        )
+
+    def _last_departure_of(self, patches: tuple) -> int:
+        """The latest tick a waiting readout of these patches leaves at.
+
+        -1 when none of them has ever waited.
+        """
+        departure_ticks = [-1]
+        for patch in patches:
+            tick = self._live.departure_tick_by_patch.get(patch, -1)
+            departure_ticks.append(tick)
+        return max(departure_ticks)
 
     def _hand_to_the_controller(self, readout, route) -> None:
         """The readout leaves the QPU: report the instant, then hand it on."""
@@ -336,7 +381,7 @@ class _TraceSources:
     """Every event the QPU device reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """
@@ -354,9 +399,11 @@ class _LiveOperations:
     round for; commands_waiting are the bodies whose start the clock has
     not reached; scheduled_boundaries and last_emitted_boundary keep a
     cycle boundary from being scheduled or emitted twice; is_finished
-    closes the clock once the workload is done. gem5 groups a
+    closes the clock once the workload is done; departure_tick_by_patch
+    is the tick the latest readout of a patch that had to wait leaves
+    at, so a later one queues behind it. gem5 groups a
     component's many members the same way
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    (gem5 src/base/stats/group.hh:60-92).
     """
 
     running_by_operation_id: dict = dataclasses.field(default_factory=dict)
@@ -365,3 +412,4 @@ class _LiveOperations:
     scheduled_boundaries: set = dataclasses.field(default_factory=set)
     last_emitted_boundary: int = 0
     is_finished: bool = False
+    departure_tick_by_patch: dict = dataclasses.field(default_factory=dict)

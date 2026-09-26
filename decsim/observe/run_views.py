@@ -2,8 +2,7 @@
 
 The decode backlog sampler (observe/metrics.py) takes a view after every
 action and the switching study reads one at the end of the run. Each
-builder receives the owners it reads and writes nothing back; the flight
-recorder that used to live here is observe/flight_recorder.py.
+builder receives the owners it reads and writes nothing back.
 """
 
 import dataclasses
@@ -36,14 +35,10 @@ class SwitchingRecordsView:
     services: tuple[decode_records.TerminalServiceRecord, ...]
 
 
-def backlog_view(
-    window_manager, decoder_managers, include_rounds: bool = True
-) -> BacklogView:
+def backlog_view(window_manager, decoder_managers) -> BacklogView:
     """Snapshot the job queues and the per-op, per-patch, system backlog.
 
     The queues are every pool's over both sides' managers.
-    include_rounds=False skips the rounds scan for an observer that only
-    needs the queue depths.
     """
     waiting_by_pool = _waiting_by_pool(decoder_managers)
     ready_jobs = len(waiting_by_pool["default"])
@@ -55,9 +50,7 @@ def backlog_view(
         queue_length = len(queue)
         per_lane.append((lane, queue_length))
         ready_jobs += queue_length
-    backlog = ()
-    if include_rounds:
-        backlog = window_manager.rounds_backlog()
+    backlog = window_manager.rounds_backlog()
     per_op = []
     per_patch: dict = {}
     total_rounds = 0

@@ -1,10 +1,10 @@
 """The service's laws: the start, the park, the overlap, the pipeline.
 
-Smith 1982 decoupled access-execute (rowD2, compare_overlap_laws.py):
+Smith 1982 decoupled access-execute:
 with two slots the next window's transfer overlaps the compute, one
 window per max(T, C). Tomasulo's rule at the boundary hazard: a landed
 job whose window owes a boundary keeps its slot and never the compute.
-Hennessy and Patterson App. C (rowD4, compare_pipeline_law.py): a
+Hennessy and Patterson App. C: a
 pipelined unit starts one decode per initiation interval, at most depth
 in flight, each result a fixed latency after its start. The laws are
 computed inside the tests. The strong-primary law needs the whole
@@ -108,7 +108,7 @@ def _manager(engine, decoder, dispatch_cycles=0):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=1,
+        unit_pools={"default": 1},
         escalation_policy=policy,
         clock=DISPATCH_CLOCK,
         dispatch_cycles=dispatch_cycles,
@@ -272,7 +272,7 @@ def test_a_parked_job_keeps_its_slot_and_releases_the_compute():
 
 
 def test_the_second_slots_transfer_overlaps_the_compute():
-    # T = 1 us, C = 2 us, three windows ready at once (rowD2's two-slot
+    # T = 1 us, C = 2 us, three windows ready at once (the two-slot
     # law): w0 lands at 1 and computes 1..3; w1 landed at 1 and waits for
     # the compute until 3; w2 takes w0's slot at 3, lands at 4, starts 5
     engine = engine_module.Engine()

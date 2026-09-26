@@ -42,6 +42,11 @@ import decsim.escalation.settings as escalation_settings
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
+# union_find_extra_growth takes the limit as an int64_t (union_find.h),
+# and ctypes wraps a larger Python int without a word, which would turn
+# a huge threshold into a small or negative limit and keep every window
+_LARGEST_TICK_COUNT = 2**63 - 1
+
 
 def union_find_extra_cluster_gap_source(
     weight_step: float,
@@ -73,7 +78,14 @@ def growth_limit_ticks(growth_limit_nats: float, weight_step: float) -> int:
             f"nonnegative natural-log weight, got {growth_limit_nats!r}"
         )
     ticks = growth_limit_nats / weight_step
-    return math.ceil(ticks)
+    limit_ticks = math.ceil(ticks)
+    if limit_ticks > _LARGEST_TICK_COUNT:
+        raise ValueError(
+            f"the extra-cluster gap's growth limit of {limit_ticks} ticks "
+            "passes the unit's 64-bit tick counter; lower gap_threshold_db "
+            "or raise the weak decoder's weight_step"
+        )
+    return limit_ticks
 
 
 class ExtraClusterGap:

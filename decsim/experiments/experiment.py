@@ -20,15 +20,15 @@ import decsim.experiments.refusal as refusal
 import decsim.settings as machine_settings
 
 _THIS_FILE = Path(__file__)
-_FRONT_DIR = _THIS_FILE.resolve()
-_REPOSITORY_ROOT = _FRONT_DIR.parents[2]
+_RESOLVED_FILE = _THIS_FILE.resolve()
+_REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 # configs/ sits beside the decsim package, gem5's configs/ beside its
 # binary; the shipped experiments are what a refused path is listed with.
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 SWEEP_AXES = (
     "physical_error_probability",
     "distance",
-    "round_period_us",
+    "round_period_microseconds",
 )
 SWEEP_KEYS = SWEEP_AXES + ("shots",)
 
@@ -56,10 +56,7 @@ class SweepBlock:
             self.distances,
             self.round_periods_microseconds,
         )
-        points = []
-        for physical_error_probability, distance, round_period_us in axes:
-            point = (physical_error_probability, distance, round_period_us)
-            points.append(point)
+        points = list(axes)
         return points
 
 
@@ -85,11 +82,11 @@ class ExperimentConfig:
 
     def _point_task(self, point: tuple, shots: int) -> collect.Task:
         """The task of one (p, distance, round period) point."""
-        physical_error_probability, distance, round_period_us = point
+        physical_error_probability, distance, round_period_microseconds = point
         return self.point_task(
             physical_error_probability=physical_error_probability,
             distance=distance,
-            round_period_us=round_period_us,
+            round_period_microseconds=round_period_microseconds,
             shots=shots,
         )
 
@@ -98,19 +95,19 @@ class ExperimentConfig:
         *,
         physical_error_probability: float,
         distance: int,
-        round_period_us: float,
+        round_period_microseconds: float,
         shots: int,
     ) -> collect.Task:
         """The task of one sweep point: its settings, shots and metadata."""
         settings = self.point_settings(
             physical_error_probability=physical_error_probability,
             distance=distance,
-            round_period_us=round_period_us,
+            round_period_microseconds=round_period_microseconds,
         )
         metadata = {
             "physical_error_probability": physical_error_probability,
             "distance": distance,
-            "round_period_us": round_period_us,
+            "round_period_microseconds": round_period_microseconds,
         }
         return collect.Task.at_point(settings, shots, metadata)
 
@@ -119,7 +116,7 @@ class ExperimentConfig:
         *,
         physical_error_probability: float,
         distance: int,
-        round_period_us: float,
+        round_period_microseconds: float,
     ) -> machine_settings.MachineSettings:
         """The machine at one sweep point.
 
@@ -131,7 +128,7 @@ class ExperimentConfig:
         qpu = dataclasses.replace(
             settings.qpu,
             distance=distance,
-            round_period_microseconds=round_period_us,
+            round_period_microseconds=round_period_microseconds,
         )
         workload = dataclasses.replace(
             settings.workload,
@@ -352,9 +349,9 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
         listed = sorted(unknown)
         raise refusal.RefusalError(
             f"sweep block {index} does not know {listed}; its axes "
-            "are physical_error_probability, distance and round_period_us, "
-            "plus shots (the algorithm lives on the decoder card, not in "
-            "the sweep)"
+            "are physical_error_probability, distance and "
+            "round_period_microseconds, plus shots (the algorithm lives "
+            "on the decoder card, not in the sweep)"
         )
     _check_axes(block, index)
     shots = block["shots"]
@@ -362,7 +359,7 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
     return SweepBlock(
         physical_error_probabilities=tuple(block["physical_error_probability"]),
         distances=tuple(block["distance"]),
-        round_periods_microseconds=tuple(block["round_period_us"]),
+        round_periods_microseconds=tuple(block["round_period_microseconds"]),
         shots=shots,
     )
 
@@ -374,8 +371,8 @@ def _check_axes(block: dict, index: int) -> None:
         listed = sorted(missing)
         raise refusal.RefusalError(
             f"sweep block {index} lacks {listed}; a block lists "
-            "physical_error_probability, distance and round_period_us and "
-            "names its shots"
+            "physical_error_probability, distance and "
+            "round_period_microseconds and names its shots"
         )
     for axis in SWEEP_AXES:
         values = block[axis]

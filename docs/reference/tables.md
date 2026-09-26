@@ -11,10 +11,8 @@ the classes it lists, in the package that owns the part, and
 `decsim/tables.py` is the one function that reads them all, so
 a name that is not a row is refused the same way everywhere
 with the rows printed. Each class fills the port named in
-[The ports](ports.md). The key a table is named under is a yaml
-key when `configs/reference.yaml` carries it. One does not:
-`magic_state_factory.kind` has no yaml section today and is set
-from Python, on `MachineSettings`.
+[The ports](ports.md). The key a table is named under is the
+yaml key `configs/reference.yaml` carries.
 
 ## `BOUNDARY_PAYLOADS`
 
@@ -66,6 +64,7 @@ In `decsim/decoders/settings.py`. A row of it is named under `<tier>_decoder.kin
 | `tesseract` | `TesseractDecoder` in `decsim/decoders/tesseract/decoder.py` | Decode physical fault mechanisms with the official Tesseract backend. |
 | `relay_bp` | `RelayBeliefPropagationDecoder` in `decsim/decoders/relay_belief_propagation/decoder.py` | Use Relay-BP for corrections and an injected model for service time. |
 | `bposd` | `BeliefPropagationOsdDecoder` in `decsim/decoders/belief_propagation_osd/decoder.py` | Decode one window with BP-OSD; ldpc's argument names are kept. |
+| `measured_table` | `MeasuredTableDecoder` in `decsim/decoders/measured_table/decoder.py` | The measured_table row: the strong decoder over a MeasuredTable. |
 
 ## `DETECTION_EVENT_FORMATION`
 
@@ -139,11 +138,12 @@ In `decsim/escalation/settings.py`. A row of it is named under `escalation.stron
 
 ## `SYNDROME_BUFFERS`
 
-In `decsim/syndrome_buffer/syndrome_buffer.py`. A row of it is named under `weak_syndrome_buffer.kind` and `strong_syndrome_buffer.kind`.
+In `decsim/syndrome_buffer/ported_syndrome_buffer.py`. A row of it is named under `weak_syndrome_buffer.kind` and `strong_syndrome_buffer.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
 | `syndrome_buffer` | `SyndromeBuffer` in `decsim/syndrome_buffer/syndrome_buffer.py` | The store: rounds by key, their holds, and the operations it serves. |
+| `ported_syndrome_buffer` | `PortedSyndromeBuffer` in `decsim/syndrome_buffer/ported_syndrome_buffer.py` | The store whose writes and reads take words on ports in arrival order. |
 
 ## `SYNDROME_SOURCES`
 

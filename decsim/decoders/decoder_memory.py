@@ -14,7 +14,7 @@ An input is held per input, not per job, with its readers recorded, so
 two jobs that read the same rounds on one unit are one copy and one
 transfer: gem5's MSHR keeps every target of a single fill
 (src/mem/cache/mshr.hh), and OpenMP's shared clause says every task
-reads the storage of the original item (openmp_spec_5_2.txt:4317-4319).
+reads the storage of the original item (OpenMP API 5.2, section 5.4.2).
 The rule the data-movement study rests on is one copy per unit that
 reads the window, never one copy per job and never a copy taken from
 another unit.
@@ -459,7 +459,7 @@ class _TraceSources:
     """Every event the decoder memory reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """
@@ -478,7 +478,7 @@ class _MemoryStatistics:
     so hold no bits here, the count the links keep for a transfer of
     unknown width (observe/link_traffic.py). gem5 keeps a component's
     counters in one Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92).
+    (gem5 src/base/stats/group.hh:60-92).
     """
 
     peak_occupied_bits: int = 0

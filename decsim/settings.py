@@ -23,8 +23,8 @@ import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.settings as qpu_settings
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.settings as window_settings
 
 # The yaml sections, in the order MachineSettings reads them. Each
@@ -46,6 +46,7 @@ SECTIONS = (
     "escalation",
     "pauli_frame",
     "workload",
+    "magic_state_factory",
     "observation",
 )
 # The sections from_mapping reads without a default; the rest fall back
@@ -70,7 +71,7 @@ class MachineSettings:
     Every field has a default, so a Python caller names only what
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
-    prices propagation only. magic_state_factory has no yaml key today.
+    prices propagation only.
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
@@ -145,6 +146,7 @@ class MachineSettings:
         escalation_section = sections.get("escalation", {})
         decoder_manager_section = sections.get("decoder_manager", {})
         observation_section = sections.get("observation", {})
+        factory_section = sections.get("magic_state_factory", {})
         qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
         controller = controller_settings.ControllerSettings.from_yaml(
             sections["controller"], clocks
@@ -154,7 +156,7 @@ class MachineSettings:
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
         buffer_settings = syndrome_buffer_settings.SyndromeBufferSettings
-        buffer_rows = syndrome_buffer_module.SYNDROME_BUFFERS
+        buffer_rows = ported_syndrome_buffer.SYNDROME_BUFFERS
         weak_syndrome_buffer = buffer_settings.from_yaml(
             sections["weak_syndrome_buffer"],
             "weak_syndrome_buffer",
@@ -186,6 +188,9 @@ class MachineSettings:
         workload = workload_settings.WorkloadSettings.from_yaml(
             sections["workload"]
         )
+        magic_state_factory = qpu_settings.FactorySettings.from_yaml(
+            factory_section
+        )
         observation = observe_settings.ObservationSettings.from_yaml(
             observation_section
         )
@@ -204,6 +209,7 @@ class MachineSettings:
             escalation=escalation,
             pauli_frame=pauli_frame,
             workload=workload,
+            magic_state_factory=magic_state_factory,
             observation=observation,
         )
 

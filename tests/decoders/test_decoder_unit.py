@@ -1,8 +1,8 @@
 """One unit's occupancy: two input slots, one compute, in-order flights.
 
-Smith 1982 decoupled access-execute (rowD2): the second slot holds the
+Smith 1982 decoupled access-execute: the second slot holds the
 next window's input while the first computes. Hennessy and Patterson
-App. C (rowD4): a pipelined unit retires its flights in issue order and
+App. C: a pipelined unit retires its flights in issue order and
 a full pipeline stalls the intake until a flight retires.
 """
 

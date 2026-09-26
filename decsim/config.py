@@ -76,7 +76,7 @@ class Clock:
     tick it stands on, so work started mid-cycle lands on an edge and
     three cycles are three periods of the domain rather than three
     periods measured from an arbitrary instant. That is gem5's Clocked
-    (tmp/resources/gem5/src/sim/clocked_object.hh lines 174-227):
+    (gem5 src/sim/clocked_object.hh lines 174-227):
     clockEdge aligns the current tick to the next edge before adding the
     cycles, and ticksToCycles rounds a span up to whole cycles.
     """

@@ -32,13 +32,20 @@ The idle accounting, as the QPU sees it: it takes every idle round.
 
 The weak syndrome buffer, as its own round receiver sees it.
 
+| Member | Type |
+| --- | --- |
+| `occupied_bits` | `int` |
+
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether a round of that many bits fits beside what is taken. |
+| `has_room` | Whether this round fits beside the stored and the reserved rounds. |
 | `accept_packed_round` | Keep one landed round, readable at that tick; None publishes none. |
+| `book_write` | Take a write of this round's stored bits; the tick it completes. |
+| `book_read` | Take a read of these stored rounds; the tick their bits are out. |
 | `release_round` | Free the round; its consumers are done with it. |
 | `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
-| `held_rounds_description` | The live holds, in one line, for a refusal a reader must debug. |
+| `held_rounds_description` | The stored rounds, in one line, for the I/O trace. |
+| `check_settled` | At the end of a run no round is stored and no hold is live. |
 
 ### `RetainedRounds`
 
@@ -59,11 +66,15 @@ The same store, as the window side that reads and holds it sees it.
 | `open_operation` | This operation may receive rounds from now on. |
 | `has_operation` | Whether the store still serves this operation. |
 | `close_operation` | The operation sends no more rounds; a closed one never reopens. |
-| `has_live_operation_reference` | Whether a hold or a stored round still names this operation. |
+| `has_live_operation_reference` | Whether a live hold still names this operation. |
 
 ### `SyndromeRoundSender`
 
 The syndrome round sender, as the assembler sees it.
+
+| Member | Type |
+| --- | --- |
+| `strong_crossing_count` | `int` |
 
 | Method | What it does |
 | --- | --- |
@@ -75,8 +86,8 @@ The strong syndrome buffer's receiving end, as its two senders see it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether a write of that many bits can land. |
-| `reserve_write` | Take the bits one crossing round will need, before it leaves. |
+| `has_room` | Whether this round's write can land. |
+| `reserve_write` | Take the room this crossing round will need, before it leaves. |
 | `receive_round` | Store a landed round and deliver it on its canonical route. |
 | `reserve_region` | Take the room an escalated region's rounds will need, or refuse. |
 | `receive_region` | Take an escalated region that landed here: every round its slot. |
@@ -87,10 +98,10 @@ The weak syndrome round receiver, as the controller sees it.
 
 | Method | What it does |
 | --- | --- |
-| `has_room` | Whether that many bits fit: the stored ones and those in flight. |
-| `reserve_write` | Take the bits one crossing round will need, before it leaves. |
-| `receive_round` | Take one round that landed here: store it, then announce it. |
-| `send_memory_round` | Send one timing-only round to the decoder side the store feeds. |
+| `has_room` | Whether this round fits beside the stored and the crossing ones. |
+| `reserve_write` | Take the room this crossing round will need, before it leaves. |
+| `receive_round` | Take one landed round: store it, announce it, then on_published. |
+| `send_memory_round` | Write one landed timing-only round, then send it to the decoder. |
 
 ### `SyndromeBufferOutput`
 
@@ -98,7 +109,7 @@ A syndrome buffer's outgoing port, as whoever asks for a round sees it.
 
 | Method | What it does |
 | --- | --- |
-| `send_input` | Move one job's rounds to its unit; the delay the link expects. |
+| `send_input` | Read one job's rounds out of the store and move them to its unit. |
 | `land_held_input` | Land a resubmitted job whose rounds never left: no delay. |
 | `send_memory_round` | Send one timing-only round and free its slot at the delivery. |
 | `input_send_for` | The send the decoder manager calls at dispatch, bound to a job. |
@@ -274,7 +285,7 @@ The decoder side's outgoing sends, as the window side asks them.
 | --- | --- |
 | `publish` | Send the result on its tier's output link; commit it at delivery. |
 | `send_selection` | Send one window's escalation; returns the delay the link expects. |
-| `send_region` | Send a strong window's rounds up; the delay the link expects. |
+| `send_region` | Read a strong window's rounds out of the weak store, send them up. |
 
 ### `WindowGapJoin`
 
@@ -340,11 +351,22 @@ One decoder: correctness and timing from one object.
 | `occupancy` | Ticks the unit's compute is held from the start; None if measured. |
 | `pipeline_depth` | Decodes that may be in flight on one unit; one is no pipeline. |
 
+### `StrongBackend`
+
+The device a strong decode runs on, as the strong decoder sees it.
+
+| Method | What it does |
+| --- | --- |
+| `capacity` | Decodes the device runs at once; decsim queues the rest. |
+| `submit` | Start one region's decode with running others on the device. |
+| `service_ticks` | The decode's time beyond the echo on the same path, in ticks. |
+| `result` | The correction and observables; decode_status marks unconverged. |
+
 ## the frame commits the correction
 
 ### `Frame`
 
-The Pauli frame, as the window manager sees it.
+The Pauli frame, as the decoder output sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -432,6 +454,7 @@ What the QPU reads out each round for an operation.
 | `finalize_stream_round` | Final data readout, ordered by the round_payloads contract. |
 | `idle_round_payloads` | The protection round the controller requests, possibly its last. |
 | `logical_observable_truth` | The observable flips the source drew, or None when it draws none. |
+| `readout_departure_tick` | The tick this readout leaves the chip, at or after readout_tick. |
 | `window_model_source` | Where the run's window error models come from, by default. |
 
 ### `DetectionEventFormer`
@@ -481,6 +504,10 @@ Who builds the decoder-facing error model of one window.
 
 The link fabric as every sender sees it.
 
+| Member | Type |
+| --- | --- |
+| `trace` | `Any` |
+
 | Method | What it does |
 | --- | --- |
 | `expected_delay_ticks` | What a send now would pay if nothing else reached its channel. |
@@ -497,6 +524,15 @@ The link fabric, as a sender that names a window or a job sees it.
 | `send_for_round` | Send in a stored round's name; on_delivered runs at the delivery. |
 | `send_boundary` | Send one boundary on its path, in its attribution's name. |
 | `send_region` | Send an escalated region in its request's name; the delay. |
+
+### `Channel`
+
+One physical channel under the fabric: its setup engine and its wire.
+
+| Method | What it does |
+| --- | --- |
+| `send` | Carry one framed payload; on_delivered runs at its delivery. |
+| `expected_delay_ticks` | What the transfer would pay if nothing else reached the channel. |
 
 ## the pluggable policies off the path
 
@@ -605,7 +641,7 @@ Where a non-Clifford operation gets its magic state.
 
 | Member | Type |
 | --- | --- |
-| `engine` | `Any` |
+| `trace` | `Any` |
 
 | Method | What it does |
 | --- | --- |
@@ -620,4 +656,44 @@ How idle rounds travel while an operation waits for feedback.
 | Method | What it does |
 | --- | --- |
 | `relay` | Carry one idle round of the patch through the idle accounting. |
-| `end_idle_period` | Settle the uncharged rounds when an operation claims the patch. |
+| `end_idle_period` | Settle the uncharged rounds: a claim, or the workload's end. |
+
+## the rows the root reads before it builds
+
+### `CodeModel`
+
+A code card: the numbers the machine reads off a QEC code.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `distance` | `int` |
+
+| Method | What it does |
+| --- | --- |
+| `rounds_per_logical_cycle` | Syndrome rounds per logical cycle. |
+| `round_period_us` | The card's own round period, or None for the run's cadence. |
+| `commit_rounds` | Rounds committed per decode window. |
+| `buffer_rounds` | Look-ahead rounds per decode window. |
+| `spatial_nodes` | The per-round graph size a latency model prices this card at. |
+| `syndrome_bits_per_round` | Syndrome bits one round of this many patches produces. |
+
+### `RowSettings`
+
+A table row's own yaml keys, read into one record.
+
+| Method | What it does |
+| --- | --- |
+| `from_yaml` | The record, read from the row's own keys the yaml wrote. |
+
+### `WorkloadRow`
+
+A workload row: what the machine runs, as the root reads it.
+
+| Member | Type |
+| --- | --- |
+| `has_frontend` | `bool` |
+
+| Method | What it does |
+| --- | --- |
+| `operations` | The operations, and the rounds policy the row fixes or None. |

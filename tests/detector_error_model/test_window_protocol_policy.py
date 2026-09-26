@@ -31,13 +31,6 @@ def test_the_generic_protocol_accepts_any_plan():
     )
 
 
-def test_a_protocol_that_is_not_a_member_is_refused():
-    with pytest.raises(ValueError, match="unsupported window protocol"):
-        window_protocol_policy.validate_window_protocol(
-            SANDWICH, "sandwich", SANDWICH_EDGES, (1,), GRAPHLIKE_REQUIRED
-        )
-
-
 def test_a_correct_sandwich_plan_is_accepted():
     window_protocol_policy.validate_window_protocol(
         SANDWICH, TAN, SANDWICH_EDGES, (1,), GRAPHLIKE_REQUIRED

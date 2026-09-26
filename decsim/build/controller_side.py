@@ -132,12 +132,10 @@ def build_detection_events(
 def build_factory(parts: build_parts.Parts) -> ports.MagicStateFactory:
     """The factory of the kind, from the one collaborators record.
 
-    Every row is handed the run's decoder manager and round: a row whose
-    card asks for correction decodes submits them there, the multi-level
-    row paces its levels on the round, and a row ignores what its card
-    does not use. The card refuses a missing decode service as it is
-    read, so the decode service is the one neighbour a seat still takes
-    at construction and this row sits after the decoder manager's.
+    Every row is handed the run's engine and round: the multi-level row
+    paces its levels on the round, and a row ignores what its card does
+    not use. The decoder manager a card's correction decodes go to is
+    bound later, as the row's decode_queue port.
     """
     settings = parts.settings.magic_state_factory
     row = tables.row(
@@ -147,9 +145,8 @@ def build_factory(parts: build_parts.Parts) -> ports.MagicStateFactory:
     )
     collaborators = magic_state_factories.FactoryCollaborators(
         engine=parts.engine,
-        decode_service=parts.seats["decoder_manager"],
         round_ticks=parts.plan.round_ticks,
-        arguments=settings.arguments,
+        settings=settings.row_settings,
     )
     return row(collaborators)
 

@@ -1,7 +1,7 @@
 """The decoder side's outgoing sends: which link, how many bits, who commits.
 
 A send is executed by an end of its hop
-(tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334, omnetpp-6.1.0;
+(omnetpp-6.1.0 src/sim/csimplemodule.cc:333-334;
 gem5 coherent_xbar.cc:354-357 bills the port a packet left by), so the
 correction that leaves a decoder for the Pauli frame leaves by the tier's
 own output link, and the frame's priced write gates the commit.
@@ -9,12 +9,17 @@ own output link, and the frame's priced write gates the commit.
 
 import functools
 
+import pytest
+
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+
+REGION_LINK_TICKS = 5
 
 
 class _Transfers:
@@ -37,6 +42,44 @@ class _Transfers:
         self.sent.append((path, job.label, request_key.tier, payload_bits))
         self.engine.schedule(self.delay_ticks, on_delivered)
         return self.delay_ticks
+
+
+class _RegionTransfers:
+    """A link that records the tick each region leaves on."""
+
+    def __init__(self, engine) -> None:
+        self.engine = engine
+        self.left_at = []
+
+    def send_region(self, path, region, on_delivered):
+        del path, region, on_delivered
+        self.left_at.append(self.engine.now)
+        return REGION_LINK_TICKS
+
+
+class _WeakStore:
+    """A store whose every read ends a fixed time after it is booked."""
+
+    def __init__(self, engine, read_ticks: int) -> None:
+        self.engine = engine
+        self.read_ticks = read_ticks
+        self.read_keys = []
+
+    def book_read(self, round_keys) -> int:
+        self.read_keys.append(round_keys)
+        return self.engine.now + self.read_ticks
+
+
+class _Link:
+    """The fabric, answering what a send starting at a tick would pay."""
+
+    def __init__(self) -> None:
+        self.asked_at = []
+
+    def expected_delay_ticks(self, path, payload_bits, now_ticks) -> int:
+        del path, payload_bits
+        self.asked_at.append(now_ticks)
+        return REGION_LINK_TICKS
 
 
 class _Frame:
@@ -78,7 +121,7 @@ def test_each_tier_publishes_over_its_own_output_link():
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
-    output = decoder_output_module.DecoderOutput()
+    output = decoder_output_module.DecoderOutput(engine)
     output.transfers = transfers
     output.frame = frame
     window = _window()
@@ -102,7 +145,7 @@ def test_a_selection_is_sent_as_zero_bits_so_a_bounded_hop_can_carry_it():
     """A size of None is refused by a bounded wire; a selection has a size."""
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
-    output = decoder_output_module.DecoderOutput()
+    output = decoder_output_module.DecoderOutput(engine)
     output.transfers = transfers
     weak_job = decoding_records.DecodeJob(
         operation_id=4, window_id=1, round_count=5, label="weak"
@@ -129,7 +172,7 @@ def test_the_frames_write_gates_the_commit_and_a_frameless_run_does_not():
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
-    output = decoder_output_module.DecoderOutput()
+    output = decoder_output_module.DecoderOutput(engine)
     output.transfers = transfers
     output.frame = frame
     committed = []
@@ -142,7 +185,7 @@ def test_the_frames_write_gates_the_commit_and_a_frameless_run_does_not():
     engine.run()
     assert frame.commits == [(4, (4, 1), (1,))]
     assert committed == [7]
-    frameless = decoder_output_module.DecoderOutput()
+    frameless = decoder_output_module.DecoderOutput(engine)
     frameless.transfers = transfers
     later = []
     on_later = functools.partial(_note, later, engine)
@@ -158,3 +201,41 @@ def _note(ticks: list, engine) -> None:
 
 def _ignore() -> None:
     pass
+
+
+def _region() -> round_records.EscalatedRegion:
+    """Rounds 2 and 3 of operation 4, each of one 8-bit fragment."""
+    packets = []
+    for round_index in (2, 3):
+        fragment = round_records.RetainedSyndromeFragment(
+            operation_id=4,
+            patch_ids=(0,),
+            round_index=round_index,
+            bits=None,
+            size_bits=8,
+            fragment_index=0,
+        )
+        packet = round_records.SyndromeRoundPacket(4, round_index, (fragment,))
+        packets.append(packet)
+    strong_key = _request_key(window_records.DecoderTier.STRONG)
+    return round_records.EscalatedRegion.of(strong_key, tuple(packets))
+
+
+@pytest.mark.parametrize("read_ticks", [0, 30])
+def test_an_escalated_region_leaves_when_its_weak_store_read_ends(read_ticks):
+    """The read of the carried rounds is priced by the weak store, once."""
+    engine = engine_module.Engine()
+    engine.now = 100
+    transfers = _RegionTransfers(engine)
+    output = decoder_output_module.DecoderOutput(engine)
+    output.transfers = transfers
+    output.weak_store = _WeakStore(engine, read_ticks)
+    output.link = _Link()
+    region = _region()
+
+    expected_delay = output.send_region(region, _ignore)
+    engine.run()
+
+    assert output.weak_store.read_keys == [((4, 2), (4, 3))]
+    assert transfers.left_at == [100 + read_ticks]
+    assert expected_delay == read_ticks + REGION_LINK_TICKS

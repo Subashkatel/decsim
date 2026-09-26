@@ -11,7 +11,8 @@ contention becomes measurable; capacity_scale sweeps the whole fabric.
 roce_v2_measured_profile is the reference card with the strong tier's
 off-board path priced by Backline's measured RoCE v2 round trip; it is
 the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
-on any path; with_transfer_overhead adds a setup cost to any fabric.
+on any path, a per-transfer setup cost (setup_cycles_per_transfer)
+included.
 
 Every number carries a source string on the settings record it sets,
 and a payload's source also travels into the traffic report with every
@@ -28,6 +29,7 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.engine
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric
 import decsim.links.settings as settings
 import decsim.ports as ports
@@ -269,11 +271,13 @@ def logical_reference_profile() -> settings.FabricSettings:
     Actual-payload paths price the runtime's own bit counts;
     default-payload paths price a stated word width.
     """
-    word_rate = _capacity(_WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE)
-    instruction_rate = _capacity(
+    word_rate = settings.CapacitySettings(
+        _WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE
+    )
+    instruction_rate = settings.CapacitySettings(
         _INSTRUCTION_BITS_PER_MICROSECOND, _INSTRUCTION_RATE_SOURCE
     )
-    off_board_rate = _capacity(
+    off_board_rate = settings.CapacitySettings(
         _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
     )
     qpu_to_controller = _actual_path(
@@ -548,10 +552,13 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     escalation request and the strong decoder's reply to the frame are
     each one half of the round trip, and the
     strong store's read into the strong decoder is zero because the
-    coprocessor polls a buffer in its own memory. The escalation round
-    trip on this card, weak_decoder_to_strong_decoder plus
-    strong_buffer_to_strong_decoder plus strong_decoder_to_frame, is
-    therefore the measured median exactly.
+    coprocessor polls a buffer in its own memory. The latencies of the
+    escalation round trip on this card, weak_decoder_to_strong_decoder
+    plus strong_buffer_to_strong_decoder plus strong_decoder_to_frame,
+    therefore sum to the measured median exactly. The three legs that
+    cross the cable also serialize their bits at its 100 Gb/s (lines
+    1229-1230), so a transfer costs its latency plus its bits, as on
+    every other row.
 
     The card prices that median. It does not cover the first, warm-up
     round trip, 4.64 us on the CPU path and 9.27 us on the GPU path, nor
@@ -594,7 +601,7 @@ class LogicalReferenceFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 class BandwidthLimitedFabric:
@@ -626,7 +633,7 @@ class BandwidthLimitedFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 class RoceV2CpuFabric:
@@ -649,7 +656,7 @@ class RoceV2CpuFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 class RoceV2GpuFabric:
@@ -674,7 +681,7 @@ class RoceV2GpuFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine)
+        return fabric.LinkFabric(card, engine, channel_module.Channel)
 
 
 # links.kind names one of these rows: which fabric model carries the
@@ -726,37 +733,6 @@ def from_yaml(
     )
 
 
-def with_transfer_overhead(
-    profile: settings.FabricSettings,
-    *,
-    overhead_microseconds: float,
-    paths: tuple = (
-        "weak_buffer_to_weak_decoder",
-        "strong_buffer_to_strong_decoder",
-    ),
-) -> settings.FabricSettings:
-    """The profile with a fixed per-transfer setup cost on the listed paths.
-
-    The default paths are the two decoder-input DMA paths. The wire keeps
-    streaming during a setup, but successive setups on one channel
-    serialize (gem5-Aladdin's one delayed-DMA event).
-    """
-    setup_ticks = config.microseconds_to_ticks(overhead_microseconds)
-    replacements = {}
-    for path in paths:
-        path_settings = getattr(profile, path)
-        if path_settings is None:
-            raise ValueError(f"{path} is not wired on this card")
-        replacements[path] = dataclasses.replace(
-            path_settings, setup_ticks=setup_ticks
-        )
-    return dataclasses.replace(
-        profile,
-        **replacements,
-        profile_name=f"{profile.profile_name}+transfer_overhead",
-    )
-
-
 def _roce_v2_measurement(coprocessor: str) -> tuple:
     """(round trip in microseconds, source) of one echo row of Table III."""
     if coprocessor == "cpu":
@@ -772,8 +748,16 @@ def _roce_v2_measurement(coprocessor: str) -> tuple:
 def _roce_v2_strong_paths(
     round_trip_microseconds: float, measurement_source: str
 ) -> dict:
-    """The four strong-side paths, priced from one measured round trip."""
+    """The four strong-side paths, priced from one measured round trip.
+
+    The three legs that cross Backline's cable serialize their bits at
+    its 100 Gb/s, as the reference card's strong hops do; the poll reads
+    the coprocessor's own memory, crosses no cable and stays unbounded.
+    """
     leg_microseconds = round_trip_microseconds / 2
+    cable_rate = settings.CapacitySettings(
+        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
+    )
     write_source = f"{measurement_source}; {ROCE_V2_WRITE_LEG}"
     escalation_source = f"{measurement_source}; {ROCE_V2_ESCALATION_LEG}"
     poll_source = f"{measurement_source}; {ROCE_V2_POLL_LEG}"
@@ -783,12 +767,14 @@ def _roce_v2_strong_paths(
         leg_microseconds,
         write_source,
         ROUND_PAYLOAD_SOURCE,
+        cable_rate,
     )
     weak_decoder_to_strong_decoder = _actual_path(
         "weak_decoder_to_strong_decoder",
         leg_microseconds,
         escalation_source,
         ESCALATION_PAYLOAD_SOURCE,
+        cable_rate,
     )
     strong_buffer_to_strong_decoder = _actual_path(
         "strong_buffer_to_strong_decoder",
@@ -801,6 +787,7 @@ def _roce_v2_strong_paths(
         leg_microseconds,
         reply_source,
         RESULT_PAYLOAD_SOURCE,
+        cable_rate,
     )
     return {
         "controller_to_strong_buffer": controller_to_strong_buffer,
@@ -951,12 +938,7 @@ def _carded_path(
     latency_ticks, bits_per_microsecond, setup_ticks = _card_ticks(card, clocks)
     capacity = None
     if bits_per_microsecond is not None:
-        capacity = settings.CapacitySettings(
-            bits_per_microsecond,
-            settings.QuantityBasis.AGGREGATE,
-            None,
-            source,
-        )
+        capacity = settings.CapacitySettings(bits_per_microsecond, source)
     channel = settings.ChannelSettings(
         path_name, latency_ticks, capacity, source
     )
@@ -987,31 +969,15 @@ class _Provisioning:
         actual_payload_source: Optional[str],
     ) -> settings.PathSettings:
         rate = nominal_bits_per_microsecond * self._capacity_scale
-        capacity = settings.CapacitySettings(
-            rate, settings.QuantityBasis.AGGREGATE, None, source
-        )
+        capacity = settings.CapacitySettings(rate, source)
         reference_path = getattr(self._reference, name)
         reference_channel = reference_path.channel
         latency_ticks = reference_channel.propagation_latency_ticks
         channel = settings.ChannelSettings(
             name, latency_ticks, capacity, source
         )
-        payload = _aggregate_payload(bits, source)
+        payload = settings.PayloadSettings(bits, source)
         return settings.PathSettings(channel, payload, actual_payload_source)
-
-
-def _aggregate_payload(bits: int, source: str) -> settings.PayloadSettings:
-    return settings.PayloadSettings(
-        bits, settings.QuantityBasis.AGGREGATE, None, source
-    )
-
-
-def _capacity(
-    bits_per_microsecond: int, source: str
-) -> settings.CapacitySettings:
-    return settings.CapacitySettings(
-        bits_per_microsecond, settings.QuantityBasis.AGGREGATE, None, source
-    )
 
 
 def _channel(
@@ -1044,5 +1010,5 @@ def _default_path(
     capacity: settings.CapacitySettings,
 ) -> settings.PathSettings:
     channel = _channel(name, latency_microseconds, latency_source, capacity)
-    payload = _aggregate_payload(bits, payload_source)
+    payload = settings.PayloadSettings(bits, payload_source)
     return settings.PathSettings(channel, payload, None)

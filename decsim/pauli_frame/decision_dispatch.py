@@ -2,9 +2,9 @@
 
 A decision leaves the frame side and lands at the controller, so the
 send is executed here: gem5 bills a transfer to the port it left by
-(tmp/resources/gem5/src/mem/coherent_xbar.cc:354-357), and OMNeT++ refuses a
-module that sends a message it does not own
-(tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334). The line that
+(gem5 src/mem/coherent_xbar.cc:354-357), and OMNeT++ refuses a module
+that sends a message it does not own (omnetpp-6.1.0
+src/sim/csimplemodule.cc:333-334). The line that
 narrates the dispatch is sourced at the end that executes it. What the
 controller then does with the decision is its own
 (controller/instruction_output.py), reached at the landing.

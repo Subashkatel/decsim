@@ -53,7 +53,7 @@ class OneEventPerRound:
         return (round_index,)
 
 
-def _manager(engine, row, formation_by_pool=None):
+def _manager(engine, row, formation_by_pool=None, unit_count=1):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
@@ -63,7 +63,7 @@ def _manager(engine, row, formation_by_pool=None):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=1,
+        unit_pools={"default": unit_count},
         escalation_policy=policy,
         formation_by_pool=formation_by_pool,
     )
@@ -302,7 +302,7 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=1,
+        unit_pools={"default": 1},
         escalation_policy=policy,
         blocks_unit_by_pool={"default": blocks_unit},
     )
@@ -455,7 +455,62 @@ def _staging_manager(engine, row, *, copies_input: bool):
         router=router,
         scheduler=scheduler,
         strong_requests=strong_requests,
-        num_units=1,
+        unit_pools={"default": 1},
         escalation_policy=policy,
         copies_input_by_pool={"default": copies_input},
     )
+
+
+class RoundsRow(decoder_module.DecoderBase):
+    """A row whose decode takes one microsecond a round."""
+
+    def latency(self, job):
+        return config.microseconds_to_ticks(job.round_count)
+
+    def decode(self, job):
+        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+
+
+def test_a_startable_job_with_input_starts_when_a_central_fifo_queue_would():
+    """Kiefer and Wolfowitz's (1955) FIFO queue over c identical servers.
+
+    Job n starts at max(its arrival, the earliest tick a server is
+    free), and that server is then busy for the job's decode. Two units
+    take decodes of 10, 1, 1 and 1 microseconds, all queued at tick 0:
+    the fourth starts at 2 on the unit that ran the short ones, not at
+    10 on the unit that has room for it at admission.
+    """
+    engine = engine_module.Engine()
+    row = RoundsRow()
+    manager = _manager(engine, row, unit_count=2)
+    start_by_label = {}
+
+    def note_start(job, unit):
+        del unit
+        start_by_label[job.label] = engine.now
+
+    manager.service.trace.job_started.connect(note_start)
+
+    def send_input(on_landed):
+        engine.schedule(0, on_landed)
+        return 0
+
+    def ignore(job, result):
+        del job, result
+
+    decode_microseconds = (10, 1, 1, 1)
+    for operation_id, microseconds in enumerate(decode_microseconds):
+        job = decoding_records.DecodeJob(
+            operation_id=operation_id,
+            window_id=0,
+            round_count=microseconds,
+            label=f"J{operation_id}",
+            ready_time=0,
+        )
+        manager.enqueue(job, send_input, ignore)
+    engine.run()
+
+    starts = [start_by_label[f"J{index}"] for index in range(4)]
+    expected_microseconds = (0, 0, 1, 2)
+    expected = [config.microseconds_to_ticks(t) for t in expected_microseconds]
+    assert starts == expected

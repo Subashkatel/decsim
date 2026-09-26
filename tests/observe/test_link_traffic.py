@@ -9,6 +9,7 @@ paths' counters by construction (one counter stream, folded twice).
 import json
 
 import decsim.engine
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
 import decsim.observe.link_traffic as link_traffic
@@ -17,7 +18,6 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 PATH = transfer_records.LinkPath
-AGGREGATE = link_settings.QuantityBasis.AGGREGATE
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
 OPERATION_ID = ("experiment", 7)
@@ -33,12 +33,19 @@ TRAFFIC_KEYS = {
 COUNTER_KEYS = {
     "transfer_count",
     "known_payload_bits",
+    "header_bits",
     "unknown_payload_transfer_count",
     "serialization_ticks",
     "propagation_ticks",
     "queue_wait_ticks",
 }
-SEMANTIC_EDGE_KEYS = {"path", "physical_alias", "counters", "setup_ticks"}
+SEMANTIC_EDGE_KEYS = {
+    "path",
+    "physical_alias",
+    "counters",
+    "setup_ticks",
+    "setup_wait_ticks",
+}
 PHYSICAL_CHANNEL_KEYS = {"physical_alias", "member_paths", "counters"}
 RECONCILIATION_KEYS = {
     "physical_alias",
@@ -52,6 +59,7 @@ TRANSFER_KEYS = {
     "physical_alias",
     "attribution",
     "payload_bits",
+    "header_bits",
     "payload_selection",
     "payload_source",
     "setup_ticks",
@@ -83,15 +91,15 @@ BOUNDARY_RELATION_KEYS = {
 }
 
 
-def bounded_path(name, bits_per_microsecond, latency_ticks, setup_ticks=0):
-    capacity = link_settings.CapacitySettings(
-        bits_per_microsecond, AGGREGATE, None, "test"
-    )
+def bounded_path(
+    name, bits_per_microsecond, latency_ticks, setup_ticks=0, header_bits=0
+):
+    capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     channel = link_settings.ChannelSettings(
         name, latency_ticks, capacity, "test"
     )
     return link_settings.PathSettings(
-        channel, None, "test payload", setup_ticks
+        channel, None, "test payload", setup_ticks, header_bits
     )
 
 
@@ -129,7 +137,9 @@ class Run:
         settings = link_settings.FabricSettings(profile_name="test", **wiring)
         self.engine = decsim.engine.Engine()
         self.ledger = link_traffic.TrafficLedger(settings)
-        self.fabric = fabric_module.LinkFabric(settings, self.engine)
+        self.fabric = fabric_module.LinkFabric(
+            settings, self.engine, channel_module.Channel
+        )
         self.fabric.trace.transfer_delivered.connect(self.ledger.on_transfer)
 
     def send(self, path, payload_bits, tick, attribution):
@@ -388,12 +398,14 @@ def test_the_traffic_json_itemizes_the_setup_per_path():
         "counters": {
             "transfer_count": 1,
             "known_payload_bits": 4,
+            "header_bits": 0,
             "unknown_payload_transfer_count": 0,
             "serialization_ticks": 4_000_000,
             "propagation_ticks": 10,
             "queue_wait_ticks": 0,
         },
         "setup_ticks": 50,
+        "setup_wait_ticks": 0,
     }
 
 
@@ -410,6 +422,26 @@ def test_the_traffic_json_sums_the_setup_over_a_paths_transfers():
     assert report["transfers"][0]["setup_ticks"] == 50
     assert report["transfers"][1]["setup_ticks"] == 50
     assert semantic_edge["setup_ticks"] == 100
+
+
+def test_a_paths_header_bits_and_setup_wait_are_its_transfers_sums():
+    # one setup engine: the second window waits out the first one's setup
+    bounded = bounded_path("bounded", 1.0, 10, setup_ticks=50, header_bits=8)
+    run = Run(strong_buffer_to_strong_decoder=bounded)
+    first_window = requested_window(3)
+    second_window = requested_window(4)
+    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, first_window)
+    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, second_window)
+    run.engine.run()
+    report = run.ledger.traffic_json_value()
+    semantic_edge = edge_of(report, "strong_buffer_to_strong_decoder")
+    channel = report["physical_channels"][1]
+    header_bits = [row["header_bits"] for row in report["transfers"]]
+    assert header_bits == [8, 8]
+    assert semantic_edge["counters"]["header_bits"] == 16
+    assert channel["counters"]["header_bits"] == 16
+    assert semantic_edge["setup_ticks"] == 100
+    assert semantic_edge["setup_wait_ticks"] == 50
 
 
 def test_the_ledger_sums_the_queue_wait_per_transfer_and_per_channel():

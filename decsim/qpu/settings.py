@@ -33,14 +33,16 @@ CODE_CARDS = {
     "rotated_surface": code_geometry.SurfaceCodeModel,
     "bivariate_bicycle": code_geometry.BivariateBicycleCodeModel,
 }
+# The key the magic_state_factory section reads for itself; any other key
+# is the row's own (its Settings).
+FACTORY_KEYS = ("kind",)
 # The keys the qpu section reads for itself; any other key is the source
 # row's or the code card row's own (its Settings, decsim/tables.py
 # row_settings). The sweep sets the distance and the round period, so
 # neither is a key here.
 QPU_KEYS = ("kind", "code_card")
-# MachineSettings.magic_state_factory names one of these rows from
-# Python: what supplies the T states an operation consumes. No yaml
-# section sets it today.
+# magic_state_factory.kind names one of these rows: what supplies the T
+# states an operation consumes.
 MAGIC_STATE_FACTORIES = {
     "infinite": magic_state_factories.InfiniteFactory,
     "distillation": magic_state_factories.DistillationFactory,
@@ -79,7 +81,7 @@ class QpuSettings:
     code_card: str = "rotated_surface"
     round_period_microseconds: float = 1.1
     distance: Optional[int] = None
-    code: Optional[code_geometry.CodeModel] = None
+    code: Optional[ports.CodeModel] = None
     layout: Optional[layouts.LayoutModel] = None
     device: Optional[ports.SyndromeSource] = None
     error_model_provider: Optional[Any] = None
@@ -152,7 +154,7 @@ class QpuSettings:
         self,
         commit_rounds_override: Optional[int],
         buffer_rounds_override: Optional[int],
-    ) -> code_geometry.CodeModel:
+    ) -> ports.CodeModel:
         """The code_card row, at the sweep's distance and the yaml's windows."""
         card_row = tables.row(CODE_CARDS, "qpu.code_card", self.code_card)
         arguments = {
@@ -197,12 +199,25 @@ class FactorySettings:
     Table rows (MAGIC_STATE_FACTORIES, above): infinite (a state is
     always in stock), distillation (Litinski's 15-to-1 stage,
     1905.06903),
-    multi_level (Silva's chain of levels, 2411.04270). The arguments are
-    the row's own card keys; they ride to the row inside the one
-    FactoryCollaborators record, beside the engine, the decode service
-    and the round ticks the root supplies (magic_state_factories.py).
-    No yaml key today.
+    multi_level (Silva's chain of levels, 2411.04270). row_settings is
+    the row's own Settings, read from the section's keys beside kind, or
+    None for a row that declares none; it rides to the row inside the
+    one FactoryCollaborators record, beside the engine and the round
+    ticks the root supplies (magic_state_factories.py).
     """
 
     kind: str = "infinite"
-    arguments: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    # the row's own Settings record, opaque to the section
+    row_settings: Optional[Any] = None
+
+    @classmethod
+    def from_yaml(cls, section: Mapping) -> "FactorySettings":
+        """The `magic_state_factory` section: a kind and the row's keys."""
+        kind = section.get("kind", "infinite")
+        row = tables.row(
+            MAGIC_STATE_FACTORIES, "magic_state_factory.kind", kind
+        )
+        row_settings = tables.row_settings(
+            row, "magic_state_factory", section, FACTORY_KEYS
+        )
+        return cls(kind=kind, row_settings=row_settings)

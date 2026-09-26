@@ -62,7 +62,10 @@ def observe(
     managers, one per side, are heard as one tuple by every listener of
     the decode path. The syndrome source, the decoder pool and the
     operations are the run's fixtures rather than seats, so they arrive
-    on their own.
+    on their own. It stays whole past the size prompt: it is the run's
+    one list of listeners, in pipeline order, one built or connected per
+    line, and a split would only hand the list from one half to the
+    other.
     """
     strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
     strong_syndrome_round_receiver = seats.get("strong_syndrome_round_receiver")
@@ -88,7 +91,9 @@ def observe(
     window_ledger = _connect_window_ledger(seats["window_manager"])
     result_ledger = _connect_result_ledger(seats["window_manager"])
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
-    _connect_runtime_stamps(seats["execution_runtime"], runtime_stamps)
+    _connect_runtime_stamps(
+        seats["execution_runtime"], seats["factory"], runtime_stamps
+    )
     queue_depth = _connect_queue_depth(decoder_managers)
     controller_counters = _connect_controller_counters(seats["idle_rounds"])
     command_events = _connect_command_events(seats["qpu"])
@@ -100,15 +105,31 @@ def observe(
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
     _connect_data_path(trace_writer, data_movement, seats, pool)
-    return _assembled(
-        observation,
-        engine,
-        log,
-        seats["window_manager"],
-        decoder_managers,
-        window_ledger=window_ledger,
-        result_ledger=result_ledger,
-        traffic_ledger=traffic_ledger,
+    decode_backlog = _decode_backlog(
+        observation, engine, seats["window_manager"], decoder_managers
+    )
+    decoder_utilization = _decoder_utilization(engine, decoder_managers)
+    decoder_memory_occupancy = _decoder_memory_occupancy(
+        observation, engine, decoder_managers
+    )
+    frame_corrections = _frame_corrections(pauli_frame)
+    flight_recorder = flight_recorder_module.FlightRecorder(
+        round_events,
+        window_ledger,
+        runtime_stamps,
+        command_events,
+        frame_corrections,
+        operations,
+    )
+    return observation_module.Observation(
+        log=log,
+        windows=window_ledger,
+        results=result_ledger,
+        traffic=traffic_ledger,
+        flight_recorder=flight_recorder,
+        frame_corrections=frame_corrections,
+        trace_writer=trace_writer,
+        data_movement=data_movement,
         decode_records=decode_records,
         runtime_stamps=runtime_stamps,
         queue_depth=queue_depth,
@@ -117,12 +138,11 @@ def observe(
         stages=stages,
         referee_audit=referee_audit,
         sampled_shots=sampled_shots,
+        decode_backlog=decode_backlog,
+        decoder_utilization=decoder_utilization,
+        decoder_memory_occupancy=decoder_memory_occupancy,
         round_events=round_events,
         syndrome_buffer_occupancy=syndrome_buffer_occupancy,
-        pauli_frame=pauli_frame,
-        operations=operations,
-        trace_writer=trace_writer,
-        data_movement=data_movement,
     )
 
 
@@ -189,7 +209,7 @@ def _syndrome_buffer_occupancy(
     engine: engine_module.Engine,
     weak_syndrome_buffer,
 ):
-    """The L5 listener on the weak syndrome buffer, only when asked for."""
+    """The weak syndrome buffer's occupancy listener, only when asked."""
     if not observation.syndrome_buffer_occupancy:
         return None
     occupancy = occupancy_module.SyndromeBufferOccupancy(engine)
@@ -203,7 +223,7 @@ def _trace_writer(
     engine: engine_module.Engine,
     process_name: str,
 ) -> Optional[trace_writer_module.TraceWriter]:
-    """The Chrome trace writer, only when the section names a path."""
+    """The Chrome trace writer, only when the section asks for a trace."""
     if not observation.writes_trace:
         return None
     return trace_writer_module.TraceWriter(engine, process_name)
@@ -344,7 +364,7 @@ def _copy_sources(seats: Mapping[str, Any]) -> list:
 def _connect_store_trace(
     trace_writer: trace_writer_module.TraceWriter, store, store_name: str
 ) -> None:
-    """One store's residences, its occupancy and its holds."""
+    """One store's residences, its occupancy, its holds and its accesses."""
     capacity_bits = store.capacity_bits()
     stored = functools.partial(
         trace_writer.round_stored, store_name, capacity_bits
@@ -360,6 +380,8 @@ def _connect_store_trace(
     store.trace.hold_transferred.connect(transferred)
     hold_released = functools.partial(trace_writer.hold_released, store_name)
     store.trace.hold_released.connect(hold_released)
+    access_served = functools.partial(trace_writer.access_served, store_name)
+    store.trace.access_served.connect(access_served)
 
 
 def _connect_decoder_trace(
@@ -435,14 +457,15 @@ def _connect_decode_records(
 
 
 def _connect_runtime_stamps(
-    execution_runtime, stamps: runtime_stamps_module.RuntimeStamps
+    execution_runtime, factory, stamps: runtime_stamps_module.RuntimeStamps
 ) -> None:
-    """The stamps hear every tick of an operation's life."""
+    """The stamps hear every tick of an operation's life and its waits."""
     execution_runtime.trace.operation_issued.connect(stamps.operation_issued)
     execution_runtime.trace.operation_started.connect(stamps.operation_started)
     execution_runtime.trace.body_finished.connect(stamps.body_finished)
     execution_runtime.trace.decode_released.connect(stamps.decode_released)
     execution_runtime.trace.result_returned.connect(stamps.result_returned)
+    factory.trace.state_delivered.connect(stamps.magic_state_delivered)
 
 
 def _connect_round_events(
@@ -526,7 +549,11 @@ def _frame_corrections(
 def _decoder_utilization(
     engine: engine_module.Engine, decoder_managers
 ) -> metrics.DecoderUtilization:
-    """The busy-unit integral, stepping at every pool's claims and returns."""
+    """The busy-unit integral, stepping at every pool's claims and returns.
+
+    Always built: every run's pool columns read each tier's busy
+    fraction off it.
+    """
     units_by_pool = {}
     for manager in decoder_managers:
         for name, units in manager.pool.units_by_pool.items():
@@ -539,10 +566,28 @@ def _decoder_utilization(
     return utilization
 
 
+def _decode_backlog(
+    observation: observe_settings.ObservationSettings,
+    engine: engine_module.Engine,
+    window_manager,
+    decoder_managers: tuple,
+) -> Optional[metrics.DecodeBacklog]:
+    """The backlog sampler, after every action, only when asked for."""
+    if not observation.backlog_trace:
+        return None
+    decode_backlog = metrics.DecodeBacklog(window_manager, decoder_managers)
+    engine.action_done.connect(decode_backlog.observe)
+    return decode_backlog
+
+
 def _decoder_memory_occupancy(
-    engine: engine_module.Engine, decoder_managers
-) -> metrics.DecoderMemoryOccupancy:
-    """The held-bit integral of every unit memory, at deposit and take."""
+    observation: observe_settings.ObservationSettings,
+    engine: engine_module.Engine,
+    decoder_managers: tuple,
+) -> Optional[metrics.DecoderMemoryOccupancy]:
+    """The held-bit integral of every unit memory, only when asked for."""
+    if not observation.decoder_memory_occupancy:
+        return None
     units = []
     for manager in decoder_managers:
         pool_units = manager.pool.units()
@@ -578,79 +623,3 @@ def _connect_log(
         if observation.log_component_io:
             engine.io_line.connect(printer.write)
     return log
-
-
-def _assembled(
-    observation: observe_settings.ObservationSettings,
-    engine: engine_module.Engine,
-    log: log_writers.LogWriter,
-    window_manager,
-    decoder_managers: tuple,
-    *,
-    window_ledger: window_ledger_module.WindowLedger,
-    result_ledger: result_ledger_module.ResultLedger,
-    traffic_ledger: link_traffic.TrafficLedger,
-    decode_records: Optional[decode_records_module.DecodeRecordLedger],
-    runtime_stamps: runtime_stamps_module.RuntimeStamps,
-    queue_depth: queue_depth_module.QueueDepthLog,
-    controller_counters: controller_counters_module.ControllerCounters,
-    command_events: command_events_module.CommandEvents,
-    stages: stage_records_module.StageLedger,
-    referee_audit: referee_audit_module.RefereeAudit,
-    sampled_shots: sampled_shots_module.SampledShots,
-    round_events,
-    syndrome_buffer_occupancy,
-    pauli_frame,
-    operations: tuple,
-    trace_writer: Optional[trace_writer_module.TraceWriter],
-    data_movement: Optional[data_movement_module.DataMovement],
-) -> observation_module.Observation:
-    """Every listener of the run: the connected ones, and the sampled ones.
-
-    The sampled metrics the section asks for connect to action_done
-    here; the rest are already connected to the sources they hear. The
-    decoder utilization is always built, since every run's pool columns
-    read each tier's busy fraction off it.
-    """
-    decode_backlog = None
-    if observation.backlog_trace:
-        decode_backlog = metrics.DecodeBacklog(window_manager, decoder_managers)
-        engine.action_done.connect(decode_backlog.observe)
-    decoder_utilization = _decoder_utilization(engine, decoder_managers)
-    decoder_memory_occupancy = None
-    if observation.decoder_memory_occupancy:
-        decoder_memory_occupancy = _decoder_memory_occupancy(
-            engine, decoder_managers
-        )
-    corrections = _frame_corrections(pauli_frame)
-    flight_recorder = flight_recorder_module.FlightRecorder(
-        round_events,
-        window_ledger,
-        runtime_stamps,
-        command_events,
-        corrections,
-        operations,
-    )
-    return observation_module.Observation(
-        log=log,
-        windows=window_ledger,
-        results=result_ledger,
-        traffic=traffic_ledger,
-        flight_recorder=flight_recorder,
-        frame_corrections=corrections,
-        trace_writer=trace_writer,
-        data_movement=data_movement,
-        decode_records=decode_records,
-        runtime_stamps=runtime_stamps,
-        queue_depth=queue_depth,
-        controller_counters=controller_counters,
-        command_events=command_events,
-        stages=stages,
-        referee_audit=referee_audit,
-        sampled_shots=sampled_shots,
-        decode_backlog=decode_backlog,
-        decoder_utilization=decoder_utilization,
-        decoder_memory_occupancy=decoder_memory_occupancy,
-        round_events=round_events,
-        syndrome_buffer_occupancy=syndrome_buffer_occupancy,
-    )

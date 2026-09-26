@@ -15,6 +15,7 @@ import types
 
 import pytest
 
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -25,7 +26,8 @@ import decsim.windows.round_retention as round_retention
 
 def _store() -> syndrome_buffer_module.SyndromeBuffer:
     settings = syndrome_buffer_settings.SyndromeBufferSettings()
-    return syndrome_buffer_module.SyndromeBuffer(settings)
+    engine = engine_module.Engine()
+    return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
 
 def _retention(store, round_counts: dict, successors: dict):

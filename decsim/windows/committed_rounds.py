@@ -5,15 +5,13 @@ over an exact inclusive round extent; the contributions of one stream
 tile it without gap or overlap, and the observables of an interval are
 the XOR of the contributions that cover it. A strong result may replace
 the prediction of an owner; a strong window may replace ordinary
-windows. Row W5 checks the ledger against a per-round oracle.
+windows. tests/windows/test_committed_rounds.py checks the ledger
+against a per-round oracle.
 """
 
 from typing import Optional
 
 import decsim.records.decoding as decoding_records
-
-OWNERSHIP_KINDS = ("ordinary_window", "strong_window")
-BOUNDARY_POLICIES = ("strict", "stream_segment")
 
 
 class LogicalLedger:
@@ -84,11 +82,6 @@ class LogicalLedger:
         An owner never changes kind or extent, extents never overlap,
         and one stream has one observable arity.
         """
-        if contribution.ownership_kind not in OWNERSHIP_KINDS:
-            raise ValueError(
-                "logical contribution ownership_kind must be "
-                "'ordinary_window' or 'strong_window'"
-            )
         if contribution.commit_lo < 1:
             _refuse_extent(contribution)
         if contribution.commit_hi < contribution.commit_lo:
@@ -115,11 +108,6 @@ class LogicalLedger:
         stream_segment, only a functional (observable-bearing) one may
         not. None when any covering contribution is timing-only.
         """
-        if boundary_policy not in BOUNDARY_POLICIES:
-            raise ValueError(
-                f"unknown logical contribution boundary policy "
-                f"{boundary_policy!r}"
-            )
         if commit_lo < 1 or commit_hi < commit_lo:
             raise ValueError(
                 f"invalid logical prediction interval {commit_lo}-{commit_hi}"

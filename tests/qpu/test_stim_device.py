@@ -184,17 +184,21 @@ def test_form_round_yields_each_rounds_slice_of_the_shots_events():
 def test_a_seeded_shot_is_stims_shot_under_the_hashed_substream_seed():
     """The device's shot is Stim's shot under the substream seed.
 
-    The substream seed's blake2b framing (root seed, "stim_device", the
-    key's type tag and the key, NUL-separated, into an 8-byte big-endian
-    digest) is the pinned cross-process contract; the law is that the
-    device samples exactly what Stim's compiled sampler samples under
-    that seed.
+    The substream seed is the run's seed law written out: blake2b-8 over
+    the namespace, the root seed as eight big-endian bytes, and the
+    stream identity as an integer path segment (tag, four-byte length,
+    decimal text). It is the pinned cross-process contract; the law is
+    that the device samples exactly what Stim's compiled sampler samples
+    under that seed.
     """
     circuit = memory_circuit(3, 3)
-    hasher = hashlib.blake2b(b"7\x00stim_device\x00int\x001", digest_size=8)
+    root_bytes = (7).to_bytes(8, "big")
+    identity_segment = b"I" + (1).to_bytes(4, "big") + b"1"
+    preimage = b"decsim.run-seed.v1" + root_bytes + identity_segment
+    hasher = hashlib.blake2b(preimage, digest_size=8)
     digest = hasher.digest()
     substream_seed = int.from_bytes(digest, "big")
-    assert substream_seed == 5762610574057409091
+    assert substream_seed == 7382560267478030810
     sampler = circuit.compile_sampler(seed=substream_seed)
     shots = sampler.sample(1)
     oracle_row = shots[0].tolist()
@@ -207,11 +211,11 @@ def test_a_seeded_shot_is_stims_shot_under_the_hashed_substream_seed():
     assert oracle_row == [
         0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1,
     ]  # fmt: skip
     assert first.bits == (0, 0, 0, 0, 0, 0, 0, 0)
     assert second.bits == (0, 0, 0, 0, 0, 0, 0, 0)
-    assert third.bits == (0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1)
+    assert third.bits == (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1)
 
 
 def test_the_same_seed_samples_the_same_shot_in_another_device():
@@ -224,7 +228,7 @@ def test_the_same_seed_samples_the_same_shot_in_another_device():
     first_round = round_payload(first, operation, 3)
     second_round = round_payload(second, operation, 3)
     assert first_round.bits == (
-        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1,
     )  # fmt: skip
     assert second_round.bits == first_round.bits
 
@@ -244,7 +248,7 @@ def test_another_sample_key_under_the_same_seed_samples_another_shot():
     device = stim_device.StimDevice(seed=7)
     device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first_round = round_payload(device, operation, 1)
-    assert first_round.bits == (1, 0, 0, 0, 0, 1, 0, 1)
+    assert first_round.bits == (1, 0, 1, 0, 0, 1, 0, 0)
 
 
 def test_a_seed_outside_stims_64_bit_range_is_refused():
@@ -266,7 +270,7 @@ def test_a_run_bound_seed_samples_stims_shot_under_that_root():
     device.commit_run_seed(reservation)
     device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
     first_round = round_payload(device, operation, 1)
-    assert first_round.bits == (0, 0, 0, 0, 0, 1, 0, 0)
+    assert first_round.bits == (1, 0, 1, 0, 0, 1, 0, 1)
 
 
 def test_a_seeded_device_refuses_an_identity_it_cannot_hash_stably():
@@ -325,8 +329,8 @@ def test_a_stream_whose_id_equals_a_segments_operation_id_samples_afresh():
     alone.begin_operation(other, 3, 3, round_period_ticks=1_100_000)
     other_first = round_payload(device, other, 1)
     alone_first = round_payload(alone, other, 1)
-    assert other_first.bits == (1, 0, 0, 0, 0, 1, 0, 0)
-    assert alone_first.bits == (1, 0, 0, 0, 0, 1, 0, 0)
+    assert other_first.bits == (0, 0, 0, 0, 0, 0, 0, 0)
+    assert alone_first.bits == (0, 0, 0, 0, 0, 0, 0, 0)
 
 
 def test_a_later_segment_with_another_source_duration_is_refused():

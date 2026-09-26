@@ -166,7 +166,7 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
@@ -195,7 +195,7 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=2,
     )
     assert task.online_threshold is not None
@@ -226,7 +226,7 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=4,
     )
 
@@ -246,7 +246,7 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=3,
     )
     built = built_window_models.BuiltWindowModels()
@@ -263,7 +263,7 @@ def test_a_machine_built_alone_builds_its_own_models():
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     settings = task.shot_settings()
@@ -276,7 +276,7 @@ def test_a_task_is_one_unit_until_a_unit_size_splits_it():
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=5,
     )
 
@@ -305,7 +305,7 @@ def test_a_point_with_an_online_threshold_stays_one_unit(tmp_path):
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=5,
     )
 
@@ -326,19 +326,19 @@ def test_two_points_under_one_cache_do_not_share_models():
     at_three = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     at_five = config.point_task(
         physical_error_probability=0.001,
         distance=5,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     noisier_at_three = config.point_task(
         physical_error_probability=0.003,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
 
@@ -364,7 +364,7 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=3,
     )
     whole_task = collect.Unit(task, 0, task.shots)
@@ -431,7 +431,7 @@ def _measured_shot(tmp_path, escalation_kind: str):
         config,
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
 

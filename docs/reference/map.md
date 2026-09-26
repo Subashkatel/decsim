@@ -107,6 +107,7 @@ docstring.
 ### syndrome_buffer
 
 - `decsim/syndrome_buffer/__init__.py`: The syndrome buffers: a finished round kept until its last reader is done.
+- `decsim/syndrome_buffer/ported_syndrome_buffer.py`: The ported syndrome buffer: the store of rounds behind memory ports.
 - `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a syndrome buffer.
 - `decsim/syndrome_buffer/round_output.py`: A syndrome buffer's outgoing port: it sends the rounds that leave the store.
 - `decsim/syndrome_buffer/settings.py`: A syndrome buffer's capacity and access costs on its named clock.
@@ -176,6 +177,9 @@ docstring.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
 - `decsim/decoders/decoders.py`: Timing-only decoders, the routers and the sampled-confidence wrapper.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
+- `decsim/decoders/measured_table/__init__.py`: The measured_table row: Relay-BP priced by a GPU's measured time.
+- `decsim/decoders/measured_table/decoder.py`: Relay-BP on a measured GPU: decsim's own answer, the device's time.
+- `decsim/decoders/measured_table/measurements.py`: Relay-BP decode times measured on NVIDIA GPUs, as a line in iterations.
 - `decsim/decoders/memory_rounds.py`: The decoder side's end for a timing-only round that lands here.
 - `decsim/decoders/minimum_weight_perfect_matching/__init__.py`: PyMatching-backed minimum-weight perfect matching decoders.
 - `decsim/decoders/minimum_weight_perfect_matching/decoder.py`: The PyMatching adapter: minimum-weight perfect matching on one window.
@@ -186,6 +190,7 @@ docstring.
 - `decsim/decoders/schedulers.py`: The ready-queue discipline of a decoder pool: which waiting job is next.
 - `decsim/decoders/settings.py`: The settings of the decoder tiers, their manager and the escalation.
 - `decsim/decoders/staged_decoder.py`: The decoder unit's timing around one algorithm: stages and a pipeline.
+- `decsim/decoders/strong_backend.py`: The strong decoder on a device: a FIFO queue in front of its capacity.
 - `decsim/decoders/strong_requests.py`: Which destination window waits for which strong result.
 - `decsim/decoders/tesseract/__init__.py`: Tesseract decoders backed by the optional tesseract-decoder package.
 - `decsim/decoders/tesseract/decoder.py`: The Tesseract adapter: the referee's decoder as a tier of its own.

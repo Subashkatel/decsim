@@ -29,6 +29,25 @@ def derive_component_seed(root_seed: int, path) -> int:
     return int.from_bytes(digest_bytes, "big")
 
 
+def substream_seed(seed: int, keys: tuple) -> int:
+    """The seed of one substream of a component's draws, named by keys.
+
+    A syndrome source keys a stream by its decode identity, and a round
+    of it drawn on its own by the identity, the round and its patches.
+    The keys name the substream, never the draw order, so a stream's
+    draws do not depend on how many another stream drew first: numpy's
+    SeedSequence names a child stream the same way, by a spawn_key under
+    one entropy (numpy/random/bit_generator.pyi lines 60-70). Each key is
+    a framed path segment under derive_component_seed, so the seed is
+    the same in every process.
+    """
+    path = []
+    for key in keys:
+        segment = _key_segment(key)
+        path.append(segment)
+    return derive_component_seed(seed, tuple(path))
+
+
 def bind_run_seed(root_seed: Optional[int], roots) -> None:
     """Bind each stochastic leaf once, cancelling every claim on failure.
 
@@ -268,6 +287,19 @@ def _sorted_by_path(pairs) -> list:
     for _, path, item in keyed:
         ordered.append((path, item))
     return ordered
+
+
+def _key_segment(key) -> seed_records.RunSeedPathSegment:
+    """An int or str key as its framed segment; any other type is refused."""
+    key_type = type(key)
+    if key_type is int:
+        return seed_records.RunSeedPathSegment("integer_key", key)
+    if key_type is str:
+        return seed_records.RunSeedPathSegment("string_key", key)
+    raise ValueError(
+        f"a substream key must be an int or str so its seed is the same in "
+        f"every process; {key!r} is a {key_type.__name__}"
+    )
 
 
 def _encode_path(path) -> bytes:

@@ -21,12 +21,12 @@ CONFIG_PATH = CONFIGS_DIR / "weak_decoder_baseline.yaml"
 POINT = {
     "physical_error_probability": 0.003,
     "distance": 3,
-    "round_period_us": 1.0,
+    "round_period_microseconds": 1.0,
 }
 SEED = 0
 # the log hash of the point; it moves when a log line changes text, and the
 # results the gate hashes do not move with it
-POINT_LOG_SHA256 = "1f76ae71ab61"
+POINT_LOG_SHA256 = "42b473b3cb9c"
 
 
 def settings(**observation_changes):

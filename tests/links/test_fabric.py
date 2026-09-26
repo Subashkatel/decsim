@@ -15,6 +15,7 @@ import pytest
 
 import decsim.config as config
 import decsim.engine
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
 import decsim.ports as ports
@@ -23,15 +24,12 @@ import decsim.records.windows as window_records
 import tests.declared_run as declared_run
 
 PATH = transfer_records.LinkPath
-AGGREGATE = link_settings.QuantityBasis.AGGREGATE
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
 
 
 def bounded_path(name, bits_per_microsecond, latency_ticks, setup_ticks=0):
-    capacity = link_settings.CapacitySettings(
-        bits_per_microsecond, AGGREGATE, None, "test"
-    )
+    capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     channel = link_settings.ChannelSettings(
         name, latency_ticks, capacity, "test"
     )
@@ -49,9 +47,7 @@ def unbounded_path(name, latency_ticks, setup_ticks=0):
 
 def default_path(name, bits):
     channel = link_settings.ChannelSettings(name, 0, None, "test")
-    payload = link_settings.PayloadSettings(
-        bits, AGGREGATE, None, "test default"
-    )
+    payload = link_settings.PayloadSettings(bits, "test default")
     return link_settings.PathSettings(channel, payload, None)
 
 
@@ -72,7 +68,7 @@ def fabric_with(engine, listener=None, **paths):
     wiring = every_path_free()
     wiring.update(paths)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
-    fabric = fabric_module.LinkFabric(settings, engine)
+    fabric = fabric_module.LinkFabric(settings, engine, channel_module.Channel)
     if listener is not None:
         fabric.trace.transfer_delivered.connect(listener.on_transfer)
     return fabric
@@ -395,9 +391,7 @@ def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
     """
     engine = decsim.engine.Engine()
     rate_bits_per_microsecond = 1000.0
-    capacity = link_settings.CapacitySettings(
-        rate_bits_per_microsecond, AGGREGATE, None, "test"
-    )
+    capacity = link_settings.CapacitySettings(rate_bits_per_microsecond, "test")
     channel = link_settings.ChannelSettings("framed", 0, capacity, "test")
     payload_bits = 360
     header_bits = 448
@@ -542,9 +536,9 @@ def test_a_fabric_with_no_listener_runs():
 
 def test_the_expected_delay_prices_the_paths_payload_rule():
     engine = decsim.engine.Engine()
-    capacity = link_settings.CapacitySettings(1000.0, AGGREGATE, None, "test")
+    capacity = link_settings.CapacitySettings(1000.0, "test")
     channel = link_settings.ChannelSettings("bounded", 300, capacity, "test")
-    payload = link_settings.PayloadSettings(8, AGGREGATE, None, "test default")
+    payload = link_settings.PayloadSettings(8, "test default")
     bus_word = link_settings.PathSettings(channel, payload, None)
     fabric = fabric_with(engine, frame_to_controller=bus_word)
     assert (
@@ -565,6 +559,62 @@ def test_the_fabric_fills_the_link_port():
     engine = decsim.engine.Engine()
     fabric = fabric_with(engine)
     assert isinstance(fabric, ports.Link)
+
+
+class _CountingChannel:
+    """A channel written outside the links package: it notes what it carries."""
+
+    def __init__(self, channel_settings, engine):
+        self.name = channel_settings.name
+        self.carried_bits = []
+        self.inner = channel_module.Channel(channel_settings, engine)
+
+    def send(self, framed, now_ticks, setup_ticks, on_delivered):
+        self.carried_bits.append(framed.payload_bits)
+        self.inner.send(framed, now_ticks, setup_ticks, on_delivered)
+
+    def expected_delay_ticks(self, framed, now_ticks, setup_ticks):
+        return self.inner.expected_delay_ticks(framed, now_ticks, setup_ticks)
+
+
+def test_the_fabric_builds_one_channel_of_the_rows_class_per_channel_name():
+    """The Channel port: a row's channel class carries every path it names."""
+    engine = decsim.engine.Engine()
+    built = []
+
+    def counting_channel(channel_settings, engine):
+        channel = _CountingChannel(channel_settings, engine)
+        built.append(channel)
+        return channel
+
+    shared = bounded_path("shared", 1000.0, 300)
+    wiring = every_path_free()
+    wiring.update(qpu_to_controller=shared, controller_to_weak_buffer=shared)
+    settings = link_settings.FabricSettings(profile_name="test", **wiring)
+    fabric = fabric_module.LinkFabric(settings, engine, counting_channel)
+    delivered = []
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+    )
+    send_on(
+        engine,
+        fabric,
+        PATH.CONTROLLER_TO_WEAK_BUFFER,
+        4,
+        0,
+        second_round,
+        delivered,
+    )
+    engine.run()
+    channel_by_name = {channel.name: channel for channel in built}
+
+    assert len(built) == 2
+    assert isinstance(built[0], ports.Channel)
+    assert channel_by_name["shared"].carried_bits == [8, 4]
+    assert channel_by_name["free"].carried_bits == []
+    assert delivered[1].queue_wait_ticks == 8000
 
 
 # The paths a whole run uses, read off the ledger the fabric feeds.

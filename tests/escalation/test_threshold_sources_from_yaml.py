@@ -2,7 +2,7 @@
 
 fixed uses the card's gap_threshold_db as given (the paper's constant
 gth). table computes nothing at run time: it looks the sweep point up
-in an offline calibration csv (calibrate_threshold.py's shape) and
+in an offline calibration csv (one row per distance and p) and
 refuses a point the table does not certify. online starts at
 gap_threshold_db and adapts it across the point's shots with the
 two-loop controller (rate tracker + audit lane); one calibrator per
@@ -38,7 +38,7 @@ def online_threshold_calibrator(
     task = config.point_task(
         physical_error_probability=physical_error_probability,
         distance=distance,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     return task.online_threshold
@@ -121,6 +121,24 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     assert math.isclose(resolved_decibels, 2.5)
 
 
+@pytest.mark.parametrize(
+    "cell, sentence",
+    [("-5.0", "must be finite and not negative"), ("abc", "number of dec")],
+)
+def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
+    tmp_path, cell, sentence
+):
+    table_path = tmp_path / "negative_table.csv"
+    table_path.write_text(f"distance,p,gth_eq4_wilson\n3,0.002,{cell}\n")
+    card = {"threshold_source": "table", "threshold_table": table_path.name}
+    config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
+    with pytest.raises(ValueError, match=sentence):
+        resolve_gap_threshold_nats(
+            config, physical_error_probability=0.002, distance=3
+        )
+
+
 def test_table_source_key_guards(tmp_path):
     table = calibration_table(tmp_path)
     both_sources_card = {
@@ -188,6 +206,42 @@ def test_online_card_guards(tmp_path):
     high_audit_rate_path = source_config(tmp_path, high_audit_rate_card)
     with pytest.raises(ValueError, match="audit_rate"):
         load_experiment(high_audit_rate_path)
+
+
+@pytest.mark.parametrize(
+    "online, sentence",
+    [
+        ({"step_db": True}, "online.step_db must be a finite number"),
+        ({"step_db": "abc"}, "online.step_db must be a finite number"),
+        ({"adjust_factor": math.inf}, "online.adjust_factor must be a finite"),
+        ({"step_db": math.nan}, "online.step_db must be a finite number"),
+        (5, "escalation.online must be a mapping"),
+    ],
+)
+def test_an_online_knob_that_is_no_finite_number_is_refused(
+    tmp_path, online, sentence
+):
+    card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": online,
+    }
+    config_path = source_config(tmp_path, card)
+    with pytest.raises(ValueError, match=sentence):
+        load_experiment(config_path)
+
+
+def test_an_online_target_written_in_exponent_form_loads(tmp_path):
+    """YAML 1.1 reads 1e-3 as text; the card reads it as the number."""
+    card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": {"target_escalation_rate": "1e-3"},
+    }
+    config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
+    online = config.settings.escalation.online
+    assert online.target_escalation_rate == 0.001
 
 
 def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
@@ -403,7 +457,7 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     task = config.point_task(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
 

@@ -66,6 +66,18 @@ def test_a_bare_on_for_the_trace_is_refused():
     )
 
 
+def test_an_empty_trace_path_is_refused_before_the_run():
+    """An empty path would fail only when the first traced shot writes."""
+    section = _section("observation:\n  trace: ''\n")
+
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings.from_yaml(section)
+
+    assert "observation.trace is empty, which names no file" in str(
+        refusal.value
+    )
+
+
 def test_a_bare_off_for_the_trace_and_the_log_is_the_word_off():
     """In yaml 1.1 a bare `off` is False, and both keys mean off."""
     section = _section("observation:\n  trace: off\n  log: off\n")
@@ -109,6 +121,28 @@ def test_a_study_knob_that_is_not_true_or_false_is_refused():
     assert "observation.data_movement must be true or false" in str(
         refusal.value
     )
+
+
+def test_a_study_knob_written_as_one_is_refused_as_not_true_or_false():
+    """A yaml `1` is an integer, and 1 == True in Python."""
+    section = _section("observation:\n  data_movement: 1\n")
+
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings.from_yaml(section)
+
+    assert "observation.data_movement must be true or false, got 1" in str(
+        refusal.value
+    )
+
+
+def test_a_list_of_referees_is_refused_with_the_rows_by_name():
+    """A yaml list is a user's mistake, and the refusal is a sentence."""
+    section = _section("observation:\n  check_windows_with: [tesseract]\n")
+
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings.from_yaml(section)
+
+    assert "observation.check_windows_with must be one of" in str(refusal.value)
 
 
 def test_every_study_knob_is_read_from_the_section():

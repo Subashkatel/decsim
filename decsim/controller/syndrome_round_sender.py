@@ -1,7 +1,7 @@
 """The sender: a finished round into every store it must reach, or held.
 
 The backpressure law of the readout path: each store's own end answers
-has_room with the round's bits before any round leaves for it, counting
+has_room for the round before any round leaves for it, counting
 the bits it holds and the bits reserved for the writes in flight, and
 the room is reserved before the wire is used (gem5's packet store
 answers `avail() = _maxsize - _size - _reserved` against the packet's
@@ -15,7 +15,7 @@ and re-sends it when clearBlocked schedules the retry
 :266-271 clearBlocked when it drains, processSendRetry); Ciw's Type I
 blocking keeps the customer at the upstream node and releases the
 longest blocked one when the destination has capacity
-(tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473, block_individual,
+(Ciw ciw/node.py:470-473, block_individual,
 release_blocked_individual). Nothing is reordered; under the stall
 policy nothing is dropped. The written round leaves on its route at the
 write (RoundTransmitter) and takes its slot where it lands.
@@ -44,11 +44,11 @@ class HeldRounds:
     nowhere else: the round waits here, before the wire is asked for, so
     its transfer carries none of it. Ruby's MessageBuffer counts that
     wait as the buffer's own statistic, the ticks a message was stalled
-    in it (tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:76-82
+    in it (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82
     for the stall counters, :331 where the wait is summed at the
     dequeue), and ns-3's queue disc stamps a packet at the enqueue and
     reads the sojourn time back at the dequeue
-    (tmp/resources/l5_buffers/ns3-traffic-control/queue-disc.cc:851
+    (ns-3 src/traffic-control/model/queue-disc.cc:851
     and :701, the trace source described at queue-disc.h:162-167).
     """
 
@@ -165,6 +165,10 @@ class SyndromeRoundSender:
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
+        # strong-primary rounds sent to the strong syndrome buffer and not
+        # yet landed there; the packing stage's bound reads it
+        # (RoundsInFlight), as it reads the transmitter's in_flight
+        self.strong_crossing_count = 0
 
     def start(self) -> None:
         """Read which store the plan's windows come from, once.
@@ -205,16 +209,16 @@ class SyndromeRoundSender:
     def _write(self, packed: round_records.PackedRound) -> bool:
         """Write the round if its store has room; False when it has none."""
         if self.publishes_from_strong_store:
-            if not self.strong_receiver.has_room(packed.wire_bits):
+            if not self.strong_receiver.has_room(packed):
                 return self.held_rounds.refuse(packed, self._write)
             self._write_strong(packed)
             return True
-        if not self.weak_receiver.has_room(packed.wire_bits):
+        if not self.weak_receiver.has_room(packed):
             return self.held_rounds.refuse(packed, self._write)
         # the round takes its weak syndrome buffer slot when its bits are
         # there: the room is reserved here, and the landing stores and
         # publishes it
-        self.weak_receiver.reserve_write(packed.wire_bits)
+        self.weak_receiver.reserve_write(packed)
         self.transmitter.send(packed)
         return True
 
@@ -223,7 +227,7 @@ class SyndromeRoundSender:
 
         The controller is the end this round leaves by, so it executes
         the send (OMNeT++ refuses a module that sends a message it does
-        not own, tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334;
+        not own, omnetpp src/sim/csimplemodule.cc:333-334;
         gem5 bills a transfer to the port it left by,
         coherent_xbar.cc:354-357).
         The room side takes the room before the round leaves, gem5's
@@ -233,7 +237,8 @@ class SyndromeRoundSender:
         attribution = transfer_records.TransferAttribution.for_packet(
             packed.packet
         )
-        self.strong_receiver.reserve_write(packed.wire_bits)
+        self.strong_receiver.reserve_write(packed)
+        self.strong_crossing_count += 1
         landed = functools.partial(self._land_in_strong_store, packed)
         self.link.send(
             transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
@@ -246,8 +251,19 @@ class SyndromeRoundSender:
     def _land_in_strong_store(
         self, packed: round_records.PackedRound, _transfer
     ) -> None:
-        """The strong syndrome buffer took the round and handles the landing."""
+        """The strong syndrome buffer took the round and handles the landing.
+
+        The landing publishes the round, so it stops counting in the
+        event after, as the transmitter lets a weak round go: a fragment
+        landing at this tick still counts it.
+        """
         self.strong_receiver.receive_round(packed)
+        self.engine.schedule(
+            0, self._leave_strong_crossing, label="strong round landed"
+        )
+
+    def _leave_strong_crossing(self) -> None:
+        self.strong_crossing_count -= 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -255,7 +271,7 @@ class _HeldRoundsTraceSources:
     """Every event the held rounds reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

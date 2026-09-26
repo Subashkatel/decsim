@@ -94,20 +94,11 @@ class OperationResults:
         """
         if operation.id in self.deliveries.finished_operation_ids:
             return
-        if self._has_window_awaiting_strong(operation.id):
-            return
-        weak_store = self.retention.weak_store
-        if weak_store.has_live_operation_reference(operation.id):
-            return
-        if self._strong_store_references(operation.id):
-            return
-        committed = self._committed_windows_of(operation.id)
-        if len(committed) != self.planner.window_count_of(operation.id):
-            return
-        if not self.tracker.is_sealed(operation.id):
+        if not self._is_final(operation.id):
             return
         self.deliveries.finished_operation_ids.add(operation.id)
         self._deliver_result(operation)
+        weak_store = self.retention.weak_store
         weak_store.close_operation(operation.id)
         self._close_strong_store_operation(operation.id)
         self.finish_workload_if_ready()
@@ -208,6 +199,20 @@ class OperationResults:
         self._record_result(operation.id, logical_observables)
         self.conditional_release.release_waiters(operation)
 
+    def _is_final(self, operation_id) -> bool:
+        """Every window committed and final, no store holding, sealed."""
+        if self._has_window_awaiting_strong(operation_id):
+            return False
+        weak_store = self.retention.weak_store
+        if weak_store.has_live_operation_reference(operation_id):
+            return False
+        if self._strong_store_references(operation_id):
+            return False
+        committed = self._committed_windows_of(operation_id)
+        if len(committed) != self.planner.window_count_of(operation_id):
+            return False
+        return self.tracker.is_sealed(operation_id)
+
     def _record_result(self, operation_id, logical_observables) -> None:
         self.trace.operation_result_delivered.fire(
             operation_id, logical_observables
@@ -220,11 +225,7 @@ class OperationResults:
         committed_round_count: int,
     ) -> None:
         segment = self.deliveries.segment_by_operation.get(operation.id)
-        operation_stream_id = operation.stream_id
-        stream_offset = operation.stream_offset
-        if segment is not None and segment.stream_id is not None:
-            operation_stream_id = segment.stream_id
-            stream_offset = segment.stream_offset
+        operation_stream_id, stream_offset = _stream_place(operation, segment)
         if operation_stream_id != stream_id:
             return
         if operation.id not in self.tracker.blocking_operation_ids:
@@ -318,6 +319,13 @@ def is_awaiting_strong(window: window_records.Window) -> bool:
     return window.published_request_key is None
 
 
+def _stream_place(operation: program_records.Operation, segment) -> tuple:
+    """The stream and offset the operation sits at; a bound segment's first."""
+    if segment is None or segment.stream_id is None:
+        return operation.stream_id, operation.stream_offset
+    return segment.stream_id, segment.stream_offset
+
+
 class _Deliveries:
     """What has been delivered so far, and whether the workload is done."""
 
@@ -343,7 +351,7 @@ class _TraceSources:
     """Every event the operation results reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

@@ -113,7 +113,7 @@ def _first_point_settings(config) -> machine_settings.MachineSettings:
     return config.point_settings(
         physical_error_probability=block.physical_error_probabilities[0],
         distance=block.distances[0],
-        round_period_us=block.round_periods_microseconds[0],
+        round_period_microseconds=block.round_periods_microseconds[0],
     )
 
 

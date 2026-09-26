@@ -73,7 +73,7 @@ def new_source():
 
     A component's events are one member, the way gem5 groups a
     component's statistics into one nested Group rather than one member
-    per counter (tmp/resources/gem5/src/base/stats/group.hh:60-92); the
+    per counter (gem5 src/base/stats/group.hh:60-92); the
     group is a frozen record whose fields are declared with this.
     """
     return dataclasses.field(default_factory=TraceSource)

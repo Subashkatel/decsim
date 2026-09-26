@@ -72,10 +72,7 @@ class WindowInputGate:
         if window is None or window.deps_remaining <= 0:
             return True
         visiting = {(window.operation_id, window.window_index)}
-        for dependency in window.deps:
-            if not self._resolving_without_new_slots(dependency, visiting):
-                return False
-        return True
+        return self._every_dependency_resolving(window.deps, visiting)
 
     def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """May this landed job start its decode?
@@ -95,7 +92,7 @@ class WindowInputGate:
         The fold's condition is that a boundary arrived, which the window
         interaction answers, and not that a bit is set in it: cuda-q QEC
         applies the accumulated syndrome mods to every window past the
-        first, whatever they hold (sliding_window.cpp:283-292, the
+        first, whatever they hold (sliding_window.cpp:287-293, the
         `w > 0` branch), and a fold skipped on an all-zero mask would
         make the work the seam costs follow the noise, which is the cost
         D9 (docs/explanation/decisions.md:156-164) prices independent of
@@ -131,23 +128,22 @@ class WindowInputGate:
 
     # ---- private
 
+    def _every_dependency_resolving(self, dependencies, visiting: set) -> bool:
+        for dependency in dependencies:
+            if not self._resolving_without_new_slots(dependency, visiting):
+                return False
+        return True
+
     def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
         if key in visiting:
             return False
         window = self.planner.windows_by_key.get(key)
-        if window is None:
-            return True
-        if window.is_absorbed:
-            return True
-        if window.t_done is not None or window.service_began:
+        if _needs_no_slot(window):
             return True
         if window.t_dispatch is None:
             return False
         visited = visiting | {key}
-        for dependency in window.deps:
-            if not self._resolving_without_new_slots(dependency, visited):
-                return False
-        return True
+        return self._every_dependency_resolving(window.deps, visited)
 
     def _masked_round(self, state, window_info, round_input):
         fragments = []
@@ -413,14 +409,9 @@ class DecodeRequester:
 
     def __init__(
         self,
-        read_clock: Optional[config.Clock] = None,
-        read_cycles: int = 0,
         clock: Optional[config.Clock] = None,
         decision_cycles: int = 0,
     ) -> None:
-        self.read_clock = read_clock
-        self.read_cycles = read_cycles
-        self.pending_reads: dict = {}
         self.clock = clock
         self.decision_cycles = decision_cycles
         self.pending_submissions: dict = {}
@@ -450,11 +441,10 @@ class DecodeRequester:
             return
         operation = self.tracker.operation_by_id[window.operation_id]
         self.builder.note_data_complete(window, operation)
-        if window.deps_remaining > 0 and not window.blocked_logged:
-            # raw rounds ship now; the boundary is XORed into the landed
-            # input at the decoder when it arrives (qLDPC net_error /
-            # cudaq-x syndrome_mods / LILLIPUT's state register)
-            window.blocked_logged = True
+        # a window still owed a boundary ships its raw rounds now; the
+        # boundary is XORed into the landed input at the decoder when it
+        # arrives (qLDPC net_error / cudaq-x syndrome_mods / LILLIPUT's
+        # state register)
         self.request(window, operation, strong_redecode)
 
     def request(
@@ -468,26 +458,33 @@ class DecodeRequester:
         The primary tier's job is the one built here; a strong tier the
         policy names too gets its sibling from the strong redecode (the
         paper's Step 1, both decoders started on the same window).
+        The store is read when the input leaves it, at dispatch
+        (syndrome_buffer/round_output.py), not here.
         """
-        if self.read_cycles == 0:
-            self._request_from_store(window, operation, strong_redecode)
-            return
-        window.queued = True
-        action = functools.partial(
-            self._request_from_store, window, operation, strong_redecode
-        )
-        read = _PendingRead(action)
-        keys = self.retention.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
-        )
         store = self.retention.primary_store
-        store.register_hold(read, keys)
-        self.pending_reads[window.key] = read
-        engine = self.builder.engine
-        edge = self.read_clock.edge(self.read_cycles, engine.now)
-        delay = edge - engine.now
-        finish = functools.partial(self._finish_read, window.key, read)
-        engine.schedule(delay, finish, label="syndrome buffer read")
+        self.builder.stamp_first_round(window, store)
+        primary_tier = self.retention.primary_tier
+        forced_classes = self._forced_logical_classes()
+        first_class = _first_forced_class(forced_classes)
+        job = self.builder.build(
+            window, operation, primary_tier, store, first_class
+        )
+        window.queued = True
+        tiers = self.escalation_policy.tiers_for_ready_window(window)
+        primary_jobs = self._primary_jobs(job, forced_classes)
+        window_reads = decoding_records.WindowReads(window.key)
+        is_input_held = self._bind_input_hold(primary_jobs, window_reads)
+        submissions = []
+        for tier in tiers:
+            if tier is primary_tier:
+                primary = self._primary_submissions(primary_jobs, is_input_held)
+                submissions.extend(primary)
+            else:
+                sibling = strong_redecode.parallel_strong_submission(job)
+                started = _sibling_submissions(sibling)
+                submissions.extend(started)
+        for submission in submissions:
+            self.enqueue(submission)
 
     def _primary_submissions(
         self, primary_jobs: list, is_input_held: bool
@@ -512,9 +509,10 @@ class DecodeRequester:
 
         A confidence built from forced-class solves needs the window
         decoded once per class, and all of them are asked for at one instant
-        (CUDA launches a whole grid in one call, cuda_guide.txt:
-        1888-1892; OpenMP's primary thread creates the whole team,
-        openmp_spec_5_2.txt:1400-1407).
+        (CUDA launches a whole grid in one call, CUDA C++ Programming
+        Guide section 5.1, Kernels; OpenMP's primary thread "creates a
+        team of itself and zero or more additional threads", OpenMP 5.2
+        specification section 1.3, Execution Model).
         """
         jobs = [job]
         for forced_class in forced_classes[1:]:
@@ -592,15 +590,10 @@ class DecodeRequester:
         (a strong window that absorbs the window owns its rounds from then
         on).
         """
-        pending = self.pending_reads.pop(window.key, None)
-        if pending is not None:
-            store = self.retention.primary_store
-            store.release_hold(pending)
         cancelled = self._withdraw_submissions(window.key)
-        if pending is None and not cancelled:
+        if not cancelled:
             self.decode_queue.withdraw_window(window.key)
         window.queued = False
-        window.blocked_logged = False
         window.t_queued = None
         window.t_dispatch = None
         window.service_began = False
@@ -652,57 +645,6 @@ class DecodeRequester:
             cancelled = True
         return cancelled
 
-    def _finish_read(self, window_key: tuple, read: "_PendingRead") -> None:
-        if self.pending_reads.get(window_key) is not read:
-            return
-        del self.pending_reads[window_key]
-        read.action()
-        store = self.retention.primary_store
-        store.release_hold(read)
-
-    def _request_from_store(
-        self,
-        window: window_records.Window,
-        operation: program_records.Operation,
-        strong_redecode,
-    ) -> None:
-        """Read the primary window's rounds and submit its requested tiers."""
-        store = self.retention.primary_store
-        self.builder.stamp_first_round(window, store)
-        primary_tier = self.retention.primary_tier
-        forced_classes = self._forced_logical_classes()
-        first_class = _first_forced_class(forced_classes)
-        job = self.builder.build(
-            window, operation, primary_tier, store, first_class
-        )
-        window.queued = True
-        tiers = self.escalation_policy.tiers_for_ready_window(window)
-        primary_jobs = self._primary_jobs(job, forced_classes)
-        window_reads = decoding_records.WindowReads(window.key)
-        is_input_held = self._bind_input_hold(primary_jobs, window_reads)
-        submissions = []
-        for tier in tiers:
-            if tier is primary_tier:
-                primary = self._primary_submissions(primary_jobs, is_input_held)
-                submissions.extend(primary)
-            else:
-                sibling = strong_redecode.parallel_strong_submission(job)
-                started = _sibling_submissions(sibling)
-                submissions.extend(started)
-        for submission in submissions:
-            self.enqueue(submission)
-
-
-@dataclasses.dataclass(frozen=True)
-class _PendingRead:
-    """One scheduled read holding its rounds until input ownership passes."""
-
-    action: Callable[[], None]
-
-    def referenced_operation_ids(self) -> tuple:
-        """The held rounds already name every operation the read keeps open."""
-        return ()
-
 
 class _SharedInputHold:
     """One store hold released when the last job that reads it has landed.
@@ -723,6 +665,17 @@ class _SharedInputHold:
         if self.readers_left > 0:
             return
         self.hold_release()
+
+
+def _needs_no_slot(window: Optional[window_records.Window]) -> bool:
+    """Unplanned, absorbed, decoded or decoding: it asks for no slot."""
+    if window is None:
+        return True
+    if window.is_absorbed:
+        return True
+    if window.t_done is not None:
+        return True
+    return window.service_began
 
 
 def _sibling_submissions(sibling) -> list:
@@ -748,7 +701,7 @@ class _TraceSources:
     """Every event the decode request builder reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

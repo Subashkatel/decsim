@@ -146,41 +146,6 @@ class WindowModels:
         )
 
 
-def _model_key(
-    operation, resolved_operation, windows: list, requirement, protocol
-) -> tuple:
-    """What one operation's window models are a function of.
-
-    The circuit and its rounds, every window's span, dependencies and
-    closed boundaries, the decoder's fault-model requirement and the
-    window protocol: exactly the arguments the builder is given
-    (qpu/stim_device.py window_models_for_operation), and nothing a seed
-    touches.
-    """
-    circuit_text = str(operation.circuit)
-    plan = []
-    for window in windows:
-        deps = tuple(window.deps)
-        span = (
-            window.key,
-            window.start_round,
-            window.commit_lo,
-            window.commit_hi,
-            window.buffer_hi,
-            deps,
-            window.closed_temporal_boundaries,
-        )
-        plan.append(span)
-    return (
-        operation.id,
-        circuit_text,
-        resolved_operation.round_count,
-        tuple(plan),
-        requirement,
-        protocol,
-    )
-
-
 class WindowPlanner:
     """Which windows exist: the plan's, and a stream's as it grows.
 
@@ -211,7 +176,7 @@ class WindowPlanner:
 
         The models come from the port, so they are built once the root
         has bound it, which is gem5's split between the constructor and
-        startup (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and
+        startup (gem5 src/sim/sim_object.hh lines 194 and
         280).
         """
         for operation in self.planned_operations:
@@ -498,6 +463,11 @@ class WindowPlanner:
         )
         if not models:
             return
+        successor_ids = self.plan.successors.get(operation.id, ())
+        if successor_ids:
+            _refuse_reads_past_the_model(
+                operation, windows, models, resolved.round_count
+            )
         for window, model in zip(windows, models):
             self.models.model_by_window[window.key] = model
 
@@ -523,6 +493,71 @@ class WindowPlanner:
         growth.next_window_index += 1
         self.trace.window_planned.fire(window)
         return window
+
+
+def _model_key(
+    operation, resolved_operation, windows: list, requirement, protocol
+) -> tuple:
+    """What one operation's window models are a function of.
+
+    The circuit and its rounds, every window's span, dependencies and
+    closed boundaries, the decoder's fault-model requirement and the
+    window protocol: exactly the arguments the builder is given
+    (qpu/stim_device.py window_models_for_operation), and nothing a seed
+    touches.
+    """
+    circuit_text = str(operation.circuit)
+    plan = []
+    for window in windows:
+        deps = tuple(window.deps)
+        span = (
+            window.key,
+            window.start_round,
+            window.commit_lo,
+            window.commit_hi,
+            window.buffer_hi,
+            deps,
+            window.closed_temporal_boundaries,
+        )
+        plan.append(span)
+    return (
+        operation.id,
+        circuit_text,
+        resolved_operation.round_count,
+        tuple(plan),
+        requirement,
+        protocol,
+    )
+
+
+def _refuse_reads_past_the_model(
+    operation: program_records.Operation,
+    windows: list,
+    models: list,
+    round_count: int,
+) -> None:
+    """A window with an error model reads only its own operation's rounds.
+
+    The model is sliced from the operation's own circuit, so its rows
+    end at the operation's last round. A window whose buffer runs on
+    into the next operation's rounds would hand the decoder rows its
+    model does not have, which the decoder's input memory refuses in the
+    middle of the run (decoders/decoder_memory.py). The flush terminal
+    policy ends the last window inside its operation.
+    """
+    for window, model in zip(windows, models):
+        if model is None:
+            continue
+        if window.buffer_hi <= round_count:
+            continue
+        first_foreign_round = round_count + 1
+        raise ValueError(
+            f"{operation.name} window {window.window_index} reads rounds "
+            f"{first_foreign_round} to {window.buffer_hi} from the operation "
+            f"after it, but its error model holds only the operation's own "
+            f"{round_count} rounds; windows.terminal_policy flush ends the "
+            "last window inside its operation"
+        )
 
 
 def _stream_round_limit(physical_round_limit, model_round_limit):
@@ -588,7 +623,7 @@ class _TraceSources:
     """Every event the window planner reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

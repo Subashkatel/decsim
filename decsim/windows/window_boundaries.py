@@ -6,7 +6,7 @@ decoder_to_decoder, whose two ends this package holds: the record kept
 here is what leaves, and the destination window's record is what it
 lands in, so this component executes the send and handles the landing
 (OMNeT++ refuses a module that sends a message it does not own,
-tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; decisions.md
+src/sim/csimplemodule.cc:333-334; decisions.md
 D12). A held boundary waits for a final result. Versions
 make late deliveries harmless: every send bumps the source's version and
 each delivery's version, and a receiver only accepts the latest. Each
@@ -174,20 +174,8 @@ class BoundaryCourier:
     ) -> None:
         """Merge an already-delivered predecessor into a newly built window."""
         record = self._record(source_key)
-        delivery_revision = record.delivery_version_by_dependent.get(
-            destination.key, 0
-        )
-        source_round_count = self.planner.round_count_of(source_key[0])
-        delivery = window_records.BoundaryDelivery(
-            source_key=source_key,
-            destination_key=destination.key,
-            source_revision=record.version,
-            delivery_revision=delivery_revision,
-            latest_source_revision=record.version,
-            latest_delivery_revision=delivery_revision,
-            source_operation_round_count=source_round_count,
-            dependency_released=True,
-            payload=boundary,
+        delivery = self._settled_delivery(
+            source_key, destination, record, boundary
         )
         update = self._propose_boundary_update(delivery, destination)
         if update.release_dependency:
@@ -295,20 +283,8 @@ class BoundaryCourier:
         a dependent of the source, so the pin reads the delivery
         bookkeeping of the weak edge and advances none of it.
         """
-        delivery_revision = record.delivery_version_by_dependent.get(
-            destination.key, 0
-        )
-        source_round_count = self.planner.round_count_of(source_key[0])
-        delivery = window_records.BoundaryDelivery(
-            source_key=source_key,
-            destination_key=destination.key,
-            source_revision=record.version,
-            delivery_revision=delivery_revision,
-            latest_source_revision=record.version,
-            latest_delivery_revision=delivery_revision,
-            source_operation_round_count=source_round_count,
-            dependency_released=True,
-            payload=boundary,
+        delivery = self._settled_delivery(
+            source_key, destination, record, boundary
         )
         update = self._merged_update(delivery, destination, destination_info)
         if update.accepted:
@@ -343,6 +319,35 @@ class BoundaryCourier:
             attribution,
             payload_bits,
             delivered,
+        )
+
+    def _settled_delivery(
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        record: "_BoundaryRecord",
+        boundary,
+    ) -> window_records.BoundaryDelivery:
+        """The source's committed boundary as a delivery already landed.
+
+        It is the latest of its source and its edge, and its dependency
+        is already released, so a merge writes it without counting the
+        edge a second time.
+        """
+        delivery_revision = record.delivery_version_by_dependent.get(
+            destination.key, 0
+        )
+        source_round_count = self.planner.round_count_of(source_key[0])
+        return window_records.BoundaryDelivery(
+            source_key=source_key,
+            destination_key=destination.key,
+            source_revision=record.version,
+            delivery_revision=delivery_revision,
+            latest_source_revision=record.version,
+            latest_delivery_revision=delivery_revision,
+            source_operation_round_count=source_round_count,
+            dependency_released=True,
+            payload=boundary,
         )
 
     def _pin_attribution(
@@ -598,7 +603,7 @@ class BoundaryCourier:
         return update
 
 
-def _row_positions(model) -> dict:
+def _row_positions(model) -> Optional[dict]:
     """Where the model's own detector rows sit, and no other detector.
 
     A window's input is its own checks, so the residual is intersected

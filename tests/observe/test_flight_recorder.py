@@ -711,7 +711,7 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     task = config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=10.0,
+        round_period_microseconds=10.0,
         shots=1,
     )
     shot = collect.run_shot(task, 0)

@@ -11,20 +11,21 @@ schedules a decode, the decoder returns a result, the frame commits the
 correction, the frame releases the controller, the controller instructs
 the QPU, and every hop between components rides a link.
 
-The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder, Link,
-EscalationPolicy, ThresholdSource, ConfidenceSignal, WindowingScheme,
-IdlePolicy) have their abstract class here, sinter's Decoder shape
-(sinter/_decoding/_decoding_decoder_class.py, one class with the methods
-a row of the table must offer), written as a Protocol because the
-implementations fill it without inheriting. Observation (metrics, the
-traffic ledger, the trace) reaches a component through callbacks it
-fires, never through a port, so every component runs with no observer.
+The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder,
+StrongBackend, Link, EscalationPolicy, ThresholdSource, ConfidenceSignal,
+WindowingScheme, IdlePolicy) have their abstract class here, sinter's
+Decoder shape (sinter/_decoding/_decoding_decoder_class.py, one class
+with the methods a row of the table must offer), written as a Protocol
+because the implementations fill it without inheriting. Observation
+(metrics, the traffic ledger, the trace) reaches a component through
+callbacks it fires, never through a port, so every component runs with
+no observer.
 
 A component names its neighbours by declaring a Port (below) for each
 one, and the root binds them by assignment once every component exists.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.records.decoding as decoding_records
@@ -40,16 +41,16 @@ class Port:
     A component declares a port as a class attribute and reads it as an
     ordinary attribute; the root binds it by assignment once every
     component exists, which is gem5's script assigning one port to
-    another (tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68).
+    another (gem5 configs/learning_gem5/part1/simple.py:68).
     The port carries the Protocol its peer answers, so a class points at
     this file rather than the other way about.
 
     Two refusals, both gem5's. A second bind names the port, the peer it
     holds and the peer offered, as PortRef.connect does
-    (tmp/resources/gem5/src/python/m5/params/port_params.py:109-114). A
+    (gem5 src/python/m5/params/port_params.py:109-114). A
     required port read before it is bound raises, as gem5's default peer
     throws UnboundPortException
-    (tmp/resources/gem5/src/mem/port.cc:62-65); an optional port reads as
+    (gem5 src/mem/port.cc:62-65); an optional port reads as
     None instead, which is the neighbour a run does not have.
 
     Whether the peer answers the Protocol is not asked here. Every bind
@@ -63,7 +64,7 @@ class Port:
     The name arrives at class creation rather than at construction,
     because a descriptor learns what it was called only once the class
     body has run; gem5 fills it the same way, from its metaclass
-    (tmp/resources/gem5/src/python/m5/SimObject.py:353-357).
+    (gem5 src/python/m5/SimObject.py:353-357).
     """
 
     def __init__(self, protocol, optional: bool = False) -> None:
@@ -147,19 +148,35 @@ class SyndromeBuffer(Protocol):
     in the store, which is at the landing of the hop that carried them, and
     it is readable at that same instant: the store and the publication
     are one call at one tick. The end that takes the landing asks
-    has_room first with the round's bits, counting the bits it has
-    reserved for the writes in flight (gem5's packet store answers
+    has_room first with the round's key and bits, counting the rounds it
+    has reserved for the writes in flight (gem5's packet store answers
     `avail() = _maxsize - _size - _reserved` against the packet's own
     length, src/dev/net/pktfifo.hh); a packed round is written once and
     kept until every consumer releases it. A store never refuses a
-    write: a round that finds no room waits upstream.
+    write: a round that finds no room waits upstream. occupied_bits is
+    the bits the stored rounds hold now, which the strong receiving end
+    names when an escalated region finds no room.
     """
 
-    def has_room(self, bits: Optional[int], reserved_bits: int = 0) -> bool:
-        """Whether a round of that many bits fits beside what is taken.
+    occupied_bits: int
 
-        A bounded store raises on a round that states no size: a bound
-        is measured against a size.
+    def has_room(
+        self,
+        round_key: tuple,
+        bits: Optional[int],
+        reserved_bits_by_round: Mapping[tuple, int],
+    ) -> bool:
+        """Whether this round fits beside the stored and the reserved rounds.
+
+        The store is asked with the round itself, as gem5's requester
+        asks its responder with the packet (RequestPort::tryTiming(
+        PacketPtr pkt), src/mem/port.hh:268 and 617-623), so a store of
+        several memories answers for the memory the round goes to, which
+        gem5's interleaved ranges pick from the address
+        (src/base/addr_range.hh 70-78). reserved_bits_by_round is the
+        bits each round still crossing toward the store will take, by
+        its key. A bounded store raises on a round that states no size:
+        a bound is measured against a size.
         """
 
     def accept_packed_round(
@@ -169,6 +186,26 @@ class SyndromeBuffer(Protocol):
         publication_tick: Optional[int],
     ) -> None:
         """Keep one landed round, readable at that tick; None publishes none."""
+
+    def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
+        """Take a write of this round's stored bits; the tick it completes.
+
+        The store owns its access timing, so the receiving end asks it
+        rather than pricing the write itself. The tick is fixed when the
+        write is booked, as gem5's SimpleMemory fixes a response tick at
+        acceptance (src/mem/simple_mem.cc:174), and a booking is never
+        withdrawn. Nothing is scheduled: the caller schedules its own
+        continuation at the tick.
+        """
+
+    def book_read(self, round_keys: tuple) -> int:
+        """Take a read of these stored rounds; the tick their bits are out.
+
+        Asked by whoever takes the bits out, at the tick they leave: the
+        store's outgoing port at dispatch. The store sizes the read from
+        the widths it keeps. The tick is fixed and never withdrawn, as
+        for book_write.
+        """
 
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
@@ -183,7 +220,10 @@ class SyndromeBuffer(Protocol):
         """
 
     def held_rounds_description(self) -> str:
-        """The live holds, in one line, for a refusal a reader must debug."""
+        """The stored rounds, in one line, for the I/O trace."""
+
+    def check_settled(self) -> None:
+        """At the end of a run no round is stored and no hold is live."""
 
 
 @runtime_checkable
@@ -243,7 +283,11 @@ class RetainedRounds(Protocol):
         """
 
     def has_live_operation_reference(self, operation_id) -> bool:
-        """Whether a hold or a stored round still names this operation."""
+        """Whether a live hold still names this operation.
+
+        A stored round that no hold names has no reader, so it does not
+        keep its operation's result waiting.
+        """
 
 
 @runtime_checkable
@@ -255,7 +299,15 @@ class SyndromeRoundSender(Protocol):
     sends it on; a round that finds no room goes to the waiting line,
     which holds it for a retry or drops it as the controller's overflow
     setting says.
+
+    strong_crossing_count is the strong-primary rounds sent to the
+    strong syndrome buffer and not yet landed there, which the packing
+    stage's bound on rounds in flight counts (controller/round_assembly.py
+    RoundsInFlight), since the windows hear of such a round at its
+    landing.
     """
+
+    strong_crossing_count: int
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it found no room."""
@@ -273,16 +325,16 @@ class StrongSyndromeRoundReceiver(Protocol):
     landing.
     """
 
-    def has_room(self, bits: Optional[int]) -> bool:
-        """Whether a write of that many bits can land."""
+    def has_room(self, packed: round_records.PackedRound) -> bool:
+        """Whether this round's write can land."""
 
-    def reserve_write(self, bits: Optional[int]) -> None:
-        """Take the bits one crossing round will need, before it leaves."""
+    def reserve_write(self, packed: round_records.PackedRound) -> None:
+        """Take the room this crossing round will need, before it leaves."""
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Store a landed round and deliver it on its canonical route."""
 
-    def reserve_region(self, round_count: int, bits: Optional[int]) -> None:
+    def reserve_region(self, region: round_records.EscalatedRegion) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
 
     def receive_region(self, region: round_records.EscalatedRegion) -> None:
@@ -303,21 +355,29 @@ class WeakSyndromeRoundReceiver(Protocol):
     store's own outgoing port.
     """
 
-    def has_room(self, bits: Optional[int]) -> bool:
-        """Whether that many bits fit: the stored ones and those in flight."""
+    def has_room(self, packed: round_records.PackedRound) -> bool:
+        """Whether this round fits beside the stored and the crossing ones."""
 
-    def reserve_write(self, bits: Optional[int]) -> None:
-        """Take the bits one crossing round will need, before it leaves."""
+    def reserve_write(self, packed: round_records.PackedRound) -> None:
+        """Take the room this crossing round will need, before it leaves."""
 
-    def receive_round(self, packed: round_records.PackedRound) -> None:
-        """Take one round that landed here: store it, then announce it."""
+    def receive_round(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        """Take one landed round: store it, announce it, then on_published.
+
+        on_published runs once the windows have heard of the round, which
+        is where the sender's count of rounds in flight lets it go.
+        """
 
     def send_memory_round(
         self,
         packed: round_records.PackedRound,
         on_delivered: Callable[[], None],
     ) -> None:
-        """Send one timing-only round to the decoder side the store feeds."""
+        """Write one landed timing-only round, then send it to the decoder."""
 
 
 @runtime_checkable
@@ -337,7 +397,11 @@ class SyndromeBufferOutput(Protocol):
         job: decoding_records.DecodeJob,
         on_landed: Callable[[], None],
     ) -> int:
-        """Move one job's rounds to its unit; the delay the link expects."""
+        """Read one job's rounds out of the store and move them to its unit.
+
+        The delay expected: the read, then the link. A store whose tier
+        reads in place lands the input at the read's end instead.
+        """
 
     def land_held_input(
         self,
@@ -383,9 +447,9 @@ class HeldRounds(Protocol):
     the sender, and the store tells the line when a slot frees so the
     head can try again. Ruby's MessageBuffer counts that wait as the
     buffer's own statistic
-    (tmp/resources/gem5/src/mem/ruby/network/MessageBuffer.cc:76-82), and
+    (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82), and
     ns-3's queue disc stamps the packet at the enqueue
-    (tmp/resources/l5_buffers/ns3-traffic-control/queue-disc.cc:851).
+    (ns-3 src/traffic-control/model/queue-disc.cc:851).
     """
 
     def retry(self) -> None:
@@ -821,7 +885,10 @@ class DecoderOutput(Protocol):
         region: round_records.EscalatedRegion,
         on_delivered: Callable[[], None],
     ) -> int:
-        """Send a strong window's rounds up; the delay the link expects."""
+        """Read a strong window's rounds out of the weak store, send them up.
+
+        The delay expected: the store's read, then the link.
+        """
 
 
 @runtime_checkable
@@ -1068,16 +1135,62 @@ class Decoder(Protocol):
         """Decodes that may be in flight on one unit; one is no pipeline."""
 
 
+@runtime_checkable
+class StrongBackend(Protocol):
+    """The device a strong decode runs on, as the strong decoder sees it.
+
+    Rows: measured_table, a device's measured time law with decsim's own
+    answer. A live device (a real GPU process decsim hands the region to
+    and waits for) answers the same four methods.
+
+    A strong decode crosses the link in, lands, is noticed, waits, is
+    decoded and is written back before the link out. The link cards
+    price the two links from echo round trips, which already hold the
+    landing, the notice and the write back with no work done: Backline's
+    responders poll their memory and "return the received value without
+    decoding" (2609.09270 lines 2355-2360), and NVQLink's persistent
+    kernel "waits for packet arrival, and loops them back" (2510.25213
+    lines 528-533). So a backend reports only the time beyond the echo
+    on the same path, the launch included, and never the wait: the wait
+    emerges from its capacity in front of the arrivals, a queue decsim
+    keeps. IonQ gives each decoding core a fixed set of blocks served in
+    turn (2608.25027 lines 507-511), and a device graph "cannot be
+    launched twice from the device at the same time" (CUDA C++
+    Programming Guide, device graph launch), so one CUDA-Q dispatcher's
+    decode ends before its next begins (cudaqx
+    docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50).
+
+    submit takes the region with the count of decodes already running on
+    the device, because the device's time depends on it (IonQ lines
+    550-554 time every decode under full co-running load). The ticket
+    lets a device answer after its own call returns; service_ticks and
+    result are asked after submit, once each.
+    """
+
+    def capacity(self) -> int:
+        """Decodes the device runs at once; decsim queues the rest."""
+
+    # The ticket is an opaque identity only the backend that issued it reads.
+    def submit(self, request: decoding_records.DecodeJob, running: int) -> Any:
+        """Start one region's decode with running others on the device."""
+
+    def service_ticks(self, ticket: Any) -> int:
+        """The decode's time beyond the echo on the same path, in ticks."""
+
+    def result(self, ticket: Any) -> decoding_records.DecodeResult:
+        """The correction and observables; decode_status marks unconverged."""
+
+
 # ------------------------------------------- the frame commits the correction
 
 
 @runtime_checkable
 class Frame(Protocol):
-    """The Pauli frame, as the window manager sees it.
+    """The Pauli frame, as the decoder output sees it.
 
     Table row: logical_register (FRAMES,
     pauli_frame/pauli_frame.py), named by pauli_frame.kind; every row
-    takes the engine and the write cost in ticks.
+    takes the engine, the clock and the write cost in cycles of it.
     """
 
     def commit_correction(
@@ -1141,7 +1254,7 @@ class OperationRuntime(Protocol):
     release path when a decision lands, and the protected streams when a
     cadence change frees an operation that was waiting. gem5 keeps the
     same split between the workload's graph and the object that runs it
-    (tmp/resources/gem5/configs/deprecated/example/se.py builds the
+    (gem5 configs/deprecated/example/se.py builds the
     process list, the system runs it).
     """
 
@@ -1349,6 +1462,21 @@ class SyndromeSource(Protocol):
     ) -> Optional[tuple[int, ...]]:
         """The observable flips the source drew, or None when it draws none."""
 
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The tick this readout leaves the chip, at or after readout_tick.
+
+        readout_tick is the cycle boundary the clock read the round out
+        at, and a source whose readout arrives with a fixed delay or a
+        jitter names a later tick, as gem5's queued port lets its owner
+        name the absolute tick a response or a request is sent
+        (gem5 src/mem/qport.hh:94 schedTimingResp, 150
+        schedTimingReq). The clock asks for every readout it hands the
+        controller, and sends it at that tick behind every earlier
+        readout of its patches.
+        """
+
     def window_model_source(self) -> "WindowModelSource":
         """Where the run's window error models come from, by default.
 
@@ -1532,7 +1660,19 @@ class Link(Protocol):
     override and builds the fabric the root sends on. Every hop of the
     reaction path is priced, and a send delivers by callback with every
     tick of the transfer on the record.
+
+    trace holds transfer_delivered, a trace source the fabric fires once
+    per delivered transfer with a TransferRecord. It is on the port
+    because the machine connects the traffic ledger, the data-movement
+    ledger and the trace writer to whatever answers this port
+    (decsim/observe/wiring.py), as the Decoder port carries
+    stage_recorded; ns-3's point-to-point device declares its trace
+    sources on the device the same way (ns-3
+    src/point-to-point/model/point-to-point-net-device.cc, GetTypeId's
+    AddTraceSource calls).
     """
+
+    trace: Any
 
     def expected_delay_ticks(
         self,
@@ -1613,6 +1753,43 @@ class WindowTransfers(Protocol):
         on_delivered: Callable[[], None],
     ) -> int:
         """Send an escalated region in its request's name; the delay."""
+
+
+@runtime_checkable
+class Channel(Protocol):
+    """One physical channel under the fabric: its setup engine and its wire.
+
+    One step below Link: the fabric selects a path's payload, frames it
+    with the path's header and hands it to the channel the path's card
+    names; the channel decides when the bits cross and calls back at
+    the delivery. The split is ns-3's, where the net device frames and
+    queues and the channel it is attached to times the crossing (ns-3
+    src/point-to-point/model/point-to-point-net-device.cc TransmitStart
+    calls point-to-point-channel.cc TransmitStart), and gem5's, where a
+    port hands its packets to the packet queue that decides when each
+    one goes (gem5 src/mem/port.hh, src/mem/packet_queue.hh:62-63).
+
+    A Link row's build hands the fabric a channel class, which the
+    fabric calls once per channel name with that channel's
+    ChannelSettings and the engine, so a jittered or credit-limited
+    channel is one class and no fabric subclass. framed is a
+    FramedPayload (decsim/links/channel.py): the payload bits a
+    component sent and the header bits its path adds.
+    """
+
+    def send(
+        self,
+        framed,
+        now_ticks: int,
+        setup_ticks: int,
+        on_delivered: Callable[[transfer_records.Transfer], None],
+    ) -> None:
+        """Carry one framed payload; on_delivered runs at its delivery."""
+
+    def expected_delay_ticks(
+        self, framed, now_ticks: int, setup_ticks: int
+    ) -> int:
+        """What the transfer would pay if nothing else reached the channel."""
 
 
 # ------------------------------------ the pluggable policies off the path
@@ -1698,9 +1875,9 @@ class ThresholdSource(Protocol):
     online row labels a kept window by re-decoding it on the strong
     tier) needs one serial strong re-decode per window, so Switching
     refuses it beside run_both_at_once and the forward strong window.
-    reads_a_calibration_table says the point's number comes from
-    calibrate_threshold.py's csv rather than from the section's card, so
-    the settings demand threshold_table. built_per_sweep_point says the
+    reads_a_calibration_table says the point's number comes from an
+    offline calibration csv rather than from the section's card, so the
+    settings demand threshold_table. built_per_sweep_point says the
     row builds one instance of itself for a whole sweep point, which
     the experiments layer hands to every shot, because the row learns
     across the point's windows; every other row is built by the root
@@ -1872,15 +2049,24 @@ class MagicStateFactory(Protocol):
     ahead of demand queues its first attempt in start, never in its
     constructor, so the order the root builds its components in cannot
     move a tick (gem5's startup, the place to schedule initial events,
-    tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+    gem5 src/sim/sim_object.hh lines 194 and 280). A row
+    declares a decode_queue port (a DecodeQueue), which the root binds
+    to the run's decoder manager; a row whose card corrects nothing
+    leaves it unread.
+
+    trace holds state_delivered(operation_id, waited_ticks), fired at
+    every delivery with the ticks the request waited, which is the
+    supply stall; it is on the port because the machine connects the
+    run's runtime stamps to whatever answers this port, and a row whose
+    requests never wait carries it and never fires it.
     """
 
-    engine: Any
+    trace: Any
 
     def start(self) -> None:
         """Queue whatever the factory does before the first request."""
 
-    def request(self, operation_id: int, callback: Callable[[], None]):
+    def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Ask for one state; callback runs once it is ready."""
 
     def shutdown(self) -> None:
@@ -1895,12 +2081,105 @@ class IdlePolicy(Protocol):
     (controller/policies.py, beside the accounting they serve). relay
     carries one idle round through the
     idle accounting it is given (controller/idle_rounds.py);
-    end_idle_period runs when an operation claims the patch, so rounds
-    the policy has not charged yet can be settled.
+    end_idle_period runs when an operation claims the patch and, for
+    every idle patch, when the workload completes, so rounds the policy
+    has not charged yet can be settled.
     """
 
     def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
         """Carry one idle round of the patch through the idle accounting."""
 
     def end_idle_period(self, idle_rounds, operation, patch) -> None:
-        """Settle the uncharged rounds when an operation claims the patch."""
+        """Settle the uncharged rounds: a claim, or the workload's end."""
+
+
+# ---------------------------- the rows the root reads before it builds
+
+
+@runtime_checkable
+class CodeModel(Protocol):
+    """A code card: the numbers the machine reads off a QEC code.
+
+    Table rows: rotated_surface, bivariate_bicycle (CODE_CARDS,
+    qpu/settings.py), named by qpu.code_card. A card is a record of
+    numbers, not a stabilizer code: the machine prices decoder timing,
+    so it asks a card for its name and distance, its window sizes, its
+    own round period, the graph size a latency model prices, and the
+    bits one round reads out, and for nothing else. The shape is CUDA-Q
+    QEC's code base class, a few counts every code implements
+    (cudaqx libs/qec/include/cudaq/qec/code.h lines 51-58
+    and 140-160), built by name with the code's own options (get_code,
+    line 257). The planner, the plan, the round policies, the QPU clock
+    and the circuit-less sources call it.
+    """
+
+    name: str
+    distance: int
+
+    def rounds_per_logical_cycle(self) -> int:
+        """Syndrome rounds per logical cycle."""
+
+    def round_period_us(self) -> Optional[float]:
+        """The card's own round period, or None for the run's cadence."""
+
+    def commit_rounds(self) -> int:
+        """Rounds committed per decode window."""
+
+    def buffer_rounds(self) -> int:
+        """Look-ahead rounds per decode window."""
+
+    def spatial_nodes(self, num_patches: int) -> int:
+        """The per-round graph size a latency model prices this card at."""
+
+    def syndrome_bits_per_round(self, num_patches: int) -> int:
+        """Syndrome bits one round of this many patches produces."""
+
+
+@runtime_checkable
+class RowSettings(Protocol):
+    """A table row's own yaml keys, read into one record.
+
+    A row with keys of its own declares a nested frozen dataclass named
+    Settings that fills this: its fields are the keys, and from_yaml
+    reads and checks the ones the yaml wrote, which are all it is
+    handed. context is whatever the row's section passes on, nothing
+    for most sections and the run's clocks (config.ClockSettings) for a
+    decoder tier, whose timing names a clock domain. A row with no keys
+    declares no Settings. The section splits its keys from the row's
+    and refuses a key neither declares (decsim/tables.py row_settings);
+    how the record reaches the row is its table's build call. The shape
+    is gem5's: a SimObject's parameters declared on its class
+    (gem5 src/mem/SimpleMemory.py:43-53) and handed to
+    its constructor as one Params record (src/mem/simple_mem.cc:53).
+    """
+
+    @classmethod
+    def from_yaml(cls, section, *context) -> "RowSettings":
+        """The record, read from the row's own keys the yaml wrote."""
+
+
+@runtime_checkable
+class WorkloadRow(Protocol):
+    """A workload row: what the machine runs, as the root reads it.
+
+    Table rows: memory_circuit, circuit_list, surgery_ir (WORKLOADS,
+    frontends/settings.py), named by workload.kind. The root never
+    builds a workload row; it reads the class. operations turns the
+    workload section's record (frontends/settings.py WorkloadSettings,
+    whose row_settings holds the row's own RowSettings) and the run's
+    code card into the operations and the rounds policy the row fixes,
+    or None where the workload's policy applies (build/plan.py
+    _operations). has_frontend says whether an operation chain is built
+    in front of the run, a fact of the run shape the escalation policy
+    checks (build/plan.py build_plan). A row that no yaml can name
+    declares a Settings whose from_yaml refuses with a sentence. gem5's
+    Workload is the same shape: a SimObject whose parameters sit on its
+    class and whose few answers the system reads before it runs
+    (gem5 src/sim/Workload.py:46-52,
+    src/sim/workload.hh:103-105).
+    """
+
+    has_frontend: bool
+
+    def operations(self, settings, code: CodeModel) -> tuple:
+        """The operations, and the rounds policy the row fixes or None."""

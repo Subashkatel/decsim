@@ -169,9 +169,7 @@ class CycleCount:
 
     def extra_growth_cycles(self, steps: tuple) -> int:
         """The cycles the extra growth's events cost after the decode."""
-        growth_ticks = 0
-        for step in steps:
-            growth_ticks += step.growth_ticks
+        growth_ticks = _growth_ticks(steps)
         if growth_ticks == 0:
             return JOIN_TEST_CYCLES
         iteration = GROW_AND_DECIDE_CYCLES + self.delay_cycles
@@ -186,9 +184,7 @@ class CycleCount:
 
     def _iteration_cycles(self, steps: tuple) -> int:
         """Grow, wait and decide, once per growth tick the decode spans."""
-        growth_ticks = 0
-        for step in steps:
-            growth_ticks += step.growth_ticks
+        growth_ticks = _growth_ticks(steps)
         iterations = max(1, growth_ticks)
         floor = GROW_AND_DECIDE_CYCLES + self.delay_cycles
         return floor * iterations
@@ -214,11 +210,21 @@ class CycleCount:
         return floor + level_cycles
 
 
+def _growth_ticks(steps: tuple) -> int:
+    """The growth ticks the steps span, one growth iteration each."""
+    growth_ticks = 0
+    for step in steps:
+        growth_ticks += step.growth_ticks
+    return growth_ticks
+
+
 def _fusion_changes(step: evidence_records.GrowthStep) -> int:
     """The cycles one step's fusions ripple through the cluster they fused.
 
     A fusion that moves no parity settles a root and the touching flag a
-    level a cycle. One that moves a parity moves the root once and then
+    level a cycle, and takes one cycle when the cluster it fused is a
+    lone detector, a detector meeting the boundary, with no level to
+    cross. One that moves a parity moves the root once and then
     climbs the parity and descends the odd flag a level a cycle, and
     those two floods overlap the root's own descent, so a chain of depth
     D settles in 1 + 2 D changes.
@@ -232,6 +238,7 @@ def _fusion_changes(step: evidence_records.GrowthStep) -> int:
 
 
 def _check_keys(section: Mapping) -> None:
+    """The block names its clock and no key the count does not read."""
     known = set(CYCLE_FIELDS)
     known.add("clock")
     known.add("cycles_per_edge")
@@ -241,6 +248,10 @@ def _check_keys(section: Mapping) -> None:
         raise ValueError(
             f"cycle_count has no key {listed}; its keys are clock, "
             f"cycles_per_edge and {list(CYCLE_FIELDS)}"
+        )
+    if "clock" not in section:
+        raise ValueError(
+            "cycle_count needs clock, the domain its cycles are counted in"
         )
 
 

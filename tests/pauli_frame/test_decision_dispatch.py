@@ -11,6 +11,7 @@ the same instant, and only the controller's own costs stand
 """
 
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.log_writers as log_writers
@@ -47,7 +48,7 @@ def dispatch_over(link):
 
 def priced_fabric(engine):
     reference = link_profiles.logical_reference_profile()
-    return fabric_module.LinkFabric(reference, engine)
+    return fabric_module.LinkFabric(reference, engine, channel_module.Channel)
 
 
 def test_the_decision_reaches_the_controller_one_crossing_later():

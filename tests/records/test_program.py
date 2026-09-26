@@ -60,3 +60,12 @@ def test_operation_planning_view_preserves_explicit_feedback_mode():
         default_feedback_boundary_mode="trailing_buffer",
     )
     assert view.feedback_boundary_mode == "committed_region"
+
+
+def test_a_segments_rounds_fold_into_its_stream_at_its_offset():
+    standalone = make_operation()
+    segment = make_operation(stream_id="stream", stream_offset=6)
+    assert program_records.decode_identity(standalone) == 4
+    assert program_records.global_round(standalone, 3) == 3
+    assert program_records.decode_identity(segment) == "stream"
+    assert program_records.global_round(segment, 3) == 9

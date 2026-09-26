@@ -12,7 +12,7 @@ The clock section follows XQsim's shape: domain labels with frequencies
 over one tick core. Both shipped domains start at LILLIPUT's 250 MHz
 (2108.06569 Table 4), so a period is 4000 ticks. A domain hands out a
 Clock, whose two methods are gem5's clockEdge and ticksToCycles
-(tmp/resources/gem5/src/sim/clocked_object.hh lines 174-186 and
+(gem5 src/sim/clocked_object.hh lines 174-186 and
 224-227): a cost of n cycles is charged from the edge at or after the
 current tick, and a span of ticks is rounded up to whole cycles.
 """

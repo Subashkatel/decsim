@@ -33,7 +33,7 @@ weak_decoder:
 sweep:
   - physical_error_probability: [0.001]
     distance: [3, 5, 7]
-    round_period_us: [1.0]
+    round_period_microseconds: [1.0]
     shots: 20
 ```
 

@@ -39,19 +39,12 @@ class RoundHolds:
         old = self.record_by_holder.get(holder)
         if old is None:
             raise RuntimeError(f"hold {holder!r} is not live")
-        if record == old:
-            return []
         self.record_by_holder[holder] = record
-        for round_key in record.round_keys:
-            if round_key not in old.round_keys:
-                self._attach(round_key, holder)
-        orphaned = []
-        for round_key in old.round_keys:
-            if round_key in record.round_keys:
-                continue
-            if self._detach(round_key, holder):
-                orphaned.append(round_key)
-        return orphaned
+        added = _rounds_missing_from(record.round_keys, old.round_keys)
+        for round_key in added:
+            self._attach(round_key, holder)
+        dropped = _rounds_missing_from(old.round_keys, record.round_keys)
+        return self._detach_all(dropped, holder)
 
     def transfer(self, old_holder, new_holder) -> None:
         """Move a live hold to a new token without freeing its rounds."""
@@ -74,10 +67,7 @@ class RoundHolds:
         record = self.record_by_holder.pop(holder, None)
         if record is None:
             raise RuntimeError(f"hold {holder!r} was never registered")
-        orphaned = []
-        for round_key in record.round_keys:
-            if self._detach(round_key, holder):
-                orphaned.append(round_key)
+        orphaned = self._detach_all(record.round_keys, holder)
         self.released_holders[holder] = record.referenced_operation_ids
         return orphaned
 
@@ -124,6 +114,14 @@ class RoundHolds:
         holders = self.holders_by_round.setdefault(round_key, set())
         holders.add(holder)
 
+    def _detach_all(self, round_keys, holder) -> list:
+        """Drop one holder from these rounds; the ones left with none."""
+        orphaned = []
+        for round_key in round_keys:
+            if self._detach(round_key, holder):
+                orphaned.append(round_key)
+        return orphaned
+
     def _detach(self, round_key, holder) -> bool:
         """Drop one holder; True when the round has no holder left."""
         holders = self.holders_by_round.get(round_key)
@@ -134,3 +132,12 @@ class RoundHolds:
             return False
         del self.holders_by_round[round_key]
         return True
+
+
+def _rounds_missing_from(round_keys: tuple, other_round_keys: tuple) -> list:
+    """The rounds of the first span that the second does not name."""
+    missing = []
+    for round_key in round_keys:
+        if round_key not in other_round_keys:
+            missing.append(round_key)
+    return missing

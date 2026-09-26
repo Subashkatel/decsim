@@ -3,9 +3,19 @@
 Skoric et al. 2209.08552 section I.B, the overlapping recovery method:
 window i commits F rounds and reads B more, and window i + 1 begins
 where window i's commit ended. How a finite stream drains its last
-buffered window is the terminal policy: the Tan flush, which is qLDPC's
-SlidingWindowDecoder tail rule, or a regular stride whose last commit is
-what is left.
+buffered window is the terminal policy: the flush, which is qLDPC's
+SlidingWindowDecoder tail rule (qLDPC src/qldpc/decoders/sinter.py:
+776-777), or a regular stride whose last commit is what is left. Tan et
+al. 2209.09219 lines 952-955 let the last window be shorter than a
+regular one; the flush, like qLDPC, never lays one shorter than W.
+
+A round here is decsim's round, and the data readout's detector layer
+folds into the last one (detector_error_model/detector_chronology.py).
+cudaqx's sliding window keeps that layer as a boundary layer of its own
+(cudaqx libs/qec/lib/decoders/sliding_window.cpp:143-146, the
+[B | S...S | B] layout), so a window whose rounds reach the last round
+reads one layer more than the cudaqx window over the same rounds; every
+earlier window reads the same layers.
 """
 
 import math
@@ -18,10 +28,9 @@ class SlidingWindowScheme:
     """Serial commit and look-ahead buffer windows.
 
     windows.terminal_policy is the one key this row reads: flush ends the
-    last window at the stream's last round, Tan's last window
-    (2209.09219 lines 952-955), and lookahead keeps the regular stride,
-    so the last window still reads rounds past its own commit and a
-    strong recovery has context to read.
+    last window at the stream's last round, qLDPC's last window, and
+    lookahead keeps the regular stride, so the last window still reads
+    rounds past its own commit and a strong recovery has context to read.
     """
 
     scheme_label = "sliding-window (serial commit/buffer chain)"
@@ -49,7 +58,7 @@ class SlidingWindowScheme:
 
         F is commit_round_count and W is commit_round_count plus
         buffer_round_count. Regular windows commit their first F rounds.
-        Under the Tan flush the last window begins when fewer than W + F
+        Under the flush the last window begins when fewer than W + F
         rounds remain and commits every remaining round (qLDPC's
         SlidingWindowDecoder tail rule; the last window is never shorter
         than W); under the lookahead policy every window strides F and
@@ -114,10 +123,11 @@ def _finite_forward_window_geometries(
     """Finite forward windows with one closed all-core tail.
 
     Regular windows commit F rounds and read W = F + B. The tail rule is
-    qLDPC's SlidingWindowDecoder rule (sinter.py, `while start < end -
-    (W + s - 1)`): the last window starts as soon as fewer than W + F
-    rounds remain, so it commits everything left and is never shorter
-    than W. A short tail is never decoded on its own; it is absorbed by
+    qLDPC's SlidingWindowDecoder rule (qLDPC src/qldpc/decoders/sinter.py:
+    776-777, `while start_time < end_time - max_size_of_last_window`,
+    that size being W + F - 1): the last window starts as soon as fewer
+    than W + F rounds remain, so it commits everything left and is never
+    shorter than W. A short tail is never decoded on its own; it is absorbed by
     the last full-width window instead.
     """
     window_width = commit_round_count + buffer_round_count

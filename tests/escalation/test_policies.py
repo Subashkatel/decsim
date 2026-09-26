@@ -471,7 +471,7 @@ def _switching_config(
     sweep_point = {
         "physical_error_probability": [0.008],
         "distance": [3],
-        "round_period_us": [1.0],
+        "round_period_microseconds": [1.0],
         "shots": 1,
     }
     strong_decoder = yaml_configs.strong_unit("belief_matching")
@@ -533,7 +533,9 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
     config_path = _confident_config(tmp_path)
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.008, distance=3, round_period_us=1.0
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings, 0)
     boundary_policy = machine.window_manager.courier.boundary_policy
@@ -598,7 +600,9 @@ def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
     )
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.008, distance=3, round_period_us=1.0
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     policy = escalation_build.build_escalation_policy(
         settings.escalation, settings.weak_decoder
@@ -769,7 +773,9 @@ def test_a_windowing_scheme_named_in_a_yaml_runs_under_switching(
     config_path = _switching_config(tmp_path, windows_kind="delegating")
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.008, distance=3, round_period_us=1.0
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings, 0)
     planner_scheme = machine.window_manager.planner.scheme
@@ -792,7 +798,9 @@ def test_eager_boundaries_named_in_a_yaml_are_refused_under_switching(
     with pytest.raises(ValueError, match="serial switching requires held"):
         config = experiment.load_experiment(config_path)
         settings = config.point_settings(
-            physical_error_probability=0.008, distance=3, round_period_us=1.0
+            physical_error_probability=0.008,
+            distance=3,
+            round_period_microseconds=1.0,
         )
         machine_module.Machine.build(settings, 0)
 
@@ -802,7 +810,9 @@ def test_held_boundaries_named_in_a_yaml_are_the_rows_the_run_gets(tmp_path):
     config_path = _switching_config(tmp_path, boundaries="held")
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.008, distance=3, round_period_us=1.0
+        physical_error_probability=0.008,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings, 0)
     boundary_policy = machine.window_manager.courier.boundary_policy
@@ -817,7 +827,9 @@ def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):
     with pytest.raises(ValueError, match="no trailing tail context"):
         config = experiment.load_experiment(config_path)
         settings = config.point_settings(
-            physical_error_probability=0.008, distance=3, round_period_us=1.0
+            physical_error_probability=0.008,
+            distance=3,
+            round_period_microseconds=1.0,
         )
         machine_module.Machine.build(settings, 0)
 

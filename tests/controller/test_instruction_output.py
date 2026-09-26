@@ -23,6 +23,7 @@ readout pulse to the start of the feedback pulse).
 import decsim.config as config
 import decsim.controller.instruction_output as instruction_output
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
@@ -40,7 +41,7 @@ def test_a_release_is_consumed_where_it_lands():
     """The crossing is already paid: the release is available at once."""
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
-    link = fabric_module.LinkFabric(reference, engine)
+    link = fabric_module.LinkFabric(reference, engine, channel_module.Channel)
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
     output.link = link
@@ -64,7 +65,7 @@ def test_a_release_is_consumed_where_it_lands():
 def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
-    link = fabric_module.LinkFabric(reference, engine)
+    link = fabric_module.LinkFabric(reference, engine, channel_module.Channel)
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
     output.link = link
@@ -94,14 +95,14 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
 def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
     """The control processor charges whole cycles, edge to edge.
 
-    gem5's clockEdge (tmp/resources/gem5/src/sim/clocked_object.hh lines
+    gem5's clockEdge (gem5 src/sim/clocked_object.hh lines
     174-186): a decision that lands mid-cycle waits out that cycle, so
     on a 100-tick period a decision at tick 10 has its pulse ready two
     cycles later, at 300.
     """
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
-    link = fabric_module.LinkFabric(reference, engine)
+    link = fabric_module.LinkFabric(reference, engine, channel_module.Channel)
     recorder = round_events.RoundEventRecorder(engine)
     slow_clock = config.Clock(100)
     output = instruction_output.InstructionOutput(engine, slow_clock, 2)

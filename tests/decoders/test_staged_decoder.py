@@ -29,6 +29,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 
@@ -265,7 +266,7 @@ def test_a_cancel_during_a_hardware_stage_ends_that_stage_at_the_cancel():
     wanted, and the stage that was open ends at the cancel rather than
     at the time its cycles would have taken: gem5 abandons a squashed
     instruction where it stands and counts it apart
-    (tmp/resources/gem5/src/cpu/o3/inst_queue.cc:895-908, :294-298).
+    (gem5 src/cpu/o3/inst_queue.cc:895-908, :294-298).
     Nothing after it is charged or reported.
     """
     engine = engine_module.Engine()
@@ -488,3 +489,44 @@ def test_the_pipeline_parameters_are_refused_where_the_card_is_built():
         )
     with pytest.raises(ValueError, match="needs an initiation_interval_us"):
         staged_decoder.UnitTiming((), (), CLOCK, pipeline_depth=2)
+
+
+def _job_of_rounds(round_bits) -> decoding_records.DecodeJob:
+    """A job whose payloads are one fragment a round, of those widths."""
+    payloads = []
+    for round_index, bits in enumerate(round_bits, start=1):
+        fragment = round_records.RetainedSyndromeFragment(
+            operation_id=1,
+            patch_ids=(0,),
+            round_index=round_index,
+            bits=None,
+            size_bits=bits,
+            fragment_index=0,
+        )
+        payloads.append(fragment)
+    round_count = len(round_bits)
+    return decoding_records.DecodeJob(
+        operation_id=1, window_id=0, round_count=round_count, payloads=payloads
+    )
+
+
+@pytest.mark.parametrize(("word_bits", "cycles"), [(8, 345), (None, 22)])
+def test_a_fetch_reads_each_round_in_whole_words_of_the_units_memory(
+    word_bits, cycles
+):
+    """At d = 11, 22 rounds and 8 + 21 x 15 = 323 words: 345 cycles.
+
+    The rounds are 60 then 21 x 120 bits, one round cycle each beside the
+    words.
+
+    gem5's crossbar charges divCeil(size, width) per packet
+    (src/mem/xbar.cc:135); Helios loads a round a byte a clock from a byte
+    boundary (control_node_single_FPGA.v lines 35-36 and 152-167).
+    """
+    fetch = staged_decoder.MemoryFetchStage(
+        "fetch", cycles_per_round=1, word_bits=word_bits
+    )
+    first_window = (60,) + (120,) * 21
+    job = _job_of_rounds(first_window)
+
+    assert fetch.cycles_for(job) == cycles

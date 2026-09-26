@@ -44,14 +44,19 @@ SHIPPED_CONFIGS = (
 
 
 def measure_point_shot(
-    config, *, physical_error_probability, distance, round_period_us, seed
+    config,
+    *,
+    physical_error_probability,
+    distance,
+    round_period_microseconds,
+    seed,
 ):
     """One seeded shot at one sweep point, collected and measured."""
     shots = seed + 1
     task = config.point_task(
         physical_error_probability=physical_error_probability,
         distance=distance,
-        round_period_us=round_period_us,
+        round_period_microseconds=round_period_microseconds,
         shots=shots,
     )
     shot = collect.run_shot(task, seed)
@@ -78,7 +83,7 @@ MINIMAL_CONFIG = {
         {
             "physical_error_probability": [0.001],
             "distance": [3],
-            "round_period_us": [1.0],
+            "round_period_microseconds": [1.0],
             "shots": 1,
         }
     ],

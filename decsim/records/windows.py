@@ -29,9 +29,9 @@ class DecoderTier(Enum):
 
 # windows.terminal_policy names one of these: how a finite serial stream
 # drains its last buffered window. flush ends the last window at the
-# stream's last round, which is Tan's last window (2209.09219 lines
-# 952-955); lookahead keeps the regular stride, so the last window
-# still reads rounds past its own commit.
+# stream's last round, which is qLDPC's last window (qLDPC
+# src/qldpc/decoders/sinter.py:776-777); lookahead keeps the regular
+# stride, so the last window still reads rounds past its own commit.
 TERMINAL_POLICIES = ("flush", "lookahead")
 
 
@@ -44,7 +44,7 @@ class WindowingSchemeCard:
     lays; a row reads the keys its own layout needs and ignores the
     rest. This is the shape the rows of STRONG_WINDOW_SHAPES have, and
     gem5's params object
-    (tmp/resources/gem5/src/python/m5/SimObject.py:204-205).
+    (gem5 src/python/m5/SimObject.py:204-205).
     """
 
     terminal_policy: str = "flush"
@@ -105,7 +105,6 @@ class Window:
     # the final one, so a provisional weak commit is still awaiting strong
     published_request_key: Optional[DecoderRequestKey] = None
     queued: bool = False  # a decode request is pending or admitted
-    blocked_logged: bool = False  # log-once flag for the "blocked" trace line
     boundary_in: Any = field(default_factory=dict)  # state owned by the
     # configured WindowInteraction
     decode_status: Optional[str] = (

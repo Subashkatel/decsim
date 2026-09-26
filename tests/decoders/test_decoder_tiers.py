@@ -35,7 +35,7 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
             config,
             physical_error_probability=0.005,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
             seed=seed,
         )
         assert measurement.algorithm == "pymatching"
@@ -53,7 +53,7 @@ def test_strong_unit_runs_belief_matching(tmp_path):
         config,
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=0,
     )
     assert measurement.algorithm == "belief_matching"
@@ -81,7 +81,9 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
     )
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings)
     machine.run()
@@ -100,3 +102,39 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
     assert len(algorithm) > 0
     assert ticks_past_an_edge == {0}
     assert min(held_ticks) >= 11 * period_ticks
+
+
+def test_a_measured_table_tier_is_held_by_the_measured_line(tmp_path):
+    """Every decode holds its unit 78.957 us plus 9.762 us an iteration.
+
+    The gh200 and a100 rows differ, so the device key read from the
+    yaml is the one the unit prices by: a100, whole, the 360-detector
+    region nearest a d = 5 window (decoders/measured_table).
+    """
+    strong_decoder = strong_unit("measured_table")
+    strong_decoder["strong_decoder"]["device"] = "a100"
+    card = {"escalation": {"kind": "strong_only"}}
+    card.update(strong_decoder)
+    config_path = write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001,
+        distance=5,
+        round_period_microseconds=1.0,
+    )
+    machine = machine_module.Machine.build(settings)
+    machine.run()
+    records = machine.observation.stages.records
+    algorithm = [
+        record
+        for record in records
+        if record.stage == staged_decoder.ALGORITHM_STAGE
+    ]
+    intercept_ticks = 78_957_000
+    ticks_per_iteration = 9_762_000
+    held_ticks = [record.end_ticks - record.start_ticks for record in algorithm]
+    iteration_ticks = [held - intercept_ticks for held in held_ticks]
+    remainders = {ticks % ticks_per_iteration for ticks in iteration_ticks}
+    assert len(algorithm) > 0
+    assert min(iteration_ticks) >= 0
+    assert remainders == {0}

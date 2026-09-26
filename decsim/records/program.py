@@ -237,3 +237,22 @@ def patches_of(operation: Operation) -> tuple:
     if operation.qubits:
         return (operation.qubits[0],)
     return (0,)
+
+
+def decode_identity(operation: Operation) -> Any:
+    """The decode stream an operation's rounds fold into.
+
+    A stream segment names its stream; a standalone operation is its own
+    stream. Every syndrome source keys its draws and its readouts by it.
+    """
+    if operation.stream_id is not None:
+        return operation.stream_id
+    return operation.id
+
+
+def global_round(operation: Operation, round_index: int) -> int:
+    """A round's index in its decode stream: the segment's offset added."""
+    stream_offset = operation.stream_offset
+    if stream_offset is None:
+        stream_offset = 0
+    return round_index + stream_offset

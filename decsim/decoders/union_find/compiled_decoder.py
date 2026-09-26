@@ -346,17 +346,17 @@ def _bound(symbol: str, argument_types: list):
 
 def _graph_arrays(graph: evidence_records.UnionFindGraph) -> tuple:
     """The graph as the three flat arrays the C reads, in edge order."""
-    endpoint_a = []
-    endpoint_b = []
+    detectors_a = []
+    detectors_b = []
     lengths = []
     for edge in graph.edges:
-        endpoint_a.append(edge.detector_a)
-        endpoint_b.append(edge.detector_b)
+        detectors_a.append(edge.detector_a)
+        detectors_b.append(edge.detector_b)
         lengths.append(edge.length_half_ticks)
-    first = numpy.asarray(endpoint_a, dtype=numpy.int32)
-    second = numpy.asarray(endpoint_b, dtype=numpy.int32)
-    third = numpy.asarray(lengths, dtype=numpy.int64)
-    return first, second, third
+    endpoint_a = numpy.asarray(detectors_a, dtype=numpy.int32)
+    endpoint_b = numpy.asarray(detectors_b, dtype=numpy.int32)
+    length_half_ticks = numpy.asarray(lengths, dtype=numpy.int64)
+    return endpoint_a, endpoint_b, length_half_ticks
 
 
 def _refuse_failure(status: int) -> None:
@@ -368,10 +368,7 @@ def _refuse_failure(status: int) -> None:
 
 def _selected_edges(selected) -> tuple:
     found = numpy.nonzero(selected)
-    indices = []
-    for edge_index in found[0]:
-        indices.append(int(edge_index))
-    return tuple(indices)
+    return _int_tuple(found[0])
 
 
 def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
@@ -380,8 +377,8 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
     Open and Closed are frozen and carry no identity: every reader tests
     the type and reads the bounds, so one instance stands for every edge
     with the same interval. A window has tens of thousands of edges and
-    a few hundred distinct intervals, and building one object each was
-    three quarters of a decode's Python time. The arrays are read whole
+    a few hundred distinct intervals, so one object per edge would be
+    most of a decode's Python time. The arrays are read whole
     because element by element indexing of numpy costs more than the
     list does.
     """
@@ -409,12 +406,16 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
 def _require_one_interval_per_edge(
     edge_count: int, edge_intervals: tuple
 ) -> None:
-    """The C reads one interval per edge and sizes nothing itself."""
+    """The C reads one interval per edge and sizes nothing itself.
+
+    The intervals are a decode's own on the same graph, so a count that
+    differs is a caller's bug, refused before the C reads past a buffer.
+    """
     interval_count = len(edge_intervals)
     if interval_count == edge_count:
         return
-    raise ValueError(
-        "the Union-Find cluster gap walks one interval per edge: the "
+    raise RuntimeError(
+        "the Union-Find growth reads one interval per edge: the "
         f"graph has {edge_count} edges and the growth left "
         f"{interval_count} intervals"
     )
@@ -434,15 +435,15 @@ def _interval_arrays(edge_intervals: tuple) -> tuple:
     lower_ticks = []
     upper_ticks = []
     for interval in edge_intervals:
-        is_closed = isinstance(interval, evidence_records.Closed)
-        closed_flags.append(is_closed)
-        lower, upper = _open_bounds(interval, is_closed)
+        edge_is_closed = isinstance(interval, evidence_records.Closed)
+        closed_flags.append(edge_is_closed)
+        lower, upper = _open_bounds(interval, edge_is_closed)
         lower_ticks.append(lower)
         upper_ticks.append(upper)
-    first = numpy.asarray(closed_flags, dtype=numpy.uint8)
-    second = numpy.asarray(lower_ticks, dtype=numpy.int64)
-    third = numpy.asarray(upper_ticks, dtype=numpy.int64)
-    return first, second, third
+    is_closed = numpy.asarray(closed_flags, dtype=numpy.uint8)
+    lower_tick = numpy.asarray(lower_ticks, dtype=numpy.int64)
+    upper_tick = numpy.asarray(upper_ticks, dtype=numpy.int64)
+    return is_closed, lower_tick, upper_tick
 
 
 def _open_bounds(interval, is_closed: bool) -> tuple:
@@ -473,8 +474,13 @@ def _growth_steps(
 
 
 def _prefix(values, count) -> tuple:
+    """The first count[0] entries the C wrote, as Python integers."""
     taken = values[: count[0]]
-    indices = []
-    for value in taken:
-        indices.append(int(value))
-    return tuple(indices)
+    return _int_tuple(taken)
+
+
+def _int_tuple(values) -> tuple:
+    integers = []
+    for value in values:
+        integers.append(int(value))
+    return tuple(integers)

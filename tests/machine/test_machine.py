@@ -53,6 +53,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
+import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
@@ -71,8 +72,10 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
@@ -187,7 +190,9 @@ def test_a_new_decoder_is_one_class_and_one_table_row():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
@@ -210,7 +215,9 @@ def test_a_second_table_row_runs_gate_point_one():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
@@ -228,7 +235,7 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     gem5 splits the constructor, which takes a component's
     collaborators, from startup, "the appropriate place to schedule
     initial event(s)"
-    (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280). With
+    (gem5 src/sim/sim_object.hh lines 194 and 280). With
     that split the order the root builds its components in cannot move a
     tick, because no component has queued anything while the rest of the
     machine is still being built.
@@ -236,7 +243,9 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
@@ -269,7 +278,7 @@ def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
     with pytest.raises(
         ValueError,
         match="strong_syndrome_buffer.kind 'off_table' is not a row of its "
-        r"table; the rows are \['syndrome_buffer'\]",
+        r"table; the rows are \['ported_syndrome_buffer', 'syndrome_buffer'\]",
     ):
         machine_module.Machine.build(settings)
 
@@ -457,7 +466,7 @@ def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
 
 @pytest.mark.parametrize(
     ("idle_policy", "load_job_count"),
-    [("separate_decode_jobs", 1), ("ignore", 0), ("extend_stream", 0)],
+    [("separate_decode_jobs", 2), ("ignore", 0), ("extend_stream", 0)],
 )
 def test_static_idle_rounds_use_strong_slots_until_the_decoder_arrival(
     idle_policy: str, load_job_count: int
@@ -876,9 +885,11 @@ def _memory_on_stim_device(
 def _two_patch_memory(weak_decoder) -> machine_settings.MachineSettings:
     """Two memory operations on two patches; the second starts at round 4.
 
-    Patch 1 idles for four rounds first, and the default idle policy
-    (separate_decode_jobs) charges that idle region as one load-only
-    decode job, a job without a window model.
+    Patch 0 idles for the four rounds after the first operation ends,
+    while the second runs, and the default idle policy
+    (separate_decode_jobs) charges them as load-only decode jobs, jobs
+    without a window model: one commit region of three rounds, and the
+    one round left when the workload completes.
     """
     first = program_records.Operation(
         id=1, name="mem0", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
@@ -915,10 +926,10 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     operation_ids = {1, 2}
     load_only = [r for r in algorithm if r.operation_id not in operation_ids]
     windows = [r for r in algorithm if r.operation_id in operation_ids]
-    assert len(load_only) == 1
+    assert len(load_only) == 2
     assert len(windows) == 2
     idle_ticks = [r.end_ticks - r.start_ticks for r in load_only]
-    assert idle_ticks == [0]
+    assert idle_ticks == [0, 0]
     assert all(r.end_ticks > r.start_ticks for r in windows)
     idle_lines = [
         line for line in machine.observation.log.lines if "mem(" in line
@@ -972,10 +983,11 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     decode returned (Meister et al. 2405.07433 Algorithm 2 lines
     518-536), and the unit charged that decode. The matching run beside
     it is the comparison the charge is read against: Union-Find's own
-    decode is this implementation's, not sparse blossom's.
+    decode is this implementation's, not sparse blossom's. Seed 1 is a
+    shot in which no window escalates, so every decode is a weak one.
     """
     settings = _switching_memory("union_find", "cluster_gap")
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(settings, 1)
     result = machine.run()
     assert result.terminal_status == "complete"
     assert result.operation_results[0].logical_observables == (0,)
@@ -988,7 +1000,7 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     window_count = len(machine.observation.decode_records.services)
     assert len(requests) == window_count
     matching_settings = _switching_memory("pymatching", "complementary_gap")
-    matching = machine_module.Machine.build(matching_settings, 0)
+    matching = machine_module.Machine.build(matching_settings, 1)
     matching.run()
     union_find_services = _weak_service_ticks(machine)
     matching_services = _weak_service_ticks(matching)
@@ -1018,10 +1030,11 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     union-find decode's own edge intervals (2405.07433 lines 518-536),
     so the evidence and its reader are the same hardware. The run
     charges one walk per window on the weak unit, and each weak service
-    ends after the decode and the walk it fed.
+    ends after the decode and the walk it fed. Seed 1 is a shot in which
+    no window escalates, so every service is a weak one.
     """
     settings = _switching_memory("union_find", "cluster_gap")
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(settings, 1)
     machine.run()
     charged = _confidence_charges(machine)
     services = machine.observation.decode_records.services
@@ -1131,8 +1144,8 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
     """A table row for the plug-in test: the store, counting its writes."""
 
-    def __init__(self, settings):
-        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings)
+    def __init__(self, settings, engine):
+        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
         self.stored_count = 0
 
     def accept_packed_round(self, packet, *, publication_tick):
@@ -1147,18 +1160,20 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     counting = dataclasses.replace(
         settings.weak_syndrome_buffer, kind="counting"
     )
     settings = dataclasses.replace(settings, weak_syndrome_buffer=counting)
-    syndrome_buffer_module.SYNDROME_BUFFERS["counting"] = CountingSyndromeBuffer
+    ported_syndrome_buffer.SYNDROME_BUFFERS["counting"] = CountingSyndromeBuffer
     try:
         machine = machine_module.Machine.build(settings, 0)
         result = machine.run()
     finally:
-        del syndrome_buffer_module.SYNDROME_BUFFERS["counting"]
+        del ported_syndrome_buffer.SYNDROME_BUFFERS["counting"]
     assert result.terminal_status == "complete"
     assert type(machine.weak_syndrome_buffer) is CountingSyndromeBuffer
     fired = [
@@ -1186,7 +1201,9 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     config_path = CONFIGS / "strong_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     escalation = dataclasses.replace(settings.escalation, kind="always_strong")
     settings = dataclasses.replace(settings, escalation=escalation)
@@ -1206,17 +1223,28 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     assert set(tiers) == {"strong"}
 
 
+class _SilentFactoryTrace:
+    """The one source the factory port declares, for a row that never waits."""
+
+    state_delivered = trace_source.SilentSource()
+
+
 class AlwaysReadyFactory:
     """A factory row written outside decsim: the collaborators alone.
 
     Its constructor is InfiniteFactory's own shape, one parameter, which
     is the shape the root refused before every row was built from one
-    collaborators record.
+    collaborators record. It declares the decode queue port the root
+    binds on every factory row, and the trace source the port declares,
+    silent because no request waits.
     """
+
+    decode_queue = ports.Port(ports.DecodeQueue)
 
     def __init__(self, collaborators):
         self.engine = collaborators.engine
         self.requests = []
+        self.trace = _SilentFactoryTrace()
 
     def start(self):
         """Nothing is made ahead of a request, so nothing is queued."""
@@ -1225,12 +1253,6 @@ class AlwaysReadyFactory:
         """Deliver at once and remember who asked."""
         self.requests.append(operation_id)
         callback()
-        return magic_state_factories.Ticket(operation_id, (), self)
-
-    def cancel(self, ticket):
-        """Nothing is ever pending."""
-        del ticket
-        return False
 
     def shutdown(self):
         """Nothing runs, so nothing stops."""
@@ -1241,7 +1263,9 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name():
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.003, distance=3, round_period_us=1.0
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     factory_settings = qpu_settings.FactorySettings(kind="always_ready")
     settings = dataclasses.replace(
@@ -1255,6 +1279,49 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name():
         del qpu_settings.MAGIC_STATE_FACTORIES["always_ready"]
     assert isinstance(machine.factory, AlwaysReadyFactory)
     assert result.terminal_status == "complete"
+
+
+def test_the_run_result_carries_the_factorys_supply_stall():
+    """The wait for a distilled state reaches the result the run returns.
+
+    One unit, a 5 us attempt and a 1 us return trip, no correction
+    decode: the one operation that needs a state asks at tick 0 and
+    waits for both.
+    """
+    operation = declared_run.memory_operation(1, consumes_magic_state=True)
+    workload = declared_run.declared_workload([operation], 6)
+    attempt_ticks = config.microseconds_to_ticks(5.0)
+    return_ticks = config.microseconds_to_ticks(1.0)
+    card = magic_state_factories.DistillationFactory.Settings(
+        unit_count=1,
+        attempt_ticks=attempt_ticks,
+        correction_round_count=0,
+        correction_decode_count=0,
+        return_ticks=return_ticks,
+    )
+    factory = qpu_settings.FactorySettings(
+        kind="distillation", row_settings=card
+    )
+    weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
+    decoder = decoders.PresetLatencyDecoder(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    qpu = declared_run.declared_qpu()
+    links = declared_run.declared_profile()
+    controller = declared_run.declared_controller()
+    settings = machine_settings.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        links=links,
+        controller=controller,
+        magic_state_factory=factory,
+    )
+
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+
+    assert result.magic_state_stall_ticks == attempt_ticks + return_ticks
+    assert result.magic_state_stall_ticks == machine.factory.total_stall_ticks
 
 
 class RecordingBoundaryPolicy:
@@ -1740,7 +1807,7 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
 
     assert machine.weak_syndrome_buffer.occupancy == 0
     assert machine.strong_syndrome_buffer.occupancy == 0
-    assert machine.strong_syndrome_round_receiver.writes_in_flight == 0
+    assert machine.strong_syndrome_round_receiver.reserved_bits_by_round == {}
 
 
 def test_the_execution_and_the_decoding_views_agree_on_the_workload():
@@ -1874,7 +1941,9 @@ def reference_run(escalation_kind):
     config_path = CONFIGS / "reference.yaml"
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
     )
     escalation = dataclasses.replace(settings.escalation, kind=escalation_kind)
     settings = dataclasses.replace(settings, escalation=escalation)
@@ -2027,7 +2096,7 @@ def late_landing_shot(directory, links):
     task = experiment_config.point_task(
         physical_error_probability=0.001,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     return collect.run_shot(task, 0)
@@ -2080,10 +2149,15 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
 
 CAMPAIGN_DIRECTORY = yaml_configs.CONFIGS_DIR / "experiments_2026_09"
 CAMPAIGN_DISTANCE = 3
-CAMPAIGN_ROUND_COUNT = 30  # base.yaml's rounds_per_shot, 10d at d = 3
+CAMPAIGN_ROUND_COUNT = 30  # the shared base's rounds_per_shot, 10d at d 3
 CAMPAIGN_PHYSICAL_ERROR = 0.001  # the smallest p of every family's sweep
 CAMPAIGN_ROUND_PERIOD_US = 1.0
 CAMPAIGN_SHOT_COUNT = 8
+# seeds 9 to 16: the eight shots include windows the switching families
+# escalate, which the kept-window rule needs beside it
+CAMPAIGN_FIRST_SEED = 9
+CAMPAIGN_SEED_END = CAMPAIGN_FIRST_SEED + CAMPAIGN_SHOT_COUNT
+CAMPAIGN_SEEDS = range(CAMPAIGN_FIRST_SEED, CAMPAIGN_SEED_END)
 CAMPAIGN_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
 SINGLE_TIER_FAMILIES = (
     "pymatching_weak",
@@ -2121,7 +2195,7 @@ def campaign_point_task(family):
     return config.point_task(
         physical_error_probability=CAMPAIGN_PHYSICAL_ERROR,
         distance=CAMPAIGN_DISTANCE,
-        round_period_us=CAMPAIGN_ROUND_PERIOD_US,
+        round_period_microseconds=CAMPAIGN_ROUND_PERIOD_US,
         shots=CAMPAIGN_SHOT_COUNT,
     )
 
@@ -2147,7 +2221,7 @@ def timed_and_untimed_decodes(family):
     task = campaign_point_task(family)
     models = built_window_models.BuiltWindowModels()
     decodes = []
-    for seed in range(CAMPAIGN_SHOT_COUNT):
+    for seed in CAMPAIGN_SEEDS:
         settings = task.shot_settings(models)
         machine = machine_module.Machine.build(settings, seed)
         untimed = machine_module.Machine.build(settings, seed)
@@ -2214,7 +2288,7 @@ def test_a_switching_familys_kept_windows_match_the_untimed_weak_model(family):
     tier (Toshio et al. 2510.25222 Sec. III A), so only the windows the
     weak verdict kept are the weak model's to answer; the escalated ones
     are counted and left to the strong tier. Eight shots at p = 0.001
-    and d = 3 escalate one or two of their eighty windows, and every
+    and d = 3 escalate one of their eighty windows, and every
     window the verdict kept carries the correction the untimed weak row
     decodes from the same window error model and the same syndrome
     (IBM arXiv 2510.21600 lines 488-495).
@@ -2266,7 +2340,7 @@ def campaign_predictions_and_events(family):
     predictions = []
     shot_events = []
     sampled = None
-    for seed in range(CAMPAIGN_SHOT_COUNT):
+    for seed in CAMPAIGN_SEEDS:
         settings = task.shot_settings(models)
         machine = machine_module.Machine.build(settings, seed)
         result = machine.run()
@@ -2519,7 +2593,8 @@ def _record_strong_occupancy(
     _packet: round_records.SyndromeRoundPacket,
 ) -> None:
     stored = machine.strong_syndrome_buffer.occupancy
-    in_flight = machine.strong_syndrome_round_receiver.writes_in_flight
+    receiver = machine.strong_syndrome_round_receiver
+    in_flight = len(receiver.reserved_bits_by_round)
     taken = stored + in_flight
     counts.append(taken)
 
@@ -2570,7 +2645,8 @@ def _assert_actual_truth(run: _Run) -> None:
 def _assert_drained(run: _Run) -> None:
     assert run.machine.weak_syndrome_buffer.occupancy == 0
     assert run.machine.strong_syndrome_buffer.occupancy == 0
-    assert run.machine.strong_syndrome_round_receiver.writes_in_flight == 0
+    receiver = run.machine.strong_syndrome_round_receiver
+    assert receiver.reserved_bits_by_round == {}
     units = run.machine.decoder_manager.pool.units()
     occupied = [unit.memory.occupied_bits for unit in units]
     assert occupied == [0] * len(units)

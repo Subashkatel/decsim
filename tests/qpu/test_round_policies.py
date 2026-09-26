@@ -54,6 +54,7 @@ def test_code_rounds_never_fall_below_one():
 
 
 def test_a_merge_costs_two_steps_of_d_rounds():
+    """A merge takes d rounds and its split d more: Horsman 1111.4022."""
     policy = round_policies.GateRounds()
     code = code_geometry.SurfaceCodeModel(distance=5)
     merge = operation(1, kind=program_records.OpKind.MERGE)

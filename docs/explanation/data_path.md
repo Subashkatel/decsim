@@ -129,7 +129,9 @@ same end decides whether the buffer has space. It counts the bits
 already stored and the bits reserved for the writes still crossing the
 link, and the controller's sender reserves the round's bits before it
 leaves. The transmitter is told when the round lands, and only so that
-it can keep its own count of the rounds in flight.
+it can keep its own count of the rounds in flight. A timing-only
+feedback-memory round crosses this hop too, is written like any round,
+and then leaves for the decoder on hop 4; it is never published.
 
 What crosses: one **packed round**, every fragment that leaves the
 controller. The bit count is `PackedRound.wire_bits`, computed in
@@ -178,7 +180,9 @@ docstrings cite).
 
 A window's rounds into a weak unit's memory. Ends: `syndrome_buffer` to
 `decoders`; the send is executed by the store's own outgoing port,
-`decsim/syndrome_buffer/round_output.py`.
+`decsim/syndrome_buffer/round_output.py`. The store's read of the rounds
+comes first, at dispatch, when the bits leave: the port asks the store
+when that read completes (`book_read`) and the move starts then.
 
 What crosses: the whole input of one decode job, every payload round of
 the window at once. The bit count is `job.payload_bits()`
@@ -200,7 +204,7 @@ Clustering's Init unit for (arXiv:2309.05558, `2309.05558.txt` lines
 268-272: the Init unit "loads the input syndrome data and appropriate
 data into the storage elements"). The other row, `in_place`, sends
 nothing at all and books a reference instead: the unit reads the rounds
-where they sit, which is what a decoder with its input on chip does,
+where they sit, landing when the store's read of them completes, which is what a decoder with its input on chip does,
 and the same comment cites AFS for it (arXiv:2001.06598,
 `2001.06598.txt` lines 520-535: "the processing elements can directly
 access the data stored on-chip"). Default latency one 250 MHz cycle and
@@ -228,6 +232,11 @@ rounds are still being measured, carries the rest as they arrive (Toshio
 arXiv:2510.25222 lines 1247 to 1250: the syndrome data of `r_strong`
 rounds is assigned to the strong decoder at the switch, after both
 boundaries are determined).
+
+The rounds leave the weak syndrome buffer when the region is sent, so
+that store prices their read there (`book_read`), once, and the region
+starts across this hop when the read ends; under the default row's
+`read_cycles: 0` it starts at once.
 
 Move, off board, with a copy into the strong syndrome buffer at the
 landing. Default latency 0.26 microseconds and 100 Gb/s: the strong

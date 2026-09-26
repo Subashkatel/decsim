@@ -186,7 +186,7 @@ cut -d, -f1-10 results/2026-09-10T02-29-33Z-reference/sweep.csv
 ```
 
 ```
-distance,physical_error_probability,algorithm,round_period_us,shots,windows_per_shot,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
+distance,physical_error_probability,algorithm,round_period_microseconds,shots,windows_per_shot,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
 3,0.001,pymatching,1.0,2,4.0,0,0.0,0.0,0.6576280471103807
 ```
 

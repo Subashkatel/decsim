@@ -61,7 +61,7 @@ def switching_config(
     sweep_point = {
         "physical_error_probability": [NEAR_THRESHOLD_P],
         "distance": [3],
-        "round_period_us": [1.0],
+        "round_period_microseconds": [1.0],
         "shots": 1,
     }
     strong_decoder = strong_unit("belief_matching")
@@ -82,7 +82,7 @@ def measured_shot(config, seed: int):
         config,
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         seed=seed,
     )
 
@@ -99,7 +99,7 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
         weak_only_settings = weak_only.point_settings(
             physical_error_probability=NEAR_THRESHOLD_P,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
         )
         Machine.build(weak_only_settings)
     strong_decoder = strong_unit("belief_matching")
@@ -136,15 +136,15 @@ def _restart_width_card(regions: int) -> dict:
 def test_both_restart_re_read_widths_load_from_the_escalation_section(
     tmp_path,
 ):
-    """0 is Toshio 2510.25222 Sec. III C, 1 is decsim's forward window."""
-    paper_card = _restart_width_card(0)
-    paper_path = write_config(tmp_path, paper_card)
-    paper = load_experiment(paper_path)
+    """Toshio 2510.25222 lines 1229-1235 allow both; Fig. 12 draws 1."""
+    no_reread_card = _restart_width_card(0)
+    no_reread_path = write_config(tmp_path, no_reread_card)
+    no_reread = load_experiment(no_reread_path)
     one_region_card = _restart_width_card(1)
     one_region_path = write_config(tmp_path, one_region_card)
     one_region = load_experiment(one_region_path)
 
-    assert paper.settings.escalation.restart_reread_buffer_regions == 0
+    assert no_reread.settings.escalation.restart_reread_buffer_regions == 0
     assert one_region.settings.escalation.restart_reread_buffer_regions == 1
 
 
@@ -152,11 +152,11 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
     """Only the two widths have a referent, and only switching restarts."""
     wide_card = _restart_width_card(2)
     wide_path = write_config(tmp_path, wide_card)
-    with pytest.raises(ValueError, match="must be 0, the paper's restart"):
+    with pytest.raises(ValueError, match="must be 0, a restart on the rounds"):
         load_experiment(wide_path)
     flag_card = _restart_width_card(True)
     flag_path = write_config(tmp_path, flag_card)
-    with pytest.raises(ValueError, match="must be 0, the paper's restart"):
+    with pytest.raises(ValueError, match="must be 0, a restart on the rounds"):
         load_experiment(flag_path)
     weak_card = {
         "escalation": {
@@ -218,7 +218,7 @@ def _strong_request_counts(tmp_path, card: dict):
     settings = config.point_settings(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     machine = Machine.build(settings, 0)
     machine.run()
@@ -244,10 +244,38 @@ def test_the_yaml_asks_for_the_papers_parallel_variant(tmp_path):
     assert parallel.cancelled > 0
 
 
-def test_a_run_both_at_once_that_is_not_a_flag_is_refused(tmp_path):
-    card = _parallel_variant_card("yes")
+@pytest.mark.parametrize("value", ["yes", 1, 0])
+def test_a_run_both_at_once_that_is_not_a_flag_is_refused(tmp_path, value):
+    card = _parallel_variant_card(value)
     config_path = write_config(tmp_path, card)
-    sentence = "escalation.run_both_at_once must be true or false, got 'yes'"
+    sentence = (
+        f"escalation.run_both_at_once must be true or false, got {value!r}"
+    )
+    with pytest.raises(ValueError, match=sentence):
+        load_experiment(config_path)
+
+
+def test_a_kind_written_as_a_list_is_refused_with_the_rows(tmp_path):
+    card = {"escalation": {"kind": ["switching"]}}
+    config_path = write_config(tmp_path, card)
+    sentence = r"escalation.kind \['switching'\] is not a row of its table"
+    with pytest.raises(ValueError, match=sentence):
+        load_experiment(config_path)
+
+
+@pytest.mark.parametrize(
+    "threshold, sentence",
+    [
+        (-1.0, "gap_threshold_db must be finite and not negative"),
+        (math.inf, "gap_threshold_db must be finite and not negative"),
+        (True, "gap_threshold_db must be a number of decibels"),
+        ("20", "gap_threshold_db must be a number of decibels"),
+    ],
+)
+def test_a_threshold_that_is_no_nonnegative_decibel_count_is_refused(
+    tmp_path, threshold, sentence
+):
+    config_path = switching_config(tmp_path, threshold)
     with pytest.raises(ValueError, match=sentence):
         load_experiment(config_path)
 
@@ -366,7 +394,7 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
         settings = config.point_settings(
             physical_error_probability=NEAR_THRESHOLD_P,
             distance=3,
-            round_period_us=1.0,
+            round_period_microseconds=1.0,
         )
         observation = replace(
             settings.observation, record_switching_windows=True
@@ -516,7 +544,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
     assert args["tick"] == expected_held
     assert slice_row["dur"] == pytest.approx(3.0)
 
-    arrows = _flows_of(document, lanes, "Strong tier", "window 1:0")
+    arrows = _flows_of(document, lanes, "Strong tier", "1:0")
     (arrow,) = arrows
     assert arrow["args"]["tick"] == expected_released
 
@@ -539,13 +567,15 @@ def _events_named(document, phase: str, name: str) -> list:
     return rows
 
 
-def _flows_of(document, lanes: dict, lane: str, flow_id: str) -> list:
-    """Every flow event of one chain on one lane."""
+def _flows_of(document, lanes: dict, lane: str, window_text: str) -> list:
+    """Every flow event of one window's chain on one lane."""
     rows = []
     for row in document:
         if row["ph"] not in ("s", "t", "f"):
             continue
-        if lanes[row["tid"]] != lane or row["id"] != flow_id:
+        if lanes[row["tid"]] != lane:
+            continue
+        if row["args"].get("window") != window_text:
             continue
         rows.append(row)
     return rows
@@ -764,7 +794,7 @@ def _walk_card_machine(tmp_path, microseconds):
     settings = config.point_settings(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
     )
     machine = Machine.build(settings, 0)
     machine.run()
@@ -857,7 +887,7 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
     task = config.point_task(
         physical_error_probability=NEAR_THRESHOLD_P,
         distance=3,
-        round_period_us=1.0,
+        round_period_microseconds=1.0,
         shots=1,
     )
     shot = collect.run_shot(task, 0)

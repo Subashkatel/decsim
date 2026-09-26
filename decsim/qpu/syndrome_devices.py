@@ -23,7 +23,7 @@ import random
 from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.qpu.code_geometry as code_geometry
+import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
@@ -49,7 +49,7 @@ class TimingOnlyDevice:
     # nothing is sampled here, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
 
-    def __init__(self, code: code_geometry.CodeModel) -> None:
+    def __init__(self, code: ports.CodeModel) -> None:
         self.code = code
 
     def logical_observable_truth(
@@ -73,9 +73,8 @@ class TimingOnlyDevice:
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """One valueless payload attributed to the operation's footprint."""
-        target, global_round = _stream_target_and_global_round(
-            operation, round_index
-        )
+        target = program_records.decode_identity(operation)
+        global_round = program_records.global_round(operation, round_index)
         patches = program_records.patches_of(operation)
         patch_count = _patch_count_of(operation)
         size_bits = self.code.syndrome_bits_per_round(patch_count)
@@ -125,6 +124,13 @@ class TimingOnlyDevice:
     ) -> None:
         """No circuit, so any length is fine."""
 
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The readout leaves the chip at the boundary it was read out at."""
+        del readout
+        return readout_tick
+
     def window_model_source(self) -> "NoWindowModels":
         """No circuit, so no window has a model to build."""
         return NO_WINDOW_MODELS
@@ -134,11 +140,11 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     """Emits seeded random bits shaped like the code card's syndrome.
 
     Each payload draws from a generator of its own, seeded by the
-    device's seed, the stream, the round and the patches, the way the
-    Stim source samples each stream under its own substream
-    (stim_device.py, _sample_seed_for). A round's bits therefore depend
-    on the seed and the round alone, and not on how many rounds another
-    operation drew before it, which another component's timing decides.
+    substream of its stream, round and patches (seeding.substream_seed,
+    the rule the Stim source samples each stream under). A round's bits
+    therefore depend on the seed and the round alone, and not on how many
+    rounds another operation drew before it, which another component's
+    timing decides.
     """
 
     operation_circuit_scope = "none"
@@ -155,7 +161,7 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
 
     def __init__(
         self,
-        code: code_geometry.CodeModel,
+        code: ports.CodeModel,
         seed: Optional[int] = None,
         one_payload_per_patch: bool = False,
     ):
@@ -183,9 +189,8 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
         """One payload per patch, or one payload covering every patch."""
-        target, global_round = _stream_target_and_global_round(
-            operation, round_index
-        )
+        target = program_records.decode_identity(operation)
+        global_round = program_records.global_round(operation, round_index)
         if self.one_payload_per_patch:
             return self._payload_per_patch(operation, target, global_round)
         patch_count = _patch_count_of(operation)
@@ -233,6 +238,13 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     ) -> None:
         """No circuit, so any length is fine."""
 
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The readout leaves the chip at the boundary it was read out at."""
+        del readout
+        return readout_tick
+
     def window_model_source(self) -> "NoWindowModels":
         """No circuit, so no window has a model to build."""
         return NO_WINDOW_MODELS
@@ -251,16 +263,12 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     def _payload_generator(
         self, target: Any, global_round: int, patches: tuple
     ) -> random.Random:
-        """The generator of one payload; an unseeded device draws entropy.
-
-        random.Random hashes a text seed with SHA-512, so the same text
-        gives the same bits in every process (Python's random module,
-        seed version 2).
-        """
+        """The generator of one payload; an unseeded device draws entropy."""
         if self._seed is None:
             return random.Random()
-        payload_identity = f"{self._seed}|{target!r}|{global_round}|{patches!r}"
-        return random.Random(payload_identity)
+        keys = (target, global_round, *patches)
+        payload_seed = seeding.substream_seed(self._seed, keys)
+        return random.Random(payload_seed)
 
     def _payload(
         self, target: Any, patches: tuple, global_round: int, bits: list
@@ -368,24 +376,6 @@ class NoWindowModels:
 
 # The one no-model component every circuit-less source names.
 NO_WINDOW_MODELS = NoWindowModels()
-
-
-def _stream_target_and_global_round(
-    operation: program_records.Operation, round_index: int
-) -> tuple:
-    """The decode identity and global round of one operation round.
-
-    A stream segment folds into its stream at its offset; a standalone
-    operation is its own stream.
-    """
-    target = operation.id
-    if operation.stream_id is not None:
-        target = operation.stream_id
-    stream_offset = 0
-    if operation.stream_offset is not None:
-        stream_offset = operation.stream_offset
-    global_round = round_index + stream_offset
-    return target, global_round
 
 
 def _patch_count_of(operation: program_records.Operation) -> int:

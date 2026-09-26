@@ -1,7 +1,7 @@
 # Switching: union_find escalating to bposd below the 20 dB cluster_gap. Every
-# other key is base.yaml's.
+# other key is the shared base's.
 
-extends: base.yaml
+extends: ../common/experiments_2026_09_base.yaml
 
 escalation:
   kind: switching

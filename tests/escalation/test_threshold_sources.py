@@ -162,6 +162,25 @@ def test_an_online_threshold_audits_kept_windows_and_learns_from_the_strong():
     assert controller.audit.audited_count == 2
 
 
+def test_an_audited_window_reaches_the_strong_tier_outside_the_capped_target():
+    """The cap bounds the gap escalations; an audit escalates past it.
+
+    Toshio 2510.25222 lines 1333-1340 count every window the strong tier
+    decodes in the backlog, and an audited window is one of them, so the
+    strong duty is the tracker's rate plus the audits.
+    """
+    controller = _controller(target=0.0, threshold=0.0, step=0.0)
+    draws = random.Random(0)
+    online = threshold_sources.OnlineThreshold(controller, draws)
+    fourth = _job(4)
+    confident = _result(5.0)
+    kept = online.decide_keep(fourth, confident)
+    assert kept is False
+    summary = online.summary()
+    assert summary["escalated"] == 0
+    assert summary["pending_audits"] == 1
+
+
 def test_an_online_threshold_records_its_trajectory_for_the_experiments_layer():
     controller = _controller(target=0.0, threshold=10.0, step=0.0)
     draws = random.Random(0)

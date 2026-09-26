@@ -35,7 +35,7 @@ class Priority(enum.IntEnum):
 
     gem5 names each priority beside the reason for it rather than
     passing a number at the call
-    (tmp/resources/gem5/src/sim/eventq.hh lines 138-244), where
+    (gem5 src/sim/eventq.hh lines 138-244), where
     Default_Pri is zero and every other name orders one kind of event
     against the rest of the tick's work. DEFAULT is every event whose
     tick alone fixes its place. The other two order one protected

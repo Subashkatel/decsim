@@ -13,7 +13,9 @@
  * incident edges", fusion appends one cluster's list to the other's,
  * and a last pass over the list drops what is no longer on the
  * boundary. An edge with no growing end cannot move, so leaving it out
- * of the event changes nothing it would have done.
+ * of the event changes nothing it would have done. The cycle count's
+ * flood is not bounded this way: every growth step lays the
+ * closed edges of the whole graph out again (fused_flood_hops).
  *
  * The extra growth (Kishi et al. arXiv:2602.03336 Algorithm 1) runs the
  * same loop on from where a decode stopped, every cluster and the
@@ -51,6 +53,16 @@ struct graph_arrays {
   const int64_t *length_half_ticks;
   /* one bit per edge, null for a decode, which reads no parity */
   const uint8_t *logical_parity;
+};
+
+/* The caller's four step arrays and the count of steps written, which
+ * the decode and the extra growth fill the same way. */
+struct step_record {
+  int32_t *edge_counts;
+  int32_t *hop_counts;
+  int64_t *growth_ticks;
+  uint8_t *fusion_kinds;
+  int32_t *count;
 };
 
 /* Everything one decode needs beyond the caller's buffers.
@@ -475,6 +487,35 @@ static int32_t refresh_active_roots(struct workspace *workspace,
   return next_count;
 }
 
+/* One growing cluster's open edges appended behind working_count, each
+ * edge once an event by its stamp, and its closed edges unlinked from
+ * the cluster's list on the way. */
+static int32_t collect_cluster_edges(struct workspace *workspace,
+                                     const uint8_t *interval_is_closed,
+                                     int32_t root, int32_t stamp,
+                                     int32_t working_count) {
+  int32_t previous = -1;
+  int32_t entry = workspace->cluster_edge_head[root];
+  while (entry >= 0) {
+    int32_t next = workspace->cluster_edge_next[entry];
+    int32_t edge = entry / 2;
+    if (interval_is_closed[edge]) {
+      unlink_entry(workspace, root, previous, next);
+      entry = next;
+      continue;
+    }
+    previous = entry;
+    entry = next;
+    if (workspace->event_stamp[edge] == stamp) {
+      continue;
+    }
+    workspace->event_stamp[edge] = stamp;
+    workspace->working_edges[working_count] = edge;
+    working_count += 1;
+  }
+  return working_count;
+}
+
 /* The edges of the clusters that still grow, each once, with the ones
  * the growth has already closed dropped from the lists on the way. */
 static int32_t collect_working_edges(struct workspace *workspace,
@@ -483,24 +524,8 @@ static int32_t collect_working_edges(struct workspace *workspace,
   int32_t working_count = 0;
   for (int32_t position = 0; position < active_count; ++position) {
     int32_t root = workspace->active_roots[position];
-    int32_t previous = -1;
-    int32_t entry = workspace->cluster_edge_head[root];
-    while (entry >= 0) {
-      int32_t next = workspace->cluster_edge_next[entry];
-      int32_t edge = entry / 2;
-      if (interval_is_closed[edge]) {
-        unlink_entry(workspace, root, previous, next);
-        entry = next;
-        continue;
-      }
-      if (workspace->event_stamp[edge] != stamp) {
-        workspace->event_stamp[edge] = stamp;
-        workspace->working_edges[working_count] = edge;
-        working_count += 1;
-      }
-      previous = entry;
-      entry = next;
-    }
+    working_count = collect_cluster_edges(workspace, interval_is_closed, root,
+                                          stamp, working_count);
   }
   return working_count;
 }
@@ -519,6 +544,28 @@ static void freeze_roots(struct workspace *workspace,
   }
 }
 
+/* The ticks until one working edge closes, or -1 when it cannot: an
+ * edge inside one cluster while only odd clusters grow, or an edge
+ * neither of whose ends grows. The fronts close it at the summed rate
+ * of its ends, and a partial tick still closes it. */
+static int64_t ticks_to_close(const struct workspace *workspace,
+                              int32_t edge,
+                              const int64_t *interval_lower_tick,
+                              const int64_t *interval_upper_tick) {
+  int32_t left = workspace->frozen_root_a[edge];
+  int32_t right = workspace->frozen_root_b[edge];
+  if (left == right && !workspace->every_cluster_grows) {
+    return -1;
+  }
+  int64_t rate = cluster_grows(workspace, left);
+  rate += cluster_grows(workspace, right);
+  if (rate == 0) {
+    return -1;
+  }
+  int64_t remaining = interval_upper_tick[edge] - interval_lower_tick[edge];
+  return (remaining + rate - 1) / rate;
+}
+
 /* How many edges can still close, and in how few ticks the first of
  * them does. While only odd clusters grow an edge inside one cluster is
  * no candidate: it closes when the cluster's own front meets itself and
@@ -533,20 +580,12 @@ static int32_t closing_candidates(struct workspace *workspace,
   *elapsed_ticks = 0;
   for (int32_t position = 0; position < working_count; ++position) {
     int32_t edge = workspace->working_edges[position];
-    workspace->ticks_until_close[edge] = -1;
-    int32_t left = workspace->frozen_root_a[edge];
-    int32_t right = workspace->frozen_root_b[edge];
-    if (left == right && !workspace->every_cluster_grows) {
-      continue;
-    }
-    int64_t rate = cluster_grows(workspace, left);
-    rate += cluster_grows(workspace, right);
-    if (rate == 0) {
-      continue;
-    }
-    int64_t remaining = interval_upper_tick[edge] - interval_lower_tick[edge];
-    int64_t ticks = (remaining + rate - 1) / rate;
+    int64_t ticks = ticks_to_close(workspace, edge, interval_lower_tick,
+                                   interval_upper_tick);
     workspace->ticks_until_close[edge] = ticks;
+    if (ticks < 0) {
+      continue;
+    }
     if (candidate_count == 0 || ticks < *elapsed_ticks) {
       *elapsed_ticks = ticks;
     }
@@ -746,19 +785,21 @@ static void merge_runs(edge_order orders_before,
   }
 }
 
+static int32_t smaller_index(int32_t left, int32_t right) {
+  if (left < right) {
+    return left;
+  }
+  return right;
+}
+
+/* A bottom-up merge sort, stable, so equal keys keep their edge order. */
 static void sort_edges(edge_order orders_before,
                        const int64_t *length_half_ticks, int32_t *values,
                        int32_t *merged, int32_t count) {
   for (int32_t width = 1; width < count; width *= 2) {
     for (int32_t start = 0; start < count; start += 2 * width) {
-      int32_t middle = start + width;
-      int32_t end = start + 2 * width;
-      if (middle > count) {
-        middle = count;
-      }
-      if (end > count) {
-        end = count;
-      }
+      int32_t middle = smaller_index(start + width, count);
+      int32_t end = smaller_index(start + 2 * width, count);
       merge_runs(orders_before, length_half_ticks, values, merged, start,
                  middle, end);
     }
@@ -832,7 +873,9 @@ static void build_closed_adjacency(struct workspace *workspace,
   place_closed_neighbors(workspace, graph, interval_is_closed);
 }
 
-/* Queue every unvisited closed-edge neighbour of node behind tail. */
+/* Queue every unvisited closed-edge neighbour of node behind tail, and
+ * write its depth, one more than node's, into tree_order: the flood
+ * borrows that array before the peel lays its order there. */
 static int32_t queue_closed_neighbors(struct workspace *workspace,
                                       int32_t node, int32_t depth,
                                       int32_t tail) {
@@ -917,6 +960,18 @@ static void clear_visited(struct workspace *workspace, int32_t first,
   workspace->is_visited[boundary_node] = 0;
 }
 
+/* A detector end of a contact edge, or the boundary node when the
+ * edge has none. */
+static int32_t contact_detector(const struct graph_arrays *graph,
+                                int32_t edge) {
+  int32_t boundary_node = graph->detector_count;
+  int32_t node = endpoint_node(graph->endpoint_a[edge], boundary_node);
+  if (node != boundary_node) {
+    return node;
+  }
+  return endpoint_node(graph->endpoint_b[edge], boundary_node);
+}
+
 /* The deepest flood among the clusters one step's contacts fused. Each
  * component of detectors is flooded once, from its lowest node; the
  * boundary node joins clusters in the union-find without joining their
@@ -931,11 +986,7 @@ static int32_t fused_flood_hops(struct workspace *workspace,
   int32_t member_count = 0;
   int32_t deepest = 0;
   for (int32_t position = start; position < end; ++position) {
-    int32_t edge = contact_edges[position];
-    int32_t node = endpoint_node(graph->endpoint_a[edge], boundary_node);
-    if (node == boundary_node) {
-      node = endpoint_node(graph->endpoint_b[edge], boundary_node);
-    }
+    int32_t node = contact_detector(graph, contact_edges[position]);
     if (node == boundary_node || workspace->is_visited[node]) {
       continue;
     }
@@ -955,6 +1006,31 @@ static int32_t fused_flood_hops(struct workspace *workspace,
   return deepest;
 }
 
+/* Write one event as the next growth step. A growth takes at most
+ * step_bound steps, since every step closes an edge, so one more is a
+ * loop that does not end and is refused. */
+static int32_t record_step(struct step_record *steps, int32_t step_bound,
+                           int32_t working_count, int64_t elapsed_ticks,
+                           int32_t fusion_kind, int32_t hops) {
+  int32_t index = *steps->count;
+  if (index >= step_bound) {
+    return union_find_growth_bound_exceeded;
+  }
+  steps->edge_counts[index] = working_count;
+  steps->growth_ticks[index] = elapsed_ticks;
+  steps->fusion_kinds[index] = (uint8_t)fusion_kind;
+  steps->hop_counts[index] = hops;
+  *steps->count = index + 1;
+  return union_find_ok;
+}
+
+static int64_t smaller_ticks(int64_t left, int64_t right) {
+  if (left < right) {
+    return left;
+  }
+  return right;
+}
+
 /* Grow until no cluster is odd or no odd cluster has an edge left to
  * grow along. The second end is best effort: PECOS and ldpc peel what
  * there is rather than refuse. */
@@ -964,10 +1040,7 @@ static int32_t grow_clusters(struct workspace *workspace,
                              int64_t *interval_lower_tick,
                              int64_t *interval_upper_tick,
                              int32_t *contact_edges, int32_t *contact_count,
-                             int32_t *step_edge_counts,
-                             int32_t *step_hop_counts,
-                             int64_t *step_growth_ticks,
-                             uint8_t *step_fusion_kinds, int32_t *step_count) {
+                             struct step_record *steps) {
   link_edge_entries(workspace, graph);
   *contact_count =
       collect_closed_contacts(graph, interval_is_closed, contact_edges);
@@ -1005,17 +1078,15 @@ static int32_t grow_clusters(struct workspace *workspace,
                                            batch_start);
     int32_t fusion_kind = fuse_contact_batch(
         workspace, graph, contact_edges, batch_start, *contact_count);
-    event_count += 1;
-    if (event_count > graph->edge_count) {
-      return union_find_growth_bound_exceeded;
+    int32_t hops = fused_flood_hops(workspace, graph, interval_is_closed,
+                                    contact_edges, batch_start,
+                                    *contact_count);
+    status = record_step(steps, graph->edge_count, working_count,
+                         elapsed_ticks, fusion_kind, hops);
+    if (status != union_find_ok) {
+      return status;
     }
-    step_edge_counts[event_count - 1] = working_count;
-    step_growth_ticks[event_count - 1] = elapsed_ticks;
-    step_fusion_kinds[event_count - 1] = (uint8_t)fusion_kind;
-    step_hop_counts[event_count - 1] =
-        fused_flood_hops(workspace, graph, interval_is_closed, contact_edges,
-                         batch_start, *contact_count);
-    *step_count = event_count;
+    event_count += 1;
     active_count =
         refresh_active_roots(workspace, active_count, event_count + 1);
   }
@@ -1051,45 +1122,36 @@ static int32_t contact_forest(struct workspace *workspace,
   return forest_count;
 }
 
-/* Each node's forest neighbours, in edge order, which is fault order. */
+/* Each node's forest neighbours, in edge order, which is fault order.
+ * They are laid as the closed neighbours are, with the forest's edges
+ * as the flags: Kruskal takes no edge whose ends are one node, so the
+ * closed builder's skip of such an edge drops nothing here. */
 static void build_forest_adjacency(struct workspace *workspace,
                                    const struct graph_arrays *graph,
                                    const int32_t *forest_edges,
                                    int32_t forest_count) {
-  int32_t node_count = graph->detector_count + 1;
   memset(workspace->is_forest_edge, 0, (size_t)graph->edge_count);
   for (int32_t position = 0; position < forest_count; ++position) {
     workspace->is_forest_edge[forest_edges[position]] = 1;
   }
-  for (int32_t node = 0; node <= node_count; ++node) {
-    workspace->adjacency_start[node] = 0;
-  }
-  for (int32_t edge = 0; edge < graph->edge_count; ++edge) {
-    if (!workspace->is_forest_edge[edge]) {
+  build_closed_adjacency(workspace, graph, workspace->is_forest_edge);
+}
+
+/* Push every unvisited forest neighbour of node onto the stack at top,
+ * marking it visited. */
+static int32_t push_unvisited_neighbors(struct workspace *workspace,
+                                        int32_t node, int32_t top) {
+  int32_t end = workspace->adjacency_start[node + 1];
+  for (int32_t slot = workspace->adjacency_start[node]; slot < end; ++slot) {
+    int32_t neighbor = workspace->adjacency_neighbor[slot];
+    if (workspace->is_visited[neighbor]) {
       continue;
     }
-    int32_t node_a =
-        endpoint_node(graph->endpoint_a[edge], graph->detector_count);
-    int32_t node_b =
-        endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    workspace->adjacency_start[node_a + 1] += 1;
-    workspace->adjacency_start[node_b + 1] += 1;
+    workspace->is_visited[neighbor] = 1;
+    workspace->node_stack[top] = neighbor;
+    top += 1;
   }
-  for (int32_t node = 0; node < node_count; ++node) {
-    workspace->adjacency_start[node + 1] += workspace->adjacency_start[node];
-    workspace->adjacency_cursor[node] = workspace->adjacency_start[node];
-  }
-  for (int32_t edge = 0; edge < graph->edge_count; ++edge) {
-    if (!workspace->is_forest_edge[edge]) {
-      continue;
-    }
-    int32_t node_a =
-        endpoint_node(graph->endpoint_a[edge], graph->detector_count);
-    int32_t node_b =
-        endpoint_node(graph->endpoint_b[edge], graph->detector_count);
-    place_neighbor(workspace, node_a, node_b, edge);
-    place_neighbor(workspace, node_b, node_a, edge);
-  }
+  return top;
 }
 
 static int32_t collect_component(struct workspace *workspace, int32_t start) {
@@ -1103,18 +1165,29 @@ static int32_t collect_component(struct workspace *workspace, int32_t start) {
     int32_t node = workspace->node_stack[top];
     workspace->component_nodes[component_count] = node;
     component_count += 1;
-    int32_t end = workspace->adjacency_start[node + 1];
-    for (int32_t slot = workspace->adjacency_start[node]; slot < end; ++slot) {
-      int32_t neighbor = workspace->adjacency_neighbor[slot];
-      if (workspace->is_visited[neighbor]) {
-        continue;
-      }
-      workspace->is_visited[neighbor] = 1;
-      workspace->node_stack[top] = neighbor;
-      top += 1;
-    }
+    top = push_unvisited_neighbors(workspace, node, top);
   }
   return component_count;
+}
+
+/* Adopt every forest neighbour of node that has no parent yet, pushing
+ * them in reverse edge order so the first in edge order pops first. */
+static int32_t adopt_children(struct workspace *workspace, int32_t node,
+                              int32_t top) {
+  int32_t first = workspace->adjacency_start[node];
+  for (int32_t slot = workspace->adjacency_start[node + 1] - 1; slot >= first;
+       --slot) {
+    int32_t neighbor = workspace->adjacency_neighbor[slot];
+    if (workspace->has_parent[neighbor]) {
+      continue;
+    }
+    workspace->has_parent[neighbor] = 1;
+    workspace->parent_node[neighbor] = node;
+    workspace->parent_edge[neighbor] = workspace->adjacency_edge[slot];
+    workspace->node_stack[top] = neighbor;
+    top += 1;
+  }
+  return top;
 }
 
 /* The tree's nodes from the root outward; parents filled on the way. A
@@ -1132,19 +1205,7 @@ static int32_t walk_tree(struct workspace *workspace, int32_t root) {
     int32_t node = workspace->node_stack[top];
     workspace->tree_order[order_count] = node;
     order_count += 1;
-    int32_t first = workspace->adjacency_start[node];
-    for (int32_t slot = workspace->adjacency_start[node + 1] - 1; slot >= first;
-         --slot) {
-      int32_t neighbor = workspace->adjacency_neighbor[slot];
-      if (workspace->has_parent[neighbor]) {
-        continue;
-      }
-      workspace->has_parent[neighbor] = 1;
-      workspace->parent_node[neighbor] = node;
-      workspace->parent_edge[neighbor] = workspace->adjacency_edge[slot];
-      workspace->node_stack[top] = neighbor;
-      top += 1;
-    }
+    top = adopt_children(workspace, node, top);
   }
   return order_count;
 }
@@ -1295,10 +1356,12 @@ int32_t union_find_decode(
   initial_intervals(&graph, interval_is_closed, interval_lower_tick,
                     interval_upper_tick);
   reset_clusters(&workspace, detector_count, residual_syndrome);
-  int32_t status = grow_clusters(
-      &workspace, &graph, interval_is_closed, interval_lower_tick,
-      interval_upper_tick, contact_edges, contact_count, step_edge_counts,
-      step_hop_counts, step_growth_ticks, step_fusion_kinds, step_count);
+  struct step_record steps = {step_edge_counts, step_hop_counts,
+                              step_growth_ticks, step_fusion_kinds,
+                              step_count};
+  int32_t status = grow_clusters(&workspace, &graph, interval_is_closed,
+                                 interval_lower_tick, interval_upper_tick,
+                                 contact_edges, contact_count, &steps);
   if (status != union_find_ok) {
     release_workspace(&workspace);
     return status;
@@ -1388,9 +1451,7 @@ static int32_t grow_on(struct workspace *workspace,
                        int64_t growth_limit_ticks, uint8_t *interval_is_closed,
                        int64_t *interval_lower_tick,
                        int64_t *interval_upper_tick,
-                       int32_t *step_edge_counts, int32_t *step_hop_counts,
-                       int64_t *step_growth_ticks, uint8_t *step_fusion_kinds,
-                       int32_t *step_count, int64_t *joined_at_tick) {
+                       struct step_record *steps, int64_t *joined_at_tick) {
   int64_t grown_ticks = 0;
   int32_t event_count = 0;
   int32_t active_count =
@@ -1415,9 +1476,7 @@ static int32_t grow_on(struct workspace *workspace,
     }
     int64_t ticks_left = growth_limit_ticks - grown_ticks;
     int32_t reaches_a_closing = elapsed_ticks <= ticks_left;
-    if (!reaches_a_closing) {
-      elapsed_ticks = ticks_left;
-    }
+    elapsed_ticks = smaller_ticks(elapsed_ticks, ticks_left);
     int32_t fusion_kind = fusion_none;
     int32_t hops = 0;
     int32_t status = grow_on_once(
@@ -1428,15 +1487,12 @@ static int32_t grow_on(struct workspace *workspace,
       return status;
     }
     grown_ticks += elapsed_ticks;
-    event_count += 1;
-    if (event_count > graph->edge_count + 1) {
-      return union_find_growth_bound_exceeded;
+    status = record_step(steps, graph->edge_count + 1, working_count,
+                         elapsed_ticks, fusion_kind, hops);
+    if (status != union_find_ok) {
+      return status;
     }
-    step_edge_counts[event_count - 1] = working_count;
-    step_growth_ticks[event_count - 1] = elapsed_ticks;
-    step_fusion_kinds[event_count - 1] = (uint8_t)fusion_kind;
-    step_hop_counts[event_count - 1] = hops;
-    *step_count = event_count;
+    event_count += 1;
     if (workspace->found_odd_walk) {
       *joined_at_tick = grown_ticks;
       return union_find_ok;
@@ -1478,11 +1534,12 @@ int32_t union_find_extra_growth(
   if (workspace.found_odd_walk) {
     *joined_at_tick = 0;
   } else {
+    struct step_record steps = {step_edge_counts, step_hop_counts,
+                                step_growth_ticks, step_fusion_kinds,
+                                step_count};
     status = grow_on(&workspace, &graph, growth_limit_ticks,
                      interval_is_closed, interval_lower_tick,
-                     interval_upper_tick, step_edge_counts, step_hop_counts,
-                     step_growth_ticks, step_fusion_kinds, step_count,
-                     joined_at_tick);
+                     interval_upper_tick, &steps, joined_at_tick);
   }
   release_workspace(&workspace);
   return status;

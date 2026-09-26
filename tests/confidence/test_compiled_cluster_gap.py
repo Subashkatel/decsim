@@ -255,7 +255,7 @@ def test_a_growth_with_one_interval_per_edge_missing_is_refused():
     one_interval = evidence_records.Open(0, 1)
     short = (one_interval,)
 
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(RuntimeError) as refusal:
         compiled_decoder.cluster_gap(graph, short)
 
     assert "one interval per edge" in str(refusal.value)

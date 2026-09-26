@@ -6,18 +6,19 @@ ns-3 schedules the destination device's own Receive after the
 propagation (the ns3-point-to-point copy of
 point-to-point-channel.cc:88-92 into point-to-point-net-device.cc:324),
 OMNeT++ takes ownership into the destination module and inserts inside
-its handler (tmp/resources/omnetpp/src/sim/csimplemodule.cc:782-783,
+its handler (omnetpp src/sim/csimplemodule.cc:782-783,
 :799, with queueinglib/Queue.cc:84-94), Ciw counts the individual in the
 destination's own accept (Ciw/ciw/node.py:602 into :102-103), and Caune
 2410.05202 lines 1243-1247 store the outcomes in the decoder sequencer's
 memory only after the propagation. The sender still refuses before it
 sends, so the room counts the bits of the writes in flight as taken
 (gem5 src/dev/net/pktfifo.hh, `avail() = _maxsize - _size - _reserved`
-with `reserve(len)`). The rest are the laws of the buffer contract
-(validation/responsibility_audit_2026_08_30/buffer_contract.md): the
+with `reserve(len)`). The rest pin the store's two ordering laws: the
 publication never precedes the store, and the window manager hears of a
 round only once the store's record says it is readable.
 """
+
+import pytest
 
 import decsim.config as config
 import decsim.detector_error_model.detection_event_formation as formation
@@ -25,6 +26,7 @@ import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.records.rounds as round_records
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
@@ -78,9 +80,9 @@ def _packed(
     return round_records.PackedRound(packet, route, BITS_PER_ROUND)
 
 
-def _store(bits=None) -> syndrome_buffer_module.SyndromeBuffer:
+def _store(engine, bits=None) -> syndrome_buffer_module.SyndromeBuffer:
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
-    return syndrome_buffer_module.SyndromeBuffer(settings)
+    return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
 
 def _receiver_with(engine, store, output=None, detection_events=None):
@@ -99,18 +101,22 @@ def _receiver_with(engine, store, output=None, detection_events=None):
     return receiver, windows
 
 
+def _no_sender_counts_it() -> None:
+    """The publication callback of a round no transmitter counts here."""
+
+
 def _cross(receiver, packed, landing_ticks=LANDING_TICKS):
     """One crossing: the room is taken at the send, the slot at the landing."""
-    receiver.reserve_write(packed.wire_bits)
+    receiver.reserve_write(packed)
     receiver.engine.schedule(
         landing_ticks,
-        lambda: receiver.receive_round(packed),
+        lambda: receiver.receive_round(packed, _no_sender_counts_it),
     )
 
 
 def test_a_crossing_round_holds_no_slot_until_it_lands():
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
 
@@ -127,28 +133,28 @@ def test_a_crossing_round_holds_no_slot_until_it_lands():
 
 def test_the_reserved_bits_count_against_the_room_until_the_round_lands():
     engine = engine_module.Engine()
-    store = _store(bits=BITS_PER_ROUND)
+    store = _store(engine, bits=BITS_PER_ROUND)
     receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
-    room_before = receiver.has_room(BITS_PER_ROUND)
+    next_round = _packed(2)
+    room_before = receiver.has_room(next_round)
 
     _cross(receiver, packed)
-    room_while_crossing = receiver.has_room(BITS_PER_ROUND)
-    reserved_while_crossing = receiver.reserved_bits
+    room_while_crossing = receiver.has_room(next_round)
+    reserved_while_crossing = dict(receiver.reserved_bits_by_round)
     engine.run()
 
     assert room_before is True
     assert room_while_crossing is False
-    assert reserved_while_crossing == BITS_PER_ROUND
-    assert receiver.has_room(BITS_PER_ROUND) is False
-    assert receiver.reserved_bits == 0
+    assert reserved_while_crossing == {(1, 1): BITS_PER_ROUND}
+    assert receiver.has_room(next_round) is False
+    assert receiver.reserved_bits_by_round == {}
     assert store.occupied_bits == BITS_PER_ROUND
-    assert receiver.writes_in_flight == 0
 
 
 def test_the_landing_stamps_the_publication_tick_of_the_end_it_reached():
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     receiver, _windows = _receiver_with(engine, store)
     packed = _packed(1)
 
@@ -160,7 +166,7 @@ def test_the_landing_stamps_the_publication_tick_of_the_end_it_reached():
 
 def test_the_windows_hear_a_landed_round_only_once_it_is_published():
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     receiver, windows = _receiver_with(engine, store)
     packed = _packed(1)
 
@@ -172,7 +178,7 @@ def test_the_windows_hear_a_landed_round_only_once_it_is_published():
 
 def test_the_published_event_is_the_incoming_ports_own():
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     receiver, _windows = _receiver_with(engine, store)
     events = []
     receiver.trace.round_event.connect(events.append)
@@ -187,7 +193,7 @@ def test_the_published_event_is_the_incoming_ports_own():
 
 def test_the_intake_copy_is_made_at_the_landing_by_this_end():
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     receiver, _windows = _receiver_with(engine, store)
     copies = []
 
@@ -216,12 +222,12 @@ def test_the_buffer_0_line_names_the_hop_the_round_arrived_by():
     engine = engine_module.Engine()
     log = log_writers.LogWriter()
     engine.io_line.connect(log.write)
-    store = _store()
+    store = _store(engine)
     receiver, _windows = _receiver_with(engine, store)
     silent_engine = engine_module.Engine()
     silent_log = log_writers.LogWriter()
     silent_engine.line.connect(silent_log.write)
-    silent_store = _store()
+    silent_store = _store(silent_engine)
     silent_receiver, _silent_windows = _receiver_with(
         silent_engine, silent_store
     )
@@ -243,13 +249,13 @@ def test_the_buffer_0_line_names_the_hop_the_round_arrived_by():
 def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
     """The round leaves the store, so the store's own port sends it."""
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     output = _Output()
     receiver, windows = _receiver_with(engine, store, output)
     packed = _packed(2, route=MEMORY_ROUTE)
     delivered = []
 
-    receiver.reserve_write(packed.wire_bits)
+    receiver.reserve_write(packed)
     receiver.send_memory_round(packed, lambda: delivered.append(True))
 
     assert output.sent == [(1, 2)]
@@ -259,12 +265,37 @@ def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
     assert windows.published == []
 
 
+def test_a_timing_only_round_takes_its_slot_once_its_write_completes():
+    """Three write cycles of a 10-tick clock from tick 1 end at 40."""
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        clock=clock, row_settings=costs
+    )
+    store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
+    output = _Output()
+    receiver, _windows = _receiver_with(engine, store, output)
+    packed = _packed(2, route=MEMORY_ROUTE)
+    delivered = []
+
+    receiver.reserve_write(packed)
+    receiver.send_memory_round(packed, lambda: delivered.append(engine.now))
+    sent_before_the_write_ends = list(output.sent)
+    engine.run()
+
+    assert sent_before_the_write_ends == []
+    assert delivered == [40]
+
+
 def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     receiver, _windows = _receiver_with(engine, store)
 
-    receiver.reserve_write(BITS_PER_ROUND)
+    crossing = _packed(1)
+    receiver.reserve_write(crossing)
 
     try:
         receiver.check_settled()
@@ -274,9 +305,22 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
         raise AssertionError("an unfinished write settled")
 
 
+def test_a_weak_store_too_small_for_a_window_stops_the_run_at_its_hold():
+    """The declared rounds are 8 bits and the first window reads six."""
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=16)
+
+    with pytest.raises(RuntimeError) as stop:
+        declared_run.weak_only_run(weak_syndrome_buffer=settings)
+
+    sentence = str(stop.value)
+    assert "16 of its 16 bits" in sentence
+    assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
+    assert "waits for [(1, 3), (1, 4), (1, 5), (1, 6)]" in sentence
+
+
 def test_the_incoming_port_fills_the_declared_port():
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     receiver, _windows = _receiver_with(engine, store)
 
     assert isinstance(receiver, ports.WeakSyndromeRoundReceiver)
@@ -289,7 +333,7 @@ def test_write_cycles_move_every_reaction_point_by_the_store_periods():
         section,
         "weak_syndrome_buffer",
         clocks,
-        syndrome_buffer_module.SYNDROME_BUFFERS,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
     )
     free = declared_run.weak_only_run()
     charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)
@@ -301,26 +345,56 @@ def test_write_cycles_move_every_reaction_point_by_the_store_periods():
     assert shifts == [expected] * 6
 
 
+def test_the_sender_hears_the_publication_after_the_windows_do():
+    """on_published runs at the write edge, once the windows have the round.
+
+    Three cycles of a 10-tick clock from tick 1 end at the edge 40.
+    """
+    engine = engine_module.Engine()
+    engine.now = 1
+    clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
+    settings = syndrome_buffer_settings.SyndromeBufferSettings(
+        bits=BITS_PER_ROUND, clock=clock, row_settings=costs
+    )
+    store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
+    receiver, windows = _receiver_with(engine, store)
+    packed = _packed(1)
+    heard = []
+
+    def sender_hears() -> None:
+        published_count = len(windows.published)
+        heard.append((engine.now, published_count))
+
+    receiver.reserve_write(packed)
+    receiver.receive_round(packed, sender_hears)
+    engine.run()
+
+    assert heard == [(40, 1)]
+
+
 def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        bits=BITS_PER_ROUND, clock=clock, write_cycles=3
+        bits=BITS_PER_ROUND, clock=clock, row_settings=costs
     )
-    store = syndrome_buffer_module.SyndromeBuffer(settings)
+    store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     receiver, windows = _receiver_with(engine, store)
     packed = _packed(1)
-    receiver.reserve_write(packed.wire_bits)
-    receiver.receive_round(packed)
+    receiver.reserve_write(packed)
+    receiver.receive_round(packed, _no_sender_counts_it)
+    next_round = _packed(2)
     assert store.occupancy == 0
-    assert receiver.writes_in_flight == 1
-    assert receiver.has_room(BITS_PER_ROUND) is False
+    assert receiver.reserved_bits_by_round == {(1, 1): BITS_PER_ROUND}
+    assert receiver.has_room(next_round) is False
     assert windows.published == []
 
     engine.run()
 
-    assert receiver.writes_in_flight == 0
+    assert receiver.reserved_bits_by_round == {}
     assert store.occupancy == 1
     assert windows.published == [(40, (1, 1), 40)]
 
@@ -336,7 +410,7 @@ class _ChipFormer:
 def test_the_store_holds_the_events_when_the_chip_forms_them():
     """The hop's copy is the raw round; the store and the windows get events."""
     engine = engine_module.Engine()
-    store = _store()
+    store = _store(engine)
     former = _ChipFormer()
     on_the_chip = formation.WeakSyndromeBufferSideFormation(former, 0)
     receiver, _windows = _receiver_with(
@@ -365,12 +439,15 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     clock = config.Clock(10)
     formation_cycles = 5
     write_cycles = 3
+    costs = syndrome_buffer_module.SyndromeBuffer.Settings(
+        write_cycles=write_cycles
+    )
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
         clock=clock,
-        write_cycles=write_cycles,
         detection_event_cycles_per_round=formation_cycles,
+        row_settings=costs,
     )
-    store = syndrome_buffer_module.SyndromeBuffer(settings)
+    store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     former = _ChipFormer()
     on_the_chip = formation.WeakSyndromeBufferSideFormation(former, 0)
     receiver, windows = _receiver_with(
@@ -378,10 +455,38 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     )
     packed = _packed(1)
 
-    receiver.reserve_write(packed.wire_bits)
-    receiver.receive_round(packed)
+    receiver.reserve_write(packed)
+    receiver.receive_round(packed, _no_sender_counts_it)
     engine.run()
 
     charged_cycles = formation_cycles + write_cycles
     expected = charged_cycles * clock.period_ticks
     assert windows.published == [(expected, (1, 1), expected)]
+
+
+def test_the_store_is_asked_for_the_round_beside_the_rounds_in_flight():
+    """gem5 asks the responder with the packet (src/mem/port.hh:268)."""
+    engine = engine_module.Engine()
+    store = _RoomAskingStore(engine)
+    receiver, _windows = _receiver_with(engine, store)
+    crossing = _packed(1)
+    asked = _packed(2)
+    receiver.reserve_write(crossing)
+
+    receiver.has_room(asked)
+
+    assert store.asked[-1] == ((1, 2), BITS_PER_ROUND, {(1, 1): BITS_PER_ROUND})
+
+
+class _RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
+    """An unbounded store recording every room question it is asked."""
+
+    def __init__(self, engine) -> None:
+        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
+        self.asked = []
+
+    def has_room(self, round_key, bits, reserved_bits_by_round):
+        reserved = dict(reserved_bits_by_round)
+        self.asked.append((round_key, bits, reserved))
+        return True

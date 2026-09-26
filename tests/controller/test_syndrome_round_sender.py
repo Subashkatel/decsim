@@ -5,12 +5,12 @@ round's bits before any round leaves for it, counting the bits it holds
 and the bits reserved for the writes in flight, and the room is
 reserved before the wire is used (gem5's packet store answers
 `avail() = _maxsize - _size - _reserved` against the packet's own
-length, tmp/resources/gem5/src/dev/net/pktfifo.hh, and reserves it with
+length, gem5 src/dev/net/pktfifo.hh, and reserves it with
 `reserve(len)`).
 A round that finds no room waits in HeldRounds and enters in completion
 order when a slot frees (gem5 src/mem/cache/base.cc:255-257 setBlocked,
 :266-271 clearBlocked and the retry; Ciw
-tmp/resources/l5_buffers/Ciw/ciw/node.py:470-473
+Ciw ciw/node.py:470-473
 release_blocked_individual), or is dropped under the drop knob (ns-3
 point-to-point-net-device.cc Send: Enqueue false, packet dropped). A
 strong-primary plan takes one hop into the strong store for both window
@@ -33,6 +33,7 @@ import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
@@ -95,16 +96,20 @@ class RecordingStrongReceiver:
         self.reserved_bits = 0
         self.written = []
 
-    def has_room(self, bits):
-        del bits
+    def has_room(self, packed):
+        del packed
         return self.room
 
-    def reserve_write(self, bits):
+    def reserve_write(self, packed):
         self.reserved += 1
-        self.reserved_bits += bits
+        self.reserved_bits += packed.wire_bits
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         self.written.append(packed.packet.round_index)
+
+
+def no_sender_counts_it() -> None:
+    """The publication callback of a round no transmitter counts here."""
 
 
 def sender_with(
@@ -118,11 +123,11 @@ def sender_with(
     held = syndrome_round_sender.HeldRounds(engine, on_full)
     held.trace.round_event.connect(recorder.record)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=weak_bits)
-    weak_store = syndrome_buffer_module.SyndromeBuffer(settings)
+    weak_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     weak_store.held_rounds = held
     transmitter = RecordingTransmitter(engine)
     profile = link_profiles.logical_reference_profile()
-    links = fabric_module.LinkFabric(profile, engine)
+    links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
     windows = RecordingWindows()
     weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
         engine, settings
@@ -162,7 +167,7 @@ def test_a_round_with_no_room_is_held_and_written_in_order_when_a_slot_frees():
     first_admitted = sender.admit(first)
     second_admitted = sender.admit(second)
     held_while_in_flight = sender.held_rounds.count
-    weak_receiver.receive_round(first)
+    weak_receiver.receive_round(first, no_sender_counts_it)
     held_after_the_landing = sender.held_rounds.count
     weak_receiver.store.release_round((1, 1))
 
@@ -201,7 +206,7 @@ def test_a_narrow_round_waits_behind_a_held_round_it_would_fit_beside():
     sender.admit(second)
     narrow_admitted = sender.admit(narrow)
     sent_while_held = list(transmitter.sent)
-    weak_receiver.receive_round(first)
+    weak_receiver.receive_round(first, no_sender_counts_it)
     weak_receiver.store.release_round((1, 1))
 
     assert narrow_admitted is False
@@ -240,7 +245,7 @@ def test_strong_primary_rounds_use_only_the_strong_store() -> None:
     engine.run()
 
     assert strong_receiver.written == [1, 2]
-    assert weak_receiver.writes_in_flight == 0
+    assert weak_receiver.reserved_bits_by_round == {}
     assert transmitter.sent == []
 
 
@@ -255,7 +260,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     """
     engine = engine_module.Engine()
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings()
-    strong_store = syndrome_buffer_module.SyndromeBuffer(store_settings)
+    strong_store = syndrome_buffer_module.SyndromeBuffer(store_settings, engine)
     reads = decoding_records.WindowReads((1, 0))
     strong_store.register_hold(reads, [(1, 1)])
     room_side = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(
@@ -268,7 +273,7 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     first = packed(1)
 
     sender.admit(first)
-    reserved_while_crossing = room_side.writes_in_flight
+    reserved_while_crossing = len(room_side.reserved_bits_by_round)
     stored_at_the_write = strong_store.occupancy
     engine.run()
 
@@ -280,7 +285,32 @@ def test_the_controller_carries_the_round_to_the_room_side_and_lands_it():
     assert stored_at_the_write == 0
     assert strong_store.occupancy == 1
     assert strong_store.publication_tick((1, 1)) == crossing_ticks
-    assert room_side.writes_in_flight == 0
+    assert room_side.reserved_bits_by_round == {}
+
+
+def test_a_strong_primary_round_is_in_flight_until_it_lands():
+    """The packing stage's bound holds the round until the windows hear of it.
+
+    The strong syndrome buffer publishes a strong-primary round at its
+    landing, the card's 0.26 us after the send, so the sender counts it
+    across the crossing and lets it go in the event after the landing.
+    """
+    engine = engine_module.Engine()
+    strong_receiver = RecordingStrongReceiver()
+    sender, _weak_receiver, _transmitter, _recorder = sender_with(
+        engine,
+        strong_receiver=strong_receiver,
+        publishes_from_strong_store=True,
+    )
+    first = packed(1)
+
+    sender.admit(first)
+    count_while_crossing = sender.strong_crossing_count
+    engine.run()
+
+    assert count_while_crossing == 1
+    assert strong_receiver.written == [1]
+    assert sender.strong_crossing_count == 0
 
 
 def test_a_weak_primary_round_never_leaves_for_the_strong_store():
@@ -298,7 +328,7 @@ def test_a_weak_primary_round_never_leaves_for_the_strong_store():
     assert admitted is True
     assert strong_receiver.written == []
     assert strong_receiver.reserved == 0
-    assert weak_receiver.writes_in_flight == 1
+    assert weak_receiver.reserved_bits_by_round == {(1, 1): BITS_PER_ROUND}
     assert transmitter.sent == [1]
 
 
@@ -316,7 +346,7 @@ def test_a_strong_primary_round_with_no_room_on_the_room_side_is_held():
 
     assert admitted is False
     assert weak_receiver.store.occupancy == 0
-    assert weak_receiver.writes_in_flight == 0
+    assert weak_receiver.reserved_bits_by_round == {}
     assert transmitter.sent == []
     assert sender.held_rounds.count == 1
 

@@ -243,7 +243,7 @@ class StrongRedecode:
         region = round_records.EscalatedRegion.of(
             assignment.request_key, packets
         )
-        self.strong_receiver.reserve_region(len(packets), region.wire_bits)
+        self.strong_receiver.reserve_region(region)
         self.carried_round_keys.update(missing)
         landed = functools.partial(self._region_landed, region)
         self.decoder_output.send_region(region, landed)
@@ -402,7 +402,7 @@ class _TraceSources:
     """Every event the strong redecode reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

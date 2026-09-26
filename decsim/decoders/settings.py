@@ -8,13 +8,16 @@ when a window is decoded again by the strong tier.
 """
 
 import dataclasses
+import math
 from collections.abc import Mapping
+from numbers import Real
 from typing import Any, Optional, Union
 
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
@@ -28,9 +31,11 @@ from decsim.decoders.relay_belief_propagation import (
 
 # weak_decoder.kind and strong_decoder.kind name one of these rows. A
 # named row decodes every window for real and is charged its measured
-# wall clock; a number instead of a name is a fixed core latency in
-# microseconds on the MWPM path (decsim/build/decoders.py). Every row is
-# one class on the Decoder port (decsim/decoders/decoder.py); sinter's
+# wall clock, except measured_table, which is charged a GPU's measured
+# time for decsim's own Relay-BP decode (measured_table/decoder.py); a
+# number instead of a name is a fixed core latency in microseconds on
+# the MWPM path (decsim/build/decoders.py). Every row is one class on
+# the Decoder port (decsim/decoders/decoder.py); sinter's
 # BUILT_IN_DECODERS is the shape.
 DECODERS = {
     "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder,
@@ -42,6 +47,7 @@ DECODERS = {
     "tesseract": tesseract.TesseractDecoder,
     "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
+    "measured_table": measured_table.MeasuredTableDecoder,
 }
 
 # The keys every row of a <tier>_decoder section shares; any other key
@@ -56,10 +62,14 @@ DECODER_KEYS = (
     "engine",
 )
 
+# The keys a <tier>_decoder section cannot leave out: the row, the unit
+# count, the unit's memory and the card its stages are priced on.
+_REQUIRED_DECODER_KEYS = ("kind", "units", "unit_memory", "engine")
+
 DECODER_MANAGER_KEYS = ("bulk_strong", "clock", "dispatch_cycles")
 
 # <tier>_decoder.unit_memory's keys.
-UNIT_MEMORY_KEYS = ("bits",)
+UNIT_MEMORY_KEYS = ("bits", "word_bits")
 
 # <tier>_decoder.engine's four stage keys, each with what it prices, so
 # a card that leaves one out is refused by name and by what is missing.
@@ -69,6 +79,14 @@ ENGINE_CYCLE_KEYS = {
     "release_cycles_per_job": "the release stage's cost once a job",
     "release_cycles_per_round": "the release stage's cost for each round",
 }
+
+# Every key a <tier>_decoder.engine card may hold; any other is refused.
+_ENGINE_KEYS = (
+    "clock",
+    *ENGINE_CYCLE_KEYS,
+    "detection_event_latency_cycles",
+    "detection_event_cycles_per_round",
+)
 
 # weak_decoder.input and strong_decoder.input name one of these rows:
 # how a tier's unit gets the rounds it decodes. copy moves them over the
@@ -88,7 +106,7 @@ DECODER_INPUTS = {"copy": True, "in_place": False}
 # duplicates the landed input and XORs the mask into the duplicate, so
 # the unit's stored rounds stay raw, which is what a software decoder
 # does (cuda-q QEC keeps the raw rounds and rebuilds the window syndrome
-# each time, sliding_window.cpp:283-292). in_place XORs the mask into
+# each time, sliding_window.cpp:287-293). in_place XORs the mask into
 # the unit's own memory, which is what a hardware decoder does: AFS's
 # processing elements write on-chip memory directly (2001.06598 lines
 # 528-531) and Helios keeps its shared memory in registers with a single
@@ -130,9 +148,18 @@ class UnitMemorySettings:
     src/systolic_array/SystolicArray.py). The unit is bits because the
     rest of the tree counts bits (payload_bits, bits_per_cycle) and a
     syndrome round is not byte aligned.
+
+    word_bits is what one read of that memory moves: the fetch stage
+    reads each round in whole words, one word a cycle, beside its per-job
+    and per-round cycles, as gem5's crossbar charges divCeil(size, width)
+    per packet (src/mem/xbar.cc:135) and Helios loads a round a byte a
+    clock (Helios_scalable_QEC control_node_single_FPGA.v lines 35-36
+    and 152-167). null keeps the fetch at its per-round cycles alone. A
+    tier that reads in place has no memory of its own, so it takes none.
     """
 
     bits: Optional[int] = None
+    word_bits: Optional[int] = None
 
     @classmethod
     def from_yaml(
@@ -149,7 +176,10 @@ class UnitMemorySettings:
         bits = section.get("bits")
         key = f"{section_name}.unit_memory.bits"
         config.check_capacity_bits(key, bits)
-        return cls(bits=bits)
+        word_bits = section.get("word_bits")
+        word_key = f"{section_name}.unit_memory.word_bits"
+        _check_word_bits(word_key, word_bits)
+        return cls(bits=bits, word_bits=word_bits)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -259,35 +289,34 @@ class DecoderSettings:
         section_name: str,
     ) -> "DecoderSettings":
         """A tier section: kind, units, unit memory and the engine card."""
+        _check_required_keys(section, section_name)
         kind = section["kind"]
         row = _decoder_row(kind, section_name)
         row_settings = tables.row_settings(
             row, section_name, section, DECODER_KEYS, clocks
         )
-        engine = section["engine"]
-        engine_clock = clocks.clock(engine["clock"])
-        unit_memory = UnitMemorySettings.from_yaml(
-            section["unit_memory"], section_name
+        engine_section = _block(section, section_name, "engine")
+        engine = _engine_card(engine_section, clocks, section_name)
+        memory_section = _block(section, section_name, "unit_memory")
+        unit_memory = UnitMemorySettings.from_yaml(memory_section, section_name)
+        input_kind = _copy_row(section, section_name, "input", DECODER_INPUTS)
+        boundary_fold = _copy_row(
+            section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
         )
-        input_kind = section.get("input", "copy")
-        boundary_fold = section.get("boundary_fold", "copy")
-        stage_cycles = _engine_stage_cycles(engine, section_name)
-        formation_latency = _formation_latency_cycles(engine)
-        formation_rate = _formation_cycles_per_round(engine)
+        _check_fold_has_a_memory(section_name, input_kind, boundary_fold)
+        _check_word_has_a_memory(section_name, input_kind, unit_memory)
         result_blocks_unit = section.get("result_blocks_unit", False)
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
+        units = _unit_count(section, section_name)
         return cls(
             kind=kind,
-            units=section["units"],
+            units=units,
             input=input_kind,
             boundary_fold=boundary_fold,
             result_blocks_unit=result_blocks_unit,
             unit_memory=unit_memory,
-            **stage_cycles,
-            detection_event_latency_cycles=formation_latency,
-            detection_event_cycles_per_round=formation_rate,
-            engine_clock=engine_clock,
             row_settings=row_settings,
+            **engine,
         )
 
 
@@ -339,11 +368,7 @@ class DecoderManagerSettings:
                 f"{list(DECODER_MANAGER_KEYS)}"
             )
         bulk_strong = section.get("bulk_strong", False)
-        if bulk_strong not in (True, False):
-            raise ValueError(
-                "decoder_manager.bulk_strong must be true or false, got "
-                f"{bulk_strong!r}"
-            )
+        _check_boolean("decoder_manager", "bulk_strong", bulk_strong)
         dispatch_cycles = section.get("dispatch_cycles", 0)
         clock = _dispatch_clock(section, clocks, dispatch_cycles)
         return cls(
@@ -356,15 +381,89 @@ class DecoderManagerSettings:
 def _dispatch_clock(
     section: Mapping, clocks: config.ClockSettings, dispatch_cycles: int
 ) -> Optional[config.Clock]:
-    """The clock dispatch_cycles are counted on; None when none are charged."""
+    """The clock dispatch_cycles are counted on; None when none is named.
+
+    A named clock is resolved whether or not a cycle is charged, so a
+    domain the clocks section does not have is refused either way.
+    """
+    if "clock" in section:
+        return clocks.clock(section["clock"])
     if dispatch_cycles == 0:
         return None
-    if "clock" not in section:
+    raise ValueError(
+        "decoder_manager.dispatch_cycles needs a clock: name the "
+        "domain its cycles are counted in"
+    )
+
+
+def _check_required_keys(section: Mapping, section_name: str) -> None:
+    """A tier section names every key it cannot do without."""
+    missing = set(_REQUIRED_DECODER_KEYS) - set(section)
+    if not missing:
+        return
+    listed = sorted(missing)
+    raise ValueError(
+        f"{section_name} needs the keys {listed}; configs/reference.yaml "
+        "holds every key with its unit"
+    )
+
+
+def _block(section: Mapping, section_name: str, key: str) -> Mapping:
+    """A nested block of the section, which is a mapping of its own keys.
+
+    `unit_memory: 4096` reads as a capacity to a user and as no mapping
+    to the reader, so it is refused with the form it takes.
+    """
+    block = section[key]
+    if isinstance(block, Mapping):
+        return block
+    raise ValueError(
+        f"{section_name}.{key} holds {block!r}; it is a mapping of its "
+        "keys, as in configs/reference.yaml"
+    )
+
+
+def _engine_card(
+    engine: Mapping, clocks: config.ClockSettings, section_name: str
+) -> dict:
+    """The engine card's fields: its clock and every stage it prices."""
+    _check_engine_keys(engine, section_name)
+    fields = _engine_stage_cycles(engine, section_name)
+    fields["engine_clock"] = _engine_clock(engine, clocks, section_name)
+    latency = _formation_latency_cycles(engine)
+    fields["detection_event_latency_cycles"] = latency
+    rate = _formation_cycles_per_round(engine)
+    fields["detection_event_cycles_per_round"] = rate
+    return fields
+
+
+def _check_engine_keys(engine: Mapping, section_name: str) -> None:
+    """An engine card holds no key it does not price.
+
+    gem5 refuses a parameter its class does not declare
+    (src/python/m5/SimObject.py:932-936), so a misspelt stage key is
+    refused rather than left at nothing.
+    """
+    unknown = set(engine) - set(_ENGINE_KEYS)
+    if not unknown:
+        return
+    listed = sorted(unknown)
+    raise ValueError(
+        f"{section_name}.engine does not know {listed}; its keys are "
+        f"{list(_ENGINE_KEYS)}"
+    )
+
+
+def _engine_clock(
+    engine: Mapping, clocks: config.ClockSettings, section_name: str
+) -> config.Clock:
+    """The domain the engine card's cycles count on; a card must name it."""
+    if "clock" not in engine:
         raise ValueError(
-            "decoder_manager.dispatch_cycles needs a clock: name the "
-            "domain its cycles are counted in"
+            f"{section_name}.engine needs clock, the domain its stage "
+            "cycles are counted in"
         )
-    return clocks.clock(section["clock"])
+    return clocks.clock(engine["clock"])
 
 
 def _engine_stage_cycles(engine: Mapping, section_name: str) -> dict:
@@ -409,13 +508,112 @@ def _check_boolean(section_name: str, key: str, value) -> None:
     )
 
 
+def _copy_row(
+    section: Mapping, section_name: str, key: str, table: dict
+) -> str:
+    """A copy-or-in-place key's row name, copy when the yaml leaves it out."""
+    name = section.get(key, "copy")
+    tables.row(table, f"{section_name}.{key}", name)
+    return name
+
+
+def _check_fold_has_a_memory(
+    section_name: str, input_kind: str, boundary_fold: str
+) -> None:
+    """Folding into the unit's memory needs the unit to hold a copy.
+
+    A tier that reads its input in place holds no rounds of its own, so
+    there is no single-writer memory to XOR the mask into (Helios
+    2301.08419 lines 632-640).
+    """
+    if input_kind == "copy" or boundary_fold == "copy":
+        return
+    raise ValueError(
+        f"{section_name}.boundary_fold in_place needs the unit's own copy "
+        "of the rounds, and input in_place reads them where the store "
+        "keeps them; fold into a copy, or copy the input"
+    )
+
+
+def _check_word_has_a_memory(
+    section_name: str,
+    input_kind: str,
+    unit_memory: UnitMemorySettings,
+) -> None:
+    """A word width prices reads of the unit's own memory, which in_place lacks.
+
+    Under input in_place the unit reads the store's words, and the store
+    prices that read (syndrome_buffer/round_output.py); a width here would
+    price the same bits twice.
+    """
+    if input_kind == "copy" or unit_memory.word_bits is None:
+        return
+    raise ValueError(
+        f"{section_name}.unit_memory.word_bits prices reads of the unit's own "
+        "memory, and input in_place reads the rounds where the store keeps "
+        "them, which the store prices; leave word_bits out, or copy the input"
+    )
+
+
+def _check_word_bits(key: str, word_bits) -> None:
+    """A word is a whole number of bits, at least one; null has none."""
+    if word_bits is None:
+        return
+    is_count = isinstance(word_bits, int) and not isinstance(word_bits, bool)
+    if is_count and word_bits >= 1:
+        return
+    raise ValueError(
+        f"{key} must be a whole number of bits, at least one, or null "
+        f"(got {word_bits!r})"
+    )
+
+
+def _unit_count(section: Mapping, section_name: str) -> int:
+    """A tier's engine count, checked where it enters."""
+    units = section["units"]
+    if _is_engine_count(units):
+        return units
+    raise ValueError(
+        f"{section_name}.units must be a whole number of engines, at least "
+        f"one (got {units!r})"
+    )
+
+
+def _is_engine_count(units) -> bool:
+    """A count of engines: a whole number at least one, never a flag."""
+    if isinstance(units, bool):
+        return False
+    if not isinstance(units, int):
+        return False
+    return units >= 1
+
+
 def _decoder_row(kind, section_name: str):
     """The row a tier's kind names; None for a number or no decoder.
 
     A number is a fixed core latency on the MWPM path
     (decsim/build/decoders.py), so it is no row and takes no keys.
     """
-    if not isinstance(kind, str):
-        return None
     key = f"{section_name}.kind"
-    return tables.row(DECODERS, key, kind)
+    if isinstance(kind, str):
+        return tables.row(DECODERS, key, kind)
+    if kind is None:
+        return None
+    if _is_latency_microseconds(kind):
+        return None
+    rows = sorted(DECODERS)
+    raise ValueError(
+        f"{key} {kind!r} is neither a row nor a latency; name one of "
+        f"{rows}, or write a finite nonnegative number of microseconds"
+    )
+
+
+def _is_latency_microseconds(kind) -> bool:
+    """A preset core latency: a finite number at least zero, never a flag."""
+    if isinstance(kind, bool):
+        return False
+    if not isinstance(kind, Real):
+        return False
+    if not math.isfinite(kind):
+        return False
+    return kind >= 0

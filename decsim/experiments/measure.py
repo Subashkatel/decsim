@@ -87,7 +87,7 @@ POINTS = (
     # for a window the first decode committed
     "weak_attempt",
     # weak decoder -> strong decoder, the escalation hop: from its first
-    # transfer's send to its last transfer's delivery, the selection and
+    # transfer's request to its last transfer's delivery, the selection and
     # then the rounds the strong store lacked, which the strong input
     # hop waits for; zero for a window that did not escalate. Under
     # run_both_at_once the rounds cross at the weak dispatch and the
@@ -126,7 +126,7 @@ class ShotMeasurement:
 
     physical_error_probability: float
     distance: int
-    round_period_us: float
+    round_period_microseconds: float
     algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
     windows: int
@@ -185,7 +185,7 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
     settings = shot.task.settings
     physical_error_probability = settings.workload.physical_error_probability
     distance = settings.qpu.distance
-    round_period_us = settings.qpu.round_period_microseconds
+    round_period_microseconds = settings.qpu.round_period_microseconds
     label = shot_label(settings, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
@@ -199,7 +199,7 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
         shot.result,
         physical_error_probability=physical_error_probability,
         distance=distance,
-        round_period_us=round_period_us,
+        round_period_microseconds=round_period_microseconds,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
         trace_path=trace_path,
@@ -240,7 +240,7 @@ def link_totals(traffic: dict) -> dict:
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """Ticks from the first send to the last delivery by (path, window key).
+    """Ticks from the first request to the last delivery by (path, window key).
 
     A hop's transfers for one window can overlap, as the escalation's
     selection and its rounds do, so the span is what the window waited
@@ -253,12 +253,12 @@ def link_delay_by_window(transfers: list) -> dict:
     names a per-instruction fact the same way: the reorder buffer finds
     an instruction by its thread and its sequence number, findInst(
     ThreadID tid, InstSeqNum squash_inst) walking instList[tid]
-    (tmp/resources/gem5/src/cpu/o3/rob.hh:131-134 and rob.cc:515-523),
-    and a retired instruction's counters land in that thread's own
-    bucket, commitStats[tid] and thread[tid]->threadStats
-    (tmp/resources/gem5/src/cpu/o3/cpu.cc:1156-1174).
+    (gem5 src/cpu/o3/rob.hh:131-134 and rob.cc:515-523), and a retired
+    instruction's counters land in that thread's own bucket,
+    commitStats[tid] and thread[tid]->threadStats (gem5
+    src/cpu/o3/cpu.cc:1156-1174).
     """
-    first_send = {}
+    first_request = {}
     last_delivery = {}
     for row in transfers:
         attribution = row["attribution"]
@@ -267,15 +267,15 @@ def link_delay_by_window(transfers: list) -> dict:
             recorded_operation
         )
         key = (row["path"], operation_id, attribution["window_id"])
-        send = row["send_ticks"]
-        earliest_send = first_send.get(key, send)
-        first_send[key] = min(earliest_send, send)
+        request = _hop_start_ticks(row)
+        earliest_request = first_request.get(key, request)
+        first_request[key] = min(earliest_request, request)
         delivery = row["delivery_ticks"]
         latest_delivery = last_delivery.get(key, delivery)
         last_delivery[key] = max(latest_delivery, delivery)
     delay = {}
-    for key, send in first_send.items():
-        delay[key] = last_delivery[key] - send
+    for key, request in first_request.items():
+        delay[key] = last_delivery[key] - request
     return delay
 
 
@@ -296,7 +296,7 @@ def input_hop_by_request(transfers: list) -> dict:
             continue
         key = (row["path"], row["attribution"]["window_id"], run_sequence)
         delay, landing = hops.get(key, (0, 0))
-        delay += row["delivery_ticks"] - row["send_ticks"]
+        delay += row["total_delay_ticks"]
         landing = max(landing, row["delivery_ticks"])
         hops[key] = (delay, landing)
     return hops
@@ -318,12 +318,12 @@ def _request_run_sequence(row: dict):
 
 
 def controller_to_weak_buffer_delays_us(transfers: list) -> list:
-    """Every round's controller-to-Buffer-0 delay, in microseconds."""
+    """Every round's controller_to_weak_buffer delay, in microseconds."""
     delays = []
     for row in transfers:
         if row["path"] != "controller_to_weak_buffer":
             continue
-        delay = _span_microseconds(row["delivery_ticks"], row["send_ticks"])
+        delay = ticks_to_microseconds(row["total_delay_ticks"])
         delays.append(delay)
     return delays
 
@@ -384,15 +384,16 @@ def strong_store_round_keys(stored_rounds: list) -> list:
 
 
 def qpu_send_ticks(transfers: list) -> dict:
-    """The tick each round left the QPU (its earliest QC send), by round."""
+    """The tick each round left the QPU (its earliest QC request), by round."""
     send = {}
     for row in transfers:
         if row["path"] != "qpu_to_controller":
             continue
         round_index = row["attribution"]["round_lo"]
         earlier = send.get(round_index)
-        if earlier is None or row["send_ticks"] < earlier:
-            send[round_index] = row["send_ticks"]
+        start = _hop_start_ticks(row)
+        if earlier is None or start < earlier:
+            send[round_index] = start
     return send
 
 
@@ -423,7 +424,7 @@ def window_points_us(
     The decode's own time and the time it waited are two points, not
     one: a window's service is what its compute took on the unit, and
     the park before that compute is two points by cause. dep_block is
-    the dependency wait: from the verdict to the input hop's send, which
+    the dependency wait: from the verdict to the input hop's request, which
     is a strong decode waiting for its escalated rounds to land in the
     strong store, and from the input landing in the unit's memory to
     the first tick the decode may start, which is where the
@@ -440,8 +441,7 @@ def window_points_us(
     functional unit counted on its own (NoFreeFU and statFuBusy,
     inst_queue.cc:1009-1014, the stats at 306-316); and Ciw's per
     customer record keeps the whole pre-service wait as named parts
-    rather than one number (tmp/resources/l5_buffers/Ciw/
-    ciw/data_record.py lines 3-21).
+    rather than one number (Ciw ciw/data_record.py lines 3-21).
     """
     operation_id, window_id = window.key
     last_emitted_round = max(qpu_send)
@@ -516,8 +516,8 @@ def frame_records_by_window(
     rest, and the windows that lost theirs would be measured against
     another stream's decode. gem5 asks the same way: an instruction in
     the reorder buffer is found by its thread and its sequence number,
-    findInst(ThreadID tid, InstSeqNum squash_inst)
-    (tmp/resources/gem5/src/cpu/o3/rob.hh:131-134).
+    findInst(ThreadID tid, InstSeqNum squash_inst) (gem5
+    src/cpu/o3/rob.hh:131-134).
     """
     records = {}
     for record in observation.frame_corrections.committed:
@@ -611,7 +611,7 @@ def chain_load(
     samples: dict,
     settings: machine_settings.MachineSettings,
     distance: int,
-    round_period_us: float,
+    round_period_microseconds: float,
 ) -> float:
     """rho: the serial chain's service per window over the window period.
 
@@ -635,7 +635,7 @@ def chain_load(
     commit_rounds = settings.windows.commit_rounds
     if commit_rounds is None:
         commit_rounds = distance
-    inter_arrival_us = commit_rounds * round_period_us
+    inter_arrival_us = commit_rounds * round_period_microseconds
     chain_us = service_us + confidence_us + handoff_us
     return chain_us / inter_arrival_us
 
@@ -674,11 +674,11 @@ def shot_label(settings: machine_settings.MachineSettings, seed: int) -> str:
     """The name a shot's log and trace files carry: its point and seed."""
     physical_error_probability = settings.workload.physical_error_probability
     distance = settings.qpu.distance
-    round_period_us = settings.qpu.round_period_microseconds
+    round_period_microseconds = settings.qpu.round_period_microseconds
     algorithm = active_decoder_kind(settings)
     return (
         f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
-        f"_round{round_period_us:g}us_seed{seed}"
+        f"_round{round_period_microseconds:g}us_seed{seed}"
     )
 
 
@@ -689,7 +689,7 @@ def _measurement(
     *,
     physical_error_probability: float,
     distance: int,
-    round_period_us: float,
+    round_period_microseconds: float,
     seed: int,
     wall_seconds: float,
     trace_path: Optional[str],
@@ -705,14 +705,14 @@ def _measurement(
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
-    load = chain_load(samples, settings, distance, round_period_us)
+    load = chain_load(samples, settings, distance, round_period_microseconds)
     algorithm = active_decoder_kind(settings)
-    queued = _max_queued_windows(observation)
+    queued = observation.queue_depth.peak
     primary_tier = escalation_build.primary_tier(settings.escalation)
     pools = _pool_measures(observation, primary_tier)
     strong = _strong_decodes(observation)
     processes = parallel_processes_needed(
-        samples, settings, distance, round_period_us
+        samples, settings, distance, round_period_microseconds
     )
     totals = link_totals(result.link_traffic)
     means = _means(samples)
@@ -720,7 +720,7 @@ def _measurement(
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
         distance=distance,
-        round_period_us=round_period_us,
+        round_period_microseconds=round_period_microseconds,
         algorithm=algorithm,
         seed=seed,
         windows=decoded_windows,
@@ -882,16 +882,6 @@ def _referee_counts(
     )
 
 
-def _max_queued_windows(
-    observation: observation_module.Observation,
-) -> int:
-    """The deepest the decode ready queue got over the shot."""
-    depths = []
-    for _tick, depth in observation.queue_depth.samples:
-        depths.append(depth)
-    return max(depths, default=0)
-
-
 def _pool_measures(
     observation: observation_module.Observation, primary_tier: str
 ) -> _PoolMeasures:
@@ -960,7 +950,7 @@ def parallel_processes_needed(
     samples: dict,
     settings: machine_settings.MachineSettings,
     distance: int,
-    round_period_us: float,
+    round_period_microseconds: float,
 ) -> int:
     """Skoric's least count of parallel decoding processes for no backlog.
 
@@ -984,7 +974,7 @@ def parallel_processes_needed(
     both_buffers_round_count = 2 * buffer_rounds
     window_round_count = commit_rounds + both_buffers_round_count
     committed_round_count = commit_rounds + window_round_count
-    committed_rounds_us = committed_round_count * round_period_us
+    committed_rounds_us = committed_round_count * round_period_microseconds
     both_layers_service_us = 2 * service_us
     processes = both_layers_service_us / committed_rounds_us
     return math.ceil(processes)
@@ -993,6 +983,20 @@ def parallel_processes_needed(
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
     return ticks_to_microseconds(span_ticks)
+
+
+def _hop_start_ticks(row: dict) -> int:
+    """The tick a transfer was asked for, which is where its hop starts.
+
+    A transfer's send_ticks follows its wait for the channel's setup
+    engine and its own setup, and total_delay_ticks counts from the
+    request (records/transfers.py, Transfer), so the request is the
+    delivery less the total. The setup is the hop's own cost: gem5 adds
+    a DMA's fixed delay to the completion its requester sees
+    (src/dev/dma_device.cc:116-118), and a point that started at the
+    send would charge it to whatever wait comes before the hop.
+    """
+    return row["delivery_ticks"] - row["total_delay_ticks"]
 
 
 def _committed_decode(stages, frame_record) -> _CommittedDecode:
@@ -1247,10 +1251,9 @@ def _write_trace(shot, run_dir, label: str) -> Optional[str]:
     of its own is written where it says, with the shot's seed in the
     name when trace_shots asks for more than one, so no shot overwrites
     another's file. Only the shots trace_shots names are written, so a
-    sweep point of two thousand shots writes one file
-    (trace_and_viewer.md section 10, ruling 1). The file it wrote comes
-    back, so the shot's measurement can say where its trace is; a shot
-    that was not traced returns None.
+    sweep point of two thousand shots writes one file. The file it wrote
+    comes back, so the shot's measurement can say where its trace is; a
+    shot that was not traced returns None.
     """
     observation = shot.task.settings.observation
     if not observation.writes_trace:

@@ -5,10 +5,10 @@ root builds them, beside the function that builds that one seat from the
 run's settings. WIRES names every edge between two seats as the port it
 fills and the seat that fills it, which is gem5's script assigning one
 component's port to another's
-(tmp/resources/gem5/configs/learning_gem5/part1/simple.py:68). The root
+(gem5 configs/learning_gem5/part1/simple.py:68). The root
 builds, then binds, then starts: nothing is scheduled while the graph is
 still being assembled, so the order the rows sit in cannot move a tick
-(tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280).
+(gem5 src/sim/sim_object.hh lines 194 and 280).
 
 SEED_ROOTS names every owner of randomness as the segment the run seed
 hashes beside the seat that owns it. A component's seed is derived from
@@ -20,13 +20,12 @@ A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
 the five conditions that decide that, once.
 
-Three rows name a seat another row built, because the class takes that
-neighbour at construction and cannot take it as a port: the magic state
-factory, whose card refuses a missing decode service as it reads it;
-the primary store output, which is one of the two store ends rather
-than a third one; and the two decoder managers, which share the ledger
-of strong requests that the chip's side opens and the host's side
-serves. Each such row therefore sits after the rows it reads.
+Two rows name a seat another row built, because the class takes that
+neighbour at construction and cannot take it as a port: the primary
+store output, which is one of the two store ends rather than a third
+one; and the two decoder managers, which share the ledger of strong
+requests that the chip's side opens and the host's side serves. Each
+such row therefore sits after the rows it reads.
 
 The member readers come before the tables because a tuple is built when
 the module loads and every row names its builder.
@@ -154,8 +153,10 @@ WIRES = (
     ("strong_syndrome_buffer.held_rounds", "held_rounds"),
     ("weak_output.transfers", "store_transfers"),
     ("weak_output.store", "weak_syndrome_buffer"),
+    ("weak_output.link", "links"),
     ("strong_output.transfers", "store_transfers"),
     ("strong_output.store", "strong_syndrome_buffer"),
+    ("strong_output.link", "links"),
     ("weak_syndrome_round_receiver.store", "weak_syndrome_buffer"),
     ("weak_syndrome_round_receiver.output", "weak_output"),
     ("weak_syndrome_round_receiver.windows", "window_manager"),
@@ -178,6 +179,8 @@ WIRES = (
     ("retention.tracker", "tracker"),
     ("decoder_output.transfers", "window_transfers"),
     ("decoder_output.frame", "pauli_frame"),
+    ("decoder_output.weak_store", "weak_syndrome_buffer"),
+    ("decoder_output.link", "links"),
     ("gate.planner", "planner"),
     ("gate.interaction", "window_interaction"),
     ("gate.input_fold", "decoder_manager.input_fold()"),
@@ -257,6 +260,7 @@ WIRES = (
     ("syndrome_round_sender.windows", "window_manager"),
     ("rounds_in_flight.held_rounds", "held_rounds"),
     ("rounds_in_flight.transmitter", "transmitter"),
+    ("rounds_in_flight.syndrome_round_sender", "syndrome_round_sender"),
     ("assembler.detection_events", "detection_events"),
     ("assembler.rounds_in_flight", "rounds_in_flight"),
     ("assembler.syndrome_round_sender", "syndrome_round_sender"),
@@ -270,6 +274,7 @@ WIRES = (
     ("streams.windows", "window_manager"),
     ("streams.runtime", "execution_runtime"),
     ("idle_rounds.decode_queue", "decoder_manager"),
+    ("factory.decode_queue", "decoder_manager"),
     ("idle_rounds.streams", "streams"),
     ("idle_rounds.qpu", "qpu"),
     ("issuer.streams", "streams"),
@@ -307,7 +312,6 @@ SEED_ROOTS = (
     ("idle_policy", "plan.idle_policy"),
     ("conditional_release", "conditional_release"),
     ("controller", "controller"),
-    ("qpu", "qpu"),
     ("execution_runtime", "execution_runtime"),
     ("pauli_frame", "pauli_frame"),
 )
@@ -347,7 +351,7 @@ def bind(wires: tuple, seats: dict) -> None:
 
     The assignment runs the port's own refusal of a second bind
     (decsim/ports.py, Port), gem5's PortRef.connect
-    (tmp/resources/gem5/src/python/m5/params/port_params.py:109-114). The
+    (gem5 src/python/m5/params/port_params.py:109-114). The
     table is this file's input, so a row that names a seat the run did
     not build, a port a class does not declare, or a peer that does not
     answer the port's protocol is refused here, with the row printed.

@@ -17,6 +17,7 @@ import decsim.engine
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
+import decsim.trace_source as trace_source
 
 
 class DecodeLog:
@@ -35,42 +36,45 @@ class DecodeLog:
 def infinite(engine):
     """The idealized row, built and started the way the root does."""
     collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine, decode_service=None, round_ticks=0
+        engine=engine, round_ticks=0
     )
     factory = magic_state_factories.InfiniteFactory(collaborators)
     factory.start()
     return factory
 
 
-def distillation(engine, *, decode_service=None, **arguments):
-    """One 15-to-1 row, built and started the way the root does."""
+def distillation(engine, *, decode_queue=None, **arguments):
+    """One 15-to-1 row, built, bound and started the way the root does."""
     factory = unstarted_distillation(
-        engine, decode_service=decode_service, **arguments
+        engine, decode_queue=decode_queue, **arguments
     )
     factory.start()
     return factory
 
 
-def unstarted_distillation(engine, *, decode_service=None, **arguments):
-    """The same row, built and not started."""
+def unstarted_distillation(engine, *, decode_queue=None, **arguments):
+    """The same row, built and bound and not started."""
+    row = magic_state_factories.DistillationFactory
+    settings = row.Settings(**arguments)
     collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine,
-        decode_service=decode_service,
-        round_ticks=0,
-        arguments=arguments,
+        engine=engine, round_ticks=0, settings=settings
     )
-    return magic_state_factories.DistillationFactory(collaborators)
+    factory = row(collaborators)
+    if decode_queue is not None:
+        factory.decode_queue = decode_queue
+    return factory
 
 
-def multi_level(engine, *, round_ticks, decode_service=None, **arguments):
-    """One level chain, built and started the way the root does."""
+def multi_level(engine, *, round_ticks, decode_queue=None, **arguments):
+    """One level chain, built, bound and started the way the root does."""
+    row = magic_state_factories.MultiLevelDistillationFactory
+    settings = row.Settings(**arguments)
     collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine,
-        decode_service=decode_service,
-        round_ticks=round_ticks,
-        arguments=arguments,
+        engine=engine, round_ticks=round_ticks, settings=settings
     )
-    factory = magic_state_factories.MultiLevelDistillationFactory(collaborators)
+    factory = row(collaborators)
+    if decode_queue is not None:
+        factory.decode_queue = decode_queue
     factory.start()
     return factory
 
@@ -117,6 +121,36 @@ def test_every_factory_row_fills_the_port_it_is_built_behind():
         assert isinstance(row, ports.MagicStateFactory), type(row)
 
 
+class _StartRequestShutdown:
+    """A factory row that keeps no engine: three calls and its trace."""
+
+    def __init__(self):
+        self.trace = _SilentFactoryTrace()
+
+    def start(self):
+        """Nothing ahead of a request."""
+
+    def request(self, operation_id, callback):
+        """Deliver at once."""
+        del operation_id
+        callback()
+
+    def shutdown(self):
+        """Nothing runs."""
+
+
+class _SilentFactoryTrace:
+    """The one source the port declares, for a row that never waits."""
+
+    state_delivered = trace_source.SilentSource()
+
+
+def test_the_port_asks_a_row_for_its_three_calls_and_no_engine():
+    """No caller reads a factory's engine, so the port does not ask for one."""
+    row = _StartRequestShutdown()
+    assert isinstance(row, ports.MagicStateFactory)
+
+
 def test_the_infinite_factory_delivers_at_once():
     engine = decsim.engine.Engine()
     factory = infinite(engine)
@@ -153,7 +187,7 @@ def test_eleven_correction_decodes_run_in_parallel_before_delivery():
         engine,
         unit_count=1,
         attempt_ticks=100,
-        decode_service=decoder,
+        decode_queue=decoder,
         correction_round_count=3,
     )
     delivered = []
@@ -177,7 +211,7 @@ def test_the_return_trip_after_the_decodes_is_the_deliver_stage():
         engine,
         unit_count=1,
         attempt_ticks=100,
-        decode_service=decoder,
+        decode_queue=decoder,
         correction_round_count=3,
         return_ticks=30,
     )
@@ -197,7 +231,7 @@ def test_a_delivered_state_carries_the_tick_of_every_stage():
         engine,
         unit_count=1,
         attempt_ticks=100,
-        decode_service=decoder,
+        decode_queue=decoder,
         correction_round_count=3,
         return_ticks=30,
     )
@@ -222,7 +256,6 @@ def test_two_units_hold_two_states_in_flight_at_the_peak():
         engine,
         unit_count=2,
         attempt_ticks=100,
-        decode_service=None,
         correction_round_count=0,
         correction_decode_count=0,
         return_ticks=50,
@@ -326,7 +359,6 @@ def test_the_single_stage_log_names_the_request_the_ready_state_and_delivery():
         engine,
         unit_count=1,
         attempt_ticks=2_000_000,
-        decode_service=None,
         correction_round_count=0,
         correction_decode_count=0,
         return_ticks=500_000,
@@ -348,7 +380,6 @@ def test_continuous_production_keeps_the_buffer_full_ahead_of_demand():
         engine,
         unit_count=2,
         attempt_ticks=100,
-        decode_service=None,
         correction_round_count=0,
         correction_decode_count=0,
         production_mode="continuous",
@@ -367,7 +398,6 @@ def test_continuous_production_refills_the_slot_a_delivery_takes():
         engine,
         unit_count=2,
         attempt_ticks=100,
-        decode_service=None,
         correction_round_count=0,
         correction_decode_count=0,
         production_mode="continuous",
@@ -391,7 +421,6 @@ def test_a_shut_down_factory_launches_no_attempt():
         engine,
         unit_count=2,
         attempt_ticks=100,
-        decode_service=None,
         correction_round_count=0,
         correction_decode_count=0,
         production_mode="continuous",
@@ -403,43 +432,19 @@ def test_a_shut_down_factory_launches_no_attempt():
     assert factory.produced_count == 0
 
 
-def test_a_cancelled_request_is_never_delivered():
-    engine = decsim.engine.Engine()
-    factory = single_stage(engine)
-    delivered = []
-    ticket = factory.request(1, lambda: delivered.append(engine.now))
-    assert ticket.cancel() is True
-    assert ticket.cancel() is False
-    engine.run()
-    assert delivered == []
-    assert factory.stored_state_count == 1
-
-
 def test_an_unknown_production_mode_is_refused():
     engine = decsim.engine.Engine()
     with pytest.raises(ValueError, match="production_mode must be"):
         single_stage(engine, production_mode="batch")
 
 
-def test_correction_decodes_need_a_decode_service():
-    engine = decsim.engine.Engine()
-    with pytest.raises(ValueError, match="decode_service is required"):
-        distillation(
-            engine,
-            unit_count=1,
-            attempt_ticks=1,
-            correction_round_count=0,
-            correction_decode_count=11,
-        )
-
-
-def test_a_card_with_no_correction_decode_ignores_the_decode_service():
-    """The root hands every row its decoder manager; this card sends none."""
+def test_a_card_with_no_correction_decode_ignores_the_decode_queue():
+    """The root binds every row's decode queue; this card sends it none."""
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=1)
     factory = distillation(
         engine,
-        decode_service=decoder,
+        decode_queue=decoder,
         unit_count=1,
         attempt_ticks=100,
         correction_round_count=0,
@@ -459,7 +464,7 @@ def test_a_negative_correction_decode_count_is_refused():
     with pytest.raises(ValueError, match="must be nonnegative"):
         distillation(
             engine,
-            decode_service=decoder,
+            decode_queue=decoder,
             unit_count=1,
             attempt_ticks=1,
             correction_round_count=0,
@@ -604,7 +609,7 @@ def test_a_chains_correction_decodes_carry_their_level_label():
     factory = chain(
         engine,
         [level],
-        decode_service=decoder,
+        decode_queue=decoder,
         correction_round_count=3,
         correction_decode_count=2,
     )
@@ -695,20 +700,6 @@ def test_a_continuous_chain_refills_the_state_a_delivery_takes():
     assert factory.counters_by_level[1].produced_count == 2
 
 
-def test_a_cancelled_chain_request_starts_no_round():
-    engine = decsim.engine.Engine()
-    level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
-    factory = chain(engine, [level])
-    delivered = []
-    ticket = factory.request(1, lambda: delivered.append(engine.now))
-    assert ticket.cancel() is True
-    engine.run()
-    assert delivered == []
-    assert engine.now == 10
-    assert factory.counters_by_level[0].stored_state_count == 15
-    assert factory.counters_by_level[1].produced_count == 0
-
-
 def test_a_shut_down_chain_serves_no_request():
     engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
@@ -740,7 +731,7 @@ def test_a_continuous_row_queues_nothing_until_it_is_started():
 
     gem5 splits the constructor from startup, "the appropriate place to
     schedule initial event(s)"
-    (tmp/resources/gem5/src/sim/sim_object.hh lines 194 and 280), so the
+    (gem5 src/sim/sim_object.hh lines 194 and 280), so the
     order the root builds its components in cannot move a tick.
     """
     engine = decsim.engine.Engine()

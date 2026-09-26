@@ -34,17 +34,19 @@ class RoundsInFlight:
 
     A round is in flight from its first fragment until the windows hear
     of it: its publication on the window route, its delivery on the
-    memory route. Until then it is in one of three places, in assembly
-    here, held for store room (HeldRounds) or on its route
-    (RoundTransmitter), and each place keeps its own count for its own
-    settlement check; the stage's count is their sum, read when a first
-    fragment asks for room, so no exit can forget a release. A round the
-    strong receiver carries alone leaves at its write and a dropped round
-    at its drop: neither is held nor sent.
+    memory route, its landing in the strong syndrome buffer on a
+    strong-primary run. Until then it is in one of four places, in
+    assembly here, held for store room (HeldRounds), on its route
+    (RoundTransmitter) or crossing to the strong syndrome buffer
+    (SyndromeRoundSender), and each place keeps its own count; the
+    stage's count is their sum, read when a first fragment asks for
+    room, so no exit can forget a release. A dropped round leaves at
+    its drop.
     """
 
     held_rounds = ports.Port(ports.HeldRounds)
     transmitter = ports.Port(round_transmission.RoundTransmitter)
+    syndrome_round_sender = ports.Port(ports.SyndromeRoundSender)
 
     def __init__(self, capacity: Optional[int]) -> None:
         self.capacity = capacity
@@ -57,14 +59,21 @@ class RoundsInFlight:
 
     def count(self, in_assembly: int) -> int:
         """The rounds in flight now, given how many are in assembly."""
-        return in_assembly + self.held_rounds.count + self.transmitter.in_flight
+        on_route = self._on_route()
+        return in_assembly + self.held_rounds.count + on_route
 
     def downstream_text(self) -> str:
         """The rounds in flight past assembly, for the refusal sentence."""
+        on_route = self._on_route()
         return (
             f"held for store room: {self.held_rounds.count}, on their "
-            f"route: {self.transmitter.in_flight}"
+            f"route: {on_route}"
         )
+
+    def _on_route(self) -> int:
+        """The rounds sent and not yet heard of by the windows."""
+        strong_crossing_count = self.syndrome_round_sender.strong_crossing_count
+        return self.transmitter.in_flight + strong_crossing_count
 
 
 class RoundAssembler:
@@ -393,7 +402,7 @@ class _TraceSources:
     """Every event the round assembler reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

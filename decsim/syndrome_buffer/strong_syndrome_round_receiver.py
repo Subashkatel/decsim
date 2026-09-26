@@ -11,7 +11,7 @@ is small), so the rounds a cold weak tier keeps for itself never cross
 the cryostat (Battistel 2303.00054 lines 342 to 347). Either sender
 executes its own crossing, being the end the data leaves by (OMNeT++
 refuses a module that sends a message it does not own,
-tmp/resources/omnetpp/src/sim/csimplemodule.cc:333-334; gem5 bills a
+omnetpp src/sim/csimplemodule.cc:333-334; gem5 bills a
 transfer to the port it left by, coherent_xbar.cc:354-357). This end owns the
 room and the landing: it answers has_room counting the bits still in
 flight, reserves those bits before a crossing starts, gem5's packet
@@ -33,6 +33,7 @@ import dataclasses
 import functools
 from typing import Optional
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
@@ -68,63 +69,73 @@ class StrongSyndromeRoundReceiver:
     output = ports.Port(ports.SyndromeBufferOutput)
     memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
-        self.writes_in_flight = 0
-        # the bits the crossing rounds will take, held against the store
-        self.reserved_bits = 0
+        # the bits each crossing round will take, by its key, held
+        # against the store until it lands
+        self.reserved_bits_by_round: dict = {}
         self.trace = _TraceSources()
 
-    def has_room(self, bits: Optional[int]) -> bool:
+    def has_room(self, packed: round_records.PackedRound) -> bool:
         """A write can land: the store weighs it against what is reserved."""
-        return self.store.has_room(bits, self.reserved_bits)
+        return self.store.has_room(
+            packed.round_key, packed.wire_bits, self.reserved_bits_by_round
+        )
 
-    def reserve_write(self, bits: Optional[int]) -> None:
+    def reserve_write(self, packed: round_records.PackedRound) -> None:
         """Take the bits one crossing round will need, before it leaves."""
-        assert self.has_room(bits), (
+        assert self.has_room(packed), (
             "a round was written into a full strong store"
         )
-        self.writes_in_flight += 1
-        self.reserved_bits += round_records.stated_bits(bits)
+        bits = round_records.stated_bits(packed.wire_bits)
+        self.reserved_bits_by_round[packed.round_key] = bits
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
         """Take one round that landed here: its room is now its slot."""
-        self.writes_in_flight -= 1
-        self.reserved_bits -= round_records.stated_bits(packed.wire_bits)
+        del self.reserved_bits_by_round[packed.round_key]
         window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
         if packed.route.kind is window_input:
             self._land(packed.packet, packed.wire_bits, CONTROLLER_WRITE)
             return
         self._forward_memory_round(packed)
 
-    def reserve_region(self, round_count: int, bits: Optional[int]) -> None:
+    def reserve_region(self, region: round_records.EscalatedRegion) -> None:
         """Take the room an escalated region needs, before it leaves the chip.
 
-        An escalation cannot wait: the weak result is already given up,
-        so a strong store with no room for the region stops the run
-        rather than holding the chip. The yaml sizes the store.
+        Each round is asked for beside the ones before it, so a store of
+        several memories answers for each. An escalation cannot wait:
+        the weak result is already given up, so a strong store with no
+        room for the region stops the run rather than holding the chip.
+        The yaml sizes the store.
         """
-        if not self.has_room(bits):
-            self._refuse_region(round_count, bits)
-        self.writes_in_flight += round_count
-        self.reserved_bits += round_records.stated_bits(bits)
+        reserved = dict(self.reserved_bits_by_round)
+        for packet in region.packets:
+            round_key = (packet.operation_id, packet.round_index)
+            bits = round_records.fragment_wire_bits(packet.fragments)
+            if not self.store.has_room(round_key, bits, reserved):
+                self._refuse_region(region)
+            reserved[round_key] = round_records.stated_bits(bits)
+        self.reserved_bits_by_round = reserved
 
     def receive_region(self, region: round_records.EscalatedRegion) -> None:
         """Take an escalated region that landed here: every round its slot."""
-        self.reserved_bits -= round_records.stated_bits(region.wire_bits)
+        for round_key in region.round_keys:
+            del self.reserved_bits_by_round[round_key]
         for packet in region.packets:
-            self.writes_in_flight -= 1
             packet_bits = round_records.fragment_wire_bits(packet.fragments)
             self._land(packet, packet_bits, ESCALATION)
 
-    def _refuse_region(self, round_count: int, bits: Optional[int]) -> None:
+    def _refuse_region(self, region: round_records.EscalatedRegion) -> None:
         """An escalated region that does not fit stops the run, by the yaml."""
         capacity = self.store.capacity_bits()
+        round_count = len(region.packets)
+        reserved_widths = self.reserved_bits_by_round.values()
+        reserved_bits = sum(reserved_widths)
         raise RuntimeError(
-            f"the strong syndrome buffer has no room for the {bits} bits "
-            f"of an escalated region's {round_count} rounds: "
-            f"{self.store.occupied_bits} bits stored and "
-            f"{self.reserved_bits} reserved against "
+            f"the strong syndrome buffer has no room for the "
+            f"{region.wire_bits} bits of an escalated region's {round_count} "
+            f"rounds: {self.store.occupied_bits} bits stored and "
+            f"{reserved_bits} reserved against "
             f"strong_syndrome_buffer.bits {capacity}"
         )
 
@@ -240,9 +251,10 @@ class StrongSyndromeRoundReceiver:
 
     def check_settled(self) -> None:
         """At the end of a run nothing may be in flight or held."""
-        if self.writes_in_flight:
+        if self.reserved_bits_by_round:
+            in_flight = len(self.reserved_bits_by_round)
             raise RuntimeError(
-                f"strong syndrome buffer ended with {self.writes_in_flight} "
+                f"strong syndrome buffer ended with {in_flight} "
                 f"writes in flight"
             )
         self.store.check_settled()
@@ -253,7 +265,7 @@ class _TraceSources:
     """Every event the strong syndrome round receiver reports, as one member.
 
     gem5 groups a component's statistics into one nested Group member
-    (tmp/resources/gem5/src/base/stats/group.hh:60-92) rather than one
+    (gem5 src/base/stats/group.hh:60-92) rather than one
     member per counter; a component's events are the same shape, so a
     listener reaches all of them through one name.
     """

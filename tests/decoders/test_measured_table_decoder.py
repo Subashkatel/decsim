@@ -1,0 +1,115 @@
+"""The measured_table row against its two referents on the same region.
+
+The time is the measured line, intercept plus slope times iterations,
+at the iteration count relay-bp's RelayDecoderF32 reports for the
+region (decode_detailed's `iterations`), with the numbers of the cell
+measurements.py ships. The answer is the relay_bp row's under the same
+run seed. The regions are Stim's rotated memory circuits of 3d rounds,
+the measured regions' own shape: at d = 5 and 15 rounds, 360 detectors.
+"""
+
+import pytest
+
+import decsim.config as config
+import decsim.decoders.measured_table.decoder as measured_table
+import decsim.decoders.relay_belief_propagation.decoder as relay
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.seeds as seed_records
+import decsim.seeding as seeding
+from tests.decoders import windows
+
+PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
+REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+
+
+def _bind_seed(component) -> None:
+    """Bind run seed 7 to the component at one path for both rows."""
+    segment = seed_records.RunSeedPathSegment("field", "strong_decoder")
+    root = ((segment,), component)
+    seeding.bind_run_seed(7, [root])
+
+
+def test_the_time_is_the_measured_line_at_relay_bps_own_iterations():
+    """a100, whole, 360 detectors: 78.957 us plus 9.762 us an iteration."""
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(5, 15, 0.003)
+    model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0])
+    settings = measured_table.MeasuredTableSettings("a100", "whole")
+    table = measured_table.MeasuredTable(settings)
+    physical = model.require_faults(PHYSICAL)
+    compiled = table.decoder.window_decoder._compiled_model(physical)
+    syndrome = windows.row_syndrome(model, detection_events[0])
+    detailed = compiled.backend.decode_detailed(syndrome)
+    ticket = table.submit(job, 0)
+    microseconds = 78.957 + 9.762 * detailed.iterations
+    assert physical.check.shape[0] == 360
+    assert table.service_ticks(ticket) == config.microseconds_to_ticks(
+        microseconds
+    )
+
+
+def test_the_answer_is_the_relay_bp_rows_under_the_same_run_seed():
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(5, 15, 0.003)
+    model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0])
+    row = measured_table.MeasuredTableDecoder()
+    reference = relay.RelayBeliefPropagationDecoder()
+    _bind_seed(row)
+    _bind_seed(reference)
+    answer = row.decode(job)
+    expected = reference.decode(job)
+    assert answer.correction.tolist() == expected.correction.tolist()
+    assert answer.logical_observables == expected.logical_observables
+    assert answer.iterations == expected.iterations
+
+
+def test_a_region_is_priced_by_the_measured_region_nearest_in_size():
+    """40 rounds at d = 5 hold 960 detectors, nearer 1,008 than 360."""
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(5, 40, 0.003)
+    model = windows.whole_circuit_window(circuit, 40, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0])
+    settings = measured_table.MeasuredTableSettings("gh200", "whole")
+    table = measured_table.MeasuredTable(settings)
+    ticket = table.submit(job, 0)
+    result = table.result(ticket)
+    microseconds = 95.243 + 11.044 * result.iterations
+    physical = model.require_faults(PHYSICAL)
+    assert physical.check.shape[0] == 960
+    assert table.service_ticks(ticket) == config.microseconds_to_ticks(
+        microseconds
+    )
+
+
+def test_a_region_with_no_faults_costs_the_intercept_alone():
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(5, 15, 0.0)
+    model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0])
+    settings = measured_table.MeasuredTableSettings("a100", "whole")
+    table = measured_table.MeasuredTable(settings)
+    ticket = table.submit(job, 0)
+    assert table.service_ticks(ticket) == config.microseconds_to_ticks(78.957)
+
+
+def test_the_device_runs_one_decode_at_a_time():
+    settings = measured_table.MeasuredTableSettings("a100", "mps")
+    table = measured_table.MeasuredTable(settings)
+    assert table.capacity() == 1
+
+
+def test_a_device_and_partition_never_measured_are_refused():
+    section = {"device": "gh200", "partition": "mps"}
+    with pytest.raises(ValueError) as refusal:
+        measured_table.MeasuredTableSettings.from_yaml(section, None)
+    assert str(refusal.value) == (
+        "measured_table has no measurement of device 'gh200' with "
+        "partition 'mps'; the measured pairs are [('a100', 'whole'), "
+        "('a100', 'mps'), ('gh200', 'whole')]"
+    )

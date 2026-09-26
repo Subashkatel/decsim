@@ -39,6 +39,33 @@ def test_the_row_returns_the_backends_correction():
         assert result.correction.tolist() == expected
 
 
+def test_the_row_reports_the_backends_iteration_count():
+    """A measured device time law reads the count relay-bp itself reports.
+
+    decode_detailed's `iterations` is the count the relay-bp package
+    returns for one syndrome (relay-bp's DecodeResult), and the result
+    carries it unchanged.
+    """
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    physical = model.require_faults(PHYSICAL)
+    detection_events, _ = windows.sampled_shots(circuit, 10, 3)
+    row = relay.RelayBeliefPropagationDecoder(
+        gamma_table_seed=5, relay_set_count=20
+    )
+    compiled = row.window_decoder._compiled_model(physical)
+    backend = compiled.backend
+    for shot in detection_events:
+        syndrome = windows.row_syndrome(model, shot)
+        detailed = backend.decode_detailed(syndrome)
+        job = windows.job_for(model, shot)
+        result = row.decode(job)
+        assert result.iterations == detailed.iterations
+
+
 def test_the_first_relay_leg_must_run_at_least_once():
     """A zero first leg would hand back the previous window's answer.
 

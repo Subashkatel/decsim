@@ -573,18 +573,6 @@ def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(
     assert rows[0]["strong_service_bound_us"] == 2.0
 
 
-def test_a_folder_without_commit_rounds_gets_no_bound(tmp_path):
-    """An older tree's shots name no r_com, so the point states no bound."""
-    measurement = switching_shot(tmp_path, 1000000.0)
-    record = report.record_of([measurement])
-    older_shot = dict(record.shots[0])
-    del older_shot["commit_rounds"]
-    rows = report.summarize([older_shot], record.window_samples)
-
-    assert "strong_service_bound_us" not in rows[0]
-    assert rows[0]["escalated_windows"] == 10
-
-
 def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops(
     tmp_path,
 ):

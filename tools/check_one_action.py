@@ -530,14 +530,14 @@ def main(arguments):
     for path in python_files(arguments):
         file_findings = check_file(path)
         findings.extend(file_findings)
-    failures, reports = split_findings(findings)
-    print_findings(failures, reports)
+    failures, reports = _split_findings(findings)
+    _print_findings(failures, reports)
     if failures:
         return 1
     return 0
 
 
-def split_findings(findings):
+def _split_findings(findings):
     """The findings that fail the check, and the size prompts it reports."""
     failures = []
     reports = []
@@ -549,7 +549,7 @@ def split_findings(findings):
     return failures, reports
 
 
-def print_findings(failures, reports):
+def _print_findings(failures, reports):
     """Print the failures with their count, then the size prompts."""
     for finding in failures:
         print(finding)

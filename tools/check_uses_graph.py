@@ -124,27 +124,6 @@ def levels_of(edges: dict, nodes: list) -> dict:
     return level
 
 
-def report_cycles(nodes: list, cycles: list) -> None:
-    """Say the graph is not a partial order, and name every cycle."""
-    print(f"uses graph: {len(nodes)} packages, NOT a partial order")
-    for cycle in cycles:
-        joined = " -> ".join(cycle)
-        print(f"  cycle: {joined}")
-
-
-def report_levels(edges: dict, nodes: list) -> None:
-    """Say the graph is acyclic, and name the packages of each level."""
-    level = levels_of(edges, nodes)
-    grouped = collections.defaultdict(list)
-    for node, number in level.items():
-        grouped[number].append(node)
-    print(f"uses graph: {len(nodes)} packages, 0 cycles")
-    for number in sorted(grouped):
-        named = sorted(grouped[number])
-        joined = " ".join(named)
-        print(f"  level {number}: {joined}")
-
-
 USAGE = (
     "usage: check_uses_graph.py <package root>; "
     "from the checkout, tools/check_uses_graph.py decsim"
@@ -168,10 +147,31 @@ def main(arguments) -> int:
         if node not in search.state:
             search.visit(node)
     if search.cycles:
-        report_cycles(nodes, search.cycles)
+        _report_cycles(nodes, search.cycles)
         return 1
-    report_levels(edges, nodes)
+    _report_levels(edges, nodes)
     return 0
+
+
+def _report_cycles(nodes: list, cycles: list) -> None:
+    """Say the graph is not a partial order, and name every cycle."""
+    print(f"uses graph: {len(nodes)} packages, NOT a partial order")
+    for cycle in cycles:
+        joined = " -> ".join(cycle)
+        print(f"  cycle: {joined}")
+
+
+def _report_levels(edges: dict, nodes: list) -> None:
+    """Say the graph is acyclic, and name the packages of each level."""
+    level = levels_of(edges, nodes)
+    grouped = collections.defaultdict(list)
+    for node, number in level.items():
+        grouped[number].append(node)
+    print(f"uses graph: {len(nodes)} packages, 0 cycles")
+    for number in sorted(grouped):
+        named = sorted(grouped[number])
+        joined = " ".join(named)
+        print(f"  level {number}: {joined}")
 
 
 if __name__ == "__main__":

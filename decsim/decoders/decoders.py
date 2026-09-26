@@ -237,6 +237,9 @@ def switch_probability_per_round(gamma_switch: float, d: int):
 
     ``gamma_switch`` is the escalation rate per d rounds; a window
     committing more rounds is proportionally more likely to escalate.
+    No shipped config names it; it stays for a study that samples
+    switching at Toshio's rate (2510.25222 eq. (6), gamma_switch per d
+    rounds), passed as SampledConfidenceDecoder's probability_for.
     """
     gamma_switch = _check_probability(gamma_switch, "gamma_switch")
     if d <= 0:

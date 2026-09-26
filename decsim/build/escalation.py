@@ -5,6 +5,7 @@ only how the yaml names it (sinter's _mux_sampler.py:33-40, which
 resolves the caller's object before its own table).
 """
 
+import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.confidence.signals as confidence_signals
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
@@ -173,7 +174,7 @@ def build_burst_detector(settings, engine, plan, escalation_policy):
     """
     section = settings.burst_detector
     row = tables.row(
-        escalation_settings.BURST_DETECTORS,
+        burst_detector_settings.BURST_DETECTORS,
         "burst_detector.kind",
         section.kind,
     )

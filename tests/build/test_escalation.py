@@ -12,9 +12,10 @@ record, so a row written outside decsim reaches the root the same way.
 import pytest
 
 import decsim.build.escalation as escalation_build
+import decsim.burst_detectors.event_count.detector as event_count
+import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
-import decsim.escalation.burst_detectors as burst_detectors
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.records.windows as window_records
@@ -143,8 +144,8 @@ def test_the_confidence_row_is_built_with_the_sections_walk_card():
 
 def test_a_burst_detector_beside_a_policy_that_never_escalates_is_refused():
     """A flagged window goes to the strong tier, which weak_baseline lacks."""
-    row_settings = burst_detectors.EventCountBurstDetector.Settings()
-    section = escalation_settings.BurstDetectorSettings(
+    row_settings = event_count.EventCountBurstDetector.Settings()
+    section = burst_detector_settings.BurstDetectorSettings(
         kind="event_count", row_settings=row_settings
     )
     settings = machine_settings.MachineSettings(burst_detector=section)

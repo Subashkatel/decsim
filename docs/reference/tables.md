@@ -34,13 +34,13 @@ In `decsim/windows/settings.py`. A row of it is named under `windows.boundaries`
 
 ## `BURST_DETECTORS`
 
-In `decsim/escalation/settings.py`. A row of it is named under `burst_detector.kind`.
+In `decsim/burst_detectors/settings.py`. A row of it is named under `burst_detector.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
 | `none` | none | the check is off |
-| `event_count` | `EventCountBurstDetector` in `decsim/escalation/burst_detectors.py` | Fires when a patch's or a position's event count outruns its usual rate. |
-| `masked_regional_cusum` | `MaskedRegionalCusumBurstDetector` in `decsim/escalation/burst_detectors.py` | Fires when a region's detection events outrun its usual rate. |
+| `event_count` | `EventCountBurstDetector` in `decsim/burst_detectors/event_count/detector.py` | Fires when a patch's or a position's event count outruns its usual rate. |
+| `masked_regional_cusum` | `MaskedRegionalCusumBurstDetector` in `decsim/burst_detectors/masked_regional_cusum/detector.py` | Fires when a region's detection events outrun its usual rate. |
 
 ## `CODE_CARDS`
 

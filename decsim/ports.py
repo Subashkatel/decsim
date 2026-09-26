@@ -1936,7 +1936,7 @@ class BurstDetector(Protocol):
     """Whether an error burst is under way, read off the detection events.
 
     Table rows: none, event_count and masked_regional_cusum
-    (BURST_DETECTORS, escalation/settings.py), named by
+    (BURST_DETECTORS, burst_detectors/settings.py), named by
     burst_detector.kind; none builds no detector. The former the
     detection event placement forms through hands every round to
     observe_round as it forms it, in round order;

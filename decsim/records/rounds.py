@@ -84,7 +84,10 @@ class QPUReadout:
     patch_ids the patches whose checks the bits read. fragment_index
     (zero-based) and fragment_count place the readout among its round's
     fragments. size_bits is its width on the wire, None when the source
-    states none.
+    states none. event_bits is the width its detection events take once
+    a seat forms them, stated by a source with no circuit to form them
+    from (qpu/syndrome_devices.py); None when a formation table sizes
+    them, or nothing does.
     """
 
     operation_id: Any
@@ -94,11 +97,15 @@ class QPUReadout:
     fragment_count: int = 1
     fragment_index: int = 0
     size_bits: Optional[int] = None
+    event_bits: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class RetainedSyndromeFragment:
-    """One validated immutable fragment retained after controller packing."""
+    """One validated immutable fragment retained after controller packing.
+
+    event_bits is the readout's, until a seat forms the fragment.
+    """
 
     operation_id: Any
     patch_ids: tuple
@@ -106,6 +113,7 @@ class RetainedSyndromeFragment:
     bits: Optional[tuple[int, ...]]
     size_bits: Optional[int]
     fragment_index: int
+    event_bits: Optional[int] = None
 
     @classmethod
     def from_readout(cls, readout: QPUReadout) -> "RetainedSyndromeFragment":
@@ -124,6 +132,7 @@ class RetainedSyndromeFragment:
             bits=bits,
             size_bits=readout.size_bits,
             fragment_index=readout.fragment_index,
+            event_bits=readout.event_bits,
         )
 
 
@@ -169,19 +178,29 @@ class EscalatedRegion:
     (cudaqx_realtime_decoding.h lines 27 to 35). wire_bits is the sum of
     the packets' fragment sizes, the width each round left the controller
     at (PackedRound.wire_bits), and None when any fragment has no size.
+    carries_the_round_before is true when the first packet is the raw
+    round before the strong window's first, which a strong side that
+    forms the events reads for that round's detectors
+    (windows/round_retention.py, strong_round_before).
     """
 
     request_key: window_records.DecoderRequestKey
     packets: tuple[SyndromeRoundPacket, ...]
     wire_bits: Optional[int]
+    carries_the_round_before: bool = False
 
     @classmethod
     def of(
         cls,
         request_key: window_records.DecoderRequestKey,
         packets: tuple,
+        first_round: int = 1,
     ) -> "EscalatedRegion":
-        """The region of these packets, its width summed from the fragments."""
+        """The region of these packets, its width summed from the fragments.
+
+        first_round is the strong window's first round; a packet before
+        it is the round before.
+        """
         wire_bits = 0
         for packet in packets:
             packet_bits = fragment_wire_bits(packet.fragments)
@@ -189,8 +208,12 @@ class EscalatedRegion:
                 wire_bits = None
                 break
             wire_bits += packet_bits
+        carries_the_round_before = packets[0].round_index < first_round
         return cls(
-            request_key=request_key, packets=packets, wire_bits=wire_bits
+            request_key=request_key,
+            packets=packets,
+            wire_bits=wire_bits,
+            carries_the_round_before=carries_the_round_before,
         )
 
     @property
@@ -208,8 +231,8 @@ class PackedRound:
 
     The packet, its route, and its size on the wire: what leaves the
     controller, which is the detection events where the controller forms
-    them and the raw measurement outcomes where the weak syndrome buffer
-    or the decoder does (controller.detection_events_formed_at).
+    them and the raw measurement outcomes where a seat after it does
+    (detection_events.formed_at).
     """
 
     packet: SyndromeRoundPacket

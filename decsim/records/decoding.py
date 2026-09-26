@@ -230,6 +230,11 @@ class DecodeJob:
         default_factory=list
     )  # transfer-source view; cleared after materialization
     decoder_input: Optional[Any] = None  # materialized decoder memory value
+    # the raw round before the first payload, read out of the store with
+    # them when the tier's decoder forms the events and has not formed
+    # that first round (detection_events, needs_the_round_before); held
+    # by the former and never decoded, cleared with the payloads
+    round_before: tuple = ()
     input_hold: Optional[Any] = (
         None  # upstream hold released at transfer completion
     )
@@ -319,10 +324,14 @@ class DecodeJob:
     detection_event_rounds: Optional[tuple] = None
 
     def payload_bits(self) -> Optional[int]:
-        """The bits of the job's payloads; None when any size is unknown."""
+        """The bits of the job's payloads and the round before them.
+
+        None when any size is unknown.
+        """
         payloads = self.payloads or ()
+        carried = self.round_before + tuple(payloads)
         sizes = []
-        for payload in payloads:
+        for payload in carried:
             sizes.append(payload.size_bits)
         for size in sizes:
             if size is None:

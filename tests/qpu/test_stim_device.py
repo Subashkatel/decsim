@@ -165,19 +165,21 @@ def test_a_replayed_shot_forms_the_events_and_truth_stim_forms():
     assert device.sampled_truth() == {1: (1,)}
 
 
-def test_form_round_yields_each_rounds_slice_of_the_shots_events():
+def test_the_formation_table_forms_each_rounds_slice_of_the_shots_events():
     circuit = memory_circuit(3, 4)
     device = recorded_device(RECORDED_ROW)
     operation = memory_operation(circuit)
     device.begin_operation(operation, 4, 4, round_period_ticks=1_100_000)
+    table = device.formation_table(1)
+    former = detector_formation.StreamingDetectorFormer(table)
     first = round_payload(device, operation, 1)
     second = round_payload(device, operation, 2)
     third = round_payload(device, operation, 3)
     fourth = round_payload(device, operation, 4)
-    assert device.form_round(1, 1, first.bits) == (0, 0, 0, 0)
-    assert device.form_round(1, 2, second.bits) == (0, 1, 0, 0, 0, 0, 0, 0)
-    assert device.form_round(1, 3, third.bits) == (0, 0, 1, 0, 0, 0, 0, 0)
-    assert device.form_round(1, 4, fourth.bits) == (
+    assert _formed(former, 1, first.bits) == (0, 0, 0, 0)
+    assert _formed(former, 2, second.bits) == (0, 1, 0, 0, 0, 0, 0, 0)
+    assert _formed(former, 3, third.bits) == (0, 0, 1, 0, 0, 0, 0, 0)
+    assert _formed(former, 4, fourth.bits) == (
         0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0,
     )  # fmt: skip
     assert device.sampled_detection_events(1) == (
@@ -187,6 +189,18 @@ def test_form_round_yields_each_rounds_slice_of_the_shots_events():
         False, True, True, False, False, False, False, False,
         False, True, True, False,
     )  # fmt: skip
+
+
+def test_an_operation_that_has_not_begun_has_no_formation_table():
+    device = recorded_device(RECORDED_ROW)
+    with pytest.raises(KeyError, match="has not begun"):
+        device.formation_table(1)
+
+
+def _formed(former, round_index, bits) -> tuple:
+    """One round's event values, in the table's detector order."""
+    events, _ = former.feed_packet(round_index, bits)
+    return tuple(value for _, value in events)
 
 
 def test_a_seeded_shot_is_stims_shot_under_the_hashed_substream_seed():

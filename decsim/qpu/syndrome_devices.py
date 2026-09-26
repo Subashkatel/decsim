@@ -6,7 +6,7 @@ operation round, one per idle stream round. Neither source here has a
 circuit, so neither builds a detector error model.
 
 TimingOnlyDevice emits payloads that carry no bit values and state the
-code card's syndrome width, for runs that price timing alone; it is the
+code card's widths, for runs that price timing alone; it is the
 default source of a run. A timing simulation models a transfer's size
 and not its content: gem5's packet trace records a tick, a command, an
 address and a size and no data (gem5 src/proto/packet.proto), and its
@@ -14,9 +14,11 @@ network tester says "No need to do functional simulation / We just do
 timing simulation of the network" (gem5 src/cpu/testers/
 garnet_synthetic_traffic/GarnetSyntheticTraffic.cc). SyndromeBitDevice
 emits seeded random bits sized by the same width, to exercise the
-payload path end to end without Stim. Both name NO_WINDOW_MODELS as
-their window model source, which answers every model question with
-nothing.
+payload path end to end without Stim. Both state a round's raw width
+and the width its detection events take once formed, layer by layer
+(_round_widths), so each seat prices the width it holds, as a circuit
+source's formation table does. Both name NO_WINDOW_MODELS as their
+window model source, which answers every model question with nothing.
 """
 
 import random
@@ -40,8 +42,9 @@ class TimingOnlyDevice:
 
     A round's size is the code card's: a rotated surface code "requires
     d2 - 1 syndrome qubits" a round (Barber et al. 2309.05558 lines
-    947-951), so every link and every memory the round crosses can
-    price it.
+    947-951), and the last round of an operation adds its data qubits
+    (_round_widths), so every link and every memory the round crosses
+    can price it.
     """
 
     operation_circuit_scope = "none"
@@ -51,6 +54,8 @@ class TimingOnlyDevice:
 
     def __init__(self, code: ports.CodeModel) -> None:
         self.code = code
+        # decode identity -> the source's rounds, its last read out
+        self.round_count_by_identity: dict = {}
 
     def logical_observable_truth(
         self, operation_id: Any
@@ -67,7 +72,10 @@ class TimingOnlyDevice:
         *,
         round_period_ticks: int,
     ) -> None:
-        """Nothing to sample."""
+        """Nothing to sample; the round the data qubits are read out on."""
+        del segment_round_count, round_period_ticks
+        target = program_records.decode_identity(operation)
+        self.round_count_by_identity[target] = source_round_count
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
@@ -75,11 +83,12 @@ class TimingOnlyDevice:
         """One valueless payload attributed to the operation's footprint."""
         target = program_records.decode_identity(operation)
         global_round = program_records.global_round(operation, round_index)
+        last_round = self.round_count_by_identity.get(target)
+        is_last = global_round == last_round
         patches = program_records.patches_of(operation)
         patch_count = _patch_count_of(operation)
-        size_bits = self.code.syndrome_bits_per_round(patch_count)
-        readout = round_records.QPUReadout(
-            target, patches, global_round, size_bits=size_bits
+        readout = _valueless_readout(
+            self.code, target, patches, global_round, is_last, patch_count
         )
         return [readout]
 
@@ -93,13 +102,11 @@ class TimingOnlyDevice:
         round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
         """One valueless payload for the idle stream round."""
-        del is_final
         del round_period_ticks
         patches = program_records.patches_of(operation)
         patch_count = _patch_count_of(operation)
-        size_bits = self.code.syndrome_bits_per_round(patch_count)
-        readout = round_records.QPUReadout(
-            stream_id, patches, global_round, size_bits=size_bits
+        readout = _valueless_readout(
+            self.code, stream_id, patches, global_round, is_final, patch_count
         )
         return [readout]
 
@@ -168,6 +175,8 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         self.code = code
         self.one_payload_per_patch = one_payload_per_patch
         self._seed = seed
+        # decode identity -> the source's rounds, its last read out
+        self.round_count_by_identity: dict = {}
         self._initialize_run_seed_binding(seed)
 
     def run_seed_children(self) -> tuple[seed_records.RunSeedChild, ...]:
@@ -183,7 +192,10 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         *,
         round_period_ticks: int,
     ) -> None:
-        """Nothing to sample ahead of time."""
+        """Nothing to sample; the round the data qubits are read out on."""
+        del segment_round_count, round_period_ticks
+        target = program_records.decode_identity(operation)
+        self.round_count_by_identity[target] = source_round_count
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
@@ -191,12 +203,9 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         """One payload per patch, or one payload covering every patch."""
         target = program_records.decode_identity(operation)
         global_round = program_records.global_round(operation, round_index)
-        if self.one_payload_per_patch:
-            return self._payload_per_patch(operation, target, global_round)
-        patch_count = _patch_count_of(operation)
-        patches = program_records.patches_of(operation)
-        bits = self._fake_bits(target, global_round, patches, patch_count)
-        return [self._payload(target, patches, global_round, bits)]
+        last_round = self.round_count_by_identity.get(target)
+        is_last = global_round == last_round
+        return self._payloads(operation, target, global_round, is_last)
 
     def idle_round_payloads(
         self,
@@ -208,14 +217,8 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
         """One fake-bit payload for the idle stream round."""
-        del is_final
         del round_period_ticks
-        if self.one_payload_per_patch:
-            return self._payload_per_patch(operation, stream_id, global_round)
-        patches = program_records.patches_of(operation)
-        patch_count = len(patches)
-        bits = self._fake_bits(stream_id, global_round, patches, patch_count)
-        return [self._payload(stream_id, patches, global_round, bits)]
+        return self._payloads(operation, stream_id, global_round, is_final)
 
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
@@ -253,9 +256,8 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         self._seed = prepared_state
 
     def _fake_bits(
-        self, target: Any, global_round: int, patches: tuple, patch_count: int
+        self, target: Any, global_round: int, patches: tuple, bit_count: int
     ) -> list:
-        bit_count = self.code.syndrome_bits_per_round(patch_count)
         self._mark_stochastic_use()
         generator = self._payload_generator(target, global_round, patches)
         return [generator.randint(0, 1) for _ in range(bit_count)]
@@ -270,15 +272,45 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         payload_seed = seeding.substream_seed(self._seed, keys)
         return random.Random(payload_seed)
 
+    def _payloads(
+        self,
+        operation: program_records.Operation,
+        target: Any,
+        global_round: int,
+        is_last: bool,
+    ) -> list[round_records.QPUReadout]:
+        """The round's payloads: one per patch, or one over every patch."""
+        if self.one_payload_per_patch:
+            return self._payload_per_patch(
+                operation, target, global_round, is_last
+            )
+        patches = program_records.patches_of(operation)
+        patch_count = _patch_count_of(operation)
+        payload = self._payload(
+            target, patches, global_round, is_last, patch_count
+        )
+        return [payload]
+
     def _payload(
-        self, target: Any, patches: tuple, global_round: int, bits: list
+        self,
+        target: Any,
+        patches: tuple,
+        global_round: int,
+        is_last: bool,
+        patch_count: int,
     ) -> round_records.QPUReadout:
+        """Random raw bits at the round's raw width, its events' stated."""
+        raw_bits, event_bits = _round_widths(
+            self.code, patch_count, global_round, is_last
+        )
+        bits = self._fake_bits(target, global_round, patches, raw_bits)
         return round_records.QPUReadout(
             target,
             patches,
             global_round,
             bits=bits,
-            size_bits=len(bits),
+            size_bits=raw_bits,
+            event_bits=event_bits,
         )
 
     def _payload_per_patch(
@@ -286,6 +318,7 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         operation: program_records.Operation,
         target: Any,
         global_round: int,
+        is_last: bool,
     ) -> list[round_records.QPUReadout]:
         patches = operation.patches
         if not patches:
@@ -293,8 +326,7 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         payloads = []
         for patch in patches:
             patch_ids = (patch,)
-            bits = self._fake_bits(target, global_round, patch_ids, 1)
-            payload = self._payload(target, patch_ids, global_round, bits)
+            payload = self._payload(target, patch_ids, global_round, is_last, 1)
             payloads.append(payload)
         return payloads
 
@@ -383,3 +415,50 @@ def _patch_count_of(operation: program_records.Operation) -> int:
     if operation.patches:
         return len(operation.patches)
     return len(operation.qubits)
+
+
+def _round_widths(
+    code: ports.CodeModel, patch_count: int, global_round: int, is_last: bool
+) -> tuple:
+    """(raw bits, event bits) of one memory round, by its layer.
+
+    Stim lays a memory out in three layers (detector_formation.py): the
+    first round's detectors compare half the checks against the
+    prepared state, every later round's compare all of them against the
+    round before, and the last round folds in the other half rebuilt
+    from the data-qubit readout. So a round reads out its checks raw,
+    the last its data qubits too, and forms c/2, c or c + c/2 events:
+    4, 8 and 12 at d=3, as stim.Circuit.generated's rotated memory
+    gives them, with 8 raw bits a round and 17 on the last.
+    """
+    check_bits = code.syndrome_bits_per_round(patch_count)
+    half_the_checks = check_bits // 2
+    raw_bits = check_bits
+    event_bits = check_bits
+    if global_round == 1:
+        event_bits = half_the_checks
+    if is_last:
+        raw_bits += code.data_bits_per_readout(patch_count)
+        event_bits += half_the_checks
+    return raw_bits, event_bits
+
+
+def _valueless_readout(
+    code: ports.CodeModel,
+    target: Any,
+    patches: tuple,
+    global_round: int,
+    is_last: bool,
+    patch_count: int,
+) -> round_records.QPUReadout:
+    """One readout with the round's widths and no bit values."""
+    raw_bits, event_bits = _round_widths(
+        code, patch_count, global_round, is_last
+    )
+    return round_records.QPUReadout(
+        target,
+        patches,
+        global_round,
+        size_bits=raw_bits,
+        event_bits=event_bits,
+    )

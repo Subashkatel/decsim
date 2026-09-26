@@ -13,7 +13,6 @@ SYNDROME_BUFFER_KEYS = (
     "kind",
     "bits",
     "clock",
-    "detection_event_cycles_per_round",
 )
 
 
@@ -36,11 +35,6 @@ class SyndromeBufferSettings:
     clock, each row by its own keys (the default row's write_cycles and
     read_cycles, syndrome_buffer.py). The stages follow gem5's frontend
     and forward latencies (src/mem/XBar.py).
-    detection_event_cycles_per_round is what forming a round's detection
-    events costs the weak decoder chip ahead of that write, read under
-    controller.detection_events_formed_at weak_syndrome_buffer alone;
-    Yang et al. fix their syndrome calculation at 5 FPGA clock cycles
-    (2605.04892 lines 1273-1275).
     A zero cost runs synchronously without clock-edge alignment.
     row_settings is the row's own Settings, read from the section's keys
     outside SYNDROME_BUFFER_KEYS, or None for a row that declares none;
@@ -50,18 +44,8 @@ class SyndromeBufferSettings:
     kind: str = "syndrome_buffer"
     bits: Optional[int] = None
     clock: Optional[config.Clock] = None
-    detection_event_cycles_per_round: int = 0
     # the row's own Settings record, opaque to the section
     row_settings: Optional[Any] = None
-
-    def __post_init__(self) -> None:
-        config.check_cycles(
-            "weak_syndrome_buffer.detection_event_cycles_per_round",
-            self.detection_event_cycles_per_round,
-        )
-        charged = self.detection_event_cycles_per_round
-        if charged > 0 and self.clock is None:
-            raise ValueError("charged weak_syndrome_buffer costs need a clock")
 
     @classmethod
     def from_yaml(
@@ -89,12 +73,10 @@ class SyndromeBufferSettings:
         clock = default_clock
         if "clock" in section:
             clock = clocks.clock(section["clock"])
-        formation_cycles = section.get("detection_event_cycles_per_round", 0)
         return cls(
             kind=kind,
             bits=bits,
             clock=clock,
-            detection_event_cycles_per_round=formation_cycles,
             row_settings=row_settings,
         )
 
@@ -105,7 +87,6 @@ _WEAK_BUFFER_ONLY_KEYS = (
     "clock",
     "write_cycles",
     "read_cycles",
-    "detection_event_cycles_per_round",
 )
 
 

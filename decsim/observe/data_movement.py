@@ -151,6 +151,8 @@ class DataMovement:
         self.references = _Counts()
         self.holds = _HoldTallies()
         self.rounds_seen: set = set()
+        # seat -> the most raw bits one operation's history held there
+        self.formation_state_bits_by_seat: dict = {}
 
     def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
         """One structure duplicated the bits into another."""
@@ -196,6 +198,18 @@ class DataMovement:
         del holder
         self.holds.released += 1
 
+    def formation_state_held(self, seat: str, operation_id, bits) -> None:
+        """A seat's former holds these raw bits of one operation now.
+
+        The ledger keeps the most one history held at each seat: the
+        state a seat keeps to form the next round (detection_events),
+        reported because no referent sizes it and nothing is refused
+        for it.
+        """
+        del operation_id
+        held = self.formation_state_bits_by_seat.get(seat, 0)
+        self.formation_state_bits_by_seat[seat] = max(held, bits)
+
     def round_emitted(self, readout) -> None:
         """One more round exists, so a per-round rate has a denominator."""
         self.rounds_seen.add((readout.operation_id, readout.round_index))
@@ -208,6 +222,8 @@ class DataMovement:
     def json_value(self) -> dict:
         """The counters as the RunResult carries them."""
         holds = self.holds.total()
+        held_by_seat = self.formation_state_bits_by_seat.items()
+        state_by_seat = dict(sorted(held_by_seat))
         return {
             "rounds": self.rounds,
             "copies": self.copies.total.events,
@@ -223,6 +239,7 @@ class DataMovement:
             "moves_by_path": _as_rows(self.moves),
             "copies_by_memory_class": _as_class_rows(self.copies.by_class),
             "moves_by_memory_class": _as_class_rows(self.moves.by_class),
+            "formation_state_bits_by_seat": state_by_seat,
         }
 
     def _add(

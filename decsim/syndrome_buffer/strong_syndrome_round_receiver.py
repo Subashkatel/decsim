@@ -24,13 +24,18 @@ ever name it (_drop_landing): a strong-primary run's last rounds, or
 the region of a parallel strong sibling that a confident weak result
 cancelled while the region was on the wire.
 
-Controller packets retain their canonical route. Window input wakes the
-window manager; timing-only idle input occupies a slot until the store's
-own decoder hop delivers it, without creating a window.
+A landed round is stored as the run's detection event placement says
+the store holds it, the landed outcomes or the events formed from them
+here (detection_events.formed_at), after the formation's cycles when
+this seat forms them. Controller packets retain their canonical route.
+Window input wakes the window manager; timing-only idle input occupies a
+slot until the store's own decoder hop delivers it, without creating a
+window.
 """
 
 import dataclasses
 import functools
+from collections.abc import Callable
 from typing import Optional
 
 import decsim.engine as engine_module
@@ -49,6 +54,8 @@ class _Hop:
 
 
 CONTROLLER_WRITE = _Hop("controller_to_strong_buffer", "controller assembler")
+# the seat this end is on the path, as detection_events.formed_at names it
+_SEAT = "strong_syndrome_buffer"
 ESCALATION = _Hop("weak_decoder_to_strong_decoder", "weak syndrome buffer")
 
 
@@ -68,6 +75,8 @@ class StrongSyndromeRoundReceiver:
     store = ports.Port(ports.SyndromeBuffer)
     output = ports.Port(ports.SyndromeBufferOutput)
     memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
+    # the run's placement, which says what the store holds of a landed round
+    detection_events = ports.Port(ports.DetectionEventPlacement)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -95,7 +104,11 @@ class StrongSyndromeRoundReceiver:
         del self.reserved_bits_by_round[packed.round_key]
         window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
         if packed.route.kind is window_input:
-            self._land(packed.packet, packed.wire_bits, CONTROLLER_WRITE)
+            packets = (packed.packet,)
+            packet_bits = (packed.wire_bits,)
+            self._form_then_land(
+                packets, packet_bits, CONTROLLER_WRITE, False, _nothing
+            )
             return
         self._forward_memory_round(packed)
 
@@ -117,13 +130,29 @@ class StrongSyndromeRoundReceiver:
             reserved[round_key] = round_records.stated_bits(bits)
         self.reserved_bits_by_round = reserved
 
-    def receive_region(self, region: round_records.EscalatedRegion) -> None:
-        """Take an escalated region that landed here: every round its slot."""
+    def receive_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Take an escalated region that landed here: every round its slot.
+
+        on_stored is called once the store holds every round, after this
+        seat has formed them when it forms them.
+        """
         for round_key in region.round_keys:
             del self.reserved_bits_by_round[round_key]
+        packet_bits = []
         for packet in region.packets:
-            packet_bits = round_records.fragment_wire_bits(packet.fragments)
-            self._land(packet, packet_bits, ESCALATION)
+            bits = round_records.fragment_wire_bits(packet.fragments)
+            packet_bits.append(bits)
+        self._form_then_land(
+            region.packets,
+            packet_bits,
+            ESCALATION,
+            region.carries_the_round_before,
+            on_stored,
+        )
 
     def _refuse_region(self, region: round_records.EscalatedRegion) -> None:
         """An escalated region that does not fit stops the run, by the yaml."""
@@ -167,6 +196,67 @@ class StrongSyndromeRoundReceiver:
             packed.route,
         )
         self.trace.round_event.fire(event)
+
+    def _form_then_land(
+        self,
+        packets,
+        packet_bits,
+        hop: _Hop,
+        carries_the_round_before: bool,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Land the rounds once this seat has formed them, if it forms them.
+
+        The rounds of one landing are formed together, a pipelined
+        stage's fixed latency once and its rate for every round after
+        the first (detection_events, detector_error_model/settings.py).
+        A round carried as the round before is not formed.
+        """
+        round_count = len(packets) - int(carries_the_round_before)
+        cycles = self.detection_events.cycles_at(_SEAT, round_count)
+        land = functools.partial(
+            self._land_formed,
+            packets,
+            packet_bits,
+            hop,
+            carries_the_round_before,
+            on_stored,
+        )
+        if cycles == 0:
+            land()
+            return
+        clock = self.detection_events.clock
+        edge = clock.edge(cycles, self.engine.now)
+        delay = edge - self.engine.now
+        self.engine.schedule(delay, land, label="detection event formation")
+
+    def _land_formed(
+        self,
+        packets,
+        packet_bits,
+        hop: _Hop,
+        carries_the_round_before: bool,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Each round as the store holds it; its copy reports the hop's bits.
+
+        The round before lands raw, as it came, and this seat holds it
+        for the first round's detectors when it forms them.
+        """
+        round_before = ()
+        if carries_the_round_before:
+            round_before = packets[0].fragments
+            self._land(packets[0], packet_bits[0], hop)
+            packets = packets[1:]
+            packet_bits = packet_bits[1:]
+        for packet, bits in zip(packets, packet_bits):
+            fragments = self.detection_events.form_at(
+                _SEAT, packet.fragments, round_before
+            )
+            round_before = ()
+            stored = dataclasses.replace(packet, fragments=fragments)
+            self._land(stored, bits, hop)
+        on_stored()
 
     def _land(
         self,
@@ -272,3 +362,7 @@ class _TraceSources:
 
     copy_made: trace_source.TraceSource = trace_source.new_source()
     round_event: trace_source.TraceSource = trace_source.new_source()
+
+
+def _nothing() -> None:
+    """A controller write's rounds wake nothing once stored."""

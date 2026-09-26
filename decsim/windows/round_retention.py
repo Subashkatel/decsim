@@ -15,7 +15,9 @@ read as a potential restart read (PotentialRestart, planned in
 frontends/planner.py), past its own request and landing: an earlier
 escalation may re-slice it as the restart window, which re-reads
 escalation.restart_reread_buffer_regions buffer regions of the strong
-region (Toshio et al. 2510.25222 Sec. III C).
+region (Toshio et al. 2510.25222 Sec. III C). When the strong side
+forms the detection events, every strong read also holds the raw round
+before its first, which that side's former reads (strong_round_before).
 The read ends when the window before it commits, or when the window is
 re-sliced or absorbed. The stores hold slots and holders; which
 rounds a window needs is decided here, gem5's split between the cache
@@ -48,9 +50,13 @@ class RoundRetention:
         *,
         is_strong_context_retained: bool,
         primary_tier: window_records.DecoderTier,
+        strong_side_forms: bool = False,
     ) -> None:
         self.is_strong_context_retained = is_strong_context_retained
         self.primary_tier = primary_tier
+        # a seat past the weak syndrome buffer on the escalation path
+        # forms the detection events (detection_events.formed_at)
+        self.strong_side_forms = strong_side_forms
 
     # ---- the stores
 
@@ -188,10 +194,25 @@ class RoundRetention:
         bounds = window_records.strong_context_bounds(window)
         context_lo, _commit_lo, _commit_hi, context_hi = bounds
         weak = set(weak_reads)
-        strong = self.read_keys_for_bounds(
+        strong = self.strong_round_before(window.operation_id, context_lo)
+        strong += self.read_keys_for_bounds(
             window.operation_id, context_lo, context_hi, window
         )
         return [round_key for round_key in strong if round_key not in weak]
+
+    def strong_round_before(self, operation_id, first_round: int) -> list:
+        """The raw round a strong redo from first_round reads before it.
+
+        When the strong side forms the events, a strong read starts one
+        raw round before its first: a detector compares a round against
+        the one before it (LILLIPUT 2108.06569 lines 499-510), and the
+        strong side's former has not seen the rounds the weak side
+        decoded. None otherwise, and none before the operation's first
+        round, which compares against the reset.
+        """
+        if not self.strong_side_forms or first_round <= 1:
+            return []
+        return [(operation_id, first_round - 1)]
 
     # ---- holds moving between owners
 

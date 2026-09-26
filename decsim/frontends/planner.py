@@ -58,6 +58,7 @@ def plan_execution(
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
     has_open_ended_dynamic_streams: bool = False,
+    strong_side_forms: bool = False,
 ) -> RunPlan:
     """Resolve cadence, geometry and windows once for one runtime code."""
     round_ticks = _resolve_round_ticks(code, fallback_round_microseconds)
@@ -93,6 +94,7 @@ def plan_execution(
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=restart_reread_buffer_regions,
         has_open_ended_dynamic_streams=has_open_ended_dynamic_streams,
+        strong_side_forms=strong_side_forms,
     )
     return RunPlan(
         code_geometry=geometry,
@@ -333,12 +335,15 @@ def _plan_syndrome_buffering(
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
     has_open_ended_dynamic_streams: bool = False,
+    strong_side_forms: bool = False,
 ) -> SyndromeBufferingPlan:
     """Plan logical holds over one upstream round allocation.
 
     Weak and possible-strong consumers may overlap, but overlapping holds
     do not create another physical packet allocation, so the sufficient
     witness is the union of round identities, not a sum of ledgers.
+    strong_side_forms says a possible strong read also holds the raw
+    round before it (windows/round_retention.py, strong_round_before).
     """
     weak = _HoldSet()
     strong = _HoldSet()
@@ -360,6 +365,7 @@ def _plan_syndrome_buffering(
                 strong,
                 retain_strong_context,
                 absorbs_weak_windows,
+                strong_side_forms,
             )
     weak_sufficient = weak.sufficient_live_rounds(
         has_open_ended_dynamic_streams
@@ -454,19 +460,23 @@ def _hold_strong_context(
     strong: "_HoldSet",
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
+    strong_side_forms: bool,
 ) -> None:
     """The rounds a possible strong redo of the window reads, from its commit.
 
-    No row reads behind the commit (records/windows.py,
+    No row decodes behind the commit (records/windows.py,
     strong_context_bounds). The near-seam redo reads one buffer past the
     commit; the forward region reads its own rounds, commit plus two
     buffers clamped at the operation's end, and no round past them
-    (escalation/strong_regions.py, forward_seam_region).
+    (escalation/strong_regions.py, forward_seam_region). A strong side
+    that forms the events also reads the raw round before the commit.
     """
     if not retain_strong_context:
         return
     bounds = window_records.strong_context_bounds(window)
     lower, _commit_lo, _commit_hi, upper = bounds
+    if strong_side_forms and lower > 1:
+        lower -= 1
     if absorbs_weak_windows:
         round_count = execution.rounds_by_operation[operation_id]
         upper = _forward_region_end(window, round_count)

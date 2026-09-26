@@ -263,7 +263,7 @@ which is what a decoder actually reads. Four bits left the controller
 rather than eight, because in the first round of a memory experiment
 only half the checks have a value to compare against
 (`decsim/detector_error_model/detection_event_formation.py`,
-`form_before_departure`, which the controller's assembler calls). That
+`form_at`, which the controller's assembler calls with its own seat). That
 round moved into the weak syndrome buffer, the store the decoder reads from, and sat
 there 5 microseconds waiting for the rest of its window. At 6.012 microseconds window 0 had all six of its rounds, so
 all 44 bits moved together into the decoder unit's memory, and the

@@ -683,9 +683,12 @@ form there. No component recognises a row.
 
 **Where to see it.**
 `decsim/detector_error_model/detection_event_formation.py`
-(`WeakSyndromeBufferSideFormation`),
-`decsim/syndrome_buffer/weak_syndrome_round_receiver.py` (`_as_stored`),
-`decsim/build/stores.py` (`check_weak_syndrome_buffer_formation`).
+(`SeatedFormation`),
+`decsim/syndrome_buffer/weak_syndrome_round_receiver.py` (`_as_stored`).
+
+**Widened since.** D29 replaces the row with a list of seats in the
+`detection_events` section; the chip's seat is `weak_syndrome_buffer`
+in that list, and its charge is the section's cost law.
 
 ## D21. A region at a back-to-back seam pins on its own weak commit
 
@@ -1023,6 +1026,52 @@ recursion and the two cancels; `tests/decoders/test_measured_table_decoder.py`
 holds the line against relay-bp's own iteration count and the answer
 against the relay_bp row under one run seed.
 
+## D29. The detection events form at a list of seats, one on each path
+
+**Decided.** The `detection_events` section names the seats that form a
+round's detection events, `formed_at: [<seat>, ...]`, out of the five on
+the path a round takes: `controller`, `weak_syndrome_buffer`,
+`strong_syndrome_buffer`, `weak_decoder` and `strong_decoder`. Every
+path from the controller to a decoder crosses exactly one of them, and
+the build checks the run's paths against the list. One cost law is
+charged at the seat that forms: `latency_cycles` once and
+`cycles_per_round` for each round after the first, on `clock`, the
+controller's by default. Each seat keeps its own history. A decoder
+seat that has not formed a job's first round reads the raw round
+before it with the job, and a strong side that forms reads the raw
+round before each escalated region; that round is priced as the raw
+bits it is.
+
+**Why.** The published placements are every seat decsim has: the
+workstation (Google 2408.13687 lines 474-476), the decoder chip's
+input path (Maurer 2510.21600 lines 234-236) and the decoder itself
+(Caune 2410.05202 lines 1252-1255, LILLIPUT 2108.06569 lines 500-509),
+and D20's three rows were three branches of that one choice. A path
+with no seat decodes raw bits and a path with two forms events of
+events, so the rule is checked once, at load. A seat keeps its own
+history because every real one does: LILLIPUT's block sits inside its
+decoder and cudaqx keeps a detector buffer per decoder instance
+(libs/qec/lib/decoder.cpp:51-61). A detector compares a round against
+the one before it (LILLIPUT lines 499-510), so a seat that never saw
+the round before a window is given it: Skoric's B blocks start after
+rounds their tier never formed, and a strong side never saw the rounds
+the weak side decoded.
+
+**What it cost the port file.** `DetectionEventPlacement` is `forms_at`,
+`form_at(seat, fragments, round_before)`, `needs_the_round_before`,
+`cycles_at` and its `clock`, in place of the two hooks and three facts
+D20 left; `DetectionEventFormer` is `formation_table(operation_id)`;
+`WindowRetention` gained `strong_round_before` and `SyndromeBuffer`
+gained `retained_fragments`.
+
+**Where to see it.** `decsim/detector_error_model/settings.py`,
+`decsim/detector_error_model/detection_event_formation.py`,
+`decsim/build/controller_side.py` (`build_detection_events`) and
+`decsim/syndrome_buffer/round_output.py` (`_read_the_round_before`).
+`tests/machine/test_copy_versus_reference.py` holds every seat on every
+path against Stim's own converter on the rows the QPU emitted, read
+where each decoder unit's memory takes them.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not
@@ -1083,7 +1132,7 @@ round ends in the decoders' own end for it
 (`decsim/decoders/memory_rounds.py`).
 
 O14 is closed by one rule: a memory counts what is written into it.
-Under `controller.detection_events_formed_at: decoder` the tier's logic
+When `detection_events.formed_at` seats the former at a decoder the tier's logic
 sits between the unit's input memory and its core, so the memory is
 written the raw round and holds it at the size it crossed the input
 link; the room test and the deposit count the same bits. "The decoder

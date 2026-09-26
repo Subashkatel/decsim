@@ -22,6 +22,8 @@ import pytest
 
 import decsim.config as config
 import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
@@ -94,7 +96,8 @@ def _receiver_with(engine, store, output=None, detection_events=None):
     receiver.store = store
     receiver.windows = windows
     if detection_events is None:
-        detection_events = formation.ControllerSideFormation(None, 0)
+        at_the_controller = event_settings.DetectionEventSettings()
+        detection_events = formation.SeatedFormation(None, at_the_controller)
     receiver.detection_events = detection_events
     if output is not None:
         receiver.output = output
@@ -306,14 +309,14 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
 
 
 def test_a_weak_store_too_small_for_a_window_stops_the_run_at_its_hold():
-    """The declared rounds are 8 bits and the first window reads six."""
+    """The first round forms 4 events, the rest 8; the window reads six."""
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=16)
 
     with pytest.raises(RuntimeError) as stop:
         declared_run.weak_only_run(weak_syndrome_buffer=settings)
 
     sentence = str(stop.value)
-    assert "16 of its 16 bits" in sentence
+    assert "12 of its 16 bits" in sentence
     assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
     assert "waits for [(1, 3), (1, 4), (1, 5), (1, 6)]" in sentence
 
@@ -399,20 +402,46 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     assert windows.published == [(40, (1, 1), 40)]
 
 
-class _ChipFormer:
-    """A formation table: every round's events are one set bit."""
+class _ChipSource:
+    """Recipes of a one-round operation: its one event is its first outcome."""
 
-    def form_round(self, operation_id, round_index, raw_bits):
-        del operation_id, round_index, raw_bits
-        return (1,)
+    def formation_table(self, operation_id):
+        """The one table."""
+        del operation_id
+        recipe = detector_formation.DetectorRecipe(
+            detector_index=0,
+            round_index=1,
+            kind=detector_formation.LayerKind.PREPARATION,
+            records=((1, 0),),
+            reference_parity=0,
+            coordinates=(),
+        )
+        return detector_formation.FormationTable(
+            round_count=1,
+            packet_width_by_round={1: 2},
+            readout_slot_start=None,
+            detectors=(recipe,),
+            observables=(),
+            max_record_span=0,
+        )
+
+
+def _on_the_chip(clock=None, latency_cycles=0):
+    """The former seated at this store's receiving end."""
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("weak_syndrome_buffer",),
+        clock=clock,
+        latency_cycles=latency_cycles,
+    )
+    source = _ChipSource()
+    return formation.SeatedFormation(source, settings)
 
 
 def test_the_store_holds_the_events_when_the_chip_forms_them():
     """The hop's copy is the raw round; the store and the windows get events."""
     engine = engine_module.Engine()
     store = _store(engine)
-    former = _ChipFormer()
-    on_the_chip = formation.WeakSyndromeBufferSideFormation(former, 0)
+    on_the_chip = _on_the_chip()
     receiver, _windows = _receiver_with(
         engine, store, detection_events=on_the_chip
     )
@@ -443,13 +472,10 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
         write_cycles=write_cycles
     )
     settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock,
-        detection_event_cycles_per_round=formation_cycles,
-        row_settings=costs,
+        clock=clock, row_settings=costs
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
-    former = _ChipFormer()
-    on_the_chip = formation.WeakSyndromeBufferSideFormation(former, 0)
+    on_the_chip = _on_the_chip(clock, formation_cycles)
     receiver, windows = _receiver_with(
         engine, store, detection_events=on_the_chip
     )

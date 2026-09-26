@@ -6,18 +6,20 @@ is where a yaml's mistake belongs (STYLE.md rule 4).
 """
 
 import dataclasses
-from unittest import mock
+import types
 
 import pytest
 
 import decsim.build.controller_side as controller_side
 import decsim.build.parts as build_parts
-import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
+import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.machine as machine_module
-import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
+import decsim.records.rounds as round_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
@@ -26,102 +28,147 @@ class _DeviceWithNoFormationTable:
     """A timing-only or synthetic source: it forms nothing."""
 
 
-class _DeviceThatForms:
-    def form_round(self, operation_id, round_index, raw_bits):
-        """One round's detection events."""
-        del operation_id, round_index
-        return tuple(raw_bits)
+class _CountingDetector:
+    """A burst detector that records the rounds it is shown."""
+
+    def __init__(self):
+        self.observed = []
+
+    def observe_round(self, operation_id, round_index, events):
+        """One round's events."""
+        del operation_id, events
+        self.observed.append(round_index)
 
 
-def _settings(**changes):
-    """A weak-only machine settings record with the given changes."""
+def _settings(formed_at=("controller",)):
+    """A weak-only machine settings record forming at the given seats."""
     workload = declared_run.declared_workload(None, 6)
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
-    controller = declared_run.declared_controller(**changes)
+    controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
+    detection_events = event_settings.DetectionEventSettings(
+        formed_at=formed_at
+    )
     return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         links=links,
         controller=controller,
+        detection_events=detection_events,
         pauli_frame=frame,
     )
 
 
-def test_a_source_that_does_not_answer_the_port_forms_nothing_either_way():
+def _policy(primary_tier="weak", requires_strong_context=False):
+    """The two facts the paths of a run are read off."""
+    tier = window_records.DecoderTier(primary_tier)
+    return types.SimpleNamespace(
+        primary_tier=tier, requires_strong_context=requires_strong_context
+    )
+
+
+WEAK_BASELINE = _policy()
+SWITCHING = _policy(requires_strong_context=True)
+STRONG_ONLY = _policy("strong")
+
+
+def test_a_source_that_does_not_answer_the_port_forms_nothing():
     settings = _settings()
     device = _DeviceWithNoFormationTable()
-
-    formation = controller_side.build_detection_events(settings, device)
-
-    assert formation.former is None
-    assert formation.decoder_side_former() is None
-
-
-def test_each_row_is_built_with_the_runs_former_and_the_controllers_cost():
-    """One constructor shape, so the row a name reaches is built the same."""
-    forms_here = _settings(detection_events_formed_at="controller")
-    forms_later = _settings(detection_events_formed_at="decoder")
-    device = _DeviceThatForms()
-
-    at_the_controller = controller_side.build_detection_events(
-        forms_here, device
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=1,
+        bits=None,
+        size_bits=8,
+        fragment_index=0,
     )
-    at_the_decoder = controller_side.build_detection_events(forms_later, device)
+    carried = (fragment,)
 
-    assert at_the_controller.former is device
-    assert at_the_controller.decoder_side_former() is None
-    assert at_the_decoder.decoder_side_former() is not None
-
-
-def test_the_controllers_formation_cost_reaches_the_row_that_charges_it():
-    forms_here = _settings(
-        detection_events_formed_at="controller",
-        detection_event_cycles_per_round=5,
-    )
-    device = _DeviceThatForms()
-
-    at_the_controller = controller_side.build_detection_events(
-        forms_here, device
+    placement = controller_side.build_detection_events(
+        settings, device, WEAK_BASELINE
     )
 
-    assert at_the_controller.detection_event_formation_cycles == 5
+    assert placement.form_at("controller", carried) == carried
 
 
-def test_a_placement_written_outside_decsim_plugs_in_as_one_row():
-    """One class on the port and one row on the table, nothing else."""
-    rows = dict(controller_settings.DETECTION_EVENT_FORMATION)
-    rows["a_third_box"] = _PlacementOfMyOwn
-    settings = _settings(detection_events_formed_at="a_third_box")
-    device = _DeviceThatForms()
+@pytest.mark.parametrize(
+    "policy, formed_at",
+    [
+        (WEAK_BASELINE, ("controller",)),
+        (WEAK_BASELINE, ("weak_syndrome_buffer",)),
+        (WEAK_BASELINE, ("weak_decoder", "strong_decoder")),
+        (SWITCHING, ("weak_syndrome_buffer",)),
+        (SWITCHING, ("weak_decoder", "strong_decoder")),
+        (SWITCHING, ("weak_decoder", "strong_syndrome_buffer")),
+        (STRONG_ONLY, ("strong_syndrome_buffer",)),
+        (STRONG_ONLY, ("weak_syndrome_buffer", "strong_decoder")),
+    ],
+)
+def test_a_seat_list_every_path_crosses_once_is_built(policy, formed_at):
+    settings = _settings(formed_at)
+    device = _DeviceWithNoFormationTable()
 
-    with mock.patch.object(
-        controller_settings, "DETECTION_EVENT_FORMATION", rows
-    ):
-        placement = controller_side.build_detection_events(settings, device)
+    placement = controller_side.build_detection_events(settings, device, policy)
 
-    assert isinstance(placement, ports.DetectionEventPlacement)
-    assert placement.form_before_departure(()) == ()
+    assert placement.forms_at(formed_at[0])
 
 
-def test_a_formation_row_that_is_not_on_the_table_is_refused():
-    settings = _settings(detection_events_formed_at="the fridge")
-    device = _DeviceThatForms()
+@pytest.mark.parametrize(
+    "policy, formed_at, crossed",
+    [
+        (WEAK_BASELINE, ("strong_decoder",), "[]"),
+        (WEAK_BASELINE, ("controller", "weak_decoder"), "['controller', "),
+        (SWITCHING, ("weak_decoder",), "[]"),
+        (
+            SWITCHING,
+            ("weak_syndrome_buffer", "strong_syndrome_buffer"),
+            "['weak_syndrome_buffer', 'strong_syndrome_buffer']",
+        ),
+        (STRONG_ONLY, ("weak_syndrome_buffer",), "[]"),
+    ],
+)
+def test_a_path_that_crosses_no_seat_or_two_is_refused(
+    policy, formed_at, crossed
+):
+    """None decodes raw outcomes; two form events of events."""
+    settings = _settings(formed_at)
+    device = _DeviceWithNoFormationTable()
 
     with pytest.raises(ValueError) as refusal:
-        controller_side.build_detection_events(settings, device)
+        controller_side.build_detection_events(settings, device, policy)
 
     sentence = str(refusal.value)
-    assert "controller.detection_events_formed_at" in sentence
-    for row in controller_settings.DETECTION_EVENT_FORMATION:
-        assert repr(row) in sentence
+    assert f"at {crossed}" in sentence
+    assert "crosses exactly one seat" in sentence
 
 
-def test_the_formation_rows_are_the_rows_the_key_offers():
-    rows = controller_settings.DETECTION_EVENT_FORMATION
+def test_the_burst_detector_counts_at_the_primary_tiers_seat():
+    """The escalated region's seat forms too, but is not counted twice."""
+    settings = _settings(("weak_decoder", "strong_decoder"))
+    source = _OneRoundSource()
+    detector = _CountingDetector()
+    placement = controller_side.build_detection_events(
+        settings, source, SWITCHING, detector
+    )
+    raw = (_OneRoundSource.fragment(),)
 
-    assert sorted(rows) == ["controller", "decoder", "weak_syndrome_buffer"]
+    placement.form_at("strong_decoder", raw)
+    placement.form_at("weak_decoder", raw)
+
+    assert detector.observed == [1]
+
+
+def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
+    settings = _settings()
+    device = _DeviceWithNoFormationTable()
+    detector = _CountingDetector()
+
+    with pytest.raises(ValueError, match="burst_detector counts detection"):
+        controller_side.build_detection_events(
+            settings, device, WEAK_BASELINE, detector
+        )
 
 
 def test_one_decoder_for_both_tiers_is_refused_when_the_run_may_escalate():
@@ -263,27 +310,40 @@ def test_the_process_name_says_which_point_a_trace_is_of():
     assert name.endswith("seed7")
 
 
-class _PlacementOfMyOwn:
-    """A placement row written outside decsim: it forms nothing at all."""
+class _OneRoundSource:
+    """Recipes of a one-round operation: its one event is its first outcome."""
 
-    forms_at_the_weak_syndrome_buffer = False
-    forms_at_the_decoder = False
+    def formation_table(self, operation_id):
+        """The one table."""
+        del operation_id
+        recipe = detector_formation.DetectorRecipe(
+            detector_index=0,
+            round_index=1,
+            kind=detector_formation.LayerKind.PREPARATION,
+            records=((1, 0),),
+            reference_parity=0,
+            coordinates=(),
+        )
+        return detector_formation.FormationTable(
+            round_count=1,
+            packet_width_by_round={1: 1},
+            readout_slot_start=None,
+            detectors=(recipe,),
+            observables=(),
+            max_record_span=0,
+        )
 
-    def __init__(self, former, detection_event_formation_cycles):
-        self.former = former
-        self.detection_event_formation_cycles = detection_event_formation_cycles
-
-    def form_before_departure(self, fragments):
-        """The round's fragments as they leave the controller."""
-        return fragments
-
-    def form_before_storage(self, fragments):
-        """The round's fragments as the weak syndrome buffer stores them."""
-        return fragments
-
-    def decoder_side_former(self):
-        """No tier forms anything either."""
-        return None
+    @staticmethod
+    def fragment():
+        """The operation's one round, its outcome set."""
+        return round_records.RetainedSyndromeFragment(
+            operation_id=1,
+            patch_ids=(0,),
+            round_index=1,
+            bits=(1,),
+            size_bits=1,
+            fragment_index=0,
+        )
 
 
 class _EscalatingPolicy:

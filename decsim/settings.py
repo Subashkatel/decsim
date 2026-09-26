@@ -16,6 +16,7 @@ from typing import Optional
 import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
+import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -36,6 +37,7 @@ SECTIONS = (
     "qpu",
     "controller",
     "idle_policy",
+    "detection_events",
     "links",
     "weak_syndrome_buffer",
     "strong_syndrome_buffer",
@@ -82,6 +84,9 @@ class MachineSettings:
     )
     idle_policy: controller_settings.IdlePolicySettings = (
         controller_settings.IdlePolicySettings()
+    )
+    detection_events: detection_event_settings.DetectionEventSettings = (
+        detection_event_settings.DetectionEventSettings()
     )
     links: link_settings.FabricSettings = (
         link_profiles.logical_reference_profile()
@@ -147,6 +152,7 @@ class MachineSettings:
         _check_section_shapes(sections)
         clocks = config.ClockSettings.from_yaml(sections["clocks"])
         idle_policy_section = sections.get("idle_policy", {})
+        detection_events_section = sections.get("detection_events", {})
         escalation_section = sections.get("escalation", {})
         decoder_manager_section = sections.get("decoder_manager", {})
         observation_section = sections.get("observation", {})
@@ -157,6 +163,10 @@ class MachineSettings:
         )
         idle_policy = controller_settings.IdlePolicySettings.from_yaml(
             idle_policy_section
+        )
+        event_settings = detection_event_settings.DetectionEventSettings
+        detection_events = event_settings.from_yaml(
+            detection_events_section, clocks, controller.clock
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
         buffer_settings = syndrome_buffer_settings.SyndromeBufferSettings
@@ -207,6 +217,7 @@ class MachineSettings:
             qpu=qpu,
             controller=controller,
             idle_policy=idle_policy,
+            detection_events=detection_events,
             links=links,
             weak_syndrome_buffer=weak_syndrome_buffer,
             strong_syndrome_buffer=strong_syndrome_buffer,

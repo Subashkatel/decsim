@@ -124,7 +124,7 @@ class DecodeService:
         cross the input link. None when a payload states no size. A
         tier that forms its own detection events forms them after they
         land, so its memory holds the rounds at this same width
-        (controller.detection_events_formed_at decoder).
+        (detection_events.formed_at naming the tier's decoder).
         """
         demand = 0
         for input_job in self._input_jobs(job):

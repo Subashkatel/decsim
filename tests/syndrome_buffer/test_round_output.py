@@ -93,6 +93,31 @@ def _store(engine, read_cycles=0) -> syndrome_buffer_module.SyndromeBuffer:
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
 
+class _DecoderThatFormedNothing:
+    """The placement port, whose decoder seat has formed no round yet."""
+
+    clock = None
+
+    def __init__(self) -> None:
+        self.asked = []
+
+    def forms_at(self, seat) -> bool:
+        del seat
+        return True
+
+    def form_at(self, seat, fragments, round_before=()) -> tuple:
+        del seat, round_before
+        return fragments
+
+    def needs_the_round_before(self, seat, operation_id, round_index) -> bool:
+        self.asked.append((seat, operation_id, round_index))
+        return True
+
+    def cycles_at(self, seat, round_count) -> int:
+        del seat, round_count
+        return 0
+
+
 def _output(
     engine, transfers, store, reads_in_place=False
 ) -> round_output.SyndromeBufferOutput:
@@ -101,6 +126,7 @@ def _output(
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
         reads_in_place,
+        "weak_decoder",
     )
     output.transfers = transfers
     output.store = store
@@ -108,18 +134,41 @@ def _output(
     return output
 
 
-def _job() -> decoding_records.DecodeJob:
-    fragment = round_records.RetainedSyndromeFragment(
+def _fragment(round_index=1) -> round_records.RetainedSyndromeFragment:
+    return round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_ids=(0,),
-        round_index=1,
+        round_index=round_index,
         bits=(1, 0),
         size_bits=2,
         fragment_index=0,
     )
+
+
+def _job(round_index=1) -> decoding_records.DecodeJob:
+    fragment = _fragment(round_index)
     return decoding_records.DecodeJob(
         operation_id=1, window_id=0, round_count=1, payloads=[fragment]
     )
+
+
+def test_the_round_before_leaves_with_a_job_whose_decoder_needs_it():
+    """Its bits ride the job's move, and the job carries its fragments."""
+    engine = engine_module.Engine()
+    transfers = _Transfers()
+    store = _store(engine)
+    round_one = _fragment(1)
+    stored = round_records.SyndromeRoundPacket(1, 1, (round_one,))
+    store.accept_packed_round(stored, publication_tick=0)
+    output = _output(engine, transfers, store)
+    output.detection_events = _DecoderThatFormedNothing()
+    job = _job(2)
+
+    output.send_input(job, lambda: None)
+
+    assert output.detection_events.asked == [("weak_decoder", 1, 2)]
+    assert job.round_before == (_fragment(1),)
+    assert transfers.sends == [(output.path, 4)]
 
 
 def test_the_recording_transfers_fill_the_port():

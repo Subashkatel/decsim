@@ -71,7 +71,10 @@ class StrongAssignment:
     views name while the job is held. folded_boundaries names the
     neighbour windows whose committed boundary conditions the row folds
     into the job's input, Bombin et al. 2303.04846's input adaptation
-    (lines 775-788); a row that reads raw rounds folds none.
+    (lines 775-788); a row that reads raw rounds folds none. first_round
+    is the strong window's first round, so a carried round before it is
+    the raw round a strong side that forms the events reads
+    (windows/round_retention.py, strong_round_before).
     """
 
     request_key: window_records.DecoderRequestKey
@@ -79,6 +82,7 @@ class StrongAssignment:
     held_plan: Any = None
     round_count: int = 0
     folded_boundaries: tuple = ()
+    first_round: int = 1
 
 
 class StrongWindowPorts:
@@ -381,6 +385,7 @@ class ForwardSeamWindow(StrongWindowPorts):
                 held_plan=held,
                 round_count=strong_window.round_count,
                 folded_boundaries=folded_boundaries,
+                first_round=strong_window.start_round,
             )
         finally:
             if guard is not None:
@@ -681,6 +686,7 @@ def _assignment_of(
             held_plan=held,
             round_count=held.strong_window.round_count,
             folded_boundaries=held.folded_boundaries,
+            first_round=held.strong_window.start_round,
         )
     job = _strong_job_of(shape, held)
     return StrongAssignment(
@@ -688,6 +694,7 @@ def _assignment_of(
         job,
         round_count=job.round_count,
         folded_boundaries=held.folded_boundaries,
+        first_round=held.strong_window.start_round,
     )
 
 

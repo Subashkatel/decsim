@@ -83,55 +83,6 @@ def test_a_result_blocking_value_that_is_not_a_boolean_is_refused_by_name():
         )
 
 
-def test_the_formation_keys_default_to_yangs_latency_at_one_round_a_clock():
-    """5 FPGA clock cycles (2605.04892 lines 1274-1275), one round a clock."""
-    clocks = config.ClockSettings({"decoder": 250.0})
-    section = {
-        "kind": "pymatching",
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "decoder",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 1,
-            "release_cycles_per_round": 0,
-        },
-    }
-
-    settings = decoder_settings.DecoderSettings.from_yaml(
-        section, clocks, "weak_decoder"
-    )
-
-    assert settings.detection_event_latency_cycles == 5
-    assert settings.detection_event_cycles_per_round == 1
-
-
-def test_the_engine_card_reads_both_formation_keys():
-    clocks = config.ClockSettings({"decoder": 250.0})
-    section = {
-        "kind": "pymatching",
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "decoder",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 1,
-            "release_cycles_per_round": 0,
-            "detection_event_latency_cycles": 9,
-            "detection_event_cycles_per_round": 2,
-        },
-    }
-
-    settings = decoder_settings.DecoderSettings.from_yaml(
-        section, clocks, "weak_decoder"
-    )
-
-    assert settings.detection_event_latency_cycles == 9
-    assert settings.detection_event_cycles_per_round == 2
-
-
 def test_the_engine_card_reads_the_per_job_and_per_round_stage_cycles():
     """Each stage is priced once a job and once a round.
 
@@ -170,8 +121,6 @@ def test_the_engine_card_reads_the_per_job_and_per_round_stage_cycles():
         "fetch_cycles_per_job",
         "release_cycles_per_job",
         "release_cycles_per_round",
-        "detection_event_latency_cycles",
-        "detection_event_cycles_per_round",
     ],
 )
 def test_an_engine_cycle_count_refusal_names_its_tier_and_card(

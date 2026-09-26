@@ -28,6 +28,7 @@ one, and the root binds them by assignment once every component exists.
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
+import decsim.config as config
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -210,6 +211,9 @@ class SyndromeBuffer(Protocol):
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 
+    def retained_fragments(self, round_key: tuple) -> Optional[tuple]:
+        """The round's stored fragments; None when it is not stored."""
+
     def capacity_bits(self) -> Optional[int]:
         """The bits this store is bounded to, or None for unbounded.
 
@@ -337,8 +341,16 @@ class StrongSyndromeRoundReceiver(Protocol):
     def reserve_region(self, region: round_records.EscalatedRegion) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
 
-    def receive_region(self, region: round_records.EscalatedRegion) -> None:
-        """Take an escalated region that landed here: every round its slot."""
+    def receive_region(
+        self,
+        region: round_records.EscalatedRegion,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Take an escalated region that landed here: every round its slot.
+
+        on_stored is called once the store holds every round, which is
+        later than the landing when this seat forms the rounds first.
+        """
 
 
 @runtime_checkable
@@ -652,6 +664,9 @@ class WindowRetention(Protocol):
         window: Optional[window_records.Window] = None,
     ) -> list:
         """The retained round keys of a possibly cross-operation range."""
+
+    def strong_round_before(self, operation_id: Any, first_round: int) -> list:
+        """The raw round a strong redo from first_round reads before it."""
 
     def require_retained(
         self, round_keys: list, purpose: str, store=None
@@ -1502,69 +1517,63 @@ class SyndromeSource(Protocol):
 
 @runtime_checkable
 class DetectionEventFormer(Protocol):
-    """Who turns one round's measurement outcomes into its detection events.
+    """Who holds the recipes that turn a round's outcomes into its events.
 
-    Rows: the run's syndrome source, whose circuit the recipes are read
-    off (decsim/detector_error_model/detector_formation.py), and the
-    memoising former the decoder side reads through
-    (decsim/detector_error_model/detection_event_formation.py). Where the
-    machine calls it is controller.detection_events_formed_at: the
-    controller's assembler before the round leaves, the weak syndrome
-    buffer's receiving end before the round is stored, or the tier that
-    reads the round. A former is called once per round, in round order,
-    because a detector compares this round's outcomes against the round
-    before it (LILLIPUT 2108.06569 lines 499-510) and the formation table
-    keeps only the packets its recipes still read.
+    Rows: the run's syndrome sources with a circuit, whose recipes are
+    read off it (decsim/detector_error_model/detector_formation.py,
+    build_formation_table), a live stream's table growing as its rounds
+    execute. The former itself is seated where
+    detection_events.formed_at names (DetectionEventPlacement), and each
+    seat forms from the raw packets it holds, since a detector compares
+    this round's outcomes against the round before it (LILLIPUT
+    2108.06569 lines 499-510).
     """
 
-    def form_round(
-        self, operation_id: Any, round_index: int, raw_bits: Sequence[int]
-    ) -> tuple[int, ...]:
-        """The round's detection events, in detector order."""
+    def formation_table(self, operation_id: Any):
+        """The operation's formation table, the rounds executed so far."""
 
 
 @runtime_checkable
 class DetectionEventPlacement(Protocol):
-    """Where the machine forms a round's detection events.
+    """Where the machine forms a round's detection events, and what it costs.
 
-    Table rows: controller, weak_syndrome_buffer, decoder
-    (decsim/controller/settings.py DETECTION_EVENT_FORMATION, built from
-    controller.detection_events_formed_at). They are placements of the
-    same conversion, Google's workstation (2408.13687 lines 474-476),
-    the decoder's own chip ahead of its store (Maurer 2510.21600 lines
-    235-237 for the chip, the order ours), and the decoder side (Caune
-    2410.05202 lines 1252-1256, LILLIPUT 2108.06569 lines 499-510), and
-    the values are the same in every row, so a row moves the width the
-    round carries, the clock its formation is charged on, and nothing
-    else. Every row is built with the run's DetectionEventFormer and the
-    controller's own formation cycles.
-
-    The controller's assembler asks form_before_departure for the round
-    that leaves it and waits detection_event_formation_cycles of the
-    controller's clock before handing it on; the weak syndrome buffer's
-    receiving end asks form_before_storage for the round it stores; the
-    root asks decoder_side_former for the former each decoder tier reads
-    its rounds through, which is None for a row that has already formed
-    them and for a source that forms nothing. The root reads two facts
-    about a row. forms_at_the_weak_syndrome_buffer: whether the run
-    depends on its rounds landing in that buffer. forms_at_the_decoder:
-    whether each tier has its own event-detection stage in front of its
-    core, which is priced whether or not the source has outcomes to
-    convert.
+    Row: SeatedFormation (decsim/detector_error_model/
+    detection_event_formation.py), built from detection_events. The
+    seats are the points on the path a round takes from the controller
+    to a decoder (decsim/detector_error_model/settings.py SEATS), and
+    each component there asks with its own seat name: the controller's
+    assembler before the round leaves, each store's receiving end before
+    it stores the round, and each decoder unit as a job's rounds land in
+    its memory. The values are the same at every seat, a parity of the
+    raw outcomes, so a seat moves the width the round carries, the state
+    the seat holds and the clock its formation is charged on (Google
+    2408.13687 lines 474-476, Maurer 2510.21600 lines 234-236, Caune
+    2410.05202 lines 1252-1255, LILLIPUT 2108.06569 lines 500-509).
+    clock is the clock cycles_at counts on; None when nothing is
+    charged.
     """
 
-    detection_event_formation_cycles: int
-    forms_at_the_weak_syndrome_buffer: bool
-    forms_at_the_decoder: bool
+    clock: Optional[config.Clock]
 
-    def form_before_departure(self, fragments: tuple) -> tuple:
-        """The round's fragments as they leave the controller."""
+    def forms_at(self, seat: str) -> bool:
+        """Whether the seat forms the rounds that cross it."""
 
-    def form_before_storage(self, fragments: tuple) -> tuple:
-        """The round's fragments as the weak syndrome buffer stores them."""
+    def form_at(
+        self, seat: str, fragments: tuple, round_before: tuple = ()
+    ) -> tuple:
+        """The fragments as they leave the seat: formed, or as they came.
 
-    def decoder_side_former(self) -> Optional[DetectionEventFormer]:
-        """The former each tier forms through, or None when none does."""
+        round_before is the raw round before the first fragment, held by
+        the seat for that round's detectors and never returned.
+        """
+
+    def needs_the_round_before(
+        self, seat: str, operation_id: Any, round_index: int
+    ) -> bool:
+        """Whether the seat must be given the raw round before this one."""
+
+    def cycles_at(self, seat: str, round_count: int) -> int:
+        """The cycles of forming round_count rounds together at the seat."""
 
 
 @runtime_checkable
@@ -2172,6 +2181,9 @@ class CodeModel(Protocol):
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Syndrome bits one round of this many patches produces."""
+
+    def data_bits_per_readout(self, num_patches: int) -> int:
+        """Data-qubit bits the final readout of this many patches adds."""
 
 
 @runtime_checkable

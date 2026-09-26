@@ -23,6 +23,7 @@ import pytest
 import decsim.config as config
 import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
@@ -176,7 +177,10 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     weak_receiver.store = store
     weak_receiver.output = store_output
     weak_receiver.windows = windows
-    weak_receiver.detection_events = formation.ControllerSideFormation(None, 0)
+    at_the_controller = event_settings.DetectionEventSettings()
+    weak_receiver.detection_events = formation.SeatedFormation(
+        None, at_the_controller
+    )
     transmitter = round_transmission.RoundTransmitter(engine)
     transmitter.link = links
     transmitter.memory_arrivals = windows

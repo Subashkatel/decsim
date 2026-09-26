@@ -85,6 +85,36 @@ def _strong_retention(strong_store, rounds_arrived: int):
     return retention
 
 
+def test_a_strong_side_that_forms_reads_the_raw_round_before_a_redo():
+    """LILLIPUT 2108.06569 lines 499-510: a detector reads the round before."""
+    retention = round_retention.RoundRetention(
+        is_strong_context_retained=True,
+        primary_tier=window_records.DecoderTier.WEAK,
+        strong_side_forms=True,
+    )
+
+    assert retention.strong_round_before(1, 4) == [(1, 3)]
+
+
+def test_an_operations_first_round_has_no_round_before_to_read():
+    retention = round_retention.RoundRetention(
+        is_strong_context_retained=True,
+        primary_tier=window_records.DecoderTier.WEAK,
+        strong_side_forms=True,
+    )
+
+    assert retention.strong_round_before(1, 1) == []
+
+
+def test_a_strong_side_that_does_not_form_reads_nothing_before_a_redo():
+    retention = round_retention.RoundRetention(
+        is_strong_context_retained=True,
+        primary_tier=window_records.DecoderTier.WEAK,
+    )
+
+    assert retention.strong_round_before(1, 4) == []
+
+
 def test_a_context_round_still_crossing_is_told_apart_from_one_released():
     """The two states the strong context's readiness check conflated.
 

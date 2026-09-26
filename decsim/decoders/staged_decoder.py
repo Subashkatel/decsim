@@ -54,6 +54,16 @@ class DecoderStage:
         round_cycles = self.cycles_per_round * job.round_count
         return self.cycles_per_job + round_cycles
 
+    def priced_on(self, unit_clock: config.Clock) -> config.Clock:
+        """The clock the stage's cycles count on: the unit's own.
+
+        A stage of other logic in front of the unit, a detection event
+        former on its own clock (decoders/detection_events.py), names
+        that clock instead, as gem5 gives each clocked object its own
+        domain (src/sim/clocked_object.hh).
+        """
+        return unit_clock
+
     def formed_round_keys(self, job: decoding_records.DecodeJob) -> tuple:
         """The rounds this stage forms; none, for a stage that forms none.
 
@@ -127,10 +137,10 @@ class UnitTiming:
         the whole job's cycles at the clock, whatever the partition.
         """
         ticks = {}
-        period_ticks = self.clock.period_ticks
         for stage in self.before + self.after:
             cycles = stage.cycles_for(job)
-            ticks[stage.name] = cycles * period_ticks
+            clock = stage.priced_on(self.clock)
+            ticks[stage.name] = cycles * clock.period_ticks
         return ticks
 
     def initiation_interval_ticks(self) -> Optional[int]:
@@ -295,13 +305,14 @@ class StagedDecoder(decoder_module.DecoderBase):
     def _steps(self, job: decoding_records.DecodeJob) -> list:
         """One step per stage; the algorithm's time is its own."""
         steps = []
+        unit_clock = self.timing.clock
         for stage in self.timing.before:
-            step = _hardware_step(stage, job)
+            step = _hardware_step(stage, job, unit_clock)
             steps.append(step)
         algorithm = _Step(ALGORITHM_STAGE, None)
         steps.append(algorithm)
         for stage in self.timing.after:
-            step = _hardware_step(stage, job)
+            step = _hardware_step(stage, job, unit_clock)
             steps.append(step)
         return steps
 
@@ -335,7 +346,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         if step.cycles == 0:
             return 0
         now = engine.now
-        edge = self.timing.clock.edge(step.cycles, now)
+        edge = step.clock.edge(step.cycles, now)
         return edge - now
 
     def _leave(self, running, engine, steps: list, index: int) -> None:
@@ -399,6 +410,8 @@ class _Step:
     # None for the algorithm, whose time is the wrapped decoder's own
     cycles: Optional[int]
     round_keys: tuple = ()
+    # the clock the cycles count on; None for the algorithm
+    clock: Optional[config.Clock] = None
 
 
 @dataclasses.dataclass
@@ -455,11 +468,14 @@ def _key(job: decoding_records.DecodeJob):
 
 
 def _hardware_step(
-    stage: DecoderStage, job: decoding_records.DecodeJob
+    stage: DecoderStage,
+    job: decoding_records.DecodeJob,
+    unit_clock: config.Clock,
 ) -> "_Step":
     cycles = stage.cycles_for(job)
     round_keys = stage.formed_round_keys(job)
-    return _Step(stage.name, cycles, round_keys)
+    clock = stage.priced_on(unit_clock)
+    return _Step(stage.name, cycles, round_keys, clock)
 
 
 def _stage_text(step: "_Step", job: decoding_records.DecodeJob) -> str:

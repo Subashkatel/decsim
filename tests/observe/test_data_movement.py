@@ -211,3 +211,18 @@ class _Delivered:
         self.transfer = _Transfer(payload_bits, header_bits)
         self.attribution = _Attribution()
         self.path = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+
+
+def test_the_ledger_keeps_the_most_one_history_held_at_each_seat():
+    ledger = data_movement.DataMovement()
+
+    ledger.formation_state_held("weak_decoder", 1, 8)
+    ledger.formation_state_held("weak_decoder", 1, 16)
+    ledger.formation_state_held("weak_decoder", 2, 8)
+    ledger.formation_state_held("controller", 1, 4)
+
+    counted = ledger.json_value()
+    assert counted["formation_state_bits_by_seat"] == {
+        "controller": 4,
+        "weak_decoder": 16,
+    }

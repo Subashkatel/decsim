@@ -23,7 +23,7 @@ port interface, quoted in
 write and one class the machine builds for it. That is sinter's shape,
 its `BUILT_IN_DECODERS` dictionary plus one abstract class per pluggable
 part, and `decsim/tables.py` is the single function that reads all
-nineteen tables, so a name that is not on a table is refused the same
+eighteen tables, so a name that is not on a table is refused the same
 way everywhere.
 
 **One root wires everything by constructor.** `decsim/machine.py` builds
@@ -54,7 +54,7 @@ graph TD
     %% Release = controller
     %% Dispatch = pauli_frame
     Qpu["QPU device"] -->|"ReadoutReceiver.accept_qpu_readout"| Controller
-    Controller -->|"DetectionEventPlacement.form_before_departure"| Formation["Detection event formation"]
+    Controller -->|"DetectionEventPlacement.form_at"| Formation["Detection event formation"]
     Controller -->|"WeakSyndromeRoundReceiver.has_room"| WeakBuffer["Weak syndrome buffer"]
     Controller -->|"WeakSyndromeRoundReceiver.receive_round"| WeakBuffer
     Controller -->|"StrongSyndromeRoundReceiver.receive_round"| StrongBuffer["Strong syndrome buffer"]

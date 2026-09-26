@@ -167,3 +167,15 @@ def test_an_odd_qubit_count_is_refused_for_a_bicycle_code():
 def test_a_zero_commit_override_is_refused_for_a_bicycle_code():
     with pytest.raises(ValueError, match="must be positive"):
         code_geometry.BivariateBicycleCodeModel(commit_rounds_override=0)
+
+
+def test_the_surface_cards_final_readout_adds_its_data_qubits():
+    code = code_geometry.SurfaceCodeModel(distance=5)
+
+    assert code.data_bits_per_readout(2) == 50
+
+
+def test_the_bivariate_bicycle_cards_final_readout_adds_its_n_qubits():
+    card = code_geometry.BivariateBicycleCodeModel()
+
+    assert card.data_bits_per_readout(1) == 144

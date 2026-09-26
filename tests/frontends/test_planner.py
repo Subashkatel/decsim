@@ -649,6 +649,26 @@ def test_a_strong_context_hold_starts_at_the_commit():
     assert held_rounds == tuple((1, index) for index in range(3, 7))
 
 
+def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
+    """Its former reads round 2 for round 3's detectors.
+
+    A detector compares a round against the one before it (LILLIPUT
+    2108.06569 lines 499-510), and the strong side never formed round 2.
+    """
+    execution = one_window_with_a_successor()
+
+    buffering = planner._plan_syndrome_buffering(
+        execution,
+        retain_strong_context=True,
+        absorbs_weak_windows=False,
+        restart_reread_buffer_regions=0,
+        strong_side_forms=True,
+    )
+
+    held_rounds = buffering.potential_holds[0][1]
+    assert held_rounds == tuple((1, index) for index in range(2, 7))
+
+
 def test_a_forward_windows_strong_hold_ends_at_the_operations_end():
     """The forward region is clamped at the operation's last round.
 

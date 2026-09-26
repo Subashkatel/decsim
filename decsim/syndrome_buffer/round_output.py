@@ -48,6 +48,9 @@ class SyndromeBufferOutput:
     store = ports.Port(ports.SyndromeBuffer)
     # the fabric, asked what a move that starts after its read will pay
     link = ports.Port(ports.Link)
+    # the run's former, asked whether the decoder this store feeds needs
+    # the round before a job's first; unbound in a bare store
+    detection_events = ports.Port(ports.DetectionEventPlacement, optional=True)
 
     def __init__(
         self,
@@ -55,12 +58,15 @@ class SyndromeBufferOutput:
         path: transfer_records.LinkPath,
         name: str,
         reads_in_place: bool = False,
+        reader_seat: Optional[str] = None,
     ) -> None:
         self.engine = engine
         self.path = path
         # the store this port belongs to, as the data path names it
         self.name = name
         self.reads_in_place = reads_in_place
+        # the seat of the decoder this store feeds (detection_events)
+        self.reader_seat = reader_seat
 
     def send_input(
         self,
@@ -76,14 +82,39 @@ class SyndromeBufferOutput:
         is the landing: nothing crosses the link.
         """
         self.name_this_store(job)
+        self._read_the_round_before(job)
         payload_bits = job.payload_bits()
-        round_keys = _payload_round_keys(job.payloads)
+        carried = job.round_before + tuple(job.payloads)
+        round_keys = _payload_round_keys(carried)
         read_tick = self.store.book_read(round_keys)
         if self.reads_in_place:
             return self._land_at(read_tick, on_landed)
         if read_tick == self.engine.now:
             return self._move(job, payload_bits, on_landed)
         return self._move_at(read_tick, job, payload_bits, on_landed)
+
+    def _read_the_round_before(self, job: decoding_records.DecodeJob) -> None:
+        """Add the raw round before the job's first, when its reader needs it.
+
+        A decoder that forms the events and has not formed the job's
+        first round reads the round before it (needs_the_round_before),
+        so that round leaves the store with the job's own and is priced
+        with them. A round the store no longer holds is not read, and
+        the former says so if it was needed.
+        """
+        if self.detection_events is None or not job.payloads:
+            return
+        first = job.payloads[0]
+        needs_it = self.detection_events.needs_the_round_before(
+            self.reader_seat, first.operation_id, first.round_index
+        )
+        if not needs_it:
+            return
+        round_key = (first.operation_id, first.round_index - 1)
+        fragments = self.store.retained_fragments(round_key)
+        if fragments is None:
+            return
+        job.round_before = tuple(sorted(fragments, key=_fragment_order))
 
     def land_held_input(
         self,
@@ -202,3 +233,7 @@ def _payload_round_keys(payloads) -> tuple:
         round_keys.append((payload.operation_id, payload.round_index))
     unique = dict.fromkeys(round_keys)
     return tuple(unique)
+
+
+def _fragment_order(fragment) -> int:
+    return fragment.fragment_index

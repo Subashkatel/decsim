@@ -1483,6 +1483,9 @@ class OutsideCodeCard:
     def syndrome_bits_per_round(self, num_patches):
         return 3 * num_patches
 
+    def data_bits_per_readout(self, num_patches):
+        return 4 * num_patches
+
 
 def _resolved_geometry(machine):
     """The geometry the run resolved, read off the issuer's table."""
@@ -2503,6 +2506,14 @@ def _program(producer: str) -> circuit_records.RepeatedStimCircuit:
     )
 
 
+# the seats a placement word names: the controller, or both decoders,
+# which serves a run of either primary tier
+SEATS_BY_PLACEMENT = {
+    "controller": ("controller",),
+    "decoder": ("weak_decoder", "strong_decoder"),
+}
+
+
 def _settings(
     program: circuit_records.RepeatedStimCircuit,
     history: str,
@@ -2513,8 +2524,9 @@ def _settings(
     strong = dataclasses.replace(base.weak_decoder, kind=0.2)
     weak = decoder_settings.DecoderSettings()
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
-    controller = dataclasses.replace(
-        base.controller, detection_events_formed_at=placement
+    seats = SEATS_BY_PLACEMENT[placement]
+    detection_events = dataclasses.replace(
+        base.detection_events, formed_at=seats
     )
     observation = dataclasses.replace(
         base.observation, record_switching_windows=True
@@ -2524,7 +2536,7 @@ def _settings(
         weak_decoder=weak,
         strong_decoder=strong,
         escalation=escalation,
-        controller=controller,
+        detection_events=detection_events,
         observation=observation,
     )
 

@@ -21,6 +21,8 @@ import pytest
 
 import decsim.assembly as assembly
 import decsim.config as config
+import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -35,6 +37,7 @@ from decsim.syndrome_buffer import (
 LANDING_TICKS = config.microseconds_to_ticks(0.5)
 # every round this file sends carries one fragment of three bits
 BITS_PER_ROUND = 3
+FORMING_CYCLES = 5
 
 
 def packet(round_index: int) -> round_records.SyndromeRoundPacket:
@@ -83,7 +86,42 @@ class RecordingListener:
         self.copies.append((round_key, bits, source_name, target_name))
 
 
-def room_side(engine, bits=None, listener=None, windows=None):
+class RecordingFormer:
+    """The placement port at this seat, keeping what it is asked."""
+
+    clock = None
+
+    def __init__(self):
+        self.formed = []
+        self.cycles_asked = []
+
+    def cycles_at(self, seat, round_count):
+        self.cycles_asked.append((seat, round_count))
+        return 0
+
+    def form_at(self, seat, fragments, round_before=()):
+        held = tuple(fragment.round_index for fragment in round_before)
+        self.formed.append((seat, fragments[0].round_index, held))
+        return fragments
+
+
+class FormingInCycles(RecordingFormer):
+    """A seat that takes FORMING_CYCLES of a 10-tick clock to form."""
+
+    clock = config.Clock(10)
+
+    def cycles_at(self, seat, round_count):
+        self.cycles_asked.append((seat, round_count))
+        return FORMING_CYCLES
+
+
+def _nothing() -> None:
+    """A landing whose stored rounds wake no one."""
+
+
+def room_side(
+    engine, bits=None, listener=None, windows=None, detection_events=None
+):
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
     store = syndrome_buffer_module.SyndromeBuffer(store_settings, engine)
     if listener is not None:
@@ -93,6 +131,10 @@ def room_side(engine, bits=None, listener=None, windows=None):
         engine
     )
     receiver.store = store
+    if detection_events is None:
+        at_the_controller = event_settings.DetectionEventSettings()
+        detection_events = formation.SeatedFormation(None, at_the_controller)
+    receiver.detection_events = detection_events
     if listener is not None:
         receiver.trace.copy_made.connect(listener.copy_made)
     if windows is not None:
@@ -137,13 +179,13 @@ class RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
         )
 
 
-def region(*round_indices) -> round_records.EscalatedRegion:
+def region(*round_indices, first_round=1) -> round_records.EscalatedRegion:
     """The escalated region of these rounds, in the strong request's name."""
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.STRONG, 1
     )
     packets = tuple(packet(round_index) for round_index in round_indices)
-    return round_records.EscalatedRegion.of(request_key, packets)
+    return round_records.EscalatedRegion.of(request_key, packets, first_round)
 
 
 def cross(
@@ -264,7 +306,9 @@ def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
 
     receiver.reserve_region(carried)
     room_while_crossing = receiver.has_room(asked)
-    engine.schedule(LANDING_TICKS, lambda: receiver.receive_region(carried))
+    engine.schedule(
+        LANDING_TICKS, lambda: receiver.receive_region(carried, _nothing)
+    )
     engine.run()
 
     assert carried.wire_bits == two_rounds_bits
@@ -288,6 +332,50 @@ def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
             "strong syndrome buffer",
         ),
     ]
+
+
+def test_the_round_before_a_region_lands_raw_and_forms_the_first_round():
+    """The seat holds it for the region's first round and forms it not."""
+    engine = engine_module.Engine()
+    former = RecordingFormer()
+    receiver = room_side(engine, detection_events=former)
+    reads = decoding_records.WindowReads((1, 0))
+    receiver.store.register_hold(reads, [(1, 1), (1, 2), (1, 3)])
+    carried = region(1, 2, 3, first_round=2)
+
+    receiver.reserve_region(carried)
+    receiver.receive_region(carried, _nothing)
+
+    seat = "strong_syndrome_buffer"
+    assert carried.carries_the_round_before
+    assert carried.wire_bits == 3 * BITS_PER_ROUND
+    assert receiver.detection_events.cycles_asked == [(seat, 2)]
+    assert receiver.detection_events.formed == [(seat, 2, (1,)), (seat, 3, ())]
+    assert receiver.store.occupancy == 3
+
+
+def test_a_region_formed_here_is_reported_stored_once_every_round_is():
+    """Five cycles of a 10-tick clock: the store holds both rounds at 50.
+
+    The sender counts the region's rounds as carried until then, so a
+    wake-up at the landing does not send them again.
+    """
+    engine = engine_module.Engine()
+    former = FormingInCycles()
+    receiver = room_side(engine, detection_events=former)
+    reads = decoding_records.WindowReads((1, 0))
+    receiver.store.register_hold(reads, [(1, 1), (1, 2)])
+    carried = region(1, 2)
+    stored_at = []
+
+    def record_stored() -> None:
+        stored_at.append((engine.now, receiver.store.occupancy))
+
+    receiver.reserve_region(carried)
+    receiver.receive_region(carried, record_stored)
+    engine.run()
+
+    assert stored_at == [(50, 2)]
 
 
 def test_a_regions_reservation_is_its_bits_and_the_refusal_names_them():

@@ -43,6 +43,7 @@ The weak syndrome buffer, as its own round receiver sees it.
 | `book_write` | Take a write of this round's stored bits; the tick it completes. |
 | `book_read` | Take a read of these stored rounds; the tick their bits are out. |
 | `release_round` | Free the round; its consumers are done with it. |
+| `retained_fragments` | The round's stored fragments; None when it is not stored. |
 | `capacity_bits` | The bits this store is bounded to, or None for unbounded. |
 | `held_rounds_description` | The stored rounds, in one line, for the I/O trace. |
 | `check_settled` | At the end of a run no round is stored and no hold is live. |
@@ -185,6 +186,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `release_absorbed_strong_hold` | Drop the rounds an absorbed window kept; the strong request has them. |
 | `require_rounds_retained` | A strong window starts only once every round it reads is held. |
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
+| `strong_round_before` | The raw round a strong redo from first_round reads before it. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
 | `require_strong_retained` | The same, on the strong syndrome buffer. |
 
@@ -460,27 +462,26 @@ What the QPU reads out each round for an operation.
 
 ### `DetectionEventFormer`
 
-Who turns one round's measurement outcomes into its detection events.
+Who holds the recipes that turn a round's outcomes into its events.
 
 | Method | What it does |
 | --- | --- |
-| `form_round` | The round's detection events, in detector order. |
+| `formation_table` | The operation's formation table, the rounds executed so far. |
 
 ### `DetectionEventPlacement`
 
-Where the machine forms a round's detection events.
+Where the machine forms a round's detection events, and what it costs.
 
 | Member | Type |
 | --- | --- |
-| `detection_event_formation_cycles` | `int` |
-| `forms_at_the_weak_syndrome_buffer` | `bool` |
-| `forms_at_the_decoder` | `bool` |
+| `clock` | `Optional[config.Clock]` |
 
 | Method | What it does |
 | --- | --- |
-| `form_before_departure` | The round's fragments as they leave the controller. |
-| `form_before_storage` | The round's fragments as the weak syndrome buffer stores them. |
-| `decoder_side_former` | The former each tier forms through, or None when none does. |
+| `forms_at` | Whether the seat forms the rounds that cross it. |
+| `form_at` | The fragments as they leave the seat: formed, or as they came. |
+| `needs_the_round_before` | Whether the seat must be given the raw round before this one. |
+| `cycles_at` | The cycles of forming round_count rounds together at the seat. |
 
 ### `WindowModelSource`
 
@@ -688,6 +689,7 @@ A code card: the numbers the machine reads off a QEC code.
 | `buffer_rounds` | Look-ahead rounds per decode window. |
 | `spatial_nodes` | The per-round graph size a latency model prices this card at. |
 | `syndrome_bits_per_round` | Syndrome bits one round of this many patches produces. |
+| `data_bits_per_readout` | Data-qubit bits the final readout of this many patches adds. |
 
 ### `RowSettings`
 

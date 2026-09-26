@@ -197,7 +197,7 @@ def _parts_of(settings) -> build_parts.Parts:
     )
     plan = plan_build.build_plan(settings, escalation_policy)
     detection_events = controller_side.build_detection_events(
-        settings, plan.device
+        settings, plan.device, escalation_policy
     )
     pool = decoder_build.build_decoder_pool(
         settings, plan, escalation_policy, detection_events

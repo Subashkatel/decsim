@@ -17,12 +17,12 @@ import decsim.controller.instruction_output as instruction_output_module
 import decsim.controller.operation_issue as operation_issue
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
-import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.pauli_frame.decision_dispatch as decision_dispatch_module
 import decsim.ports as ports
@@ -30,6 +30,7 @@ import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
 
@@ -106,33 +107,34 @@ def _decoder_manager(
 def build_detection_events(
     settings: machine_settings.MachineSettings,
     device,
+    escalation_policy: ports.EscalationPolicy,
     burst_detector: Optional[ports.BurstDetector] = None,
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
 
-    controller.detection_events_formed_at names the row; the yaml's value
-    is refused where the file loads, a Python-built record's here, before
-    the first round is packed. Every row is built the same way, with the
-    run's former and the controller's own formation cost in cycles. A
-    source that does not answer the DetectionEventFormer port forms
-    nothing either way. A burst detector reads every round the former
-    forms. The decoder pool
-    is compiled from this seat, so the root builds it before the rest.
+    Every path a round of this run takes to a decoder crosses exactly
+    one seat of detection_events.formed_at: a path with none would
+    decode raw outcomes, and a path with two would form events of
+    events, a wrong answer either way. A source that does not answer
+    the DetectionEventFormer port forms nothing. A burst detector
+    counts the rounds the first seat on the primary tier's path forms.
+    The decoder pool is compiled from this seat, so the root builds it
+    before the rest.
     """
-    former = None
+    formed_at = settings.detection_events.formed_at
+    paths = _paths_of_the_run(escalation_policy)
+    for path in paths:
+        _check_one_seat_on(path, formed_at)
+    source = None
     if isinstance(device, ports.DetectionEventFormer):
-        former = device
+        source = device
+    observed_seat = None
     if burst_detector is not None:
-        former = _observed(former, burst_detector)
-    row = tables.row(
-        controller_settings.DETECTION_EVENT_FORMATION,
-        "controller.detection_events_formed_at",
-        settings.controller.detection_events_formed_at,
+        _check_forms_events(source)
+        observed_seat = _first_seat_on(paths[0], formed_at)
+    return formation.SeatedFormation(
+        source, settings.detection_events, observed_seat, burst_detector
     )
-    detection_event_formation_cycles = (
-        settings.controller.detection_event_cycles_per_round
-    )
-    return row(former, detection_event_formation_cycles)
 
 
 def build_factory(parts: build_parts.Parts) -> ports.MagicStateFactory:
@@ -314,12 +316,47 @@ def resolved_patches_by_identity(plan) -> dict:
     return patch_by_identity
 
 
-def _observed(former, burst_detector: ports.BurstDetector):
-    """The former, reporting each round to the burst detector."""
-    if former is None:
-        raise ValueError(
-            "burst_detector counts detection events, and this qpu.kind "
-            "forms none; name a source that forms them, or write "
-            "burst_detector: {kind: none}"
-        )
-    return formation.ObservedDetectionEvents(former, burst_detector)
+def _check_forms_events(source) -> None:
+    """A burst detector counts detection events, so the source forms some."""
+    if source is not None:
+        return
+    raise ValueError(
+        "burst_detector counts detection events, and this qpu.kind "
+        "forms none; name a source that forms them, or write "
+        "burst_detector: {kind: none}"
+    )
+
+
+def _paths_of_the_run(escalation_policy: ports.EscalationPolicy) -> tuple:
+    """The paths this run's rounds take to a decoder, the primary first."""
+    strong = window_records.DecoderTier.STRONG
+    if escalation_policy.primary_tier is strong:
+        return (event_settings.STRONG_PATH,)
+    if escalation_policy.requires_strong_context:
+        return (event_settings.WEAK_PATH, event_settings.ESCALATION_PATH)
+    return (event_settings.WEAK_PATH,)
+
+
+def _check_one_seat_on(path: tuple, formed_at: tuple) -> None:
+    """The path crosses exactly one seat that forms, or the run is refused."""
+    seats = []
+    for seat in path:
+        if seat in formed_at:
+            seats.append(seat)
+    if len(seats) == 1:
+        return
+    listed = ", ".join(path)
+    raise ValueError(
+        f"detection_events.formed_at {list(formed_at)} forms the rounds "
+        f"on the path {listed} at {seats}: every path to a decoder "
+        "crosses exactly one seat, since a path with none decodes raw "
+        "outcomes and a path with two forms events of events"
+    )
+
+
+def _first_seat_on(path: tuple, formed_at: tuple) -> str:
+    """The seat of formed_at the path crosses; the path crosses one."""
+    for seat in path:
+        if seat in formed_at:
+            return seat
+    raise AssertionError("every path crosses one seat")

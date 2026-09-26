@@ -7,6 +7,8 @@ and its result reaches on_decoded once, with the manager's log naming
 the job it started.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.config as config
@@ -17,6 +19,9 @@ import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.detector_error_model.detection_event_formation as event_formation
+import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.observe.log_writers as log_writers
@@ -44,13 +49,60 @@ class FixedRow(decoder_module.DecoderBase):
         )
 
 
-class OneEventPerRound:
-    """A former whose events are the round index: the value is not the law."""
+class OneRoundSource:
+    """Recipes of a one-round operation: the value is not the law."""
 
-    def form_round(self, operation_id, round_index, raw_bits):
-        """One round's detection events."""
-        del operation_id, raw_bits
-        return (round_index,)
+    def formation_table(self, operation_id):
+        """The one table: one event, the round's first outcome."""
+        del operation_id
+        recipe = detector_formation.DetectorRecipe(
+            detector_index=0,
+            round_index=1,
+            kind=detector_formation.LayerKind.PREPARATION,
+            records=((1, 0),),
+            reference_parity=0,
+            coordinates=(),
+        )
+        return detector_formation.FormationTable(
+            round_count=1,
+            packet_width_by_round={1: 2},
+            readout_slot_start=None,
+            detectors=(recipe,),
+            observables=(),
+            max_record_span=0,
+        )
+
+
+class TwoRoundSource:
+    """Recipes of a two-round operation: round 2 compares against round 1."""
+
+    def formation_table(self, operation_id):
+        """One event a round, the second the XOR of both rounds' outcome."""
+        del operation_id
+        first = detector_formation.DetectorRecipe(
+            detector_index=0,
+            round_index=1,
+            kind=detector_formation.LayerKind.PREPARATION,
+            records=((1, 0),),
+            reference_parity=0,
+            coordinates=(),
+        )
+        second = detector_formation.DetectorRecipe(
+            detector_index=1,
+            round_index=2,
+            kind=detector_formation.LayerKind.BULK,
+            records=((1, 0), (2, 0)),
+            reference_parity=0,
+            coordinates=(),
+        )
+        return detector_formation.FormationTable(
+            round_count=2,
+            packet_width_by_round={1: 1, 2: 1},
+            readout_slot_start=None,
+            detectors=(first, second),
+            observables=(),
+            max_record_span=1,
+        )
 
 
 def _manager(engine, row, formation_by_pool=None, unit_count=1):
@@ -167,14 +219,19 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     """
     engine = engine_module.Engine()
     row = FixedRow()
-    former = OneEventPerRound()
-    formation = detection_events.TierFormation(former)
+    former_clock = config.Clock(4000)
+    at_the_weak_decoder = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder",),
+        clock=former_clock,
+        latency_cycles=5,
+        cycles_per_round=1,
+    )
+    source = OneRoundSource()
+    placement = event_formation.SeatedFormation(source, at_the_weak_decoder)
+    formation = detection_events.TierFormation(placement, "weak_decoder")
     manager = _manager(engine, row, {"default": formation})
     formation_stage = detection_events.DetectionEventFormationStage(
-        "detection_event_formation",
-        cycles_per_job=5,
-        cycles_per_round=1,
-        formation=formation,
+        "detection_event_formation", formation=formation
     )
     busy = _window_job()
     busy.label = "busy"
@@ -198,6 +255,47 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     assert after_the_withdrawal == 5
     engine.run()
     manager.check_decode_work_settled()
+
+
+def test_the_round_before_is_held_by_the_tier_and_not_deposited():
+    """The unit's memory takes the job's rounds; the tier's logic the rest."""
+    engine = engine_module.Engine()
+    at_the_weak_decoder = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder",)
+    )
+    source = TwoRoundSource()
+    placement = event_formation.SeatedFormation(source, at_the_weak_decoder)
+    formation = detection_events.TierFormation(placement, "weak_decoder")
+    row = FixedRow()
+    manager = _manager(engine, row, {"default": formation})
+    deposited = []
+
+    def note_deposit(job, *_) -> None:
+        landed = job.decoder_input.fragments()
+        deposited.extend(landed)
+
+    for copy_source in manager.copy_sources():
+        copy_source.connect(note_deposit)
+    job = _window_job()
+    round_one = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=("p",),
+        round_index=1,
+        bits=(1,),
+        size_bits=1,
+        fragment_index=0,
+    )
+    round_two = dataclasses.replace(round_one, round_index=2)
+    job.payloads = [round_two]
+    job.round_before = (round_one,)
+    on_decoded = _resolving(manager)
+
+    manager.enqueue(job, None, on_decoded)
+    engine.run()
+
+    assert [fragment.round_index for fragment in deposited] == [2]
+    assert deposited[0].bits == (0,)
+    assert job.round_before == ()
 
 
 def test_an_escalation_routed_to_a_pipelined_unit_is_refused():

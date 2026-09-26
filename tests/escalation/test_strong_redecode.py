@@ -158,8 +158,21 @@ class _StrongReceiver:
         self.reserved += len(region.packets)
         self.reserved_bits += region.wire_bits
 
-    def receive_region(self, region):
+    def receive_region(self, region, on_stored):
         self.landed.append(region)
+        on_stored()
+
+
+class _FormingStrongReceiver(_StrongReceiver):
+    """A receiving end that forms the rounds, storing them after landing."""
+
+    def __init__(self) -> None:
+        _StrongReceiver.__init__(self)
+        self.stored_callbacks = []
+
+    def receive_region(self, region, on_stored):
+        self.landed.append(region)
+        self.stored_callbacks.append(on_stored)
 
 
 class _StrongOutput:
@@ -190,7 +203,7 @@ class _DecodeQueue:
         self.calls.append(("accept", window_key, request_key))
 
 
-def _redecode(shape):
+def _redecode(shape, receiver_row=_StrongReceiver):
     engine = engine_module.Engine()
     decoder_output = _DecoderOutput()
     strong_output = _StrongOutput()
@@ -201,7 +214,7 @@ def _redecode(shape):
     redecode.pending = pending_module.PendingStrongWindows()
     redecode.retention = _Retention()
     redecode.decoder_output = decoder_output
-    redecode.strong_receiver = _StrongReceiver()
+    redecode.strong_receiver = receiver_row()
     redecode.strong_output = strong_output
     redecode.decode_queue = queue
     redecode.verdict = verdict
@@ -363,6 +376,36 @@ def test_a_held_windows_missing_rounds_are_carried_up_once_and_land():
     assert redecode.carried_round_keys == set()
     assert _call_names(queue) == ["await", "enqueue"]
     assert not redecode.has_pending()
+
+
+def test_a_region_still_forming_at_its_landing_is_not_carried_again():
+    """A wake-up between the landing and the store sends nothing more.
+
+    A strong seat that forms the rounds stores them only once it has
+    formed them, so until then they still count as carried.
+    """
+    strong_job = _strong_job(5)
+    shape = _Shape(
+        strong_job, is_held=True, waits_on=(), missing_rounds=REGION_ROUND_KEYS
+    )
+    redecode, output, _strong, _queue, _done = _redecode(
+        shape, _FormingStrongReceiver
+    )
+    receiver = redecode.strong_receiver
+    weak_job = _weak_job()
+
+    redecode.escalate(weak_job)
+    redecode.submit_if_stored_data_releases(1)
+    _region, landed = output.regions[0]
+    landed()
+    redecode.submit_if_stored_data_releases(1)
+    carried_while_forming = set(redecode.carried_round_keys)
+    (stored,) = receiver.stored_callbacks
+    stored()
+
+    assert len(output.regions) == 1
+    assert carried_while_forming == set(REGION_ROUND_KEYS)
+    assert redecode.carried_round_keys == set()
 
 
 def test_a_row_that_holds_its_job_and_names_nothing_is_refused():

@@ -5,7 +5,7 @@ The controller chooses the final round; model lookahead never executes it.
 """
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any, Optional
 
 import stim
@@ -139,12 +139,12 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         del source_round_count
         raise ValueError("live Stim memory folds readout into its final round")
 
-    def form_round(
-        self, operation_id: Any, round_index: int, raw_bits: Sequence[int]
-    ) -> tuple[int, ...]:
-        """Form arrived records using retained measurements across rounds."""
+    def formation_table(self, operation_id: Any) -> formation.FormationTable:
+        """The recipes of the stream's rounds executed so far."""
         stream = self._stream_for(operation_id)
-        return stream.history.form_round(round_index, raw_bits)
+        table = stream.history.table
+        assert table is not None, "formation follows physical execution"
+        return table
 
     def logical_observable_truth(
         self, operation_id: Any
@@ -351,8 +351,9 @@ class _Stream:
 class _History:
     """The physical instructions and measurements executed so far.
 
-    The former holds the formation table of the circuit so far and forms
-    arrived rounds against it; every appended fragment extends it.
+    The formation table covers the circuit so far; every appended
+    fragment extends it, and each seat that forms the stream's rounds
+    takes the longer table in turn.
     """
 
     def __init__(self, seed: Optional[int]) -> None:
@@ -361,7 +362,7 @@ class _History:
         self.measurement_rounds: dict[int, int] = {}
         self.round_count = 0
         self.is_final = False
-        self.former: Optional[formation.StreamingDetectorFormer] = None
+        self.table: Optional[formation.FormationTable] = None
 
     def append(self, fragment: stim.Circuit, is_final: bool) -> tuple[int, ...]:
         first_measurement = self.circuit.num_measurements
@@ -377,26 +378,15 @@ class _History:
             self.round_count,
             measurement_rounds=self.measurement_rounds,
         )
-        if self.former is None:
-            self.former = formation.StreamingDetectorFormer(table)
-        else:
-            self.former.extend_table(table)
+        self.table = table
         measurements = self.simulator.current_measurement_record()
         new_measurements = measurements[first_measurement:]
         return tuple(int(bit) for bit in new_measurements)
 
-    def form_round(
-        self, round_index: int, raw_bits: Sequence[int]
-    ) -> tuple[int, ...]:
-        """One arrived round's detection events against the table so far."""
-        assert self.former is not None, "formation follows physical execution"
-        events, _ = self.former.feed_packet(round_index, raw_bits)
-        return tuple(value for _, value in events)
-
     def formed_shot(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
-        if self.former is None:
+        table = self.table
+        if table is None:
             return (), ()
-        table = self.former.table
         measurements = self.simulator.current_measurement_record()
         packets = formation.split_measurements_into_packets(table, measurements)
         return formation.form_shot(table, packets)

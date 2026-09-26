@@ -191,16 +191,16 @@ def test_the_qpu_port_declares_what_the_controller_calls():
     assert _undeclared(called, ("Qpu",)) == {}
 
 
-def test_the_placement_port_declares_what_the_assembler_calls():
-    """The assembler holds the run's detection event row only as this port."""
-    called = _called_on(("detection_events",), ("controller",))
+def test_the_placement_port_declares_what_every_seat_calls():
+    """Each seat holds the run's former only as this port."""
+    callers = ("controller", "syndrome_buffer", "decoders")
+    called = _called_on(("detection_events", "placement"), callers)
     assert _undeclared(called, ("DetectionEventPlacement",)) == {}
 
 
-def test_the_former_port_declares_what_every_row_that_forms_calls():
-    """Both placements and each tier's logic hold a former as this port."""
-    callers = ("detector_error_model", "decoders")
-    called = _called_on(("former",), callers)
+def test_the_former_port_declares_what_every_seat_history_calls():
+    """A seat's history reads the source's recipes only as this port."""
+    called = _called_on(("recipes",), ("detector_error_model",))
     assert _undeclared(called, ("DetectionEventFormer",)) == {}
 
 

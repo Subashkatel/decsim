@@ -96,6 +96,7 @@ An arrow nobody makes fails the suite.
 | Decoder manager | `decoders/` | decode jobs | one result per request, once its input landed and its unit computed |
 | Decoder unit | `decoders/` | one input per slot | the correction its backend found, priced at the unit's clock |
 | Escalation | `escalation/` | a weak result and its confidence | the verdict: keep it, or re-decode the region on the strong tier |
+| Burst detector | `burst_detectors/` | each round's detection events, as they are formed | a flag, which sends the windows it meets to the strong tier |
 | Boundary courier | `windows/` | a committed correction | the neighbouring window, with that correction folded into its input |
 | Pauli frame | `pauli_frame/` | one correction per window | the folded frame per stream, and the release of whatever waited |
 | Conditional release | `controller/` | an operation whose result is final | the decision, which the frame's end sends and the controller relays as the instruction to the QPU |

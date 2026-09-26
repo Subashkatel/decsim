@@ -20,6 +20,7 @@ import fractions
 import math
 from typing import Optional, Union
 
+import decsim.config as config
 import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 
@@ -73,18 +74,47 @@ class PayloadSettings:
 
 
 @dataclasses.dataclass(frozen=True)
+class FramingSettings:
+    """How a packet channel cuts a message: a FRAMINGS row and its keys.
+
+    row_settings is the row's own Settings record, None for a row with
+    no keys (decsim/links/framings.py).
+    """
+
+    kind: str = "whole"
+    row_settings: Optional[object] = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ProtocolSettings:
+    """What a channel's frames follow: a PROTOCOLS row and its keys.
+
+    ideal is the whole transfer on an unbounded buffer with nothing
+    lost; credit and reliable are packet rows (decsim/links/fabric.py
+    PROTOCOLS). row_settings is the row's own Settings record, None for
+    ideal; its cycles count on clock, the card's clock domain.
+    """
+
+    kind: str = "ideal"
+    row_settings: Optional[object] = None
+    clock: Optional[config.Clock] = None
+
+
+@dataclasses.dataclass(frozen=True)
 class ChannelSettings:
     """One physical channel: its name, a propagation latency, a bandwidth.
 
     No capacity means an unbounded wire that charges its latency only.
     Two paths whose channels carry the same name share one channel, so
-    the name is the identity a fabric wires by.
+    the name is the identity a fabric wires by. A packet protocol cuts
+    every message into frames of known size, so it needs a bounded wire.
     """
 
     name: str
     propagation_latency_ticks: int
     capacity: Optional[CapacitySettings]
     configuration_source: str
+    protocol: ProtocolSettings = ProtocolSettings()
 
     def __post_init__(self) -> None:
         propagation_latency_ticks = _as_whole_number(
@@ -95,6 +125,13 @@ class ChannelSettings:
         )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
+        is_packet_protocol = self.protocol.kind != "ideal"
+        if is_packet_protocol and self.capacity is None:
+            raise ValueError(
+                f"channel {self.name!r} runs the {self.protocol.kind} "
+                f"protocol, which cuts every message into frames of known "
+                f"size; give it a bounded wire (bits_per_cycle)"
+            )
 
 
 @dataclasses.dataclass(frozen=True)

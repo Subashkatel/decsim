@@ -16,9 +16,18 @@ and times the whole packet, and the receiver has it txTime plus the
 channel delay later). A fractional tick of serialization rounds up,
 because a transfer never ends before its exact time. An unbounded
 channel serializes nothing and never queues.
+
+This is the protocol row `ideal`: one whole frame, an unbounded receive
+buffer and nothing lost, the lossless reference gem5's SimpleNetwork
+gives with its default infinite buffers (src/mem/ruby/network/simple/
+SimpleNetwork.py:53-57) and ns-3's device with no error model
+(point-to-point-net-device.cc:55-59). The packet rows keep the setup
+engine and replace the wire (decsim/links/credit_channel.py,
+decsim/links/reliable_channel.py).
 """
 
 import collections
+import copy
 import dataclasses
 import fractions
 import math
@@ -28,6 +37,7 @@ import decsim.config as config
 import decsim.engine
 import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
+import decsim.trace_source as trace_source
 
 OnDelivered = Callable[[transfer_records.Transfer], None]
 
@@ -45,20 +55,60 @@ class FramedPayload:
     header_bits: int = 0
 
 
+@dataclasses.dataclass(frozen=True)
+class FrameTiming:
+    """One frame's trip across a wire.
+
+    The frame could go at queue_ticks (its message ready and the wire
+    free), waited credit_wait_ticks for a receive-buffer credit, held
+    the wire from start_ticks to end_ticks, and landed at the receiver
+    at landed_ticks. bits is None for a payload of unknown size on an
+    unbounded wire.
+    """
+
+    bits: Optional[int]
+    queue_ticks: int
+    credit_wait_ticks: int
+    start_ticks: int
+    end_ticks: int
+    landed_ticks: int
+
+
+@dataclasses.dataclass(frozen=True)
+class FrameRecord:
+    """One frame on one channel, reported when its message is delivered.
+
+    transfer_sequence is the channel's count of the message the frame
+    belongs to and frame_index its place in the message. A reliable
+    channel also reports each lost frame and each retransmission.
+    """
+
+    channel: str
+    transfer_sequence: int
+    frame_index: int
+    timing: FrameTiming
+    is_lost: bool = False
+    is_retransmission: bool = False
+
+
 class Channel:
-    """One channel at run time: its settings, its setup engine, its wire."""
+    """One channel at run time: a setup engine, then a wire moving each whole.
+
+    Trace source: frame_landed(record), one FrameRecord per frame when
+    its message is delivered.
+    """
 
     def __init__(
         self,
         channel_settings: link_settings.ChannelSettings,
         engine: decsim.engine.Engine,
     ):
+        self.trace = _TraceSources()
         self._settings = channel_settings
         self._engine = engine
         self._in_setup: collections.deque = collections.deque()
-        self._wire_free_ticks = 0
+        self._wire = self._new_wire()
         self._last_request_ticks = 0
-        self._transfer_count = 0
 
     def send(
         self,
@@ -105,18 +155,24 @@ class Channel:
         serialization and the propagation. A transfer with a setup is
         ready after every transfer now in setup, so each of those takes
         the wire ahead of it. A scheduler's estimate, exact whenever no
-        later request overtakes it on the wire.
+        later request overtakes it on the wire and nothing is lost.
         """
         ready_ticks = self._ready_ticks(now_ticks, setup_ticks)
-        wire_free_ticks = self._wire_free_ticks
+        wire = self._wire_as_it_stands()
         if setup_ticks > 0:
-            wire_free_ticks = self._wire_free_after_setups()
-        start_ticks, serialization_ticks = self._wire_interval(
-            ready_ticks, framed, wire_free_ticks
-        )
-        end_ticks = start_ticks + serialization_ticks
-        delivery_ticks = end_ticks + self._settings.propagation_latency_ticks
-        return delivery_ticks - now_ticks
+            for waiting in self._in_setup:
+                wire.cross(waiting.framed, waiting.ready_ticks)
+        timings = wire.cross(framed, ready_ticks)
+        last_frame = timings[-1]
+        return last_frame.landed_ticks - now_ticks
+
+    def _new_wire(self) -> "IdealWire":
+        """The wire this row serializes on."""
+        return IdealWire(self._settings)
+
+    def _wire_as_it_stands(self):
+        """A copy of the wire to price a transfer on without moving it."""
+        return self._wire.copy()
 
     def _ready_ticks(self, now_ticks: int, setup_ticks: int) -> int:
         """When the transfer reaches the wire's queue: after its setup."""
@@ -128,28 +184,6 @@ class Channel:
             setup_start_ticks = max(now_ticks, last_in_setup.ready_ticks)
         return setup_start_ticks + setup_ticks
 
-    def _wire_free_after_setups(self) -> int:
-        """When the wire frees once every transfer now in setup crossed it."""
-        wire_free_ticks = self._wire_free_ticks
-        for waiting in self._in_setup:
-            start_ticks, serialization_ticks = self._wire_interval(
-                waiting.ready_ticks, waiting.framed, wire_free_ticks
-            )
-            wire_free_ticks = start_ticks + serialization_ticks
-        return wire_free_ticks
-
-    def _wire_interval(
-        self, ready_ticks: int, framed: FramedPayload, wire_free_ticks: int
-    ) -> tuple[int, int]:
-        """The wire's slot for the transfer: its start and its length."""
-        capacity = self._settings.capacity
-        if capacity is None:
-            return ready_ticks, 0
-        start_ticks = max(ready_ticks, wire_free_ticks)
-        wire_bits = framed.payload_bits + framed.header_bits
-        serialization_ticks = _serialization_ticks(wire_bits, capacity)
-        return start_ticks, serialization_ticks
-
     def _finish_setup(self, request: "_Request") -> None:
         """At the setup's end: the engine frees and the wire takes it."""
         finished = self._in_setup.popleft()
@@ -157,56 +191,126 @@ class Channel:
         self._take_wire(request)
 
     def _take_wire(self, request: "_Request") -> None:
-        """At the ready tick: take the wire's next slot, schedule delivery."""
-        start_ticks, serialization_ticks = self._wire_interval(
-            request.ready_ticks, request.framed, self._wire_free_ticks
-        )
-        end_ticks = start_ticks + serialization_ticks
-        if self._settings.capacity is not None:
-            self._wire_free_ticks = end_ticks
-        propagation_ticks = self._settings.propagation_latency_ticks
-        delivery_ticks = end_ticks + propagation_ticks
-        setup_span_ticks = request.ready_ticks - request.request_ticks
-        setup_wait_ticks = setup_span_ticks - request.setup_ticks
-        queue_wait_ticks = start_ticks - request.ready_ticks
-        total_delay_ticks = delivery_ticks - request.request_ticks
-        transfer = transfer_records.Transfer(
-            payload_bits=request.framed.payload_bits,
-            header_bits=request.framed.header_bits,
-            request_ticks=request.request_ticks,
-            setup_wait_ticks=setup_wait_ticks,
-            setup_ticks=request.setup_ticks,
-            send_ticks=request.ready_ticks,
-            queue_wait_ticks=queue_wait_ticks,
-            serialization_ticks=serialization_ticks,
-            propagation_ticks=propagation_ticks,
-            serializer_start_ticks=start_ticks,
-            serializer_end_ticks=end_ticks,
-            delivery_ticks=delivery_ticks,
-            total_delay_ticks=total_delay_ticks,
-            physical_sequence=self._transfer_count,
-        )
-        self._transfer_count += 1
-        delivery_delay_ticks = delivery_ticks - self._engine.now
+        """At the ready tick: cross the wire, schedule the delivery."""
+        transfer_sequence = self._wire.crossing_count
+        timings = self._wire.cross(request.framed, request.ready_ticks)
+        transfer = transfer_for(request, timings, transfer_sequence)
+        delivery_delay_ticks = transfer.delivery_ticks - self._engine.now
         self._engine.schedule(
             delivery_delay_ticks,
-            lambda: request.on_delivered(transfer),
+            lambda: self._deliver(request, transfer, timings),
             label="link delivery",
         )
 
+    def _deliver(
+        self,
+        request: "_Request",
+        transfer: transfer_records.Transfer,
+        timings: tuple,
+    ) -> None:
+        """At the delivery: the frames are reported, then the caller hears."""
+        if self.trace.frame_landed.has_listeners:
+            records = frame_records(
+                self._settings.name, transfer.physical_sequence, timings
+            )
+            for record in records:
+                self.trace.frame_landed.fire(record)
+        request.on_delivered(transfer)
 
-@dataclasses.dataclass(frozen=True)
-class _Request:
-    """One send waiting for its setup, then for the wire."""
 
-    framed: FramedPayload
-    request_ticks: int
-    setup_ticks: int
-    ready_ticks: int
-    on_delivered: OnDelivered
+class IdealWire:
+    """One wire that serializes each transfer whole, as one frame.
+
+    An unbounded wire serializes nothing and keeps no queue.
+    """
+
+    def __init__(self, channel_settings: link_settings.ChannelSettings):
+        self._capacity = channel_settings.capacity
+        self._propagation_ticks = channel_settings.propagation_latency_ticks
+        self._free_ticks = 0
+        self.crossing_count = 0
+
+    def copy(self) -> "IdealWire":
+        """The same wire in the same state, to price on."""
+        return copy.copy(self)
+
+    def cross(
+        self, framed: FramedPayload, ready_ticks: int
+    ) -> tuple[FrameTiming, ...]:
+        """Take the wire's next slot for the whole transfer."""
+        self.crossing_count += 1
+        if self._capacity is None:
+            landed_ticks = ready_ticks + self._propagation_ticks
+            timing = FrameTiming(
+                None, ready_ticks, 0, ready_ticks, ready_ticks, landed_ticks
+            )
+            return (timing,)
+        start_ticks = max(ready_ticks, self._free_ticks)
+        wire_bits = framed.payload_bits + framed.header_bits
+        serialization = serialization_ticks(wire_bits, self._capacity)
+        end_ticks = start_ticks + serialization
+        self._free_ticks = end_ticks
+        landed_ticks = end_ticks + self._propagation_ticks
+        timing = FrameTiming(
+            wire_bits, start_ticks, 0, start_ticks, end_ticks, landed_ticks
+        )
+        return (timing,)
 
 
-def _serialization_ticks(
+def transfer_for(
+    request: "_Request", timings: tuple, transfer_sequence: int
+) -> transfer_records.Transfer:
+    """The transfer's record: its frames' span on the wire, as one move.
+
+    The wire held the transfer from its first frame's start to its last
+    frame's end; serialization_ticks is the time its frames held the
+    wire, and queue_wait_ticks everything else from the ready tick to
+    the last frame's end (the wire's queue, credit waits, recovery from
+    a loss), so the total is still the sum of the transfer's parts.
+    """
+    first_frame = timings[0]
+    last_frame = timings[-1]
+    serialization = 0
+    for timing in timings:
+        serialization += timing.end_ticks - timing.start_ticks
+    wire_span_ticks = last_frame.end_ticks - request.ready_ticks
+    queue_wait_ticks = wire_span_ticks - serialization
+    propagation_ticks = last_frame.landed_ticks - last_frame.end_ticks
+    setup_span_ticks = request.ready_ticks - request.request_ticks
+    setup_wait_ticks = setup_span_ticks - request.setup_ticks
+    total_delay_ticks = last_frame.landed_ticks - request.request_ticks
+    return transfer_records.Transfer(
+        payload_bits=request.framed.payload_bits,
+        header_bits=request.framed.header_bits,
+        request_ticks=request.request_ticks,
+        setup_wait_ticks=setup_wait_ticks,
+        setup_ticks=request.setup_ticks,
+        send_ticks=request.ready_ticks,
+        queue_wait_ticks=queue_wait_ticks,
+        serialization_ticks=serialization,
+        propagation_ticks=propagation_ticks,
+        serializer_start_ticks=first_frame.start_ticks,
+        serializer_end_ticks=last_frame.end_ticks,
+        delivery_ticks=last_frame.landed_ticks,
+        total_delay_ticks=total_delay_ticks,
+        physical_sequence=transfer_sequence,
+    )
+
+
+def frame_records(
+    channel_name: str, transfer_sequence: int, timings: tuple
+) -> tuple[FrameRecord, ...]:
+    """One record per frame of one transfer, in sending order."""
+    records = []
+    for frame_index, timing in enumerate(timings):
+        record = FrameRecord(
+            channel_name, transfer_sequence, frame_index, timing
+        )
+        records.append(record)
+    return tuple(records)
+
+
+def serialization_ticks(
     wire_bits: int, capacity: link_settings.CapacitySettings
 ) -> int:
     """Whole ticks to put the bits on the wire at the channel's rate.
@@ -220,3 +324,21 @@ def _serialization_ticks(
     bits_times_ticks = bits * config.TICKS_PER_MICROSECOND
     exact_ticks = bits_times_ticks / rate
     return math.ceil(exact_ticks)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Request:
+    """One send waiting for its setup, then for the wire."""
+
+    framed: FramedPayload
+    request_ticks: int
+    setup_ticks: int
+    ready_ticks: int
+    on_delivered: OnDelivered
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event a channel reports, as one member."""
+
+    frame_landed: trace_source.TraceSource = trace_source.new_source()

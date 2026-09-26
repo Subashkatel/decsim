@@ -11,19 +11,27 @@ its wire and its setup engine. The shape is gem5's: a SimObject owns its
 parameters and its children and is reached through its ports
 (src/sim/sim_object.hh, src/mem/port.hh); the trace source is ns-3's
 TracedCallback fired at the device's transition
-(point-to-point-net-device.cc TransmitComplete). The channels are the
-class the row's build names (the Channel port in decsim/ports.py), one
-per channel name.
+(point-to-point-net-device.cc TransmitComplete). The channels are what
+the row's build names (the Channel port in decsim/ports.py), one per
+channel name; the shipped rows build the PROTOCOLS row each card's
+protocol names. The fabric is the seed composite of its channels, so a
+channel that draws (the reliable row's losses) is seeded under its name.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from typing import Callable, Optional
 
+import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
+import decsim.links.credit_channel as credit_channel
+import decsim.links.reliable_channel as reliable_channel
 import decsim.links.settings as link_settings
 import decsim.ports as ports
+import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
+import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 # What a Link row's build hands the fabric: called once per channel name
@@ -32,13 +40,54 @@ ChannelClass = Callable[
     [link_settings.ChannelSettings, decsim.engine.Engine], ports.Channel
 ]
 
+# links.<path>.protocol.kind names one of these rows: how the path's
+# channel moves a message. ideal is the whole transfer on an unbounded
+# buffer with nothing lost; credit cuts it into frames that wait for
+# receive-buffer credits; reliable adds loss and go-back-N recovery.
+PROTOCOLS = {
+    "ideal": channel_module.Channel,
+    "credit": credit_channel.CreditChannel,
+    "reliable": reliable_channel.ReliableChannel,
+}
+
+
+def protocol_channel(
+    channel_settings: link_settings.ChannelSettings,
+    engine: decsim.engine.Engine,
+) -> ports.Channel:
+    """The channel of the PROTOCOLS row the channel's settings name."""
+    row = PROTOCOLS[channel_settings.protocol.kind]
+    return row(channel_settings, engine)
+
+
+def protocol_settings_from_yaml(
+    section, clock: config.Clock, path_name: str
+) -> link_settings.ProtocolSettings:
+    """A card's protocol mapping: a kind, and the keys its row declares."""
+    section_name = f"links.{path_name}.protocol"
+    if not isinstance(section, Mapping):
+        raise ValueError(
+            f"{section_name} holds {section!r}; it is a mapping with a kind, "
+            f"one of {sorted(PROTOCOLS)}"
+        )
+    kind = section.get("kind", "ideal")
+    row = tables.row(PROTOCOLS, f"links.{path_name}.protocol.kind", kind)
+    row_settings = tables.row_settings(
+        row, section_name, section, ("kind",), path_name
+    )
+    return link_settings.ProtocolSettings(
+        kind=kind, row_settings=row_settings, clock=clock
+    )
+
 
 class LinkFabric:
     """One run's fabric: the wired paths on their channels.
 
-    Trace source: transfer_delivered(record), one TransferRecord per
+    Trace sources: transfer_delivered(record), one TransferRecord per
     delivered transfer, carrying the path, the attribution and the
-    Transfer with its send, serializer and delivery ticks.
+    Transfer with its send, serializer and delivery ticks; and
+    frame_landed(record), one FrameRecord per frame a channel moves,
+    the transfer's inside.
     """
 
     def __init__(
@@ -47,7 +96,6 @@ class LinkFabric:
         engine: decsim.engine.Engine,
         channel_class: ChannelClass,
     ) -> None:
-        self.trace = _TraceSources()
         self._channel_by_name: dict[str, ports.Channel] = {}
         self._binding_by_path: dict[
             transfer_records.LinkPath, _PathBinding
@@ -66,6 +114,10 @@ class LinkFabric:
             )
             binding = _PathBinding(route.settings, channel)
             self._readout_by_footprint[route.patch_ids] = binding
+        built_channels = self._channel_by_name.values()
+        channels = tuple(built_channels)
+        frame_landed = _EveryChannelsFrames(channels)
+        self.trace = _TraceSources(frame_landed=frame_landed)
 
     def expected_delay_ticks(
         self,
@@ -127,6 +179,15 @@ class LinkFabric:
             binding.settings.setup_ticks,
             lambda transfer: self._finish(outgoing, transfer),
         )
+
+    def run_seed_children(self) -> tuple:
+        """Every channel, under its name; only a channel that draws binds."""
+        children = []
+        for name, channel in self._channel_by_name.items():
+            segment = seed_records.RunSeedPathSegment("string_key", name)
+            child = seed_records.RunSeedChild((segment,), channel)
+            children.append(child)
+        return tuple(children)
 
     def _binding_for(
         self,
@@ -246,4 +307,29 @@ class _TraceSources:
     listener reaches all of them through one name.
     """
 
+    frame_landed: "_EveryChannelsFrames"
     transfer_delivered: trace_source.TraceSource = trace_source.new_source()
+
+
+class _EveryChannelsFrames:
+    """The frame_landed sources of every channel, heard as one.
+
+    A listener is connected to each channel's own source, so a channel
+    with no listener builds no frame record.
+    """
+
+    def __init__(self, channels: tuple) -> None:
+        self._channels = channels
+
+    def connect(self, listener: Callable) -> None:
+        """Hear every frame of every channel from now on."""
+        for channel in self._channels:
+            channel.trace.frame_landed.connect(listener)
+
+    @property
+    def has_listeners(self) -> bool:
+        """Whether any channel's frames are heard."""
+        for channel in self._channels:
+            if channel.trace.frame_landed.has_listeners:
+                return True
+        return False

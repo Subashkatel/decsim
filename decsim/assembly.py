@@ -323,6 +323,7 @@ SEED_ROOTS = (
     ("controller", "controller"),
     ("execution_runtime", "execution_runtime"),
     ("pauli_frame", "pauli_frame"),
+    ("links", "links"),
 )
 
 

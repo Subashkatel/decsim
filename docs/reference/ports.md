@@ -531,10 +531,22 @@ The link fabric, as a sender that names a window or a job sees it.
 
 One physical channel under the fabric: its setup engine and its wire.
 
+| Member | Type |
+| --- | --- |
+| `trace` | `Any` |
+
 | Method | What it does |
 | --- | --- |
 | `send` | Carry one framed payload; on_delivered runs at its delivery. |
 | `expected_delay_ticks` | What the transfer would pay if nothing else reached the channel. |
+
+### `Framing`
+
+How a packet channel cuts one message into its wire's frames.
+
+| Method | What it does |
+| --- | --- |
+| `frames` | The wire bits of each frame, in sending order; at least one. |
 
 ## the pluggable policies off the path
 

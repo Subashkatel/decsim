@@ -49,11 +49,16 @@ which is what the decoders' own tests run.
 The eleven priced hops are the line where a call stops being local
 (Waldo 1994, waldo1994.txt 302-304 and 852-855): a call across a hop
 has a card, a payload a record names, and a send at one end; a call
-inside a unit is never priced. Across that line decsim models latency
-and memory access and no partial failure at all: no hop drops,
-duplicates or reorders what it carries, and nothing retries. That is a
-stated scope, not an omission, and a retry added to a hop as a tuning
-knob would be a modeling change, not a parameter.
+inside a unit is never priced. Across that line decsim models latency,
+memory access, and partial failure only where a card's protocol names
+it. The ideal row, every card's default, drops, duplicates and reorders
+nothing and never retries. The credit row cuts a message into frames
+that wait for a finite receive buffer's credits and loses nothing. The
+reliable row loses frames at the card's bit error rate and resends them
+by go-back-N until each message is delivered once and in order, so a
+component above a hop never sees a loss, a duplicate or a reordering
+on any row (decsim/links/fabric.py PROTOCOLS); when its retry count
+runs out, the link has failed and the run stops with an error.
 """
 
 import dataclasses

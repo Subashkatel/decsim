@@ -350,7 +350,7 @@ def test_a_round_hop_carries_the_width_its_sender_let_go_of(shape, distance):
     """The readout hop prices the outcomes, the store hops the layer.
 
     These cards form the detection events at the controller
-    (controller.detection_events_formed_at), so the round narrows at the
+    (detection_events.formed_at), so the round narrows at the
     assembler: what leaves the QPU is the measurement outcomes, and what
     leaves the controller for either store is the layer the store then
     holds.

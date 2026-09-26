@@ -61,6 +61,7 @@ class Event:
     sequence_number: int
     action: Action = dataclasses.field(compare=False)
     label: str = dataclasses.field(compare=False, default="")
+    is_descheduled: bool = dataclasses.field(compare=False, default=False)
 
 
 class Engine:
@@ -80,8 +81,8 @@ class Engine:
         action: Action,
         label: str = "",
         priority: Priority = Priority.DEFAULT,
-    ) -> None:
-        """Queue an action to run `delay` ticks from now."""
+    ) -> Event:
+        """Queue an action to run `delay` ticks from now; the event returns."""
         if delay < 0:
             raise ValueError(
                 f"cannot schedule an action in the past: delay {delay} "
@@ -91,6 +92,16 @@ class Engine:
         sequence_number = next(self._sequence_numbers)
         event = Event(due_time, priority, sequence_number, action, label)
         heapq.heappush(self._event_queue, event)
+        return event
+
+    def deschedule(self, event: Event) -> None:
+        """Take a queued action back: it never runs and never sets the time.
+
+        gem5's EventQueue::deschedule (src/sim/eventq.hh:790), for a timer
+        stopped before it fires, so a run does not end at a timer that
+        had nothing left to do.
+        """
+        event.is_descheduled = True
 
     @property
     def idle(self) -> bool:
@@ -121,6 +132,8 @@ class Engine:
         """Run every scheduled action until the queue is empty."""
         while self._event_queue:
             event = heapq.heappop(self._event_queue)
+            if event.is_descheduled:
+                continue
             self.now = event.time
             event.action()
             self.action_done.fire(self.now)

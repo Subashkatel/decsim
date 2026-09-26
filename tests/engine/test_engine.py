@@ -213,3 +213,19 @@ def literal_keywords(call, path):
         if isinstance(keyword.value, ast.Constant):
             return [f"{path}:{call.lineno}"]
     return []
+
+
+def test_a_descheduled_action_never_runs_and_never_sets_the_time():
+    """gem5 EventQueue::deschedule (src/sim/eventq.hh:790)."""
+    engine = Engine()
+    ran = []
+    first = record_arrival(ran, 0)
+    second = record_arrival(ran, 1)
+    engine.schedule(5, first)
+    stopped = engine.schedule(50, second)
+    engine.deschedule(stopped)
+
+    engine.run()
+
+    assert ran == [0]
+    assert engine.now == 5

@@ -98,8 +98,11 @@ docstring.
 
 - `decsim/links/__init__.py`: The links: the classical channels of the reaction path and their fabric.
 - `decsim/links/channel.py`: One physical channel: a setup engine and a wire, driven by events.
+- `decsim/links/credit_channel.py`: A channel whose frames need a credit from a finite receive buffer.
 - `decsim/links/fabric.py`: The link fabric: every hop of the reaction path wired to its channel.
+- `decsim/links/framings.py`: How a link cuts one message into the frames its wire carries.
 - `decsim/links/link_profiles.py`: The link number cards: the four shipped rows and the yaml's own.
+- `decsim/links/reliable_channel.py`: A credit channel that loses frames and recovers them by go-back-N.
 - `decsim/links/settings.py`: What the yaml and the number cards build for the links: settings only.
 - `decsim/links/window_transfers.py`: The window transfers: sends in a window's name over the links.
 

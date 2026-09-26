@@ -209,7 +209,12 @@ class Transfer:
     propagation later. total_delay_ticks counts from the request and is
     the sum of the two setup spans, the queue wait, the serialization
     and the propagation. header_bits is the path's framing, which the
-    wire serialized with the payload and which is no part of it.
+    wire serialized with the payload and which is no part of it. On a
+    packet protocol the transfer is its frames: serializer_start_ticks
+    is the first frame's start and serializer_end_ticks the last
+    frame's end, serialization_ticks the time its frames held the wire,
+    lost and resent ones included, and queue_wait_ticks the rest of
+    that span, the credit waits and the recovery with the queue.
     """
 
     payload_bits: Optional[int]

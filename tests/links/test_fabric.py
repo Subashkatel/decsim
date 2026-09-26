@@ -568,6 +568,7 @@ class _CountingChannel:
         self.name = channel_settings.name
         self.carried_bits = []
         self.inner = channel_module.Channel(channel_settings, engine)
+        self.trace = self.inner.trace
 
     def send(self, framed, now_ticks, setup_ticks, on_delivered):
         self.carried_bits.append(framed.payload_bits)

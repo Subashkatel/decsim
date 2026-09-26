@@ -29,7 +29,6 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.engine
-import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric
 import decsim.links.settings as settings
 import decsim.ports as ports
@@ -75,8 +74,8 @@ ESCALATION_PAYLOAD_SOURCE = "EscalatedRegion.wire_bits"
 
 # The two controller-to-store hops carry the packed round at the width
 # it leaves the controller: the detection events where the controller
-# forms them and the raw measurement outcomes where the decoder does
-# (controller.detection_events_formed_at,
+# forms them and the raw measurement outcomes where a later seat does
+# (detection_events.formed_at,
 # controller/round_assembly.py's wire_bits of the fragments that leave).
 ROUND_PAYLOAD_SOURCE = "PackedRound.wire_bits"
 
@@ -250,12 +249,13 @@ ROCE_V2_REPLY_LEG = (
 
 
 # The keys a path's card writes: the first three on every card, the rest
-# only when the path has lanes, a setup or a header to price.
+# only when the path has lanes, a setup, a header or a packet protocol.
 _REQUIRED_CARD_KEYS = ("latency_cycles", "clock", "bits_per_cycle")
 _CARD_KEYS = _REQUIRED_CARD_KEYS + (
     "channels",
     "setup_cycles_per_transfer",
     "header_bits_per_transfer",
+    "protocol",
 )
 
 
@@ -601,7 +601,7 @@ class LogicalReferenceFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, channel_module.Channel)
+        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
 
 
 class BandwidthLimitedFabric:
@@ -633,7 +633,7 @@ class BandwidthLimitedFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, channel_module.Channel)
+        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
 
 
 class RoceV2CpuFabric:
@@ -656,7 +656,7 @@ class RoceV2CpuFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, channel_module.Channel)
+        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
 
 
 class RoceV2GpuFabric:
@@ -681,7 +681,7 @@ class RoceV2GpuFabric:
         card: settings.FabricSettings, engine: decsim.engine.Engine
     ) -> ports.Link:
         """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, channel_module.Channel)
+        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
 
 
 # links.kind names one of these rows: which fabric model carries the
@@ -702,8 +702,10 @@ def from_yaml(
 
     A card prices its path in cycles of a named clock domain: latency,
     bits per cycle per lane (null is unbounded), the lane count, an
-    optional per-transfer setup cost, and an optional per-transfer
-    header in bits. A null card keeps the chosen row's
+    optional per-transfer setup cost, an optional per-transfer header
+    in bits, and an optional packet protocol (a PROTOCOLS row of
+    links/fabric.py, with its framing, buffer and recovery keys; none is
+    the ideal row). A null card keeps the chosen row's
     numbers for that path. The config prices readout classification on
     its own line, so its qpu_to_controller card is link propagation only,
     and the fabric says so.
@@ -959,8 +961,9 @@ def _carded_path(
     capacity = None
     if bits_per_microsecond is not None:
         capacity = settings.CapacitySettings(bits_per_microsecond, source)
+    protocol = _card_protocol(path_name, card, clocks)
     channel = settings.ChannelSettings(
-        path_name, latency_ticks, capacity, source
+        path_name, latency_ticks, capacity, source, protocol
     )
     header_bits = card.get("header_bits_per_transfer", 0)
     return dataclasses.replace(
@@ -969,6 +972,17 @@ def _carded_path(
         setup_ticks=setup_ticks,
         header_bits=header_bits,
     )
+
+
+def _card_protocol(
+    path_name: str, card: Mapping, clocks: config.ClockSettings
+) -> settings.ProtocolSettings:
+    """The card's protocol, counted on its clock; ideal when it names none."""
+    section = card.get("protocol")
+    if section is None:
+        return settings.ProtocolSettings()
+    clock = clocks.clock(card["clock"])
+    return fabric.protocol_settings_from_yaml(section, clock, path_name)
 
 
 class _Provisioning:

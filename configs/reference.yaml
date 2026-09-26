@@ -640,6 +640,64 @@ links:                             # a kind, then one card per path; null = the
                                    #     of a reply, 192 bits (cudaqx
                                    #     decoder_rpc_wire_format.h lines 41-43
                                    #     and 62-69)
+                                   #   protocol: optional; how the path's
+                                   #     channel moves a message (PROTOCOLS,
+                                   #     links/fabric.py). Absent is kind
+                                   #     ideal: the whole transfer on an
+                                   #     unbounded receive buffer, nothing
+                                   #     lost, the law above. A packet
+                                   #     protocol needs a bounded wire:
+                                   #     kind: ideal | credit | reliable
+                                   #     framing: how a message is cut into
+                                   #       frames (FRAMINGS, links/framings.py):
+                                   #       {kind: whole} one frame;
+                                   #       {kind: flits, flit_bits: F} Garnet's
+                                   #       divCeil flits; {kind: aurora_64b66b}
+                                   #       n octets in n/8 + 1 66-bit blocks
+                                   #       (SP011); {kind: pcie_tlp,
+                                   #       max_payload_bytes: MPS} 24 bytes on
+                                   #       every TLP (pcie-bench); {kind:
+                                   #       roce_v2, path_mtu_bytes: M}, the
+                                   #       one framing of the reliable row, and
+                                   #       {kind: ethernet_udp, mtu_bytes: M}
+                                   #       with their headers (Linux rxe,
+                                   #       pcie-bench eth.py). Line-coded rows
+                                   #       (flits, aurora) are priced at the
+                                   #       line rate, byte rows at the data
+                                   #       rate after the physical coding
+                                   #     receive_buffer_frames: frames the
+                                   #       receiver holds; a frame goes only
+                                   #       with a credit (Garnet OutVcState.cc
+                                   #       56-63); credit and reliable
+                                   #     credit_latency_cycles: from the
+                                   #       receiver taking a frame to its
+                                   #       credit at the sender; Aurora's
+                                   #       native flow control is this row
+                                   #       with its 256-block bound here
+                                   #     window_packets, ack_every_packets,
+                                   #       retransmit_timeout_cycles,
+                                   #       retry_count, bit_error_rate:
+                                   #       reliable only; the
+                                   #       go-back-N recovery of Linux rxe
+                                   #       (rxe_req.c, rxe_resp.c), whose
+                                   #       own constants are a window of 129
+                                   #       and an ACK every 66 packets. ACKs
+                                   #       and NAKs are RoCE frames on the
+                                   #       reverse direction, lost by the same
+                                   #       law. Each lost frame is resent
+                                   #       inside the link, so messages still
+                                   #       arrive once and in order. retry_count
+                                   #       (0 to 7) is rxe's retry_cnt: the
+                                   #       retries allowed without an ACK
+                                   #       between them, 7 never spent; a retry
+                                   #       with none left fails the run, naming
+                                   #       the channel and the frame. For example:
+                                   #   controller_to_weak_buffer: {latency_cycles: 1,
+                                   #     clock: fridge, bits_per_cycle: 8.0,
+                                   #     protocol: {kind: credit, framing:
+                                   #     {kind: flits, flit_bits: 8},
+                                   #     receive_buffer_frames: 4,
+                                   #     credit_latency_cycles: 1}}
   qpu_to_controller: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
                                    # QPU -> controller, one readout
   controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}

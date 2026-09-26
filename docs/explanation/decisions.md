@@ -931,6 +931,11 @@ list-of-readouts contract. The current aggregate source does not establish
 independent per-patch acquisition latency, variable-duration rounds, dynamic
 tableau merging or arbitrary conditional gates.
 
+**Narrowed since.** Once an operation starts on part of a group, the
+group's stream is released: the patches left idle hold no stream and
+idle for the policy instead of being refused (D32). A partial group
+that no operation has split is still refused.
+
 ## D27. Readout channels route canonical footprints and retire rounds in order
 
 **Problem.** One semantic readout path previously selected one physical channel.
@@ -1172,6 +1177,43 @@ which Backline's 4.5 differs from by 1.7 percent.
 
 The row decodes X and Z together only: its kernel lines were traced on
 whole regions.
+
+## D32. An idle patch continues its stream; a continuation binds as it starts
+
+**Decided.** A patch holding a live stream keeps its logical qubit in
+memory while it waits, so each idle cycle is the stream's next round,
+emitted on the stream (`extend_live_stream`), until the source has no
+rounds left. A segment that declares no stream offset takes the
+stream's next round when the QPU starts it, after its boundary's idle
+rounds (`bind_at_start`); a declared offset is bound at load and a
+protected feedback source at issue. One call, `_bind`, writes the
+offset to the bindings and to the result ledger, and the window plan
+cuts the stream before the segment's first round and after its last,
+so the result the ledger folds over the segment's rounds is a sum of
+whole windows. Continuing the stream is no longer an idle policy, so
+the `extend_stream` row is gone.
+
+**Why.** A waiting logical qubit keeps being measured and the sliding
+windows read those rounds (Terhal 1302.3428 lines 3176-3178; Skoric et
+al. 2209.08552 lines 196-199). An offset bound at issue ignored the
+idle rounds read out before the segment started, so the segment's
+rounds and the source's disagreed. The stream's correction is the sum
+over its committed windows (Skoric et al. 2209.08552), and a window
+clipped on a segment's edge is the closed-tail case (Tan et al.
+2209.09219 lines 1052-1056).
+
+**What it cost the port file.** `IdleRoundReceiver` gained
+`bind_at_start`, which the QPU calls as a segment with no offset
+starts. `OperationIssuer.after_successor_release` lost
+`waits_for_blocked`. The `IdlePolicy` table lost its `extend_stream`
+row.
+
+**Where to see it.** `decsim/controller/feedback_streams.py`
+(`extend_live_stream`, `bind_at_start`, `_bind`),
+`decsim/qpu/cycle_clock.py` (`_start_command`),
+`decsim/windows/window_manager.py` (`bind_stream_operation`),
+`decsim/windows/window_planner.py` (`cut_stream_after`);
+`tests/machine/test_live_stream_finalization.py`.
 
 ## What is not modelled yet
 

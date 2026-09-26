@@ -56,20 +56,10 @@ class TesseractDecoderConfig:
             "priority_queue_limit",
             "detector_order_count",
         )
-        for name in integer_fields:
-            value = getattr(self, name)
-            if type(value) is not int:
-                raise TypeError(f"{name} must be an exact built-in int")
-        if self.detector_beam < 0:
-            raise ValueError("detector_beam must be nonnegative")
-        if self.priority_queue_limit < 1:
-            raise ValueError("priority_queue_limit must be positive")
-        if self.detector_order_count < 1:
-            raise ValueError("detector_order_count must be positive")
-        for name in ("beam_climbing", "no_revisit_detectors"):
-            value = getattr(self, name)
-            if type(value) is not bool:
-                raise TypeError(f"{name} must be an exact built-in bool")
+        _check_exact_type(self, integer_fields, int)
+        _check_search_limits(self)
+        boolean_fields = ("beam_climbing", "no_revisit_detectors")
+        _check_exact_type(self, boolean_fields, bool)
         _check_detector_order_method(self.detector_order_method)
         _check_detector_order_seed(self.detector_order_seed)
 
@@ -187,6 +177,24 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
 
 class _BackendConstructionError(RuntimeError):
     """The optional backend rejected a locally validated configuration."""
+
+
+def _check_exact_type(configuration, names, exact_type) -> None:
+    """Each named field is exactly that built-in type, not a subclass."""
+    type_name = exact_type.__name__
+    for name in names:
+        value = getattr(configuration, name)
+        if type(value) is not exact_type:
+            raise TypeError(f"{name} must be an exact built-in {type_name}")
+
+
+def _check_search_limits(configuration) -> None:
+    if configuration.detector_beam < 0:
+        raise ValueError("detector_beam must be nonnegative")
+    if configuration.priority_queue_limit < 1:
+        raise ValueError("priority_queue_limit must be positive")
+    if configuration.detector_order_count < 1:
+        raise ValueError("detector_order_count must be positive")
 
 
 def _check_detector_order_method(method) -> None:

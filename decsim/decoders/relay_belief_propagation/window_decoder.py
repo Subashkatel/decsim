@@ -87,22 +87,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
             return backend_outcome.empty_fault_model_outcome(syndrome)
         if compiled.backend_construction_failed:
             return _backend_error_outcome()
-        try:
-            detailed = compiled.backend.decode_detailed(syndrome)
-            correction = _binary_vector(
-                detailed.decoding, expected_size=faults.check.shape[1]
-            )
-        except _WrongCorrectionArityError:
-            return _invalid_outcome(_Reason.CORRECTION_WRONG_ARITY)
-        except _NonbinaryCorrectionError:
-            return _invalid_outcome(_Reason.CORRECTION_NOT_BINARY)
-        except Exception:
-            return _backend_error_outcome()
-        try:
-            evidence = _detailed_evidence(detailed, faults)
-        except Exception:
-            return _backend_error_outcome()
-        return _outcome_of(faults, syndrome, correction, evidence)
+        return _decode_once(compiled.backend, faults, syndrome)
 
     def _entropy_seed(self):
         return secrets.randbits(64)
@@ -167,6 +152,26 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
             self._thread_state.process_id = process_id
             self._thread_state.compiled_models = {}
         return self._thread_state.compiled_models
+
+
+def _decode_once(backend, faults, syndrome):
+    """One decode_detailed call, its correction checked, its evidence read."""
+    try:
+        detailed = backend.decode_detailed(syndrome)
+        correction = _binary_vector(
+            detailed.decoding, expected_size=faults.check.shape[1]
+        )
+    except _WrongCorrectionArityError:
+        return _invalid_outcome(_Reason.CORRECTION_WRONG_ARITY)
+    except _NonbinaryCorrectionError:
+        return _invalid_outcome(_Reason.CORRECTION_NOT_BINARY)
+    except Exception:
+        return _backend_error_outcome()
+    try:
+        evidence = _detailed_evidence(detailed, faults)
+    except Exception:
+        return _backend_error_outcome()
+    return _outcome_of(faults, syndrome, correction, evidence)
 
 
 @dataclasses.dataclass(frozen=True)

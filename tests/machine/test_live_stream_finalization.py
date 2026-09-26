@@ -10,6 +10,7 @@ import numpy
 import pytest
 
 import decsim.config as config
+import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -46,6 +47,61 @@ def test_final_readout_uses_the_final_model_before_same_tick_decoding(
     assert owner_result.operation_id == 100
     assert owner_result.observable_truth == truth
     assert owner_result.logical_failure is not None
+
+
+@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@pytest.mark.parametrize("waiting_patch", [0, 1])
+def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
+    idle_policy: str, waiting_patch: int
+) -> None:
+    """The stream's last window is queued before the seal reaches it.
+
+    A measurement_closed boundary lets the prefix's window decode on its
+    own rounds, so the waiting operation starts at the same tick as when
+    the prefix is an ordinary finite operation.
+    """
+    stream_run = _closed_boundary_run(True, idle_policy, waiting_patch)
+    finite_run = _closed_boundary_run(False, idle_policy, waiting_patch)
+    assert stream_run == finite_run
+
+
+def _closed_boundary_run(
+    is_stream: bool, idle_policy: str, waiting_patch: int
+) -> tuple:
+    """When the prefix ends, the release lands and the run finishes."""
+    prefix = program_records.Operation(1, "prefix", (0,), patches=(0,))
+    streams = ()
+    counts = {1: 3, 2: 1}
+    if is_stream:
+        prefix = dataclasses.replace(prefix, stream_id=100, stream_offset=0)
+        stream = program_records.Operation(100, "memory", (0,), patches=(0,))
+        streams = (stream,)
+        counts[100] = 0
+    patches = (waiting_patch,)
+    waiting = program_records.Operation(
+        2, "waiting", patches, patches=patches, predecessors=(1,), blocked_by=1
+    )
+    policy = round_policies.PerOperationRounds(counts)
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, waiting),
+        dynamic_streams=streams,
+        rounds_policy=policy,
+        feedback_boundary_mode="measurement_closed",
+    )
+    clock = config.Clock(1000)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine_clock=clock)
+    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
+    settings = machine_settings.MachineSettings(
+        workload=workload, weak_decoder=decoder, idle_policy=idle
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    events = []
+    trace = machine.execution_runtime.trace
+    trace.body_finished.connect(lambda *event: events.append(event))
+    trace.decode_released.connect(lambda *event: events.append(event))
+    trace.operation_started.connect(lambda *event: events.append(event))
+    result = machine.run()
+    return tuple(events), result.fully_done_ticks
 
 
 def _machine(

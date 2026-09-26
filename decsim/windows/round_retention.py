@@ -135,12 +135,20 @@ class RoundRetention:
         self.release_hold_if_live(restart)
 
     def reset_clipped_window_reads(self, window: window_records.Window) -> None:
-        """After clipping a live tail, retain only its primary commit range."""
+        """After clipping a live tail, retain only its primary commit range.
+
+        A window already queued has handed its reads to its decode
+        request (decode_requests.py, _bind_input_hold), so it has none
+        left to shrink. A measurement_closed boundary queues the last
+        window before the seal reaches it.
+        """
+        reads = decoding_records.WindowReads(window.key)
+        if not self.primary_store.has_hold(reads):
+            return
         stop_round = window.commit_hi + 1
         new_reads = []
         for round_index in range(window.start_round, stop_round):
             new_reads.append((window.operation_id, round_index))
-        reads = decoding_records.WindowReads(window.key)
         self.primary_store.replace_hold(reads, new_reads)
 
     def read_keys_for_bounds(

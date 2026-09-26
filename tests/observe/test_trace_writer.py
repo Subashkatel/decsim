@@ -476,13 +476,23 @@ def _check_row(row) -> None:
         assert row["name"] in _METADATA_NAMES
         return
     assert isinstance(row["ts"], float)
+    _check_tick(row)
+    _check_phase_fields(row)
+
+
+def _check_tick(row) -> None:
+    """A counter keeps its tick in ts alone; every other event states it."""
     if row["ph"] == "C":
         # catapult makes one series per key of a counter's args, so a
         # counter carries its value and nothing else; ts holds the tick
         assert "tick" not in row["args"]
-    else:
-        assert isinstance(row["args"]["tick"], int)
-        assert row["args"]["tick"] / 1_000_000 == row["ts"]
+        return
+    assert isinstance(row["args"]["tick"], int)
+    assert row["args"]["tick"] / 1_000_000 == row["ts"]
+
+
+def _check_phase_fields(row) -> None:
+    """The fields a complete, instant or flow event adds."""
     if row["ph"] == "X":
         assert isinstance(row["dur"], float)
         assert row["dur"] >= 0

@@ -111,13 +111,7 @@ def _rounds_from_coordinates(
     circuit, detector_count: int, round_count: int
 ) -> dict[int, int]:
     coordinates = circuit.get_detector_coordinates()
-    arities = set()
-    for detector_id in range(detector_count):
-        detector_coordinates = coordinates.get(detector_id, ())
-        arities.add(len(detector_coordinates))
-    if len(arities) != 1:
-        raise ValueError("finite-memory detector coordinates need one arity")
-    coordinate_arity = next(iter(arities))
+    coordinate_arity = _coordinate_arity(coordinates, detector_count)
     # Stim's repetition code writes two coordinates, the surface and toric
     # codes three or more; the round is the last one either way.
     if coordinate_arity < 2:
@@ -139,6 +133,17 @@ def _rounds_from_coordinates(
     for detector_id, layer in layer_by_detector.items():
         resolved[detector_id] = _round_of_layer(layer, round_count)
     return resolved
+
+
+def _coordinate_arity(coordinates: dict, detector_count: int) -> int:
+    """The one coordinate count every detector shares."""
+    arities = set()
+    for detector_id in range(detector_count):
+        detector_coordinates = coordinates.get(detector_id, ())
+        arities.add(len(detector_coordinates))
+    if len(arities) != 1:
+        raise ValueError("finite-memory detector coordinates need one arity")
+    return next(iter(arities))
 
 
 def _layer_of(detector_coordinates) -> int:

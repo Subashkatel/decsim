@@ -159,7 +159,7 @@ def _run_program(program, shape) -> list:
     return completions
 
 
-def test_every_completion_equals_the_fifo_multi_port_law_over_random_programs():
+def test_every_completion_is_the_fifo_multi_port_law_property():
     for seed in range(300):
         generator = random.Random(seed)
         port_shape = generator.choice(PORT_SHAPES)

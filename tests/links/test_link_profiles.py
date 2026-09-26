@@ -11,13 +11,16 @@ Table III, the CPU and GPU echo rows, for the two measured RoCE v2 rows.
 """
 
 import ast
+import fractions
 import pathlib
 import re
 
 import pytest
 
 import decsim.config as config
+import decsim.engine
 import decsim.experiments.experiment as experiment
+import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
@@ -282,13 +285,36 @@ def test_the_bandwidth_card_provisions_each_path_for_one_commit_region():
         "weak_buffer_to_weak_decoder": 48.0,
         "weak_decoder_to_strong_decoder": 72.0,
         "strong_buffer_to_strong_decoder": 72.0,
-        "weak_decoder_to_frame": 0.2,
-        "decoder_to_decoder": 4.8,
-        "strong_decoder_to_frame": 0.2,
-        "frame_to_controller": 6.4,
-        "controller_to_qpu": 25.6,
+        "weak_decoder_to_frame": fractions.Fraction("0.2"),
+        "decoder_to_decoder": fractions.Fraction("4.8"),
+        "strong_decoder_to_frame": fractions.Fraction("0.2"),
+        "frame_to_controller": fractions.Fraction("6.4"),
+        "controller_to_qpu": fractions.Fraction("25.6"),
     }
     assert profile.profile_name == "bandwidth_limited"
+
+
+def test_a_nominal_round_serializes_in_exactly_one_round_period():
+    """ns-3 txTime = bits / rate (point-to-point-net-device.cc:243).
+
+    At 8 bits per 1.1 us a float rate falls below 80/11 bits per
+    microsecond and the round would take one tick more than its period.
+    """
+    profile = link_profiles.bandwidth_limited_profile(
+        syndrome_bits_per_round=8,
+        round_microseconds=1.1,
+        commit_rounds=3,
+        buffer_rounds=3,
+    )
+    engine = decsim.engine.Engine()
+    readout = profile.qpu_to_controller.channel
+    channel = channel_module.Channel(readout, engine)
+    framed = channel_module.FramedPayload(8)
+    delivered = []
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+    transfer = delivered[0]
+    assert transfer.serialization_ticks == 1_100_000
 
 
 def test_the_bandwidth_card_keeps_the_reference_latencies():
@@ -321,7 +347,7 @@ def test_the_capacity_scale_multiplies_every_rate():
     )
     capacities = capacities_of(halved)
     assert capacities["qpu_to_controller"] == 12.0
-    assert capacities["controller_to_qpu"] == 12.8
+    assert capacities["controller_to_qpu"] == fractions.Fraction("12.8")
 
 
 def test_a_capacity_scale_of_zero_is_refused():
@@ -329,6 +355,35 @@ def test_a_capacity_scale_of_zero_is_refused():
         link_profiles.bandwidth_limited_profile(
             **DISTANCE_5_GEOMETRY, capacity_scale=0.0
         )
+
+
+def test_a_cards_cycles_cost_its_clocks_period_in_whole_ticks():
+    """gem5 cyclesToTicks, clockPeriod() * c (clocked_object.hh:227).
+
+    At 300 MHz the period is 3333 ticks, so three cycles are 9999 ticks
+    and eight bits at eight bits per cycle take one period, the same
+    ticks every other component on the domain charges.
+    """
+    clocks = config.ClockSettings({"fridge": 300.0})
+    card = {
+        "latency_cycles": 3,
+        "clock": "fridge",
+        "bits_per_cycle": 8.0,
+        "setup_cycles_per_transfer": 3,
+    }
+    section = {"controller_to_weak_buffer": card}
+    profile = link_profiles.from_yaml(section, clocks, "clocked")
+    path = profile.controller_to_weak_buffer
+    engine = decsim.engine.Engine()
+    channel = channel_module.Channel(path.channel, engine)
+    framed = channel_module.FramedPayload(8)
+    delivered = []
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+    transfer = delivered[0]
+    assert path.channel.propagation_latency_ticks == 9999
+    assert path.setup_ticks == 9999
+    assert transfer.serialization_ticks == 3333
 
 
 def test_the_setup_cost_lands_on_the_two_decoder_input_paths():
@@ -658,6 +713,18 @@ def test_the_gpu_rows_strong_side_sources_cite_backline():
     ]
     declared = _named_where(sources, _declares_a_choice)
     assert declared == []
+
+
+def test_the_instruction_hops_cite_the_rows_their_latencies_come_from():
+    """Khalid 2511.10633 Table I: toc 4 us, tcq 0.15 us.
+
+    The payload of these hops is a word width from other papers, so the
+    latency and the payload each name their own source.
+    """
+    profile = link_profiles.logical_reference_profile()
+    sources = sources_of(profile)
+    assert "Table I toc" in sources["frame_to_controller"]
+    assert "Table I tcq" in sources["controller_to_qpu"]
 
 
 def test_a_coprocessor_backline_did_not_echo_from_is_refused():

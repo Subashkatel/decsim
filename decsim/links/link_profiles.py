@@ -22,6 +22,7 @@ it as the machine's links setting.
 """
 
 import dataclasses
+import fractions
 from collections.abc import Mapping
 from typing import Optional
 
@@ -229,11 +230,17 @@ def logical_reference_profile() -> settings.FabricSettings:
         RESULT_PAYLOAD_SOURCE,
     )
     frame_to_controller = _default_path(
-        "frame_to_controller", 4.0, BUS_WORD_BITS, BUS_WORD_SOURCE
+        "frame_to_controller",
+        4.0,
+        "Khalid 2511.10633 Table I toc, instructions from orchestrator "
+        "to controller",
+        BUS_WORD_BITS,
+        BUS_WORD_SOURCE,
     )
     controller_to_qpu = _default_path(
         "controller_to_qpu",
         0.15,
+        "Khalid 2511.10633 Table I tcq, instructions from controller to QPU",
         INSTRUCTION_WORD_BITS,
         INSTRUCTION_WORD_SOURCE,
     )
@@ -277,8 +284,16 @@ def bandwidth_limited_profile(
     accumulates (Little's law). The rates are an explicit per-link
     provisioning, the way ns-3 declares a DataRate per point-to-point
     device, never a floor borrowed from another path.
+
+    Each rate is an exact fraction of the decimals given, so a nominal
+    payload serializes in exactly its period: a float such as 8 / 1.1
+    lands below the true rate, and the rounded-up serialization then
+    runs one tick past the period and a periodic stream queues one tick
+    more every round (ns-3 times a packet from its size and the device's
+    stated DataRate, point-to-point-net-device.cc:243).
     """
-    commit_region_microseconds = commit_rounds * round_microseconds
+    round_period_microseconds = fractions.Fraction(str(round_microseconds))
+    commit_region_microseconds = commit_rounds * round_period_microseconds
     weak_window_rounds = commit_rounds + buffer_rounds
     weak_window_bits = weak_window_rounds * syndrome_bits_per_round
     strong_window_rounds = window_records.strong_region_round_count(
@@ -286,7 +301,9 @@ def bandwidth_limited_profile(
     )
     strong_window_bits = strong_window_rounds * syndrome_bits_per_round
     one_per_region = 1 / commit_region_microseconds
-    round_bits_per_microsecond = syndrome_bits_per_round / round_microseconds
+    round_bits_per_microsecond = (
+        syndrome_bits_per_round / round_period_microseconds
+    )
     weak_window_bits_per_microsecond = (
         weak_window_bits / commit_region_microseconds
     )
@@ -699,23 +716,34 @@ def _roce_v2_strong_paths(
     }
 
 
-def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:
-    """(latency, aggregate rate, setup) of one card in microseconds."""
-    megahertz = clocks.megahertz(card["clock"])
+def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
+    """(latency ticks, aggregate rate, setup ticks) of one card.
+
+    A cycle costs its domain's period in whole ticks, gem5's
+    cyclesToTicks (src/sim/clocked_object.hh:227, clockPeriod() * c),
+    so a link's cycles and every other component's cycles on one domain
+    are the same ticks. The rate moves bits_per_cycle on each lane every
+    period, kept as an exact fraction of the card's decimals.
+    """
+    clock = clocks.clock(card["clock"])
+    period_ticks = clock.period_ticks
     latency_cycles = card["latency_cycles"]
     config.check_cycles("latency_cycles", latency_cycles)
-    latency_microseconds = latency_cycles / megahertz
+    latency_ticks = latency_cycles * period_ticks
     bits_per_cycle = card["bits_per_cycle"]
     lane_count = card.get("channels", 1)
     bits_per_microsecond = None
     if bits_per_cycle is not None:
-        bits_per_microsecond = bits_per_cycle * lane_count * megahertz
+        lane_bits_per_cycle = fractions.Fraction(str(bits_per_cycle))
+        bits_per_period = lane_bits_per_cycle * lane_count
+        bits_per_tick = bits_per_period / period_ticks
+        bits_per_microsecond = bits_per_tick * config.TICKS_PER_MICROSECOND
     setup_cycles = card.get("setup_cycles_per_transfer")
-    setup_microseconds = None
+    setup_ticks = 0
     if setup_cycles is not None:
         config.check_cycles("setup_cycles_per_transfer", setup_cycles)
-        setup_microseconds = setup_cycles / megahertz
-    return latency_microseconds, bits_per_microsecond, setup_microseconds
+        setup_ticks = setup_cycles * period_ticks
+    return latency_ticks, bits_per_microsecond, setup_ticks
 
 
 def _carded_path(
@@ -726,9 +754,7 @@ def _carded_path(
     source: str,
 ) -> settings.PathSettings:
     """The reference path with the card's channel and setup cost."""
-    latency_microseconds, bits_per_microsecond, setup_microseconds = (
-        _card_microseconds(card, clocks)
-    )
+    latency_ticks, bits_per_microsecond, setup_ticks = _card_ticks(card, clocks)
     capacity = None
     if bits_per_microsecond is not None:
         capacity = settings.CapacitySettings(
@@ -737,13 +763,9 @@ def _carded_path(
             None,
             source,
         )
-    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     channel = settings.ChannelSettings(
         path_name, latency_ticks, capacity, source
     )
-    setup_ticks = 0
-    if setup_microseconds:
-        setup_ticks = config.microseconds_to_ticks(setup_microseconds)
     header_bits = card.get("header_bits_per_transfer", 0)
     return dataclasses.replace(
         path_settings,
@@ -757,14 +779,14 @@ class _Provisioning:
     """The bounded card's paths: one channel per path at a scaled rate."""
 
     def __init__(self, capacity_scale: float):
-        self._capacity_scale = capacity_scale
+        self._capacity_scale = fractions.Fraction(str(capacity_scale))
 
     def path(
         self,
         name: str,
         latency_microseconds: float,
         bits: int,
-        nominal_bits_per_microsecond: float,
+        nominal_bits_per_microsecond: fractions.Fraction,
         source: str,
         actual_payload_source: Optional[str],
     ) -> settings.PathSettings:
@@ -804,8 +826,12 @@ def _actual_path(
 
 
 def _default_path(
-    name: str, latency_microseconds: float, bits: int, source: str
+    name: str,
+    latency_microseconds: float,
+    latency_source: str,
+    bits: int,
+    payload_source: str,
 ) -> settings.PathSettings:
-    channel = _unbounded_channel(name, latency_microseconds, source)
-    payload = _aggregate_payload(bits, source)
+    channel = _unbounded_channel(name, latency_microseconds, latency_source)
+    payload = _aggregate_payload(bits, payload_source)
     return settings.PathSettings(channel, payload, None)

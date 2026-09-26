@@ -78,7 +78,7 @@ def test_an_outcome_that_carries_a_correction_is_committed_with_its_status():
     the machine has for the window, so the row commits it and carries
     NONCONVERGED on the result for the frame and the reports to read.
     """
-    nonconverged = backend_outcome.BackendDecodeStatus.NONCONVERGED
+    nonconverged = decoder_module.BackendDecodeStatus.NONCONVERGED
     reasons = backend_outcome.BackendFailureReason
     reason = reasons.NO_CONVERGED_RELAY_SOLUTION
     outcome = outcome_of(nonconverged, reason, (1, 0))
@@ -108,7 +108,7 @@ def test_an_outcome_with_no_correction_is_a_contract_violation():
     would corrupt the frame; the run stops loudly instead (STYLE.md
     rule 4).
     """
-    backend_error = backend_outcome.BackendDecodeStatus.BACKEND_ERROR
+    backend_error = decoder_module.BackendDecodeStatus.BACKEND_ERROR
     reasons = backend_outcome.BackendFailureReason
     reason = reasons.UPSTREAM_EXCEPTION
     outcome = outcome_of(backend_error, reason, None)

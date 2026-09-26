@@ -182,15 +182,14 @@ class CreditWire:
 def read_credit_keys(section: Mapping, path_name: str) -> tuple:
     """(framing, receive_buffer_frames, credit_latency_cycles) of a card."""
     section_name = f"links.{path_name}.protocol"
-    framing_section = _required(section, "framing", section_name)
+    framing_section = link_settings.required_key(
+        section, "framing", section_name
+    )
     framing = framings.framing_settings_from_yaml(framing_section, path_name)
-    receive_buffer_frames = _required(
+    receive_buffer_frames = link_settings.positive_count_key(
         section, "receive_buffer_frames", section_name
     )
-    _check_positive_count(
-        receive_buffer_frames, f"{section_name}.receive_buffer_frames"
-    )
-    credit_latency_cycles = _required(
+    credit_latency_cycles = link_settings.required_key(
         section, "credit_latency_cycles", section_name
     )
     config.check_cycles(
@@ -206,18 +205,3 @@ def credit_latency_ticks(
     protocol = channel_settings.protocol
     cycles = protocol.row_settings.credit_latency_cycles
     return cycles * protocol.clock.period_ticks
-
-
-def _required(section: Mapping, key: str, section_name: str):
-    """A key the protocol needs, refused by name when missing."""
-    if key not in section:
-        raise ValueError(f"{section_name} needs {key}")
-    return section[key]
-
-
-def _check_positive_count(value, name: str) -> None:
-    """A positive whole number, never a yaml boolean."""
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and value > 0:
-        return
-    raise ValueError(f"{name} is {value!r}; it is a positive whole number")

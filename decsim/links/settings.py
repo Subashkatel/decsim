@@ -18,6 +18,7 @@ are where they enter decsim.
 import dataclasses
 import fractions
 import math
+from collections.abc import Mapping
 from typing import Optional, Union
 
 import decsim.config as config
@@ -272,6 +273,24 @@ class FabricSettings:
                 (transfer_records.LinkPath.QPU_TO_CONTROLLER, route.settings)
             )
         return tuple(bindings)
+
+
+def required_key(section: Mapping, key: str, section_name: str):
+    """A key a link card needs, refused by name when missing."""
+    if key not in section:
+        raise ValueError(f"{section_name} needs {key}")
+    return section[key]
+
+
+def positive_count_key(section: Mapping, key: str, section_name: str) -> int:
+    """A key a link card needs: a positive whole number, never a boolean."""
+    value = required_key(section, key, section_name)
+    is_whole = isinstance(value, int) and not isinstance(value, bool)
+    if is_whole and value > 0:
+        return value
+    raise ValueError(
+        f"{section_name}.{key} is {value!r}; it is a positive whole number"
+    )
 
 
 def _as_whole_number(value, name: str) -> int:

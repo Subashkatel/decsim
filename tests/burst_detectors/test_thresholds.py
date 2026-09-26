@@ -2,6 +2,8 @@
 
 Closed forms on the maxima 1 to 100: the observed tail, and past it the
 exponential fitted to the largest maxima, u + beta ln(k / (n share)).
+The 21st largest of them is 80, and the 20 largest exceed it by 10.5 on
+average.
 """
 
 import numpy
@@ -9,15 +11,11 @@ import pytest
 
 import decsim.burst_detectors.masked_regional_cusum.thresholds as thresholds
 
-# the calibration rule on hand maxima: one group of maxima 1 to
-# 100, whose 21st largest is 80 and whose 20 largest exceed it by 10.5
-# on average
-HAND_MAXIMA = numpy.arange(1.0, 101.0)
-
 
 def test_a_measured_level_is_the_smallest_maximum_at_most_its_share():
     """30 of 100 blocks reach 71, and 30 is at least the 20 fitted."""
-    maxima = HAND_MAXIMA[:, None]
+    hand_maxima = numpy.arange(1.0, 101.0)
+    maxima = hand_maxima[:, None]
 
     levels = thresholds.bank_thresholds(maxima, 0.3)
 
@@ -31,7 +29,8 @@ def test_one_group_alarms_on_at_most_its_target_share_of_blocks():
     admits 95 too, six blocks; one group goes through the bank's
     bisection like any other bank.
     """
-    maxima = HAND_MAXIMA[:, None]
+    hand_maxima = numpy.arange(1.0, 101.0)
+    maxima = hand_maxima[:, None]
 
     levels = thresholds.bank_thresholds(maxima, 0.05)
 
@@ -47,7 +46,8 @@ def test_a_shared_level_keeps_the_bank_at_its_target():
     next maximum up: 72.
     """
     silent = numpy.zeros(100)
-    maxima = numpy.stack([HAND_MAXIMA, silent], axis=1)
+    hand_maxima = numpy.arange(1.0, 101.0)
+    maxima = numpy.stack([hand_maxima, silent], axis=1)
 
     levels = thresholds.bank_thresholds(maxima, 0.3)
 
@@ -61,7 +61,8 @@ def test_an_unmeasured_target_keeps_the_ratio_found_at_five_alarms():
     carries down to one alarm, and the fitted tail gives the level.
     """
     silent = numpy.zeros(100)
-    maxima = numpy.stack([HAND_MAXIMA, silent], axis=1)
+    hand_maxima = numpy.arange(1.0, 101.0)
+    maxima = numpy.stack([hand_maxima, silent], axis=1)
 
     levels = thresholds.bank_thresholds(maxima, 0.01)
 

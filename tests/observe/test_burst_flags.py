@@ -1,4 +1,8 @@
-"""The burst flag record: the first round fired on from a given round."""
+"""The burst flag record: the first round fired on from a given round.
+
+A change-point detector's delay is its first alarm at or after the
+change (Xie et al. 2104.04186 lines 161-171); 0 names no round.
+"""
 
 import decsim.observe.burst_flags as burst_flags
 

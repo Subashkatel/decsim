@@ -329,6 +329,35 @@ def test_the_drop_knob_drops_only_the_round_that_found_no_context() -> None:
     assert [round.packet.round_index for round in packed] == [1]
 
 
+def test_a_round_joined_from_two_fragments_states_both_event_widths() -> None:
+    """A valueless round's checks and data readout form 8 and 4 events."""
+    engine = engine_module.Engine()
+    packed = []
+    assembler = assembler_with(engine, packed, None)
+    checks = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=1,
+        bits=None,
+        size_bits=8,
+        fragment_index=0,
+        event_bits=8,
+    )
+    readout = dataclasses.replace(
+        checks, size_bits=9, fragment_index=1, event_bits=4
+    )
+    assembler.expect_round(checks, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(checks, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(readout, 2, round_records.WINDOW_INPUT_ROUTE)
+
+    engine.run()
+
+    (round,) = packed
+    (joined,) = round.packet.fragments
+    assert joined.size_bits == 17
+    assert joined.event_bits == 12
+
+
 def test_detection_events_are_formed_once_from_the_merged_bits() -> None:
     engine = engine_module.Engine()
     packed = []

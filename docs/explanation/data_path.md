@@ -104,7 +104,12 @@ against and the last closes on the data readout
 (`tests/links/test_data_through.py` derives each count from the circuit).
 A source with no circuit states the same two widths layer by layer
 (`decsim/qpu/syndrome_devices.py`), so the seat that forms the events
-prices the width it holds for every source.
+prices the width it holds for every source. A program may deliver the
+last round's data readout as its own terminal fragment instead (Maurer
+et al. 2510.21600 route the codeword, once the controller asks for it,
+the same way as the syndromes, lines 511-513); every source then reads
+the checks first and the `d*d` data bits in the fragment that
+finalizes the round, and the controller joins the two into one round.
 A bounded link therefore serializes the last round longer than the rest.
 
 Move, off board, and the landing is also a copy into the controller's

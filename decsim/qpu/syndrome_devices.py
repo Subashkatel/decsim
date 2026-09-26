@@ -17,8 +17,13 @@ emits seeded random bits sized by the same width, to exercise the
 payload path end to end without Stim. Both state a round's raw width
 and the width its detection events take once formed, layer by layer
 (_round_widths), so each seat prices the width it holds, as a circuit
-source's formation table does. Both name NO_WINDOW_MODELS as their
-window model source, which answers every model question with nothing.
+source's formation table does. A program may split a stream's last
+round in two, the checks first and the data readout as its own
+terminal fragment, as the Stim source reads a declared terminal
+fragment out (stim_device.py finalize_stream_round); both sources then
+state the readout in finalize_stream_round. Both name NO_WINDOW_MODELS
+as their window model source, which answers every model question with
+nothing.
 """
 
 import random
@@ -84,7 +89,7 @@ class TimingOnlyDevice:
         target = program_records.decode_identity(operation)
         global_round = program_records.global_round(operation, round_index)
         last_round = self.round_count_by_identity.get(target)
-        is_last = global_round == last_round
+        is_last = _reads_the_data_out(operation, global_round, last_round, 1)
         patches = program_records.patches_of(operation)
         patch_count = _patch_count_of(operation)
         readout = _valueless_readout(
@@ -113,9 +118,21 @@ class TimingOnlyDevice:
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
     ) -> list[round_records.QPUReadout]:
-        """Refused: a stream without a circuit has no final readout."""
-        del operation, source_round_count
-        raise ValueError("TimingOnlyDevice cannot finalize a physical stream")
+        """The stream's final data readout as its own valueless fragment."""
+        del source_round_count
+        target = program_records.decode_identity(operation)
+        final_round = program_records.global_round(operation, 1)
+        patches = program_records.patches_of(operation)
+        patch_count = _patch_count_of(operation)
+        raw_bits, event_bits = _data_readout_widths(self.code, patch_count)
+        readout = round_records.QPUReadout(
+            target,
+            patches,
+            final_round,
+            size_bits=raw_bits,
+            event_bits=event_bits,
+        )
+        return [readout]
 
     def declare_stream(
         self,
@@ -204,7 +221,11 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         target = program_records.decode_identity(operation)
         global_round = program_records.global_round(operation, round_index)
         last_round = self.round_count_by_identity.get(target)
-        is_last = global_round == last_round
+        groups = self._patch_groups(operation)
+        payload_count = len(groups)
+        is_last = _reads_the_data_out(
+            operation, global_round, last_round, payload_count
+        )
         return self._payloads(operation, target, global_round, is_last)
 
     def idle_round_payloads(
@@ -223,9 +244,16 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     def finalize_stream_round(
         self, operation: program_records.Operation, source_round_count: int
     ) -> list[round_records.QPUReadout]:
-        """Refused: a stream without a circuit has no final readout."""
-        del operation, source_round_count
-        raise ValueError("SyndromeBitDevice cannot finalize a physical stream")
+        """The final data readout in the round's own payload shape."""
+        del source_round_count
+        target = program_records.decode_identity(operation)
+        final_round = program_records.global_round(operation, 1)
+        payloads = []
+        for patch_ids, patch_count in self._patch_groups(operation):
+            widths = _data_readout_widths(self.code, patch_count)
+            payload = self._payload(target, patch_ids, final_round, widths)
+            payloads.append(payload)
+        return payloads
 
     def declare_stream(
         self,
@@ -280,29 +308,34 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         is_last: bool,
     ) -> list[round_records.QPUReadout]:
         """The round's payloads: one per patch, or one over every patch."""
-        if self.one_payload_per_patch:
-            return self._payload_per_patch(
-                operation, target, global_round, is_last
+        payloads = []
+        for patch_ids, patch_count in self._patch_groups(operation):
+            widths = _round_widths(
+                self.code, patch_count, global_round, is_last
             )
-        patches = program_records.patches_of(operation)
-        patch_count = _patch_count_of(operation)
-        payload = self._payload(
-            target, patches, global_round, is_last, patch_count
-        )
-        return [payload]
+            payload = self._payload(target, patch_ids, global_round, widths)
+            payloads.append(payload)
+        return payloads
+
+    def _patch_groups(self, operation: program_records.Operation) -> tuple:
+        """(patch ids, patch count) of each payload: one per patch, or one."""
+        if not self.one_payload_per_patch:
+            patches = program_records.patches_of(operation)
+            patch_count = _patch_count_of(operation)
+            return ((patches, patch_count),)
+        patches = operation.patches
+        if not patches:
+            patches = operation.qubits
+        groups = []
+        for patch in patches:
+            groups.append(((patch,), 1))
+        return tuple(groups)
 
     def _payload(
-        self,
-        target: Any,
-        patches: tuple,
-        global_round: int,
-        is_last: bool,
-        patch_count: int,
+        self, target: Any, patches: tuple, global_round: int, widths: tuple
     ) -> round_records.QPUReadout:
-        """Random raw bits at the round's raw width, its events' stated."""
-        raw_bits, event_bits = _round_widths(
-            self.code, patch_count, global_round, is_last
-        )
+        """Random raw bits at the (raw, event) widths, its events' stated."""
+        raw_bits, event_bits = widths
         bits = self._fake_bits(target, global_round, patches, raw_bits)
         return round_records.QPUReadout(
             target,
@@ -312,23 +345,6 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
             size_bits=raw_bits,
             event_bits=event_bits,
         )
-
-    def _payload_per_patch(
-        self,
-        operation: program_records.Operation,
-        target: Any,
-        global_round: int,
-        is_last: bool,
-    ) -> list[round_records.QPUReadout]:
-        patches = operation.patches
-        if not patches:
-            patches = operation.qubits
-        payloads = []
-        for patch in patches:
-            patch_ids = (patch,)
-            payload = self._payload(target, patch_ids, global_round, is_last, 1)
-            payloads.append(payload)
-        return payloads
 
 
 class NoWindowModels:
@@ -441,6 +457,38 @@ def _round_widths(
         raw_bits += code.data_bits_per_readout(patch_count)
         event_bits += half_the_checks
     return raw_bits, event_bits
+
+
+def _data_readout_widths(code: ports.CodeModel, patch_count: int) -> tuple:
+    """(raw bits, event bits) of a last round's data readout on its own.
+
+    The data qubits leave raw, and the events they close are the other
+    half of the checks, the last layer _round_widths folds into the last
+    round; the checks fragment keeps the rest.
+    """
+    raw_bits = code.data_bits_per_readout(patch_count)
+    check_bits = code.syndrome_bits_per_round(patch_count)
+    event_bits = check_bits // 2
+    return raw_bits, event_bits
+
+
+def _reads_the_data_out(
+    operation: program_records.Operation,
+    global_round: int,
+    last_round: Optional[int],
+    payload_count: int,
+) -> bool:
+    """Whether this round of the operation carries the data readout.
+
+    The last round does, unless the program split it in two with this
+    operation's payloads first: the terminal fragment then brings the
+    readout (finalize_stream_round), one payload for each of these.
+    """
+    if global_round != last_round:
+        return False
+    is_first_half = operation.syndrome_fragment_index == 0
+    has_two_halves = operation.syndrome_fragment_count == 2 * payload_count
+    return not (is_first_half and has_two_halves)
 
 
 def _valueless_readout(

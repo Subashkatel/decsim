@@ -87,43 +87,62 @@ def lines_starting_with(lines, opening):
     return found
 
 
+# the counters a shot splits over its paths, one share a row
+PATH_COLUMNS = (
+    "copies",
+    "copied_rounds",
+    "copy_bits",
+    "moves",
+    "moved_rounds",
+    "move_bits",
+)
+
+
+def _column_sums(rows: list, columns: tuple) -> dict:
+    sums = {column: 0 for column in columns}
+    for row in rows:
+        for column in columns:
+            sums[column] += row[column]
+    return sums
+
+
+def _class_copy_bits(shot_rows: list, memory_class: str) -> float:
+    """The copy bits of every path row in one memory class."""
+    copy_bits = 0.0
+    for row in shot_rows:
+        if row["memory_class"] == memory_class:
+            copy_bits += row["copy_bits"]
+    return copy_bits
+
+
+def _class_rows(point_rows: list) -> list:
+    """The point rows that stand for a memory class, in listed order."""
+    rows = []
+    for row in point_rows:
+        if row["grouping"] == "memory_class":
+            rows.append(row)
+    return rows
+
+
 def test_a_shots_rows_add_up_to_that_shots_own_counters(tmp_path):
     config_path = write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 1)
     rows = sweep_report.shot_data_movement_rows(measurements)
     counted = measurements[0].data_movement
-    copies = 0
-    copied_rounds = 0
-    copy_bits = 0
-    moves = 0
-    moved_rounds = 0
-    move_bits = 0
-    for row in rows:
-        copies += row["copies"]
-        copied_rounds += row["copied_rounds"]
-        copy_bits += row["copy_bits"]
-        moves += row["moves"]
-        moved_rounds += row["moved_rounds"]
-        move_bits += row["move_bits"]
+    summed = _column_sums(rows, PATH_COLUMNS)
+    references = {row["references"] for row in rows}
+    referenced_rounds = {row["referenced_rounds"] for row in rows}
 
-    assert copies == counted["copies"]
-    assert copied_rounds == counted["copied_rounds"]
-    assert copy_bits == counted["copy_bits"]
-    assert moves == counted["moves"]
-    assert moved_rounds == counted["moved_rounds"]
-    assert move_bits == counted["move_bits"]
-    for row in rows:
-        assert row["references"] == counted["references"]
-        assert row["referenced_rounds"] == counted["referenced_rounds"]
+    assert summed == {column: counted[column] for column in PATH_COLUMNS}
+    assert references == {counted["references"]}
+    assert referenced_rounds == {counted["referenced_rounds"]}
 
 
 def test_each_rows_memory_class_is_the_one_the_counters_placed(tmp_path):
     config_path = write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 1)
     rows = sweep_report.shot_data_movement_rows(measurements)
-    class_by_path = {}
-    for row in rows:
-        class_by_path[row["path"]] = row["memory_class"]
+    class_by_path = {row["path"]: row["memory_class"] for row in rows}
 
     assert class_by_path["qpu_to_controller"] == "off_board"
     assert class_by_path["controller_to_weak_buffer"] == "on_board"
@@ -137,16 +156,12 @@ def test_a_memory_class_row_is_that_classs_paths_over_the_shots(tmp_path):
     measurements = measured_shots(config_path, 2)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
     point_rows = sweep_report.data_movement_rows(shot_rows)
-    on_board_paths = 0.0
-    for row in shot_rows:
-        if row["memory_class"] == "on_board":
-            on_board_paths += row["copy_bits"]
-    on_board_class = 0.0
-    for row in point_rows:
-        if row["grouping"] != "memory_class":
-            continue
-        if row["name"] == "on_board":
-            on_board_class = row["copy_bits_per_shot"]
+    on_board_paths = _class_copy_bits(shot_rows, "on_board")
+    class_rows = _class_rows(point_rows)
+    per_shot_by_class = {
+        row["name"]: row["copy_bits_per_shot"] for row in class_rows
+    }
+    on_board_class = per_shot_by_class["on_board"]
 
     assert on_board_class == on_board_paths / 2
 
@@ -156,10 +171,8 @@ def test_the_class_rows_are_listed_cheapest_first(tmp_path):
     measurements = measured_shots(config_path, 1)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
     point_rows = sweep_report.data_movement_rows(shot_rows)
-    listed = []
-    for row in point_rows:
-        if row["grouping"] == "memory_class":
-            listed.append(row["name"])
+    class_rows = _class_rows(point_rows)
+    listed = [row["name"] for row in class_rows]
 
     assert listed == ["on_chip", "on_board", "off_board"]
 
@@ -178,8 +191,8 @@ def test_a_references_column_counts_one_shots_holds_once(tmp_path):
     second = measurements[1].data_movement["references"]
     mean_references = (first + second) / 2
 
-    for row in point_rows:
-        assert row["references_per_shot"] == mean_references
+    per_shot = {row["references_per_shot"] for row in point_rows}
+    assert per_shot == {mean_references}
 
 
 def test_a_path_only_some_shots_took_still_carries_the_points_holds(
@@ -200,9 +213,7 @@ def test_a_path_only_some_shots_took_still_carries_the_points_holds(
     escalating_shots = _shots_with_a_path(
         shot_rows, "strong_buffer_to_strong_decoder"
     )
-    references = []
-    for row in point_rows:
-        references.append(row["references_per_shot"])
+    references = [row["references_per_shot"] for row in point_rows]
 
     assert 0 < escalating_shots < len(measurements)
     assert len(set(references)) == 1

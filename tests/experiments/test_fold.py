@@ -136,25 +136,39 @@ def _running_float_sum(values) -> float:
     return total
 
 
-def test_an_exact_sum_equals_math_fsum_of_the_values_it_was_given():
-    """Values whose plain float sum cancels away, and random ones."""
+def _exact_sum(values) -> fold.ExactSum:
+    """An exact sum given the values in order."""
     running = fold.ExactSum()
-    for value in CANCELLING:
+    for value in values:
         running.add(value)
+    return running
+
+
+def _spread_values(generator, count: int, largest_exponent: int) -> list:
+    """Random values whose decimal exponents span +-largest_exponent."""
+    values = []
+    for _index in range(count):
+        exponent = generator.randint(-largest_exponent, largest_exponent)
+        digits = generator.random()
+        value = digits * 10.0**exponent
+        values.append(value)
+    return values
+
+
+def test_an_exact_sum_equals_math_fsum_of_values_that_cancel():
+    """Values whose plain float sum cancels away."""
+    running = _exact_sum(CANCELLING)
+
     assert running.total() == math.fsum(CANCELLING)
     assert _running_float_sum(CANCELLING) != math.fsum(CANCELLING)
 
+
+def test_an_exact_sum_equals_math_fsum_of_random_values_property():
+    """Two hundred random spreads of fifty values against math.fsum."""
     generator = random.Random(2026)
     for _attempt in range(200):
-        values = []
-        for _index in range(50):
-            exponent = generator.randint(-30, 30)
-            digits = generator.random()
-            value = digits * 10.0**exponent
-            values.append(value)
-        running = fold.ExactSum()
-        for value in values:
-            running.add(value)
+        values = _spread_values(generator, 50, 30)
+        running = _exact_sum(values)
         assert running.total() == math.fsum(values)
 
 
@@ -168,9 +182,7 @@ def test_an_exact_sum_equals_math_fsum_only_on_finite_values():
     fold sums can reach them, so nothing refuses them and this test
     says where the two part company rather than asking them to agree.
     """
-    finite = fold.ExactSum()
-    for value in CANCELLING:
-        finite.add(value)
+    finite = _exact_sum(CANCELLING)
     assert finite.total() == math.fsum(CANCELLING)
 
     with_infinity = fold.ExactSum()
@@ -203,25 +215,14 @@ def test_an_exact_sum_is_the_same_whichever_order_the_values_arrive_in():
     swallowed = [1e16] + [1.0] * 10
     backwards_first = list(reversed(swallowed))
     assert _running_float_sum(swallowed) != _running_float_sum(backwards_first)
-    forwards = fold.ExactSum()
-    for value in swallowed:
-        forwards.add(value)
-    backwards = fold.ExactSum()
-    for value in backwards_first:
-        backwards.add(value)
+    forwards = _exact_sum(swallowed)
+    backwards = _exact_sum(backwards_first)
     assert forwards.total() == backwards.total()
     assert forwards.total() == math.fsum(swallowed)
 
     generator = random.Random(7)
-    values = []
-    for _index in range(200):
-        exponent = generator.randint(-40, 40)
-        digits = generator.random()
-        value = digits * 10.0**exponent
-        values.append(value)
-    spread = fold.ExactSum()
-    for value in values:
-        spread.add(value)
+    values = _spread_values(generator, 200, 40)
+    spread = _exact_sum(values)
     assert spread.total() == math.fsum(values)
 
 
@@ -236,9 +237,7 @@ def test_an_exact_sum_skips_a_zero_and_still_equals_math_fsum():
     """
     zeros = (1e100, 0.0, 1.0, -0.0, -1e100, 0.0, 1.0)
     assert _running_float_sum(zeros) != math.fsum(zeros)
-    with_zeros = fold.ExactSum()
-    for value in zeros:
-        with_zeros.add(value)
+    with_zeros = _exact_sum(zeros)
     assert with_zeros.total() == math.fsum(zeros)
     assert with_zeros.total() == 2.0
     only_zeros = fold.ExactSum()
@@ -251,16 +250,27 @@ def test_an_exact_sum_skips_a_zero_and_still_equals_math_fsum():
     assert sign == 1.0
 
 
-def test_row_totals_mean_is_statistics_fmean_of_the_rows():
-    """Which is what the summary columns were before they were streamed."""
-    generator = random.Random(11)
+def _uniform_values(generator, count: int, largest: float) -> list:
     values = []
-    for _index in range(500):
-        value = generator.random() * 1e6
+    for _index in range(count):
+        value = generator.random() * largest
         values.append(value)
+    return values
+
+
+def _row_totals_of(values) -> fold.RowTotals:
+    """Row totals given one row a value, under the column name value."""
     totals = fold.RowTotals(means=("value",))
     for value in values:
         totals.add({"value": value})
+    return totals
+
+
+def test_row_totals_mean_is_statistics_fmean_of_the_rows():
+    """Which is what the summary columns were before they were streamed."""
+    generator = random.Random(11)
+    values = _uniform_values(generator, 500, 1e6)
+    totals = _row_totals_of(values)
     assert totals.mean("value") == statistics.fmean(values)
 
 
@@ -361,13 +371,16 @@ def test_a_fold_holds_one_row_of_each_folder_however_many_shots_they_hold(
     test's do.
     """
     shards = 3
-    peaks = {}
-    for shots in (3, 9):
-        run_dirs = _shards_of_one_point(tmp_path, shots, shards)
-        out_dir = tmp_path / f"combined_of_{shots}"
-        peaks[shots] = _peak_rows_alive(monkeypatch, run_dirs, out_dir)
-    assert peaks[3] == peaks[9]
-    assert peaks[9] <= shards + 1
+    one_shot_dirs = _shards_of_one_point(tmp_path, 3, shards)
+    three_shot_dirs = _shards_of_one_point(tmp_path, 9, shards)
+    one_shot_out = tmp_path / "combined_of_3"
+    three_shot_out = tmp_path / "combined_of_9"
+    one_shot_peak = _peak_rows_alive(monkeypatch, one_shot_dirs, one_shot_out)
+    three_shot_peak = _peak_rows_alive(
+        monkeypatch, three_shot_dirs, three_shot_out
+    )
+    assert one_shot_peak == three_shot_peak
+    assert three_shot_peak <= shards + 1
 
 
 def _rows_of(path):
@@ -392,6 +405,24 @@ def _without_a_point(run_dir, name):
             continue
         kept.append(row)
     _write_rows(samples_path, kept)
+
+
+def _each_without_a_point(run_dirs, name) -> None:
+    for run_dir in run_dirs:
+        _without_a_point(run_dir, name)
+
+
+def _each_with_a_renamed_point(run_dirs, name, renamed) -> None:
+    for run_dir in run_dirs:
+        _with_a_renamed_point(run_dir, name, renamed)
+
+
+def _without_columns(row: dict, columns: tuple) -> dict:
+    kept = {}
+    for column, value in row.items():
+        if column not in columns:
+            kept[column] = value
+    return kept
 
 
 def _with_a_renamed_point(run_dir, name, renamed):
@@ -426,8 +457,7 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     whole_dir = tmp_path / "whole"
     older_dir = tmp_path / "older"
     report.combine(run_dirs, whole_dir)
-    for run_dir in run_dirs:
-        _without_a_point(run_dir, "confidence")
+    _each_without_a_point(run_dirs, "confidence")
     report.combine(run_dirs, older_dir)
 
     whole_path = whole_dir / "sweep.csv"
@@ -440,13 +470,9 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
         "confidence_p99_us",
         "confidence_max_us",
     )
-    for column in dropped:
-        assert column in whole[0]
-        assert column not in older[0]
-    for column in whole[0]:
-        if column in dropped:
-            continue
-        assert older[0][column] == whole[0][column]
+    whole_without_the_point = _without_columns(whole[0], dropped)
+    assert set(dropped) <= set(whole[0])
+    assert older[0] == whole_without_the_point
 
 
 def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
@@ -460,8 +486,7 @@ def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
     about service.
     """
     run_dirs = _shards_of_one_point(tmp_path, 4, 2)
-    for run_dir in run_dirs:
-        _without_a_point(run_dir, "service")
+    _each_without_a_point(run_dirs, "service")
     out_dir = tmp_path / "combined"
     rows = report.combine(run_dirs, out_dir)
 
@@ -484,8 +509,7 @@ def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
     behind. It is refused at the boundary instead, by name.
     """
     run_dirs = _shards_of_one_point(tmp_path, 4, 2)
-    for run_dir in run_dirs:
-        _with_a_renamed_point(run_dir, "service", "park")
+    _each_with_a_renamed_point(run_dirs, "service", "park")
     out_dir = tmp_path / "combined"
     with pytest.raises(refusal.RefusalError) as refused:
         report.combine(run_dirs, out_dir)

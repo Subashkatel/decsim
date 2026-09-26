@@ -58,17 +58,17 @@ def test_the_reference_controller_charges_the_traced_issue_pipeline():
     assert controller.clock == config.settings.clocks.clock("fridge")
 
 
-def test_every_shipped_config_loads():
-    for name in SHIPPED_CONFIGS:
-        config_path = CONFIGS_DIR / name
-        config = experiment.load_experiment(config_path)
-        assert config.active_decoder is not None, name
+@pytest.mark.parametrize("name", SHIPPED_CONFIGS)
+def test_every_shipped_config_loads(name):
+    config_path = CONFIGS_DIR / name
+    config = experiment.load_experiment(config_path)
+    assert config.active_decoder is not None
 
 
-def test_every_config_the_tests_name_is_shipped():
-    for name in SHIPPED_CONFIGS:
-        config_path = CONFIGS_DIR / name
-        assert config_path.is_file(), name
+@pytest.mark.parametrize("name", SHIPPED_CONFIGS)
+def test_every_config_the_tests_name_is_shipped(name):
+    config_path = CONFIGS_DIR / name
+    assert config_path.is_file()
 
 
 def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):

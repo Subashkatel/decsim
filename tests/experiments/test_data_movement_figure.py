@@ -44,9 +44,12 @@ def test_a_class_series_is_that_classs_bits_at_each_swept_distance(tmp_path):
 
     assert series["on_chip"]["copied"][0] == [3, 5]
     assert series["on_board"]["copied"][0] == [3, 5]
-    for _distances, bits in series["on_chip"].values():
-        for value in bits:
-            assert value > 0
+    on_chip_bits = [
+        value
+        for _distances, bits in series["on_chip"].values()
+        for value in bits
+    ]
+    assert min(on_chip_bits) > 0
 
 
 def test_an_off_board_hop_of_this_machine_moves_and_never_copies(tmp_path):

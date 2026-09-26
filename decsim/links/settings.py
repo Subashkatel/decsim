@@ -275,7 +275,7 @@ class FabricSettings:
         return tuple(bindings)
 
 
-def required_key(section: Mapping, key: str, section_name: str):
+def required_key(section: Mapping, key: str, section_name: str) -> object:
     """A key a link card needs, refused by name when missing."""
     if key not in section:
         raise ValueError(f"{section_name} needs {key}")

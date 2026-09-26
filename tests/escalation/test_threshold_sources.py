@@ -88,8 +88,6 @@ def test_the_rate_tracker_pins_the_target_rate_over_a_random_gap_stream():
 def test_the_audit_lane_estimate_is_inverse_propensity_weighted():
     """Each audited bad outcome stands for 1/audit_rate kept windows."""
     lane = threshold_sources.AuditLane(audit_rate=0.5)
-    for _ in range(100):
-        lane.record_kept()
     lane.record_audit(weak_was_bad=True)
     lane.record_audit(weak_was_bad=True)
     lane.record_audit(weak_was_bad=False)

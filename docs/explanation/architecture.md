@@ -22,13 +22,13 @@ port interface, quoted in
 **A pluggable part is a table of rows.** A row is one name a yaml may
 write and one class the machine builds for it. That is sinter's shape,
 its `BUILT_IN_DECODERS` dictionary plus one abstract class per pluggable
-part, and `decsim/tables.py` is the single function that reads all
-eighteen tables, so a name that is not on a table is refused the same
+part, and `decsim/tables.py` is the single function that reads every
+table, so a name that is not on a table is refused the same
 way everywhere.
 
-**One root wires everything by constructor.** `decsim/machine.py` builds
-every component from its settings and hands each one its neighbours. No
-component builds or looks up another. gem5's configuration script does
+**One root wires everything.** `decsim/machine.py` builds every
+component from its settings, then binds each port to the neighbour that
+answers it. No component builds or looks up another. gem5's configuration script does
 the same job, naming each component once and assigning its ports.
 
 `decsim/ports.py` is therefore the map of the pipeline, and a reader who
@@ -108,7 +108,7 @@ why `observe/` can be switched off without a single other line changing.
 
 ## The pluggable parts
 
-Nineteen tables, listed with every row in [The plug-in tables](../reference/tables.md).
+Every table is listed with every row in [The plug-in tables](../reference/tables.md).
 The parts a study is most likely to change:
 
 - the **syndrome source**, which is what the QPU reads out

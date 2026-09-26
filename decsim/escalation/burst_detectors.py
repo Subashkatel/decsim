@@ -1770,12 +1770,13 @@ def _mean_detection_probability(region_priors: list, scale: float) -> float:
 
 
 def _saturating_scale(region_priors: list) -> float:
-    """The scale past which every region prior sits at one half."""
-    smallest_priors = []
-    for priors in region_priors:
-        smallest = numpy.min(priors)
-        smallest_priors.append(smallest)
-    smallest_prior = min(smallest_priors)
+    """The scale past which every region prior sits at one half.
+
+    A noiseless position has no prior, so it bounds nothing; it still
+    counts in the region's rate as a position that never fires.
+    """
+    every_prior = numpy.concatenate(region_priors)
+    smallest_prior = numpy.min(every_prior)
     return MAXIMUM_PRIOR / float(smallest_prior)
 
 

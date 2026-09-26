@@ -63,10 +63,8 @@ def _circuit(distance, rounds):
 def _graphlike_catalog(circuit):
     """The whole-circuit graphlike fault catalog decsim builds."""
     requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
-    catalogs, _link = fault_catalogs.prepare_fault_catalogs(
-        circuit, requirement
-    )
-    return catalogs[GRAPHLIKE]
+    catalogs = fault_catalogs.prepare_fault_catalogs(circuit, requirement)
+    return catalogs.by_representation[GRAPHLIKE]
 
 
 def _signature(catalog, fault_id):

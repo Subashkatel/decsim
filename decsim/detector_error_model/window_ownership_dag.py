@@ -78,8 +78,9 @@ def explicit_fault_ownership(
     excluded round, has no owner. Raises ValueError for a fault with two
     owners of the same depth.
     """
+    representations = slicer.catalogs.by_representation
     ownership = [
-        {representation: set() for representation in slicer.catalogs}
+        {representation: set() for representation in representations}
         for _ in entries
     ]
     excluded_faults = _excluded_faults(slicer, fault_exclusion_ranges)
@@ -179,7 +180,7 @@ def _assign_commit_round_owners(
 ) -> None:
     """Give every fault of every representation its commit-round owner."""
     windows_by_commit_round = _windows_by_commit_round(entries)
-    for representation, catalog in slicer.catalogs.items():
+    for representation, catalog in slicer.catalogs.by_representation.items():
         _assign_owners(
             ownership,
             representation,
@@ -248,7 +249,7 @@ def _excluded_faults(
 ) -> dict[fault_model_contracts.FaultRepresentation, set[int]]:
     """The faults of each representation that touch an excluded round."""
     excluded_faults = {}
-    for representation, catalog in slicer.catalogs.items():
+    for representation, catalog in slicer.catalogs.by_representation.items():
         every_fault = list(range(len(catalog.detector_sets)))
         excluded_faults[representation] = (
             window_placement.faults_touching_excluded_rounds(

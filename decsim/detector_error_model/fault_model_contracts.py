@@ -144,6 +144,19 @@ class FaultCatalog:
 
 
 @dataclasses.dataclass(frozen=True)
+class FaultCatalogs:
+    """One circuit's catalogs, keyed by representation, and their link.
+
+    `link` is a graphlike-by-physical csc_matrix whose column j marks the
+    graphlike faults physical fault j is made of, or None when the
+    requirement does not ask for it.
+    """
+
+    by_representation: dict[FaultRepresentation, FaultCatalog]
+    link: Optional[object]
+
+
+@dataclasses.dataclass(frozen=True)
 class WindowErrorModel:
     """What a decoder is handed for one window.
 

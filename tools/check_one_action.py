@@ -489,12 +489,14 @@ def check_file(path):
     return checker.findings
 
 
-def is_excluded(path):
-    """True when the path names a skipped folder or file."""
-    for part in path.parts:
-        if part in EXCLUDED_PARTS:
-            return True
-    return False
+def is_excluded(path, target):
+    """True when the path, read below its target, names a skipped part.
+
+    Only the part below the target counts, so a checkout that itself sits
+    under a folder named tmp is still checked.
+    """
+    below = path.relative_to(target)
+    return not EXCLUDED_PARTS.isdisjoint(below.parts)
 
 
 def files_under(target):
@@ -508,14 +510,15 @@ def files_under(target):
 
 def python_files(targets):
     """Every Python file under the targets, minus the excluded parts."""
-    candidates = []
     for target in targets:
-        found = files_under(target)
-        candidates.extend(found)
-    for candidate in candidates:
-        if is_excluded(candidate):
-            continue
-        yield candidate
+        root = pathlib.Path(target)
+        yield from kept_files(root)
+
+
+def kept_files(target):
+    """The Python files under one target that no excluded part names."""
+    found = files_under(target)
+    return [path for path in found if not is_excluded(path, target)]
 
 
 REPORT_ONLY_KINDS = frozenset({"long function", "wide state"})

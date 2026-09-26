@@ -107,9 +107,7 @@ class GrowingStimModels:
             detector_rounds=detector_rounds,
             fault_model_requirement=self.requirement,
         )
-        source_ids = self.identities.register(
-            slicer.catalogs, slicer.catalog_link
-        )
+        source_ids = self.identities.register(slicer.catalogs)
         return slicer, source_ids, round_count
 
 
@@ -120,20 +118,16 @@ class _FaultIdentities:
         self.ids_by_representation: dict = {}
 
     def register(
-        self,
-        catalogs: dict[
-            fault_models.FaultRepresentation, fault_models.FaultCatalog
-        ],
-        catalog_link: Optional[object],
+        self, catalogs: fault_models.FaultCatalogs
     ) -> dict[fault_models.FaultRepresentation, tuple[int, ...]]:
         source_ids = {}
-        for representation, catalog in catalogs.items():
+        for representation, catalog in catalogs.by_representation.items():
             known = self.ids_by_representation.setdefault(representation, {})
             local_ids = []
             for index, detectors in enumerate(catalog.detector_sets):
                 observables = catalog.observable_sets[index]
                 decomposition = _decomposition_identity(
-                    representation, index, catalogs, catalog_link
+                    representation, index, catalogs
                 )
                 identity = (detectors, observables, decomposition)
                 stable_id = known.setdefault(identity, len(known))
@@ -142,13 +136,15 @@ class _FaultIdentities:
         return source_ids
 
 
-def _decomposition_identity(representation, index, catalogs, catalog_link):
-    if catalog_link is None:
+def _decomposition_identity(representation, index, catalogs):
+    if catalogs.link is None:
         return ()
     if representation is not fault_models.FaultRepresentation.PHYSICAL:
         return ()
-    graphlike = catalogs[fault_models.FaultRepresentation.GRAPHLIKE]
-    column = catalog_link.getcol(index)
+    graphlike = catalogs.by_representation[
+        fault_models.FaultRepresentation.GRAPHLIKE
+    ]
+    column = catalogs.link.getcol(index)
     column = column.tocoo()
     components = []
     for component in column.row:

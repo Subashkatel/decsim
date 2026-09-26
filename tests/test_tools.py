@@ -145,6 +145,26 @@ def test_the_one_action_check_fails_a_call_or_sum_passed_as_an_argument(
     assert "busy_arguments.py:6: busy argument" in captured.out
 
 
+def test_a_checkout_under_a_folder_named_tmp_is_still_checked(tmp_path, capsys):
+    """Only the part below the target names a skipped folder.
+
+    A clone under /tmp, as on a CI runner, was skipped whole, and a
+    folder named tmp inside the target is still skipped.
+    """
+    tool = _tool("check_one_action")
+    checkout = tmp_path / "tmp" / "checkout"
+    scratch = checkout / "tmp"
+    scratch.mkdir(parents=True)
+    busy = "def nested(x):\n    return g(h(x))\n"
+    (checkout / "checked.py").write_text(busy)
+    (scratch / "skipped.py").write_text(busy)
+    exit_code = tool.main([str(checkout)])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "checked.py:2: nested call" in captured.out
+    assert "skipped.py" not in captured.out
+
+
 def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
     """The list stays honest: a name nobody tests against is deleted.
 

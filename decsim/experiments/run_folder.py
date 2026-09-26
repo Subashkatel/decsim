@@ -27,8 +27,8 @@ import decsim.build.plan as plan_build
 import decsim.collect as collect
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.experiment as experiment
-import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.frontends.settings as workload_settings
+import decsim.frontends.workload_files as workload_files
 
 RESULTS_DIR = Path("results")
 RESOLVED_FOLDER = "resolved"
@@ -497,7 +497,7 @@ def _write_inputs(inputs_dir: Path, record) -> None:
     A folder recorded again holds its earlier hashes.json, which is the
     record of the inputs and not one of them.
     """
-    circuit_frontend.write_workload(record, inputs_dir)
+    workload_files.write_workload(record, inputs_dir)
     hashes_path = inputs_dir / HASHES_FILE
     hashes = {}
     written = inputs_dir.rglob("*")

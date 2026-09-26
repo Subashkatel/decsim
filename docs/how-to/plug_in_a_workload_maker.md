@@ -107,7 +107,7 @@ each measurement index, as a string, to its one-based round. A
 for. `decsim show` builds the first point, which reads the files, so a
 missing or malformed one stops it with Python's or Stim's own error,
 and an operations file of another schema is refused.
-`decsim.frontends.circuit_frontend.write_workload` writes a Python
+`decsim.frontends.workload_files.write_workload` writes a Python
 maker's workload in this form.
 
 ## Run a live memory from a yaml

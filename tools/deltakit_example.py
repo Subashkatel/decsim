@@ -19,9 +19,9 @@ import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
-import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
+import decsim.frontends.workload_files as workload_files
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
@@ -259,7 +259,7 @@ def _circuit(arguments) -> tuple[stim.Circuit, dict[int, int]]:
     operations_path = point_folder / "operations.json"
     circuit_path = point_folder / "circuit.stim"
     rounds_path = point_folder / "measurement_rounds.json"
-    workload = circuit_frontend.read_workload(
+    workload = workload_files.read_workload(
         operations_path, circuit_path, rounds_path
     )
     physical = workload.physical

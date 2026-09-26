@@ -376,7 +376,7 @@ workload:
   # The files row's keys, instead of function and arguments; paths are
   # read from this file's folder:
   # operations: ops.json           # the operation list, schema decsim.ops/1
-                                   # (frontends/circuit_frontend.py
+                                   # (frontends/workload_files.py
                                    # OPERATION_KEYS); required
   # circuit: history.stim          # a finite physical circuit, with
   # measurement_rounds: rounds.json   # each measurement index's round

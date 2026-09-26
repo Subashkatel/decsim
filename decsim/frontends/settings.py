@@ -18,6 +18,7 @@ from typing import Any, Optional
 import stim
 
 import decsim.frontends.circuit_frontend as circuit_frontend
+import decsim.frontends.workload_files as workload_files
 import decsim.ports as ports
 import decsim.records.workload as workload_records
 import decsim.tables as tables
@@ -228,7 +229,7 @@ class FilesWorkload:
     ) -> workload_records.Workload:
         """The workload the files hold, the same at every sweep point."""
         del sweep_values
-        return circuit_frontend.read_workload(
+        return workload_files.read_workload(
             settings.operations,
             settings.circuit,
             settings.measurement_rounds,

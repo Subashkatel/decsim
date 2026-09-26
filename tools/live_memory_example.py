@@ -16,8 +16,8 @@ import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
-import decsim.frontends.circuit_frontend as circuit_frontend
 import decsim.frontends.settings as workload_settings
+import decsim.frontends.workload_files as workload_files
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
@@ -155,7 +155,7 @@ def _recorded_values(fragments) -> dict:
     """
     if fragments is None:
         return {}
-    physical_path = fragments / circuit_frontend.PHYSICAL_FILE_NAME
+    physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
     physical = _read_json(physical_path)
     recorded = {}
     for name, value in physical.items():
@@ -199,7 +199,7 @@ def _program(
     arguments: argparse.Namespace, parameters: dict
 ) -> circuit_records.RepeatedStimCircuit:
     if arguments.input is not None:
-        return circuit_frontend.read_fragments(arguments.input)
+        return workload_files.read_fragments(arguments.input)
     import decsim.frontends.deltakit as deltakit
 
     return deltakit.memory_rounds(

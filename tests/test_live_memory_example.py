@@ -16,7 +16,7 @@ import stim
 
 import decsim.config as config
 import decsim.experiments.experiment as experiment
-import decsim.frontends.circuit_frontend as circuit_frontend
+import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
 import decsim.producers as producers
 import decsim.records.circuits as circuit_records
@@ -236,7 +236,7 @@ def test_optional_producer_saves_reusable_physical_inputs(
     command = _producer_command(output, noise_model)
     subprocess.run(command, check=True, capture_output=True)
     saved = _saved_fragments(output)
-    parameters = _read_json(saved, circuit_frontend.PHYSICAL_FILE_NAME)
+    parameters = _read_json(saved, workload_files.PHYSICAL_FILE_NAME)
     assert parameters["round_period_microseconds"] == 1.25
     result = _read_json(output, "result.json")
     assert result["terminal_status"] == "complete"
@@ -359,12 +359,12 @@ def _write_fragments(
 ) -> None:
     """The four fragments and physical.json, as the files row reads them."""
     fragments.mkdir(parents=True)
-    for name in circuit_frontend.FRAGMENT_NAMES:
+    for name in workload_files.FRAGMENT_NAMES:
         fragment = getattr(program, name)
         path = fragments / f"{name}.stim"
         fragment.to_file(str(path))
     physical = {"round_period_microseconds": program.round_period_microseconds}
-    physical_path = fragments / circuit_frontend.PHYSICAL_FILE_NAME
+    physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
     physical_text = json.dumps(physical)
     physical_path.write_text(physical_text)
 

@@ -31,9 +31,9 @@ POINT_LOG_SHA256 = "42b473b3cb9c"
 
 def settings(**observation_changes):
     """Gate point 1's settings, with its observation section changed."""
-    from decsim.experiments.experiment import load_experiment
+    import decsim.experiments.experiment as experiment
 
-    config = load_experiment(CONFIG_PATH)
+    config = experiment.load_experiment(CONFIG_PATH)
     shipped = config.point_settings(**POINT)
     changes = {"log_component_io": True, **observation_changes}
     observation = dataclasses.replace(shipped.observation, **changes)

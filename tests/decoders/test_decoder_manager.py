@@ -29,7 +29,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
-from decsim.decoders.decoder_manager import DecoderManager
 
 # a 1 MHz unit clock; these units declare no stage, so the period only
 # has to be a real one
@@ -110,7 +109,7 @@ def _manager(engine, row, formation_by_pool=None, unit_count=1):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
@@ -320,7 +319,7 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    manager = DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
@@ -395,7 +394,7 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
@@ -548,7 +547,7 @@ def _staging_manager(engine, row, *, copies_input: bool):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,

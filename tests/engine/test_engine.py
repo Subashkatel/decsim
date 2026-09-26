@@ -18,7 +18,6 @@ import pathlib
 import random
 
 import decsim.engine as engine_module
-from decsim.engine import Engine
 
 
 def scheduled_order_oracle(requests):
@@ -42,7 +41,7 @@ def record_arrival(ran, arrival_index):
 def test_random_programs_run_in_time_priority_arrival_order():
     rng = random.Random(7)
     for _ in range(200):
-        engine = Engine()
+        engine = engine_module.Engine()
         request_count = rng.randint(1, 30)
         requests = []
         for _ in range(request_count):
@@ -58,7 +57,7 @@ def test_random_programs_run_in_time_priority_arrival_order():
 
 
 def test_an_action_sees_its_own_due_tick_as_now():
-    engine = Engine()
+    engine = engine_module.Engine()
     seen = []
     engine.schedule(5, lambda: seen.append(engine.now))
     engine.schedule(2, lambda: seen.append(engine.now))
@@ -68,7 +67,7 @@ def test_an_action_sees_its_own_due_tick_as_now():
 
 
 def test_actions_scheduled_while_running_join_the_same_order():
-    engine = Engine()
+    engine = engine_module.Engine()
     ran = []
 
     def schedule_two_more():
@@ -90,7 +89,7 @@ def test_actions_scheduled_while_running_join_the_same_order():
 
 
 def test_a_negative_delay_is_refused():
-    engine = Engine()
+    engine = engine_module.Engine()
     try:
         engine.schedule(-1, lambda: None)
     except ValueError as error:
@@ -100,7 +99,7 @@ def test_a_negative_delay_is_refused():
 
 
 def test_action_done_carries_the_tick_after_every_action():
-    engine = Engine()
+    engine = engine_module.Engine()
     heard = []
     engine.action_done.connect(heard.append)
     engine.schedule(2, lambda: None)
@@ -115,11 +114,11 @@ def test_the_engine_runs_the_same_ticks_with_no_listener_at_all():
         engine.schedule(2, lambda: seen.append(engine.now))
         engine.schedule(2, lambda: engine.log("worker", "ready"))
 
-    bare = Engine()
+    bare = engine_module.Engine()
     bare_seen = []
     program(bare, bare_seen)
     bare.run()
-    heard = Engine()
+    heard = engine_module.Engine()
     heard_seen = []
     heard_lines = []
     heard_ticks = []
@@ -143,7 +142,7 @@ def test_an_action_that_raises_stops_the_run_and_leaves_the_rest_queued():
     The failing action is already off the queue, so a second run resumes
     with what is left.
     """
-    engine = Engine()
+    engine = engine_module.Engine()
     failure = RuntimeError("the component is wrong")
     ran = []
 
@@ -217,7 +216,7 @@ def literal_keywords(call, path):
 
 def test_a_descheduled_action_never_runs_and_never_sets_the_time():
     """gem5 EventQueue::deschedule (src/sim/eventq.hh:790)."""
-    engine = Engine()
+    engine = engine_module.Engine()
     ran = []
     first = record_arrival(ran, 0)
     second = record_arrival(ran, 1)

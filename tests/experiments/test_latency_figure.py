@@ -8,24 +8,18 @@ more than one distance.
 
 import pytest
 
+import decsim.experiments.experiment as experiment
 import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
-from decsim.experiments.experiment import load_experiment
-from decsim.experiments.plots import latency_samples_by_distance
-from tests.experiments.yaml_configs import (
-    MINIMAL_CONFIG,
-    measure_point_shot,
-    strong_unit,
-    write_config,
-)
+import tests.experiments.yaml_configs as yaml_configs
 
 
 def wall_clock_config(tmp_path, distances):
-    return write_config(
+    return yaml_configs.write_config(
         tmp_path,
         {
             "weak_decoder": {
-                **MINIMAL_CONFIG["weak_decoder"],
+                **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
                 "kind": "pymatching",
             },
             "sweep": [
@@ -42,8 +36,8 @@ def wall_clock_config(tmp_path, distances):
 
 def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
     config_path = wall_clock_config(tmp_path, [3])
-    config = load_experiment(config_path)
-    measurement = measure_point_shot(
+    config = experiment.load_experiment(config_path)
+    measurement = yaml_configs.measure_point_shot(
         config,
         physical_error_probability=0.001,
         distance=3,
@@ -57,9 +51,9 @@ def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
 
 def test_latency_samples_pool_over_shots_per_distance(tmp_path):
     config_path = wall_clock_config(tmp_path, [3, 5])
-    config = load_experiment(config_path)
+    config = experiment.load_experiment(config_path)
     measurements = [
-        measure_point_shot(
+        yaml_configs.measure_point_shot(
             config,
             physical_error_probability=0.001,
             distance=distance,
@@ -69,7 +63,7 @@ def test_latency_samples_pool_over_shots_per_distance(tmp_path):
         for distance in (3, 5)
         for seed in range(2)
     ]
-    pooled = latency_samples_by_distance(measurements)
+    pooled = plots.latency_samples_by_distance(measurements)
     assert list(pooled) == [3, 5]
     for distance in (3, 5):
         decoded_windows = sum(
@@ -83,18 +77,18 @@ def test_latency_samples_pool_over_shots_per_distance(tmp_path):
 def test_latency_figure_written_only_for_wall_clock_multi_distance(
     tmp_path, monkeypatch
 ):
-    from decsim.experiments.collect_command import run_experiment
+    import decsim.experiments.collect_command as collect_command
 
     monkeypatch.chdir(tmp_path)
 
     config_path = wall_clock_config(tmp_path, [3, 5])
-    run_dir, rows = run_experiment(config_path)
+    run_dir, rows = collect_command.run_experiment(config_path)
     assert (run_dir / "latency.png").exists()
     assert (run_dir / "latency_samples.csv").exists()
 
     # the fixed-latency card is flat in d by construction: no figure,
     # no raw samples
-    card_path = write_config(
+    card_path = yaml_configs.write_config(
         tmp_path,
         {
             "sweep": [
@@ -107,22 +101,21 @@ def test_latency_figure_written_only_for_wall_clock_multi_distance(
             ]
         },
     )
-    card_run_dir, rows = run_experiment(card_path)
+    card_run_dir, rows = collect_command.run_experiment(card_path)
     assert not (card_run_dir / "latency.png").exists()
     assert not (card_run_dir / "latency_samples.csv").exists()
 
 
 def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
     """The cross-tier figure: two runs' latency_samples.csv on one axes."""
-    from decsim.experiments.collect_command import run_experiment
-    from decsim.experiments.plots import combined_latency_plot
+    import decsim.experiments.collect_command as collect_command
 
     monkeypatch.chdir(tmp_path)
 
     weak_config_path = wall_clock_config(tmp_path, [3, 5])
-    weak_run_dir, rows = run_experiment(weak_config_path)
-    strong_decoder_section = strong_unit("belief_matching")
-    strong_path = write_config(
+    weak_run_dir, rows = collect_command.run_experiment(weak_config_path)
+    strong_decoder_section = yaml_configs.strong_unit("belief_matching")
+    strong_path = yaml_configs.write_config(
         tmp_path,
         {
             "escalation": {"kind": "strong_only"},
@@ -137,13 +130,13 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
             ],
         },
     )
-    strong_run_dir, rows = run_experiment(strong_path)
+    strong_run_dir, rows = collect_command.run_experiment(strong_path)
 
     combined = tmp_path / "latency_combined.png"
     weak_samples_path = weak_run_dir / "latency_samples.csv"
     strong_samples_path = strong_run_dir / "latency_samples.csv"
     sample_paths = [weak_samples_path, strong_samples_path]
-    combined_latency_plot(sample_paths, combined)
+    plots.combined_latency_plot(sample_paths, combined)
     assert combined.exists()
 
 

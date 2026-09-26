@@ -31,6 +31,7 @@ import types
 import pytest
 
 import decsim.collect as collect
+import decsim.config as config_module
 import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.observe.flight_recorder as flight_recorder_module
@@ -38,7 +39,6 @@ import decsim.observe.round_events as round_events_module
 import decsim.records.rounds as round_records
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
-from decsim.config import microseconds_to_ticks
 
 
 def kinds_and_ticks(chain):
@@ -160,11 +160,11 @@ def test_a_rounds_chain_is_exact_and_each_event_names_its_cause():
 
     rows = kinds_and_ticks(chain)
     assert rows == [
-        ("EMITTED", microseconds_to_ticks(3.0)),
-        ("BINARY_AVAILABLE", microseconds_to_ticks(8.0)),
-        ("PACKED", microseconds_to_ticks(8.0)),
-        ("CWB_SENT", microseconds_to_ticks(8.0)),
-        ("PUBLISHED", microseconds_to_ticks(12.0)),
+        ("EMITTED", config_module.microseconds_to_ticks(3.0)),
+        ("BINARY_AVAILABLE", config_module.microseconds_to_ticks(8.0)),
+        ("PACKED", config_module.microseconds_to_ticks(8.0)),
+        ("CWB_SENT", config_module.microseconds_to_ticks(8.0)),
+        ("PUBLISHED", config_module.microseconds_to_ticks(12.0)),
     ]
     causes = chained_ids(chain)
     leading = leading_ids(chain)
@@ -190,20 +190,20 @@ def test_a_windows_chain_is_exact_and_its_cause_is_the_last_round_it_read():
 
     rows = kinds_and_ticks(chain)
     assert rows == [
-        ("WINDOW_DATA_COMPLETE", microseconds_to_ticks(15.0)),
-        ("DECODE_QUEUED", microseconds_to_ticks(15.0)),
-        ("UNIT_ASSIGNED", microseconds_to_ticks(15.0)),
-        ("DECODE_STARTED", microseconds_to_ticks(20.0)),
-        ("DECODE_DONE", microseconds_to_ticks(30.0)),
-        ("FRAME_ACCEPTED", microseconds_to_ticks(32.0)),
-        ("FRAME_COMMITTED", microseconds_to_ticks(33.0)),
+        ("WINDOW_DATA_COMPLETE", config_module.microseconds_to_ticks(15.0)),
+        ("DECODE_QUEUED", config_module.microseconds_to_ticks(15.0)),
+        ("UNIT_ASSIGNED", config_module.microseconds_to_ticks(15.0)),
+        ("DECODE_STARTED", config_module.microseconds_to_ticks(20.0)),
+        ("DECODE_DONE", config_module.microseconds_to_ticks(30.0)),
+        ("FRAME_ACCEPTED", config_module.microseconds_to_ticks(32.0)),
+        ("FRAME_COMMITTED", config_module.microseconds_to_ticks(33.0)),
     ]
     by_id = events_by_id(ledger)
     first = chain[0]
     cause = by_id[first.prev_event_id]
     assert cause.kind == "PUBLISHED"
     assert cause.round == 6
-    assert cause.tick == microseconds_to_ticks(15.0)
+    assert cause.tick == config_module.microseconds_to_ticks(15.0)
 
 
 def test_every_emitted_round_reaches_exactly_one_terminal_state():
@@ -241,20 +241,20 @@ def test_a_strong_primary_run_records_the_room_side_landing():
 
     round_rows = ledger.chain(op=1, round=3)
     assert kinds_and_ticks(round_rows) == [
-        ("EMITTED", microseconds_to_ticks(3.0)),
-        ("BINARY_AVAILABLE", microseconds_to_ticks(8.0)),
-        ("PACKED", microseconds_to_ticks(8.0)),
-        ("STORED_SB1", microseconds_to_ticks(15.0)),
+        ("EMITTED", config_module.microseconds_to_ticks(3.0)),
+        ("BINARY_AVAILABLE", config_module.microseconds_to_ticks(8.0)),
+        ("PACKED", config_module.microseconds_to_ticks(8.0)),
+        ("STORED_SB1", config_module.microseconds_to_ticks(15.0)),
     ]
     window_rows = ledger.chain(op=1, window=0)
     assert kinds_and_ticks(window_rows) == [
-        ("WINDOW_DATA_COMPLETE", microseconds_to_ticks(18.0)),
-        ("DECODE_QUEUED", microseconds_to_ticks(18.0)),
-        ("UNIT_ASSIGNED", microseconds_to_ticks(18.0)),
-        ("DECODE_STARTED", microseconds_to_ticks(24.0)),
-        ("DECODE_DONE", microseconds_to_ticks(54.0)),
-        ("FRAME_ACCEPTED", microseconds_to_ticks(58.0)),
-        ("FRAME_COMMITTED", microseconds_to_ticks(59.0)),
+        ("WINDOW_DATA_COMPLETE", config_module.microseconds_to_ticks(18.0)),
+        ("DECODE_QUEUED", config_module.microseconds_to_ticks(18.0)),
+        ("UNIT_ASSIGNED", config_module.microseconds_to_ticks(18.0)),
+        ("DECODE_STARTED", config_module.microseconds_to_ticks(24.0)),
+        ("DECODE_DONE", config_module.microseconds_to_ticks(54.0)),
+        ("FRAME_ACCEPTED", config_module.microseconds_to_ticks(58.0)),
+        ("FRAME_COMMITTED", config_module.microseconds_to_ticks(59.0)),
     ]
     last = window_rows[-1]
     assert last.route == "strong"
@@ -301,12 +301,12 @@ def test_a_release_is_caused_by_the_blocking_operations_commit():
     cause = by_id[decision.prev_event_id]
     assert cause.kind == "FRAME_COMMITTED"
     assert cause.op == 1
-    assert cause.tick == microseconds_to_ticks(33.0)
-    assert decision.tick == microseconds_to_ticks(35.0)
-    assert released.tick == microseconds_to_ticks(35.0)
-    assert issued.tick == microseconds_to_ticks(35.0)
-    assert arrived.tick == microseconds_to_ticks(37.0)
-    assert started.tick == microseconds_to_ticks(37.0)
+    assert cause.tick == config_module.microseconds_to_ticks(33.0)
+    assert decision.tick == config_module.microseconds_to_ticks(35.0)
+    assert released.tick == config_module.microseconds_to_ticks(35.0)
+    assert issued.tick == config_module.microseconds_to_ticks(35.0)
+    assert arrived.tick == config_module.microseconds_to_ticks(37.0)
+    assert started.tick == config_module.microseconds_to_ticks(37.0)
     chain = [decision, released, issued, arrived, started]
     causes = chained_ids(chain)
     leading = leading_ids(chain)
@@ -321,8 +321,8 @@ def test_the_check_refuses_an_effect_stamped_before_its_cause():
     slow run, so the check raises instead of reporting a negative
     latency (flight_recorder.py's _causes_before_effects).
     """
-    cause_tick = microseconds_to_ticks(5.0)
-    effect_tick = microseconds_to_ticks(4.0)
+    cause_tick = config_module.microseconds_to_ticks(5.0)
+    effect_tick = config_module.microseconds_to_ticks(4.0)
     cause = flight_recorder_module.LedgerEvent(
         event_id=0, kind="EMITTED", tick=cause_tick, op=1, round=1
     )
@@ -348,7 +348,7 @@ def test_the_check_refuses_a_round_that_disappeared():
     ledger is used as evidence, so it must fail rather than read as a
     complete run (flight_recorder.py's _one_terminal_per_round).
     """
-    orphan_tick = microseconds_to_ticks(1.0)
+    orphan_tick = config_module.microseconds_to_ticks(1.0)
     orphan = flight_recorder_module.LedgerEvent(
         event_id=0, kind="EMITTED", tick=orphan_tick, op=1, round=1
     )

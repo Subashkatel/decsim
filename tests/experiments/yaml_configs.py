@@ -8,14 +8,14 @@ invoked on demand) and gem5's config split (structure on the component,
 parameters swept around it).
 """
 
-from pathlib import Path
+import pathlib
 
 import yaml
 
 import decsim.collect as collect
 import decsim.experiments.measure as measure
 
-_THIS_FILE = Path(__file__)
+_THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
 _REPOSITORY_ROOT = _TEST_FILE.parents[2]
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
@@ -135,7 +135,7 @@ def memory_workload(rounds_per_shot) -> dict:
     }
 
 
-def write_config(tmp_path, overrides: dict) -> Path:
+def write_config(tmp_path, overrides: dict) -> pathlib.Path:
     raw = dict(MINIMAL_CONFIG)
     raw.update(overrides)
     config_path = tmp_path / "unit_test_config.yaml"
@@ -177,7 +177,7 @@ def online_threshold() -> dict:
 
 def example_tool_config(
     tmp_path, qpu_kind: str, workload: dict, feedback_microseconds=4.0
-) -> Path:
+) -> pathlib.Path:
     """The machine tools/deltakit_example.py and live_memory_example.py build.
 
     Their Python settings as a yaml: the logical reference links with the

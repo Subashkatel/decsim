@@ -7,19 +7,19 @@ same file, so the seed goes into the name before its suffixes
 (one file per traced shot).
 """
 
-from decsim.experiments.measure import trace_path_for_shot
+import decsim.experiments.measure as measure
 
 
 def test_one_traced_shot_keeps_the_path_the_yaml_gave():
     assert (
-        trace_path_for_shot("/tmp/run.trace.json", 0, (0,))
+        measure.trace_path_for_shot("/tmp/run.trace.json", 0, (0,))
         == "/tmp/run.trace.json"
     )
 
 
 def test_several_traced_shots_each_take_their_seed():
-    first = trace_path_for_shot("/tmp/run.trace.json", 0, (0, 3))
-    second = trace_path_for_shot("/tmp/run.trace.json", 3, (0, 3))
+    first = measure.trace_path_for_shot("/tmp/run.trace.json", 0, (0, 3))
+    second = measure.trace_path_for_shot("/tmp/run.trace.json", 3, (0, 3))
 
     assert first == "/tmp/run_seed0.trace.json"
     assert second == "/tmp/run_seed3.trace.json"
@@ -27,12 +27,12 @@ def test_several_traced_shots_each_take_their_seed():
 
 
 def test_the_seed_goes_before_every_suffix_so_gzip_still_opens():
-    path = trace_path_for_shot("/tmp/run.trace.json.gz", 7, (0, 7))
+    path = measure.trace_path_for_shot("/tmp/run.trace.json.gz", 7, (0, 7))
 
     assert path == "/tmp/run_seed7.trace.json.gz"
 
 
 def test_a_path_with_no_suffix_takes_the_seed_at_its_end():
-    path = trace_path_for_shot("/tmp/run", 7, (0, 7))
+    path = measure.trace_path_for_shot("/tmp/run", 7, (0, 7))
 
     assert path == "/tmp/run_seed7"

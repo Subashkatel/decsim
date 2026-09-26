@@ -17,6 +17,7 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
+import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
@@ -24,7 +25,6 @@ import decsim.engine as engine_module
 import decsim.observe.queue_depth as queue_depth
 import decsim.records.decoding as decoding_records
 import tests.declared_run as declared_run
-from decsim.decoders.decoder_manager import DecoderManager
 
 SERVICE_MICROSECONDS = 1.0
 SERVICE_TICKS = config.microseconds_to_ticks(SERVICE_MICROSECONDS)
@@ -49,7 +49,7 @@ def _manager(engine, units, scheduler=None):
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
     router = decoders.CodeRouter(decoder)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
@@ -201,7 +201,7 @@ def test_bulk_strong_is_refused_beside_a_pool_it_does_not_mean():
     scheduler = schedulers.FifoScheduler()
     strong_requests = strong_requests_module.StrongRequests()
     build = functools.partial(
-        DecoderManager,
+        decoder_manager.DecoderManager,
         engine,
         router=router,
         scheduler=scheduler,

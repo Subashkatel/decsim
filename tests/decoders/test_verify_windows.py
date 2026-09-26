@@ -11,17 +11,17 @@ import pytest
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
-from tests.experiments.yaml_configs import strong_unit, write_config
+import tests.experiments.yaml_configs as yaml_configs
 
 
 def _algorithm_spans(tmp_path, check_windows_with: str) -> list:
     """(start, end) ticks of every algorithm stage of a measured_table run."""
-    strong_decoder = strong_unit("measured_table")
+    strong_decoder = yaml_configs.strong_unit("measured_table")
     strong_decoder["strong_decoder"]["device"] = "a100"
     observation = {"check_windows_with": check_windows_with}
     card = {"escalation": {"kind": "strong_only"}, "observation": observation}
     card.update(strong_decoder)
-    config_path = write_config(tmp_path, card)
+    config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
         physical_error_probability=0.001,

@@ -154,9 +154,7 @@ def build_weak_syndrome_round_receiver(
     parts: build_parts.Parts,
 ) -> weak_syndrome_round_receiver.WeakSyndromeRoundReceiver:
     """The weak syndrome buffer's room and landing."""
-    return weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
-        parts.engine, parts.settings.weak_syndrome_buffer
-    )
+    return weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(parts.engine)
 
 
 def build_pauli_frame(parts: build_parts.Parts) -> ports.Frame:

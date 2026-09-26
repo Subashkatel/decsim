@@ -137,7 +137,7 @@ def sender_with(
     links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
     windows = RecordingWindows()
     weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
-        engine, settings
+        engine
     )
     weak_receiver.store = weak_store
     weak_receiver.windows = windows

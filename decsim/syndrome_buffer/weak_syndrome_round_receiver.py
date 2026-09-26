@@ -69,7 +69,6 @@ import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.trace_source as trace_source
 
 # the seat this end is on the path, as detection_events.formed_at names it
@@ -91,13 +90,8 @@ class WeakSyndromeRoundReceiver:
     # the run's placement, which says what the store holds of a landed round
     detection_events = ports.Port(ports.DetectionEventPlacement)
 
-    def __init__(
-        self,
-        engine: engine_module.Engine,
-        settings: syndrome_buffer_settings.SyndromeBufferSettings,
-    ) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
-        self.settings = settings
         # the bits each crossing round will take, by its key, held
         # against the store until its write completes
         self.reserved_bits_by_round: dict = {}

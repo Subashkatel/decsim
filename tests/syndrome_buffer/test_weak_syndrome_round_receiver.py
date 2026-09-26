@@ -90,9 +90,7 @@ def _store(engine, bits=None) -> syndrome_buffer_module.SyndromeBuffer:
 def _receiver_with(engine, store, output=None, detection_events=None):
     """A receiver whose rounds arrive formed, unless a placement is given."""
     windows = _Windows(engine, store)
-    receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
-        engine, store.settings
-    )
+    receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(engine)
     receiver.store = store
     receiver.windows = windows
     if detection_events is None:

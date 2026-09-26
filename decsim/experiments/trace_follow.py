@@ -337,13 +337,25 @@ def _rounds_cover(args: dict, key: str) -> bool:
     if not text:
         return False
     operation, index = _key_parts(key)
-    named = args.get("operation")
-    if named is not None and str(named) != operation:
+    named = _operation_of(args)
+    if named != operation:
         return False
     low, high = trace_file.range_of(text)
     if index < low:
         return False
     return index <= high
+
+
+def _operation_of(args: dict) -> Optional[str]:
+    """The operation an event names: its own, or its window's."""
+    named = args.get("operation")
+    if named is not None:
+        return str(named)
+    window = args.get("window")
+    if window is None:
+        return None
+    operation, _ = _key_parts(window)
+    return operation
 
 
 def _key_parts(key: str) -> tuple:

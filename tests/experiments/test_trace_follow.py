@@ -12,6 +12,8 @@ import pytest
 import decsim.experiments.trace_file as trace_file
 import decsim.experiments.trace_follow as trace_follow
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
+import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
 import tests.observe.gate_point as gate_point
 
@@ -297,6 +299,30 @@ def test_a_round_is_followed_through_a_strong_window_hold(tmp_path):
 
     landed = _row_of(followed, "Decoder unit strong#0", "memory copy")
     assert landed.tick == 24_000_000
+
+
+def test_a_rounds_path_keeps_to_its_own_operation(tmp_path):
+    """Two memory operations each read their rounds 1..6 at once.
+
+    Round 2:1 is held by operation 2's window alone and lands in one
+    unit's memory, however many operations read a round 1.
+    """
+    trace_path = tmp_path / "two_operations.trace.json"
+    operations = [
+        declared_run.memory_operation(1),
+        declared_run.memory_operation(2),
+    ]
+    observation = observe_settings.ObservationSettings(trace=str(trace_path))
+    machine = declared_run.weak_only_run(
+        rounds=6, operations=operations, observation=observation
+    )
+    machine.observation.trace_writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+
+    followed = trace_follow.follow(document, "round", "2:1")
+
+    assert followed.counts.holds == 1
+    assert followed.counts.job_references == 1
 
 
 def test_trace_does_only_what_it_says_it_does():

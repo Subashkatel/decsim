@@ -314,6 +314,7 @@ class TraceWriter:
         """One consumer token keeps the listed rounds alive."""
         args = {
             "holder": _holder_text(holder),
+            "operation": _operation_of(round_keys),
             "rounds": _rounds_text(round_keys),
             "transfer": "reference",
         }
@@ -351,6 +352,7 @@ class TraceWriter:
         thread = f"{store_name} port {port_index}"
         duration = completion_tick - start_tick
         args = {
+            "operation": _operation_of(round_keys),
             "rounds": _rounds_text(round_keys),
             "arrival": arrival_tick,
             "waited_ticks": start_tick - arrival_tick,
@@ -1063,6 +1065,13 @@ def _holder_text(holder) -> str:
         window = window_text(window_key)
         return f"{kind_name} {window}"
     return kind_name
+
+
+def _operation_of(round_keys) -> Optional[int]:
+    """The operation whose rounds these are; None when there are none."""
+    for operation_id, _round_index in round_keys:
+        return operation_id
+    return None
 
 
 def _rounds_text(round_keys) -> str:

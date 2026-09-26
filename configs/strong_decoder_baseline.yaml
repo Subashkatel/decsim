@@ -58,8 +58,8 @@ links:
   weak_buffer_to_weak_decoder: null
   weak_decoder_to_frame: null
   weak_decoder_to_strong_decoder: null
-  frame_to_controller:  null
-  controller_to_qpu:  null
+  frame_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_qpu:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
 
 weak_syndrome_buffer:
   bits: null

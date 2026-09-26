@@ -93,8 +93,9 @@ engine's clock, which is what `engine_clock` is;
 version of this choice.
 
 **The links are the default card.** `logical_reference_profile` prices
-`frame_to_controller` at 4.0 microseconds and `controller_to_qpu` at
-0.15, which is the number the next step checks.
+`frame_to_controller` at no propagation and one 32-bit word a 250 MHz
+cycle, and `controller_to_qpu` at 0.088 microseconds and one 128-bit word
+a cycle, which are the numbers the next step checks.
 
 ## 3. Read the loop closing
 
@@ -122,20 +123,20 @@ for event in machine.observation.command_events.events:
 ```
 
 ```
-frame_to_controller 10.797 -> 14.797 us, 32 bits
-controller_to_qpu 14.797 -> 14.947 us, 128 bits
+frame_to_controller 7.703125 -> 7.707125 us, 32 bits
+controller_to_qpu 7.707125 -> 7.799125 us, 128 bits
 ARRIVED 0.0 us, operation 1
 STARTED 0.0 us, operation 1
-ARRIVED 14.947 us, operation 2
-STARTED 15.4 us, operation 2
+ARRIVED 7.799125 us, operation 2
+STARTED 8.8 us, operation 2
 ```
 
 That is the whole loop. Operation 1's last window committed, the Pauli
-frame decided, and the decision left for the controller at 10.797 as one
-32-bit control bus word. It took the card's 4.0 microseconds to get
-there, the released command took the card's 0.15 more as one 128-bit
-instruction word, and operation 2's command arrived at the QPU at
-14.947, which is 10.797 plus 4.15. Run the same script with `blocked_by`
+frame decided, and the decision left for the controller at 7.703125 as
+one 32-bit control bus word. The word took one 4 ns cycle to cross, the
+released command took the card's 0.088 microseconds plus one 4 ns cycle
+for its 128-bit instruction word, and operation 2's command arrived at
+the QPU at 7.799125, which is 7.703125 plus 0.096. Run the same script with `blocked_by`
 removed and both lines disappear: no operation waits, so no decision
 travels.
 
@@ -154,10 +155,9 @@ against each other.
   (`decsim/links/link_profiles.py`, the two default-payload paths).
 - **The wait is the decision's, not the decode's.** Operation 2 was not
   waiting for a decoder to be free; it was waiting for an answer to
-  travel. Double the propagation latency of the profile's
-  `frame_to_controller` channel, from 4.0 microseconds to 8.0, and the
-  command arrives at 18.947: exactly 4.0 later, with its own hop
-  unchanged.
+  travel. Add 4.0 microseconds to the propagation latency of the
+  profile's `frame_to_controller` channel and the command arrives at
+  11.799125: exactly 4.0 later, with its own hop unchanged.
 
 `tests/links/test_data_through.py` runs this same workload as a test, on
 a measured decoder rather than a card, and asserts the two transfers and

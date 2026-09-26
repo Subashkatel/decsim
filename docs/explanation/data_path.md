@@ -39,8 +39,9 @@ Between two components a call is not just a call: it is a transfer with
 a card. The card gives the path a propagation latency, optionally a
 bandwidth in bits per cycle of a named clock, the channel it shares with
 other paths, and a per-transfer setup cost. `LINK_FABRICS` has four rows:
-`logical_reference`, the default, which charges propagation only and
-never queues; `bandwidth_limited`, which gives the channels finite
+`logical_reference`, the default, which charges each hop a latency plus
+its bits over a rate, both from a system of decsim's scale;
+`bandwidth_limited`, which gives the channels finite
 rates provisioned from the code geometry; and `roce_v2_cpu` and
 `roce_v2_gpu`, the default card with the strong tier's off-board hops
 priced by a measured round trip ([D14](decisions.md#d14-the-strong-tiers-off-board-path-can-be-priced-by-a-measured-round-trip)).
@@ -57,11 +58,18 @@ the referents it comes from.
 The paths are the `LinkPath` values in `decsim/records/transfers.py`.
 The default latencies below are the `logical_reference` card in
 `decsim/links/link_profiles.py`; they are the card's numbers, and a
-config that sets its own replaces them. Six of them (hops 1, 4, 6, 7, 8
-and 9) carry the source string "Khalid 2511.10633 Table I" in the card:
-one table's numbers, reported here as the card's facts and not as a
-derivation, which [The design decisions](decisions.md) D5 flags as open
-work.
+config that sets its own replaces them. The weak loop is Yang
+arXiv:2605.04892 Table I hop for hop, a d=3 surface code whose readout
+modules, decoder FPGA and pulse generators the table times one by one
+at 250 MHz; the strong node is one inter-chassis hop away, Caune
+arXiv:2410.05202 Fig. 1a stage F; the on-chip hops are one 250 MHz
+cycle, a stated assumption, because no referent measures a wire inside
+a chip. A bounded hop moves a 32-bit word a cycle on the decoder's bus
+and on chip (Caune lines 998-1008), a 128-bit instruction word a cycle
+into the pulse generator (QubiC arXiv:2404.15260), and 100 Gb/s off
+board (Backline arXiv:2609.09270 lines 1229-1230). Hops 1 and 7 are
+unbounded, because every qubit has its own readout channel and every
+graph edge its own link.
 
 ### 1. `qpu_to_controller`
 
@@ -97,11 +105,12 @@ against and the last closes on the data readout
 A bounded link therefore serializes the last round longer than the rest.
 
 Move, off board, and the landing is also a copy into the controller's
-intake register. Default latency 0.15 microseconds. The hop is modelled
-on measurement signals classified into bits and then sent to a
-workstation over a low-latency link, which is what
-`decsim/observe/data_movement.py` cites Google arXiv:2408.13687 for,
-with the classification itself priced separately
+intake register. Default latency 48 nanoseconds, unbounded: Yang's ADC
+chip 12, IQ demodulation 32 and classification 4 nanoseconds, counted
+from the end of the acquisition window, which the round period holds.
+The default card therefore includes turning the signal into bits; a
+config's own card times the wire alone and prices the classification
+separately
 (`readout_to_bits_cycles`, whose
 sources are in `decsim/controller/controller.py`: 40 nanoseconds of
 in-FPGA discrimination, Fermilab arXiv:2406.18807, and 20 nanoseconds to
@@ -133,10 +142,11 @@ Move, on board, with a copy into the weak syndrome buffer's record at the landin
 round occupies a slot when its bits are in the store, and it is readable
 at that same instant; the room it will need is reserved before the wire
 is used, so the store can still refuse a round before it leaves the
-controller. Default latency 0.04 microseconds, taken from Caune arXiv:2410.05202 Fig. 1a
-stage D, "result message handled and prepared for broadcast", 40
-nanoseconds. The weak syndrome buffer sits with the controller, which is why that stage
-is the right one.
+controller. Default latency 18 nanoseconds and a 32-bit word a cycle:
+half of the 36 nanoseconds of digital communication in Yang's Table I,
+which cover the loop's two links (readout module to decoder FPGA, and
+decoder FPGA to the pulse side) and give no split. The weak syndrome
+buffer sits on the decoder chip, so this is the first of the two.
 
 ### 3. `controller_to_strong_buffer`
 
@@ -155,7 +165,7 @@ escalated window's rounds on hop 5.
 What crosses: the same round, the same bit count.
 
 Move, off board, with a copy into the strong syndrome buffer at the landing. Default
-latency 0.26 microseconds, from Caune Fig. 1a stage F, the inter-node
+latency 0.26 microseconds and 100 Gb/s, from Caune Fig. 1a stage F, the inter-node
 broadcast between control system chassis, 240 to 260 nanoseconds at the
 stated worst case. It is off board because the strong tier is a separate
 machine, room side in this tree, which is given its assigned data:
@@ -193,7 +203,10 @@ nothing at all and books a reference instead: the unit reads the rounds
 where they sit, which is what a decoder with its input on chip does,
 and the same comment cites AFS for it (arXiv:2001.06598,
 `2001.06598.txt` lines 520-535: "the processing elements can directly
-access the data stored on-chip"). Default latency 2.0 microseconds.
+access the data stored on-chip"). Default latency one 250 MHz cycle and
+a 32-bit word a cycle, a stated assumption: Yang keep the syndrome in
+registers, fully pipelined (lines 1273-1275), and a compiled on-chip
+memory moves one 32-bit word per access.
 
 ### 5. `weak_decoder_to_strong_decoder`
 
@@ -217,9 +230,9 @@ rounds is assigned to the strong decoder at the switch, after both
 boundaries are determined).
 
 Move, off board, with a copy into the strong syndrome buffer at the
-landing. Default latency 0.5 microseconds. This is the one card number
-in the fabric that names no paper: its source string reads "repository
-weak-to-strong model choice".
+landing. Default latency 0.26 microseconds and 100 Gb/s: the strong
+node is one inter-chassis hop from the weak chip, Caune Fig. 1a stage F,
+the same kind of hop as hop 3.
 
 ### 6. `strong_buffer_to_strong_decoder`
 
@@ -238,7 +251,7 @@ These timing-only rounds are counted there and occupy no decoder-unit input
 memory. No weak-buffer hop or escalation is involved.
 
 Window input moves on board, with the same copy into the unit's memory. Default
-latency 2.0 microseconds. It is on board rather than off board because
+latency one 250 MHz cycle and a 32-bit word a cycle, as hop 4. It is on board rather than off board because
 the rounds already crossed boards into the strong syndrome buffer, at
 hop 3 or hop 5: the strong syndrome buffer sits beside the strong
 decoder.
@@ -265,7 +278,10 @@ and their creation described) and how
 `decsim/windows/boundary_payloads.py` cites Bombin arXiv:2303.04846 for
 bounding the update to a small number of check generators.
 
-Move, on chip. Default latency 0.5 microseconds. It is on chip because
+Move, on chip. Default latency one 250 MHz cycle, unbounded: Helios
+gives every graph edge its own link in one clock domain
+(arXiv:2301.08419 lines 764-769 and 801), so the seam's detectors cross
+in parallel. It is on chip because
 one decoder's boundary reaches another through shared memory the
 processing elements write, which
 `decsim/observe/data_movement.py` cites Helios arXiv:2301.08419 for.
@@ -285,7 +301,9 @@ is a different card.
 
 Both are moves. The weak one is on board, because the frame is the
 controller's; the strong one is off board, because the strong decoder is
-not. Default latency 1.0 microseconds each. The strong answer's way home
+not. Default latency 18 nanoseconds and a 32-bit word a cycle for the
+weak one, the second half of Yang's digital communication, and 0.26
+microseconds and 100 Gb/s for the strong one, Caune's stage F. The strong answer's way home
 runs through the chip's window side before it leaves: the decoder
 manager returns the result to the verdict (`accept_strong_result` in
 `decsim/windows/window_commits.py`), the committer publishes it, and
@@ -308,8 +326,10 @@ gem5 bills a transfer to the port it left by (`packet.hh:424-431`).
 
 What crosses: a decision, no data. The card charges one 32-bit control
 bus word, the decoder sequencer's WISHBONE interface width (Caune
-arXiv:2410.05202, Methods). Move, on chip, default latency 4.0
-microseconds.
+arXiv:2410.05202, Methods). Move, on chip, no propagation and a 32-bit
+word a cycle: the frame sits in the controller and hands the core one
+32-bit word with a ready signal (QubiC arXiv:2404.15260 lines 186-190),
+so the hop costs that word's one cycle.
 
 ### 11. `controller_to_qpu`
 
@@ -324,7 +344,11 @@ processor's issue pipeline from the decision at the core to the pulse
 trigger, 8 cycles traced on QubiC's core in `configs/reference.yaml`,
 against QICK's measured 16 clocks for the conditional evaluation and
 the jump and 20 for the next pulse (arXiv:2110.00557 lines 893-900).
-Move, off board, default latency 0.15 microseconds.
+Move, off board, default latency 88 nanoseconds and a 128-bit word a
+cycle: Yang's trigger propagation to the pulse generator 16, waveform
+generation 32 and DAC chip 40 nanoseconds (QICK measures a 45
+nanosecond DAC). The coax down to the QPU is outside Yang's
+measurement and no source gives it.
 
 ## Why the copies are where they are
 

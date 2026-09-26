@@ -188,10 +188,19 @@ def _parallel_variant_card(run_both_at_once) -> dict:
         "clock": "fridge",
         "bits_per_cycle": None,
     }
+    # the weak input waits two microseconds, so a sibling submitted at
+    # weak readiness is live in the strong side when the weak verdict
+    # arrives and a confident window cancels it there
+    two_microseconds = {
+        "latency_cycles": 500,
+        "clock": "fridge",
+        "bits_per_cycle": None,
+    }
     links = {
         "qpu_to_controller": one_fridge_cycle,
         "controller_to_weak_buffer": one_fridge_cycle,
         "controller_to_strong_buffer": one_fridge_cycle,
+        "weak_buffer_to_weak_decoder": two_microseconds,
     }
     strong_decoder = strong_unit("belief_matching")
     card = {"escalation": escalation, "links": links}

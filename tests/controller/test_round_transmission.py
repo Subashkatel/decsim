@@ -46,8 +46,9 @@ WBD_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 # 64 bits at 1000 bits per microsecond, one serialization on the wire
 ROUND_BITS = 64
 SERIALIZATION_TICKS = config.microseconds_to_ticks(0.064)
-# the reference card's controller_to_weak_buffer, Caune's 40 ns stage
-REFERENCE_CWB_TICKS = config.microseconds_to_ticks(0.04)
+# a pure-delay controller_to_weak_buffer, so a window round publishes
+# one fixed store hop after it is sent
+STORE_HOP_TICKS = config.microseconds_to_ticks(0.04)
 
 
 class RecordingWindows:
@@ -119,7 +120,8 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
     """The reference card with a 5 us weak_buffer_to_weak_decoder.
 
     With a rate the channel is bandwidth bounded (reviewer A's bounded
-    wbd shape); without one it is a pure delay.
+    wbd shape); without one it is a pure delay. The store hop in front
+    of it is a pure delay of STORE_HOP_TICKS.
     """
     reference = link_profiles.logical_reference_profile()
     edge = reference.weak_buffer_to_weak_decoder
@@ -137,7 +139,16 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
     path = link_settings.PathSettings(
         channel, edge.default_payload, edge.actual_payload_source
     )
-    return dataclasses.replace(reference, weak_buffer_to_weak_decoder=path)
+    store_hop = reference.controller_to_weak_buffer
+    store_channel = link_settings.ChannelSettings(
+        store_hop.channel.name, STORE_HOP_TICKS, None, "test"
+    )
+    store_path = dataclasses.replace(store_hop, channel=store_channel)
+    return dataclasses.replace(
+        reference,
+        weak_buffer_to_weak_decoder=path,
+        controller_to_weak_buffer=store_path,
+    )
 
 
 def transmitter_with(engine, profile, windows=None):
@@ -236,7 +247,7 @@ def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
     "memory_send_ticks, memory_delivery, input_delivery, wire_order",
     [
         (0, 5_064_000, 5_128_000, [1, 9]),
-        (REFERENCE_CWB_TICKS, 5_168_000, 5_104_000, [9, 1]),
+        (STORE_HOP_TICKS, 5_168_000, 5_104_000, [9, 1]),
     ],
 )
 def test_two_routes_take_one_wire_in_the_order_they_reach_it(

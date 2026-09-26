@@ -381,9 +381,11 @@ def _protected_machine(
         feedback_microseconds,
     )
     instruction_ticks = config.microseconds_to_ticks(instruction_microseconds)
+    # a pure delay: the instruction's time is its latency and nothing else
     channel = dataclasses.replace(
         settings.links.controller_to_qpu.channel,
         propagation_latency_ticks=instruction_ticks,
+        capacity=None,
     )
     path = dataclasses.replace(
         settings.links.controller_to_qpu, channel=channel

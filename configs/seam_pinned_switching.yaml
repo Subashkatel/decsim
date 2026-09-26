@@ -23,8 +23,8 @@ links:
   decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
   weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
   strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  frame_to_controller:  null
-  controller_to_qpu:  null
+  frame_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_qpu:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
 
 weak_decoder:
   kind: pymatching

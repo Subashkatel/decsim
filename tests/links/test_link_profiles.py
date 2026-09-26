@@ -1,17 +1,20 @@
 """The number cards carry their sources' numbers.
 
-Sources: Khalid et al. 2511.10633 Table I for the reference latencies;
-Caune et al.
-2410.05202 (a 32-bit bus word) and Fruitwala et al. 2404.15260 (a 128-bit
-instruction word) for the default payloads; the provisioning rule of the
-bandwidth card (each path carries its nominal traffic in one commit
-region, ns-3's per-device DataRate); gem5-Aladdin's setup cost (Shao et
-al., MICRO 2016) for with_transfer_overhead; Backline 2609.09270
-Table III, the CPU and GPU echo rows, for the two measured RoCE v2 rows.
+Sources: Yang et al. 2605.04892 Table I for the reference card's weak
+loop, Caune et al. 2410.05202 Fig. 1a F for its strong node, and ns-3's
+txTime, bits over the DataRate (point-to-point-net-device.cc:243), for
+its law; Caune et al. 2410.05202 (a 32-bit bus word) and Fruitwala et al.
+2404.15260 (a 128-bit instruction word) for the default payloads; the
+provisioning rule of the bandwidth card (each path carries its nominal
+traffic in one commit region, ns-3's per-device DataRate); gem5-Aladdin's
+setup cost (Shao et al., MICRO 2016) for with_transfer_overhead; Backline
+2609.09270 Table III, the CPU and GPU echo rows, for the two measured
+RoCE v2 rows.
 """
 
 import ast
 import fractions
+import math
 import pathlib
 import re
 
@@ -82,36 +85,43 @@ def path_names():
     return names
 
 
-def test_the_reference_card_carries_its_sources_latencies():
+def test_a_reference_hop_delivers_its_latency_after_its_bits_serialize():
+    """ns-3: delivery is txTime, bits over the rate, plus the delay.
+
+    point-to-point-net-device.cc:243 times the packet from its size and
+    the DataRate, and the receiver has it the channel delay later. A d=11
+    round of 120 bits on the weak store's hop, rounded up to whole ticks.
+    """
     profile = link_profiles.logical_reference_profile()
-    assert latencies_of(profile) == {
-        "qpu_to_controller": config.microseconds_to_ticks(0.15),
-        "controller_to_weak_buffer": config.microseconds_to_ticks(0.04),
-        "controller_to_strong_buffer": config.microseconds_to_ticks(0.26),
-        "weak_buffer_to_weak_decoder": config.microseconds_to_ticks(2.0),
-        "weak_decoder_to_strong_decoder": config.microseconds_to_ticks(0.5),
-        "strong_buffer_to_strong_decoder": config.microseconds_to_ticks(2.0),
-        "weak_decoder_to_frame": config.microseconds_to_ticks(1.0),
-        "decoder_to_decoder": config.microseconds_to_ticks(0.5),
-        "strong_decoder_to_frame": config.microseconds_to_ticks(1.0),
-        "frame_to_controller": config.microseconds_to_ticks(4.0),
-        "controller_to_qpu": config.microseconds_to_ticks(0.15),
-    }
+    weak_store = profile.controller_to_weak_buffer.channel
+    engine = decsim.engine.Engine()
+    channel = channel_module.Channel(weak_store, engine)
+    framed = channel_module.FramedPayload(120)
+    delivered = []
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+    transfer = delivered[0]
+    rate = weak_store.capacity.exact_aggregate_bits_per_microsecond()
+    exact_ticks = 120 * config.TICKS_PER_MICROSECOND / rate
+    serialization_ticks = math.ceil(exact_ticks)
+    latency_ticks = weak_store.propagation_latency_ticks
+    assert transfer.delivery_ticks == serialization_ticks + latency_ticks
 
 
-def test_the_reference_card_is_unbounded_on_every_path():
+def test_the_reference_card_leaves_unbounded_only_the_parallel_hops():
+    """Readout and the seam move every bit at once; the rest serialize.
+
+    Each qubit has its own demodulation channel (QubiC 2404.15260 lines
+    709-715) and each graph edge its own link (Helios 2301.08419 lines
+    764-769), so those two hops carry no rate.
+    """
     profile = link_profiles.logical_reference_profile()
-    assert profile.qpu_to_controller.channel.capacity is None
-    assert profile.controller_to_weak_buffer.channel.capacity is None
-    assert profile.controller_to_strong_buffer.channel.capacity is None
-    assert profile.weak_buffer_to_weak_decoder.channel.capacity is None
-    assert profile.weak_decoder_to_strong_decoder.channel.capacity is None
-    assert profile.strong_buffer_to_strong_decoder.channel.capacity is None
-    assert profile.weak_decoder_to_frame.channel.capacity is None
-    assert profile.decoder_to_decoder.channel.capacity is None
-    assert profile.strong_decoder_to_frame.channel.capacity is None
-    assert profile.frame_to_controller.channel.capacity is None
-    assert profile.controller_to_qpu.channel.capacity is None
+    unbounded = []
+    for path in transfer_records.LinkPath:
+        path_settings = profile.path_settings(path)
+        if path_settings.channel.capacity is None:
+            unbounded.append(path.value)
+    assert unbounded == ["qpu_to_controller", "decoder_to_decoder"]
     assert profile.profile_name == "logical_reference"
     assert profile.qpu_to_controller.excludes_receiver_processing is False
 
@@ -404,27 +414,45 @@ def test_the_setup_cost_lands_on_the_two_decoder_input_paths():
     assert profile.profile_name == "logical_reference+transfer_overhead"
 
 
-def test_the_reference_card_prices_the_two_controller_to_buffer_hops():
-    """Caune's per-hop stages: the intra-unit write, and the crossing.
+def test_the_reference_weak_loop_is_yangs_control_electronics():
+    """Yang 2605.04892 Table I lines 1053-1061, the loop's links.
 
-    The weak syndrome buffer sits with the controller, so its write is Fig. 1a
-    stage D, the 40 ns the control system takes to handle a result
-    message and prepare it for broadcast; strong syndrome buffer sits at room
-    temperature, so its write leaves the chassis on stage F, the 240 to
-    260 ns inter-node broadcast, taken at the caption's stated worst
-    case (arXiv:2410.05202, Fig. 1a).
+    Readout 12 + 32 + 4 ns, the two digital links 36 ns, and trigger,
+    waveform and DAC 16 + 32 + 40 ns: the 180 ns control-electronics
+    subtotal less the 8 ns backplane logic, which is the controller's
+    own decision work and not a hop.
     """
     profile = link_profiles.logical_reference_profile()
-    weak_store = profile.controller_to_weak_buffer
-    strong_store = profile.controller_to_strong_buffer
-    weak_ticks = config.microseconds_to_ticks(0.04)
-    strong_ticks = config.microseconds_to_ticks(0.26)
-    weak_source = weak_store.channel.configuration_source
-    strong_source = strong_store.channel.configuration_source
-    assert weak_store.channel.propagation_latency_ticks == weak_ticks
-    assert strong_store.channel.propagation_latency_ticks == strong_ticks
-    assert "Caune 2410.05202 Fig. 1a D" in weak_source
-    assert "Caune 2410.05202 Fig. 1a F" in strong_source
+    loop_paths = (
+        profile.qpu_to_controller,
+        profile.controller_to_weak_buffer,
+        profile.weak_decoder_to_frame,
+        profile.controller_to_qpu,
+    )
+    loop_ticks = 0
+    for path_settings in loop_paths:
+        loop_ticks += path_settings.channel.propagation_latency_ticks
+    control_electronics_microseconds = 0.180
+    backplane_logic_microseconds = 0.008
+    loop_microseconds = (
+        control_electronics_microseconds - backplane_logic_microseconds
+    )
+    assert loop_ticks == config.microseconds_to_ticks(loop_microseconds)
+
+
+def test_every_hop_to_or_from_the_strong_node_is_one_chassis_crossing():
+    """Caune 2410.05202 Fig. 1a F, the inter-chassis hop, at 260 ns."""
+    profile = link_profiles.logical_reference_profile()
+    crossings = (
+        profile.controller_to_strong_buffer,
+        profile.weak_decoder_to_strong_decoder,
+        profile.strong_decoder_to_frame,
+    )
+    crossing_ticks = config.microseconds_to_ticks(0.26)
+    for path_settings in crossings:
+        channel = path_settings.channel
+        assert channel.propagation_latency_ticks == crossing_ticks
+        assert "Caune 2410.05202 Fig. 1a F" in channel.configuration_source
 
 
 def test_a_run_without_a_card_uses_the_reference_card():
@@ -544,47 +572,22 @@ def _named_where(sources: dict, holds) -> list:
     return names
 
 
-def test_every_reference_latency_cites_a_paper_or_says_it_is_a_choice():
-    """A number on the card carries where it came from.
-
-    Ten of the eleven latencies are card facts read off a published
-    table, so each names its arXiv identifier; the weak-to-strong
-    selection hop has no referent on disk and says so instead of
-    borrowing the authority of one.
-    """
+def test_every_reference_number_cites_a_paper():
+    """Each latency and each rate on the card names its arXiv source."""
     profile = link_profiles.logical_reference_profile()
-    sources = sources_of(profile)
-    cited = _named_where(sources, _cites_a_paper)
-    declared = _named_where(sources, _declares_a_choice)
-    assert declared == ["weak_decoder_to_strong_decoder"]
-    assert len(cited) == 10
-
-
-KHALID_TABLE = "Khalid 2511.10633 Table I "
-
-
-def _khalid_symbol(source: str) -> str:
-    """The Table I row symbol one source reads, or an empty string."""
-    if not source.startswith(KHALID_TABLE):
-        return ""
-    rest = source[len(KHALID_TABLE) :]
-    words = rest.split()
-    return words[0].rstrip(",")
-
-
-def test_the_khalid_latencies_name_the_table_row_they_are_read_from():
-    """Five hops take a Khalid Table I row; each names the row's symbol."""
-    profile = link_profiles.logical_reference_profile()
-    sources = sources_of(profile)
-    symbols = {}
-    for name, source in sources.items():
-        symbols[name] = _khalid_symbol(source)
-    assert symbols["qpu_to_controller"] == "tqc"
-    assert symbols["weak_buffer_to_weak_decoder"] == "tcd"
-    assert symbols["strong_buffer_to_strong_decoder"] == "tcd"
-    assert symbols["weak_decoder_to_frame"] == "tdo"
-    assert symbols["strong_decoder_to_frame"] == "tdo"
-    assert symbols["decoder_to_decoder"] == "tdd"
+    sources_by_path = sources_of(profile)
+    path_sources = sources_by_path.values()
+    sources = list(path_sources)
+    for path in transfer_records.LinkPath:
+        path_settings = profile.path_settings(path)
+        capacity = path_settings.channel.capacity
+        if capacity is not None:
+            sources.append(capacity.source)
+    uncited = []
+    for source in sources:
+        if not _cites_a_paper(source):
+            uncited.append(source)
+    assert uncited == []
 
 
 # The hops the measured RoCE v2 rows reprice: the write into syndrome
@@ -716,16 +719,22 @@ def test_the_gpu_rows_strong_side_sources_cite_backline():
     assert declared == []
 
 
-def test_the_instruction_hops_cite_the_rows_their_latencies_come_from():
-    """Khalid 2511.10633 Table I: toc 4 us, tcq 0.15 us.
+def test_an_instruction_hop_moves_its_word_in_one_cycle():
+    """QubiC 2404.15260: a 32-bit result word, a 128-bit instruction.
 
-    The payload of these hops is a word width from other papers, so the
-    latency and the payload each name their own source.
+    Each word crosses its hop whole, one per 250 MHz cycle, 4000 ticks.
     """
     profile = link_profiles.logical_reference_profile()
-    sources = sources_of(profile)
-    assert "Table I toc" in sources["frame_to_controller"]
-    assert "Table I tcq" in sources["controller_to_qpu"]
+    instruction_paths = (
+        profile.frame_to_controller,
+        profile.controller_to_qpu,
+    )
+    for path_settings in instruction_paths:
+        word_bits = path_settings.default_payload.aggregate_bits
+        capacity = path_settings.channel.capacity
+        rate = capacity.exact_aggregate_bits_per_microsecond()
+        word_ticks = word_bits * config.TICKS_PER_MICROSECOND / rate
+        assert word_ticks == 4000
 
 
 def test_a_coprocessor_backline_did_not_echo_from_is_refused():

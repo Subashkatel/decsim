@@ -809,6 +809,122 @@ def test_separate_terminal_emitters_preserve_the_complete_record(
     assert result.logical_observables == expected_prediction
 
 
+def test_a_timing_only_terminal_fragment_reads_the_round_out_whole():
+    """The split last round crosses as the unsplit one: 17 raw, 12 events.
+
+    The checks fragment reads 8 bits and the terminal fragment the 9
+    data qubits, and the controller forms the round's 8 and 4 events
+    into one round of 12, as a three-round operation's last round is.
+    """
+    source = syndrome_devices.TimingOnlyDevice(CIRCUIT_LESS_CODE)
+    split = _circuit_less_terminal_run(source, (0,), is_split=True)
+    source = syndrome_devices.TimingOnlyDevice(CIRCUIT_LESS_CODE)
+    whole = _circuit_less_terminal_run(source, (0,), is_split=False)
+
+    assert split.terminal_status == "complete"
+    assert _payload_bits_on(split, "qpu_to_controller") == [8, 8, 8, 9]
+    assert _payload_bits_on(whole, "qpu_to_controller") == [8, 8, 17]
+    split_events = _payload_bits_on(split, "controller_to_weak_buffer")
+    whole_events = _payload_bits_on(whole, "controller_to_weak_buffer")
+    assert split_events == whole_events == [4, 8, 12]
+
+
+@pytest.mark.parametrize("is_split", [False, True])
+def test_a_payload_per_patch_reads_each_patch_out_whole(is_split: bool):
+    """Two patches, one payload each: 17 raw bits each on the last round.
+
+    The operation's declared slots are the ones its payloads fill, so
+    its last round reads the data out; split, the checks leave two
+    slots and the terminal fragment fills them with 9 data bits a patch.
+    """
+    source = syndrome_devices.SyndromeBitDevice(
+        CIRCUIT_LESS_CODE, one_payload_per_patch=True
+    )
+    result = _circuit_less_terminal_run(source, (0, 1), is_split=is_split)
+    last_round_bits = [17, 17]
+    if is_split:
+        last_round_bits = [8, 8, 9, 9]
+
+    assert result.terminal_status == "complete"
+    readouts = _payload_bits_on(result, "qpu_to_controller")
+    assert readouts == [8, 8, 8, 8] + last_round_bits
+
+
+CIRCUIT_LESS_CODE = code_geometry.SurfaceCodeModel(distance=3)
+
+
+def _circuit_less_terminal_run(
+    source, patches: tuple, is_split: bool
+) -> result_records.RunResult:
+    """Three rounds of stream 100 on the patches, on a circuit-less source."""
+    owner = program_records.Operation(100, "memory", patches, patches=patches)
+    operations, counts = _three_stream_rounds(owner, is_split)
+    policy = round_policies.PerOperationRounds(counts)
+    workload = workload_settings.WorkloadSettings(
+        operations=operations, decode_operations=(owner,), rounds_policy=policy
+    )
+    qpu = qpu_settings.QpuSettings(distance=3, device=source)
+    clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=decoder
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    return machine.run()
+
+
+def _three_stream_rounds(
+    owner: program_records.Operation, is_split: bool
+) -> tuple:
+    """(operations, round counts) of three rounds of the owner's stream.
+
+    Each operation declares the fragment slots its payloads fill, one
+    payload a patch. Split: two rounds, then the last round's checks in
+    the first half of the slots and its data readout as the terminal
+    fragment in the second.
+    """
+    payload_count = len(owner.patches)
+    memory = dataclasses.replace(
+        owner,
+        id=1,
+        name="memory",
+        stream_id=100,
+        stream_offset=0,
+        syndrome_fragment_index=0,
+        syndrome_fragment_count=payload_count,
+    )
+    if not is_split:
+        return (memory,), {100: 3, 1: 3}
+    split_count = 2 * payload_count
+    checks = dataclasses.replace(
+        memory,
+        id=2,
+        name="last checks",
+        stream_offset=2,
+        predecessors=(1,),
+        syndrome_fragment_count=split_count,
+    )
+    readout = dataclasses.replace(
+        checks,
+        id=3,
+        name="data readout",
+        predecessors=(2,),
+        finalizes_stream_round=True,
+        syndrome_fragment_index=payload_count,
+    )
+    return (memory, checks, readout), {100: 3, 1: 2, 2: 1, 3: 0}
+
+
+def _payload_bits_on(result: result_records.RunResult, path: str) -> list:
+    """The payload of every transfer the run booked on one path, in order."""
+    bits = []
+    for transfer in result.link_traffic["transfers"]:
+        if transfer["path"] == path:
+            bits.append(transfer["payload_bits"])
+    return bits
+
+
 @pytest.mark.parametrize("placement", ["controller", "decoder"])
 @pytest.mark.parametrize("basis", ["X", "Z"])
 def test_deltakit_bell_memory_uses_shared_live_execution(

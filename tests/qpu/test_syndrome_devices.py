@@ -142,20 +142,84 @@ def test_one_payload_per_patch_when_asked():
     assert payloads[1].operation_id == 1
 
 
-def test_the_timing_only_source_cannot_finalize_a_stream_round():
-    operation = program_records.Operation(id=1, name="tail", qubits=(0,))
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    timing_only = syndrome_devices.TimingOnlyDevice(code)
-    with pytest.raises(ValueError, match="finalize"):
-        timing_only.finalize_stream_round(operation, 3)
+def last_syndrome_fragment() -> program_records.Operation:
+    """Round 5 of stream "s" split in two: the checks first, of two slots."""
+    return program_records.Operation(
+        id=8,
+        name="last syndrome",
+        qubits=(2,),
+        patches=(7,),
+        stream_id="s",
+        stream_offset=4,
+        syndrome_fragment_index=0,
+        syndrome_fragment_count=2,
+    )
 
 
-def test_the_fake_bit_source_cannot_finalize_a_stream_round():
-    operation = program_records.Operation(id=1, name="tail", qubits=(0,))
+def data_readout_fragment() -> program_records.Operation:
+    """The terminal fragment that finalizes round 5 of stream "s"."""
+    return program_records.Operation(
+        id=9,
+        name="data readout",
+        qubits=(2,),
+        patches=(7,),
+        stream_id="s",
+        stream_offset=4,
+        finalizes_stream_round=True,
+        syndrome_fragment_index=1,
+        syndrome_fragment_count=2,
+    )
+
+
+def test_a_last_round_split_in_two_keeps_the_readout_for_its_fragment():
+    """The checks fragment is 8 bits; the finalizer brings the 9 data bits."""
     code = code_geometry.SurfaceCodeModel(distance=3)
-    fake_bits = syndrome_devices.SyndromeBitDevice(code, seed=1)
-    with pytest.raises(ValueError, match="finalize"):
-        fake_bits.finalize_stream_round(operation, 3)
+    device = syndrome_devices.TimingOnlyDevice(code)
+    checks = last_syndrome_fragment()
+    device.begin_operation(checks, 1, 5, round_period_ticks=1)
+
+    payload = first_payload(device, checks, 1)
+
+    assert payload == round_records.QPUReadout(
+        "s", (7,), 5, size_bits=8, event_bits=8
+    )
+
+
+def test_the_timing_only_finalizer_emits_the_data_readout_as_a_fragment():
+    """9 data qubits raw, closing the last 4 of the round's 12 events."""
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.TimingOnlyDevice(code)
+    readout = data_readout_fragment()
+
+    (payload,) = device.finalize_stream_round(readout, 5)
+
+    assert payload == round_records.QPUReadout(
+        "s", (7,), 5, size_bits=9, event_bits=4
+    )
+
+
+def test_a_fake_bit_last_round_split_in_two_draws_the_checks_alone():
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    checks = last_syndrome_fragment()
+    device.begin_operation(checks, 1, 5, round_period_ticks=1)
+
+    payload = first_payload(device, checks, 1)
+
+    assert len(payload.bits) == 8
+    assert payload.event_bits == 8
+
+
+def test_the_fake_bit_finalizer_draws_the_data_readout():
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    readout = data_readout_fragment()
+
+    (payload,) = device.finalize_stream_round(readout, 5)
+
+    assert len(payload.bits) == 9
+    assert payload.round_index == 5
+    assert payload.event_bits == 4
 
 
 def test_the_fake_bit_device_names_its_code_card_as_its_seed_child():

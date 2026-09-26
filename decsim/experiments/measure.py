@@ -29,7 +29,6 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
-import decsim.qpu.stim_device as stim_device
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.transfers as transfer_records
@@ -848,11 +847,14 @@ def _burst_catch(
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:
-    """The burst's first round; None when the shot draws no burst."""
-    burst_settings = stim_device.BurstStimDevice.Settings
-    if not isinstance(qpu_row_settings, burst_settings):
-        return None
-    if qpu_row_settings.burst_error_probability == 0:
+    """The burst's first round; None when the shot draws no burst.
+
+    Read by the keys' names rather than the row's class, so any qpu row
+    whose settings carry a burst probability and onset, as burst_stim's
+    do, is measured alike; a probability of 0 is no burst.
+    """
+    probability = getattr(qpu_row_settings, "burst_error_probability", 0)
+    if probability == 0:
         return None
     return qpu_row_settings.burst_onset_round
 

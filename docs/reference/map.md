@@ -171,6 +171,9 @@ docstring.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
 - `decsim/decoders/decoders.py`: Timing-only decoders, the routers and the sampled-confidence wrapper.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
+- `decsim/decoders/dispatch_steps/__init__.py`: The dispatch_steps row: Relay-BP behind a CUDA-Q dispatcher, step by step.
+- `decsim/decoders/dispatch_steps/decoder.py`: Relay-BP on a GPU behind a CUDA-Q dispatcher, step by step.
+- `decsim/decoders/dispatch_steps/measurements.py`: A CUDA-Q dispatcher's steps on NVIDIA GPUs, each timed on its own.
 - `decsim/decoders/measured_table/__init__.py`: The measured_table row: Relay-BP priced by a GPU's measured time.
 - `decsim/decoders/measured_table/decoder.py`: Relay-BP on a measured GPU: decsim's own answer, the device's time.
 - `decsim/decoders/measured_table/measurements.py`: Relay-BP decode times measured on NVIDIA GPUs, as a line in iterations.
@@ -184,7 +187,7 @@ docstring.
 - `decsim/decoders/schedulers.py`: The ready-queue discipline of a decoder pool: which waiting job is next.
 - `decsim/decoders/settings.py`: The settings of the decoder tiers, their manager and the escalation.
 - `decsim/decoders/staged_decoder.py`: The decoder unit's timing around one algorithm: stages and a pipeline.
-- `decsim/decoders/strong_backend.py`: The strong decoder on a device: a FIFO queue in front of its capacity.
+- `decsim/decoders/strong_backend.py`: The strong decoder on a device: FIFO queues in front of its resources.
 - `decsim/decoders/strong_requests.py`: Which destination window waits for which strong result.
 - `decsim/decoders/tesseract/__init__.py`: Tesseract decoders backed by the optional tesseract-decoder package.
 - `decsim/decoders/tesseract/decoder.py`: The Tesseract adapter: the referee's decoder as a tier of its own.

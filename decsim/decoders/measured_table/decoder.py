@@ -20,8 +20,9 @@ law matches the distribution of times, not each long decode.
 
 The row is "bound": one chip's regions reach one dispatcher, which runs
 one decode at a time (a CUDA-Q dispatcher's decode holds it, cudaqx
-docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50), so its
-capacity is the most decodes a measured cell ran at once, which is one.
+docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50), so the
+decode is one step on the dispatcher, and the dispatcher's count is the
+most decodes a measured cell ran at once, which is one.
 """
 
 import dataclasses
@@ -105,12 +106,13 @@ class MeasuredTable:
         """The Relay-BP decoder's own children, at the relay_bp row's paths."""
         return self.decoder.run_seed_children()
 
-    def capacity(self) -> int:
-        """The most decodes a measured cell of this device ran at once."""
+    def capacities(self) -> dict:
+        """One dispatcher, running the most decodes a measured cell ran."""
         counts = []
         for cell in self.cells:
             counts.append(cell.decodes_running)
-        return max(counts)
+        most = max(counts)
+        return {strong_backend.DISPATCHER: most}
 
     def submit(
         self, request: decoding_records.DecodeJob, running: int
@@ -119,15 +121,23 @@ class MeasuredTable:
         result = self.decoder.decode(request)
         detectors = _region_detectors(request)
         decodes_running = running + 1
-        cell = _nearest_cell(self.cells, decodes_running, detectors)
+        cells = _cells_running(self.cells, decodes_running)
+        cell = nearest_in_size(cells, detectors)
         iterations = _iterations_of(result)
         microseconds = cell.decode_microseconds(iterations)
-        service_ticks = config.microseconds_to_ticks(microseconds)
-        return _Ticket(result, service_ticks)
+        decode_ticks = config.microseconds_to_ticks(microseconds)
+        return _Ticket(result, decode_ticks)
 
-    def service_ticks(self, ticket: "_Ticket") -> int:
-        """The priced time, known at submit."""
-        return ticket.service_ticks
+    def steps(self, ticket: "_Ticket") -> tuple:
+        """One step, the measured decode, holding the dispatcher throughout.
+
+        The measured line is one decode() call with its copies and its
+        launch inside it, so it is not split here.
+        """
+        decode = decoding_records.Step(
+            "decode", ticket.decode_ticks, strong_backend.DISPATCHER
+        )
+        return (decode,)
 
     def result(self, ticket: "_Ticket") -> decoding_records.DecodeResult:
         """The region's answer from decsim's own Relay-BP decode."""
@@ -152,7 +162,7 @@ class MeasuredTableDecoder(strong_backend.StrongBackendDecoder):
 @dataclasses.dataclass(frozen=True)
 class _Ticket:
     result: decoding_records.DecodeResult
-    service_ticks: int
+    decode_ticks: int
 
 
 def _measured_rows(device: str, partition: str, bases: str) -> tuple:
@@ -191,21 +201,25 @@ def _iterations_of(result: decoding_records.DecodeResult) -> int:
     return result.iterations
 
 
-def _nearest_cell(
-    cells: tuple, decodes_running: int, detectors: int
-) -> measurements.MeasuredTime:
-    """The cell with this many decodes whose region is nearest in size."""
-    nearest = None
-    nearest_gap = None
+def _cells_running(cells: tuple, decodes_running: int) -> tuple:
+    """The cells measured with this many decodes at once."""
+    running = []
     for cell in cells:
-        if cell.decodes_running != decodes_running:
-            continue
-        size_difference = cell.detectors - detectors
-        size_gap = abs(size_difference)
-        if nearest is None or size_gap < nearest_gap:
-            nearest = cell
-            nearest_gap = size_gap
-    assert nearest is not None, (
-        f"no measured cell runs {decodes_running} decodes at once"
-    )
+        if cell.decodes_running == decodes_running:
+            running.append(cell)
+    assert running, f"no measured cell runs {decodes_running} decodes at once"
+    return tuple(running)
+
+
+def nearest_in_size(rows: tuple, detectors: int):
+    """The row whose region is nearest in detectors; the first on a tie.
+
+    Rows are in region order, so the first is the smaller region.
+    """
+    nearest = rows[0]
+    for row in rows:
+        size_difference = row.detectors - detectors
+        nearest_difference = nearest.detectors - detectors
+        if abs(size_difference) < abs(nearest_difference):
+            nearest = row
     return nearest

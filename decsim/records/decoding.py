@@ -399,6 +399,23 @@ class WindowDecode:
     iterations: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class Step:
+    """One step of a strong decode on its device, as the device states it.
+
+    name says what the step is (notice, launch, copy_in, decode); ticks
+    is its time; resource is the one it holds, dispatcher or worker, or
+    None for none. priced_on names where a zero-tick step's time is
+    counted instead, such as the link card's echo round trip, so a trace
+    shows every step and counts each tick once.
+    """
+
+    name: str
+    ticks: int
+    resource: Optional[str] = None
+    priced_on: Optional[str] = None
+
+
 @dataclass
 class DecodeResult:
     """One window result; timing-only decoders leave optional fields unset."""

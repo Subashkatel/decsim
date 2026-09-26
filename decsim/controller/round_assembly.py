@@ -399,7 +399,12 @@ def _concatenated(
     size_bits = None
     if prior.size_bits is not None and fragment.size_bits is not None:
         size_bits = prior.size_bits + fragment.size_bits
-    return dataclasses.replace(prior, bits=bits, size_bits=size_bits)
+    event_bits = None
+    if prior.event_bits is not None and fragment.event_bits is not None:
+        event_bits = prior.event_bits + fragment.event_bits
+    return dataclasses.replace(
+        prior, bits=bits, size_bits=size_bits, event_bits=event_bits
+    )
 
 
 @dataclasses.dataclass(frozen=True)

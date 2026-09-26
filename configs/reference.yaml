@@ -17,8 +17,8 @@
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
-                                   # | recorded_stim | streaming_stim:
-                                   # what the QPU reads out
+                                   # | recorded_stim | streaming_stim
+                                   # | burst_stim: what the QPU reads out
                                    # each round. stim_device samples the
                                    # workload's circuit (real detector data);
                                    # timing_only states each round's size, the
@@ -30,11 +30,39 @@ qpu:
                                    # streaming_stim takes repeated circuit
                                    # records keyed by dynamic stream owner,
                                    # which no yaml key carries: build it in
-                                   # Python (QpuSettings(device=...)). A
-                                   # source row with keys of its own reads
-                                   # them here (its Settings); the sweep
-                                   # sets the distance and the round period,
-                                   # so neither is a key here
+                                   # Python (QpuSettings(device=...)).
+                                   # burst_stim is stim_device drawing each
+                                   # shot from the circuit plus one error
+                                   # burst the decoders are not told of
+                                   # (their models stay the circuit's own,
+                                   # as qec-burst-scaling's qecburst/
+                                   # circuit.py does). A source row with keys
+                                   # of its own reads them here (its
+                                   # Settings); the sweep sets the distance
+                                   # and the round period, so neither is a
+                                   # key here. burst_stim's, with their
+                                   # defaults (a probability of 0 is no
+                                   # burst, and the shot is stim_device's):
+  # burst_onset_round: 1           # the first one-based round with extra noise
+  # burst_decay_rounds: null       # the extra probability in round r is
+                                   # burst_error_probability x exp(-(r -
+                                   # onset) / burst_decay_rounds), McEwen's
+                                   # exponential recovery (2104.05219: about
+                                   # 25 ms on Sycamore; 400-700 us on Willow,
+                                   # 2408.13687); null holds it to the end
+  # burst_radius: null             # Stim qubit-coordinate units around
+                                   # burst_center; null is every qubit
+  # burst_center: null             # [x, y]; null is the middle of the
+                                   # qubits' coordinates
+  # burst_error_probability: 0.0   # the extra probability at onset, 0 to 0.75
+  # burst_channels: [gate, idle, measurement, reset]
+                                   # the noise it raises, named for where
+                                   # Stim's generator puts each parameter
+                                   # (src/stim/gen/circuit_gen_params.cc):
+                                   # after a unitary, after the round's first
+                                   # TICK, before a measurement, after a
+                                   # reset. [idle] is qec-burst-scaling's
+                                   # one DEPOLARIZE1 per round on data qubits
   code_card: rotated_surface       # rotated_surface | bivariate_bicycle: the
                                    # code card the run prices, at the sweep's
                                    # distance, with windows.commit_rounds and
@@ -253,14 +281,23 @@ escalation:
 #                                  # region per bounded window
 
 workload:
-  kind: memory_circuit             # memory_circuit is the one yaml row; the
-                                   # other rows (circuit_list, surgery_ir)
-                                   # are built in Python
+  kind: memory_circuit             # memory_circuit | memory_patches are the
+                                   # yaml rows; the other rows (circuit_list,
+                                   # surgery_ir) are built in Python.
+                                   # memory_patches runs patch_count copies of
+                                   # the memory circuit at once, one operation
+                                   # per patch sharing the decoder units
+                                   # (Elastic 2406.17995 lines 121-123), side
+                                   # by side along x, 2d + 2 Stim coordinate
+                                   # units apart, so a qpu burst region covers
+                                   # the patches it reaches
   code_task: surface_code:rotated_memory_z   # stim generator task
   rounds_per_shot: 15              # QEC rounds per shot: a fixed count, or
                                    # "<n>d" to scale with the swept distance
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
+  # patch_count: 4                 # memory_patches only, and required there:
+                                   # the patches, at least 1
 
 # The plan, a word the comments below use, is the list of windows the scheme
 # lays out for each operation before the run starts.

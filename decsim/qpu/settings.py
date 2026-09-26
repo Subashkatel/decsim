@@ -25,6 +25,7 @@ SYNDROME_SOURCES = {
     "syndrome_bits": syndrome_devices.SyndromeBitDevice,
     "recorded_stim": stim_device.RecordedStimDevice,
     "streaming_stim": streaming_stim_device.StreamingStimDevice,
+    "burst_stim": stim_device.BurstStimDevice,
 }
 # qpu.code_card names one of these rows: the code card the run prices.
 # CUDA-Q QEC builds a code by name the same way
@@ -59,7 +60,9 @@ class QpuSettings:
     code's size with no values), syndrome_bits (seeded random bits
     shaped like the code's syndrome), recorded_stim (a released
     experiment's measurements replayed), streaming_stim (repeated Stim
-    fragments executed as the controller requests rounds). The round
+    fragments executed as the controller requests rounds), burst_stim
+    (stim_device sampling each shot with one error burst the decoders are
+    not told of, its keys the row's own Settings). The round
     period is the device's physical cadence, a quantum-device number,
     not a classical clock's cycles: Google 921 ns (2207.06431) and
     1.1 us (2408.13687), Krinner 1.1 us (2112.03708), Yang 1.25 us

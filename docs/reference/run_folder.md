@@ -52,7 +52,7 @@ its maximum.
 | --- | --- |
 | `physical_error_probability`, `distance`, `round_period_microseconds`, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
 | `windows` | how many windows this shot decoded |
-| `logical_failure` | 1 when the decoded observable did not match the truth, else 0 |
+| `logical_failure` | 1 when any operation's decoded observable did not match its truth, else 0; a `memory_patches` shot fails when any patch does |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
 | `direct_failure`, `direct_mismatch` | the same shot decoded straight through PyMatching outside the machine, and whether the machine disagreed with it |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
@@ -61,6 +61,10 @@ its maximum.
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_mean_us` | the windows the strong tier committed, the rounds its decodes read, and their mean service |
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
+| `weak_syndrome_weight_mean`, `weak_syndrome_weight_max` | the set bits of each weak decode's input, its detection events when they are formed ahead of the decoder; only when `observation.record_switching_windows` is on |
+| `weak_service_mean_us` | each weak decode's compute, its first stage's start to its last stage's end; the same switch |
+| `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from its enqueue to its compute start, for a unit and for the unit's compute; the same switch |
+| `backlog_peak_rounds` | the most rounds produced and not yet decoded at once; only when `observation.backlog_trace` is on |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's count, when `observation.check_windows_with` asked for one |
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `<point>_mean_us`, `<point>_max_us` | one pair per latency point below |
@@ -221,6 +225,9 @@ point the run held:
 | `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point and their mean service |
 | `strong_service_bound_us` | Toshio's Theorem 1 bound on that service, tau_gen d windows / strong rounds over the point (2510.25222 lines 1270-1300); infinite when nothing escalated |
 | `parallel_processes_needed` | the largest over the point's shots |
+| `weak_syndrome_weight_mean`, `weak_service_mean_us`, `strong_wait_mean_us` | the means over the point's shots, when they kept the switching records |
+| `weak_syndrome_weight_max`, `strong_wait_max_us`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |
+| `escalated_fraction` | the windows the strong tier committed over the windows decoded, beside the columns above |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's totals |
 | `load` | the mean load |
 | `sim_wall_seconds_per_shot` | what the simulation cost to run |

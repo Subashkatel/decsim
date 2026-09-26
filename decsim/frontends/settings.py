@@ -67,7 +67,8 @@ class WorkloadSettings:
     Table rows (WORKLOADS, below): memory_circuit (Stim's generated
     memory circuit for the code task, one physical error probability on
     all four of Stim's noise channels, rounds_per_shot rounds, both keys
-    its own Settings), circuit_list (a Python-built operation list),
+    its own Settings), memory_patches (patch_count such circuits, one
+    operation per patch, at once), circuit_list (a Python-built operation list),
     surgery_ir (the line-based text IR).
     The other fields are Python-only: the decode owners, the dynamic
     streams and protected regions of a feedback workload, the round policy
@@ -156,14 +157,7 @@ class MemoryCircuitWorkload:
             cls, section: Mapping
         ) -> "MemoryCircuitWorkload.Settings":
             """Both keys; a missing one is refused rather than defaulted."""
-            missing = []
-            for field in dataclasses.fields(cls):
-                if field.name not in section:
-                    missing.append(field.name)
-            if missing:
-                raise ValueError(
-                    f"workload.kind memory_circuit needs {missing} beside kind"
-                )
+            _refuse_missing_keys(cls, section, "memory_circuit")
             rounds_per_shot = RoundsPerShot.from_yaml(
                 section["rounds_per_shot"]
             )
@@ -174,24 +168,83 @@ class MemoryCircuitWorkload:
     @staticmethod
     def operations(settings: "WorkloadSettings", code) -> tuple:
         """One operation, its rounds fixed."""
-        if settings.physical_error_probability is None:
-            raise ValueError(
-                "a memory_circuit workload needs physical_error_probability; "
-                "the sweep sets it per point"
-            )
-        row_settings = settings.row_settings
-        rounds_per_shot = row_settings.rounds_per_shot
-        rounds = rounds_per_shot.rounds_for(code.distance)
-        circuit = memory_circuit(
-            row_settings.code_task,
-            rounds,
-            code.distance,
-            settings.physical_error_probability,
-        )
+        circuit, rounds = _generated_memory(settings, code, "memory_circuit")
         operation = program_records.Operation(
             id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
         )
         return (operation,), round_policies.FixedRounds(rounds)
+
+
+class MemoryPatchesWorkload:
+    """The memory_patches row: independent memory patches run at once.
+
+    patch_count copies of the memory_circuit row's circuit, each its own
+    operation on its own patch and logical qubit, all from round one, so
+    their windows share the decoder tiers' units, Elastic's "smaller pool
+    of decoders" shared across logical qubits (2406.17995 lines 121-123).
+    The copies sit side by side along x in one Stim coordinate frame,
+    patch p shifted by p (2 d + 2) with a SHIFT_COORDS ahead of its
+    circuit, so a surface-code patch, 2 d units wide, starts one lattice
+    step past its neighbour and a burst region in that frame covers the
+    patches it reaches (McEwen 2104.05219: a burst starts at one spot and
+    spreads over the chip). Each copy draws its own shot.
+    """
+
+    has_frontend = False
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The memory_circuit row's two keys and the number of patches."""
+
+        code_task: str
+        rounds_per_shot: RoundsPerShot
+        patch_count: int
+
+        def __post_init__(self) -> None:
+            count = self.patch_count
+            is_count = isinstance(count, int) and not isinstance(count, bool)
+            if is_count and count >= 1:
+                return
+            raise ValueError(
+                f"workload.patch_count is a number of patches, at least 1; "
+                f"got {count!r}"
+            )
+
+        @classmethod
+        def from_yaml(
+            cls, section: Mapping
+        ) -> "MemoryPatchesWorkload.Settings":
+            """All three keys; a missing one is refused, not defaulted."""
+            _refuse_missing_keys(cls, section, "memory_patches")
+            rounds_per_shot = RoundsPerShot.from_yaml(
+                section["rounds_per_shot"]
+            )
+            return cls(
+                code_task=section["code_task"],
+                rounds_per_shot=rounds_per_shot,
+                patch_count=section["patch_count"],
+            )
+
+    @staticmethod
+    def operations(settings: "WorkloadSettings", code) -> tuple:
+        """One operation per patch, every one fixed at the same rounds."""
+        circuit, rounds = _generated_memory(settings, code, "memory_patches")
+        pitch = 2 * code.distance + 2
+        operations = []
+        for patch in range(settings.row_settings.patch_count):
+            offset = patch * pitch
+            shift = stim.Circuit(f"SHIFT_COORDS({offset}, 0)")
+            placed = shift + circuit
+            operation_id = patch + 1
+            operation = program_records.Operation(
+                id=operation_id,
+                name=f"memory{patch}",
+                qubits=(patch,),
+                patches=(patch,),
+                circuit=placed,
+            )
+            operations.append(operation)
+        return tuple(operations), round_policies.FixedRounds(rounds)
 
 
 class CircuitListWorkload:
@@ -251,6 +304,39 @@ class SurgeryIRWorkload:
         return tuple(operations), None
 
 
+def _generated_memory(
+    settings: "WorkloadSettings", code, row_name: str
+) -> tuple:
+    """Stim's memory circuit at the sweep's point, and its round count."""
+    if settings.physical_error_probability is None:
+        raise ValueError(
+            f"a {row_name} workload needs physical_error_probability; "
+            "the sweep sets it per point"
+        )
+    row_settings = settings.row_settings
+    rounds_per_shot = row_settings.rounds_per_shot
+    rounds = rounds_per_shot.rounds_for(code.distance)
+    circuit = memory_circuit(
+        row_settings.code_task,
+        rounds,
+        code.distance,
+        settings.physical_error_probability,
+    )
+    return circuit, rounds
+
+
+def _refuse_missing_keys(settings_class, section: Mapping, row_name: str):
+    """Every field of the row's Settings is a key the yaml must write."""
+    missing = []
+    for field in dataclasses.fields(settings_class):
+        if field.name not in section:
+            missing.append(field.name)
+    if missing:
+        raise ValueError(
+            f"workload.kind {row_name} needs {missing} beside kind"
+        )
+
+
 def _is_per_distance_text(value) -> bool:
     """True for "<n>d": digits naming at least one round, then a d."""
     if not isinstance(value, str):
@@ -267,6 +353,7 @@ def _is_per_distance_text(value) -> bool:
 # (decsim/ports.py).
 WORKLOADS = {
     "memory_circuit": MemoryCircuitWorkload,
+    "memory_patches": MemoryPatchesWorkload,
     "circuit_list": CircuitListWorkload,
     "surgery_ir": SurgeryIRWorkload,
 }

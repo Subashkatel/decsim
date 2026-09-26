@@ -9,9 +9,11 @@ so a run is reproducible across processes, and reused by every segment
 of the stream.
 """
 
+import bisect
 import dataclasses
+import math
 import numbers
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
 import numpy
@@ -30,6 +32,17 @@ import decsim.trace_source as trace_source
 
 # Stream ids, operation ids and patches are opaque identities chosen by
 # the workload; Any stands for them in every signature below.
+
+# The noise a burst raises, each channel named for the place Stim's
+# generator puts one of its four noise parameters (Stim
+# src/stim/gen/circuit_gen_params.cc): gate is after_clifford_depolarization
+# after a unitary (append_unitary_1, append_unitary_2), idle is
+# before_round_data_depolarization after the round's first TICK
+# (append_begin_round_tick), measurement is before_measure_flip_probability
+# before a measurement (append_measure) and reset is
+# after_reset_flip_probability after a reset (append_reset,
+# append_measure_reset).
+BURST_CHANNELS = ("gate", "idle", "measurement", "reset")
 
 
 class StimDevice(seeding._AtomicRunSeedConsumer):
@@ -437,9 +450,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         source_round_count: int,
         detector_rounds: dict,
     ) -> None:
-        sampler = self._sampler_for(key, operation.circuit)
-        self._mark_stochastic_use()
-        measurement_row = self._measurement_row(sampler)
         measurement_rounds = self._shots.measurement_rounds_override.get(key)
         table = detector_formation.build_formation_table(
             operation.circuit,
@@ -447,6 +457,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             measurement_rounds=measurement_rounds,
             detector_rounds=detector_rounds,
         )
+        sampled_circuit = self._sampled_circuit(operation.circuit, table)
+        sampler = self._sampler_for(key, sampled_circuit)
+        self._mark_stochastic_use()
+        measurement_row = self._measurement_row(sampler)
         packets = detector_formation.split_measurements_into_packets(
             table, measurement_row
         )
@@ -461,6 +475,13 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         self._shots.shot_by_key[key] = shot
         self._shots.sample_key_by_operation_id[operation.id] = key
         self.shot_sampled.fire(operation, formed_events)
+
+    def _sampled_circuit(
+        self, circuit: stim.Circuit, table: detector_formation.FormationTable
+    ) -> stim.Circuit:
+        """The circuit the shot is drawn from: the operation's own."""
+        del table
+        return circuit
 
     def _measurement_row(
         self, sampler: stim.CompiledMeasurementSampler
@@ -576,6 +597,100 @@ class RecordedStimDevice(StimDevice):
         return _as_int_bits(row)
 
 
+class BurstStimDevice(StimDevice):
+    """Samples every shot with one error burst the decoders are not told of.
+
+    The shot is drawn from burst_circuit, the operation's circuit with the
+    burst's extra noise; detection events are formed, and window models
+    built, from the operation's own circuit, as on hardware, where the
+    decoders' error model is the calibrated one. The public
+    qec-burst-scaling code samples its bursts the same way, with the
+    decoder weights from the background circuit (qecburst/circuit.py
+    inject_burst_profile; qecburst/simulate.py). One burst per shot:
+    bursts come every 10 s on Sycamore (McEwen 2104.05219, "λ = 1/(10
+    s)") and about once an hour on Willow (2408.13687, "once every
+    hour"), far apart next to a shot, so the rate joins when the shots
+    are read, as Q3DE weighs a burst shot's logical error by the time
+    bursts take up (2501.00331, equation (1)).
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The burst: when, how it decays, where, how strong, which noise.
+
+        burst_onset_round is the first one-based round with extra noise.
+        The extra probability in round r at or after it is
+        burst_error_probability times exp(-(r - onset) /
+        burst_decay_rounds), the exponential recovery McEwen measures ("a
+        typical ~25 ms exponential decay", 2104.05219) and
+        qec-burst-scaling samples (qecburst/circuit.py
+        exponential_decay_profile); a burst_decay_rounds of None holds the
+        onset's probability to the shot's end. The region is every qubit
+        whose first two Stim coordinates lie within burst_radius of
+        burst_center, the midpoint of the qubits' coordinates when None;
+        a burst_radius of None is every qubit. burst_channels names the
+        noise it raises (BURST_CHANNELS). A burst_error_probability of 0
+        is no burst: the shot is drawn from the operation's own circuit.
+        """
+
+        burst_onset_round: int = 1
+        burst_decay_rounds: Optional[float] = None
+        burst_radius: Optional[float] = None
+        burst_center: Optional[tuple] = None
+        burst_error_probability: float = 0.0
+        burst_channels: tuple = BURST_CHANNELS
+
+        def __post_init__(self) -> None:
+            _check_onset_round(self.burst_onset_round)
+            _check_decay_rounds(self.burst_decay_rounds)
+            _check_radius(self.burst_radius)
+            _check_center(self.burst_center)
+            _check_burst_probability(self.burst_error_probability)
+            _check_channels(self.burst_channels)
+
+        @classmethod
+        def from_yaml(cls, section: Mapping) -> "BurstStimDevice.Settings":
+            """The qpu section's burst keys; an absent key is its default.
+
+            A yaml list, the centre or the channels, reads as a tuple.
+            """
+            values = dict(section)
+            for key in ("burst_center", "burst_channels"):
+                value = values.get(key)
+                if isinstance(value, list):
+                    values[key] = tuple(value)
+            return cls(**values)
+
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        seed: Optional[numbers.Integral] = None,
+        detector_rounds: Optional[dict] = None,
+        terminal_detector_ids: Optional[dict] = None,
+        measurement_rounds: Optional[dict] = None,
+        readout_partitions: Optional[dict] = None,
+    ) -> None:
+        StimDevice.__init__(
+            self,
+            seed=seed,
+            detector_rounds=detector_rounds,
+            terminal_detector_ids=terminal_detector_ids,
+            measurement_rounds=measurement_rounds,
+            readout_partitions=readout_partitions,
+        )
+        if settings is None:
+            settings = BurstStimDevice.Settings()
+        self.burst = settings
+
+    def _sampled_circuit(
+        self, circuit: stim.Circuit, table: detector_formation.FormationTable
+    ) -> stim.Circuit:
+        """The burst circuit; the operation's own when there is no burst."""
+        if self.burst.burst_error_probability == 0:
+            return circuit
+        return burst_circuit(circuit, table, self.burst)
+
+
 def validated_seed(seed) -> Optional[int]:
     """The seed under Stim's public unsigned 64-bit contract, or None.
 
@@ -594,6 +709,52 @@ def validated_seed(seed) -> Optional[int]:
             f"seed must be None or a 64-bit unsigned integer; got {seed!r}"
         )
     return root_seed
+
+
+def burst_circuit(
+    circuit: stim.Circuit,
+    table: detector_formation.FormationTable,
+    burst: BurstStimDevice.Settings,
+) -> stim.Circuit:
+    """The flattened circuit with one burst's extra noise in its rounds.
+
+    A round is decsim's own: the instructions after the previous round's
+    last measurement through its own last one, as the formation table's
+    packet widths lay the measurements out, so no TICK count is assumed.
+    In a burst round every noise instruction of a named channel that
+    touches the region is preceded by a copy of itself on the region's
+    targets at the round's extra probability; a two-qubit channel keeps a
+    pair when either qubit is in the region. The idle copy lands right
+    after the round's first TICK, where qec-burst-scaling inserts its
+    one DEPOLARIZE1 per round (qecburst/circuit.py inject_burst_profile).
+    A circuit the burst adds nothing to, a patch the region misses, is
+    returned as it is, so its shot is the one stim_device draws.
+
+    Raises:
+        ValueError: the burst starts after the shot's last round, so no
+            shot would run with the burst the settings name.
+    """
+    if burst.burst_onset_round > table.round_count:
+        _refuse_a_late_onset(burst, table.round_count)
+    region = _burst_region(circuit, burst)
+    round_ends = _round_ends(table)
+    flattened = circuit.flattened()
+    instructions = list(flattened)
+    sampled = stim.Circuit()
+    inserted_count = 0
+    measurement_count = 0
+    for index, instruction in enumerate(instructions):
+        round_index = _round_of(round_ends, measurement_count)
+        probability = _burst_probability(burst, round_index)
+        copy = _burst_copy(instructions, index, region, probability, burst)
+        if copy is not None:
+            sampled.append(copy)
+            inserted_count += 1
+        sampled.append(instruction)
+        measurement_count += instruction.num_measurements
+    if inserted_count == 0:
+        return circuit
+    return sampled
 
 
 @dataclasses.dataclass(frozen=True)
@@ -752,3 +913,237 @@ def _detector_ids_by_key(declared: Optional[dict]) -> dict:
     for key, detector_ids in declared.items():
         copied[key] = tuple(detector_ids)
     return copied
+
+
+def _check_onset_round(value) -> None:
+    is_count = isinstance(value, int) and not isinstance(value, bool)
+    if is_count and value >= 1:
+        return
+    raise ValueError(
+        f"qpu.burst_onset_round is a one-based round, at least 1; got {value!r}"
+    )
+
+
+def _check_decay_rounds(value) -> None:
+    if value is None:
+        return
+    if _is_finite_number(value) and value > 0:
+        return
+    raise ValueError(
+        f"qpu.burst_decay_rounds is a number of rounds above 0 or null; "
+        f"got {value!r}"
+    )
+
+
+def _check_radius(value) -> None:
+    """Zero is one qubit's burst, the TLS case of 2408.13687."""
+    if value is None:
+        return
+    if _is_finite_number(value) and value >= 0:
+        return
+    raise ValueError(
+        f"qpu.burst_radius is a distance of 0 or more in Stim qubit "
+        f"coordinates, or null; got {value!r}"
+    )
+
+
+def _check_center(value) -> None:
+    if value is None:
+        return
+    is_pair = isinstance(value, tuple) and len(value) == 2
+    if is_pair and all(_is_finite_number(number) for number in value):
+        return
+    raise ValueError(
+        f"qpu.burst_center is [x, y] in Stim qubit coordinates or null; "
+        f"got {value!r}"
+    )
+
+
+def _check_burst_probability(value) -> None:
+    """At most 3/4, the largest DEPOLARIZE1 probability Stim accepts."""
+    if _is_finite_number(value) and 0 <= value <= 0.75:
+        return
+    raise ValueError(
+        "qpu.burst_error_probability is a number from 0 to 0.75 (YAML "
+        f"reads 1e-3 as text; write 1.0e-3); got {value!r}"
+    )
+
+
+def _check_channels(value) -> None:
+    is_named = isinstance(value, tuple) and len(value) > 0
+    if is_named and set(value) <= set(BURST_CHANNELS):
+        return
+    raise ValueError(
+        f"qpu.burst_channels is a non-empty list drawn from "
+        f"{list(BURST_CHANNELS)}; got {value!r}"
+    )
+
+
+def _is_finite_number(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value)
+
+
+def _burst_region(
+    circuit: stim.Circuit, burst: BurstStimDevice.Settings
+) -> frozenset:
+    """The qubits within burst_radius of the centre, or every qubit."""
+    if burst.burst_radius is None:
+        every_qubit = range(circuit.num_qubits)
+        return frozenset(every_qubit)
+    coordinates = circuit.get_final_qubit_coordinates()
+    center = burst.burst_center
+    if center is None:
+        center = _coordinate_midpoint(coordinates)
+    region = set()
+    for qubit, position in coordinates.items():
+        position_x, position_y = _planar(position)
+        offset_x = position_x - center[0]
+        offset_y = position_y - center[1]
+        distance = math.hypot(offset_x, offset_y)
+        if distance <= burst.burst_radius:
+            region.add(qubit)
+    return frozenset(region)
+
+
+def _coordinate_midpoint(coordinates: dict) -> tuple:
+    """The centre of the box the qubits' first two coordinates span."""
+    positions = [_planar(position) for position in coordinates.values()]
+    x_values = [position_x for position_x, _ in positions]
+    y_values = [position_y for _, position_y in positions]
+    middle_x = (min(x_values) + max(x_values)) / 2
+    middle_y = (min(y_values) + max(y_values)) / 2
+    return (middle_x, middle_y)
+
+
+def _planar(position) -> tuple:
+    """A qubit's first two coordinates; a line's qubits sit at y = 0."""
+    if len(position) < 2:
+        return (position[0], 0.0)
+    return (position[0], position[1])
+
+
+def _round_ends(table: detector_formation.FormationTable) -> list:
+    """The measurement count at each round's end, round 1 first."""
+    ends = []
+    total = 0
+    after_last_round = table.round_count + 1
+    for round_index in range(1, after_last_round):
+        total += table.packet_width_by_round[round_index]
+        ends.append(total)
+    return ends
+
+
+def _round_of(round_ends: list, measurement_count: int) -> int:
+    """The round of the instruction that follows measurement_count records.
+
+    Its round is the first whose end lies beyond them; what follows the
+    last measurement stays in the last round.
+    """
+    rounds_ended = bisect.bisect_right(round_ends, measurement_count)
+    round_index = rounds_ended + 1
+    return min(round_index, len(round_ends))
+
+
+def _burst_probability(burst: BurstStimDevice.Settings, round_index) -> float:
+    """The extra probability in one round, zero before the onset."""
+    rounds_since_onset = round_index - burst.burst_onset_round
+    if rounds_since_onset < 0:
+        return 0.0
+    amplitude = burst.burst_error_probability
+    if burst.burst_decay_rounds is None:
+        return amplitude
+    exponent = -rounds_since_onset / burst.burst_decay_rounds
+    decay = math.exp(exponent)
+    return amplitude * decay
+
+
+def _burst_copy(
+    instructions: list,
+    index: int,
+    region: frozenset,
+    probability: float,
+    burst: BurstStimDevice.Settings,
+) -> Optional[stim.CircuitInstruction]:
+    """The copy one noise instruction gets in a burst round, or None."""
+    if probability == 0:
+        return None
+    channel = _noise_channel(instructions, index)
+    if channel not in burst.burst_channels:
+        return None
+    instruction = instructions[index]
+    targets = _region_targets(instruction, region)
+    if not targets:
+        return None
+    return stim.CircuitInstruction(instruction.name, targets, [probability])
+
+
+def _noise_channel(instructions: list, index: int) -> Optional[str]:
+    """Which of BURST_CHANNELS one instruction is, by its neighbours."""
+    name = instructions[index].name
+    previous_index = index - 1
+    following_index = index + 1
+    previous_gate = _gate_at(instructions, previous_index)
+    following_gate = _gate_at(instructions, following_index)
+    if name in ("DEPOLARIZE1", "DEPOLARIZE2"):
+        return _depolarizing_channel(name, previous_gate)
+    if name in ("X_ERROR", "Z_ERROR"):
+        return _flip_channel(previous_gate, following_gate)
+    return None
+
+
+def _depolarizing_channel(name: str, previous_gate) -> Optional[str]:
+    if previous_gate is None:
+        return None
+    is_round_start = previous_gate.name == "TICK"
+    if is_round_start and name == "DEPOLARIZE1":
+        return "idle"
+    if previous_gate.is_unitary:
+        return "gate"
+    return None
+
+
+def _flip_channel(previous_gate, following_gate) -> Optional[str]:
+    if previous_gate is not None and previous_gate.is_reset:
+        return "reset"
+    if following_gate is not None and following_gate.produces_measurements:
+        return "measurement"
+    return None
+
+
+def _gate_at(instructions: list, index: int) -> Optional[stim.GateData]:
+    """Stim's data on the gate at index, None past either end."""
+    if not 0 <= index < len(instructions):
+        return None
+    name = instructions[index].name
+    return stim.gate_data(name)
+
+
+def _region_targets(
+    instruction: stim.CircuitInstruction, region: frozenset
+) -> list:
+    """The instruction's targets in the region; a pair goes whole."""
+    targets = instruction.targets_copy()
+    if instruction.name == "DEPOLARIZE2":
+        return _pairs_touching(targets, region)
+    return [target for target in targets if target.value in region]
+
+
+def _pairs_touching(targets: list, region: frozenset) -> list:
+    kept = []
+    firsts = targets[::2]
+    seconds = targets[1::2]
+    for first, second in zip(firsts, seconds):
+        if first.value in region or second.value in region:
+            kept.extend((first, second))
+    return kept
+
+
+def _refuse_a_late_onset(
+    burst: BurstStimDevice.Settings, round_count: int
+) -> None:
+    raise ValueError(
+        f"qpu.burst_onset_round {burst.burst_onset_round} is after the "
+        f"shot's last round, {round_count}; the burst would never start"
+    )

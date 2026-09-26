@@ -2728,15 +2728,17 @@ def _run(
 
 def _record_strong_occupancy(
     machine: machine_module.Machine,
-    counts: list[int],
+    taken_bits: list[int],
     _key: tuple,
     _packet: round_records.SyndromeRoundPacket,
 ) -> None:
-    stored = machine.strong_syndrome_buffer.occupancy
+    """The strong store's bits held and reserved, as its room test sums them."""
+    stored_bits = machine.strong_syndrome_buffer.occupied_bits
     receiver = machine.strong_syndrome_round_receiver
-    in_flight = len(receiver.reserved_bits_by_round)
-    taken = stored + in_flight
-    counts.append(taken)
+    reserved_widths = receiver.reserved_bits_by_round.values()
+    reserved_bits = sum(reserved_widths)
+    taken = stored_bits + reserved_bits
+    taken_bits.append(taken)
 
 
 def _assert_direct_strong_path(run: _Run) -> None:

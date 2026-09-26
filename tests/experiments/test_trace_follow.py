@@ -9,10 +9,12 @@ not the link's 8.
 
 import pytest
 
+import decsim.engine as engine_module
 import decsim.experiments.trace_file as trace_file
 import decsim.experiments.trace_follow as trace_follow
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
+import decsim.observe.trace_writer as trace_writer
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
 import tests.observe.gate_point as gate_point
@@ -323,6 +325,30 @@ def test_a_rounds_path_keeps_to_its_own_operation(tmp_path):
 
     assert followed.counts.holds == 1
     assert followed.counts.job_references == 1
+
+
+def test_a_hold_across_two_operations_is_followed_from_each_ones_rounds(
+    tmp_path,
+):
+    """A lookahead window holds 4..6 of operation 1 and 1..3 of operation 2.
+
+    Round 2:1 is under that hold and round 1:1 is not, although both
+    have round index 1.
+    """
+    engine = engine_module.Engine()
+    writer = trace_writer.TraceWriter(engine, "one hold")
+    round_keys = ((1, 4), (1, 5), (1, 6), (2, 1), (2, 2), (2, 3))
+    holder = object()
+    writer.hold_registered("weak syndrome buffer", holder, round_keys)
+    trace_path = tmp_path / "one_hold.trace.json"
+    writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+
+    from_the_next_operation = trace_follow.follow(document, "round", "2:1")
+    from_the_holders_own = trace_follow.follow(document, "round", "1:1")
+
+    assert from_the_next_operation.counts.holds == 1
+    assert from_the_holders_own.counts.holds == 0
 
 
 def test_trace_does_only_what_it_says_it_does():

@@ -290,7 +290,7 @@ def _decoder_input_window(args: dict) -> Optional[str]:
     window = args.get("window")
     if window is None:
         return None
-    if args.get("rounds") is None:
+    if args.get("rounds_by_operation") is None:
         return None
     if args.get("request") is None:
         return None
@@ -333,17 +333,31 @@ def _rounds_cover(args: dict, key: str) -> bool:
     A move, a hold and a decoder input name a range and not one round,
     so a round's own path runs through the window that reads it.
     """
-    text = args.get("rounds")
-    if not text:
-        return False
     operation, index = _key_parts(key)
-    named = _operation_of(args)
-    if named != operation:
+    ranges = _ranges_by_operation(args)
+    text = ranges.get(operation)
+    if not text:
         return False
     low, high = trace_file.range_of(text)
     if index < low:
         return False
     return index <= high
+
+
+def _ranges_by_operation(args: dict) -> dict:
+    """An event's round ranges by operation text.
+
+    An event built from round keys states a range per operation it
+    touches; a move or a window names one operation beside one range.
+    """
+    by_operation = args.get("rounds_by_operation")
+    if by_operation is not None:
+        return by_operation
+    text = args.get("rounds")
+    operation = _operation_of(args)
+    if operation is None:
+        return {}
+    return {operation: text}
 
 
 def _operation_of(args: dict) -> Optional[str]:

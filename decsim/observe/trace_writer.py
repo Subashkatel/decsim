@@ -314,8 +314,7 @@ class TraceWriter:
         """One consumer token keeps the listed rounds alive."""
         args = {
             "holder": _holder_text(holder),
-            "operation": _operation_of(round_keys),
-            "rounds": _rounds_text(round_keys),
+            "rounds_by_operation": _rounds_by_operation(round_keys),
             "transfer": "reference",
         }
         self._instant(store_name, "hold registered", "hold", args)
@@ -352,8 +351,7 @@ class TraceWriter:
         thread = f"{store_name} port {port_index}"
         duration = completion_tick - start_tick
         args = {
-            "operation": _operation_of(round_keys),
-            "rounds": _rounds_text(round_keys),
+            "rounds_by_operation": _rounds_by_operation(round_keys),
             "arrival": arrival_tick,
             "waited_ticks": start_tick - arrival_tick,
         }
@@ -507,7 +505,7 @@ class TraceWriter:
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
-            "rounds": _job_rounds_text(job),
+            "rounds_by_operation": _job_rounds_by_operation(job),
             "bits": _landed_bits(job),
             "transfer": "copy",
             "capacity_bits": unit.memory.capacity_bits,
@@ -1033,23 +1031,19 @@ def _copied_identity(key) -> dict:
         return {"round": round_text(key)}
     window_key = (key.operation_id, key.window_id)
     window = window_text(window_key)
-    rounds = _job_rounds_text(key)
-    return {"window": window, "rounds": rounds}
+    rounds = _job_rounds_by_operation(key)
+    return {"window": window, "rounds_by_operation": rounds}
 
 
-def _job_rounds_text(job: decoding_records.DecodeJob) -> str:
-    """The rounds a job's landed input holds, as `lo..hi`."""
+def _job_rounds_by_operation(job: decoding_records.DecodeJob) -> dict:
+    """The rounds a job's landed input holds, by operation."""
     decoder_input = job.decoder_input
     if decoder_input is None:
-        return ""
-    indices = []
+        return {}
+    round_keys = []
     for round_input in decoder_input.rounds:
-        indices.append(round_input.round_index)
-    if not indices:
-        return ""
-    low = min(indices)
-    high = max(indices)
-    return f"{low}..{high}"
+        round_keys.append((round_input.operation_id, round_input.round_index))
+    return _rounds_by_operation(round_keys)
 
 
 def _holder_text(holder) -> str:
@@ -1067,20 +1061,22 @@ def _holder_text(holder) -> str:
     return kind_name
 
 
-def _operation_of(round_keys) -> Optional[int]:
-    """The operation whose rounds these are; None when there are none."""
-    for operation_id, _round_index in round_keys:
-        return operation_id
-    return None
+def _rounds_by_operation(round_keys) -> dict:
+    """Each operation's rounds among the keys as `lo..hi`, by operation.
 
-
-def _rounds_text(round_keys) -> str:
-    indices = []
-    for _operation_id, round_index in round_keys:
+    A lookahead window reads its predecessor's last rounds and its own
+    first ones, so one range over every key would name rounds of one
+    operation that the other owns.
+    """
+    indices_by_operation = {}
+    for operation_id, round_index in round_keys:
+        operation = str(operation_id)
+        indices = indices_by_operation.setdefault(operation, [])
         indices.append(round_index)
-    if not indices:
-        return ""
-    return f"{min(indices)}..{max(indices)}"
+    ranges = {}
+    for operation, indices in indices_by_operation.items():
+        ranges[operation] = f"{min(indices)}..{max(indices)}"
+    return ranges
 
 
 def _move_name(attribution) -> str:

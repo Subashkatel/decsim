@@ -1546,9 +1546,6 @@ def _bank_thresholds(maxima, target_share: float):
     for group in range(group_count):
         tail = _group_tail(maxima[:, group])
         tails.append(tail)
-    # one group is the bank, so its level is the target's own
-    if group_count == 1:
-        return _levels(tails, target_share)
     expected_alarms = target_share * block_count
     if expected_alarms >= MEASURED_ALARMS:
         group_share = _shared_share(maxima, tails, target_share)

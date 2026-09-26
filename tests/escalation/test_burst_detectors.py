@@ -955,14 +955,20 @@ def test_a_measured_level_is_the_smallest_maximum_at_most_its_share():
     assert list(levels) == [71.0]
 
 
-def test_a_level_past_twenty_blocks_follows_the_fitted_tail():
-    """5 expected blocks: 80 + 10.5 ln(20 / 5)."""
+def test_one_group_alarms_on_at_most_its_target_share_of_blocks():
+    """5 percent of 100 blocks: the level passes 95, so 96 to 100 alarm.
+
+    The fitted tail alone gives 80 + 10.5 ln(20 / 5) = 94.56, which
+    admits 95 too, six blocks; one group goes through the bank's
+    bisection like any other bank, as the clean room calibrates it.
+    """
     maxima = HAND_MAXIMA[:, None]
 
     levels = burst_detectors._bank_thresholds(maxima, 0.05)
 
-    fitted_level = 80 + 10.5 * numpy.log(4)
-    assert levels[0] == pytest.approx(fitted_level)
+    reaches = maxima >= levels
+    assert levels[0] == pytest.approx(95.0)
+    assert numpy.count_nonzero(reaches) == 5
 
 
 def test_a_shared_level_keeps_the_bank_at_its_target():

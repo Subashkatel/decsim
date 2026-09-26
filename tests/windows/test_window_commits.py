@@ -87,6 +87,16 @@ class _Transfers:
         self.engine.schedule(self.delay_ticks, on_delivered)
 
 
+def _strong_admissions(requests) -> list:
+    """The tick each strong request was admitted, in request order."""
+    strong = window_records.DecoderTier.STRONG
+    admissions = []
+    for row in requests:
+        if row.request_key.tier is strong:
+            admissions.append(row.admitted_ticks)
+    return admissions
+
+
 class _Fixture:
     def __init__(
         self,
@@ -351,17 +361,8 @@ def test_switch_cycles_delay_the_strong_request_and_frame_points():
     assert shifts == [0, 0, 0, 0, expected, expected]
     free_requests = free.observation.decode_records.requests
     charged_requests = charged.observation.decode_records.requests
-    strong = window_records.DecoderTier.STRONG
-    free_admissions = [
-        row.admitted_ticks
-        for row in free_requests
-        if row.request_key.tier is strong
-    ]
-    charged_admissions = [
-        row.admitted_ticks
-        for row in charged_requests
-        if row.request_key.tier is strong
-    ]
+    free_admissions = _strong_admissions(free_requests)
+    charged_admissions = _strong_admissions(charged_requests)
     assert len(free_admissions) == 1
     assert charged_admissions == [free_admissions[0] + expected]
 

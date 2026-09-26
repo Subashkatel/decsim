@@ -82,6 +82,27 @@ def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
     )
 
 
+def _arrive_all(fixture, round_indices) -> None:
+    for round_index in round_indices:
+        fixture.arrive(round_index)
+
+
+def _completed_weak_requests(records, window_id: int) -> list:
+    """One window's weak requests that were forwarded for delivery."""
+    weak = window_records.DecoderTier.WEAK
+    outcomes = decoding_records.RequestProcessingOutcome
+    completed = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
+    requests = []
+    for row in records:
+        if row.request_key.tier is not weak:
+            continue
+        if row.request_key.window_id != window_id:
+            continue
+        if row.terminal_processing_outcome is completed:
+            requests.append(row)
+    return requests
+
+
 class _Fixture:
     """One six-round operation with one window reading rounds 1 to 5."""
 
@@ -215,8 +236,7 @@ class _Fixture:
 
 def test_a_complete_window_is_requested_once():
     fixture = _Fixture()
-    for round_index in (1, 2, 3, 4):
-        fixture.arrive(round_index)
+    _arrive_all(fixture, (1, 2, 3, 4))
     assert fixture.queue.enqueued == []
     fixture.arrive(5)
     fixture.requester.request_if_ready(fixture.window, None)
@@ -236,8 +256,7 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
     fixture.window.deps = [(1, 9)]
     fixture.window.deps_remaining = 1
     fixture.deliver_boundary({5: [1, 0, 1]})
-    for round_index in (1, 2, 3, 4, 5):
-        fixture.arrive(round_index)
+    _arrive_all(fixture, (1, 2, 3, 4, 5))
     (job, _send_input) = fixture.queue.enqueued[0]
     assert fixture.gate.may_start(job) is False
     raw = job.payloads[4]
@@ -266,8 +285,7 @@ def test_a_boundary_that_flipped_nothing_is_still_folded():
     fixture.window.deps = [(1, 9)]
     fixture.window.deps_remaining = 1
     fixture.deliver_boundary({5: [0, 0, 0]})
-    for round_index in (1, 2, 3, 4, 5):
-        fixture.arrive(round_index)
+    _arrive_all(fixture, (1, 2, 3, 4, 5))
     (job, _send_input) = fixture.queue.enqueued[0]
     raw = _fragment(5, bits=(1, 0, 1))
     landed = decoder_memory.MaterializedSyndromeRound(1, 5, (raw,))
@@ -286,8 +304,7 @@ def test_a_boundary_that_flipped_nothing_is_still_folded():
 
 def test_a_withdrawn_window_is_requested_again_fresh():
     fixture = _Fixture()
-    for round_index in (1, 2, 3, 4, 5):
-        fixture.arrive(round_index)
+    _arrive_all(fixture, (1, 2, 3, 4, 5))
     (first_job, _send_input) = fixture.queue.enqueued[0]
     fixture.requester.withdraw(fixture.window)
     assert fixture.queue.withdrawn == [(1, 0)]
@@ -316,10 +333,9 @@ def test_a_decode_job_is_priced_for_the_rounds_it_reads():
     view = run_views.switching_records_view(
         machine.observation.windows, machine.observation.decode_records
     )
-    by_window = {}
-    for record in view.requests:
-        window_id = record.request_key.window_id
-        by_window[window_id] = record
+    by_window = {
+        record.request_key.window_id: record for record in view.requests
+    }
     regular = by_window[1]
     tail = by_window[2]
     assert regular.request_key.tier is window_records.DecoderTier.WEAK
@@ -335,8 +351,7 @@ def _landed_job(fixture, folds_in_place: bool):
     fixture.window.deps = [(1, 9)]
     fixture.window.deps_remaining = 1
     fixture.deliver_boundary({5: [1, 0, 1]})
-    for round_index in (1, 2, 3, 4, 5):
-        fixture.arrive(round_index)
+    _arrive_all(fixture, (1, 2, 3, 4, 5))
     (job, _send_input) = fixture.queue.enqueued[0]
     memory = decoder_memory.DecoderMemory("default", 0, None)
     job.decoder_input = memory.deposit(job)
@@ -438,9 +453,10 @@ FOLD_COUNTING_SWEEP = {
 FOLD_SEEDS = (0, 1, 2, 3, 4)
 
 
+@pytest.mark.parametrize("seed", FOLD_SEEDS)
 @pytest.mark.parametrize("probability", (0.001, 0.01))
 def test_every_window_with_a_predecessor_folds_its_boundary(
-    tmp_path, probability
+    tmp_path, probability, seed
 ):
     """The fold's count is the geometry's, not the noise's.
 
@@ -452,21 +468,20 @@ def test_every_window_with_a_predecessor_folds_its_boundary(
     """
     config_path = yaml_configs.write_config(tmp_path, FOLD_COUNTING_SWEEP)
     config = experiment.load_experiment(config_path)
-    for seed in FOLD_SEEDS:
-        measurement = yaml_configs.measure_point_shot(
-            config,
-            physical_error_probability=probability,
-            distance=3,
-            round_period_microseconds=1.0,
-            seed=seed,
-        )
-        by_path = measurement.data_movement["copies_by_path"]
-        folds = by_path["unit default#0 memory -> masked view"]
+    measurement = yaml_configs.measure_point_shot(
+        config,
+        physical_error_probability=probability,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=seed,
+    )
+    by_path = measurement.data_movement["copies_by_path"]
+    folds = by_path["unit default#0 memory -> masked view"]
 
-        assert measurement.windows == 4
-        assert folds["events"] == measurement.windows - 1
-        assert folds["rounds"] == 18
-        assert measurement.direct_mismatch is False
+    assert measurement.windows == 4
+    assert folds["events"] == measurement.windows - 1
+    assert folds["rounds"] == 18
+    assert measurement.direct_mismatch is False
 
 
 # switching, so every window's request runs the two forced-class solves
@@ -616,15 +631,7 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     result = machine.run()
 
     records = machine.observation.decode_records.requests
-    weak = window_records.DecoderTier.WEAK
-    outcomes = decoding_records.RequestProcessingOutcome
-    completed = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
-    restarted = [
-        row
-        for row in records
-        if row.request_key.window_id == 3 and row.request_key.tier is weak
-        if row.terminal_processing_outcome is completed
-    ]
+    restarted = _completed_weak_requests(records, 3)
     (restart,) = restarted
     assert result.terminal_status == "complete"
     # W3 commits 10-12 past the strong region 1-9 and, at the default

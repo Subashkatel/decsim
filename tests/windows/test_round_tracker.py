@@ -51,6 +51,11 @@ def _window(
     )
 
 
+def _close_boundaries(tracker, stream_id, boundaries) -> None:
+    for boundary in boundaries:
+        tracker.close_boundary(stream_id, boundary)
+
+
 def _tracker(
     round_counts: dict, successors: dict
 ) -> round_tracker.RoundTracker:
@@ -115,8 +120,7 @@ def test_a_stream_closed_boundary_in_the_buffer_is_the_earliest_one():
     tracker = _tracker({}, {"stream": []})
     operation_stream = _operation("stream")
     tracker.register_stream(operation_stream, None)
-    for boundary in (2, 3, 4, 6, 7):
-        tracker.close_boundary("stream", boundary)
+    _close_boundaries(tracker, "stream", (2, 3, 4, 6, 7))
     window = _window("stream", 1, 3, 7)
     assert tracker.closed_boundary_round_for_window(window) == 3
 

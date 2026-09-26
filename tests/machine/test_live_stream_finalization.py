@@ -556,6 +556,43 @@ def test_a_continuation_s_last_round_ends_a_window_of_its_source():
     assert binding.stream_offset == 19
 
 
+def test_a_continuation_keeps_a_later_declared_segment_s_windows():
+    """A continuation bound at start keeps a declared segment's cuts.
+
+    Segment 5 declares rounds 19 to 21 of the 36-round source at load;
+    the continuation released at round 7 replans the windows after it,
+    and protect waits for segment 5's result, its own windows.
+    """
+    circuit = memory_programs.memory_circuit(36, 3)
+    owner = program_records.Operation(
+        100, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    resumed = _continuation(owner, 2, 1, blocked_by=1)
+    declared = dataclasses.replace(
+        owner,
+        id=5,
+        name="declared",
+        stream_id=100,
+        stream_offset=18,
+        predecessors=(2,),
+        scheduled_start_round=19,
+    )
+    protect, readout = _protected_tail(5, 5, 37)
+    counts = {100: 36, 1: 3, 2: 3, 5: 3, 3: 0, 4: 0}
+    later = (resumed, declared, protect, readout)
+    workload = _region_workload(owner, later, counts)
+    source = stim_device.StimDevice()
+    machine = _stim_machine(workload, source)
+    guard = _refuse_past(100_000_000)
+    machine.engine.action_done.connect(guard)
+    rounds = _emitted_rounds(machine)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    assert rounds == list(range(1, 37))
+
+
 def _stim_machine(
     workload: workload_settings.WorkloadSettings, device
 ) -> machine_module.Machine:

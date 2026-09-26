@@ -396,6 +396,30 @@ def test_a_cut_in_a_finite_stream_s_laid_last_window_plans_the_rest():
     assert commits == [(1, 3), (4, 6), (7, 10), (11, 12)]
 
 
+def test_a_finite_stream_replan_keeps_the_cuts_bound_before_it():
+    """A cut at round 4 replans the rest and still ends a window on 8.
+
+    The segment bound first, after round 8, keeps its first round on a
+    window's first round: each stretch between cuts is its own plan.
+    """
+    source = _FiniteSource(12)
+    planner = _planner(source)
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.cut_stream_after("stream", 8)
+    planner.cut_stream_after("stream", 4)
+    planner.grow_stream("stream", 12, None)
+    commits = _commit_spans(planner)
+    scheme = sliding_scheme.SlidingWindowScheme()
+    stretch = scheme.plan_operation(
+        "stream", 4, commit_round_count=3, buffer_round_count=2
+    )
+    first_stretch = _shifted_spans(stretch.windows, 4)
+    second_stretch = _shifted_spans(stretch.windows, 8)
+    assert commits[:2] == [(1, 3), (4, 4)]
+    assert commits[2:] == first_stretch + second_stretch
+
+
 def _commit_spans(planner: window_planner.WindowPlanner) -> list:
     """(commit_lo, commit_hi) of each window of the stream, in order."""
     return [

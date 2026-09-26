@@ -461,7 +461,8 @@ class WindowPlanner:
         round commits through it and may be smaller than the others, as
         at a closed tail (Tan et al. 2209.09219 lines 1052-1056), but the
         stream's model stays open; a window not laid yet is cut as it is
-        laid. The window clipped is returned, or None.
+        laid. Every cut is kept, so a later replan keeps the segments
+        bound before it. The window clipped is returned, or None.
         """
         growth = self.growth_by_stream[stream_id]
         clipped = None
@@ -469,9 +470,8 @@ class WindowPlanner:
             if window.commit_lo <= last_round < window.commit_hi:
                 _clip(window, last_round, growth)
                 clipped = window
-        if growth.finite_geometries is None:
-            growth.cut_rounds.append(last_round)
-        else:
+        growth.cut_rounds.append(last_round)
+        if growth.finite_geometries is not None:
             self._replan_finite_after(stream_id, growth, last_round)
         return clipped
 
@@ -483,8 +483,9 @@ class WindowPlanner:
         """Lay the finite source's windows not laid yet from the cut on.
 
         The window across the cut commits through it, and the scheme
-        plans the rounds after it as its own stretch. A cut on a window
-        edge, or on the source's last round, leaves the plan as it is.
+        plans each stretch between the cuts after it as its own. A cut on
+        a window edge, or on the source's last round, leaves the plan as
+        it is.
         """
         geometries = growth.finite_geometries
         round_limit = geometries[-1].commit_hi
@@ -495,17 +496,32 @@ class WindowPlanner:
         kept = list(geometries[:following_index])
         straddler = _clipped_straddler(unlaid_after, last_round, growth)
         kept.extend(straddler)
-        rest_round_count = round_limit - last_round
-        rest_plan = self.scheme.plan_operation(
+        stretch_start = last_round
+        stretch_ends = _stretch_ends(growth.cut_rounds, last_round, round_limit)
+        for stretch_end in stretch_ends:
+            stretch = self._plan_stretch(
+                stream_id, growth, stretch_start, stretch_end
+            )
+            kept.extend(stretch)
+            stretch_start = stretch_end
+        growth.finite_geometries = tuple(kept)
+
+    def _plan_stretch(
+        self,
+        stream_id: Any,
+        growth: "_StreamGrowth",
+        round_before: int,
+        last_round: int,
+    ) -> list:
+        """The scheme's windows over the rounds after one through another."""
+        round_count = last_round - round_before
+        plan = self.scheme.plan_operation(
             stream_id,
-            rest_round_count,
+            round_count,
             commit_round_count=growth.commit_rounds,
             buffer_round_count=growth.buffer_rounds,
         )
-        for geometry in rest_plan.windows:
-            shifted = _shifted(geometry, last_round)
-            kept.append(shifted)
-        growth.finite_geometries = tuple(kept)
+        return [_shifted(geometry, round_before) for geometry in plan.windows]
 
     def _build_operation_models(
         self, operation: program_records.Operation
@@ -646,6 +662,14 @@ def _first_past(
         ),
         len(geometries),
     )
+
+
+def _stretch_ends(cut_rounds: list, last_round: int, round_limit: int) -> list:
+    """The last round of each stretch after the round: the cuts, the end."""
+    later_cuts = {cut for cut in cut_rounds if last_round < cut < round_limit}
+    stretch_ends = sorted(later_cuts)
+    stretch_ends.append(round_limit)
+    return stretch_ends
 
 
 def _is_plan_edge(

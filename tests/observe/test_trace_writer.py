@@ -64,6 +64,52 @@ def _by_phase(document, phase) -> list:
     return [row for row in document if row["ph"] == phase]
 
 
+def _rows_with(rows, key: str, value) -> list:
+    """The rows whose key holds that value, in document order."""
+    matching = []
+    for row in rows:
+        if row.get(key) == value:
+            matching.append(row)
+    return matching
+
+
+def _rows_with_arg(rows, key: str, value) -> list:
+    """The rows whose args hold that value under key, in document order."""
+    matching = []
+    for row in rows:
+        if row["args"].get(key) == value:
+            matching.append(row)
+    return matching
+
+
+def _flow_rows(document) -> list:
+    flows = []
+    for row in document:
+        if row["ph"] in ("s", "t", "f"):
+            flows.append(row)
+    return flows
+
+
+def _chains_by_id(flows) -> dict:
+    """Each flow id: the (category, round, window) chains that use it."""
+    chains_by_id = {}
+    for row in flows:
+        args = row["args"]
+        followed = (row["cat"], args.get("round"), args.get("window"))
+        chains = chains_by_id.setdefault(row["id"], set())
+        chains.add(followed)
+    return chains_by_id
+
+
+def _recorded_steps_of(events, round_key: tuple) -> list:
+    """(kind, tick) of every recorded event of one round, in order."""
+    steps = []
+    for event in events:
+        if (event.operation_id, event.round_index) == round_key:
+            steps.append((event.kind, event.tick))
+    return steps
+
+
 def _flow_of(document, kind, key_text) -> list:
     """The events of the chain that follows that round or that window."""
     rows = []
@@ -141,36 +187,64 @@ def test_a_path_ending_in_gz_holds_the_same_trace_compressed(traced, tmp_path):
 def test_every_event_carries_the_fields_its_phase_declares(traced):
     """The JSON schema of the trace note's section 2, checked row by row."""
     _machine, _result, document = traced
-    tids_with_events = set()
+    event_rows = _event_rows(document)
+    tids_with_events = {row["tid"] for row in event_rows}
 
-    for row in document:
-        _check_row(row)
-        if row["ph"] != "M":
-            tids_with_events.add(row["tid"])
+    _check_every_row(document)
 
     named_tids = _thread_names(document)
     assert tids_with_events <= set(named_tids)
 
 
+def _event_rows(document) -> list:
+    """Every row but the metadata ones."""
+    events = []
+    for row in document:
+        if row["ph"] != "M":
+            events.append(row)
+    return events
+
+
+def _check_every_row(document) -> None:
+    for row in document:
+        _check_row(row)
+
+
 def test_every_flow_event_lies_inside_a_complete_event_on_its_thread(traced):
     """A flow's binding point is its enclosing slice, so it must have one."""
     _machine, _result, document = traced
+    complete_rows = _by_phase(document, "X")
+    spans_by_tid = _tick_spans_by_tid(complete_rows)
+    flows = _flow_rows(document)
+
+    uncovered = _rows_outside_every_span(flows, spans_by_tid)
+
+    assert uncovered == []
+
+
+def _tick_spans_by_tid(complete_rows) -> dict:
+    """Each lane's complete events as (start tick, end tick)."""
     spans_by_tid = {}
-    for row in _by_phase(document, "X"):
+    for row in complete_rows:
         start = row["args"]["tick"]
         microseconds = row["dur"] * 1_000_000
         duration = round(microseconds)
         end = start + int(duration)
         spans = spans_by_tid.setdefault(row["tid"], [])
         spans.append((start, end))
+    return spans_by_tid
 
-    for row in document:
-        if row["ph"] not in ("s", "t", "f"):
-            continue
+
+def _rows_outside_every_span(rows, spans_by_tid: dict) -> list:
+    """The rows whose tick no span on their own lane covers."""
+    outside = []
+    for row in rows:
         tick = row["args"]["tick"]
         spans = spans_by_tid.get(row["tid"], ())
         covered = any(start <= tick <= end for start, end in spans)
-        assert covered, row
+        if not covered:
+            outside.append(row)
+    return outside
 
 
 def test_every_flow_chain_has_a_number_of_its_own(traced):
@@ -182,14 +256,8 @@ def test_every_flow_chain_has_a_number_of_its_own(traced):
     round or window a chain follows is in its args.
     """
     _machine, _result, document = traced
-    chains_by_id = {}
-    for row in document:
-        if row["ph"] not in ("s", "t", "f"):
-            continue
-        args = row["args"]
-        followed = (row["cat"], args.get("round"), args.get("window"))
-        chains = chains_by_id.setdefault(row["id"], set())
-        chains.add(followed)
+    flows = _flow_rows(document)
+    chains_by_id = _chains_by_id(flows)
 
     starts = _by_phase(document, "s")
     assert all(isinstance(flow_id, int) for flow_id in chains_by_id)
@@ -200,20 +268,15 @@ def test_every_flow_chain_has_a_number_of_its_own(traced):
 def test_round_ones_first_hops_are_the_notes_worked_example(traced):
     """The note's example, hop by hop, for the first round of the point."""
     _machine, _result, document = traced
-    emitted = [
-        row
-        for row in document
-        if row["ph"] == "i" and row["name"] == "emitted round 1"
-    ]
+    instants = _by_phase(document, "i")
+    emitted = _rows_with(instants, "name", "emitted round 1")
     (emitted_row,) = emitted
     assert emitted_row["args"]["tick"] == 1_000_000
     assert emitted_row["args"]["bits"] == 8
 
-    moves = [
-        row
-        for row in _by_phase(document, "X")
-        if row["cat"] == "round,link" and row["args"]["rounds"] == "1..1"
-    ]
+    complete_rows = _by_phase(document, "X")
+    round_moves = _rows_with(complete_rows, "cat", "round,link")
+    moves = _rows_with_arg(round_moves, "rounds", "1..1")
     assert [row["args"]["tick"] for row in moves] == [1_000_000, 1_004_000]
     assert [row["args"]["delivery_tick"] for row in moves] == [
         1_004_000,
@@ -245,12 +308,12 @@ def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):
     queued = _one(document, "X", "W0 queued")
     assert queued["args"]["tick"] == 6_008_000
 
-    input_move = [
-        row
-        for row in _by_phase(document, "X")
-        if row["cat"] == "window,link"
-        and row["args"]["channel"] == "weak_buffer_to_weak_decoder"
-    ][0]
+    complete_rows = _by_phase(document, "X")
+    window_moves = _rows_with(complete_rows, "cat", "window,link")
+    input_moves = _rows_with_arg(
+        window_moves, "channel", "weak_buffer_to_weak_decoder"
+    )
+    input_move = input_moves[0]
     assert input_move["args"]["tick"] == 6_008_000
     assert input_move["args"]["bits"] == 44
     assert input_move["args"]["rounds"] == "1..6"
@@ -262,7 +325,7 @@ def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):
     assert resident["args"]["capacity_bits"] is None
     assert resident["args"]["freed"] == 6_104_000
 
-    stages = [row for row in _by_phase(document, "X") if row["cat"] == "stage"]
+    stages = _rows_with(complete_rows, "cat", "stage")
     first_three = stages[:3]
     assert [row["name"] for row in first_three] == [
         "fetch",
@@ -288,11 +351,8 @@ def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):
 def test_one_rounds_flow_chain_equals_the_round_events_recorded(traced):
     """The file's chain for round 1 is the recorder's chain for round 1."""
     machine, _result, document = traced
-    recorded = []
-    for event in machine.observation.round_events.events:
-        if (event.operation_id, event.round_index) != (1, 1):
-            continue
-        recorded.append((event.kind, event.tick))
+    events = machine.observation.round_events.events
+    recorded = _recorded_steps_of(events, (1, 1))
 
     flow = _flow_of(document, "round", "1:1")
     assert [row["ph"] for row in flow] == ["s", "t", "t", "t", "f"]
@@ -385,9 +445,11 @@ def test_a_windows_flow_joins_its_queue_its_moves_its_unit_and_the_frame(
     _machine, _result, document = traced
     threads = _thread_names(document)
     flow = _flow_of(document, "window", "1:0")
-    lanes = []
-    for row in flow:
-        lanes.append((row["ph"], threads[row["tid"]], row["args"]["tick"]))
+    lanes = [
+        (row["ph"], threads[row["tid"]], row["args"]["tick"]) for row in flow
+    ]
+    categories = {row["cat"] for row in flow}
+    names = {row["name"] for row in flow}
 
     assert lanes == [
         ("s", "Window planner", 6_008_000),
@@ -397,9 +459,8 @@ def test_a_windows_flow_joins_its_queue_its_moves_its_unit_and_the_frame(
         ("t", "weak_decoder_to_frame", 6_104_000),
         ("f", "Frame", 6_108_000),
     ]
-    for row in flow:
-        assert row["cat"] == "window"
-        assert row["name"] == "W0"
+    assert categories == {"window"}
+    assert names == {"W0"}
 
 
 def test_every_window_is_ready_when_its_last_round_is_readable(traced):
@@ -410,20 +471,35 @@ def test_every_window_is_ready_when_its_last_round_is_readable(traced):
     the store residence records as data_ready for that round.
     """
     machine, _result, document = traced
-    ready = []
-    for row in _by_phase(document, "i"):
-        if row["name"].endswith(" ready"):
-            ready.append(row)
+    instants = _by_phase(document, "i")
+    ready = _ready_rows(instants)
     windows = machine.observation.windows.windows
+    ready_ticks = [row["args"]["tick"] for row in ready]
+    last_round_ticks = _last_rounds_data_ready(document, ready)
 
     assert len(ready) == len(windows)
     assert len(ready) == 9
+    assert ready_ticks == last_round_ticks
+
+
+def _ready_rows(instants) -> list:
+    ready = []
+    for row in instants:
+        if row["name"].endswith(" ready"):
+            ready.append(row)
+    return ready
+
+
+def _last_rounds_data_ready(document, ready) -> list:
+    """For each ready window, the data_ready tick of the last round it reads."""
+    ticks = []
     for row in ready:
         read_rounds = row["args"]["rounds"]
         first_and_last = read_rounds.split("..")
         last_round = first_and_last[1]
         residence = _one(document, "X", f"round {last_round}")
-        assert row["args"]["tick"] == residence["args"]["data_ready"]
+        ticks.append(residence["args"]["data_ready"])
+    return ticks
 
 
 def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
@@ -431,10 +507,7 @@ def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
     machine, _result, document = traced
     (unit,) = machine.decoder_manager.pool.units()
     name = f"{unit.memory.name} bits"
-    values = []
-    for row in _by_phase(document, "C"):
-        if row["name"] == name:
-            values.append(row["args"]["bits"])
+    values = _counter_values(document, name, "bits")
 
     assert values
     assert max(values) == unit.memory.statistics.peak_occupied_bits
@@ -459,12 +532,16 @@ def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):
     assert residence["args"]["freed"] == 1_004_000
     assert residence["args"]["freed_reason"] == "packed"
     assert residence["args"]["capacity"] is None
-    steps = []
-    for row in _by_phase(document, "C"):
-        if row["name"] == "controller assembler rounds":
-            steps.append(row["args"]["rounds"])
+    steps = _counter_values(document, "controller assembler rounds", "rounds")
     assert max(steps) == 1
     assert steps[-1] == 0
+
+
+def _counter_values(document, name: str, series: str) -> list:
+    """The values one named counter plotted, in document order."""
+    counters = _by_phase(document, "C")
+    named = _rows_with(counters, "name", name)
+    return [row["args"][series] for row in named]
 
 
 def _check_row(row) -> None:
@@ -561,13 +638,23 @@ def _timing_only_row(latency_model=None):
     return decoders.PresetLatencyDecoder(1.0)
 
 
+def _corrections(document) -> list:
+    corrections = []
+    for row in document:
+        if _is_a_correction(row):
+            corrections.append(row)
+    return corrections
+
+
 def _is_a_correction(row) -> bool:
     """The residence of one window's correction on the frame's lane."""
     is_complete = row["ph"] == "X"
     return is_complete and row["name"].endswith(" correction")
 
 
-def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
+def test_a_write_with_no_prediction_is_traced_without_observables(
+    tmp_path, monkeypatch
+):
     """A result may carry no observables, and the residence then names none.
 
     decsim/ports.py's Decoder.decode returns a result whose correction
@@ -581,22 +668,21 @@ def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
     point = _settings(trace_path)
     weak_decoder = dataclasses.replace(point.weak_decoder, kind="timing_only")
     point = dataclasses.replace(point, weak_decoder=weak_decoder)
-    decoder_settings.DECODERS["timing_only"] = _timing_only_row
-    try:
-        machine = machine_module.Machine.build(point, SEED)
-        result = machine.run()
-    finally:
-        del decoder_settings.DECODERS["timing_only"]
+    monkeypatch.setitem(
+        decoder_settings.DECODERS, "timing_only", _timing_only_row
+    )
+    machine = machine_module.Machine.build(point, SEED)
+    result = machine.run()
     machine.observation.trace_writer.write(str(trace_path))
     text = trace_path.read_text()
     document = json.loads(text)
-    corrections = [row for row in document if _is_a_correction(row)]
+    corrections = _corrections(document)
+    names_committed = {"committed" in row["args"] for row in corrections}
+    names_observables = {"observables" in row["args"] for row in corrections}
 
     assert result.terminal_status == "complete"
-    assert corrections
-    for row in corrections:
-        assert "committed" in row["args"]
-        assert "observables" not in row["args"]
+    assert names_committed == {True}
+    assert names_observables == {False}
 
 
 def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
@@ -608,12 +694,13 @@ def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
     """
     _machine, _result, document = traced
     counters = _by_phase(document, "C")
-    assert counters
-    for row in counters:
-        assert len(row["args"]) == 1, row
-        assert "tick" not in row["args"]
-        for value in row["args"].values():
-            assert isinstance(value, int)
+    series_counts = {len(row["args"]) for row in counters}
+    series_names = {name for row in counters for name in row["args"]}
+    values = [value for row in counters for value in row["args"].values()]
+    value_is_whole = {isinstance(value, int) for value in values}
+    assert series_counts == {1}
+    assert "tick" not in series_names
+    assert value_is_whole == {True}
 
 
 def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
@@ -638,7 +725,7 @@ def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
     text = path.read_text()
     document = json.loads(text)
 
-    accesses = [row for row in document if row.get("cat") == "access"]
+    accesses = _rows_with(document, "cat", "access")
     names = {row["name"] for row in accesses}
     tids = {row["tid"] for row in accesses}
     first_port, second_port = sorted(tids)
@@ -663,13 +750,29 @@ def test_each_transfer_is_one_frame_on_its_channels_frame_lane(traced):
     so the frames on one channel's lane never overlap, one per move.
     """
     _machine, _result, document = traced
-    frames = [row for row in document if row.get("cat") == "frame"]
-    moves = [row for row in document if _is_a_move(row)]
+    frames = _rows_with(document, "cat", "frame")
+    moves = _moves(document)
     frame_lanes = {row["tid"] for row in frames}
+    overlapping = _overlapping_lanes(frames, frame_lanes)
 
     assert len(frames) == len(moves)
-    for tid in frame_lanes:
-        assert _lane_spans_overlap(frames, tid) is False
+    assert overlapping == []
+
+
+def _moves(document) -> list:
+    moves = []
+    for row in document:
+        if _is_a_move(row):
+            moves.append(row)
+    return moves
+
+
+def _overlapping_lanes(rows, lanes) -> list:
+    overlapping = []
+    for tid in sorted(lanes):
+        if _lane_spans_overlap(rows, tid):
+            overlapping.append(tid)
+    return overlapping
 
 
 def _is_a_move(row) -> bool:

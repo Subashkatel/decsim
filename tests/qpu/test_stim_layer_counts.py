@@ -19,6 +19,7 @@ somewhere else.
 
 import collections
 
+import pytest
 import stim
 
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -44,69 +45,71 @@ def _detectors_per_round(table) -> dict:
     return per_round
 
 
-def test_the_first_round_carries_half_a_rounds_detectors():
-    for distance in DISTANCES:
-        round_count = 4 * distance
-        _circuit, table = _formation_table(distance, round_count)
-        per_round = _detectors_per_round(table)
-        half = (distance * distance - 1) // 2
+@pytest.mark.parametrize("distance", DISTANCES)
+def test_the_first_round_carries_half_a_rounds_detectors(distance):
+    round_count = 4 * distance
+    _circuit, table = _formation_table(distance, round_count)
+    per_round = _detectors_per_round(table)
+    half = (distance * distance - 1) // 2
 
-        assert per_round[1] == half, distance
-
-
-def test_a_middle_round_carries_one_detector_per_stabilizer():
-    for distance in DISTANCES:
-        round_count = 4 * distance
-        _circuit, table = _formation_table(distance, round_count)
-        per_round = _detectors_per_round(table)
-        stabilizers = distance * distance - 1
-
-        assert per_round[2] == stabilizers, distance
+    assert per_round[1] == half
 
 
-def test_the_last_round_carries_one_and_a_half_because_the_readout_folds():
-    for distance in DISTANCES:
-        round_count = 4 * distance
-        _circuit, table = _formation_table(distance, round_count)
-        per_round = _detectors_per_round(table)
-        stabilizers = distance * distance - 1
-        one_and_a_half = 3 * stabilizers // 2
+@pytest.mark.parametrize("distance", DISTANCES)
+def test_a_middle_round_carries_one_detector_per_stabilizer(distance):
+    round_count = 4 * distance
+    _circuit, table = _formation_table(distance, round_count)
+    per_round = _detectors_per_round(table)
+    stabilizers = distance * distance - 1
 
-        assert per_round[round_count] == one_and_a_half, distance
+    assert per_round[2] == stabilizers
 
 
-def test_the_rounds_sum_to_the_circuits_own_detector_count():
+@pytest.mark.parametrize("distance", DISTANCES)
+def test_the_last_round_carries_one_and_a_half_because_the_readout_folds(
+    distance,
+):
+    round_count = 4 * distance
+    _circuit, table = _formation_table(distance, round_count)
+    per_round = _detectors_per_round(table)
+    stabilizers = distance * distance - 1
+    one_and_a_half = 3 * stabilizers // 2
+
+    assert per_round[round_count] == one_and_a_half
+
+
+@pytest.mark.parametrize("distance", DISTANCES)
+def test_the_rounds_sum_to_the_circuits_own_detector_count(distance):
     """Nothing is lost or double counted by the folding."""
-    for distance in DISTANCES:
-        round_count = 4 * distance
-        circuit, table = _formation_table(distance, round_count)
-        formed = len(table.detectors)
+    round_count = 4 * distance
+    circuit, table = _formation_table(distance, round_count)
+    formed = len(table.detectors)
 
-        assert formed == circuit.num_detectors, distance
-
-
-def test_the_three_layer_kinds_split_as_half_bulk_half():
-    for distance in DISTANCES:
-        round_count = 4 * distance
-        _circuit, table = _formation_table(distance, round_count)
-        by_kind = collections.Counter()
-        for recipe in table.detectors:
-            by_kind[recipe.kind] += 1
-        half = (distance * distance - 1) // 2
-
-        assert by_kind[detector_formation.LayerKind.PREPARATION] == half
-        assert by_kind[detector_formation.LayerKind.READOUT] == half
+    assert formed == circuit.num_detectors
 
 
-def test_the_raw_packet_is_one_bit_per_measure_qubit_plus_the_data_readout():
+@pytest.mark.parametrize("distance", DISTANCES)
+def test_the_three_layer_kinds_split_as_half_bulk_half(distance):
+    round_count = 4 * distance
+    _circuit, table = _formation_table(distance, round_count)
+    by_kind = collections.Counter(recipe.kind for recipe in table.detectors)
+    half = (distance * distance - 1) // 2
+
+    assert by_kind[detector_formation.LayerKind.PREPARATION] == half
+    assert by_kind[detector_formation.LayerKind.READOUT] == half
+
+
+@pytest.mark.parametrize("distance", DISTANCES)
+def test_the_raw_packet_is_one_bit_per_measure_qubit_plus_the_data_readout(
+    distance,
+):
     """The other width: what the QPU actually reads out each round."""
-    for distance in DISTANCES:
-        round_count = 4 * distance
-        _circuit, table = _formation_table(distance, round_count)
-        widths = table.packet_width_by_round
-        stabilizers = distance * distance - 1
-        data_qubits = distance * distance
+    round_count = 4 * distance
+    _circuit, table = _formation_table(distance, round_count)
+    widths = table.packet_width_by_round
+    stabilizers = distance * distance - 1
+    data_qubits = distance * distance
 
-        assert widths[1] == stabilizers, distance
-        assert widths[2] == stabilizers, distance
-        assert widths[round_count] == stabilizers + data_qubits, distance
+    assert widths[1] == stabilizers
+    assert widths[2] == stabilizers
+    assert widths[round_count] == stabilizers + data_qubits

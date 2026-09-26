@@ -121,6 +121,15 @@ def test_an_operation_on_no_qubits_claims_nothing():
     assert claims == [expected]
 
 
+def _calls_by_name(calls: list) -> dict:
+    """Each hook's name, with the values it heard in call order."""
+    calls_by_name = {}
+    for name, value in calls:
+        heard = calls_by_name.setdefault(name, [])
+        heard.append(value)
+    return calls_by_name
+
+
 def test_a_layout_written_outside_decsim_hears_every_hook_of_a_run():
     """A run asks the layout for its codes, then per operation and patch."""
     card = code_geometry.SurfaceCodeModel(distance=3)
@@ -129,10 +138,7 @@ def test_a_layout_written_outside_decsim_hears_every_hook_of_a_run():
     machine = machine_module.Machine.build(settings)
     machine.run()
 
-    calls_by_name = {}
-    for name, value in layout.calls:
-        heard = calls_by_name.setdefault(name, [])
-        heard.append(value)
+    calls_by_name = _calls_by_name(layout.calls)
     operation = one_operation()
     view = program_records.OperationPlanningView.from_operation(operation)
     assert calls_by_name["codes"] == [None]

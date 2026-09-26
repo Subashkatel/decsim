@@ -117,8 +117,8 @@ def test_every_factory_row_fills_the_port_it_is_built_behind():
     )
     level_chain = chain(engine, [level])
     rows.append(level_chain)
-    for row in rows:
-        assert isinstance(row, ports.MagicStateFactory), type(row)
+    fills_the_port = [isinstance(row, ports.MagicStateFactory) for row in rows]
+    assert fills_the_port == [True, True, True]
 
 
 class _StartRequestShutdown:

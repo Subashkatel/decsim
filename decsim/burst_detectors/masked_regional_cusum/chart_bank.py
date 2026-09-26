@@ -15,48 +15,30 @@ positions for a burst's lifetime (2501.00331 lines 729-733).
 
 import dataclasses
 import math
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy
 
 import decsim.burst_detectors.layout as layout_module
 
+if TYPE_CHECKING:
+    import decsim.burst_detectors.masked_regional_cusum.detector as detector
+
 # Each usual rate is floored here, so a check no fault reaches still
 # has a finite design ratio.
-SMALLEST_USUAL_RATE = 1e-6
+_SMALLEST_USUAL_RATE = 1e-6
 # Region radii are in grid units, where neighbouring checks sit
 # sqrt(2) apart: Stim's rotated layout puts them 2 apart.
-GRID_UNITS_PER_COORDINATE = math.sqrt(2) / 2
+_GRID_UNITS_PER_COORDINATE = math.sqrt(2) / 2
 # A disc holds a check at its radius exactly, whatever the rounding.
-RADIUS_ROUNDING = 1e-9
+_RADIUS_ROUNDING = 1e-9
 # On Stim's rotated surface code the two checks diagonal to a data
 # qubit measure its basis (gen_surface_code.cc lines 220-262), so the
 # pair one data-qubit flip fires together sits this far apart in both
 # coordinates.
-PAIR_OFFSET = 2.0
+_PAIR_OFFSET = 2.0
 # A check never flagged is masked at no round.
-NEVER_FLAGGED = -(10**9)
-
-
-@dataclasses.dataclass
-class _BankState:
-    """The chart bank's state, one row per stream it scores.
-
-    The rings hold the last mask_window_rounds rounds of each check's
-    repeats and each pair's joint firings; scored_rounds places the next
-    round in them.
-    """
-
-    previous_row: Any
-    repeat_ring: Any
-    joint_ring: Any
-    repeat_counts: Any
-    joint_counts: Any
-    last_flagged_round: Any
-    usual_counts: Any
-    scores: Any
-    last_zero_round: Any
-    scored_rounds: int = 0
+_NEVER_FLAGGED = -(10**9)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -70,17 +52,21 @@ class ChartBank:
     regions', design-major.
     """
 
-    settings: Any
-    usual_rates: Any
-    incidence: Any
-    region_rates: Any
-    region_scales: Any
-    pair_incidence: Any
-    log_ratios: Any
-    ratio_excesses: Any
+    settings: "detector.MaskedRegionalCusumBurstDetector.Settings"
+    usual_rates: numpy.ndarray
+    incidence: numpy.ndarray
+    region_rates: numpy.ndarray
+    region_scales: numpy.ndarray
+    pair_incidence: numpy.ndarray
+    log_ratios: numpy.ndarray
+    ratio_excesses: numpy.ndarray
 
     @classmethod
-    def for_layout(cls, layout: layout_module.Layout, settings) -> "ChartBank":
+    def for_layout(
+        cls,
+        layout: layout_module.Layout,
+        settings: "detector.MaskedRegionalCusumBurstDetector.Settings",
+    ) -> "ChartBank":
         """The regions, the pairs and the designs' log ratios.
 
         A design multiplies each fault's rate by k, so a check of usual
@@ -88,7 +74,7 @@ class ChartBank:
         combined by parity), and a region's ratio is rho = sum q1 / sum
         q0.
         """
-        usual_rates = numpy.maximum(layout.usual_rates, SMALLEST_USUAL_RATE)
+        usual_rates = numpy.maximum(layout.usual_rates, _SMALLEST_USUAL_RATE)
         incidence, region_scales = _regions(layout.positions, settings)
         pair_incidence = _pair_incidence(layout.positions)
         region_rates = usual_rates @ incidence
@@ -117,7 +103,10 @@ class ChartBank:
         scale_count = len(self.settings.region_radii) + 1
         return design_count * scale_count
 
-    def cycles_per_round(self, settings) -> int:
+    def cycles_per_round(
+        self,
+        settings: "detector.MaskedRegionalCusumBurstDetector.Settings",
+    ) -> int:
         """ceil(regions x designs / datapaths) + pipeline_cycles.
 
         A bank of U chart updates spread over P datapaths, each a
@@ -133,7 +122,7 @@ class ChartBank:
         update_cycles = math.ceil(updates_per_datapath)
         return update_cycles + settings.pipeline_cycles
 
-    def new_state(self, stream_count: int, first_round: int) -> _BankState:
+    def new_state(self, stream_count: int, first_round: int) -> "_BankState":
         """Every chart at zero before first_round, every mu its usual rate."""
         check_count, region_count = self.incidence.shape
         pair_count = self.pair_incidence.shape[0]
@@ -150,7 +139,7 @@ class ChartBank:
         joint_ring = numpy.zeros(pair_ring_shape, numpy.uint8)
         repeat_counts = numpy.zeros(check_shape, int)
         joint_counts = numpy.zeros(pair_shape, int)
-        last_flagged_round = numpy.full(check_shape, NEVER_FLAGGED)
+        last_flagged_round = numpy.full(check_shape, _NEVER_FLAGGED)
         usual_counts = numpy.tile(self.region_rates, (stream_count, 1))
         scores = numpy.zeros(chart_shape)
         last_zero_round = numpy.full(chart_shape, before_first_round)
@@ -166,7 +155,9 @@ class ChartBank:
             last_zero_round=last_zero_round,
         )
 
-    def score_round(self, state: _BankState, rows, round_index: int):
+    def score_round(
+        self, state: "_BankState", rows: numpy.ndarray, round_index: int
+    ) -> numpy.ndarray:
         """One round of every stream: mask, then score; the group scores.
 
         rows is (streams, checks) of 0/1. The score is read after the
@@ -177,7 +168,9 @@ class ChartBank:
         self._score(state, rows, is_unmasked, round_index)
         return self._group_scores(state)
 
-    def block_maxima(self, rows, first_round: int):
+    def block_maxima(
+        self, rows: numpy.ndarray, first_round: int
+    ) -> numpy.ndarray:
         """Each stream's largest group scores over its rounds, from cold.
 
         rows is (streams, rounds, checks); the streams start together
@@ -194,7 +187,9 @@ class ChartBank:
             numpy.maximum(maxima, group_scores, out=maxima)
         return maxima
 
-    def leading_chart(self, state: _BankState, thresholds) -> tuple:
+    def leading_chart(
+        self, state: "_BankState", thresholds: numpy.ndarray
+    ) -> tuple:
         """The first stream's chart with the largest score over its level."""
         design_count = len(self.settings.fault_rate_multipliers)
         scale_count = len(self.settings.region_radii) + 1
@@ -204,7 +199,7 @@ class ChartBank:
         flat_index = numpy.argmax(ratios)
         return numpy.unravel_index(flat_index, ratios.shape)
 
-    def _unmasked(self, state: _BankState, rows, round_index: int):
+    def _unmasked(self, state: "_BankState", rows, round_index: int):
         """Which checks count this round: none flagged in the hold.
 
         A repeat is a firing now and in the round before; a pair's joint
@@ -234,7 +229,7 @@ class ChartBank:
         rounds_since_flag = round_index - state.last_flagged_round
         return rounds_since_flag > settings.mask_hold_rounds
 
-    def _score(self, state: _BankState, rows, is_unmasked, round_index):
+    def _score(self, state: "_BankState", rows, is_unmasked, round_index):
         """Every chart's CUSUM step, then each region's usual count.
 
         c counts the region's unmasked firings and f is the unmasked
@@ -257,7 +252,7 @@ class ChartBank:
         self._track(state, counts, unmasked_shares)
         state.scored_rounds += 1
 
-    def _track(self, state: _BankState, counts, unmasked_shares) -> None:
+    def _track(self, state: "_BankState", counts, unmasked_shares) -> None:
         """Move mu toward c / f by 1 / rate_tracking_rounds, when f > floor.
 
         The count is scaled back to the whole region; with too little of
@@ -273,7 +268,7 @@ class ChartBank:
         tracked_steps = steps * is_tracked
         state.usual_counts += tracked_steps
 
-    def _group_scores(self, state: _BankState):
+    def _group_scores(self, state: "_BankState"):
         """(streams, groups): each design's largest score at each radius."""
         stream_count, design_count, _ = state.scores.shape
         scale_count = len(self.settings.region_radii) + 1
@@ -287,6 +282,27 @@ class ChartBank:
         return numpy.reshape(group_scores, (stream_count, group_count))
 
 
+@dataclasses.dataclass
+class _BankState:
+    """The chart bank's state, one row per stream it scores.
+
+    The rings hold the last mask_window_rounds rounds of each check's
+    repeats and each pair's joint firings; scored_rounds places the next
+    round in them.
+    """
+
+    previous_row: numpy.ndarray
+    repeat_ring: numpy.ndarray
+    joint_ring: numpy.ndarray
+    repeat_counts: numpy.ndarray
+    joint_counts: numpy.ndarray
+    last_flagged_round: numpy.ndarray
+    usual_counts: numpy.ndarray
+    scores: numpy.ndarray
+    last_zero_round: numpy.ndarray
+    scored_rounds: int = 0
+
+
 def _regions(positions: tuple, settings) -> tuple:
     """Discs of every radius around every check, then the whole patch.
 
@@ -295,14 +311,14 @@ def _regions(positions: tuple, settings) -> tuple:
     whole patch last.
     """
     coordinates = numpy.asarray(positions, dtype=float)
-    grid = coordinates * GRID_UNITS_PER_COORDINATE
+    grid = coordinates * _GRID_UNITS_PER_COORDINATE
     offsets = grid[:, None, :] - grid[None, :, :]
     squared_offsets = offsets**2
     squared_distances = numpy.sum(squared_offsets, axis=2)
     columns = []
     region_scales = []
     for scale, radius in enumerate(settings.region_radii):
-        reach = radius * radius + RADIUS_ROUNDING
+        reach = radius * radius + _RADIUS_ROUNDING
         discs = squared_distances <= reach
         columns.append(discs)
         disc_scales = [scale] * len(positions)
@@ -319,7 +335,7 @@ def _pair_incidence(positions: tuple):
     coordinates = numpy.asarray(positions, dtype=float)
     offsets = coordinates[:, None, :] - coordinates[None, :, :]
     distances = numpy.abs(offsets)
-    is_pair_offset = distances == PAIR_OFFSET
+    is_pair_offset = distances == _PAIR_OFFSET
     is_diagonal = numpy.all(is_pair_offset, axis=2)
     upper = numpy.triu(is_diagonal)
     first_checks, second_checks = numpy.nonzero(upper)

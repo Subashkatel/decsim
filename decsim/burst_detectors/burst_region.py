@@ -5,12 +5,13 @@ faults with its graph unchanged (IonQ 2608.25027 lines 334-340).
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
 import numpy
 
 import decsim.burst_detectors.flag_log as flag_log
 import decsim.burst_detectors.layout as layout_module
+import decsim.detector_error_model.fault_model_contracts as fault_models
 
 
 @dataclasses.dataclass(frozen=True)
@@ -28,7 +29,7 @@ class BurstRegion:
         cls,
         layout: layout_module.Layout,
         episode: flag_log.Episode,
-        is_in_region: Any,
+        is_in_region: numpy.ndarray,
         flagged_rows: list,
     ) -> "BurstRegion":
         """The region's positions, and the scale its measured rate asks.
@@ -44,7 +45,9 @@ class BurstRegion:
             last_round = None
         return cls(positions, episode.first_round, last_round, prior_scale)
 
-    def raised(self, model):
+    def raised(
+        self, model: fault_models.WindowErrorModel
+    ) -> fault_models.WindowErrorModel:
         """The model with every region fault's prior scaled, capped at 1/2.
 
         Only the prior vector changes: "we update only the corresponding

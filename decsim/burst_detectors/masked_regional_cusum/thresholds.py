@@ -7,27 +7,28 @@ meets the target.
 
 import dataclasses
 import math
-from typing import Any
 
 import numpy
 
 # The calibration rule's constants: the exponential tail is fitted to
-# the largest TAIL_FIT_COUNT block maxima, a bank target is measured
-# when the blocks hold MEASURED_ALARMS expected alarms, the shared level
+# the largest _TAIL_FIT_COUNT block maxima, a bank target is measured
+# when the blocks hold _MEASURED_ALARMS expected alarms, the shared level
 # is bisected this many times, and a fitted tail is never flatter than
-# SMALLEST_TAIL_SCALE.
-TAIL_FIT_COUNT = 20
-MEASURED_ALARMS = 5
-SHARE_BISECTION_STEPS = 30
-SMALLEST_TAIL_SCALE = 1e-9
+# _SMALLEST_TAIL_SCALE.
+_TAIL_FIT_COUNT = 20
+_MEASURED_ALARMS = 5
+_SHARE_BISECTION_STEPS = 30
+_SMALLEST_TAIL_SCALE = 1e-9
 
 
-def bank_thresholds(maxima, target_share: float):
+def bank_thresholds(
+    maxima: numpy.ndarray, target_share: float
+) -> numpy.ndarray:
     """One level per group, sharing one tail share, so the bank meets target.
 
     maxima is (blocks, groups). The shared share is bisected so the
     share of blocks where any group reaches its level is at most the
-    target. A target the blocks hold fewer than MEASURED_ALARMS alarms
+    target. A target the blocks hold fewer than _MEASURED_ALARMS alarms
     at keeps the bank-to-group ratio found where they hold that many.
     """
     block_count, group_count = maxima.shape
@@ -36,10 +37,10 @@ def bank_thresholds(maxima, target_share: float):
         tail = _group_tail(maxima[:, group])
         tails.append(tail)
     expected_alarms = target_share * block_count
-    if expected_alarms >= MEASURED_ALARMS:
+    if expected_alarms >= _MEASURED_ALARMS:
         group_share = _shared_share(maxima, tails, target_share)
         return _levels(tails, group_share)
-    measured_share = MEASURED_ALARMS / block_count
+    measured_share = _MEASURED_ALARMS / block_count
     group_share = _shared_share(maxima, tails, measured_share)
     bank_ratio = measured_share / group_share
     extrapolated_share = target_share / bank_ratio
@@ -56,8 +57,8 @@ class _GroupTail:
     maxima's excesses over the next one, u + beta ln(k / (n share)).
     """
 
-    values: Any
-    tails: Any
+    values: numpy.ndarray
+    tails: numpy.ndarray
     block_count: int
     fitted_count: int
     fit_base: float
@@ -89,11 +90,11 @@ def _group_tail(maxima) -> _GroupTail:
     ascending = numpy.sort(maxima)
     descending = ascending[::-1]
     largest_fitted_count = block_count - 1
-    fitted_count = min(TAIL_FIT_COUNT, largest_fitted_count)
+    fitted_count = min(_TAIL_FIT_COUNT, largest_fitted_count)
     fit_base = descending[fitted_count]
     excesses = descending[:fitted_count] - fit_base
     mean_excess = numpy.mean(excesses)
-    fit_scale = max(float(mean_excess), SMALLEST_TAIL_SCALE)
+    fit_scale = max(float(mean_excess), _SMALLEST_TAIL_SCALE)
     return _GroupTail(
         values, tails, block_count, fitted_count, fit_base, fit_scale
     )
@@ -106,7 +107,7 @@ def _shared_share(maxima, tails: list, bank_share: float) -> float:
     high = bank_share
     while _bank_alarm_share(maxima, tails, low) > bank_share:
         low /= 2
-    for _ in range(SHARE_BISECTION_STEPS):
+    for _ in range(_SHARE_BISECTION_STEPS):
         product = low * high
         middle = math.sqrt(product)
         if _bank_alarm_share(maxima, tails, middle) <= bank_share:

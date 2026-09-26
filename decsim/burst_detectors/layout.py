@@ -7,7 +7,6 @@ position off the circuit's own detector error model.
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Any
 
 import numpy
 import stim
@@ -46,7 +45,7 @@ class Layout:
     positions: tuple
     position_by_value: dict
     first_bulk_round: int
-    usual_rates: Any
+    usual_rates: numpy.ndarray
     position_priors: tuple
     slot_by_detector: dict
     faults: list
@@ -97,7 +96,9 @@ class Layout:
         numpy.add.at(counts, bulk_positions, bulk_values)
         return counts
 
-    def prior_scale(self, is_in_region: Any, measured_rate: float) -> float:
+    def prior_scale(
+        self, is_in_region: numpy.ndarray, measured_rate: float
+    ) -> float:
         """The factor on the region's priors that explains its event rate.
 
         Solved so the region's mean detection probability, (1 - prod(1 -
@@ -122,7 +123,7 @@ class Layout:
             return largest_scale
         return _bisected_scale(region_priors, measured_rate, largest_scale)
 
-    def _region_priors(self, is_in_region: Any) -> list:
+    def _region_priors(self, is_in_region: numpy.ndarray) -> list:
         """The priors behind each position of the region."""
         region_priors = []
         for position, is_member in enumerate(is_in_region):

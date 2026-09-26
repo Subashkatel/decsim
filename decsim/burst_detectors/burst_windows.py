@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.burst_detectors.flag_log as flag_log
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
 
@@ -32,7 +33,11 @@ class BurstWindows:
         episode = self._published_episode(window)
         return episode is not None
 
-    def with_burst_priors(self, window: window_records.Window, model):
+    def with_burst_priors(
+        self,
+        window: window_records.Window,
+        model: fault_models.WindowErrorModel,
+    ) -> fault_models.WindowErrorModel:
         """The model with the meeting flag's region raised; unmet, unchanged."""
         episode = self._published_episode(window)
         if episode is None:

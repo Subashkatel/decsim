@@ -24,6 +24,7 @@ import decsim.burst_detectors.event_count.tail_law as tail_law
 import decsim.burst_detectors.flag_log as flag_log
 import decsim.burst_detectors.layout as layout_module
 import decsim.config as config
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
@@ -150,7 +151,11 @@ class EventCountBurstDetector:
         """Whether a flag published by now meets the window's rounds."""
         return self.windows.is_burst_window(window)
 
-    def with_burst_priors(self, window: window_records.Window, model):
+    def with_burst_priors(
+        self,
+        window: window_records.Window,
+        model: fault_models.WindowErrorModel,
+    ) -> fault_models.WindowErrorModel:
         """The model with the flagged region's priors raised, graph kept."""
         if not self.settings.raise_strong_priors:
             return model
@@ -296,7 +301,6 @@ class _OperationCounts:
 
 
 def _counts_by_operation(circuits: Mapping, settings) -> dict:
-    """One calibrated counter set per operation."""
     counts_by_operation = {}
     for operation_id, (circuit, round_count) in circuits.items():
         _refuse_a_short_operation(operation_id, round_count, settings)
@@ -376,7 +380,6 @@ def _position_laws(
 
 
 def _centred_slab(round_count: int, window_rounds: int) -> tuple:
-    """The window_rounds rounds in the middle of the operation."""
     last_round = (round_count + window_rounds + 1) // 2
     first_round = last_round - window_rounds + 1
     return first_round, last_round

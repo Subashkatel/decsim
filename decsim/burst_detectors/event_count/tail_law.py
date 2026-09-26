@@ -1,7 +1,6 @@
 """The tail of one count of detection events under the usual rates."""
 
 import dataclasses
-from typing import Any
 
 import numpy
 import scipy.special
@@ -47,11 +46,14 @@ class TailLaw:
     """
 
     fault_rate: float
-    conditional_tails: Any
+    conditional_tails: numpy.ndarray
 
     @classmethod
     def from_priors(
-        cls, priors: Any, incidence: Any, smallest_false_alarms: float
+        cls,
+        priors: numpy.ndarray,
+        incidence: numpy.ndarray,
+        smallest_false_alarms: float,
     ) -> "TailLaw":
         """The tail law of one count, integrated by fault count.
 
@@ -74,7 +76,7 @@ class TailLaw:
         )
         return cls(fault_rate, conditional_tails)
 
-    def tails(self, rate_scale: float) -> Any:
+    def tails(self, rate_scale: float) -> numpy.ndarray:
         """P(count >= k) for every k, with every fault's rate scaled.
 
         A scale s on the rates gives a fault of prior p the odd chance

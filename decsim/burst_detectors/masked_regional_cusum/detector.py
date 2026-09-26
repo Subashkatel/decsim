@@ -23,6 +23,7 @@ import decsim.burst_detectors.layout as layout_module
 import decsim.burst_detectors.masked_regional_cusum.chart_bank as chart_bank
 import decsim.burst_detectors.masked_regional_cusum.thresholds as thresholds
 import decsim.config as config
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
@@ -151,7 +152,11 @@ class MaskedRegionalCusumBurstDetector:
         """Whether a flag published by now meets the window's rounds."""
         return self.windows.is_burst_window(window)
 
-    def with_burst_priors(self, window: window_records.Window, model):
+    def with_burst_priors(
+        self,
+        window: window_records.Window,
+        model: fault_models.WindowErrorModel,
+    ) -> fault_models.WindowErrorModel:
         """The model with the flagged region's priors raised, graph kept."""
         if not self.settings.raise_strong_priors:
             return model
@@ -172,7 +177,7 @@ class _ChartCalibration:
     layout: layout_module.Layout
     bank: chart_bank.ChartBank
     # one level per group, from quiet shots of the operation's circuit
-    thresholds: Any
+    thresholds: numpy.ndarray
 
 
 class _OperationCharts:
@@ -236,7 +241,6 @@ class _OperationCharts:
 def _charts_by_operation(
     circuits: Mapping, settings, round_period_microseconds: float
 ) -> dict:
-    """One calibrated chart bank per operation."""
     charts_by_operation = {}
     for operation_id, (circuit, round_count) in circuits.items():
         circuit_text = str(circuit)

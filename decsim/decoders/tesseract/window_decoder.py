@@ -10,7 +10,7 @@ merging is off so the physical columns keep their one-to-one identity.
 
 import dataclasses
 import math
-import numbers as numbers_module
+import numbers
 import os
 import secrets
 import threading
@@ -310,7 +310,7 @@ def _normalized_coordinate(detector_index: int, coordinate) -> tuple:
 def _finite_coordinate(
     detector_index: int, coordinate_index: int, value
 ) -> float:
-    if isinstance(value, bool) or not isinstance(value, numbers_module.Real):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(
             f"detector coordinate {detector_index}[{coordinate_index}] "
             "must be a real number"
@@ -353,7 +353,7 @@ def _validated_priors(priors, fault_count: int) -> tuple:
 
 
 def _validated_prior(fault_index: int, value) -> float:
-    if isinstance(value, bool) or not isinstance(value, numbers_module.Real):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"physical prior at column {fault_index} must be real")
     probability = float(value)
     if not math.isfinite(probability) or not 0 < probability <= 0.5:
@@ -466,10 +466,10 @@ def _check_round_trip(
 
 
 def _float_tuple(values) -> tuple:
-    numbers = []
+    floats = []
     for value in values:
-        numbers.append(float(value))
-    return tuple(numbers)
+        floats.append(float(value))
+    return tuple(floats)
 
 
 def _correction_from_error_indices(indices, fault_count: int) -> tuple:
@@ -477,9 +477,7 @@ def _correction_from_error_indices(indices, fault_count: int) -> tuple:
     correction = numpy.zeros(fault_count, dtype=numpy.uint8)
     seen = set()
     for value in indices:
-        if isinstance(value, bool) or not isinstance(
-            value, numbers_module.Integral
-        ):
+        if isinstance(value, bool) or not isinstance(value, numbers.Integral):
             reason = _Reason.CORRECTION_NOT_BINARY
             return None, reason
         fault_index = int(value)

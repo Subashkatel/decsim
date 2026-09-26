@@ -13,7 +13,7 @@ diagnostic only and never becomes simulated time.
 
 import dataclasses
 import math
-import numbers as numbers_module
+import numbers
 import os
 import secrets
 import threading
@@ -216,7 +216,7 @@ class _NonbinaryCorrectionError(ValueError):
 def _finite_real(value, name: str, *, allow_none: bool = False):
     if value is None and allow_none:
         return None
-    if isinstance(value, bool) or not isinstance(value, numbers_module.Real):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"{name} must be a finite real number")
     normalized = float(value)
     if not math.isfinite(normalized):
@@ -225,9 +225,7 @@ def _finite_real(value, name: str, *, allow_none: bool = False):
 
 
 def _nonnegative_integer(value, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(
-        value, numbers_module.Integral
-    ):
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
         raise TypeError(f"{name} must be a nonnegative integer")
     normalized = int(value)
     if normalized < 0:
@@ -391,10 +389,10 @@ def _binary_vector(value, *, expected_size: int) -> tuple:
 
 
 def _float_tuple(values) -> tuple:
-    numbers = []
+    floats = []
     for value in values:
-        numbers.append(float(value))
-    return tuple(numbers)
+        floats.append(float(value))
+    return tuple(floats)
 
 
 def _reconstruct(check, correction) -> tuple:

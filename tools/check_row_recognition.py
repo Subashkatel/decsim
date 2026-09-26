@@ -34,9 +34,9 @@ YAML_BOUNDARY = frozenset(
         "str",
         "tuple",
         "Mapping",
-        "Integral",
         "Real",
         "numbers.Integral",
+        "numbers.Real",
         "pathlib.Path",
     }
 )

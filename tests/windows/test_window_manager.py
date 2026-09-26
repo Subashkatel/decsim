@@ -124,8 +124,8 @@ def test_a_committed_window_publishes_the_request_that_decoded_it():
 def test_no_window_of_a_weak_run_is_absorbed():
     machine = _weak_run()
     windows = machine.observation.windows.windows.values()
-    absorbed = {window.is_absorbed for window in windows}
-    assert absorbed == {False}
+    is_false = [window.is_absorbed is False for window in windows]
+    assert all(is_false)
 
 
 def test_a_window_is_final_once_its_request_is_published():

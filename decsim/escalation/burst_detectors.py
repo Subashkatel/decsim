@@ -26,9 +26,10 @@ reaches its group's threshold, the multichart CUSUM rule (Zhang et al.
 1410.8765 lines 338-350). A check that behaves like a defect, firing in
 consecutive rounds or with its pair too often, leaves the counts for a
 hold time, as Q3DE removes detected positions for a burst's lifetime
-(2501.00331 lines 729-733). The method and its numbers are the burst
-study's mask_p8r8_D0_x2, its thresholds read by the study's rule off
-quiet shots of the operation's own circuit.
+(2501.00331 lines 729-733). The thresholds are read off quiet shots
+of the operation's own circuit: every group takes the level its block
+maxima pass at one shared tail share, bisected until the share of
+shots on which any group alarms meets the target.
 
 A flag runs from its estimated onset to the last round the detector
 still fires on: the count's onset is the firing round less the window
@@ -81,11 +82,11 @@ TRUNCATION_SHARE = 0.01
 # Quiet shots drawn and scored together, which bounds the memory the
 # CUSUM's calibration holds.
 CALIBRATION_BATCH_SHOTS = 1000
-# The study floors each usual rate here, so a check no fault reaches
-# still has a finite design ratio (burst study pass4.py lines 125, 396).
+# Each usual rate is floored here, so a check no fault reaches still
+# has a finite design ratio.
 SMALLEST_USUAL_RATE = 1e-6
-# Region radii are in the study's grid units, where neighbouring checks
-# sit sqrt(2) apart: Stim's rotated layout puts them 2 apart.
+# Region radii are in grid units, where neighbouring checks sit
+# sqrt(2) apart: Stim's rotated layout puts them 2 apart.
 GRID_UNITS_PER_COORDINATE = math.sqrt(2) / 2
 # A disc holds a check at its radius exactly, whatever the rounding.
 RADIUS_ROUNDING = 1e-9
@@ -96,8 +97,7 @@ RADIUS_ROUNDING = 1e-9
 PAIR_OFFSET = 2.0
 # A check never flagged is masked at no round.
 NEVER_FLAGGED = -(10**9)
-# The CUSUM calibration rule's constants (burst study harness/
-# analysis.py GroupTail and bank_thresholds): the exponential tail is
+# The CUSUM calibration rule's constants: the exponential tail is
 # fitted to the largest TAIL_FIT_COUNT block maxima, a bank target is
 # measured when the blocks hold MEASURED_ALARMS expected alarms, the
 # shared level is bisected this many times, and a fitted tail is never
@@ -154,7 +154,7 @@ class EventCountBurstDetector:
         def from_yaml(
             cls, section: Mapping, clocks: config.ClockSettings
         ) -> "EventCountBurstDetector.Settings":
-            """The section's keys, each refused by a sentence when wrong."""
+            """A priced count names its clock; an unpriced one needs none."""
             patch_window = _whole_count(
                 section, "patch_window_rounds", 4, "rounds"
             )
@@ -215,20 +215,18 @@ class EventCountBurstDetector:
 
     def is_burst_window(self, window: window_records.Window) -> bool:
         """Whether a flag published by now meets the window's rounds."""
-        counts = self.counts_by_operation[window.operation_id]
-        episode = counts.flags.episode_meeting(window, self.engine.now)
+        episode = _published_episode(
+            self.counts_by_operation, self.engine, window
+        )
         return episode is not None
 
     def with_burst_priors(self, window: window_records.Window, model):
         """The model with the flagged region's priors raised, graph kept."""
         if not self.settings.raise_strong_priors:
             return model
-        counts = self.counts_by_operation[window.operation_id]
-        episode = counts.flags.episode_meeting(window, self.engine.now)
-        if episode is None:
-            return model
-        region = counts.region_of(episode)
-        return region.raised(model)
+        return _raised_priors(
+            self.counts_by_operation, self.engine, window, model
+        )
 
 
 class MaskedRegionalCusumBurstDetector:
@@ -244,7 +242,7 @@ class MaskedRegionalCusumBurstDetector:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The masked_regional_cusum row's keys, the study's values.
+        """The masked_regional_cusum row's keys and the method's defaults.
 
         mask_window_rounds is the window of each check's repeat count
         and each pair's joint count; mask_count is the count at which
@@ -282,7 +280,7 @@ class MaskedRegionalCusumBurstDetector:
         def from_yaml(
             cls, section: Mapping, clocks: config.ClockSettings
         ) -> "MaskedRegionalCusumBurstDetector.Settings":
-            """The section's keys, each refused by a sentence when wrong."""
+            """The timing card prices on a clock; a null mask_count is none."""
             method = _method_keys(section)
             clock = _bank_clock(section, clocks)
             datapaths = _whole_count(section, "datapaths", 1, "datapaths")
@@ -337,20 +335,18 @@ class MaskedRegionalCusumBurstDetector:
 
     def is_burst_window(self, window: window_records.Window) -> bool:
         """Whether a flag published by now meets the window's rounds."""
-        charts = self.charts_by_operation[window.operation_id]
-        episode = charts.flags.episode_meeting(window, self.engine.now)
+        episode = _published_episode(
+            self.charts_by_operation, self.engine, window
+        )
         return episode is not None
 
     def with_burst_priors(self, window: window_records.Window, model):
         """The model with the flagged region's priors raised, graph kept."""
         if not self.settings.raise_strong_priors:
             return model
-        charts = self.charts_by_operation[window.operation_id]
-        episode = charts.flags.episode_meeting(window, self.engine.now)
-        if episode is None:
-            return model
-        region = charts.region_of(episode)
-        return region.raised(model)
+        return _raised_priors(
+            self.charts_by_operation, self.engine, window, model
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -644,6 +640,30 @@ class _BurstRegion:
         scaled = priors[is_touched] * self.prior_scale
         priors[is_touched] = numpy.minimum(scaled, MAXIMUM_PRIOR)
         return dataclasses.replace(faults, priors=priors)
+
+
+def _published_episode(
+    operations: Mapping, engine: engine_module.Engine, window
+) -> Optional[_Episode]:
+    """The flag published by now that meets the window, or None.
+
+    operations maps an operation id to its counters or its chart bank;
+    both keep their flags in a _FlagLog.
+    """
+    operation = operations[window.operation_id]
+    return operation.flags.episode_meeting(window, engine.now)
+
+
+def _raised_priors(
+    operations: Mapping, engine: engine_module.Engine, window, model
+):
+    """The model with the meeting flag's region raised; unmet, unchanged."""
+    episode = _published_episode(operations, engine, window)
+    if episode is None:
+        return model
+    operation = operations[window.operation_id]
+    region = operation.region_of(episode)
+    return region.raised(model)
 
 
 def _publication_tick(
@@ -1066,10 +1086,10 @@ class _ChartBank:
     def cycles_per_round(self, settings) -> int:
         """ceil(regions x designs / datapaths) + pipeline_cycles.
 
-        A bank of U chart updates over P datapaths takes one frame a
-        round when U / P + L fits the round (burst study hw/BUDGET.md K1
-        and K10). U is the algorithm's own count, one update per region
-        and design; P and L are the hardware's, pencil figures until a
+        A bank of U chart updates spread over P datapaths, each a
+        pipeline L cycles deep, finishes a round in U / P + L cycles.
+        U is the algorithm's own count, one update per region and
+        design; P and L are the hardware's, pencil figures until a
         design is built.
         """
         region_count = self.incidence.shape[1]
@@ -1116,8 +1136,8 @@ class _ChartBank:
         """One round of every stream: mask, then score; the group scores.
 
         rows is (streams, checks) of 0/1. The score is read after the
-        update, and the usual count moves after the score (burst study
-        PROTOCOL.md section 18, "The exact rules of mask_p8r8_D0_x2").
+        update, and the usual count moves after the score, so a round's
+        own events never lower the bar they are scored against.
         """
         is_unmasked = self._unmasked(state, rows, round_index)
         self._score(state, rows, is_unmasked, round_index)
@@ -1383,8 +1403,8 @@ def _regions(positions: tuple, settings) -> tuple:
     """Discs of every radius around every check, then the whole patch.
 
     Returns incidence (checks, regions) of 0/1 and each region's radius
-    index, in the study's order (burst study harness layouts.py
-    disc_regions).
+    index: radius by radius, each radius's discs in check order, and the
+    whole patch last.
     """
     coordinates = numpy.asarray(positions, dtype=float)
     grid = coordinates * GRID_UNITS_PER_COORDINATE
@@ -1427,8 +1447,8 @@ def _pair_incidence(positions: tuple):
 def _shot_target(settings, shot_seconds: float) -> float:
     """The share of quiet shots that may alarm: the rate times a shot's time.
 
-    A shot is one calibration block, as the study counts a Willow shot
-    as one (burst study PROTOCOL.md section 1).
+    A shot is one calibration block: the bank alarms in a shot when any
+    group reaches its level on any of its rounds.
     """
     target_share = settings.false_alarms_per_second * shot_seconds
     if target_share < 1.0:
@@ -1485,8 +1505,7 @@ class _GroupTail:
     level(share) is the smallest observed maximum whose tail is at most
     share while the blocks reach that share (share x blocks at least the
     fitted count); past it, the exponential fitted to the largest
-    maxima's excesses over the next one, u + beta ln(k / (n share))
-    (burst study PROTOCOL.md section 2).
+    maxima's excesses over the next one, u + beta ln(k / (n share)).
     """
 
     values: Any
@@ -1538,8 +1557,7 @@ def _bank_thresholds(maxima, target_share: float):
     The shared share is bisected so the share of blocks where any group
     reaches its level is at most the target. A target the blocks hold
     fewer than MEASURED_ALARMS alarms at keeps the bank-to-group ratio
-    found where they hold that many (burst study PROTOCOL.md section 2;
-    harness/analysis.py bank_thresholds).
+    found where they hold that many.
     """
     block_count, group_count = maxima.shape
     tails = []
@@ -1825,7 +1843,9 @@ def _episodes(flags: list, first_round: int) -> list:
         round_index = first_round + index
         _extend_runs(runs, flag, round_index)
     newest_round = first_round + len(flags) - 1
-    _open_the_newest_run(runs, newest_round)
+    # a run still firing on the newest round covers every later round
+    if runs and runs[-1].last_firing_round == newest_round:
+        runs[-1] = dataclasses.replace(runs[-1], is_open=True)
     return runs
 
 
@@ -1838,14 +1858,6 @@ def _extend_runs(runs: list, flag: _Flag, round_index: int) -> None:
         return
     run = _Episode(flag.onset_round, round_index, False, flag.region)
     runs.append(run)
-
-
-def _open_the_newest_run(runs: list, newest_round: int) -> None:
-    """A run still firing on the newest round covers every later round."""
-    if not runs:
-        return
-    if runs[-1].last_firing_round == newest_round:
-        runs[-1] = dataclasses.replace(runs[-1], is_open=True)
 
 
 def _method_keys(section: Mapping) -> dict:

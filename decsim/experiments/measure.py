@@ -769,7 +769,7 @@ def _measurement(
     totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
-    catch = _burst_catch(settings, observation)
+    first_flag_round, is_caught = _burst_catch(settings, observation)
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
         distance=distance,
@@ -809,41 +809,36 @@ def _measurement(
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,
         trace_path=trace_path,
-        burst_first_flag_round=catch.first_flag_round,
-        burst_caught_in_time=catch.caught_in_time,
+        burst_first_flag_round=first_flag_round,
+        burst_caught_in_time=is_caught,
     )
-
-
-@dataclasses.dataclass(frozen=True)
-class _BurstCatch:
-    """The detector's first flag after the burst's onset, and if in time."""
-
-    first_flag_round: Optional[int] = None
-    caught_in_time: Optional[bool] = None
 
 
 def _burst_catch(
     settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
-) -> _BurstCatch:
-    """The burst study's catch: its first alarm at or after the onset.
+) -> tuple:
+    """The first flag at or after the burst's onset, and whether in time.
 
-    A burst is caught within k rounds when that alarm's delay from the
-    onset is at most k (burst study PROTOCOL.md section 3). A shot with
-    no burst counts from round 1, so any flag on it is a false alarm.
+    A detector's delay is its first alarm at or after the onset less the
+    onset, and it catches the burst within k rounds when that delay is
+    at most k, as detection delay is scored for change-point detectors
+    (Xie et al. 2104.04186 lines 161-171). A shot with no burst counts
+    from round 1,
+    so any flag on it is a false alarm. (None, None) without a detector.
     """
     flags = observation.burst_flags
     if flags is None:
-        return _BurstCatch()
+        return None, None
     onset_round = _burst_onset_round(settings.qpu.row_settings)
     if onset_round is None:
         first_flag_round = flags.first_flag_from(1)
-        return _BurstCatch(first_flag_round)
+        return first_flag_round, None
     first_flag_round = flags.first_flag_from(onset_round)
     delay = first_flag_round - onset_round
     deadline = settings.burst_detector.catch_deadline_rounds
     is_caught = first_flag_round > 0 and delay <= deadline
-    return _BurstCatch(first_flag_round, is_caught)
+    return first_flag_round, is_caught
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:

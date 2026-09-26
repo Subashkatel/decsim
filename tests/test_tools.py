@@ -24,6 +24,16 @@ TOOLS = PACKAGE_ROOT / "tools"
 SLURM_RUNNER = PACKAGE_ROOT / "slurm" / "slurm_run.sh"
 EXPERIMENT_RUNNER = PACKAGE_ROOT / "slurm" / "experiment_run.sh"
 CHECK_SCRIPT = TOOLS / "check.sh"
+# What a submitting shell could hand the runner: an excuse for a dirty
+# tree, a pinned python, or the array job the suite itself runs in.
+UNSET_FOR_THE_RUNNER = (
+    "ALLOW_DIRTY",
+    "DECSIM_PYTHON",
+    "SLURM_ARRAY_TASK_ID",
+    "SLURM_ARRAY_TASK_COUNT",
+    "RUN",
+    "SHARDS",
+)
 
 
 def _tool(name: str):
@@ -295,9 +305,11 @@ def _refused_run(tmp_path, status):
     checkout.mkdir()
     _stub_python(tmp_path, checkout)
     _stub_git(tmp_path, status)
-    environment = dict(os.environ)
-    environment.pop("ALLOW_DIRTY", None)
-    environment.pop("DECSIM_PYTHON", None)
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in UNSET_FOR_THE_RUNNER
+    }
     environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
     path = environment.get("PATH", "")
     environment["PATH"] = f"{tmp_path}:{path}"

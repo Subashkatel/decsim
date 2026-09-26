@@ -33,8 +33,11 @@ import statistics
 from typing import Optional
 
 import decsim.config as config_module
+import decsim.escalation.settings as escalation_settings
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.experiments.trace_file as trace_file
+import decsim.tables as tables
 
 WINDOW_COLORS = (
     "tab:blue",
@@ -242,7 +245,7 @@ def ler_vs_distance_plot(
     for run_index, run_dir in enumerate(run_dirs):
         rows = _ler_rows_at_probability(run_dir, probability)
         color = f"C{run_index}"
-        tier_label = _csv_tier_label(rows[0]["algorithm"])
+        tier_label = _run_tier_label(run_dir, rows[0]["algorithm"])
         measured_rows = _rows_with_failures(rows, swept_distances)
         _draw_measured_ler_points(axis, measured_rows, color, tier_label)
     axis.set_yscale("log")
@@ -1155,20 +1158,28 @@ def _power_of_ten_label(value: float) -> str:
     return f"${mantissa:g}{{\\times}}10^{{{exponent}}}$"
 
 
-def _csv_tier_label(algorithm_field: str) -> str:
-    """The csv's tier label, read back from its algorithm column.
+def _run_tier_label(run_dir, algorithm_field: str) -> str:
+    """The run's decoder and tier, read back from what the run recorded.
 
-    "pymatching (weak)" or "belief matching (strong)". A numeric card
-    reads as pymatching, the same ruling as decoder_title.
+    "pymatching (weak)" or "relay bp (strong)". The algorithm column
+    names the card of the tier that decodes the plan's windows, and that
+    tier is the escalation row's primary tier, read from the settings
+    the run's first point recorded in resolved/. A numeric card reads as
+    pymatching, the same ruling as decoder_title.
     """
     try:
         float(algorithm_field)
         algorithm_name = "pymatching"
     except ValueError:
         algorithm_name = algorithm_field
-    tier = "weak"
-    if algorithm_name == "belief_matching":
-        tier = "strong"
+    records = run_folder.resolved_by_point(run_dir)
+    record_values = records.values()
+    record = next(iter(record_values))
+    escalation_kind = record["settings"]["escalation"]["kind"]
+    escalation_row = tables.row(
+        escalation_settings.ESCALATIONS, "escalation.kind", escalation_kind
+    )
+    tier = escalation_row.primary_tier.value
     display_name = algorithm_name.replace("_", " ")
     return f"{display_name} ({tier})"
 

@@ -450,15 +450,18 @@ class WindowPlanner:
         return None
 
     def cut_stream_after(
-        self, stream_id, last_round: int
+        self, stream_id: Any, last_round: int
     ) -> Optional[window_records.Window]:
         """End a commit region on the round: a segment starts after it.
 
-        A segment's result is the sum over whole windows of its rounds
-        (operation_results.py), so its first round starts a window. A
-        window already laid across the round commits through it, as at a
-        closed tail, but the stream's model stays open; a window not laid
-        yet is cut as it is laid. The window clipped is returned, or None.
+        A segment's result is the sum of the windows committed over its
+        rounds (Skoric et al. 2209.08552, the stream's correction is the
+        sum over its committed windows; operation_results.py), so its
+        first round starts a window. A window already laid across the
+        round commits through it and may be smaller than the others, as
+        at a closed tail (Tan et al. 2209.09219 lines 1052-1056), but the
+        stream's model stays open; a window not laid yet is cut as it is
+        laid. The window clipped is returned, or None.
         """
         growth = self.growth_by_stream[stream_id]
         clipped = None
@@ -467,7 +470,7 @@ class WindowPlanner:
                 _clip(window, last_round, growth)
                 clipped = window
         if growth.finite_geometries is None:
-            growth.cut_after(last_round)
+            growth.cut_rounds.append(last_round)
         else:
             self._replan_finite_after(stream_id, growth, last_round)
         return clipped
@@ -617,11 +620,14 @@ def _refuse_reads_past_the_model(
         )
 
 
-def _clip(window: window_records.Window, last_round: int, growth) -> None:
+def _clip(
+    window: window_records.Window, last_round: int, growth: "_StreamGrowth"
+) -> None:
     """The window commits through the round; the next starts after it."""
     window.commit_hi = last_round
     window.buffer_hi = last_round + growth.buffer_rounds
-    window.round_count = window.buffer_hi - window.start_round + 1
+    rounds_after_start = window.buffer_hi - window.start_round
+    window.round_count = rounds_after_start + 1
     growth.next_commit_lo = last_round + 1
 
 
@@ -717,11 +723,6 @@ class _StreamGrowth:
         # rounds a commit region not laid yet must end on
         self.cut_rounds: list = []
 
-    def cut_after(self, last_round: int) -> None:
-        """A window not laid yet commits through the round at most."""
-        if last_round >= self.next_commit_lo:
-            self.cut_rounds.append(last_round)
-
     def finite_geometries_begun(self, highest_known_round: int) -> list:
         """The source's next geometries whose commit region has begun."""
         begun = []
@@ -738,7 +739,7 @@ class _StreamGrowth:
     def arithmetic_geometries_begun(
         self, highest_known_round: int, round_cap: Optional[int]
     ) -> list:
-        """Each window commits the ncom rounds after the last, to the cap."""
+        """Each window commits a stride after the last, to the cap."""
         begun = []
         commit_lo = self.next_commit_lo
         while True:
@@ -759,7 +760,8 @@ class _StreamGrowth:
 
     def _commit_end(self, commit_lo: int) -> int:
         """A full stride after commit_lo, or the first cut inside it."""
-        commit_hi = commit_lo + self.commit_rounds - 1
+        after_stride = commit_lo + self.commit_rounds
+        commit_hi = after_stride - 1
         for cut_round in self.cut_rounds:
             if commit_lo <= cut_round < commit_hi:
                 commit_hi = cut_round

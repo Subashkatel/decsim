@@ -1,7 +1,7 @@
 """`decsim run`: one seeded shot of one yaml, narrated.
 
 The Python it wraps is `experiment.load_experiment(path)`, the first
-point's `point_settings`, and `Machine.build(settings, seed).run()`,
+point's task, and `Machine.build(task.shot_settings(), seed).run()`,
 with the observation knobs on the command line instead of in the file,
 the way gem5's --debug-flags and --debug-file set what the config
 script did not (src/python/m5/main.py:280, 299). The shot is the first
@@ -42,7 +42,8 @@ def run_one_shot(
     task = config.first_point_task()
     settings = _with_observation(task.settings, log, trace)
     task = dataclasses.replace(task, settings=settings)
-    machine = config.built_machine(settings, seed)
+    shot_settings = task.shot_settings()
+    machine = config.built_machine(shot_settings, seed)
     run_dir = run_folder.run_dir_for(config, out_dir)
     started_utc = run_folder.start_run(config, run_dir)
     run_folder.write_producer(run_dir, settings.workload)

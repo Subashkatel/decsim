@@ -227,6 +227,17 @@ def test_show_builds_a_point_whose_threshold_learns_online(tmp_path, capsys):
     assert "escalation: kind switching" in printed.out
 
 
+def test_run_builds_a_point_whose_threshold_learns_online(tmp_path):
+    """The one shot runs its point's threshold, as a collect's shot does."""
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    out_dir = tmp_path / "run"
+
+    run_command.run_one_shot(config_path, out_dir=out_dir)
+
+    assert (out_dir / "finished").exists()
+
+
 def test_show_names_the_fabric_card_the_run_resolved_to():
     """The card is one line, because every hop on it is priced.
 

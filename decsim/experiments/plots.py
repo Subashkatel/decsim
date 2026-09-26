@@ -1305,12 +1305,8 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
         raise refusal.RefusalError(
             f"{run_dir} swept no p={probability:g} point"
         )
-    selected_rows.sort(key=_by_distance_text)
+    selected_rows.sort(key=_row_distance)
     return selected_rows
-
-
-def _by_distance_text(row: dict) -> int:
-    return int(row["distance"])
 
 
 def _rows_with_failures(rows: list, swept_distances: set) -> list:

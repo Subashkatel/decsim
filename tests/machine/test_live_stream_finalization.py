@@ -454,6 +454,64 @@ def _released_continuation(is_finite: bool) -> tuple:
     return workload, source
 
 
+def test_a_continuation_s_last_round_ends_a_window_of_its_source():
+    """A continuation's result is its own windows though idle rounds follow.
+
+    The fifteen-round prefix's decision releases the continuation at
+    round 19, so it runs rounds 20 to 22 of the 24-round source, whose
+    last window the scheme lays over rounds 20 to 24; readout waits for
+    the continuation's result and then idles out the source.
+    """
+    workload, source = _late_continuation()
+    machine = _stim_machine(workload, source)
+    guard = _refuse_past(100_000_000)
+    machine.engine.action_done.connect(guard)
+    rounds = _emitted_rounds(machine)
+
+    result = machine.run()
+
+    binding = machine.issuer.stream_binding_for(2)
+    assert result.terminal_status == "complete"
+    assert rounds == list(range(1, 25))
+    assert binding.stream_offset == 19
+
+
+def _late_continuation() -> tuple:
+    """(workload, source): readout waits for a late continuation's result."""
+    circuit = memory_programs.memory_circuit(24, 3)
+    owner = program_records.Operation(
+        100, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    resumed = dataclasses.replace(
+        owner,
+        id=2,
+        name="resumed",
+        stream_id=100,
+        predecessors=(1,),
+        blocked_by=1,
+    )
+    readout = program_records.Operation(
+        4,
+        "readout",
+        (0,),
+        patches=(0,),
+        predecessors=(2,),
+        blocked_by=2,
+        emits_detector_data=False,
+    )
+    counts = {100: 24, 1: 15, 2: 3, 4: 0}
+    policy = round_policies.PerOperationRounds(counts)
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, resumed, readout),
+        dynamic_streams=(owner,),
+        rounds_policy=policy,
+    )
+    return workload, stim_device.StimDevice()
+
+
 def _continuation_workload(
     start_rounds: tuple = (8,),
     readout_round: int = 15,

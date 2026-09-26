@@ -231,6 +231,14 @@ class WindowManager:
                 continue
             self.retention.replace_window_reads(window.key, window)
 
+    def _cut_stream_after(self, stream_id, last_round: int) -> None:
+        """End a window of the stream on the round; refresh one clipped."""
+        clipped = self.planner.cut_stream_after(stream_id, last_round)
+        if clipped is None:
+            return
+        self.planner.refresh_stream_models(stream_id)
+        self._refresh_unqueued_stream_windows(stream_id)
+
     def has_dynamic_stream(self, stream_id) -> bool:
         """True for a stream whose windows are planned at runtime."""
         return self.planner.has_stream(stream_id)
@@ -429,17 +437,19 @@ class WindowManager:
     ) -> None:
         """Note which stream and offset a segment's rounds fold into.
 
-        The segment's first round starts a window of its stream, so its
-        result is a sum over whole windows.
+        The segment's first round starts a window of its stream and its
+        last round ends one, the interval its result reads
+        (operation_results.py), so its result is a sum over whole
+        windows even when idle rounds of the stream come before or after
+        it.
         """
         self.results.bind_stream_segment(operation_id, stream_id, stream_offset)
         if not self.planner.has_stream(stream_id):
             return
-        clipped = self.planner.cut_stream_after(stream_id, stream_offset)
-        if clipped is None:
-            return
-        self.planner.refresh_stream_models(stream_id)
-        self._refresh_unqueued_stream_windows(stream_id)
+        round_count = self.planner.round_count_of(operation_id)
+        segment_end = stream_offset + round_count
+        self._cut_stream_after(stream_id, stream_offset)
+        self._cut_stream_after(stream_id, segment_end)
 
     def bind_required_stream_end(
         self, operation_id: int, required_stream_end: int

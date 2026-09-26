@@ -475,41 +475,31 @@ class WindowPlanner:
     # ---- private
 
     def _replan_finite_after(
-        self, stream_id, growth: "_StreamGrowth", last_round: int
+        self, stream_id: Any, growth: "_StreamGrowth", last_round: int
     ) -> None:
         """Lay the finite source's windows not laid yet from the cut on.
 
         The window across the cut commits through it, and the scheme
         plans the rounds after it as its own stretch. A cut on a window
-        edge leaves the plan as it is.
+        edge, or on the source's last round, leaves the plan as it is.
         """
         geometries = growth.finite_geometries
-        index = growth.next_window_index
-        while index < len(geometries) and (
-            geometries[index].commit_hi <= last_round
-        ):
-            index += 1
-        if index == len(geometries):
-            return
-        following = geometries[index]
-        if following.commit_lo == last_round + 1:
-            return
-        kept = list(geometries[:index])
-        if following.commit_lo <= last_round:
-            buffer_hi = last_round + growth.buffer_rounds
-            clipped = dataclasses.replace(
-                following, commit_hi=last_round, buffer_hi=buffer_hi
-            )
-            kept.append(clipped)
         round_limit = geometries[-1].commit_hi
+        following_index = _first_past(geometries, growth, last_round)
+        unlaid_after = geometries[following_index:]
+        if _is_plan_edge(unlaid_after, last_round, round_limit):
+            return
+        kept = list(geometries[:following_index])
+        straddler = _clipped_straddler(unlaid_after, last_round, growth)
+        kept.extend(straddler)
         rest_round_count = round_limit - last_round
-        rest = self.scheme.plan_operation(
+        rest_plan = self.scheme.plan_operation(
             stream_id,
             rest_round_count,
             commit_round_count=growth.commit_rounds,
             buffer_round_count=growth.buffer_rounds,
         )
-        for geometry in rest.windows:
+        for geometry in rest_plan.windows:
             shifted = _shifted(geometry, last_round)
             kept.append(shifted)
         growth.finite_geometries = tuple(kept)
@@ -633,6 +623,56 @@ def _clip(window: window_records.Window, last_round: int, growth) -> None:
     window.buffer_hi = last_round + growth.buffer_rounds
     window.round_count = window.buffer_hi - window.start_round + 1
     growth.next_commit_lo = last_round + 1
+
+
+def _first_past(
+    geometries: tuple, growth: "_StreamGrowth", last_round: int
+) -> int:
+    """The first geometry not laid yet that commits past the round.
+
+    It is the geometry count when every one after the round is laid.
+    """
+    return next(
+        (
+            index
+            for index in range(growth.next_window_index, len(geometries))
+            if geometries[index].commit_hi > last_round
+        ),
+        len(geometries),
+    )
+
+
+def _is_plan_edge(
+    unlaid_after: tuple, last_round: int, round_limit: int
+) -> bool:
+    """Whether a window of the plan already ends on the round.
+
+    The source's last round ends one, and so does a round the next
+    geometry not laid yet starts after. A window already laid across
+    the round was clipped to it, so the rounds after it need a plan.
+    """
+    if last_round >= round_limit:
+        return True
+    if not unlaid_after:
+        return False
+    first_round_after = last_round + 1
+    return unlaid_after[0].commit_lo == first_round_after
+
+
+def _clipped_straddler(
+    unlaid_after: tuple, last_round: int, growth: "_StreamGrowth"
+) -> list:
+    """The geometry not laid yet across the round, clipped to it, if any."""
+    if not unlaid_after:
+        return []
+    following = unlaid_after[0]
+    if following.commit_lo > last_round:
+        return []
+    buffer_hi = last_round + growth.buffer_rounds
+    clipped = dataclasses.replace(
+        following, commit_hi=last_round, buffer_hi=buffer_hi
+    )
+    return [clipped]
 
 
 def _shifted(

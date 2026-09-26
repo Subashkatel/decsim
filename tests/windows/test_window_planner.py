@@ -391,6 +391,22 @@ def test_a_finite_stream_cut_replans_the_rounds_after_it():
     assert commits[2:] == rest_commits
 
 
+def test_a_cut_in_a_finite_stream_s_laid_last_window_plans_the_rest():
+    """The rounds after a cut inside the last window, laid, get windows."""
+    source = _FiniteSource(12)
+    planner = _planner(source)
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.grow_stream("stream", 10, None)
+    planner.cut_stream_after("stream", 10)
+    planner.grow_stream("stream", 12, None)
+    commits = [
+        (window.commit_lo, window.commit_hi)
+        for window in planner.windows_of("stream")
+    ]
+    assert commits == [(1, 3), (4, 6), (7, 10), (11, 12)]
+
+
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(

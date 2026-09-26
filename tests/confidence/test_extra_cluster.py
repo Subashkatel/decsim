@@ -393,7 +393,7 @@ def test_the_extra_growth_stays_inside_its_buffers_on_the_random_graphs():
 @pytest.mark.parametrize(
     "limit_nats", (TWENTY_DECIBELS_NATS, SIXTY_DECIBELS_NATS)
 )
-def test_the_windows_keep_kishi_theorems_against_the_cluster_gap(
+def test_the_windows_keep_kishi_theorems_against_the_cluster_gap_property(
     distance, limit_nats
 ):
     """Theorems 1 and 2 on surface code shots, at 20 dB and at 60 dB.

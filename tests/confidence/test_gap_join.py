@@ -74,6 +74,38 @@ def _weak_requests(machine) -> list:
     return records
 
 
+def _weak_decode_starts(machine) -> list:
+    starts = fabric.log_lines_containing(machine, "START DECODE mem")
+    weak_starts = []
+    for line in starts:
+        if "strong(" not in line:
+            weak_starts.append(line)
+    return weak_starts
+
+
+def _companions_and_answers(machine) -> tuple:
+    """The weak requests the ledger marks companions, and those answered."""
+    outcomes = decoding_records.RequestProcessingOutcome
+    companion = outcomes.WEAK_FORCED_CLASS_COMPANION
+    companions = []
+    answered = []
+    for record in _weak_requests(machine):
+        if record.terminal_processing_outcome is companion:
+            companions.append(record)
+            continue
+        if record.soft_output is not None:
+            answered.append(record)
+    return companions, answered
+
+
+def _rows_named(document: list, name: str) -> list:
+    rows = []
+    for row in document:
+        if row.get("name") == name:
+            rows.append(row)
+    return rows
+
+
 def _weak_input_traffic(machine) -> tuple:
     """(transfers, bits) that moved into the weak units."""
     snapshot = machine.observation.traffic.snapshot()
@@ -120,11 +152,7 @@ def test_one_unit_holds_the_window_for_the_sum_of_its_two_solves():
     """A priced weak card prices one decode; the pair is two of them."""
     machine = _switching_machine(1, weak_microseconds=4.0)
     machine.run()
-    starts = fabric.log_lines_containing(machine, "START DECODE mem")
-    weak_starts = []
-    for line in starts:
-        if "strong(" not in line:
-            weak_starts.append(line)
+    weak_starts = _weak_decode_starts(machine)
     windows = len(machine.observation.windows.windows)
     assert len(weak_starts) == 2 * windows
 
@@ -146,16 +174,7 @@ def test_a_windows_two_requests_are_one_attempt_in_the_ledger():
     """One attempt, two forced-class requests, one of them the answer."""
     machine = _switching_machine(1)
     machine.run()
-    outcomes = decoding_records.RequestProcessingOutcome
-    companion = outcomes.WEAK_FORCED_CLASS_COMPANION
-    companions = []
-    answered = []
-    for record in _weak_requests(machine):
-        if record.terminal_processing_outcome is companion:
-            companions.append(record)
-            continue
-        if record.soft_output is not None:
-            answered.append(record)
+    companions, answered = _companions_and_answers(machine)
     windows = len(machine.observation.windows.windows)
     assert len(companions) == windows
     assert len(answered) == windows
@@ -166,17 +185,14 @@ def test_a_window_whose_other_solve_never_arrives_refuses_the_run():
     machine = _switching_machine(1)
     join = machine.window_manager.requester.gap_join
     joined_solves = join.accept_result
-    left_alone = []
 
-    def hold_one_solve_alone(job, result):
+    def hold_the_first_solve_alone(job, result):
         joined_solves(job, result)
-        if left_alone:
-            return
-        left_alone.append(job)
+        join.accept_result = joined_solves
         solve = gap_join_module.HeldSolve(job, result)
         join.held_by_window[(job.operation_id, UNJOINED_WINDOW_ID)] = [solve]
 
-    join.accept_result = hold_one_solve_alone
+    join.accept_result = hold_the_first_solve_alone
     with pytest.raises(RuntimeError, match="unjoined solve"):
         machine.run()
 
@@ -350,10 +366,7 @@ def test_a_two_solve_runs_trace_carries_every_held_solve(tmp_path):
     machine.observation.trace_writer.write(str(path))
     text = path.read_text()
     document = json.loads(text)
-    held = []
-    for row in document:
-        if row.get("name") == "solve held":
-            held.append(row)
+    held = _rows_named(document, "solve held")
     windows = len(machine.observation.windows.windows)
     assert len(held) == windows
     assert held[0]["ph"] == "i"

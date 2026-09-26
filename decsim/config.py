@@ -26,7 +26,7 @@ def microseconds_to_ticks(microseconds: float) -> int:
 
 
 def ticks_to_microseconds(ticks: int) -> float:
-    """A tick count as a float of microseconds."""
+    """Unrounded, so a report or a figure keeps every tick it was given."""
     return ticks / TICKS_PER_MICROSECOND
 
 

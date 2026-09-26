@@ -14,14 +14,12 @@ import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
 
 
-def _algorithm_spans(tmp_path, check_windows_with: str) -> list:
-    """(start, end) ticks of every algorithm stage of a measured_table run."""
-    strong_decoder = yaml_configs.strong_unit("measured_table")
-    strong_decoder["strong_decoder"]["device"] = "a100"
+def _algorithm_spans(folder, card: dict, check_windows_with: str) -> list:
+    """(start, end) ticks of every algorithm stage of one card's run."""
+    folder.mkdir()
     observation = {"check_windows_with": check_windows_with}
-    card = {"escalation": {"kind": "strong_only"}, "observation": observation}
-    card.update(strong_decoder)
-    config_path = yaml_configs.write_config(tmp_path, card)
+    checked_card = {**card, "observation": observation}
+    config_path = yaml_configs.write_config(folder, checked_card)
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
         physical_error_probability=0.001,
@@ -41,11 +39,15 @@ def _algorithm_spans(tmp_path, check_windows_with: str) -> list:
 def test_the_referee_leaves_a_measured_table_tiers_spans_unchanged(tmp_path):
     pytest.importorskip("relay_bp")
     pytest.importorskip("tesseract_decoder")
+    strong_decoder = yaml_configs.strong_unit("measured_table")
+    strong_decoder["strong_decoder"]["device"] = "a100"
+    card = {"escalation": {"kind": "strong_only"}, **strong_decoder}
+
     unchecked_folder = tmp_path / "unchecked"
     checked_folder = tmp_path / "checked"
-    unchecked_folder.mkdir()
-    checked_folder.mkdir()
-    unchecked_spans = _algorithm_spans(unchecked_folder, "none")
-    checked_spans = _algorithm_spans(checked_folder, "tesseract")
+
+    unchecked_spans = _algorithm_spans(unchecked_folder, card, "none")
+    checked_spans = _algorithm_spans(checked_folder, card, "tesseract")
+
     assert len(unchecked_spans) > 0
     assert checked_spans == unchecked_spans

@@ -59,11 +59,12 @@ def _table():
     return detector_formation.build_formation_table(circuit, ROUNDS)
 
 
-def _rounds_of_events(sampled_events):
+def _rounds_of_events(circuit, round_count, sampled_events):
     """One shot's detection events cut into rounds, in formation order."""
-    table = _table()
+    table = detector_formation.build_formation_table(circuit, round_count)
     rounds = []
-    for round_index in range(1, AFTER_LAST_ROUND):
+    after_last_round = round_count + 1
+    for round_index in range(1, after_last_round):
         recipes = table.detectors_of_round(round_index)
         values = []
         for recipe in recipes:
@@ -76,7 +77,8 @@ def _rounds_of_events(sampled_events):
 def _sampled_rounds(circuit, seed):
     sampler = circuit.compile_detector_sampler(seed=seed)
     shots = sampler.sample(1)
-    return _rounds_of_events(shots[0])
+    base_circuit = _circuit()
+    return _rounds_of_events(base_circuit, ROUNDS, shots[0])
 
 
 def _whole_patch_burst(onset_round, probability):
@@ -618,21 +620,6 @@ def _cusum_detector(settings, rounds=ROUNDS, engine=None):
     return CUSUM(settings, engine, circuits, 1.0)
 
 
-def _shot_rounds(circuit, round_count, sampled):
-    """One sampled shot cut into decsim's rounds, in formation order."""
-    table = detector_formation.build_formation_table(circuit, round_count)
-    rounds = []
-    after_last_round = round_count + 1
-    for round_index in range(1, after_last_round):
-        recipes = table.detectors_of_round(round_index)
-        values = []
-        for recipe in recipes:
-            value = sampled[recipe.detector_index]
-            values.append(value)
-        rounds.append(values)
-    return rounds
-
-
 def _long_burst_shot(seed):
     """A d = 5 shot of LONG_ROUNDS rounds, bursting from LONG_BURST_ONSET."""
     circuit = workload_settings.memory_circuit(
@@ -858,7 +845,7 @@ def test_the_row_fires_on_the_rounds_the_clean_room_rules_alarm():
     is_alarm = reaches.any(axis=1)
     alarms = numpy.flatnonzero(is_alarm)
 
-    shot_rounds = _shot_rounds(circuit, LONG_ROUNDS, sampled)
+    shot_rounds = _rounds_of_events(circuit, LONG_ROUNDS, sampled)
     _feed(detector, shot_rounds)
     flags = charts.flags.flags
     fired = [index for index, flag in enumerate(flags) if flag is not None]

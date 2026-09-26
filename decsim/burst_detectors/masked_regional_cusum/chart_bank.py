@@ -77,10 +77,12 @@ class ChartBank:
         incidence, region_scales = _regions(layout.positions, settings)
         pair_incidence = _pair_incidence(layout.positions)
         region_rates = usual_rates @ incidence
-        survivals = 1.0 - 2.0 * usual_rates
+        doubled_rates = 2.0 * usual_rates
+        survivals = 1.0 - doubled_rates
         multipliers = numpy.asarray(settings.fault_rate_multipliers)
         design_survivals = survivals[None, :] ** multipliers[:, None]
-        design_rates = (1.0 - design_survivals) / 2.0
+        design_flips = 1.0 - design_survivals
+        design_rates = design_flips / 2.0
         design_region_rates = design_rates @ incidence
         ratios = design_region_rates / region_rates
         log_ratios = numpy.log(ratios)
@@ -317,7 +319,8 @@ def _regions(positions: tuple, settings) -> tuple:
     columns = []
     region_scales = []
     for scale, radius in enumerate(settings.region_radii):
-        reach = radius * radius + _RADIUS_ROUNDING
+        squared_radius = radius * radius
+        reach = squared_radius + _RADIUS_ROUNDING
         discs = squared_distances <= reach
         columns.append(discs)
         disc_scales = [scale] * len(positions)

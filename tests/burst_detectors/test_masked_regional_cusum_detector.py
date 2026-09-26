@@ -66,7 +66,8 @@ def test_quiet_shots_alarm_at_the_calibrated_rate():
     # sqrt(0.05 x 0.95 / 4000), the binomial standard error
     standard_error = 0.003446
     difference = alarmed_share - 0.05
-    assert abs(difference) < 5 * standard_error
+    bound = 5 * standard_error
+    assert abs(difference) < bound
 
 
 def test_a_whole_patch_burst_is_flagged_from_its_onset():

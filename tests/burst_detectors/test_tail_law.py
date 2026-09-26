@@ -160,7 +160,8 @@ def _drawn_standard_errors(law):
     fault_counts = numpy.arange(len(law.conditional_tails))
     weights = scipy.stats.poisson.pmf(fault_counts, law.fault_rate)
     conditional = law.conditional_tails
-    spread = conditional * (1.0 - conditional)
+    misses = 1.0 - conditional
+    spread = conditional * misses
     squared_weights = weights**2
     variance = squared_weights @ spread
     draws = tail_law.DRAWS_PER_FAULT_COUNT
@@ -179,7 +180,8 @@ def _assert_the_law_is_the_exact_tail(priors, incidence, exact_tails):
     errors = standard_errors[compared_counts]
     signed_differences = law_tails - exact
     differences = numpy.abs(signed_differences)
-    allowed = 5 * errors + TAIL_ROUNDING
+    five_errors = 5 * errors
+    allowed = five_errors + TAIL_ROUNDING
     is_within = differences <= allowed
     assert numpy.all(is_within)
 

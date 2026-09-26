@@ -41,7 +41,8 @@ def test_the_patch_count_tail_is_the_tail_stim_samples():
     standard_error = numpy.sqrt(variance)
     difference = predicted - sampled
     assert threshold == 6
-    assert abs(difference) < 5 * standard_error
+    bound = 5 * standard_error
+    assert abs(difference) < bound
 
 
 def test_a_whole_patch_burst_is_flagged_within_three_rounds():

@@ -77,7 +77,9 @@ def reference_pairs(circuit: stim.Circuit) -> set:
     x_checks = _hadamard_targets(circuit)
     pairs = set()
     for data_x, data_y in coordinates.values():
-        if data_x % 2 == 1 and data_y % 2 == 1:
+        x_parity = data_x % 2
+        y_parity = data_y % 2
+        if x_parity == 1 and y_parity == 1:
             beside = _pairs_beside(coordinates, x_checks, data_x, data_y)
             pairs |= beside
     return pairs
@@ -127,7 +129,8 @@ def _reference_flags(rows, pairs, mask_count):
 
 def _window_start(round_index):
     """The first of the 64 rounds that end at round_index, from zero."""
-    start = round_index - REFERENCE_WINDOW + 1
+    before_window = round_index - REFERENCE_WINDOW
+    start = before_window + 1
     return max(0, start)
 
 
@@ -163,12 +166,14 @@ def _reference_region_step(
         doubled_rates = 2 * usual_rates[member]
         survivals = 1 - doubled_rates
         design_survivals = survivals**multiplier
-        fired = (1 - design_survivals) / 2
+        design_flips = 1 - design_survivals
+        fired = design_flips / 2
         fired_rate = fired.sum()
         ratio = fired_rate / region_rate
         log_ratio = numpy.log(ratio)
         evidence = count * log_ratio
-        drift = (ratio - 1) * expected
+        ratio_excess = ratio - 1
+        drift = ratio_excess * expected
         step = evidence - drift
         score = scores[design, region] + step
         scores[design, region] = max(0.0, score)

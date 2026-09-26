@@ -115,7 +115,8 @@ def _episodes(flags: list, first_round: int) -> list:
 
 def _extend_runs(runs: list, flag: Flag, round_index: int) -> None:
     """A firing round joins the run it follows, or starts a run."""
-    if runs and runs[-1].last_firing_round == round_index - 1:
+    previous_round = round_index - 1
+    if runs and runs[-1].last_firing_round == previous_round:
         runs[-1] = dataclasses.replace(
             runs[-1], last_firing_round=round_index, region=flag.region
         )

@@ -125,7 +125,8 @@ def quiet_rounds(round_count: int) -> list:
 
 
 def window(first_round: int, last_round: int) -> window_records.Window:
-    round_count = last_round - first_round + 1
+    round_span = last_round - first_round
+    round_count = round_span + 1
     return window_records.Window(
         operation_id=1,
         window_index=0,

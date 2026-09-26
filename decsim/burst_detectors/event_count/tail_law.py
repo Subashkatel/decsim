@@ -93,7 +93,9 @@ class TailLaw:
         counts_plus_one = fault_counts + 1
         log_factorials = scipy.special.gammaln(counts_plus_one)
         log_rate = numpy.log(rate)
-        log_weights = fault_counts * log_rate - rate - log_factorials
+        count_terms = fault_counts * log_rate
+        rated_terms = count_terms - rate
+        log_weights = rated_terms - log_factorials
         weights = numpy.exp(log_weights)
         weight_total = numpy.sum(weights)
         # the weights past the last fault count, never below zero when
@@ -131,9 +133,11 @@ def _parity_rates(priors):
     A Poisson count of rate r is odd with chance (1 - e^(-2r)) / 2, which
     is p at r = -ln(1 - 2p) / 2.
     """
-    survivals = 1.0 - 2.0 * priors
+    doubled = 2.0 * priors
+    survivals = 1.0 - doubled
     log_survivals = numpy.log(survivals)
-    return -log_survivals / 2.0
+    rates = -log_survivals
+    return rates / 2.0
 
 
 def _faultless_law(incidence) -> TailLaw:

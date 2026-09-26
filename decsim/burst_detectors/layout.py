@@ -66,7 +66,8 @@ class Layout:
         slots = slot_by_detector.values()
         first_slot = min(slots)
         first_bulk_round = first_slot[0]
-        middle_round = (table.round_count + 1) // 2
+        after_last_round = table.round_count + 1
+        middle_round = after_last_round // 2
         usual_round = max(middle_round, first_bulk_round)
         position_priors = _position_priors(faults_by_position, usual_round)
         usual_rates = _detection_probabilities(position_priors)
@@ -270,9 +271,11 @@ def _odd_probability(priors, scale: float) -> float:
     """(1 - prod(1 - 2 s p)) / 2, s p capped at one half (Tan et al.)."""
     scaled_priors = priors * scale
     scaled = numpy.minimum(scaled_priors, MAXIMUM_PRIOR)
-    survivals = 1.0 - 2.0 * scaled
+    doubled = 2.0 * scaled
+    survivals = 1.0 - doubled
     product = numpy.prod(survivals)
-    return (1.0 - product) / 2.0
+    odd_share = 1.0 - product
+    return odd_share / 2.0
 
 
 def _mean_detection_probability(region_priors: list, scale: float) -> float:
@@ -300,10 +303,12 @@ def _bisected_scale(region_priors: list, measured_rate, largest_scale) -> float:
     low = 1.0
     high = largest_scale
     for _ in range(BISECTION_STEPS):
-        middle = (low + high) / 2
+        bracket_total = low + high
+        middle = bracket_total / 2
         probability = _mean_detection_probability(region_priors, middle)
         if probability < measured_rate:
             low = middle
         else:
             high = middle
-    return (low + high) / 2
+    bracket_total = low + high
+    return bracket_total / 2

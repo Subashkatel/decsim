@@ -223,7 +223,8 @@ class _OperationCharts:
         incidence = self.calibration.bank.incidence
         is_in_region = incidence[:, episode.region] > 0
         first_row = episode.first_round - layout.first_bulk_round
-        after_last_row = episode.last_firing_round - layout.first_bulk_round + 1
+        last_row = episode.last_firing_round - layout.first_bulk_round
+        after_last_row = last_row + 1
         flagged_rows = self.rows[first_row:after_last_row]
         return burst_region.BurstRegion.of_episode(
             layout, episode, is_in_region, flagged_rows

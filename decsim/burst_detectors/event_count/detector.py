@@ -206,7 +206,8 @@ class _OperationCounts:
         A firing round's onset is the round less the longest window of
         a statistic firing on it, never before the first round.
         """
-        assert round_index == len(self.rows) + 1, (
+        next_round = len(self.rows) + 1
+        assert round_index == next_round, (
             "an operation's rounds are counted in order"
         )
         layout = self.calibration.layout
@@ -217,7 +218,8 @@ class _OperationCounts:
             self.flags.record(None, published_tick)
             self._track(row)
             return False
-        onset = round_index - firing_window + 1
+        before_onset = round_index - firing_window
+        onset = before_onset + 1
         flag = flag_log.Flag(max(onset, 1))
         self.flags.record(flag, published_tick)
         return True
@@ -234,7 +236,8 @@ class _OperationCounts:
         region_thresholds = self._position_thresholds(REGION_FALSE_ALARMS)
         is_in_region = position_counts >= region_thresholds
         detector_window = self.settings.detector_window_rounds
-        window_start = newest_round - detector_window + 1
+        before_window = newest_round - detector_window
+        window_start = before_window + 1
         first_counted = max(episode.first_round, window_start)
         flagged_rows = self.rows[first_counted - 1 : newest_round]
         return burst_region.BurstRegion.of_episode(
@@ -298,7 +301,8 @@ class _OperationCounts:
 
     def _track(self, row) -> None:
         """Move each usual rate one step toward this round's events."""
-        step = (row - self.tracked_rates) / self.settings.rate_tracking_rounds
+        error = row - self.tracked_rates
+        step = error / self.settings.rate_tracking_rounds
         self.tracked_rates += step
 
 
@@ -382,8 +386,11 @@ def _position_laws(
 
 
 def _centred_slab(round_count: int, window_rounds: int) -> tuple:
-    last_round = (round_count + window_rounds + 1) // 2
-    first_round = last_round - window_rounds + 1
+    rounds_total = round_count + window_rounds
+    after_total = rounds_total + 1
+    last_round = after_total // 2
+    before_slab = last_round - window_rounds
+    first_round = before_slab + 1
     return first_round, last_round
 
 

@@ -28,11 +28,13 @@ import dataclasses
 import enum
 import hashlib
 import json
+import numbers
 import pathlib
 import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
 
+import numpy
 import stim
 
 import decsim.machine as machine_module
@@ -332,9 +334,10 @@ def json_value(value: Any) -> Any:
     A dataclass (a settings record, a round policy) appears as its
     fields. A Python-built component (a decoder, a device) appears as its
     class name, since the machine binds its neighbours onto it; every
-    number, string and flag appears as written, and an enum member as
-    its name. A Stim circuit appears as its text, as sinter's strong id
-    carries the task's circuit (sinter/_data/_task.py:193), so two tasks
+    number appears exactly (a json number, or a Fraction's exact text),
+    every string and flag as written, and an enum member as its name.
+    A Stim circuit appears as its text, as sinter's strong id carries
+    the task's circuit (sinter/_data/_task.py:193), so two tasks
     that run different circuits are two tasks.
     """
     if dataclasses.is_dataclass(value):
@@ -373,8 +376,10 @@ def _json_list(sequence) -> list:
 
 
 def _json_scalar(value: Any) -> Any:
-    """A number, string, flag or path as written; any other object named."""
-    if isinstance(value, (bool, int, float, str)) or value is None:
+    """A number exactly, a string, flag or path as written; others named."""
+    if isinstance(value, (numbers.Number, numpy.generic)):
+        return _json_number(value)
+    if isinstance(value, str) or value is None:
         return value
     if isinstance(value, pathlib.Path):
         return str(value)
@@ -384,3 +389,21 @@ def _json_scalar(value: Any) -> Any:
         return str(value)
     value_type = type(value)
     return value_type.__name__
+
+
+def _json_number(value: Any) -> Any:
+    """A number as json holds it, or as its exact text when json cannot.
+
+    A numpy scalar is the Python number it holds. A bool, int or float
+    is a json number already; any other number (a Fraction link rate, a
+    Decimal) is its exact text, "80/11" or "1.10", the value Python's
+    own pickle keeps (Fraction.__reduce__ is the numerator and the
+    denominator, Decimal.__reduce__ its string) and the text Fraction
+    and Decimal read back. sinter's json.dumps refuses such a value and
+    dask's tokenize pickles it; neither lets two values share an id.
+    """
+    if isinstance(value, numpy.generic):
+        value = value.item()
+    if isinstance(value, (bool, int, float)):
+        return value
+    return str(value)

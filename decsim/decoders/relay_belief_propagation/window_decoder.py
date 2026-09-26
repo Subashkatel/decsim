@@ -13,11 +13,11 @@ diagnostic only and never becomes simulated time.
 
 import dataclasses
 import math
+import numbers as numbers_module
 import os
 import secrets
 import threading
 import weakref
-from numbers import Integral, Real
 from typing import Optional
 
 import numpy
@@ -216,7 +216,7 @@ class _NonbinaryCorrectionError(ValueError):
 def _finite_real(value, name: str, *, allow_none: bool = False):
     if value is None and allow_none:
         return None
-    if isinstance(value, bool) or not isinstance(value, Real):
+    if isinstance(value, bool) or not isinstance(value, numbers_module.Real):
         raise TypeError(f"{name} must be a finite real number")
     normalized = float(value)
     if not math.isfinite(normalized):
@@ -225,7 +225,9 @@ def _finite_real(value, name: str, *, allow_none: bool = False):
 
 
 def _nonnegative_integer(value, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, Integral):
+    if isinstance(value, bool) or not isinstance(
+        value, numbers_module.Integral
+    ):
         raise TypeError(f"{name} must be a nonnegative integer")
     normalized = int(value)
     if normalized < 0:
@@ -292,14 +294,14 @@ def _relay_profile(
 
 def _load_relay_decoder_type():
     try:
-        from relay_bp import RelayDecoderF32
+        import relay_bp
     except ImportError as error:
         raise ImportError(
             "Relay-BP decoding requires the optional official "
             "dependency `relay-bp`; install that package before selecting "
             "RelayBeliefPropagationWindowDecoder"
         ) from error
-    return RelayDecoderF32
+    return relay_bp.RelayDecoderF32
 
 
 def _gamma_table(profile: _RelayProfile, seed: int, column_count: int):

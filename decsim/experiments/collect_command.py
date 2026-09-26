@@ -13,8 +13,8 @@ folds back together.
 
 import csv
 import functools
+import pathlib
 import sys
-from pathlib import Path
 from typing import Optional
 
 import decsim.collect as collect
@@ -29,7 +29,7 @@ import decsim.experiments.run_folder as run_folder
 
 def run_sweep(
     tasks: list,
-    run_dir: Optional[Path] = None,
+    run_dir: Optional[pathlib.Path] = None,
     *,
     processes: int = 1,
     shard: Optional[tuple] = None,
@@ -56,7 +56,7 @@ def run_sweep(
 
 def run_experiment(
     config_path,
-    out_dir: Optional[Path] = None,
+    out_dir: Optional[pathlib.Path] = None,
     *,
     processes: int = 1,
     shard: Optional[tuple] = None,
@@ -99,7 +99,7 @@ def run_experiment(
 
 
 def _start_the_run_folder(
-    config, run_dir: Path, tasks: list, how_it_ran: dict
+    config, run_dir: pathlib.Path, tasks: list, how_it_ran: dict
 ) -> str:
     """Everything a run folder holds before its first shot; the start time."""
     started_utc = run_folder.start_run(config, run_dir, **how_it_ran)
@@ -108,7 +108,7 @@ def _start_the_run_folder(
 
 
 def _record_the_points(
-    config, run_dir: Path, tasks: list, shard, shots_per_unit
+    config, run_dir: pathlib.Path, tasks: list, shard, shots_per_unit
 ) -> None:
     """The maker, and every point's values and workload, before any shot.
 
@@ -135,7 +135,7 @@ def _seeds_of(task, units: list) -> list:
     return run_folder.seed_ranges(ranges)
 
 
-def _report_the_finished_folder(run_dir: Path) -> None:
+def _report_the_finished_folder(run_dir: pathlib.Path) -> None:
     """One line for a folder a run already finished, which is left as it is."""
     print(
         f"{run_dir} holds a finished run, so this run leaves it as it is; "
@@ -159,7 +159,9 @@ def _report_no_work_unit() -> None:
     )
 
 
-def _echo_description(config, run_dir: Path, shard: Optional[tuple]) -> None:
+def _echo_description(
+    config, run_dir: pathlib.Path, shard: Optional[tuple]
+) -> None:
     """The resolved experiment, before the first shot, as gem5 dumps it."""
     description = experiment.resolved_description(config)
     if shard is not None:
@@ -171,7 +173,7 @@ def _echo_description(config, run_dir: Path, shard: Optional[tuple]) -> None:
 
 
 def _report_point_done(
-    task: collect.Task, run_dir: Optional[Path] = None
+    task: collect.Task, run_dir: Optional[pathlib.Path] = None
 ) -> None:
     """The progress line, and the online threshold's record when it ran."""
     point = task.metadata
@@ -195,7 +197,7 @@ def _report_point_done(
 
 def _write_online_threshold_record(
     calibrator,
-    run_dir: Optional[Path],
+    run_dir: Optional[pathlib.Path],
     *,
     physical_error_probability: float,
     distance: int,
@@ -214,7 +216,7 @@ def _write_online_threshold_record(
     print(summary_line, file=sys.stderr)
     if run_dir is None:
         return
-    record_path = Path(run_dir) / (
+    record_path = pathlib.Path(run_dir) / (
         f"online_threshold_p{physical_error_probability}_d{distance}"
         f"_round{round_period_microseconds}us.csv"
     )

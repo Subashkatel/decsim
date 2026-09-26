@@ -19,8 +19,8 @@ on the named clock's edge as every stage of the decoder unit does.
 
 import dataclasses
 import math
+import numbers
 from collections.abc import Mapping
-from numbers import Real
 from typing import Optional
 
 import decsim.config as config
@@ -269,7 +269,7 @@ def _check_keys(section: Mapping, section_name: str) -> None:
 
 
 def _check_cycles_per_edge(value) -> None:
-    if isinstance(value, bool) or not isinstance(value, Real):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise ValueError("cycle_count.cycles_per_edge must be a number")
     if not math.isfinite(value) or value < 0:
         raise ValueError(

@@ -9,8 +9,8 @@ when a window is decoded again by the strong tier.
 
 import dataclasses
 import math
+import numbers
 from collections.abc import Mapping
-from numbers import Real
 from typing import Any, Optional, Union
 
 import decsim.config as config
@@ -557,7 +557,7 @@ def _is_latency_microseconds(kind) -> bool:
     """A preset core latency: a finite number at least zero, never a flag."""
     if isinstance(kind, bool):
         return False
-    if not isinstance(kind, Real):
+    if not isinstance(kind, numbers.Real):
         return False
     if not math.isfinite(kind):
         return False

@@ -16,30 +16,6 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
 import tests.burst_detectors.burst_rounds as burst_rounds
-from tests.burst_detectors.burst_rounds import (
-    BULK_ROUND_QUIET,
-    CLOCKS,
-    CODE_TASK,
-    DISTANCE,
-    PHYSICAL_ERROR_PROBABILITY,
-    ROUNDS,
-)
-
-
-def _sampled_bulk_round_counts(shot_count, seed):
-    """Stim's detection events per bulk round, summed over the patch."""
-    circuit = burst_rounds.memory_circuit()
-    sampler = circuit.compile_detector_sampler(seed=seed)
-    samples = sampler.sample(shot_count)
-    table = burst_rounds.formation_table()
-    bulk = detector_formation.LayerKind.BULK
-    shape = (shot_count, ROUNDS)
-    per_round = numpy.zeros(shape, dtype=numpy.int64)
-    for recipe in table.detectors:
-        if recipe.kind is bulk:
-            column = recipe.round_index - 1
-            per_round[:, column] += samples[:, recipe.detector_index]
-    return per_round[:, 1:]
 
 
 def test_the_patch_count_tail_is_the_tail_stim_samples():
@@ -84,7 +60,7 @@ def test_a_burst_free_shot_is_not_flagged():
     circuit = burst_rounds.memory_circuit()
     rounds = burst_rounds.sampled_rounds(circuit, seed=3)
     burst_rounds.feed(detector, rounds)
-    window = burst_rounds.window(1, ROUNDS)
+    window = burst_rounds.window(1, burst_rounds.ROUNDS)
     assert not detector.is_burst_window(window)
 
 
@@ -92,7 +68,10 @@ def test_an_operation_shorter_than_the_windows_is_refused():
     """The laws are read off a slab two rounds longer than a window."""
     settings = event_count.EventCountBurstDetector.Settings()
     circuit = workload_settings.memory_circuit(
-        CODE_TASK, 21, DISTANCE, PHYSICAL_ERROR_PROBABILITY
+        burst_rounds.CODE_TASK,
+        21,
+        burst_rounds.DISTANCE,
+        burst_rounds.PHYSICAL_ERROR_PROBABILITY,
     )
     engine = engine_module.Engine()
     circuits = {7: (circuit, 21)}
@@ -104,25 +83,33 @@ def test_an_operation_shorter_than_the_windows_is_refused():
 def test_a_priced_count_needs_a_clock():
     section = {"kind": "event_count", "cycles_per_round": 3}
     with pytest.raises(ValueError, match="cycles_per_round needs a clock"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+        burst_detector_settings.BurstDetectorSettings.from_yaml(
+            section, burst_rounds.CLOCKS
+        )
 
 
 def test_a_false_alarm_rate_is_a_probability():
     section = {"kind": "event_count", "false_alarms_per_round": "1e-6"}
     with pytest.raises(ValueError, match="must be a probability"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+        burst_detector_settings.BurstDetectorSettings.from_yaml(
+            section, burst_rounds.CLOCKS
+        )
 
 
 def test_a_window_is_a_whole_number_of_rounds():
     section = {"kind": "event_count", "patch_window_rounds": 0}
     with pytest.raises(ValueError, match="whole number of rounds"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+        burst_detector_settings.BurstDetectorSettings.from_yaml(
+            section, burst_rounds.CLOCKS
+        )
 
 
 def test_raising_priors_is_true_or_false():
     section = {"kind": "event_count", "raise_strong_priors": "yes"}
     with pytest.raises(ValueError, match="must be true or false"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+        burst_detector_settings.BurstDetectorSettings.from_yaml(
+            section, burst_rounds.CLOCKS
+        )
 
 
 def test_without_burst_priors_a_flagged_window_keeps_its_model():
@@ -133,14 +120,6 @@ def test_without_burst_priors_a_flagged_window_keeps_its_model():
     model = burst_rounds.window_model(12, 17)
     kept = detector.with_burst_priors(window, model)
     assert kept is model
-
-
-def _noiseless_detector(settings):
-    """The detector calibrated on the d = 5 memory circuit at p = 0."""
-    circuit = workload_settings.memory_circuit(CODE_TASK, ROUNDS, DISTANCE, 0.0)
-    circuits = {1: (circuit, ROUNDS)}
-    engine = engine_module.Engine()
-    return event_count.EventCountBurstDetector(settings, engine, circuits, 1.0)
 
 
 @pytest.mark.filterwarnings("error")
@@ -155,7 +134,7 @@ def test_a_noiseless_background_fires_on_its_first_event():
     )
     detector = _noiseless_detector(settings)
     quiet_before = burst_rounds.quiet_rounds(11)
-    one_event = (1,) + BULK_ROUND_QUIET[1:]
+    one_event = (1,) + burst_rounds.BULK_ROUND_QUIET[1:]
     burst_rounds.feed(detector, quiet_before)
     quiet_window = burst_rounds.window(1, 11)
     was_quiet = detector.is_burst_window(quiet_window)
@@ -167,3 +146,29 @@ def test_a_noiseless_background_fires_on_its_first_event():
     assert not was_quiet
     assert detector.is_burst_window(window)
     assert kept is model
+
+
+def _sampled_bulk_round_counts(shot_count, seed):
+    """Stim's detection events per bulk round, summed over the patch."""
+    circuit = burst_rounds.memory_circuit()
+    sampler = circuit.compile_detector_sampler(seed=seed)
+    samples = sampler.sample(shot_count)
+    table = burst_rounds.formation_table()
+    bulk = detector_formation.LayerKind.BULK
+    shape = (shot_count, burst_rounds.ROUNDS)
+    per_round = numpy.zeros(shape, dtype=numpy.int64)
+    for recipe in table.detectors:
+        if recipe.kind is bulk:
+            column = recipe.round_index - 1
+            per_round[:, column] += samples[:, recipe.detector_index]
+    return per_round[:, 1:]
+
+
+def _noiseless_detector(settings):
+    """The detector calibrated on the d = 5 memory circuit at p = 0."""
+    circuit = workload_settings.memory_circuit(
+        burst_rounds.CODE_TASK, burst_rounds.ROUNDS, burst_rounds.DISTANCE, 0.0
+    )
+    circuits = {1: (circuit, burst_rounds.ROUNDS)}
+    engine = engine_module.Engine()
+    return event_count.EventCountBurstDetector(settings, engine, circuits, 1.0)

@@ -69,7 +69,9 @@ class _GroupTail:
         if expected_blocks >= self.fitted_count:
             return self._observed_level(share)
         reach = self.fitted_count / expected_blocks
-        return self.fit_base + self.fit_scale * math.log(reach)
+        log_reach = math.log(reach)
+        excess = self.fit_scale * log_reach
+        return self.fit_base + excess
 
     def _observed_level(self, share: float) -> float:
         negated_tails = -self.tails

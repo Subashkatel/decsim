@@ -17,7 +17,10 @@ the row's code:
   alarm: any group at or over its threshold (multichart CUSUM).
 """
 
+from typing import Optional
+
 import numpy
+import stim
 
 REFERENCE_RADII = (0.0, 1.5, 2.3, 3.2)
 REFERENCE_DESIGNS = (2.0, 4.0, 20.0)
@@ -28,6 +31,56 @@ REFERENCE_TRACKING = 5000.0
 REFERENCE_SHARE_FLOOR = 0.2
 # grid units: neighbouring checks sqrt(2) apart
 GRID_UNIT = 0.7071067811865476
+
+
+def reference_scores(
+    rows: numpy.ndarray,
+    positions: tuple,
+    pairs: list,
+    usual_rates: numpy.ndarray,
+    mask_count: Optional[int] = 8,
+) -> tuple:
+    """Regions to groups, region by region, round by round.
+
+    Returns (rounds, groups) design-major, and the masked check-rounds.
+    """
+    members, scales = _reference_regions(positions, REFERENCE_RADII)
+    flags = _reference_flags(rows, pairs, mask_count)
+    usual_counts = []
+    for member in members:
+        region_rate = usual_rates[member].sum()
+        usual_counts.append(region_rate)
+    scores = numpy.zeros((len(REFERENCE_DESIGNS), len(members)))
+    group_scores = []
+    masked = 0
+    for round_index, row in enumerate(rows):
+        kept = _reference_kept(flags, round_index)
+        is_masked = ~kept
+        masked += is_masked.sum()
+        for region, member in enumerate(members):
+            _reference_region_step(
+                scores, usual_counts, region, member, row, kept, usual_rates
+            )
+        groups = _reference_groups(scores, scales)
+        group_scores.append(groups)
+    return numpy.asarray(group_scores), masked
+
+
+def reference_pairs(circuit: stim.Circuit) -> set:
+    """For each data qubit, its two same-basis checks, the flag's pairs.
+
+    On Stim's rotated surface code data qubits sit at odd coordinates
+    and X checks carry an H, and a check beside a data qubit sits one
+    unit off in both coordinates.
+    """
+    coordinates = circuit.get_final_qubit_coordinates()
+    x_checks = _hadamard_targets(circuit)
+    pairs = set()
+    for data_x, data_y in coordinates.values():
+        if data_x % 2 == 1 and data_y % 2 == 1:
+            beside = _pairs_beside(coordinates, x_checks, data_x, data_y)
+            pairs |= beside
+    return pairs
 
 
 def _reference_regions(positions, radii):
@@ -96,33 +149,6 @@ def _reference_kept(flags, round_index):
     return ~recent.any(axis=0)
 
 
-def reference_scores(rows, positions, pairs, usual_rates, mask_count=8):
-    """Regions to groups, region by region, round by round.
-
-    Returns (rounds, groups) design-major, and the masked check-rounds.
-    """
-    members, scales = _reference_regions(positions, REFERENCE_RADII)
-    flags = _reference_flags(rows, pairs, mask_count)
-    usual_counts = []
-    for member in members:
-        region_rate = usual_rates[member].sum()
-        usual_counts.append(region_rate)
-    scores = numpy.zeros((len(REFERENCE_DESIGNS), len(members)))
-    group_scores = []
-    masked = 0
-    for round_index, row in enumerate(rows):
-        kept = _reference_kept(flags, round_index)
-        is_masked = ~kept
-        masked += is_masked.sum()
-        for region, member in enumerate(members):
-            _reference_region_step(
-                scores, usual_counts, region, member, row, kept, usual_rates
-            )
-        groups = _reference_groups(scores, scales)
-        group_scores.append(groups)
-    return numpy.asarray(group_scores), masked
-
-
 def _reference_region_step(
     scores, usual_counts, region, member, row, kept, usual_rates
 ):
@@ -134,13 +160,21 @@ def _reference_region_step(
     share = kept_rate / region_rate
     expected = usual_counts[region] * share
     for design, multiplier in enumerate(REFERENCE_DESIGNS):
-        fired = (1 - (1 - 2 * usual_rates[member]) ** multiplier) / 2
-        ratio = fired.sum() / region_rate
-        step = count * numpy.log(ratio) - (ratio - 1) * expected
+        doubled_rates = 2 * usual_rates[member]
+        survivals = 1 - doubled_rates
+        design_survivals = survivals**multiplier
+        fired = (1 - design_survivals) / 2
+        fired_rate = fired.sum()
+        ratio = fired_rate / region_rate
+        log_ratio = numpy.log(ratio)
+        evidence = count * log_ratio
+        drift = (ratio - 1) * expected
+        step = evidence - drift
         score = scores[design, region] + step
         scores[design, region] = max(0.0, score)
     if share > REFERENCE_SHARE_FLOOR:
-        error = count / share - usual_counts[region]
+        whole_count = count / share
+        error = whole_count - usual_counts[region]
         usual_counts[region] += error / REFERENCE_TRACKING
 
 
@@ -154,23 +188,6 @@ def _reference_groups(scores, scales):
             at_scale = design_scores[is_at_scale]
             groups.append(max(at_scale))
     return groups
-
-
-def reference_pairs(circuit):
-    """For each data qubit, its two same-basis checks, the flag's pairs.
-
-    On Stim's rotated surface code data qubits sit at odd coordinates
-    and X checks carry an H, and a check beside a data qubit sits one
-    unit off in both coordinates.
-    """
-    coordinates = circuit.get_final_qubit_coordinates()
-    x_checks = _hadamard_targets(circuit)
-    pairs = set()
-    for data_x, data_y in coordinates.values():
-        if data_x % 2 == 1 and data_y % 2 == 1:
-            beside = _pairs_beside(coordinates, x_checks, data_x, data_y)
-            pairs |= beside
-    return pairs
 
 
 def _hadamard_targets(circuit):

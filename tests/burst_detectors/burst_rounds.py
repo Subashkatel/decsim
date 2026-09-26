@@ -5,7 +5,10 @@ memory_circuit generates, its rounds in formation order, and the two
 rows built on it.
 """
 
+from typing import Optional
+
 import numpy
+import stim
 
 import decsim.burst_detectors.event_count.detector as event_count
 import decsim.config as config
@@ -14,6 +17,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_contracts
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
+import decsim.ports as ports
 import decsim.qpu.stim_device as stim_device
 import decsim.records.windows as window_records
 from decsim.burst_detectors.masked_regional_cusum import (
@@ -38,13 +42,16 @@ LONG_ROUNDS = 160
 LONG_BURST_ONSET = 40
 
 
-def memory_circuit():
+def memory_circuit() -> stim.Circuit:
     return workload_settings.memory_circuit(
         CODE_TASK, ROUNDS, DISTANCE, PHYSICAL_ERROR_PROBABILITY
     )
 
 
-def event_count_detector(settings, engine=None):
+def event_count_detector(
+    settings: event_count.EventCountBurstDetector.Settings,
+    engine: Optional[engine_module.Engine] = None,
+) -> event_count.EventCountBurstDetector:
     if engine is None:
         engine = engine_module.Engine()
     circuit = memory_circuit()
@@ -52,7 +59,11 @@ def event_count_detector(settings, engine=None):
     return event_count.EventCountBurstDetector(settings, engine, circuits, 1.0)
 
 
-def cusum_detector(settings, rounds=ROUNDS, engine=None):
+def cusum_detector(
+    settings: masked_regional_cusum.MaskedRegionalCusumBurstDetector.Settings,
+    rounds: int = ROUNDS,
+    engine: Optional[engine_module.Engine] = None,
+) -> masked_regional_cusum.MaskedRegionalCusumBurstDetector:
     if engine is None:
         engine = engine_module.Engine()
     circuit = workload_settings.memory_circuit(
@@ -62,12 +73,14 @@ def cusum_detector(settings, rounds=ROUNDS, engine=None):
     return CUSUM(settings, engine, circuits, 1.0)
 
 
-def formation_table():
+def formation_table() -> detector_formation.FormationTable:
     circuit = memory_circuit()
     return detector_formation.build_formation_table(circuit, ROUNDS)
 
 
-def rounds_of_events(circuit, round_count, sampled_events):
+def rounds_of_events(
+    circuit: stim.Circuit, round_count: int, sampled_events: numpy.ndarray
+) -> list:
     """One shot's detection events cut into rounds, in formation order."""
     table = detector_formation.build_formation_table(circuit, round_count)
     rounds = []
@@ -82,14 +95,14 @@ def rounds_of_events(circuit, round_count, sampled_events):
     return rounds
 
 
-def sampled_rounds(circuit, seed):
+def sampled_rounds(circuit: stim.Circuit, seed: int) -> list:
     sampler = circuit.compile_detector_sampler(seed=seed)
     shots = sampler.sample(1)
     base_circuit = memory_circuit()
     return rounds_of_events(base_circuit, ROUNDS, shots[0])
 
 
-def whole_patch_burst(onset_round, probability):
+def whole_patch_burst(onset_round: int, probability: float) -> stim.Circuit:
     circuit = memory_circuit()
     table = formation_table()
     burst = stim_device.BurstStimDevice.Settings(
@@ -99,19 +112,19 @@ def whole_patch_burst(onset_round, probability):
     return stim_device.burst_circuit(circuit, table, burst)
 
 
-def feed(detector, rounds):
+def feed(detector: ports.BurstDetector, rounds: list) -> None:
     for index, events in enumerate(rounds):
         round_index = index + 1
         detector.observe_round(1, round_index, events)
 
 
-def quiet_rounds(round_count):
+def quiet_rounds(round_count: int) -> list:
     bulk_round_count = round_count - 1
     bulk_rounds = [BULK_ROUND_QUIET] * bulk_round_count
     return [FIRST_ROUND_QUIET, *bulk_rounds]
 
 
-def window(first_round, last_round):
+def window(first_round: int, last_round: int) -> window_records.Window:
     round_count = last_round - first_round + 1
     return window_records.Window(
         operation_id=1,
@@ -123,7 +136,9 @@ def window(first_round, last_round):
     )
 
 
-def window_model(first_round, last_round):
+def window_model(
+    first_round: int, last_round: int
+) -> fault_contracts.WindowErrorModel:
     """The window's model as the planner slices it: rows and columns."""
     circuit = memory_circuit()
     slicer = window_slicer.WindowSlicer(
@@ -136,7 +151,7 @@ def window_model(first_round, last_round):
     )
 
 
-def long_burst_shot(seed):
+def long_burst_shot(seed: int) -> tuple:
     """A d = 5 shot of LONG_ROUNDS rounds, bursting from LONG_BURST_ONSET."""
     circuit = workload_settings.memory_circuit(
         CODE_TASK, LONG_ROUNDS, DISTANCE, PHYSICAL_ERROR_PROBABILITY
@@ -151,7 +166,9 @@ def long_burst_shot(seed):
     return circuit, shots[0]
 
 
-def bulk_rows(circuit, sampled, positions):
+def bulk_rows(
+    circuit: stim.Circuit, sampled: numpy.ndarray, positions: tuple
+) -> numpy.ndarray:
     """(bulk rounds, checks) of 0/1, read off Stim's detector coordinates.
 
     Stim's time coordinate 0 is the first round and its last is the
@@ -174,7 +191,9 @@ def bulk_rows(circuit, sampled, positions):
     return rows
 
 
-def bank_inputs(detector):
+def bank_inputs(
+    detector: masked_regional_cusum.MaskedRegionalCusumBurstDetector,
+) -> tuple:
     """The bank's positions, pairs and floored usual rates."""
     calibration = detector.charts_by_operation[1].calibration
     bank = calibration.bank
@@ -187,7 +206,9 @@ def bank_inputs(detector):
     return positions, pairs, bank.usual_rates
 
 
-def flagged_event_count_detector(raise_strong_priors):
+def flagged_event_count_detector(
+    raise_strong_priors: bool,
+) -> event_count.EventCountBurstDetector:
     """Every detector loud from round 12 to 17: the whole patch in burst."""
     settings = event_count.EventCountBurstDetector.Settings(
         raise_strong_priors=raise_strong_priors
@@ -200,7 +221,9 @@ def flagged_event_count_detector(raise_strong_priors):
     return detector
 
 
-def flagged_cusum_detector(raise_strong_priors):
+def flagged_cusum_detector(
+    raise_strong_priors: bool,
+) -> masked_regional_cusum.MaskedRegionalCusumBurstDetector:
     """Every check loud from round 12 to 17: the whole patch in burst."""
     settings = CUSUM.Settings(raise_strong_priors=raise_strong_priors)
     detector = cusum_detector(settings)

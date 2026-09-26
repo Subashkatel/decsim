@@ -13,22 +13,14 @@ import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
 import tests.burst_detectors.burst_rounds as burst_rounds
 import tests.burst_detectors.written_rules as written_rules
-from tests.burst_detectors.burst_rounds import (
-    BULK_ROUND_QUIET,
-    CLOCKS,
-    CODE_TASK,
-    CUSUM,
-    DISTANCE,
-    LONG_ROUNDS,
-    PHYSICAL_ERROR_PROBABILITY,
-    ROUNDS,
-)
 
 
 def test_the_row_fires_on_the_rounds_the_written_rules_alarm():
     """Alarm, at the row's own thresholds, through observe_round."""
-    settings = CUSUM.Settings(calibration_shots=2000)
-    detector = burst_rounds.cusum_detector(settings, rounds=LONG_ROUNDS)
+    settings = burst_rounds.CUSUM.Settings(calibration_shots=2000)
+    detector = burst_rounds.cusum_detector(
+        settings, rounds=burst_rounds.LONG_ROUNDS
+    )
     positions, pairs, usual_rates = burst_rounds.bank_inputs(detector)
     circuit, sampled = burst_rounds.long_burst_shot(seed=4)
     rows = burst_rounds.bulk_rows(circuit, sampled, positions)
@@ -41,34 +33,14 @@ def test_the_row_fires_on_the_rounds_the_written_rules_alarm():
     is_alarm = reaches.any(axis=1)
     alarms = numpy.flatnonzero(is_alarm)
 
-    shot_rounds = burst_rounds.rounds_of_events(circuit, LONG_ROUNDS, sampled)
+    shot_rounds = burst_rounds.rounds_of_events(
+        circuit, burst_rounds.LONG_ROUNDS, sampled
+    )
     burst_rounds.feed(detector, shot_rounds)
     fired = _fired_rounds(charts.flags.flags)
 
     assert len(alarms) > 0
     assert fired == list(alarms)
-
-
-def _fired_rounds(flags):
-    """The offsets of the rounds a flag was recorded on."""
-    fired = []
-    for index, flag in enumerate(flags):
-        if flag is not None:
-            fired.append(index)
-    return fired
-
-
-def _quiet_rows(shot_count, seed, positions):
-    circuit = workload_settings.memory_circuit(
-        CODE_TASK, ROUNDS, DISTANCE, PHYSICAL_ERROR_PROBABILITY
-    )
-    sampler = circuit.compile_detector_sampler(seed=seed)
-    shots = sampler.sample(shot_count)
-    rows = []
-    for sampled in shots:
-        shot_rows = burst_rounds.bulk_rows(circuit, sampled, positions)
-        rows.append(shot_rows)
-    return numpy.asarray(rows)
 
 
 def test_quiet_shots_alarm_at_the_calibrated_rate():
@@ -77,9 +49,9 @@ def test_quiet_shots_alarm_at_the_calibrated_rate():
     4000 fresh quiet shots (another seed than the calibration's) alarm
     within five binomial standard errors of that share.
     """
-    shot_seconds = ROUNDS * 1e-6
+    shot_seconds = burst_rounds.ROUNDS * 1e-6
     rate = 0.05 / shot_seconds
-    settings = CUSUM.Settings(
+    settings = burst_rounds.CUSUM.Settings(
         false_alarms_per_second=rate, calibration_shots=4000
     )
     detector = burst_rounds.cusum_detector(settings)
@@ -99,7 +71,7 @@ def test_quiet_shots_alarm_at_the_calibrated_rate():
 
 def test_a_whole_patch_burst_is_flagged_from_its_onset():
     """The study's 0.03 per second; the flag's change point is round 12."""
-    settings = CUSUM.Settings()
+    settings = burst_rounds.CUSUM.Settings()
     detector = burst_rounds.cusum_detector(settings)
     burst = burst_rounds.whole_patch_burst(onset_round=12, probability=0.1)
     rounds = burst_rounds.sampled_rounds(burst, seed=3)
@@ -112,12 +84,12 @@ def test_a_whole_patch_burst_is_flagged_from_its_onset():
 
 
 def test_a_quiet_shot_is_not_flagged_by_the_cusum():
-    settings = CUSUM.Settings()
+    settings = burst_rounds.CUSUM.Settings()
     detector = burst_rounds.cusum_detector(settings)
     circuit = burst_rounds.memory_circuit()
     rounds = burst_rounds.sampled_rounds(circuit, seed=3)
     burst_rounds.feed(detector, rounds)
-    window = burst_rounds.window(1, ROUNDS)
+    window = burst_rounds.window(1, burst_rounds.ROUNDS)
 
     assert not detector.is_burst_window(window)
 
@@ -138,15 +110,19 @@ def test_a_noiseless_background_fires_the_cusum_on_its_first_event():
 
     The region no fault reaches keeps its priors.
     """
-    settings = CUSUM.Settings(raise_strong_priors=True)
-    circuit = workload_settings.memory_circuit(CODE_TASK, ROUNDS, DISTANCE, 0.0)
+    settings = burst_rounds.CUSUM.Settings(raise_strong_priors=True)
+    circuit = workload_settings.memory_circuit(
+        burst_rounds.CODE_TASK, burst_rounds.ROUNDS, burst_rounds.DISTANCE, 0.0
+    )
     engine = engine_module.Engine()
-    detector = CUSUM(settings, engine, {1: (circuit, ROUNDS)}, 1.0)
+    detector = burst_rounds.CUSUM(
+        settings, engine, {1: (circuit, burst_rounds.ROUNDS)}, 1.0
+    )
     quiet_before = burst_rounds.quiet_rounds(11)
     burst_rounds.feed(detector, quiet_before)
     quiet_window = burst_rounds.window(1, 11)
     was_quiet = detector.is_burst_window(quiet_window)
-    one_event = (1,) + BULK_ROUND_QUIET[1:]
+    one_event = (1,) + burst_rounds.BULK_ROUND_QUIET[1:]
     detector.observe_round(1, 12, one_event)
     window = burst_rounds.window(12, 12)
     model = burst_rounds.window_model(12, 12)
@@ -158,7 +134,7 @@ def test_a_noiseless_background_fires_the_cusum_on_its_first_event():
 
 
 def test_a_rate_of_a_false_alarm_a_shot_is_refused():
-    settings = CUSUM.Settings(false_alarms_per_second=1e6)
+    settings = burst_rounds.CUSUM.Settings(false_alarms_per_second=1e6)
 
     with pytest.raises(ValueError, match="at least one false alarm a shot"):
         burst_rounds.cusum_detector(settings)
@@ -183,7 +159,9 @@ def test_a_wrong_cusum_key_is_refused_by_a_sentence(key, value, sentence):
     section = {"kind": "masked_regional_cusum", key: value}
 
     with pytest.raises(ValueError, match=sentence):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+        burst_detector_settings.BurstDetectorSettings.from_yaml(
+            section, burst_rounds.CLOCKS
+        )
 
 
 def test_the_cusum_keys_reach_the_rows_settings():
@@ -197,7 +175,7 @@ def test_the_cusum_keys_reach_the_rows_settings():
     }
 
     detector_section = burst_detector_settings.BurstDetectorSettings.from_yaml(
-        section, CLOCKS
+        section, burst_rounds.CLOCKS
     )
 
     settings = detector_section.row_settings
@@ -205,4 +183,29 @@ def test_the_cusum_keys_reach_the_rows_settings():
     assert settings.region_radii == ()
     assert settings.fault_rate_multipliers == (3.0,)
     assert settings.datapaths == 2
-    assert settings.clock == CLOCKS.clock("fridge")
+    assert settings.clock == burst_rounds.CLOCKS.clock("fridge")
+
+
+def _fired_rounds(flags):
+    """The offsets of the rounds a flag was recorded on."""
+    fired = []
+    for index, flag in enumerate(flags):
+        if flag is not None:
+            fired.append(index)
+    return fired
+
+
+def _quiet_rows(shot_count, seed, positions):
+    circuit = workload_settings.memory_circuit(
+        burst_rounds.CODE_TASK,
+        burst_rounds.ROUNDS,
+        burst_rounds.DISTANCE,
+        burst_rounds.PHYSICAL_ERROR_PROBABILITY,
+    )
+    sampler = circuit.compile_detector_sampler(seed=seed)
+    shots = sampler.sample(shot_count)
+    rows = []
+    for sampled in shots:
+        shot_rows = burst_rounds.bulk_rows(circuit, sampled, positions)
+        rows.append(shot_rows)
+    return numpy.asarray(rows)

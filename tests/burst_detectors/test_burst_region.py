@@ -8,10 +8,6 @@ import numpy
 
 import decsim.burst_detectors.event_count.detector as event_count
 import tests.burst_detectors.burst_rounds as burst_rounds
-from tests.burst_detectors.burst_rounds import (
-    BULK_ROUND_LOUD,
-    GRAPHLIKE,
-)
 
 
 def test_burst_priors_raise_the_priors_and_keep_the_graph():
@@ -26,8 +22,8 @@ def test_burst_priors_raise_the_priors_and_keep_the_graph():
     window = burst_rounds.window(12, 17)
     model = burst_rounds.window_model(12, 17)
     raised = detector.with_burst_priors(window, model)
-    faults = model.require_faults(GRAPHLIKE)
-    raised_faults = raised.require_faults(GRAPHLIKE)
+    faults = model.require_faults(burst_rounds.GRAPHLIKE)
+    raised_faults = raised.require_faults(burst_rounds.GRAPHLIKE)
     changed_checks = faults.check != raised_faults.check
     assert changed_checks.nnz == 0
     assert raised.detector_ids == model.detector_ids
@@ -45,7 +41,7 @@ def test_a_flag_with_no_anomalous_position_keeps_the_model():
     )
     detector = burst_rounds.event_count_detector(settings)
     quiet_before = burst_rounds.quiet_rounds(11)
-    rounds = [*quiet_before, BULK_ROUND_LOUD]
+    rounds = [*quiet_before, burst_rounds.BULK_ROUND_LOUD]
     burst_rounds.feed(detector, rounds)
     window = burst_rounds.window(12, 12)
     model = burst_rounds.window_model(12, 12)
@@ -59,8 +55,8 @@ def test_cusum_burst_priors_cap_the_region_and_keep_the_graph():
     window = burst_rounds.window(12, 17)
     model = burst_rounds.window_model(12, 17)
     raised = detector.with_burst_priors(window, model)
-    faults = model.require_faults(GRAPHLIKE)
-    raised_faults = raised.require_faults(GRAPHLIKE)
+    faults = model.require_faults(burst_rounds.GRAPHLIKE)
+    raised_faults = raised.require_faults(burst_rounds.GRAPHLIKE)
     changed_checks = faults.check != raised_faults.check
     is_capped = raised_faults.priors == 0.5
 

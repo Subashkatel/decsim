@@ -35,6 +35,7 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
+import decsim.trace_source as trace_source
 
 
 class Port:
@@ -1931,6 +1932,12 @@ class EscalationPolicy(Protocol):
         """The strong tier answered for the window; a source may learn."""
 
 
+class BurstDetectorTrace(Protocol):
+    """The one event a burst detector reports, as its trace member."""
+
+    round_flagged: trace_source.TraceSource
+
+
 @runtime_checkable
 class BurstDetector(Protocol):
     """Whether an error burst is under way, read off the detection events.
@@ -1951,7 +1958,7 @@ class BurstDetector(Protocol):
     connects the run's burst flag record to whatever answers this port.
     """
 
-    trace: Any
+    trace: BurstDetectorTrace
 
     def observe_round(
         self, operation_id: Any, round_index: int, events: Sequence[int]

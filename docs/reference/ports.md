@@ -579,13 +579,21 @@ Whether and when a window is decoded again by the strong tier.
 | `verdict_for_weak_result` | Keep the weak result as final, or escalate its window. |
 | `learn_from_strong_result` | The strong tier answered for the window; a source may learn. |
 
+### `BurstDetectorTrace`
+
+The one event a burst detector reports, as its trace member.
+
+| Member | Type |
+| --- | --- |
+| `round_flagged` | `trace_source.TraceSource` |
+
 ### `BurstDetector`
 
 Whether an error burst is under way, read off the detection events.
 
 | Member | Type |
 | --- | --- |
-| `trace` | `Any` |
+| `trace` | `BurstDetectorTrace` |
 
 | Method | What it does |
 | --- | --- |

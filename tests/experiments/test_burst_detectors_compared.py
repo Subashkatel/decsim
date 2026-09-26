@@ -9,9 +9,9 @@ import pytest
 import yaml
 
 import decsim.experiments.experiment as experiment
-from tests.experiments.yaml_configs import CONFIGS_DIR
+import tests.experiments.yaml_configs as yaml_configs
 
-FOLDER = CONFIGS_DIR / "burst_detectors_compared"
+FOLDER = yaml_configs.CONFIGS_DIR / "burst_detectors_compared"
 BASE = "../common/burst_detectors_compared_base.yaml"
 # each detector's burst_detector section, as its burst file writes it
 DETECTORS = {

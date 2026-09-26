@@ -734,9 +734,9 @@ def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
     assert _lane_spans_overlap(accesses, second_port) is False
 
 
-def _lane_spans_overlap(accesses, tid) -> bool:
+def _lane_spans_overlap(accesses, thread_id) -> bool:
     """Whether a span on this lane starts before the one before it ends."""
-    spans = [row for row in accesses if row["tid"] == tid]
+    spans = [row for row in accesses if row["tid"] == thread_id]
     ends = [row["ts"] + row["dur"] for row in spans[:-1]]
     starts = [row["ts"] for row in spans[1:]]
     return any(start < end for start, end in zip(starts, ends, strict=True))
@@ -769,9 +769,9 @@ def _moves(document) -> list:
 
 def _overlapping_lanes(rows, lanes) -> list:
     overlapping = []
-    for tid in sorted(lanes):
-        if _lane_spans_overlap(rows, tid):
-            overlapping.append(tid)
+    for thread_id in sorted(lanes):
+        if _lane_spans_overlap(rows, thread_id):
+            overlapping.append(thread_id)
     return overlapping
 
 

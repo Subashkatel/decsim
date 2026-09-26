@@ -1340,9 +1340,7 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
     result = machine.run()
     assert result.terminal_status == "complete"
     snapshot = machine.pauli_frame.snapshot()
-    tiers = []
-    for record in snapshot.records:
-        tiers.append(record.tier)
+    tiers = [record.tier for record in snapshot.records]
     assert tiers
     assert set(tiers) == {"strong"}
 

@@ -222,6 +222,59 @@ def test_a_segment_issued_at_a_declared_offset_holds_the_stream() -> None:
     assert qpu.emissions == [(7, 13, 0, False)]
 
 
+def test_a_stream_the_windows_do_not_plan_is_continued_by_no_patch() -> None:
+    """Only a stream whose windows are planned as it runs grows idle rounds."""
+    owner = _operation(8, patches=("A", "B"))
+    segment = _operation(1, patches=("A", "B"))
+    segment = dataclasses.replace(segment, stream_id=8, stream_offset=0)
+    program = program_records.ExecutionProgram(
+        operations=(segment,), dynamic_streams=(owner,)
+    )
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(segment)
+
+    assert streams.extend_live_stream(segment, "A") is False
+    assert qpu.emissions == []
+
+
+def test_a_split_group_leaves_a_member_s_hold_on_another_stream() -> None:
+    """Splitting stream seven's group frees only the patches it holds.
+
+    Patch B went on to stream nine, so when an operation on patch A
+    alone splits seven's group, B still holds nine and continues it.
+    """
+    group_owner = _operation(7, patches=("A", "B"))
+    other_owner = _operation(9, patches=("B",))
+    first = _operation(1, patches=("A",))
+    first = dataclasses.replace(first, stream_id=7, stream_offset=0)
+    second = _operation(2, patches=("B",))
+    second = dataclasses.replace(second, stream_id=9, stream_offset=0)
+    splitter = _operation(3, patches=("A",))
+    waiting = _operation(4, patches=("B",), emits_detector_data=False)
+    operations = (first, second, splitter, waiting)
+    program = program_records.ExecutionProgram(
+        operations=operations, dynamic_streams=(group_owner, other_owner)
+    )
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(4, ("B",)))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(first)
+    streams.begin(second)
+    streams.begin(splitter)
+    streams.begin(waiting)
+
+    assert streams.extend_live_stream(waiting, "B") is True
+    assert qpu.emissions == [(9, 7, 0, False)]
+
+
 def test_a_sealed_stream_is_continued_by_no_idle_patch() -> None:
     program = _unprotected_group_program()
     operation = program.operations[0]
@@ -679,8 +732,8 @@ class _Windows:
         del stream_offset
 
     def has_dynamic_stream(self, stream_id: Any) -> bool:
-        """The fixture declares stream seven."""
-        return stream_id == 7
+        """The fixture declares streams seven and nine."""
+        return stream_id in (7, 9)
 
     def seal_stream(self, stream_id, stream_round_count: int) -> None:
         """One sealed stream."""

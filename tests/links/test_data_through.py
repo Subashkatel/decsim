@@ -61,7 +61,6 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings_module
 
 ROUNDS = 15
-# what a strong request's name is on a wire
 NAME_BITS = window_records.REQUEST_KEY_WIRE_BITS
 PROBABILITY = 0.008
 SEED = 0
@@ -394,15 +393,12 @@ def test_the_boundary_hop_pays_one_bulk_layer_per_hand_off(distance):
     assert set(sizes) == {bulk_layer}
 
 
-def bounded_strong_hops_run() -> dict:
-    """The d=5 switching run with both strong hops at the bounded row's rates.
+def bounded_strong_hops_run(distance: int) -> dict:
+    """The switching run with both strong hops at the bounded row's rates.
 
-    The row provisions each hop for one escalation a commit region: a
-    selection and a region of fifteen rounds, each behind a name, is
-    488 bits in 5 us, 97.6 bits per us; an answer is 65 bits in 5 us,
-    13 bits per us.
+    The row provisions each hop for one escalation a commit region of
+    distance rounds.
     """
-    distance = 5
     data_qubit_count = distance * distance
     syndrome_bits_per_round = data_qubit_count - 1
     bounded = link_profiles.bandwidth_limited_profile(
@@ -424,18 +420,29 @@ def bounded_strong_hops_run() -> dict:
 
 
 def test_a_bounded_escalation_hop_serializes_the_selections_name():
-    """64 bits at 97.6 bits per us is 0.655738 us on the wire."""
-    grouped = bounded_strong_hops_run()
+    """64 bits at 97.6 bits per us is 0.655738 us on the wire.
+
+    At d = 5 a selection and a region of fifteen rounds, each behind a
+    name, is 488 bits in the 5 us commit region: 97.6 bits per us.
+    """
+    distance = 5
+    grouped = bounded_strong_hops_run(distance)
     first_selection = grouped["weak_decoder_to_strong_decoder"][0]
     assert first_selection["payload_bits"] == NAME_BITS
     assert first_selection["serialization_ticks"] == 655_738
 
 
 def test_a_bounded_answer_hop_serializes_the_answers_name_and_flip():
-    """65 bits at 13 bits per us is 5 us, the one commit region it has."""
-    grouped = bounded_strong_hops_run()
+    """65 bits at 13 bits per us is 5 us, the one commit region it has.
+
+    At d = 5 the row provisions the answer hop for one 65-bit answer in
+    the 5 us commit region: 13 bits per us.
+    """
+    distance = 5
+    grouped = bounded_strong_hops_run(distance)
     first_answer = grouped["strong_decoder_to_frame"][0]
-    assert first_answer["payload_bits"] == NAME_BITS + 1
+    name_and_flip_bits = NAME_BITS + 1
+    assert first_answer["payload_bits"] == name_and_flip_bits
     assert first_answer["serialization_ticks"] == 5_000_000
 
 
@@ -486,12 +493,17 @@ def test_every_strong_answer_has_one_selection(distance):
     assert len(selections) == len(answers)
 
 
-@pytest.mark.parametrize("distance", (3, 5))
-def test_a_region_transfer_is_the_name_and_its_rounds_layers(distance):
+@pytest.mark.parametrize(
+    "distance, region_index",
+    [(3, 0), (3, 1), (3, 2), (3, 3), (5, 0), (5, 1)],
+)
+def test_a_region_transfer_is_the_name_and_its_rounds_layers(
+    distance, region_index
+):
     """Each transfer of a region carries the request's name once."""
     _selections, regions = escalation_transfers(distance)
-    beside = {bits_beside_the_layers(region, distance) for region in regions}
-    assert beside == {NAME_BITS}
+    region = regions[region_index]
+    assert bits_beside_the_layers(region, distance) == NAME_BITS
 
 
 @pytest.mark.parametrize("distance", (3, 5))

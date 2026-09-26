@@ -89,11 +89,18 @@ class TimingOnlyDevice:
         target = program_records.decode_identity(operation)
         global_round = program_records.global_round(operation, round_index)
         last_round = self.round_count_by_identity.get(target)
-        is_last = _reads_the_data_out(operation, global_round, last_round, 1)
+        has_data_readout = _reads_the_data_out(
+            operation, global_round, last_round, 1
+        )
         patches = program_records.patches_of(operation)
         patch_count = _patch_count_of(operation)
         readout = _valueless_readout(
-            self.code, target, patches, global_round, is_last, patch_count
+            self.code,
+            target,
+            patches,
+            global_round,
+            has_data_readout,
+            patch_count,
         )
         return [readout]
 
@@ -223,10 +230,10 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         last_round = self.round_count_by_identity.get(target)
         groups = self._patch_groups(operation)
         payload_count = len(groups)
-        is_last = _reads_the_data_out(
+        has_data_readout = _reads_the_data_out(
             operation, global_round, last_round, payload_count
         )
-        return self._payloads(operation, target, global_round, is_last)
+        return self._payloads(operation, target, global_round, has_data_readout)
 
     def idle_round_payloads(
         self,
@@ -305,13 +312,13 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         operation: program_records.Operation,
         target: Any,
         global_round: int,
-        is_last: bool,
+        has_data_readout: bool,
     ) -> list[round_records.QPUReadout]:
         """The round's payloads: one per patch, or one over every patch."""
         payloads = []
         for patch_ids, patch_count in self._patch_groups(operation):
             widths = _round_widths(
-                self.code, patch_count, global_round, is_last
+                self.code, patch_count, global_round, has_data_readout
             )
             payload = self._payload(target, patch_ids, global_round, widths)
             payloads.append(payload)
@@ -434,7 +441,10 @@ def _patch_count_of(operation: program_records.Operation) -> int:
 
 
 def _round_widths(
-    code: ports.CodeModel, patch_count: int, global_round: int, is_last: bool
+    code: ports.CodeModel,
+    patch_count: int,
+    global_round: int,
+    has_data_readout: bool,
 ) -> tuple:
     """(raw bits, event bits) of one memory round, by its layer.
 
@@ -453,7 +463,7 @@ def _round_widths(
     event_bits = check_bits
     if global_round == 1:
         event_bits = half_the_checks
-    if is_last:
+    if has_data_readout:
         raw_bits += code.data_bits_per_readout(patch_count)
         event_bits += half_the_checks
     return raw_bits, event_bits
@@ -496,12 +506,12 @@ def _valueless_readout(
     target: Any,
     patches: tuple,
     global_round: int,
-    is_last: bool,
+    has_data_readout: bool,
     patch_count: int,
 ) -> round_records.QPUReadout:
     """One readout with the round's widths and no bit values."""
     raw_bits, event_bits = _round_widths(
-        code, patch_count, global_round, is_last
+        code, patch_count, global_round, has_data_readout
     )
     return round_records.QPUReadout(
         target,

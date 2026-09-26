@@ -183,8 +183,18 @@ def test_a_whole_count_is_an_integer_of_at_least_one(value):
 
     assert str(refusal.value) == (
         "detector.window_rounds must be a whole number of rounds, at least "
-        f"one (got {value!r})"
+        f"1 (got {value!r})"
     )
+
+
+def test_a_whole_count_may_start_at_its_minimum():
+    section = {"deadline_rounds": 0, "late_rounds": -1}
+
+    read = config.whole_count(section, "detector", "deadline_rounds", 9, "", 0)
+    with pytest.raises(ValueError, match="at least 0 .got -1."):
+        config.whole_count(section, "detector", "late_rounds", 9, "", 0)
+
+    assert read == 0
 
 
 def test_a_knob_is_read_or_off():

@@ -59,20 +59,11 @@ class BurstDetectorSettings:
         row_settings = tables.row_settings(
             row, "burst_detector", section, section_keys, clocks
         )
-        deadline = section.get("catch_deadline_rounds", 300)
-        _check_catch_deadline(deadline)
+        deadline = config.whole_count(
+            section, "burst_detector", "catch_deadline_rounds", 300, "rounds", 0
+        )
         return cls(
             kind=kind,
             row_settings=row_settings,
             catch_deadline_rounds=deadline,
         )
-
-
-def _check_catch_deadline(deadline) -> None:
-    is_whole = isinstance(deadline, int) and not isinstance(deadline, bool)
-    if is_whole and deadline >= 0:
-        return
-    raise ValueError(
-        "burst_detector.catch_deadline_rounds must be a whole number of "
-        f"rounds, at least zero (got {deadline!r})"
-    )

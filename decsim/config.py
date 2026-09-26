@@ -72,20 +72,25 @@ def check_cycles(name: str, cycles: int) -> None:
 
 
 def whole_count(
-    section: Mapping, section_name: str, key: str, default: int, unit: str
+    section: Mapping,
+    section_name: str,
+    key: str,
+    default: int,
+    unit: str,
+    minimum: int = 1,
 ) -> int:
-    """A count of at least one, read from a yaml section's key.
+    """A count of at least minimum, read from a yaml section's key.
 
     A bool is refused though Python counts it an int, so true never
     stands for one.
     """
     value = section.get(key, default)
     is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and value >= 1:
+    if is_whole and value >= minimum:
         return value
     raise ValueError(
         f"{section_name}.{key} must be a whole number of {unit}, at least "
-        f"one (got {value!r})"
+        f"{minimum} (got {value!r})"
     )
 
 

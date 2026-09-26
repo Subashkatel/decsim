@@ -414,20 +414,20 @@ def _staged_unit(
         before.append(formation_stage)
     fetch = staged_decoder.MemoryFetchStage(
         "fetch",
-        cycles_per_job=tier_settings.fetch_cycles_per_job,
-        cycles_per_round=tier_settings.fetch_cycles_per_round,
+        cycles_per_job=tier_settings.engine.fetch_cycles_per_job,
+        cycles_per_round=tier_settings.engine.fetch_cycles_per_round,
         word_bits=tier_settings.unit_memory.word_bits,
     )
     before.append(fetch)
     release = staged_decoder.DecoderStage(
         "release",
-        cycles_per_job=tier_settings.release_cycles_per_job,
-        cycles_per_round=tier_settings.release_cycles_per_round,
+        cycles_per_job=tier_settings.engine.release_cycles_per_job,
+        cycles_per_round=tier_settings.engine.release_cycles_per_round,
     )
     timing = staged_decoder.UnitTiming(
         before=tuple(before),
         after=(release,),
-        clock=tier_settings.engine_clock,
+        clock=tier_settings.engine.clock,
     )
     return staged_decoder.StagedDecoder(algorithm, timing)
 

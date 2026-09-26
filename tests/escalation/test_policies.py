@@ -43,6 +43,7 @@ import tests.experiments.yaml_configs as yaml_configs
 
 # the decoder engines run at 100 MHz, a 10000-tick period
 ENGINE_CLOCK = config.Clock(10_000)
+ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # the frame writes one cycle of a 250 MHz clock, 4 ns
 FRAME_CLOCK = config.Clock(4000)
 SOURCE = decoding_records.SoftOutputSource(
@@ -171,14 +172,16 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     )
     decoder_manager = decoder_settings.DecoderManagerSettings()
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        gap_threshold_decibels=15.0,
+        gap_threshold_db=15.0,
         gap_threshold_nats=threshold_nats,
     )
     pauli_frame = pauli_frame_module.PauliFrameConfig(
@@ -354,10 +357,12 @@ def _forward_window_settings(
         commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
     )
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="belief_matching", engine_clock=ENGINE_CLOCK
+        kind="belief_matching",
+        engine=ENGINE_CARD,
     )
     escalation = escalation_settings.EscalationSettings(
         kind="switching",

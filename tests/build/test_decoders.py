@@ -81,14 +81,14 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
     """
     period_ticks = config.microseconds_to_ticks(0.01)
     clock = config.Clock(period_ticks)
-    weak = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    engine = decoder_settings.EngineSettings(
+        clock=clock,
         fetch_cycles_per_job=2,
         fetch_cycles_per_round=3,
         release_cycles_per_job=5,
         release_cycles_per_round=7,
-        engine_clock=clock,
     )
+    weak = decoder_settings.DecoderSettings(kind="pymatching", engine=engine)
     settings = _settings(weak=weak)
     policy = escalation_build.build_escalation_policy(
         settings.escalation, settings.weak_decoder
@@ -108,10 +108,11 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     """The growth resolution the yaml names reaches the row that grows."""
     period_ticks = config.microseconds_to_ticks(0.01)
     clock = config.Clock(period_ticks)
+    engine = decoder_settings.EngineSettings(clock=clock)
     union_find_settings = union_find.UnionFindDecoder.Settings(weight_step=0.25)
     weak = decoder_settings.DecoderSettings(
         kind="union_find",
-        engine_clock=clock,
+        engine=engine,
         row_settings=union_find_settings,
     )
     settings = _settings(weak=weak)

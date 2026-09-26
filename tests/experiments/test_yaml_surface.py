@@ -39,8 +39,8 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     assert settings.strong_decoder.kind == "belief_matching"
     assert config.active_decoder is settings.weak_decoder
     # engine cycles price on a named domain, resolved once like the links
-    assert settings.weak_decoder.engine_clock == settings.clocks.clock("fridge")
-    assert settings.strong_decoder.engine_clock == settings.clocks.clock("room")
+    assert settings.weak_decoder.engine.clock == settings.clocks.clock("fridge")
+    assert settings.strong_decoder.engine.clock == settings.clocks.clock("room")
 
 
 def test_the_reference_controller_charges_the_traced_issue_pipeline():

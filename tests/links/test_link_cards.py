@@ -78,8 +78,8 @@ def test_the_header_key_reaches_the_path(tmp_path):
     card_path.write_text(CARD_YAML)
     config = load_experiment(card_path)
     card = config.settings.links
-    assert card.decoder_to_decoder.header_bits == 448
-    assert card.weak_decoder_to_frame.header_bits == 0
+    assert card.decoder_to_decoder.header_bits_per_transfer == 448
+    assert card.weak_decoder_to_frame.header_bits_per_transfer == 0
 
 
 def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):

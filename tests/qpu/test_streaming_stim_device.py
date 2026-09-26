@@ -321,7 +321,8 @@ def _protected_machine(
         round_period_microseconds=period_microseconds,
     )
     clock = config.Clock(1000)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine_clock=clock)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
     links = link_profiles.logical_reference_profile()
     feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
     channel = dataclasses.replace(

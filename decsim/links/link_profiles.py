@@ -1063,7 +1063,7 @@ def _carded_path(
         path_settings,
         channel=channel,
         setup_ticks=setup_ticks,
-        header_bits=header_bits,
+        header_bits_per_transfer=header_bits,
     )
 
 

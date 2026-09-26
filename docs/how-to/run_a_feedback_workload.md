@@ -61,12 +61,11 @@ workload = workload_settings.WorkloadSettings(
     operations=(first, second),
     rounds_policy=round_policies.FixedRounds(6),
 )
+engine = decoder_settings.EngineSettings(clock=config.Clock(1000))
 settings = machine_settings.MachineSettings(
     workload=workload,
     qpu=qpu_settings.QpuSettings(distance=3, device=stim_device.StimDevice()),
-    weak_decoder=decoder_settings.DecoderSettings(
-        kind=1.0, engine_clock=config.Clock(1000)
-    ),
+    weak_decoder=decoder_settings.DecoderSettings(kind=1.0, engine=engine),
     links=link_profiles.logical_reference_profile(),
 )
 machine = machine_module.Machine.build(settings, 0)
@@ -82,7 +81,8 @@ every operation, matching the circuit built above.
 **The decoder is priced.** `kind=1.0` charges the decode one microsecond
 from a card instead of the wall clock a real decode took, so the ticks
 below are the same on your machine as on this page. A card needs its
-engine's clock, which is what `engine_clock` is;
+engine's clock, which is what `engine` holds, as a yaml's
+`engine: {clock: ...}` does;
 [how to run a timing study](run_a_timing_only_study.md) is the longer
 version of this choice.
 

@@ -187,8 +187,10 @@ def supplied_settings(
         round_period_microseconds=period_microseconds,
     )
     clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
     decoder = decoder_settings.DecoderSettings(
-        kind=decoder_microseconds, engine_clock=clock
+        kind=decoder_microseconds,
+        engine=engine,
     )
     reference = link_profiles.logical_reference_profile()
     feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)

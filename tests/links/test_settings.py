@@ -38,7 +38,7 @@ def actual_path(channel_settings, setup_ticks=0, header_bits=0):
         None,
         "test payload",
         setup_ticks,
-        header_bits=header_bits,
+        header_bits_per_transfer=header_bits,
     )
 
 
@@ -117,12 +117,16 @@ def test_a_negative_setup_cost_is_refused():
 
 
 def test_a_negative_header_is_refused():
-    with pytest.raises(ValueError, match="header_bits must be nonnegative"):
+    with pytest.raises(
+        ValueError, match="header_bits_per_transfer must be nonnegative"
+    ):
         actual_path(FREE_CHANNEL, header_bits=-8)
 
 
 def test_a_boolean_header_is_refused_as_no_whole_number():
-    with pytest.raises(ValueError, match="header_bits must be a finite whole"):
+    with pytest.raises(
+        ValueError, match="header_bits_per_transfer must be a finite whole"
+    ):
         actual_path(FREE_CHANNEL, header_bits=True)
 
 

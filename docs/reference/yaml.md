@@ -103,9 +103,9 @@ The bracket names the layer that set the value, `your file`, `preset`
 and the file's name for a file your `extends` chain reads, `sweep`, or
 `default`, then the line of the yaml key that set it. A default's line
 is where `configs/reference.yaml` documents the key. A value that is no
-one key's, such as a link's ticks derived from its card or
-`clocks.megahertz_by_name.fridge` read from `clocks.fridge`, prints no
-bracket, since show names only a source it is sure of. A swept value
+one key's, such as a link's ticks derived from its card or a section's
+clock period derived from the domain it names, prints no bracket, since
+show names only a source it is sure of. A swept value
 lists the sweep's values. This is the fastest way to check that an `extends`
 chain says what you meant.
 

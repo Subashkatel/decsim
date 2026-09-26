@@ -141,8 +141,8 @@ sweep block 1: p [0.008], d [3, 5], round period [1.0] us, 50 shots
 log: off
 trace: off
 values:
-clocks.megahertz_by_name.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:50]
-clocks.megahertz_by_name.room = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
+clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:50]
+clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
 qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:4]
 qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:81]
 qpu.round_period_microseconds = [1.0]  [sweep, configs/two_tiers.yaml:51-55]

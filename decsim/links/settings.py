@@ -141,11 +141,11 @@ class PathSettings:
     At least one of the default payload and the actual payload source is
     given. setup_ticks is paid on the channel's setup engine before every
     transfer of the path; zero means the path programs nothing.
-    header_bits is the framing every transfer of the path carries beside
-    its payload, serialized with it and counted apart from it; zero
-    means the path frames nothing. CUDA-Q's real-time messages are the
-    worked case: a 24 byte RPCHeader in front of every request and a 24
-    byte RPCResponse in front of every reply
+    header_bits_per_transfer is the framing every transfer of the path
+    carries beside its payload, serialized with it and counted apart
+    from it; zero means the path frames nothing. CUDA-Q's real-time
+    messages are the worked case: a 24 byte RPCHeader in front of every
+    request and a 24 byte RPCResponse in front of every reply
     (cudaqx decoder_rpc_wire_format.h lines 41-43), and 32 bytes of
     fields in front of the syndromes of an enqueue (lines 62-69).
     excludes_receiver_processing says what the card's latency covers: a
@@ -159,7 +159,7 @@ class PathSettings:
     default_payload: Optional[PayloadSettings]
     actual_payload_source: Optional[str]
     setup_ticks: int = 0
-    header_bits: int = 0
+    header_bits_per_transfer: int = 0
     # the card times the wire alone, so the receiving component's own
     # processing of what arrives is priced somewhere else
     excludes_receiver_processing: bool = False
@@ -173,8 +173,10 @@ class PathSettings:
             )
         setup_ticks = _as_count(self.setup_ticks, "setup_ticks")
         object.__setattr__(self, "setup_ticks", setup_ticks)
-        header_bits = _as_count(self.header_bits, "header_bits")
-        object.__setattr__(self, "header_bits", header_bits)
+        header_bits = _as_count(
+            self.header_bits_per_transfer, "header_bits_per_transfer"
+        )
+        object.__setattr__(self, "header_bits_per_transfer", header_bits)
 
 
 @dataclasses.dataclass(frozen=True)

@@ -103,7 +103,9 @@ SIX_ROUND_WINDOW_BITS = {
 }
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
+FAST_ENGINE_CARD = decoder_settings.EngineSettings(clock=FAST_ENGINE_CLOCK)
 ENGINE_CLOCK = config.Clock(10_000)
+ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # The run helpers' default root seed: one call is one repeatable shot.
 RUN_SEED = 17
 
@@ -915,7 +917,8 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     with a model holds the unit for its measured time.
     """
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=FAST_ENGINE_CLOCK
+        kind="pymatching",
+        engine=FAST_ENGINE_CARD,
     )
     settings = _two_patch_memory(weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
@@ -947,14 +950,16 @@ def _switching_memory(weak_kind: str, confidence: str):
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         confidence=confidence,
-        gap_threshold_decibels=decibels,
+        gap_threshold_db=decibels,
         gap_threshold_nats=nats,
     )
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=weak_kind, engine_clock=ENGINE_CLOCK
+        kind=weak_kind,
+        engine=ENGINE_CARD,
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
@@ -1117,14 +1122,17 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
     """
     tiers = {
         "weak": decoder_settings.DecoderSettings(
-            kind="pymatching", engine_clock=ENGINE_CLOCK
+            kind="pymatching",
+            engine=ENGINE_CARD,
         ),
         "strong": decoder_settings.DecoderSettings(
-            kind="belief_matching", engine_clock=ENGINE_CLOCK
+            kind="belief_matching",
+            engine=ENGINE_CARD,
         ),
     }
     tiers[tier] = decoder_settings.DecoderSettings(
-        kind="union_find_cluster_gap", engine_clock=ENGINE_CLOCK
+        kind="union_find_cluster_gap",
+        engine=ENGINE_CARD,
     )
     escalation = escalation_settings.EscalationSettings(kind=escalation_kind)
     if escalation_kind == "switching":
@@ -2486,9 +2494,7 @@ def _protected_memory_settings(circuit, source):
         rounds_policy=policy,
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
-    decoder = decoder_settings.DecoderSettings(
-        kind=0.1, engine_clock=ENGINE_CLOCK
-    )
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=ENGINE_CARD)
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -2709,13 +2715,14 @@ def _declared_timing(
     links = _price_path(links, "controller_to_strong_buffer", 250_000)
     links = _price_path(links, "strong_buffer_to_strong_decoder", 350_000)
     links = _price_path(links, "strong_decoder_to_frame", 400_000)
-    decoder = dataclasses.replace(
-        settings.strong_decoder,
+    engine = dataclasses.replace(
+        settings.strong_decoder.engine,
         fetch_cycles_per_round=0,
         fetch_cycles_per_job=0,
         release_cycles_per_job=0,
         release_cycles_per_round=0,
     )
+    decoder = dataclasses.replace(settings.strong_decoder, engine=engine)
     return dataclasses.replace(settings, links=links, strong_decoder=decoder)
 
 
@@ -2805,7 +2812,8 @@ def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
     source = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
     clock = config.Clock(4000)
-    strong = decoder_settings.DecoderSettings(kind=0.2, engine_clock=clock)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    strong = decoder_settings.DecoderSettings(kind=0.2, engine=engine)
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
     idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     settings = machine_settings.MachineSettings(

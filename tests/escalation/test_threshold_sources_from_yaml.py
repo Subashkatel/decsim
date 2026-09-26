@@ -89,7 +89,7 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     wilson_card = {"threshold_source": "table", "threshold_table": table}
     wilson_path = source_config(tmp_path, wilson_card)
     config = load_experiment(wilson_path)
-    assert config.settings.escalation.gap_threshold_decibels is None
+    assert config.settings.escalation.gap_threshold_db is None
     assert config.settings.escalation.threshold_column == "gth_eq4_wilson"
 
     resolved = resolve_gap_threshold_nats(

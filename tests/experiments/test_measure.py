@@ -1078,8 +1078,11 @@ def seam_streams_shot(stream_count: int):
         distance=3, device=device, round_period_microseconds=1.0
     )
     engine_clock = config_module.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=engine_clock)
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=1.0, units=8, engine_clock=engine_clock
+        kind=1.0,
+        units=8,
+        engine=engine,
     )
     manager = decoder_settings.DecoderManagerSettings(dispatch_cycles=0)
     windows = window_settings.WindowSettings(

@@ -132,6 +132,8 @@ chain says what you meant.
 | `configs/data_movement_switching.yaml` | the same under the switching escalation |
 | `configs/experiments_2026_09/` | the sixteen decoder experiments: sixteen experiment files that differ only in their decoder rows, one file per experiment and distance for the Slurm arrays, and `configs/experiments_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
 | `configs/common/experiments_2026_09_base.yaml` | the shared base those sixteen extend; it names no decoder, so it is not run by itself |
+| `configs/burst_detectors_compared/` | four burst detectors on one burst at d = 5 and on quiet shots, a file each, each changing only its detector or its burst ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
+| `configs/common/burst_detectors_compared_base.yaml` | the shared base of that folder; it names no detector, so it is not a comparison by itself |
 
 ## Read next
 

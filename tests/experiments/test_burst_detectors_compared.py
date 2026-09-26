@@ -1,0 +1,76 @@
+"""The burst detector comparison folder: one base, one change per file.
+
+configs/burst_detectors_compared/ compares four detectors on one burst
+and on quiet shots, so a difference between two files' rows is the
+detector's or the burst's only when each file changes nothing else.
+"""
+
+import pytest
+import yaml
+
+import decsim.experiments.experiment as experiment
+from tests.experiments.yaml_configs import CONFIGS_DIR
+
+FOLDER = CONFIGS_DIR / "burst_detectors_compared"
+BASE = "../common/burst_detectors_compared_base.yaml"
+# each detector's burst_detector section, as its burst file writes it
+DETECTORS = {
+    "event_count": {"kind": "event_count"},
+    "whole_patch_cusum": {
+        "kind": "masked_regional_cusum",
+        "mask_count": None,
+        "region_radii": [],
+    },
+    "regional_cusum": {"kind": "masked_regional_cusum", "mask_count": None},
+    "masked_regional_cusum": {"kind": "masked_regional_cusum"},
+}
+
+
+def _written(path) -> dict:
+    text = path.read_text()
+    return yaml.safe_load(text)
+
+
+def test_the_folder_holds_a_burst_and_a_quiet_file_per_detector():
+    names = []
+    for path in FOLDER.glob("*.yaml"):
+        names.append(path.stem)
+    expected = []
+    for detector in DETECTORS:
+        expected.append(f"{detector}_burst")
+        expected.append(f"{detector}_quiet")
+
+    assert sorted(names) == sorted(expected)
+
+
+@pytest.mark.parametrize("detector", DETECTORS)
+def test_a_burst_file_changes_only_its_detector(detector):
+    burst_path = FOLDER / f"{detector}_burst.yaml"
+    written = _written(burst_path)
+
+    assert written == {"extends": BASE, "burst_detector": DETECTORS[detector]}
+
+
+@pytest.mark.parametrize("detector", DETECTORS)
+def test_a_quiet_file_changes_only_its_burst(detector):
+    quiet_path = FOLDER / f"{detector}_quiet.yaml"
+    written = _written(quiet_path)
+    burst_name = f"{detector}_burst.yaml"
+
+    assert written == {"extends": burst_name, "qpu": {"kind": "stim_device"}}
+
+
+@pytest.mark.parametrize("detector", DETECTORS)
+def test_every_file_loads_with_its_detector_and_the_catch_deadline(detector):
+    burst_path = FOLDER / f"{detector}_burst.yaml"
+    quiet_path = FOLDER / f"{detector}_quiet.yaml"
+
+    burst = experiment.load_experiment(burst_path)
+    quiet = experiment.load_experiment(quiet_path)
+
+    kind = DETECTORS[detector]["kind"]
+    assert burst.settings.burst_detector.kind == kind
+    assert quiet.settings.burst_detector == burst.settings.burst_detector
+    assert burst.settings.burst_detector.catch_deadline_rounds == 300
+    assert burst.settings.qpu.kind == "burst_stim"
+    assert quiet.settings.qpu.kind == "stim_device"

@@ -187,7 +187,7 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     ]
 
 
-def test_a_new_decoder_is_one_class_and_one_table_row():
+def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a decoder added as a row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
@@ -198,12 +198,9 @@ def test_a_new_decoder_is_one_class_and_one_table_row():
     )
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
-    decoder_settings.DECODERS["fake"] = FakeWeakDecoder
-    try:
-        machine = machine_module.Machine.build(settings, 0)
-        result = machine.run()
-    finally:
-        del decoder_settings.DECODERS["fake"]
+    monkeypatch.setitem(decoder_settings.DECODERS, "fake", FakeWeakDecoder)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
     assert result.terminal_status == "complete"
     assert type(machine.active_decoder.decoder) is FakeWeakDecoder
     decode_lines = [
@@ -1282,7 +1279,7 @@ class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
         )
 
 
-def test_a_new_syndrome_buffer_is_one_class_and_one_table_row():
+def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a store added as a row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
@@ -1295,12 +1292,13 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row():
         settings.weak_syndrome_buffer, kind="counting"
     )
     settings = dataclasses.replace(settings, weak_syndrome_buffer=counting)
-    ported_syndrome_buffer.SYNDROME_BUFFERS["counting"] = CountingSyndromeBuffer
-    try:
-        machine = machine_module.Machine.build(settings, 0)
-        result = machine.run()
-    finally:
-        del ported_syndrome_buffer.SYNDROME_BUFFERS["counting"]
+    monkeypatch.setitem(
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
+        "counting",
+        CountingSyndromeBuffer,
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
     assert result.terminal_status == "complete"
     assert type(machine.weak_syndrome_buffer) is CountingSyndromeBuffer
     fired = [
@@ -1323,7 +1321,7 @@ class AlwaysStrongEscalation(escalation_policies.EscalationPolicyBase):
         return decoding_records.Verdict.KEEP
 
 
-def test_a_new_escalation_kind_is_one_class_and_one_table_row():
+def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
     """The row declares its tier, so no second table names the kind."""
     config_path = CONFIGS / "strong_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
@@ -1334,13 +1332,12 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row():
     )
     escalation = dataclasses.replace(settings.escalation, kind="always_strong")
     settings = dataclasses.replace(settings, escalation=escalation)
-    escalation_settings.ESCALATIONS["always_strong"] = AlwaysStrongEscalation
-    try:
-        assert escalation_build.primary_tier(escalation) == "strong"
-        machine = machine_module.Machine.build(settings, 0)
-        result = machine.run()
-    finally:
-        del escalation_settings.ESCALATIONS["always_strong"]
+    monkeypatch.setitem(
+        escalation_settings.ESCALATIONS, "always_strong", AlwaysStrongEscalation
+    )
+    assert escalation_build.primary_tier(escalation) == "strong"
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
     assert result.terminal_status == "complete"
     snapshot = machine.pauli_frame.snapshot()
     tiers = []
@@ -1385,7 +1382,9 @@ class AlwaysReadyFactory:
         """Nothing runs, so nothing stops."""
 
 
-def test_a_factory_row_written_outside_decsim_builds_by_its_own_name():
+def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
+    monkeypatch,
+):
     """One constructor call, so a row that reads only the engine builds."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
@@ -1398,12 +1397,11 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name():
     settings = dataclasses.replace(
         settings, magic_state_factory=factory_settings
     )
-    qpu_settings.MAGIC_STATE_FACTORIES["always_ready"] = AlwaysReadyFactory
-    try:
-        machine = machine_module.Machine.build(settings, 0)
-        result = machine.run()
-    finally:
-        del qpu_settings.MAGIC_STATE_FACTORIES["always_ready"]
+    monkeypatch.setitem(
+        qpu_settings.MAGIC_STATE_FACTORIES, "always_ready", AlwaysReadyFactory
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
     assert isinstance(machine.factory, AlwaysReadyFactory)
     assert result.terminal_status == "complete"
 

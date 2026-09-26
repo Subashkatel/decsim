@@ -26,11 +26,6 @@ DETECTORS = {
 }
 
 
-def _written(path) -> dict:
-    text = path.read_text()
-    return yaml.safe_load(text)
-
-
 def test_the_folder_holds_a_burst_and_a_quiet_file_per_detector():
     paths = FOLDER.glob("*.yaml")
     names = sorted(path.stem for path in paths)
@@ -78,3 +73,8 @@ def test_every_file_loads_with_its_detector_and_the_catch_deadline(detector):
     assert burst.settings.burst_detector.catch_deadline_rounds == 300
     assert burst.settings.qpu.kind == "burst_stim"
     assert quiet.settings.qpu.kind == "stim_device"
+
+
+def _written(path) -> dict:
+    text = path.read_text()
+    return yaml.safe_load(text)

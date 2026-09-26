@@ -13,6 +13,7 @@ and PyMatching's from_check_matrix read.
 import dataclasses
 import enum
 import types
+from collections.abc import Mapping
 from typing import Optional
 
 
@@ -30,10 +31,16 @@ GRAPHLIKE_ONLY = frozenset({FaultRepresentation.GRAPHLIKE})
 
 @dataclasses.dataclass(frozen=True)
 class DecoderFaultModelRequirement:
-    """The fault representations a decoder needs for one operation's code."""
+    """The fault representations a decoder needs for one operation's code.
+
+    detector_bases asks for each detector's and observable's type, X or
+    Z, on the window model, which a decoder that splits a region into
+    its X and Z parts reads (basis_split.py).
+    """
 
     representations: frozenset[FaultRepresentation] = frozenset()
     require_physical_to_graphlike_link: bool = False
+    detector_bases: bool = False
 
     def __post_init__(self) -> None:
         has_both = self.representations == _BOTH_REPRESENTATIONS
@@ -52,7 +59,10 @@ class DecoderFaultModelRequirement:
             self.require_physical_to_graphlike_link
             or other.require_physical_to_graphlike_link
         )
-        return DecoderFaultModelRequirement(representations, needs_link)
+        needs_bases = self.detector_bases or other.detector_bases
+        return DecoderFaultModelRequirement(
+            representations, needs_link, needs_bases
+        )
 
 
 def frozen_sparse_columns(value: object) -> object:
@@ -143,6 +153,9 @@ class WindowErrorModel:
     window can see or hand off to its (round, position in round).
     `first_commit_round` is the first round of the window's commit
     region, which says which of its columns reach behind it.
+    `detector_bases` maps every detector of `defect_positions` to its
+    type, X or Z, and `observable_bases` gives each logical observable's,
+    when the decoder's requirement asks for them; None otherwise.
     """
 
     detector_ids: tuple[int, ...]
@@ -152,8 +165,14 @@ class WindowErrorModel:
     graphlike_faults: Optional[PlacedFaultModel]
     physical_faults: Optional[PlacedFaultModel]
     physical_to_graphlike_detector_projection: Optional[object] = None
+    detector_bases: Optional[Mapping[int, str]] = None
+    observable_bases: Optional[tuple[str, ...]] = None
 
     def __post_init__(self) -> None:
+        if self.detector_bases is not None:
+            bases = dict(self.detector_bases)
+            frozen_bases = types.MappingProxyType(bases)
+            object.__setattr__(self, "detector_bases", frozen_bases)
         projection = self.physical_to_graphlike_detector_projection
         if projection is None:
             return
@@ -250,6 +269,8 @@ _BOTH_REPRESENTATIONS = GRAPHLIKE_ONLY | _PHYSICAL_ONLY
 NO_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement()
 GRAPHLIKE_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(GRAPHLIKE_ONLY)
 PHYSICAL_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(_PHYSICAL_ONLY)
+# joined onto a row's own requirement when it decodes X and Z apart
+DETECTOR_BASES_REQUIRED = DecoderFaultModelRequirement(detector_bases=True)
 LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
     _BOTH_REPRESENTATIONS, require_physical_to_graphlike_link=True
 )

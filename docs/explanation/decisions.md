@@ -1072,6 +1072,43 @@ gained `retained_fragments`.
 path against Stim's own converter on the rows the QPU emitted, read
 where each decoder unit's memory takes them.
 
+## D30. A strong backend decodes X and Z together or apart
+
+**Decided.** `bases` on a strong backend row names a row of
+`BASIS_DECODES` (`decsim/decoders/strong_backend.py`): `together`, the
+region's whole physical model in one decode, or `apart`, its X part
+and its Z part as two decodes. `apart` is two requests to the device's
+queue, each priced by its own size, and the region's answer joins the
+two when both are in. There is no series or parallel key: the device's
+capacity decides whether the two overlap. On `measured_table` a part is
+priced by parts measured on the same GPU, never by the whole region's
+line.
+
+**Why.** Relay-BP's XZ-decoding "decomposes σ into σX and σZ, which are
+independently decoded" and "may degrade performance by modeling X and Z
+errors as independent" (Muller et al. 2506.01779 lines 289-296); IBM's
+FPGA decoder runs X, Z or XYZ (2510.21600 line 291). Two decodes on one
+CUDA-Q dispatcher run in series, since a fired decode holds it
+(dispatch_kernel.cu v0.15.2 lines 575-589), while the host path gives
+each graph entry "its own worker, enabling pipelined execution"
+(host_api.md lines 1104-1106), so the overlap is the device's, not a
+setting. The parts are smaller and shaped differently from the whole
+(Relay-BP lines 299-302), so a whole-model line would misprice them.
+
+**The split.** Rows by detector type, read from Stim's detecting regions
+on the data qubits; each column cut to one type's rows and dropped when
+that leaves nothing; identical cuts merged as odd counts (Relay-BP
+lines 674-700); each observable kept only in the part of its own type.
+cudaqx's layout split keeps every column's observable in both parts, so
+its X part of a Z memory still flips the Z observable; decsim does not.
+A detector of neither type is refused where the circuit enters.
+
+**Where to see it.** `decsim/detector_error_model/basis_split.py`;
+`tests/detector_error_model/test_basis_split.py` holds each part
+against Stim's own decomposition of the same circuit and a windowed part
+against the recipe; `tests/decoders/test_strong_backend.py` holds the
+two requests against the first-come first-served recursion.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

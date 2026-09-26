@@ -33,6 +33,7 @@ import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.tables as tables
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )
@@ -44,12 +45,16 @@ PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 class MeasuredTableSettings:
     """The measured_table row's keys in its tier section.
 
-    device names the GPU measured and partition how it was shared; the
-    pair must be a measured one (measurements.py).
+    device names the GPU measured and partition how it was shared;
+    bases names a row of BASIS_DECODES (strong_backend.py), whether a
+    region is decoded whole or as its X and Z parts. The three must name
+    measured cells (measurements.py): a part is priced by parts measured
+    on the device, never by the whole region's line.
     """
 
     device: str = "a100"
     partition: str = "whole"
+    bases: str = "together"
 
     @classmethod
     def from_yaml(
@@ -66,14 +71,16 @@ class MeasuredTableSettings:
         del clocks
         device = section.get("device", "a100")
         partition = section.get("partition", "whole")
-        rows = _measured_rows(device, partition)
+        bases = section.get("bases", "together")
+        tables.row(strong_backend.BASIS_DECODES, f"{section_name}.bases", bases)
+        rows = _measured_rows(device, partition, bases)
         if rows:
-            return cls(device=device, partition=partition)
-        pairs = _measured_pairs()
+            return cls(device=device, partition=partition, bases=bases)
+        measured = _measured_cells()
         raise ValueError(
             f"{section_name}.device {device!r} with partition "
-            f"{partition!r} has no measurement in measured_table; the "
-            f"measured pairs are {pairs}"
+            f"{partition!r} and bases {bases!r} has no measurement in "
+            f"measured_table; the measured ones are {measured}"
         )
 
 
@@ -89,7 +96,9 @@ class MeasuredTable:
     """
 
     def __init__(self, settings: MeasuredTableSettings) -> None:
-        self.cells = _measured_rows(settings.device, settings.partition)
+        self.cells = _measured_rows(
+            settings.device, settings.partition, settings.bases
+        )
         self.decoder = relay_belief_propagation.RelayBeliefPropagationDecoder()
 
     def run_seed_children(self) -> tuple:
@@ -135,7 +144,9 @@ class MeasuredTableDecoder(strong_backend.StrongBackendDecoder):
         if settings is None:
             settings = MeasuredTableSettings()
         backend = MeasuredTable(settings)
-        strong_backend.StrongBackendDecoder.__init__(self, backend)
+        strong_backend.StrongBackendDecoder.__init__(
+            self, backend, settings.bases
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -144,22 +155,24 @@ class _Ticket:
     service_ticks: int
 
 
-def _measured_rows(device: str, partition: str) -> tuple:
-    """The measured cells of one device and partition, in region order."""
+def _measured_rows(device: str, partition: str, bases: str) -> tuple:
+    """The measured cells of one device, partition and bases, in order."""
+    wanted = (device, partition, bases)
     rows = []
     for cell in measurements.RELAY_BP_TIMES:
-        if cell.device == device and cell.partition == partition:
+        if (cell.device, cell.partition, cell.bases) == wanted:
             rows.append(cell)
     return tuple(rows)
 
 
-def _measured_pairs() -> list:
-    pairs = []
+def _measured_cells() -> list:
+    """Every measured (device, partition, bases), once each."""
+    measured = []
     for cell in measurements.RELAY_BP_TIMES:
-        pair = (cell.device, cell.partition)
-        if pair not in pairs:
-            pairs.append(pair)
-    return pairs
+        triple = (cell.device, cell.partition, cell.bases)
+        if triple not in measured:
+            measured.append(triple)
+    return measured
 
 
 def _region_detectors(request: decoding_records.DecodeJob) -> int:

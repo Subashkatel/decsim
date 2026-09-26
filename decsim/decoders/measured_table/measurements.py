@@ -29,14 +29,21 @@ The regions are decsim's memory circuit (Stim
 surface_code:rotated_memory_z, p = 0.001 on all four noise channels) of
 3d rounds, r_strong = r_com + 2 r_buf at r_com = r_buf = d (Toshio et
 al. arXiv:2510.25222 lines 1246-1250), 2,000 Stim shots per distance.
+Rows with bases apart time the X part and the Z part of the same
+regions on the same shots, each one decode at a time on the whole card:
+decsim's split (detector_error_model/basis_split.py) cuts the region's
+model, each part is given decsim's gamma table for its own column
+count, and each part is a row of its own, named by its detector count.
 
 Every whole-card and MPS line explains its cell's times with r2 at
 least 0.996 except the GH200 at d = 13, 0.683, where a few slow outliers
-sit off the line. The slice lines explain r2 0.951 to 0.9999, and a
-line leans on the long decodes: at a cell's median decode a slice's line
-reads 1 percent high to 13 percent low, the whole card's 1 percent high
-to 6 percent low. The 1g.10gb
-line at d = 13 leans the hardest: it reads 522 us at the three
+sit off the line; the part lines explain r2 0.990 to 1.000 except the
+A100's d = 5 X part, 0.864, where one decode of one iteration took
+1,704 us, an outlier the line cannot follow. The slice
+lines explain r2 0.951 to 0.9999, and a line leans on the long decodes:
+at a cell's median decode a slice's line reads 1 percent high to 13
+percent low, the whole card's 1 percent high to 6 percent low. The
+1g.10gb line at d = 13 leans the hardest: it reads 522 us at the three
 iterations its fastest region ran and crosses zero below two, while
 that region took 1,406 us, which is why a line is floored at its cell's
 fastest decode.
@@ -55,6 +62,7 @@ class MeasuredTime:
 
     device: str
     partition: str
+    bases: str
     decodes_running: int
     detectors: int
     intercept_microseconds: float
@@ -68,53 +76,124 @@ class MeasuredTime:
         return max(line_microseconds, self.fastest_decode_microseconds)
 
 
-# Rows in device, partition, then region order; the comment above a row
-# names the code distance of its region and its line's r2.
+# Rows in device, partition, bases, then region order; the comment above
+# a row names the code distance of its region, its part when it is one,
+# and its line's r2.
 RELAY_BP_TIMES = (
     # d 5, 0.9962
-    MeasuredTime("a100", "whole", 1, 360, 78.957, 9.762, 85.872),
+    MeasuredTime("a100", "whole", "together", 1, 360, 78.957, 9.762, 85.872),
     # d 7, 0.9971
-    MeasuredTime("a100", "whole", 1, 1008, 106.435, 20.797, 122.491),
+    MeasuredTime(
+        "a100", "whole", "together", 1, 1008, 106.435, 20.797, 122.491
+    ),
     # d 9, 0.9997
-    MeasuredTime("a100", "whole", 1, 2160, 147.553, 26.852, 170.963),
+    MeasuredTime(
+        "a100", "whole", "together", 1, 2160, 147.553, 26.852, 170.963
+    ),
     # d 11, 0.9999
-    MeasuredTime("a100", "whole", 1, 3960, 189.257, 36.131, 277.895),
+    MeasuredTime(
+        "a100", "whole", "together", 1, 3960, 189.257, 36.131, 277.895
+    ),
     # d 13, 0.9997
-    MeasuredTime("a100", "whole", 1, 6552, 310.036, 48.329, 464.768),
+    MeasuredTime(
+        "a100", "whole", "together", 1, 6552, 310.036, 48.329, 464.768
+    ),
+    # d 5, X part, 0.8641
+    MeasuredTime("a100", "whole", "apart", 1, 168, 59.437, 7.752, 64.058),
+    # d 5, Z part, 0.9991
+    MeasuredTime("a100", "whole", "apart", 1, 192, 59.673, 7.346, 64.831),
+    # d 7, X part, 0.9996
+    MeasuredTime("a100", "whole", "apart", 1, 480, 67.169, 10.024, 74.726),
+    # d 7, Z part, 0.9999
+    MeasuredTime("a100", "whole", "apart", 1, 528, 69.844, 11.465, 77.773),
+    # d 9, X part, 0.9997
+    MeasuredTime("a100", "whole", "apart", 1, 1040, 80.712, 20.042, 98.627),
+    # d 9, Z part, 0.9994
+    MeasuredTime("a100", "whole", "apart", 1, 1120, 85.380, 20.228, 99.995),
+    # d 11, X part, 1.0000
+    MeasuredTime("a100", "whole", "apart", 1, 1920, 92.328, 22.866, 118.381),
+    # d 11, Z part, 0.9989
+    MeasuredTime("a100", "whole", "apart", 1, 2040, 96.495, 25.718, 124.116),
+    # d 13, X part, 0.9999
+    MeasuredTime("a100", "whole", "apart", 1, 3192, 125.165, 28.965, 163.399),
+    # d 13, Z part, 0.9985
+    MeasuredTime("a100", "whole", "apart", 1, 3360, 123.099, 32.976, 162.063),
     # d 5, 0.9971
-    MeasuredTime("a100", "mps", 1, 360, 80.911, 9.839, 86.273),
+    MeasuredTime("a100", "mps", "together", 1, 360, 80.911, 9.839, 86.273),
     # d 9, 0.9985
-    MeasuredTime("a100", "mps", 1, 2160, 155.414, 26.961, 171.383),
+    MeasuredTime("a100", "mps", "together", 1, 2160, 155.414, 26.961, 171.383),
     # d 13, 0.9988
-    MeasuredTime("a100", "mps", 1, 6552, 326.723, 48.319, 464.064),
+    MeasuredTime("a100", "mps", "together", 1, 6552, 326.723, 48.319, 464.064),
     # d 5, 0.9514
-    MeasuredTime("a100", "3g.40gb", 1, 360, 72.377, 9.527, 77.529),
+    MeasuredTime("a100", "3g.40gb", "together", 1, 360, 72.377, 9.527, 77.529),
     # d 7, 0.9810
-    MeasuredTime("a100", "3g.40gb", 1, 1008, 101.534, 14.972, 112.184),
+    MeasuredTime(
+        "a100", "3g.40gb", "together", 1, 1008, 101.534, 14.972, 112.184
+    ),
     # d 9, 0.9967
-    MeasuredTime("a100", "3g.40gb", 1, 2160, 139.312, 27.765, 175.893),
+    MeasuredTime(
+        "a100", "3g.40gb", "together", 1, 2160, 139.312, 27.765, 175.893
+    ),
     # d 11, 0.9999
-    MeasuredTime("a100", "3g.40gb", 1, 3960, 200.997, 47.165, 328.342),
+    MeasuredTime(
+        "a100", "3g.40gb", "together", 1, 3960, 200.997, 47.165, 328.342
+    ),
     # d 13, 0.9999
-    MeasuredTime("a100", "3g.40gb", 1, 6552, 209.000, 79.085, 582.489),
+    MeasuredTime(
+        "a100", "3g.40gb", "together", 1, 6552, 209.000, 79.085, 582.489
+    ),
     # d 5, 0.9997
-    MeasuredTime("a100", "1g.10gb", 1, 360, 68.534, 15.951, 81.145),
+    MeasuredTime("a100", "1g.10gb", "together", 1, 360, 68.534, 15.951, 81.145),
     # d 7, 0.9981
-    MeasuredTime("a100", "1g.10gb", 1, 1008, 98.295, 36.404, 136.857),
+    MeasuredTime(
+        "a100", "1g.10gb", "together", 1, 1008, 98.295, 36.404, 136.857
+    ),
     # d 9, 0.9998
-    MeasuredTime("a100", "1g.10gb", 1, 2160, 96.910, 76.640, 229.207),
+    MeasuredTime(
+        "a100", "1g.10gb", "together", 1, 2160, 96.910, 76.640, 229.207
+    ),
     # d 11, 0.9999
-    MeasuredTime("a100", "1g.10gb", 1, 3960, 96.049, 136.788, 502.685),
+    MeasuredTime(
+        "a100", "1g.10gb", "together", 1, 3960, 96.049, 136.788, 502.685
+    ),
     # d 13, 0.9993
-    MeasuredTime("a100", "1g.10gb", 1, 6552, -585.136, 369.200, 1405.683),
+    MeasuredTime(
+        "a100", "1g.10gb", "together", 1, 6552, -585.136, 369.200, 1405.683
+    ),
     # d 5, 0.9996
-    MeasuredTime("gh200", "whole", 1, 360, 70.463, 7.219, 71.808),
+    MeasuredTime("gh200", "whole", "together", 1, 360, 70.463, 7.219, 71.808),
     # d 7, 0.9969
-    MeasuredTime("gh200", "whole", 1, 1008, 95.243, 11.044, 99.552),
+    MeasuredTime("gh200", "whole", "together", 1, 1008, 95.243, 11.044, 99.552),
     # d 9, 0.9999
-    MeasuredTime("gh200", "whole", 1, 2160, 125.843, 16.437, 137.280),
+    MeasuredTime(
+        "gh200", "whole", "together", 1, 2160, 125.843, 16.437, 137.280
+    ),
     # d 11, 0.9999
-    MeasuredTime("gh200", "whole", 1, 3960, 171.485, 23.870, 211.552),
+    MeasuredTime(
+        "gh200", "whole", "together", 1, 3960, 171.485, 23.870, 211.552
+    ),
     # d 13, 0.6833
-    MeasuredTime("gh200", "whole", 1, 6552, 312.388, 34.671, 328.545),
+    MeasuredTime(
+        "gh200", "whole", "together", 1, 6552, 312.388, 34.671, 328.545
+    ),
+    # d 5, X part, 0.9985
+    MeasuredTime("gh200", "whole", "apart", 1, 168, 54.440, 6.678, 56.640),
+    # d 5, Z part, 0.9932
+    MeasuredTime("gh200", "whole", "apart", 1, 192, 55.712, 6.664, 56.896),
+    # d 7, X part, 0.9995
+    MeasuredTime("gh200", "whole", "apart", 1, 480, 63.201, 7.745, 65.953),
+    # d 7, Z part, 0.9997
+    MeasuredTime("gh200", "whole", "apart", 1, 528, 63.061, 8.220, 66.433),
+    # d 9, X part, 0.9981
+    MeasuredTime("gh200", "whole", "apart", 1, 1040, 76.305, 10.804, 80.352),
+    # d 9, Z part, 0.9901
+    MeasuredTime("gh200", "whole", "apart", 1, 1120, 76.863, 12.163, 81.440),
+    # d 11, X part, 1.0000
+    MeasuredTime("gh200", "whole", "apart", 1, 1920, 88.026, 14.421, 95.968),
+    # d 11, Z part, 0.9985
+    MeasuredTime("gh200", "whole", "apart", 1, 2040, 97.686, 14.612, 96.736),
+    # d 13, X part, 1.0000
+    MeasuredTime("gh200", "whole", "apart", 1, 3192, 128.126, 19.358, 140.032),
+    # d 13, Z part, 0.9990
+    MeasuredTime("gh200", "whole", "apart", 1, 3360, 128.366, 20.625, 129.952),
 )

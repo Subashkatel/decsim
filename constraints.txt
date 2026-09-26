@@ -4,6 +4,8 @@ beliefmatching==0.2.0
     # via decsim (pyproject.toml)
 cffi==2.1.1
     # via clarabel
+ciw==3.2.7
+    # via decsim (pyproject.toml)
 clarabel==0.11.1
     # via cvxpy
 cloudpickle==3.1.2
@@ -67,14 +69,17 @@ mpmath==1.3.0
     # via sympy
 networkx==3.4.2 ; python_full_version < '3.11'
     # via
+    #   ciw
     #   pymatching
     #   qldpc
 networkx==3.6.1 ; python_full_version == '3.11.*'
     # via
+    #   ciw
     #   pymatching
     #   qldpc
 networkx==3.7 ; python_full_version >= '3.12'
     # via
+    #   ciw
     #   pymatching
     #   qldpc
 numba==0.67.0
@@ -83,6 +88,7 @@ numpy==2.2.6
     # via
     #   decsim (pyproject.toml)
     #   beliefmatching
+    #   ciw
     #   clarabel
     #   contourpy
     #   cvxpy
@@ -178,7 +184,9 @@ scipy==1.18.1 ; python_full_version >= '3.12'
 scs==3.3.1
     # via cvxpy
 setuptools==84.0.0
-    # via osqp
+    # via
+    #   ciw
+    #   osqp
 sinter==1.16.0
     # via
     #   decsim (pyproject.toml)
@@ -201,7 +209,9 @@ sympy==1.14.0
 tomli==2.4.1 ; python_full_version < '3.11'
     # via pytest
 tqdm==4.70.1
-    # via ldpc
+    # via
+    #   ciw
+    #   ldpc
 typing-extensions==4.16.0
     # via
     #   exceptiongroup

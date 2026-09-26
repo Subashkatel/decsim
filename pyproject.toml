@@ -37,9 +37,9 @@ deltakit-compile = [
     "deltakit-compile==0.1.0",
 ]
 # The suite and the referees it checks decsim against (sinter's decoders,
-# beliefmatching, qLDPC's sliding windows), at the versions it passes on;
-# the tests cite beliefmatching's and qLDPC's source lines at these.
-test = ["pytest==9.1.1", "sinter==1.16.0", "beliefmatching==0.2.0", "qldpc==0.3.3"]
+# beliefmatching, qLDPC's sliding windows, Ciw's blocking queue), at the
+# versions it passes on; the tests cite their source lines at these.
+test = ["pytest==9.1.1", "sinter==1.16.0", "beliefmatching==0.2.0", "qldpc==0.3.3", "ciw==3.2.7"]
 # The style gate tools/check.sh runs, at the ruff whose rules STYLE.md reads.
 dev = ["ruff==0.16.5"]
 bb-decoders = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]

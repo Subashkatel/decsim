@@ -99,7 +99,7 @@ def _forward_switching_at_the_decoder():
         settings.controller, detection_events_formed_at="decoder"
     )
     escalation = dataclasses.replace(
-        settings.escalation, strong_window="forward"
+        settings.escalation, strong_window="forward_seam_pinned"
     )
     settings = dataclasses.replace(
         settings, controller=controller, escalation=escalation

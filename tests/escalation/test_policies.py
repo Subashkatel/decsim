@@ -310,7 +310,7 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="forward",
+            strong_window="forward_seam_pinned",
             run_both_at_once=True,
         )
 
@@ -351,7 +351,9 @@ def _forward_window_settings(
         kind="belief_matching", engine_clock=ENGINE_CLOCK
     )
     escalation = escalation_settings.EscalationSettings(
-        kind="switching", gap_threshold_nats=1.0, strong_window="forward"
+        kind="switching",
+        gap_threshold_nats=1.0,
+        strong_window="forward_seam_pinned",
     )
     return machine_settings.MachineSettings(
         windows=windows,
@@ -374,8 +376,8 @@ def test_a_forward_window_crossing_a_later_commit_region_is_refused(
     settings = _forward_window_settings(commit_rounds, buffer_rounds)
     with pytest.raises(
         ValueError,
-        match="the strong region of forward, commit plus two buffers, "
-        "must end inside its own commit region",
+        match="the strong region of forward_seam_pinned, commit plus two "
+        "buffers, must end inside its own commit region",
     ):
         machine_module.Machine.build(settings, 0)
 
@@ -402,7 +404,7 @@ def test_an_online_source_under_a_forward_window_is_refused_as_serial():
     )
     policy = policies.Switching(collaborators)
     escalation = escalation_settings.EscalationSettings(
-        policy=policy, strong_window="forward"
+        policy=policy, strong_window="forward_seam_pinned"
     )
     with pytest.raises(
         ValueError, match="online threshold calibration is serial-only"
@@ -410,7 +412,7 @@ def test_an_online_source_under_a_forward_window_is_refused_as_serial():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="forward",
+            strong_window="forward_seam_pinned",
             escalation=escalation,
         )
 
@@ -779,7 +781,7 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="forward",
+        strong_window="forward_seam_pinned",
         round_microseconds=4.0,
         scheme=scheme,
     )

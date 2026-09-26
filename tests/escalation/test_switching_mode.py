@@ -124,7 +124,7 @@ def _restart_width_card(regions: int) -> dict:
     escalation = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "forward",
+        "strong_window": "forward_seam_pinned",
         "restart_reread_buffer_regions": regions,
     }
     strong_decoder = strong_unit("belief_matching")

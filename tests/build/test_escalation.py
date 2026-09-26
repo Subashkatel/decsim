@@ -107,7 +107,9 @@ def test_the_strong_window_row_is_named_and_declares_whether_it_absorbs():
     near_seam = escalation_settings.EscalationSettings(
         strong_window="near_seam_pinned"
     )
-    forward = escalation_settings.EscalationSettings(strong_window="forward")
+    forward = escalation_settings.EscalationSettings(
+        strong_window="forward_seam_pinned"
+    )
 
     near_seam_row = escalation_build.strong_window_row(near_seam)
     forward_row = escalation_build.strong_window_row(forward)

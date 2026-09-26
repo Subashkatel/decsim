@@ -608,7 +608,7 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     machine = declared_fabric.switching_machine(
         rounds=15,
         escalated_windows={0},
-        strong_window="forward",
+        strong_window="forward_seam_pinned",
         weak_syndrome_buffer=settings,
         record=True,
     )

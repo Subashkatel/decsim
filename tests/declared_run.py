@@ -312,7 +312,7 @@ def switching_run(
     # serial switching needs Held boundaries; the forward window refuses
     # them (escalation.policies.Switching.check_plan)
     boundary_policy = boundary_policies.Held()
-    if strong_window == "forward":
+    if strong_window == "forward_seam_pinned":
         boundary_policy = None
     scheme = lookahead_sliding_scheme()
     windows = window_settings.WindowSettings(

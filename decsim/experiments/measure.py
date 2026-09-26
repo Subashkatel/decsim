@@ -150,11 +150,13 @@ class ShotMeasurement:
     weak_busy_fraction: float
     strong_busy_fraction: float
     # the windows the strong tier committed, the rounds its decodes read
-    # and their mean service: the report forms Toshio's Theorem 1 bound
-    # on that service per sweep point from the first (2510.25222 eq. (6))
+    # and their mean service, and r_com, the rounds a window commits: the
+    # report forms Toshio's Theorem 1 bound on that service per sweep
+    # point from the first and the last (2510.25222 eq. (6))
     escalated_windows: int
     strong_decoded_rounds: int
     strong_service_mean_us: float
+    commit_rounds: int
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
@@ -163,8 +165,12 @@ class ShotMeasurement:
     # weak decode's input, its detection events when they are formed
     # ahead of the decoder; each weak decode's compute, its stages' span;
     # each strong decode's wait from its enqueue to its compute start,
-    # the queueing delay a queue splits from service; and the most
-    # undecoded rounds the machine held at once. The first five need
+    # the queueing delay a queue splits from service; the most strong
+    # decodes held in the units' memory at once, landed and free to
+    # compute but waiting on a unit's compute, which the strong ready
+    # queue's peak does not see because a unit takes the next decode
+    # into its memory while it computes; and the most undecoded rounds
+    # the machine held at once. The first six need
     # observation.record_switching_windows and the last
     # observation.backlog_trace; a shot that kept neither holds None,
     # and its row no column, since zeros would say nothing waited
@@ -173,6 +179,7 @@ class ShotMeasurement:
     weak_service_mean_us: Optional[float]
     strong_wait_mean_us: Optional[float]
     strong_wait_max_us: Optional[float]
+    strong_held_in_units_max: Optional[int]
     backlog_peak_rounds: Optional[int]
     tesseract_windows_checked: int  # referee re-decodes (0 = referee off)
     # referee reached a different owned observable contribution
@@ -647,12 +654,20 @@ def chain_load(
     service_us = _mean_or_zero(samples["service"])
     confidence_us = _mean_or_zero(samples["confidence"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
-    commit_rounds = settings.windows.commit_rounds
-    if commit_rounds is None:
-        commit_rounds = distance
+    commit_rounds = commit_round_count(settings, distance)
     inter_arrival_us = commit_rounds * round_period_microseconds
     chain_us = service_us + confidence_us + handoff_us
     return chain_us / inter_arrival_us
+
+
+def commit_round_count(
+    settings: machine_settings.MachineSettings, distance: int
+) -> int:
+    """r_com: the rounds a window commits, the code distance when null."""
+    commit_rounds = settings.windows.commit_rounds
+    if commit_rounds is None:
+        return distance
+    return commit_rounds
 
 
 def active_decoder_kind(settings: machine_settings.MachineSettings):
@@ -721,6 +736,7 @@ def _measurement(
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
     load = chain_load(samples, settings, distance, round_period_microseconds)
+    commit_rounds = commit_round_count(settings, distance)
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
     primary_tier = escalation_build.primary_tier(settings.escalation)
@@ -758,12 +774,14 @@ def _measurement(
         escalated_windows=strong.windows,
         strong_decoded_rounds=strong.rounds,
         strong_service_mean_us=strong.service_mean_us,
+        commit_rounds=commit_rounds,
         parallel_processes_needed=processes,
         weak_syndrome_weight_mean=tiers.weak_syndrome_weight_mean,
         weak_syndrome_weight_max=tiers.weak_syndrome_weight_max,
         weak_service_mean_us=tiers.weak_service_mean_us,
         strong_wait_mean_us=tiers.strong_wait_mean_us,
         strong_wait_max_us=tiers.strong_wait_max_us,
+        strong_held_in_units_max=tiers.strong_held_in_units_max,
         backlog_peak_rounds=backlog_peak,
         tesseract_windows_checked=referee.windows_checked,
         tesseract_window_disagreements=referee.window_disagreements,
@@ -859,6 +877,7 @@ class _TierRecords:
     weak_service_mean_us: Optional[float] = None
     strong_wait_mean_us: Optional[float] = None
     strong_wait_max_us: Optional[float] = None
+    strong_held_in_units_max: Optional[int] = None
 
 
 def _logical_verdicts(
@@ -1020,6 +1039,7 @@ def _tier_records(
     weights = _weak_syndrome_weights(records.requests)
     weak_computes = _weak_compute_microseconds(records.requests, lives)
     strong_waits = _strong_wait_microseconds(records.requests, lives)
+    held_peak = _strong_held_in_units_peak(records.requests, lives)
     weight_mean = _mean_or_zero(weights)
     weight_max = max(weights, default=0)
     compute_mean = _mean_or_zero(weak_computes)
@@ -1031,6 +1051,7 @@ def _tier_records(
         weak_service_mean_us=compute_mean,
         strong_wait_mean_us=wait_mean,
         strong_wait_max_us=wait_max,
+        strong_held_in_units_max=held_peak,
     )
 
 
@@ -1095,6 +1116,36 @@ def _strong_wait_microseconds(requests: list, lives: dict) -> list:
     return waits
 
 
+def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
+    """The most strong decodes held in unit memory at once, on compute.
+
+    A strong decode is held from the tick it may compute, its input
+    landed and no boundary owed, to its compute start: the compute_wait
+    of the latency points, the wait gem5 counts apart as fuBusy when a
+    ready instruction finds no free functional unit (gem5
+    src/cpu/o3/inst_queue.cc:1009-1014). A merged batch is one decode
+    in one unit and counts once. A depth counts only when time passes
+    at it, the rule of the ready queue's peak (observe/queue_depth.py),
+    so a decode that starts on the tick it may start was never held.
+    """
+    change_by_tick = collections.defaultdict(int)
+    held_decodes = set()
+    for request in _requests_of_tier(requests, lives, "strong"):
+        run_sequence = request.request_key.run_sequence
+        if run_sequence in held_decodes:
+            continue
+        held_decodes.add(run_sequence)
+        life = lives[run_sequence]
+        change_by_tick[life.ready] += 1
+        change_by_tick[life.compute_start] -= 1
+    depth = 0
+    peak = 0
+    for tick in sorted(change_by_tick):
+        depth += change_by_tick[tick]
+        peak = max(peak, depth)
+    return peak
+
+
 def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
     """The tier's requests whose decode ran at least one stage."""
     chosen = []
@@ -1134,9 +1185,7 @@ def parallel_processes_needed(
     needs; the serial chain's own condition is chain_load.
     """
     service_us = _mean_or_zero(samples["service"])
-    commit_rounds = settings.windows.commit_rounds
-    if commit_rounds is None:
-        commit_rounds = distance
+    commit_rounds = commit_round_count(settings, distance)
     buffer_rounds = settings.windows.buffer_rounds
     if buffer_rounds is None:
         buffer_rounds = distance

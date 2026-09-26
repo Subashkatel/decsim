@@ -136,7 +136,7 @@ def test_the_forward_window_absorbs_the_windows_it_covers():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="forward",
+        strong_window="forward_seam_pinned",
         round_microseconds=4.0,
     )
     machine.run()
@@ -159,7 +159,7 @@ def test_the_forward_window_is_submitted_once_at_the_far_boundary_commit():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="forward",
+        strong_window="forward_seam_pinned",
         round_microseconds=4.0,
     )
     machine.run()
@@ -181,7 +181,7 @@ def test_the_forward_window_is_submitted_once_at_the_far_boundary_commit():
 
 def test_the_forward_window_at_the_operations_end_waits_for_terminal_data():
     machine = fabric.switching_machine(
-        rounds=9, escalated_windows={2}, strong_window="forward"
+        rounds=9, escalated_windows={2}, strong_window="forward_seam_pinned"
     )
     machine.run()
     submitted = fabric.log_lines_containing(
@@ -230,7 +230,7 @@ def _recorded_waits(machine) -> dict:
 
 def test_a_second_escalation_of_one_window_is_refused():
     machine = fabric.switching_machine(
-        rounds=9, escalated_windows={2}, strong_window="forward"
+        rounds=9, escalated_windows={2}, strong_window="forward_seam_pinned"
     )
     machine.run()
     shape = machine.window_manager.strong_redecode.shape
@@ -254,7 +254,7 @@ def _gate_forward_window_machine(
     strong_microseconds: float,
     weak_units: int,
     reread_buffer_regions: int,
-    strong_window: str = "forward",
+    strong_window: str = "forward_seam_pinned",
 ) -> machine_module.Machine:
     """The gate's switching card with a forward window, both tiers priced.
 
@@ -319,7 +319,7 @@ def test_a_forward_window_plan_claims_the_rounds_a_restart_would_read():
     claims nothing.
     """
     forward = fabric.switching_machine(
-        rounds=15, escalated_windows=set(), strong_window="forward"
+        rounds=15, escalated_windows=set(), strong_window="forward_seam_pinned"
     )
     # W1 commits 4-6 and reads to 9; the re-read adds 1-3
     assert _claim(forward, 1) == tuple((1, index) for index in range(1, 10))
@@ -350,13 +350,13 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
         ((1, 1), "weak"),
         ((1, 2), "weak"),
         ((1, 3), "strong"),
-        ((1, 9), "strong"),
         ((1, 6), "strong"),
+        ((1, 9), "strong"),
     ]
     resliced = fabric.log_lines_containing(machine, "re-sliced")
     assert (
         "restart window (1, 6) re-sliced across strong window edge 18 "
-        "(reads rounds 16-24; crossing faults owned by strong_region)"
+        "(reads rounds 16-24; crossing faults owned by restart_window)"
     ) in resliced[0]
     withdrawn_restart = _log_index(machine, "WITHDRAW memory W6")
     assert withdrawn_restart < machine.observation.log.lines.index(resliced[0])
@@ -371,13 +371,13 @@ def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
-        ((1, 5), "strong"),
         ((1, 2), "strong"),
+        ((1, 5), "strong"),
     ]
     resliced = fabric.log_lines_containing(machine, "re-sliced")
     assert (
         "restart window (1, 5) re-sliced across strong window edge 20 "
-        "(reads rounds 17-28; crossing faults owned by strong_region)"
+        "(reads rounds 17-28; crossing faults owned by restart_window)"
     ) in resliced[0]
 
 
@@ -408,8 +408,8 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
         ((1, 1), "weak"),
         ((1, 2), "weak"),
         ((1, 3), "strong"),
-        ((1, 9), "strong"),
         ((1, 6), "strong"),
+        ((1, 9), "strong"),
     ]
 
 
@@ -435,8 +435,8 @@ def test_width_zero_restarts_on_the_round_after_the_strong_region():
         ((1, 1), "weak"),
         ((1, 2), "weak"),
         ((1, 3), "strong"),
-        ((1, 9), "strong"),
         ((1, 6), "strong"),
+        ((1, 9), "strong"),
     ]
 
 
@@ -447,7 +447,7 @@ def test_the_forward_window_lands_in_the_declared_backlog_regime():
     refused.
     """
     machine = fabric.switching_machine(
-        rounds=15, escalated_windows={1}, strong_window="forward"
+        rounds=15, escalated_windows={1}, strong_window="forward_seam_pinned"
     )
     machine.run()
     assert fabric.frame_tiers(machine) == [
@@ -541,7 +541,7 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
     ]
 
 
-class RecordingForwardWindow(strong_window_shapes.ForwardWindow):
+class RecordingForwardWindow(strong_window_shapes.ForwardSeamWindow):
     """A shape row a study adds that absorbs the windows it covers.
 
     It takes the same one constructor and the same ports the shipped
@@ -557,7 +557,7 @@ class RecordingForwardWindow(strong_window_shapes.ForwardWindow):
     def plan(self, weak_job):
         """Note the window, then plan it as the forward window does."""
         self.planned_windows.append(weak_job.window_id)
-        forward = strong_window_shapes.ForwardWindow
+        forward = strong_window_shapes.ForwardSeamWindow
         return forward.plan(self, weak_job)
 
 
@@ -793,6 +793,27 @@ def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
     )
 
 
+def test_the_forward_row_that_reads_its_near_face_raw_is_not_a_row():
+    """A forward extent needs its near face pinned to explain its seam.
+
+    Read raw, the near face folds no committed neighbour, so the strong
+    decode can explain a seam defect differently from the neighbour's
+    commit and the committed corrections leave it lit (Bombin et al.
+    2303.04846 lines 775-788: the input is the syndrome plus every prior
+    committed correction). forward_seam_pinned is that extent with the
+    face pinned, and the unpinned name is refused naming the rows.
+    """
+    with pytest.raises(ValueError) as refusal:
+        fabric.switching_machine(
+            rounds=9,
+            escalated_windows=set(),
+            strong_window="forward",
+        )
+    message = str(refusal.value)
+    assert "escalation.strong_window 'forward' is not a row" in message
+    assert "forward_seam_pinned" in message
+
+
 def test_the_near_seam_row_reads_its_commit_region_and_one_buffer():
     """Bombin 2303.04846 lines 1456-1458: a pinned face needs no buffer.
 
@@ -898,9 +919,9 @@ def test_the_forward_seam_row_reads_exactly_the_rounds_it_commits():
     """Toshio 2510.25222 lines 1248-1250, as the paper states it.
 
     W1 of a d=3 run commits 4-6, so the forward strong region commits
-    r_com + 2 r_buf = 9 rounds, 4-12. The shipped forward row reads one
-    buffer of raw context on each side of that, 1-15; pinning both faces
-    drops both buffers, so this row reads the 9 rounds it commits.
+    r_com + 2 r_buf = 9 rounds, 4-12. Pinning both faces needs no
+    buffer of context on either side, so the row reads the 9 rounds it
+    commits.
     """
     machine = fabric.switching_machine(
         rounds=15,
@@ -924,10 +945,10 @@ def test_the_forward_seam_row_pins_its_near_and_its_far_face():
     """One message per pinned face, both on decoder_to_decoder.
 
     The near face is the window before the strong region, the far face
-    the window that restarts the weak chain after it, which is the
-    boundary the shipped forward row already waits for (Toshio
-    2510.25222 lines 1253-1259). Skoric 2209.08552 lines 1038-1040 sends
-    each face's defects block to block, so two faces are two messages.
+    the window that restarts the weak chain after it, the boundary the
+    row waits for (Toshio 2510.25222 lines 1253-1259). Skoric 2209.08552
+    lines 1038-1040 sends each face's defects block to block, so two
+    faces are two messages.
     """
     machine = fabric.switching_machine(
         rounds=15,
@@ -980,8 +1001,7 @@ def test_the_forward_seam_row_at_the_operations_end_has_no_far_pin():
     """Tan 2209.09219 lines 953-955: the last window's faces are closed.
 
     A terminal strong region has no later window to pin on, so it waits
-    for the terminal data the way the shipped forward row does and reads
-    to its own last committed round.
+    for the terminal data and reads to its own last committed round.
     """
     machine = fabric.switching_machine(
         rounds=9,
@@ -1053,8 +1073,7 @@ def test_a_yaml_names_the_forward_seam_row_and_it_runs():
     """The row is one class, one table row and one yaml name.
 
     The gate's own switching card with escalation.strong_window
-    forward_seam_pinned builds this row and runs the point through, with
-    the absorbing apparatus of the shipped forward row underneath it.
+    forward_seam_pinned builds this row and runs the point through.
     """
     machine = _gate_machine("forward_seam_pinned")
     result = machine.run()

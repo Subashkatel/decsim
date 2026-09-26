@@ -60,10 +60,12 @@ its maximum.
 | `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_mean_us` | the windows the strong tier committed, the rounds its decodes read, and their mean service |
+| `commit_rounds` | r_com, the rounds a window commits: `windows.commit_rounds`, or the code distance when it is null |
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
 | `weak_syndrome_weight_mean`, `weak_syndrome_weight_max` | the set bits of each weak decode's input, its detection events when they are formed ahead of the decoder; only when `observation.record_switching_windows` is on |
 | `weak_service_mean_us` | each weak decode's compute, its first stage's start to its last stage's end; the same switch |
 | `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from its enqueue to its compute start, for a unit and for the unit's compute; the same switch |
+| `strong_held_in_units_max` | the most strong decodes held in the units' memory at once, landed and free to compute but waiting for a unit's compute, by the rule of the queue peaks. A unit takes the next decode into its memory while it computes, so this wait never shows in `strong_queue_max`; the same switch |
 | `backlog_peak_rounds` | the most rounds produced and not yet decoded at once; only when `observation.backlog_trace` is on |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's count, when `observation.check_windows_with` asked for one |
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
@@ -223,10 +225,10 @@ point the run held:
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
 | `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
 | `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point and their mean service |
-| `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen r_com windows / escalated windows over the point, with r_com = d (2510.25222 eq. (6)); infinite when nothing escalated |
+| `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen r_com windows / escalated windows over the point, with r_com the shots' `commit_rounds` (2510.25222 eq. (6)); infinite when nothing escalated, and absent for shots written without `commit_rounds` |
 | `parallel_processes_needed` | the largest over the point's shots |
 | `weak_syndrome_weight_mean`, `weak_service_mean_us`, `strong_wait_mean_us` | the means over the point's shots, when they kept the switching records |
-| `weak_syndrome_weight_max`, `strong_wait_max_us`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |
+| `weak_syndrome_weight_max`, `strong_wait_max_us`, `strong_held_in_units_max`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |
 | `escalated_fraction` | the windows the strong tier committed over the windows decoded, beside the columns above |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's totals |
 | `load` | the mean load |

@@ -351,10 +351,12 @@ def strong_region_round_count(
 def strong_context_bounds(window: "Window") -> tuple:
     """(context_lo, commit_lo, commit_hi, context_hi) a strong read may span.
 
-    The widest read a strong window starting at this window's commit
-    takes: one buffer region of context on each side of its commit
-    rounds, clipped at round 1, which is the raw near face of the forward
-    rows (windows/window_interactions.py, plan_strong_region).
+    One buffer region of context on each side of this window's commit
+    rounds, clipped at round 1, which the round retention keeps for a
+    strong window starting at this window's commit. Both shipped rows
+    pin their past face and read no round before the commit
+    (escalation/strong_window_shapes.py), so the region kept behind it
+    is wider than any row reads.
     """
     buffer_span = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, buffer_span)

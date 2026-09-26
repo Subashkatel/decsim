@@ -28,6 +28,7 @@ is the decoder-to-decoder seam.
 """
 
 import math
+from typing import Optional
 
 import pytest
 import yaml
@@ -40,6 +41,7 @@ import decsim.experiments.measure as measure
 import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
+import decsim.machine as machine_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
@@ -174,6 +176,7 @@ def switching_run(
     strong_units: int = 1,
     observation: tuple = (),
     patch_count: int = 1,
+    commit_rounds: Optional[int] = None,
 ):
     """One collected shot of a 1.0 us weak tier beside a 10.0 us one.
 
@@ -182,9 +185,14 @@ def switching_run(
     run_both_at_once starts the strong sibling with the weak job and
     cancels it when the weak result is kept, which is Toshio et al.
     2510.25222 Sec. III A step 1. observation names the section's flags
-    the shot turns on; more than one patch runs the memory_patches row.
+    the shot turns on; more than one patch runs the memory_patches row;
+    commit_rounds sets windows.commit_rounds, the code distance when
+    None.
     """
     raw = dict(MINIMAL_CONFIG)
+    windows = dict(MINIMAL_CONFIG["windows"])
+    windows["commit_rounds"] = commit_rounds
+    raw["windows"] = windows
     raw["observation"] = dict.fromkeys(observation, True)
     workload = dict(MINIMAL_CONFIG["workload"])
     workload["rounds_per_shot"] = 30
@@ -541,6 +549,40 @@ def test_toshios_per_decode_bound_is_commit_time_over_escalated_share(
     assert measurement.strong_decoded_rounds == 57
     assert measurement.strong_service_mean_us == 10.0628
     assert rows[0]["strong_service_bound_us"] == 3.0
+    assert rows[0]["escalated_windows"] == 10
+
+
+def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(
+    tmp_path,
+):
+    """Theorem 1 per decode at r_com = 2, not d = 3.
+
+    With windows.commit_rounds 2 the window period is 2 tau_gen, so
+    tau_gen r_com windows / escalated windows is 1.0 us x 2 x 15 / 15 =
+    2 us over the fifteen windows of 30 rounds, every one escalated
+    (Toshio 2510.25222 eq. (6), gamma_switch per d rounds, lines
+    1254-1255). A bound read with r_com = d would say 3 us.
+    """
+    shot = switching_run(tmp_path, 1000000.0, commit_rounds=2)
+    measurement = measure.measure_shot(shot)
+    record = report.record_of([measurement])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert record.shots[0]["commit_rounds"] == 2
+    assert measurement.windows == 15
+    assert measurement.escalated_windows == 15
+    assert rows[0]["strong_service_bound_us"] == 2.0
+
+
+def test_a_folder_without_commit_rounds_gets_no_bound(tmp_path):
+    """An older tree's shots name no r_com, so the point states no bound."""
+    measurement = switching_shot(tmp_path, 1000000.0)
+    record = report.record_of([measurement])
+    older_shot = dict(record.shots[0])
+    del older_shot["commit_rounds"]
+    rows = report.summarize([older_shot], record.window_samples)
+
+    assert "strong_service_bound_us" not in rows[0]
     assert rows[0]["escalated_windows"] == 10
 
 
@@ -1293,6 +1335,80 @@ def test_a_strong_requests_wait_is_lindleys_one_server_wait(tmp_path):
     assert measurement.strong_wait_max_us > 0
 
 
+class StrongResidentsWaitingOnCompute:
+    """Each tick's strong decodes held in a unit, off the units' own slots.
+
+    A resident whose input landed, that is not parked on a boundary and
+    has not started, is in the unit's memory waiting for its compute.
+    The last sample of a tick is the depth the tick ends at.
+    """
+
+    def __init__(self, machine) -> None:
+        self.units = []
+        for manager in (
+            machine.decoder_manager,
+            machine.strong_decoder_manager,
+        ):
+            if manager is not None:
+                pool_units = manager.service.pool.units()
+                self.units.extend(pool_units)
+        self.depth_by_tick = {}
+
+    def sample(self, now: int) -> None:
+        """Count the strong residents waiting for compute now."""
+        waiting = 0
+        for unit in self.units:
+            waiting += _strong_residents_waiting(unit)
+        self.depth_by_tick[now] = waiting
+
+
+def _strong_residents_waiting(unit) -> int:
+    waiting = 0
+    for resident in unit.residents:
+        if _is_strong_and_waiting(resident):
+            waiting += 1
+    return waiting
+
+
+def _is_strong_and_waiting(resident) -> bool:
+    """A strong decode landed, not parked, and not started."""
+    strong = window_records.DecoderTier.STRONG
+    if resident.request_key.tier is not strong:
+        return False
+    if resident.is_parked or resident.service_started:
+        return False
+    return resident.input_landed
+
+
+def test_the_strong_decodes_held_in_units_are_the_units_own_residents(
+    tmp_path, monkeypatch
+):
+    """A unit takes the next decode into its memory while it computes.
+
+    The column reads the most strong decodes held at once off the stage
+    ledger; the units' own slots, sampled after every engine action, give
+    the same peak. One unit holds two residents, the decode it computes
+    and the next one (decode_service.py, resident_capacity), so one is
+    the most it can hold waiting.
+    """
+    samplers = []
+    build = machine_module.Machine.build
+
+    def build_and_sample(settings, seed):
+        machine = build(settings, seed)
+        sampler = StrongResidentsWaitingOnCompute(machine)
+        machine.engine.action_done.connect(sampler.sample)
+        samplers.append(sampler)
+        return machine
+
+    monkeypatch.setattr(machine_module.Machine, "build", build_and_sample)
+    _, measurement = escalating_shot(tmp_path, 1)
+    (sampler,) = samplers
+    depths = sampler.depth_by_tick.values()
+
+    assert measurement.strong_held_in_units_max == max(depths) == 1
+
+
 def test_enough_strong_units_leave_the_same_windows_and_no_wait(tmp_path):
     """The paired run: the same seed, the real unit count and ten.
 
@@ -1310,6 +1426,7 @@ def test_enough_strong_units_leave_the_same_windows_and_no_wait(tmp_path):
     assert ample.escalated_windows == real.escalated_windows == 30
     assert ample.strong_wait_max_us == 0.0
     assert real.strong_wait_max_us > 0.0
+    assert ample.strong_held_in_units_max == 0
     assert ample.backlog_peak_rounds < real.backlog_peak_rounds
 
 

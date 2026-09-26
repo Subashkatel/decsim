@@ -50,6 +50,31 @@ def test_the_time_is_the_measured_line_at_relay_bps_own_iterations():
     )
 
 
+@pytest.mark.parametrize(
+    "partition, intercept_microseconds, microseconds_per_iteration",
+    [("3g.40gb", 72.377, 9.527), ("1g.10gb", 68.534, 15.951)],
+)
+def test_a_multi_instance_gpu_slice_is_priced_by_its_own_measured_line(
+    partition, intercept_microseconds, microseconds_per_iteration
+):
+    """a100, one slice, 360 detectors: the slice's line, not the card's."""
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(5, 15, 0.003)
+    model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 11)
+    job = windows.job_for(model, detection_events[0])
+    section = {"device": "a100", "partition": partition}
+    settings = measured_table.MeasuredTableSettings.from_yaml(section, None)
+    table = measured_table.MeasuredTable(settings)
+    ticket = table.submit(job, 0)
+    result = table.result(ticket)
+    per_iteration = microseconds_per_iteration * result.iterations
+    microseconds = intercept_microseconds + per_iteration
+    assert table.service_ticks(ticket) == config.microseconds_to_ticks(
+        microseconds
+    )
+
+
 def test_the_answer_is_the_relay_bp_rows_under_the_same_run_seed():
     pytest.importorskip("relay_bp")
     circuit = windows.memory_circuit(5, 15, 0.003)
@@ -111,5 +136,6 @@ def test_a_device_and_partition_never_measured_are_refused():
     assert str(refusal.value) == (
         "measured_table has no measurement of device 'gh200' with "
         "partition 'mps'; the measured pairs are [('a100', 'whole'), "
-        "('a100', 'mps'), ('gh200', 'whole')]"
+        "('a100', 'mps'), ('a100', '3g.40gb'), ('a100', '1g.10gb'), "
+        "('gh200', 'whole')]"
     )

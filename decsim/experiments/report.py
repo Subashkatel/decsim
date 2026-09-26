@@ -88,6 +88,7 @@ LOAD_MEANS = (
 LOAD_MAXES = (
     "weak_syndrome_weight_max",
     "strong_wait_max_us",
+    "strong_held_in_units_max",
     "backlog_peak_rounds",
 )
 # which role each field of shots.csv plays in a sweep point's row: a
@@ -106,6 +107,8 @@ SHOT_MEANS = (
     *LOAD_MEANS,
 )
 SHOT_MAXES = (
+    # one value per point, the yaml's or d, so its largest is that value
+    "commit_rounds",
     "max_queued_windows",
     "weak_queue_max",
     "strong_queue_max",
@@ -278,7 +281,7 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
         "load": totals.mean("load"),
         "sim_wall_seconds_per_shot": totals.mean("sim_wall_seconds"),
     }
-    _add_pool_columns(row, totals, distance, round_period_microseconds)
+    _add_pool_columns(row, totals, round_period_microseconds)
     _add_load_columns(row, totals)
     for name in _points_held(totals.means):
         multiset = counts.get((point, name), {})
@@ -752,12 +755,14 @@ def _folder_files(folders: list, name: str) -> list:
 
 
 def _add_pool_columns(
-    row: dict, totals, distance: int, round_period_microseconds: float
+    row: dict, totals, round_period_microseconds: float
 ) -> None:
     """The pool columns and Toshio's bound, when the shots hold them.
 
-    A folder an older tree wrote holds no pool columns, and the rule of
-    _points_held applies: it gets none rather than a column of zeros.
+    A folder an older tree wrote holds no pool columns, or no
+    commit_rounds and so no bound, and the rule of _points_held applies:
+    it gets none rather than a column of zeros or a bound on a guessed
+    r_com.
     """
     if "strong_decoded_rounds" not in totals.sums:
         return
@@ -767,9 +772,10 @@ def _add_pool_columns(
     row["strong_busy_fraction"] = totals.mean("strong_busy_fraction")
     row["escalated_windows"] = totals.sums["escalated_windows"]
     row["strong_service_mean_us"] = totals.mean("strong_service_mean_us")
-    row["strong_service_bound_us"] = strong_service_bound_us(
-        totals, distance, round_period_microseconds
-    )
+    if "commit_rounds" in totals.maxes:
+        row["strong_service_bound_us"] = strong_service_bound_us(
+            totals, round_period_microseconds
+        )
     row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
 
 
@@ -793,9 +799,7 @@ def _add_load_columns(row: dict, totals) -> None:
     row["escalated_fraction"] = escalated / windows
 
 
-def strong_service_bound_us(
-    totals, distance: int, round_period_microseconds: float
-) -> float:
+def strong_service_bound_us(totals, round_period_microseconds: float) -> float:
     """Toshio's Theorem 1 bound on one strong decode's time, per point.
 
     Theorem 1 bounds the strong decoder's time per round (2510.25222
@@ -807,13 +811,13 @@ def strong_service_bound_us(
     escalated windows over its windows, so the bound is tau_gen r_com
     windows / escalated windows, the same unit as
     strong_service_mean_us beside it; infinite when nothing escalated.
-    r_com is d, the commit size every window scheme defaults to.
+    r_com is the shots' commit_rounds column.
     """
     escalated_windows = totals.sums["escalated_windows"]
     if escalated_windows == 0:
         return math.inf
     windows = totals.sums["windows"]
-    commit_rounds = distance
+    commit_rounds = totals.maxes["commit_rounds"]
     committed_microseconds = round_period_microseconds * commit_rounds
     return committed_microseconds * windows / escalated_windows
 

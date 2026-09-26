@@ -50,20 +50,6 @@ class _ForwardProposal:
 
 
 @dataclasses.dataclass(frozen=True)
-class _PinnedFaces:
-    """The faces a forward row pins its input on.
-
-    A row that pins nothing passes None instead of this record and
-    reads every face raw. near_source_key is the window whose commit
-    closes the near face (forward_near_face), or None at the operation's
-    first round; the far face pins on the restart window whenever the
-    region has one.
-    """
-
-    near_source_key: Optional[tuple]
-
-
-@dataclasses.dataclass(frozen=True)
 class ForwardRegion:
     """One forward strong region, resolved against the live window graph."""
 
@@ -198,20 +184,10 @@ class StrongRegions:
             return model
         return self.burst_detector.with_burst_priors(window, model)
 
-    def forward_region(self, key: tuple) -> ForwardRegion:
-        """The forward strong region of an escalated window, resolved.
-
-        The interaction proposes the extent, this checks it against the
-        windows that exist, and the rounds each side reads are required
-        to be retained before anything moves.
-        """
-        proposal = self._proposed_forward_region(key)
-        return self._resolved_forward_region(key, proposal, pinned_faces=None)
-
     def forward_seam_region(
         self, key: tuple, *, near_source_key: Optional[tuple]
     ) -> ForwardRegion:
-        """The same extent, read with no context on its pinned faces.
+        """The forward strong region, checked, read with no context.
 
         Toshio et al. 2510.25222 Fig. 12 assigns the strong decoder
         r_strong rounds and no more, "after the boundary conditions at
@@ -246,10 +222,7 @@ class StrongRegions:
             restart_seam_fault_owner=seam_fault_owner,
         )
         pinned = dataclasses.replace(proposal, plan=pinned_plan)
-        pinned_faces = _PinnedFaces(near_source_key)
-        return self._resolved_forward_region(
-            key, pinned, pinned_faces=pinned_faces
-        )
+        return self._resolved_forward_region(key, pinned, near_source_key)
 
     def _proposed_forward_region(self, key: tuple) -> "_ForwardProposal":
         """The extent the interaction proposes, with what it was read on."""
@@ -271,8 +244,7 @@ class StrongRegions:
         self,
         key: tuple,
         proposal: "_ForwardProposal",
-        *,
-        pinned_faces: Optional["_PinnedFaces"],
+        near_source_key: Optional[tuple],
     ) -> ForwardRegion:
         """The proposed extent checked against the windows that exist."""
         operation_id = key[0]
@@ -296,7 +268,7 @@ class StrongRegions:
             restart_key,
             restart_reads,
             context_keys,
-            pinned_faces,
+            near_source_key,
         )
 
     def operation(self, operation_id) -> program_records.Operation:
@@ -371,7 +343,7 @@ class StrongRegions:
         restart_key: Optional[tuple],
         restart_reads: tuple,
         context_keys: list,
-        pinned_faces: Optional["_PinnedFaces"],
+        near_source_key: Optional[tuple],
     ) -> ForwardRegion:
         """The resolved region with the two windows' error models.
 
@@ -396,7 +368,7 @@ class StrongRegions:
                 None,
             )
         prior_faults = self._forward_prior_faults(
-            key, pinned_faces, restart_model
+            key, near_source_key, restart_model
         )
         planned_model = self.planner.strong_window_model(
             operation,
@@ -421,20 +393,17 @@ class StrongRegions:
     def _forward_prior_faults(
         self,
         key: tuple,
-        pinned_faces: Optional["_PinnedFaces"],
+        near_source_key: Optional[tuple],
         restart_model,
     ):
         """What the faces of a forward region's pins carry.
 
         The near face pins on a commit the planner holds the owned
-        faults of; the far face pins on the restart window, whose model
-        is the one built just above. A row that pins neither face gets
-        None and keeps every candidate fault as a column.
+        faults of, or on nothing at the operation's first round; the far
+        face pins on the restart window, whose model is the one built
+        just above. None when neither face carries any owned fault.
         """
-        if pinned_faces is None:
-            return None
         owned_sets = []
-        near_source_key = pinned_faces.near_source_key
         if near_source_key is not None:
             near_owned = self._near_face_faults(key, near_source_key)
             if near_owned is not None:
@@ -670,20 +639,13 @@ def _fault_exclusions(
 ) -> tuple:
     """(strong window's, restart window's) fault exclusion ranges.
 
-    The seam's owner keeps the crossing faults: when the strong region
-    owns them the restart window excludes everything up to the strong
-    window's edge; otherwise the strong window excludes the rounds past
-    its edge and the restart window excludes only the rounds before it.
+    The restart window owns the crossing faults (forward_seam_region):
+    the strong window excludes the rounds past its edge and the restart
+    window excludes only the rounds before the strong window.
     """
     left_exclusions = _left_fault_exclusions(plan.commit_lo)
     if restart_key is None:
         return left_exclusions, None
-    if (
-        plan.restart_seam_fault_owner
-        is window_records.SeamFaultOwner.STRONG_REGION
-    ):
-        restart_exclusions = ((1, plan.commit_hi),)
-        return left_exclusions, restart_exclusions
     right_exclusion = (plan.commit_hi + 1, round_count)
     strong_exclusions = left_exclusions + (right_exclusion,)
     return strong_exclusions, left_exclusions

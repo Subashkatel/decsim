@@ -141,8 +141,7 @@ In `decsim/escalation/settings.py`. A row of it is named under `escalation.stron
 | Row | Class | What it is |
 | --- | --- | --- |
 | `near_seam_pinned` | `NearSeamWindow` in `decsim/escalation/strong_window_shapes.py` | The commit region with its past face pinned and one open buffer. |
-| `forward` | `ForwardWindow` in `decsim/escalation/strong_window_shapes.py` | Sec. III C, Fig. 12: a strong window that absorbs what it covers. |
-| `forward_seam_pinned` | `ForwardSeamWindow` in `decsim/escalation/strong_window_shapes.py` | Sec. III C, Fig. 12 read as the paper states it: both faces pinned. |
+| `forward_seam_pinned` | `ForwardSeamWindow` in `decsim/escalation/strong_window_shapes.py` | Sec. III C, Fig. 12 as the paper states it: both faces pinned. |
 
 ## `SYNDROME_BUFFERS`
 

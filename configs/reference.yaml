@@ -221,7 +221,7 @@ escalation:
 #                                  # weak_decoder_to_strong_decoder hop, which the
 #                                  # paper expects to cost little because the
 #                                  # switching rate decays with the code distance
-#   strong_window: near_seam_pinned  # near_seam_pinned | forward |
+#   strong_window: near_seam_pinned  # near_seam_pinned |
 #                                  # forward_seam_pinned: the shape
 #                                  # of the window the strong tier re-decodes
 #                                  # (STRONG_WINDOW_SHAPES in
@@ -240,38 +240,35 @@ escalation:
 #                                  # (lines 850-852) when windows.buffer_rounds
 #                                  # is the distance. It escalates with Held
 #                                  # boundaries, serially or beside the weak
-#                                  # decode (run_both_at_once). forward is the
-#                                  # paper's Sec. III C scheme: the weak chain
-#                                  # keeps committing past an escalated strong
-#                                  # window, which absorbs the windows it
-#                                  # covers and re-slices the one past it.
+#                                  # decode (run_both_at_once).
 #                                  # forward_seam_pinned is the paper's
-#                                  # Sec. III C as it is stated: the same
-#                                  # r_com + 2 r_buf extent as forward, read
-#                                  # with no context, its near face pinned on
-#                                  # the window before it and its far face on
-#                                  # the restart window's weak commit (Toshio
-#                                  # 2510.25222 lines 1248-1259). It absorbs
-#                                  # the windows it covers as forward does,
+#                                  # Sec. III C as it is stated: the weak chain
+#                                  # keeps committing past an escalated strong
+#                                  # window of r_com + 2 r_buf rounds, which
+#                                  # is read with no context, its near face
+#                                  # pinned on the window before it and its
+#                                  # far face on the restart window's weak
+#                                  # commit (Toshio 2510.25222 lines
+#                                  # 1248-1259). It absorbs the windows it
+#                                  # covers, re-slices the one past it,
 #                                  # leaves the faults crossing its far face
 #                                  # to the restart window, and reads one
 #                                  # buffer region of raw context on a near
 #                                  # face that no committed correction closes
-#   restart_reread_buffer_regions: 1  # the forward rows only: how many of the
-#                                  # strong region's buffer regions the
-#                                  # restarted weak window re-reads. Toshio
+#   restart_reread_buffer_regions: 1  # forward_seam_pinned only: how many
+#                                  # of the strong region's buffer regions
+#                                  # the restarted weak window re-reads. Toshio
 #                                  # 2510.25222 lines 1229-1235 resume the weak
 #                                  # decoder once commit plus buffer rounds are
 #                                  # stored after the strong region, which both
 #                                  # values meet. 1, the default, re-reads
 #                                  # the region's last buffer region as the
 #                                  # restart window's past context, as Fig. 12
-#                                  # step 5 draws it; forward's strong region
-#                                  # keeps the crossing faults, and
-#                                  # forward_seam_pinned's leaves them to the
-#                                  # restart window its far face pins on. It
-#                                  # costs the weak syndrome buffer one more
-#                                  # buffer region per bounded window. 0 reads
+#                                  # step 5 draws it; the strong region leaves
+#                                  # the crossing faults to the restart window
+#                                  # its far face pins on. It costs the weak
+#                                  # syndrome buffer one more buffer region
+#                                  # per bounded window. 0 reads
 #                                  # nothing inside the region, and the
 #                                  # restart window owns the faults of the
 #                                  # rounds it reads
@@ -1028,7 +1025,10 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # 0.8.0) on that GPU, one decode at a time
                                    # (decoders/measured_table/measurements.py)
   # partition: whole               # how the GPU was shared when measured:
-                                   # whole | mps (a100 only)
+                                   # whole | mps | 3g.40gb | 1g.10gb, the
+                                   # last three a100 only; 3g.40gb and
+                                   # 1g.10gb are one Multi-Instance GPU
+                                   # slice of that NVIDIA profile
   engine:
     clock: room                    # the strong unit lives room-side
     fetch_cycles_per_round: 1

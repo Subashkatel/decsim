@@ -502,4 +502,3 @@ class RunShape:
     is_bulk_strong: bool
     has_dynamic_streams: bool
     has_static_decode_plan: bool
-    has_frontend: bool

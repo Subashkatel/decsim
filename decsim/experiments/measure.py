@@ -927,7 +927,7 @@ def _throughput_per_microsecond(
 
     The rounds are the ones the QPU read out, each (operation, round)
     once (the EMITTED rows, qpu/cycle_clock.py), so the number holds for
-    any workload row, not only the one that declares rounds_per_shot.
+    any workload, not only the maker that declares rounds_per_shot.
     Operations that run at once add their rounds: the rate is the load
     the shared decoders serve, which the backlog condition weighs against
     their service rate (Holmes 2004.04794 section III), not the QEC

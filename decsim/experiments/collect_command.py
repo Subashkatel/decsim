@@ -28,21 +28,20 @@ import decsim.experiments.run_folder as run_folder
 
 
 def run_sweep(
-    config,
+    tasks: list,
     run_dir: Optional[Path] = None,
     *,
     processes: int = 1,
     shard: Optional[tuple] = None,
     shots_per_unit: Optional[int] = None,
 ) -> list:
-    """Every shot of every point of the config's sweep blocks, measured.
+    """Every shot of every task of a sweep (config.tasks()), measured.
 
     A point named by more than one block runs once; run_dir receives the
     trace files and the online threshold records. The measure handed to
     the pool is a partial of a module-level function, so a worker
     process can unpickle it.
     """
-    tasks = config.tasks()
     measure_shot = functools.partial(measure.measure_shot, run_dir=run_dir)
     on_task_done = functools.partial(_report_point_done, run_dir=run_dir)
     return collect.collect(
@@ -65,17 +64,21 @@ def run_experiment(
 ) -> tuple:
     """One full experiment: sweep, summary, report, figures.
 
-    Returns the results folder and the summary rows.
+    Returns the results folder and the summary rows. A folder a run
+    already finished is skipped, so rerunning a Slurm array reruns only
+    the shards that did not finish.
     """
     config = experiment.load_experiment(config_path)
     run_dir = run_folder.run_dir_for(config, out_dir)
-    run_folder.snapshot_code_state(config, run_dir)
-    started_utc = run_folder.utc_now()
+    if run_folder.is_finished(run_dir):
+        _report_the_finished_folder(run_dir)
+        return run_dir, []
     how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
-    run_folder.write_manifest(config, run_dir, started_utc, **how_it_ran)
+    tasks = config.tasks()
+    started_utc = _start_the_run_folder(config, run_dir, tasks, how_it_ran)
     _echo_description(config, run_dir, shard)
     measurements = run_sweep(
-        config,
+        tasks,
         run_dir,
         processes=processes,
         shard=shard,
@@ -83,7 +86,7 @@ def run_experiment(
     )
     if not measurements:
         _report_no_work_unit()
-        _finish_the_manifest(config, run_dir, started_utc, how_it_ran)
+        run_folder.finish_run(config, run_dir, started_utc, **how_it_ran)
         return run_dir, []
     record = report.record_of(measurements)
     rows = report.summarize(record.shots, record.window_samples)
@@ -91,8 +94,54 @@ def run_experiment(
     residence_rows = residence.rows_of(measurements)
     residence.write_residence(residence_rows, run_dir)
     plots.plots(config, rows, run_dir, measurements)
-    _finish_the_manifest(config, run_dir, started_utc, how_it_ran)
+    run_folder.finish_run(config, run_dir, started_utc, **how_it_ran)
     return run_dir, rows
+
+
+def _start_the_run_folder(
+    config, run_dir: Path, tasks: list, how_it_ran: dict
+) -> str:
+    """Everything a run folder holds before its first shot; the start time."""
+    started_utc = run_folder.start_run(config, run_dir, **how_it_ran)
+    _record_the_points(config, run_dir, tasks, **how_it_ran)
+    return started_utc
+
+
+def _record_the_points(
+    config, run_dir: Path, tasks: list, shard, shots_per_unit
+) -> None:
+    """The maker, and every point's values and workload, before any shot.
+
+    Every shard records every point, with its own units' seeds, so a
+    shard's folder alone says what its sweep was and combine folds the
+    content-named files into one set. Recording builds each point's
+    plan, so a point the build refuses stops the run before any shot.
+    """
+    run_folder.write_producer(run_dir, config.settings.workload)
+    unique = collect.unique_tasks(tasks)
+    units = collect.work_units(unique, shots_per_unit)
+    selected = collect.shard_of(units, shard)
+    for task in unique:
+        seeds = _seeds_of(task, selected)
+        run_folder.record_point(run_dir, task, seeds)
+
+
+def _seeds_of(task, units: list) -> list:
+    """The seed ranges of the task's units among these."""
+    ranges = []
+    for unit in units:
+        if unit.task is task:
+            ranges.append((unit.first_seed, unit.seeds))
+    return run_folder.seed_ranges(ranges)
+
+
+def _report_the_finished_folder(run_dir: Path) -> None:
+    """One line for a folder a run already finished, which is left as it is."""
+    print(
+        f"{run_dir} holds a finished run, so this run leaves it as it is; "
+        "name another --out to run the sweep again",
+        file=sys.stderr,
+    )
 
 
 def _report_no_work_unit() -> None:
@@ -107,20 +156,6 @@ def _report_no_work_unit() -> None:
         "no work unit of this sweep fell to this run, so it wrote no rows "
         "beyond its manifest",
         file=sys.stderr,
-    )
-
-
-def _finish_the_manifest(
-    config, run_dir: Path, started_utc: str, how_it_ran: dict
-) -> None:
-    """The manifest again, now carrying the time the run ended."""
-    finished_utc = run_folder.utc_now()
-    run_folder.write_manifest(
-        config,
-        run_dir,
-        started_utc,
-        finished_utc=finished_utc,
-        **how_it_ran,
     )
 
 

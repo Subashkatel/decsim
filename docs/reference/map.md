@@ -38,6 +38,7 @@ docstring.
 - `decsim/records/seeds.py`: The run-level seed graph's records: a path edge, a child, a reservation.
 - `decsim/records/transfers.py`: One transfer on one link: its hop, its bits, its timing, its ledger.
 - `decsim/records/windows.py`: One decoder window: its geometry, its plan, its boundaries, its state.
+- `decsim/records/workload.py`: What a workload maker hands decsim: an operation list and its circuit.
 
 ### tables
 
@@ -239,12 +240,13 @@ docstring.
 ### frontends
 
 - `decsim/frontends/__init__.py`: Everything that happens to a program before and while it runs.
-- `decsim/frontends/circuit_frontend.py`: Workloads written by hand: an operation list, or a small text IR.
+- `decsim/frontends/circuit_frontend.py`: A maker's workload lowered into a program the machine runs.
 - `decsim/frontends/deltakit.py`: Deltakit memory circuits exported into the supplied-circuit frontend.
 - `decsim/frontends/deltakit_compiler.py`: Compile finite rotated-code experiments through Deltakit's CircuitBuilder.
 - `decsim/frontends/execution_runtime.py`: Which operation runs when: readiness, resource ownership, timestamps.
 - `decsim/frontends/planner.py`: The plan of one run: cadence, geometry, windows and buffer holds.
 - `decsim/frontends/settings.py`: The workload settings: what the machine runs, and for how many rounds.
+- `decsim/frontends/workload_files.py`: A maker's workload on disk: decsim.ops/1 and the physical circuit.
 
 ### observe
 
@@ -272,7 +274,11 @@ docstring.
 - `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.
 
-## Level 5: settings
+## Level 5: producers, settings
+
+### producers
+
+- `decsim/producers.py`: The workload makers decsim ships: Stim's and Deltakit's memories.
 
 ### settings
 
@@ -317,6 +323,7 @@ docstring.
 - `decsim/experiments/__init__.py`: The experiments layer: the yaml experiment, the sweep, the rows and figures.
 - `decsim/experiments/collect_command.py`: `decsim collect`: every shot of every sweep point of one yaml.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
+- `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
 - `decsim/experiments/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
@@ -325,12 +332,16 @@ docstring.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
 - `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
 - `decsim/experiments/run_command.py`: `decsim run`: one seeded shot of one yaml, narrated.
-- `decsim/experiments/run_folder.py`: The run folder: where a sweep's results, config and identity land.
+- `decsim/experiments/run_folder.py`: The run folder: where a run's results, config and identity land.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
-## Level 11: __main__
+## Level 11: __main__, results
 
 ### __main__
 
 - `decsim/__main__.py`: `python -m decsim <verb>`: the same command set as the console script.
+
+### results
+
+- `decsim/results.py`: Run folders read back as one table, drawn and saved.

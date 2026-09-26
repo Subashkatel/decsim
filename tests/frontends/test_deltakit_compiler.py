@@ -16,10 +16,7 @@ import stim
 
 import decsim.detector_error_model.detector_formation as formation
 import decsim.frontends.deltakit_compiler as compiler
-import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.qpu.round_policies as round_policies
-import decsim.records.program as program_records
 import tools.deltakit_example as example
 
 COMPILER_SPECIFICATION = importlib.util.find_spec("deltakit_compile")
@@ -127,16 +124,10 @@ def test_machine_decodes_the_compiled_noisy_experiment(
     model = circuit.detector_error_model(
         decompose_errors=True, approximate_disjoint_errors=False
     )
-    operation = program_records.Operation(
-        1, experiment, ("test-patch",), patches=("test-patch",), circuit=circuit
-    )
-    policy = round_policies.FixedRounds(round_count)
-    workload = workload_settings.WorkloadSettings(
-        operations=(operation,), rounds_policy=policy
+    workload = example.memory_workload(
+        circuit, mapping, round_count, "test-patch"
     )
     settings = example.supplied_settings(
-        circuit,
-        mapping,
         workload,
         distance=distance,
         round_count=round_count,
@@ -146,7 +137,7 @@ def test_machine_decodes_the_compiled_noisy_experiment(
     )
     machine = machine_module.Machine.build(settings, seed=73)
     result = machine.run()
-    source = settings.qpu.device
+    source = machine.syndrome_source
     detection = source.sampled_detection_events(1)
     matcher = pymatching.Matching.from_detector_error_model(model)
     prediction = matcher.decode(detection)

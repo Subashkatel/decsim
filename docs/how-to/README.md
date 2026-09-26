@@ -10,7 +10,7 @@ the [explanation](../explanation/README.md) pages and the facts in the
 ## Plug something in
 
 decsim is built so that a new part is one class filling a port and one
-row in a table, and nothing else changes. These four are that recipe
+row in a table, and nothing else changes. These five are that recipe
 and its variants.
 
 - [How to add a row to a table](add_a_table_row.md): the general recipe
@@ -23,6 +23,9 @@ and its variants.
 - [How to add a yaml key](add_a_yaml_key.md): a knob a config file can
   set, checked once at the boundary and documented in the reference
   file.
+- [How to plug in a workload maker](plug_in_a_workload_maker.md): name
+  a function that returns an operation list and its physical circuit,
+  and run it from a yaml.
 
 ## Run and read an experiment
 

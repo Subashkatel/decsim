@@ -332,12 +332,6 @@ def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
             "folded at runtime (dynamic_streams/decode_ops) are not "
             "supported yet"
         )
-    if plan.has_frontend:
-        raise ValueError(
-            f"escalation.strong_window {row_name} is validated for explicit "
-            "ops= workloads; "
-            "frontend-built operation chains are not supported yet"
-        )
     for operation in plan.operations:
         if operation.decoder_boundary_predecessors:
             raise ValueError(

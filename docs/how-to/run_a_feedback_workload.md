@@ -18,20 +18,14 @@ window jobs use the strong decoder, and corrections return through the frame.
 There is no weak decode or escalation hop. Detection events may be formed at
 the controller or decoder; formation in the weak buffer is incompatible.
 
-## 1. Know why this one is Python and not yaml
+## 1. Know why this one is Python
 
-`workload.kind` names one of four rows, and the row that takes an
-operation list refuses a yaml:
-
-```
-workload.kind circuit_list takes a list of Operation records with their
-Stim circuits, which a yaml scalar cannot carry; build it in Python
-(WorkloadSettings(operations=...))
-```
-
-`memory_circuit`, the row every shipped config uses, builds one
-operation for the whole shot, so there is nothing for a second operation
-to wait on. Build this one as a machine, in Python.
+`decsim.producers:memory_circuit`, the maker every shipped config names,
+builds one operation for the whole shot, so there is nothing for a
+second operation to wait on. This page builds the operation list as a
+machine, in Python, to show each field; a maker function that returns
+the same list runs it from a yaml
+([plug in a workload maker](plug_in_a_workload_maker.md)).
 
 ## 2. Build the two operations
 
@@ -67,12 +61,11 @@ workload = workload_settings.WorkloadSettings(
     operations=(first, second),
     rounds_policy=round_policies.FixedRounds(6),
 )
+engine = decoder_settings.EngineSettings(clock=config.Clock(1000))
 settings = machine_settings.MachineSettings(
     workload=workload,
     qpu=qpu_settings.QpuSettings(distance=3, device=stim_device.StimDevice()),
-    weak_decoder=decoder_settings.DecoderSettings(
-        kind=1.0, engine_clock=config.Clock(1000)
-    ),
+    weak_decoder=decoder_settings.DecoderSettings(kind=1.0, engine=engine),
     links=link_profiles.logical_reference_profile(),
 )
 machine = machine_module.Machine.build(settings, 0)
@@ -81,14 +74,15 @@ result = machine.run()
 
 Three of those lines are choices worth naming.
 
-**`rounds_policy`.** A `circuit_list` workload does not fix its own
+**`rounds_policy`.** A workload built in Python does not fix its own
 rounds, so say how many each operation runs. `FixedRounds(6)` is six for
 every operation, matching the circuit built above.
 
 **The decoder is priced.** `kind=1.0` charges the decode one microsecond
 from a card instead of the wall clock a real decode took, so the ticks
 below are the same on your machine as on this page. A card needs its
-engine's clock, which is what `engine_clock` is;
+engine's clock, which is what `engine` holds, as a yaml's
+`engine: {clock: ...}` does;
 [how to run a timing study](run_a_timing_only_study.md) is the longer
 version of this choice.
 

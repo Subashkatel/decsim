@@ -216,7 +216,5 @@ In `decsim/frontends/settings.py`. A row of it is named under `workload.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `memory_circuit` | `MemoryCircuitWorkload` in `decsim/frontends/settings.py` | The memory_circuit row: Stim's generated memory circuit. |
-| `memory_patches` | `MemoryPatchesWorkload` in `decsim/frontends/settings.py` | The memory_patches row: independent memory patches run at once. |
-| `circuit_list` | `CircuitListWorkload` in `decsim/frontends/settings.py` | The circuit_list row: the operations as the caller built them. |
-| `surgery_ir` | `SurgeryIRWorkload` in `decsim/frontends/settings.py` | The surgery_ir row: the line-based text IR parsed and wired. |
+| `producer` | `ProducerWorkload` in `decsim/frontends/settings.py` | The producer row: a maker function and the arguments it is called with. |
+| `files` | `FilesWorkload` in `decsim/frontends/settings.py` | The files row: a maker's two outputs read from disk. |

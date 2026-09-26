@@ -25,6 +25,8 @@ from tests.experiments.yaml_configs import (
     MINIMAL_CONFIG,
     SHIPPED_CONFIGS,
     measure_point_shot,
+    memory_workload,
+    online_threshold,
     write_config,
 )
 
@@ -37,8 +39,8 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     assert settings.strong_decoder.kind == "belief_matching"
     assert config.active_decoder is settings.weak_decoder
     # engine cycles price on a named domain, resolved once like the links
-    assert settings.weak_decoder.engine_clock == settings.clocks.clock("fridge")
-    assert settings.strong_decoder.engine_clock == settings.clocks.clock("room")
+    assert settings.weak_decoder.engine.clock == settings.clocks.clock("fridge")
+    assert settings.strong_decoder.engine.clock == settings.clocks.clock("room")
 
 
 def test_the_reference_controller_charges_the_traced_issue_pipeline():
@@ -653,13 +655,11 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
 def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
     # "10d" is Toshio 2510.25222's memory-experiment convention: the shot
     # length follows the swept code distance.
+    workload = memory_workload("10d")
     config_path = write_config(
         tmp_path,
         {
-            "workload": {
-                **MINIMAL_CONFIG["workload"],
-                "rounds_per_shot": "10d",
-            },
+            "workload": workload,
             "sweep": [
                 {
                     "physical_error_probability": [0.001],
@@ -671,10 +671,18 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    rounds_per_shot = config.settings.workload.row_settings.rounds_per_shot
-    assert rounds_per_shot.rounds_for(3) == 30
-    assert rounds_per_shot.rounds_for(5) == 50
-    assert str(rounds_per_shot) == "10d"
+    at_three = config.point_settings(
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+    )
+    at_five = config.point_settings(
+        physical_error_probability=0.001,
+        distance=5,
+        round_period_microseconds=1.0,
+    )
+    assert at_three.workload.rounds_policy.rounds_by_operation[1] == 30
+    assert at_five.workload.rounds_policy.rounds_by_operation[1] == 50
     measurement = measure_point_shot(
         config,
         physical_error_probability=0.001,
@@ -699,7 +707,7 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     manifest_path = run_dir / "manifest.json"
     manifest_text = manifest_path.read_text()
     manifest = json.loads(manifest_text)
-    assert manifest["versions"]["stim"]
+    assert manifest["versions"]["packages"]["stim"]
     assert (
         manifest["resolved_config"]["settings"]["escalation"]["kind"]
         == "weak_baseline"
@@ -715,6 +723,20 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     assert run_dir.name.endswith("-unit_test_config")
     assert (run_dir / "config" / "unit_test_config.yaml").exists()
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
+
+
+def test_a_run_with_an_online_threshold_records_its_trajectory(
+    tmp_path, monkeypatch
+):
+    """The point's threshold is built per point, so every file is written."""
+    overrides = online_threshold()
+    config_path = write_config(tmp_path, overrides)
+    monkeypatch.chdir(tmp_path)
+    run_dir, rows = collect_command.run_experiment(config_path)
+
+    records = run_dir.glob("online_threshold_*.csv")
+    assert len(rows) == 1 and len(list(records)) == 1
+    assert (run_dir / "finished").exists()
 
 
 def test_two_config_files_of_one_name_are_both_copied(tmp_path):

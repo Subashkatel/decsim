@@ -2,10 +2,13 @@
 
 # The run folder
 
-Every `decsim collect` writes one folder under `results/`, named for the
-UTC time it started and the config it ran, and never reused
-(`decsim/experiments/run_folder.py`, `new_run_dir`). `results/` is
-output, not code, and git does not track it, which is gem5's `m5out/`.
+Every `decsim collect` and every `decsim run` writes one folder under
+`results/`, named for the UTC time it started and the config it ran, and
+never reused (`decsim/experiments/run_folder.py`, `new_run_dir`), unless
+`--out` names one. `results/` is output, not code, and git does not
+track it, which is gem5's `m5out/`. `tools/deltakit_example.py` and
+`tools/live_memory_example.py` write the same records into their
+`--output` folder.
 
 A run folder holds facts that add up and nothing else. No summary is
 stored: `sweep.csv` and `links.csv` are computed from the additive files
@@ -28,7 +31,13 @@ without any number changing (`decsim/experiments/report.py`).
 | `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `manifest.json` | `decsim/experiments/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
 | `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain, each at its place relative to the others, so every `extends` still resolves |
-| `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, written only when the checkout was dirty |
+| `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, and a patch creating each untracked file git does not ignore, written only when there is either |
+| `resolved/<id>.json` | `decsim/experiments/run_folder.py`, `record_point` | one per sweep point, named by the point's content id: its metadata, the seeds this folder ran of it (ranges of first and how many; a shard's own, and every shard's once combined), every setting, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
+| `inputs/<id>/` | `decsim/experiments/run_folder.py`, `record_point` | the workload the point ran, as the `files` workload row reads it (`operations.json`, and `circuit.stim` with `measurement_rounds.json` or `fragments/`), and `hashes.json`, each file's sha256 |
+| `producer.json` | `decsim/experiments/run_folder.py`, `write_producer` | the maker a `producer` workload names: its `function`, its `arguments` and its package's `version` |
+| `result.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: every field of the shot's result |
+| `commands.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: when each QPU command arrived and when it started |
+| `finished` | `decsim/experiments/run_folder.py`, `mark_finished` | the time the run ended, written last; a `decsim collect` into a folder that holds it leaves the folder as it is |
 | `trace/<shot>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot |
 | `log/<shot>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
 | `timeline.png`, `ler.png`, `latency.png` | `decsim/experiments/plots.py`, `plots` | the figures `decsim collect` draws itself, each one when its input is there: a timeline when a shot was traced, an error-rate figure when the sweep has more than one physical error rate, and a latency figure when a wall-clock decoder ran at more than one distance |
@@ -36,7 +45,10 @@ without any number changing (`decsim/experiments/report.py`).
 
 The manifest, the config copy and the patch together are the whole
 experiment: the commit plus the patch is the code, and the config chain
-is the input.
+is the input. `resolved/` says what every value came to at each point,
+and `inputs/` holds each point's workload, so a point reruns with the
+`files` row pointed at `inputs/<id>/operations.json` (and its circuit
+keys) without the maker installed.
 
 ## The columns of each file
 
@@ -280,7 +292,8 @@ One object. Its keys, from `write_manifest` in
 | `shard`, `shots_per_unit` | the `--shard` and `--shots-per-unit` this process ran with, or null |
 | `git` | the commit and whether the checkout was dirty, read once when the process started |
 | `container` | the container image, when one was in use |
-| `versions` | the Python, Stim, PyMatching and numpy versions |
+| `versions` | the Python version, and `packages`: every installed package and its version |
+| `union_find_library_sha256` | the compiled Union-Find library's sha256, which the commit does not name, or null when it is not built |
 | `host`, `slurm_job_id` | where it ran |
 | `argv` | the command line as it was invoked |
 | `started_utc`, `finished_utc` | when |

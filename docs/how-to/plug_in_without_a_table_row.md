@@ -51,8 +51,9 @@ this way also keeps its own window sizes; `windows.commit_rounds` and
 `windows.buffer_rounds` size only the card `qpu.code_card` names.
 
 Without a row your class cannot be named from a config file, which
-means it cannot appear in a sweep run by `decsim collect` and a run
-folder's manifest records it by its class name only. Everything else
+means it cannot appear in a sweep run by `decsim collect`, and a run
+folder records it by its class and its attributes, which a later run
+cannot rebuild it from. Everything else
 works: the ports, the engine, the trace, the metrics.
 
 ## When to add the row

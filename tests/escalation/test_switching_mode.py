@@ -30,8 +30,8 @@ import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 from decsim.experiments.experiment import load_experiment
 from tests.experiments.yaml_configs import (
-    MINIMAL_CONFIG,
     measure_point_shot,
+    memory_workload,
     strong_unit,
     write_config,
 )
@@ -57,7 +57,7 @@ def switching_config(
             },
         }
     }
-    workload = {**MINIMAL_CONFIG["workload"], "rounds_per_shot": rounds}
+    workload = memory_workload(rounds)
     sweep_point = {
         "physical_error_probability": [NEAR_THRESHOLD_P],
         "distance": [3],
@@ -285,7 +285,7 @@ def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config = load_experiment(config_path)
     log_of_ten = math.log(10.0)
     expected_nats = 2.0 * log_of_ten
-    assert config.settings.escalation.gap_threshold_decibels == 20.0
+    assert config.settings.escalation.gap_threshold_db == 20.0
     assert math.isclose(
         config.settings.escalation.gap_threshold_nats, expected_nats
     )

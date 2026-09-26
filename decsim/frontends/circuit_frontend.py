@@ -1,131 +1,258 @@
-"""Workloads written by hand: an operation list, or a small text IR.
+"""A maker's workload lowered into a program the machine runs.
 
-Both frontends fill each operation's patches and its predecessors from
-program order on those patches, so two operations that share a patch
-always carry a dependency edge between them. The four named circuits are
-the examples the guides and slides run.
+Each operation's predecessors come from program order on its patches,
+so two operations that share a patch always carry a dependency edge.
+The stream's owner, its protected region and every operation's rounds
+are derived, so a maker writes none of them.
 """
 
-import math
+import dataclasses
+from collections.abc import Mapping
 from typing import Optional
 
+import decsim.ports as ports
+import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
-
-CLIFFORD_GATES = {
-    "cnot",
-    "cx",
-    "h",
-    "x",
-    "y",
-    "z",
-    "s",
-    "sdg",
-    "cz",
-    "swap",
-    "id",
-}
-NON_CLIFFORD_GATES = {"t", "tdg", "ccz", "ccx", "toffoli"}
-ROTATION_GATES = {"rz", "rx", "ry", "p", "u1"}
-GENERAL_UNITARY_GATES = {"u2", "u3", "u"}
+import decsim.records.workload as workload_records
 
 
-def three_cnot_circuit() -> list[program_records.Operation]:
-    """Three CNOTs where the first two can run before the third."""
-    operations = [
-        program_records.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        program_records.Operation(1, "Op1:CNOT(q2,q3)", (2, 3), clifford=True),
-        program_records.Operation(2, "Op2:CNOT(q1,q3)", (1, 3), clifford=True),
-    ]
-    return _wire_circuit(operations)
+@dataclasses.dataclass(frozen=True)
+class WorkloadProgram:
+    """A maker's workload in the machine's terms.
 
-
-def cnot_plus_two_t_circuit() -> list[program_records.Operation]:
-    """A CNOT followed by two dependent T operations."""
-    operations = [
-        program_records.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        program_records.Operation(
-            1, "Op1:T(q1)", (1,), clifford=False, blocked_by=None
-        ),
-        program_records.Operation(
-            2, "Op2:T(q1)", (1,), clifford=False, blocked_by=1
-        ),
-    ]
-    return _wire_circuit(operations)
-
-
-def independent_t_circuit(count: int = 6) -> list[program_records.Operation]:
-    """Independent T operations that only wait for magic-state supply."""
-    operations = []
-    for index in range(count):
-        operation = program_records.Operation(
-            index, f"T(q{index})", (index,), clifford=False, blocked_by=None
-        )
-        operations.append(operation)
-    return _wire_circuit(operations)
-
-
-def three_cnot_six_qubits_circuit() -> list[program_records.Operation]:
-    """Three independent CNOTs on six qubits."""
-    operations = [
-        program_records.Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        program_records.Operation(1, "Op1:CNOT(q3,q4)", (3, 4), clifford=True),
-        program_records.Operation(2, "Op2:CNOT(q2,q5)", (2, 5), clifford=True),
-    ]
-    return _wire_circuit(operations)
-
-
-class CircuitFrontend:
-    """A workload from a Python-built operation list."""
-
-    def __init__(
-        self,
-        operations: list[program_records.Operation],
-        qubit_to_patch: Optional[dict] = None,
-    ):
-        self.operations = operations
-        self.qubit_to_patch = qubit_to_patch
-
-    def build(self) -> list[program_records.Operation]:
-        """The operations with patch-order dependencies filled in."""
-        return _wire_circuit(self.operations, self.qubit_to_patch)
-
-
-class SurgeryIRFrontend:
-    """A workload from the line-based text IR.
-
-    Each line is a gate mnemonic, its qubits (q0 q1 ...), an optional
-    rotation angle, and an optional ``blocked_by <operation id>``; a ``#``
-    starts a comment.
+    physical_circuits maps the stream key that runs the workload's
+    physical circuit (the stream's owner, or the one operation that runs
+    it) to that circuit, for the syndrome source.
     """
 
-    def __init__(self, text: str, qubit_to_patch: Optional[dict] = None):
-        self.text = text
-        self.qubit_to_patch = qubit_to_patch
-
-    def build(self) -> list[program_records.Operation]:
-        """Parse the text and lower it into wired operations."""
-        gates = []
-        for raw_line in self.text.splitlines():
-            gate = _parse_gate_line(raw_line)
-            if gate is None:
-                continue
-            gates.append(gate)
-        return _operations_from_gates(gates, self.qubit_to_patch)
+    operations: tuple
+    dynamic_streams: tuple
+    protected_regions: tuple
+    rounds_policy: Optional[ports.RoundsPolicy]
+    physical_circuits: Mapping
 
 
-def _wire_circuit(
-    operations: list[program_records.Operation],
-    qubit_to_patch: Optional[dict] = None,
-) -> list[program_records.Operation]:
-    """Fill operation patches and predecessors in schedule order."""
+def lowered(workload: workload_records.Workload) -> WorkloadProgram:
+    """The workload's operations wired, its stream and rounds derived."""
+    operations = _copied(workload.operations)
+    _wire_circuit(operations)
+    stream_id = _one_stream_id(operations)
+    physical = workload.physical
+    round_counts = dict(workload.round_counts)
+    if stream_id is None:
+        return _standalone_program(operations, round_counts, physical)
+    return _stream_program(operations, round_counts, physical, stream_id)
+
+
+def _wire_circuit(operations: list[program_records.Operation]) -> None:
+    """Fill operation patches and predecessors in schedule order.
+
+    An operation keeps the predecessors it declares and gains the last
+    earlier user of each of its patches. A decoder boundary joins two
+    operations that emit detector data, so only such an operation
+    carries one.
+    """
     _check_unique_qubits(operations)
-    _check_patch_mapping(operations, qubit_to_patch)
-    predecessors = _patch_order_predecessors(operations, qubit_to_patch)
+    predecessors = _patch_order_predecessors(operations)
+    emitters = _emitters(operations)
+    decoded_ids = {operation.id for operation in emitters}
     for operation in operations:
         ordered = sorted(predecessors[operation.id])
         operation.predecessors = tuple(ordered)
-        operation.decoder_boundary_predecessors = operation.predecessors
-    return operations
+        boundary_predecessors = _boundary_predecessors(operation, decoded_ids)
+        operation.decoder_boundary_predecessors = boundary_predecessors
+
+
+def _copied(operations) -> list:
+    """Copies of the maker's operations, so the wiring leaves its own."""
+    copies = []
+    for operation in operations:
+        copy = dataclasses.replace(operation)
+        copies.append(copy)
+    return copies
+
+
+def _one_stream_id(operations: list) -> Optional[object]:
+    """The stream the first segment names, or None.
+
+    A workload has one physical circuit, so one stream; the machine
+    refuses a segment of any other, whose stream has no owner.
+    """
+    for operation in operations:
+        if operation.stream_id is not None:
+            return operation.stream_id
+    return None
+
+
+def _standalone_program(
+    operations: list, round_counts: dict, physical
+) -> WorkloadProgram:
+    """Operations with no stream: the physical circuit runs as one of them.
+
+    That operation runs the whole circuit, so its rounds are the
+    circuit's unless it names them.
+    """
+    physical_circuits = {}
+    if physical is not None:
+        runner = _the_one_runner(operations)
+        runner.circuit = physical.circuit
+        physical_circuits[runner.id] = physical
+        circuit_round_count = _owner_round_count(physical)
+        round_counts.setdefault(runner.id, circuit_round_count)
+    rounds_policy = _rounds_policy(round_counts)
+    return WorkloadProgram(
+        operations=tuple(operations),
+        dynamic_streams=(),
+        protected_regions=(),
+        rounds_policy=rounds_policy,
+        physical_circuits=physical_circuits,
+    )
+
+
+def _stream_program(
+    operations: list, round_counts: dict, physical, stream_id
+) -> WorkloadProgram:
+    """Segments of one stream: its owner, its region and its rounds derived.
+
+    The owner holds every patch its segments do, runs the finite circuit
+    for the circuit's rounds or stays open for live fragments, and the
+    segments sample the owner's shot, so they carry its circuit too.
+    """
+    segments = _segments(operations, stream_id)
+    circuit = _finite_circuit(physical)
+    for segment in segments:
+        segment.circuit = circuit
+    owner = _owner(stream_id, segments, circuit)
+    round_counts[stream_id] = _owner_round_count(physical)
+    regions = _protected_regions(operations, segments, owner)
+    physical_circuits = {}
+    if physical is not None:
+        physical_circuits[stream_id] = physical
+    rounds_policy = _rounds_policy(round_counts)
+    return WorkloadProgram(
+        operations=tuple(operations),
+        dynamic_streams=(owner,),
+        protected_regions=regions,
+        rounds_policy=rounds_policy,
+        physical_circuits=physical_circuits,
+    )
+
+
+def _the_one_runner(operations: list):
+    """The one operation that emits detector data, which runs the circuit.
+
+    decsim never builds a merged circuit (docs/how-to/
+    plug_in_a_workload_maker.md), so a circuit two operations share
+    needs each one's round range.
+    """
+    emitters = _emitters(operations)
+    if len(emitters) == 1:
+        return emitters[0]
+    raise ValueError(
+        f"the workload's one circuit is the history of "
+        f"{len(emitters)} operations that emit detector data, and "
+        "none names its round range; give each a stream_id and a "
+        "stream_offset into the circuit, since decsim builds no "
+        "merged circuit"
+    )
+
+
+def _emitters(operations: list) -> list:
+    emitters = []
+    for operation in operations:
+        if operation.emits_detector_data:
+            emitters.append(operation)
+    return emitters
+
+
+def _segments(operations: list, stream_id) -> list:
+    """The operations that run a slice of the stream, in program order."""
+    segments = []
+    for operation in operations:
+        if operation.stream_id == stream_id:
+            segments.append(operation)
+    return segments
+
+
+def _finite_circuit(physical):
+    """The finite circuit the owner and its segments sample, or None."""
+    if isinstance(physical, workload_records.FiniteCircuit):
+        return physical.circuit
+    return None
+
+
+def _owner(stream_id, segments: list, circuit) -> program_records.Operation:
+    """The stream's owner: every patch its segments hold, in first-use order."""
+    patches = {}
+    for segment in segments:
+        segment_patches = dict.fromkeys(segment.patches)
+        patches.update(segment_patches)
+    return program_records.Operation(
+        stream_id,
+        f"stream {stream_id}",
+        tuple(patches),
+        patches=tuple(patches),
+        circuit=circuit,
+    )
+
+
+def _owner_round_count(physical) -> int:
+    """A finite circuit's rounds; zero leaves a live stream open-ended.
+
+    The live source finishes a stream when its final readout executes
+    (qpu/streaming_stim_device.py), so the owner declares no length.
+    """
+    if isinstance(physical, workload_records.FiniteCircuit):
+        rounds = physical.measurement_rounds.values()
+        return max(rounds)
+    return 0
+
+
+def _protected_regions(operations: list, segments: list, owner) -> tuple:
+    """The region a waiting stream keeps measuring in, or none.
+
+    A patch that waits keeps running rounds: "during this delay time
+    ∆proc a new data record is generated" (Terhal 1302.3428, lines
+    2697-2698 of the text), and "where our quantum system is idle,
+    more syndromes are generated" (Holmes 2004.04794 line 451). So the
+    operations that hold every patch of the stream after its last
+    segment run inside one protected region, from the first of them to
+    the last (controller/feedback_streams.py).
+    """
+    last_segment = segments[-1]
+    last_index = operations.index(last_segment)
+    after_the_stream = last_index + 1
+    owner_patches = set(owner.patches)
+    holders = []
+    for operation in operations[after_the_stream:]:
+        if owner_patches.issubset(operation.patches):
+            holders.append(operation)
+    if not holders:
+        return ()
+    first = holders[0]
+    last = holders[-1]
+    region = program_records.ProtectedRegion(owner.id, first.id, last.id)
+    return (region,)
+
+
+def _rounds_policy(round_counts: dict) -> Optional[ports.RoundsPolicy]:
+    """The rounds each operation names; the rest take GateRounds'."""
+    if not round_counts:
+        return None
+    fallback = round_policies.GateRounds()
+    return round_policies.PerOperationRounds(round_counts, fallback)
+
+
+def _boundary_predecessors(
+    operation: program_records.Operation, decoded_ids: set
+) -> tuple:
+    if operation.id not in decoded_ids:
+        return ()
+    boundary_predecessors = []
+    for predecessor_id in operation.predecessors:
+        if predecessor_id in decoded_ids:
+            boundary_predecessors.append(predecessor_id)
+    return tuple(boundary_predecessors)
 
 
 def _check_unique_qubits(operations: list[program_records.Operation]) -> None:
@@ -139,56 +266,23 @@ def _check_unique_qubits(operations: list[program_records.Operation]) -> None:
             )
 
 
-def _check_patch_mapping(
-    operations: list[program_records.Operation], qubit_to_patch: Optional[dict]
-) -> None:
-    """Refuse a patch map that leaves a used qubit without a patch."""
-    if qubit_to_patch is None:
-        return
-    missing = set()
-    for operation in operations:
-        unmapped = _unmapped_qubits(operation, qubit_to_patch)
-        missing.update(unmapped)
-    if missing:
-        ordered = sorted(missing)
-        raise ValueError(f"qubit_to_patch has no patch for qubit(s) {ordered}")
-
-
-def _unmapped_qubits(
-    operation: program_records.Operation, qubit_to_patch: dict
-) -> set:
-    unmapped = set()
-    for qubit in operation.qubits:
-        if qubit not in qubit_to_patch:
-            unmapped.add(qubit)
-    return unmapped
-
-
-def _operation_patches(
-    operation: program_records.Operation, qubit_to_patch: Optional[dict]
-) -> tuple:
-    """The patches an operation touches, in first-use order."""
-    if qubit_to_patch is not None:
-        patches = []
-        for qubit in operation.qubits:
-            patches.append(qubit_to_patch[qubit])
-        distinct = dict.fromkeys(patches)
-        return tuple(distinct)
+def _operation_patches(operation: program_records.Operation) -> tuple:
+    """The patches an operation touches: its own, or its qubits."""
     if operation.patches:
         return operation.patches
     return tuple(operation.qubits)
 
 
 def _patch_order_predecessors(
-    operations: list[program_records.Operation], qubit_to_patch: Optional[dict]
+    operations: list[program_records.Operation],
 ) -> dict:
-    """Each operation's predecessors: the last earlier user of each patch."""
+    """Each operation's predecessors: its own, and each patch's last user."""
     last_operation_on_patch = {}
     predecessors = {}
     for operation in operations:
-        predecessors[operation.id] = set()
+        predecessors[operation.id] = set(operation.predecessors)
     for operation in operations:
-        operation.patches = _operation_patches(operation, qubit_to_patch)
+        operation.patches = _operation_patches(operation)
         earlier_users = _claim_patches(operation, last_operation_on_patch)
         predecessors[operation.id].update(earlier_users)
     return predecessors
@@ -205,166 +299,3 @@ def _claim_patches(
             earlier_users.add(previous_id)
         last_operation_on_patch[patch] = operation.id
     return earlier_users
-
-
-def _parse_gate_line(raw_line: str) -> Optional[tuple]:
-    """One IR line as (mnemonic, qubits, is_clifford, blocked_by)."""
-    code, _, _comment = raw_line.partition("#")
-    line = code.strip()
-    if not line:
-        return None
-    words = line.split()
-    mnemonic = words[0]
-    tokens, blocked_by = _split_blocked_by(words)
-    qubits = _qubits_of(tokens)
-    angle = None
-    lowered = mnemonic.lower()
-    if lowered in ROTATION_GATES:
-        angle = _angle_token(tokens)
-    is_clifford = _gate_is_clifford(mnemonic, angle)
-    return (mnemonic, qubits, is_clifford, blocked_by)
-
-
-def _split_blocked_by(words: list[str]) -> tuple:
-    """The words before blocked_by, and the operation id it names."""
-    if "blocked_by" not in words:
-        return words, None
-    keyword_index = words.index("blocked_by")
-    value_start = keyword_index + 1
-    values = words[value_start:]
-    if len(values) != 1 or not values[0].isdigit():
-        raise ValueError(
-            f"blocked_by takes one operation id and nothing after it, got "
-            f"{values}"
-        )
-    blocked_by = int(values[0])
-    return words[:keyword_index], blocked_by
-
-
-def _qubits_of(tokens: list[str]) -> tuple[int, ...]:
-    """The qubit indices named by q<index> tokens after the mnemonic."""
-    qubits = []
-    for token in tokens[1:]:
-        if _is_qubit_token(token):
-            qubit = _qubit_index(token)
-            qubits.append(qubit)
-    return tuple(qubits)
-
-
-def _qubit_index(token: str) -> int:
-    """The index of a q<index> token; any other q word is refused."""
-    digits = token[1:]
-    if not digits.isdigit():
-        raise ValueError(f"qubit {token!r} is not q followed by an index")
-    return int(digits)
-
-
-def _angle_token(tokens: list[str]) -> Optional[str]:
-    """The first token after the mnemonic that is not a qubit."""
-    for token in tokens[1:]:
-        if not _is_qubit_token(token):
-            return token
-    return None
-
-
-def _is_qubit_token(token: str) -> bool:
-    lowered = token.lower()
-    return lowered.startswith("q")
-
-
-def _operations_from_gates(
-    gates: list, qubit_to_patch: Optional[dict] = None
-) -> list[program_records.Operation]:
-    """Lower parsed gates into wired operations."""
-    operations = []
-    for operation_index, gate in enumerate(gates):
-        mnemonic, qubits, is_clifford, blocked_by = gate
-        qubit_words = []
-        for qubit in qubits:
-            qubit_words.append(f"q{qubit}")
-        qubit_text = ",".join(qubit_words)
-        upper_mnemonic = mnemonic.upper()
-        operation = program_records.Operation(
-            operation_index,
-            f"Op{operation_index}:{upper_mnemonic}({qubit_text})",
-            tuple(qubits),
-            clifford=is_clifford,
-            blocked_by=blocked_by,
-        )
-        operations.append(operation)
-    return _wire_circuit(operations, qubit_to_patch)
-
-
-def _gate_is_clifford(mnemonic: str, angle: Optional[str] = None) -> bool:
-    """Whether a gate is Clifford; an unknown mnemonic is refused."""
-    lowered = mnemonic.lower()
-    if lowered in CLIFFORD_GATES:
-        return True
-    if lowered in NON_CLIFFORD_GATES:
-        return False
-    if lowered in GENERAL_UNITARY_GATES:
-        return False
-    if lowered in ROTATION_GATES:
-        return _rotation_is_clifford(angle)
-    raise ValueError(
-        f"unsupported gate '{mnemonic}'. Add it to CLIFFORD_GATES / "
-        f"NON_CLIFFORD_GATES / ROTATION_GATES / GENERAL_UNITARY_GATES"
-    )
-
-
-def _rotation_is_clifford(angle_expression: Optional[str]) -> bool:
-    """A single-axis rotation is Clifford at a multiple of a quarter turn."""
-    angle = _parse_angle(angle_expression)
-    if angle is None:
-        return False
-    quarter_turn = math.pi / 2.0
-    quarter_turns = angle / quarter_turn
-    nearest = round(quarter_turns)
-    distance = quarter_turns - nearest
-    return abs(distance) < 1e-9
-
-
-def _parse_angle(angle_expression: Optional[str]) -> Optional[float]:
-    """A number or a pi fraction in radians; None when the line gives none.
-
-    The text IR is input, so an angle the grammar cannot read is refused
-    with the line's angle rather than read as a non-Clifford rotation
-    that would ask the factory for a magic state (STYLE.md rule 4).
-    """
-    if angle_expression is None:
-        return None
-    stripped = angle_expression.strip()
-    lowered = stripped.lower()
-    normalized = lowered.replace(" ", "")
-    try:
-        return _angle_from_text(normalized)
-    except (ValueError, ZeroDivisionError) as error:
-        raise ValueError(
-            f"rotation angle {angle_expression!r} is not "
-            "[-]factor[*factor...][/factor] with each factor a number or pi"
-        ) from error
-
-
-def _angle_from_text(normalized: str) -> float:
-    """[-]<factor>[*<factor>...][/<factor>] with pi as a factor."""
-    is_negative = normalized.startswith("-")
-    if is_negative:
-        normalized = normalized[1:]
-    denominator = 1.0
-    if "/" in normalized:
-        numerator_text, denominator_text = normalized.split("/", 1)
-        denominator = _factor_value(denominator_text)
-        normalized = numerator_text
-    coefficient = 1.0
-    for factor_text in normalized.split("*"):
-        coefficient *= _factor_value(factor_text)
-    angle = coefficient / denominator
-    if is_negative:
-        return -angle
-    return angle
-
-
-def _factor_value(factor_text: str) -> float:
-    if factor_text == "pi":
-        return math.pi
-    return float(factor_text)

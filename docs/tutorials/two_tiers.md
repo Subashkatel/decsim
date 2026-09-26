@@ -134,13 +134,24 @@ strong_decoder: kind 10.0
 escalation: kind switching
 burst_detector: kind none
 pauli_frame: kind logical_register
-workload: kind memory_circuit
+workload: kind producer
 magic_state_factory: kind infinite
 links: card two_tiers.yaml
 sweep block 1: p [0.008], d [3, 5], round period [1.0] us, 50 shots
 log: off
 trace: off
+values:
+clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:50]
+clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
+qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:4]
+qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:81]
+qpu.round_period_microseconds = [1.0]  [sweep, configs/two_tiers.yaml:51-55]
+qpu.distance = [3, 5]  [sweep, configs/two_tiers.yaml:51-55]
 ```
+
+Below `values:` the list goes on to every value the machine is built
+with, one per line: the layer that set it (your file, a preset it
+extends, the sweep, or the default) and the yaml lines it came from.
 
 Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the weak tier and
 keeps every round a strong re-decode might still ask for;

@@ -98,7 +98,7 @@ class OnlineThresholdSettings:
     """The online calibrator's knobs (threshold_source online).
 
     Two loops around the live threshold: a rate tracker steps it toward
-    target_escalation_rate on every window (step_decibels per event), and
+    target_escalation_rate on every window (step_db per event), and
     a randomized audit lane strong-decodes audit_rate of the kept
     windows; one revised audit multiplies the target by adjust_factor,
     and only ceil(3 / kept_bad_budget) consecutive clean audits divide it
@@ -111,7 +111,7 @@ class OnlineThresholdSettings:
     """
 
     target_escalation_rate: float = 1e-3
-    step_decibels: float = 0.25
+    step_db: float = 0.25
     audit_rate: float = 0.01
     kept_bad_budget: float = 2e-4
     adjust_factor: float = 2.0
@@ -137,7 +137,7 @@ class OnlineThresholdSettings:
         target_escalation_rate = _online_float(
             section, "target_escalation_rate", 1e-3
         )
-        step_decibels = _online_float(section, "step_db", 0.25)
+        step_db = _online_float(section, "step_db", 0.25)
         audit_rate = _online_float(section, "audit_rate", 0.01)
         kept_bad_budget = _online_float(section, "kept_bad_budget", 2e-4)
         adjust_factor = _online_float(section, "adjust_factor", 2.0)
@@ -149,7 +149,7 @@ class OnlineThresholdSettings:
         )
         settings = cls(
             target_escalation_rate=target_escalation_rate,
-            step_decibels=step_decibels,
+            step_db=step_db,
             audit_rate=audit_rate,
             kept_bad_budget=kept_bad_budget,
             adjust_factor=adjust_factor,
@@ -161,10 +161,10 @@ class OnlineThresholdSettings:
 
     def check(self) -> None:
         """Refuse a knob outside its range."""
-        if self.step_decibels <= 0:
+        if self.step_db <= 0:
             raise ValueError(
                 "escalation.online.step_db must be positive "
-                f"(got {self.step_decibels})"
+                f"(got {self.step_db})"
             )
         if not 0 < self.audit_rate < 1:
             raise ValueError(
@@ -185,7 +185,7 @@ class OnlineThresholdSettings:
 
     def step_nats(self) -> float:
         """The step in natural-log weight units."""
-        return decibels_to_nats(self.step_decibels)
+        return decibels_to_nats(self.step_db)
 
     def _check_rates(self) -> None:
         low = self.min_escalation_rate
@@ -253,7 +253,7 @@ class EscalationSettings:
     kind: str = "weak_baseline"
     confidence: str = "complementary_gap"
     confidence_walk_microseconds: Optional[float] = None
-    gap_threshold_decibels: Optional[float] = None
+    gap_threshold_db: Optional[float] = None
     threshold_source: str = "fixed"
     threshold_table: Optional[str] = None
     threshold_column: Optional[str] = None
@@ -471,12 +471,12 @@ def _switching_settings(
     threshold_row = tables.row(
         THRESHOLD_SOURCES, "escalation.threshold_source", threshold_source
     )
-    gap_threshold_decibels = _gap_threshold_decibels(
+    gap_threshold_db = _gap_threshold_db(
         section, threshold_source, threshold_row
     )
     gap_threshold_nats = None
-    if gap_threshold_decibels is not None:
-        gap_threshold_nats = decibels_to_nats(gap_threshold_decibels)
+    if gap_threshold_db is not None:
+        gap_threshold_nats = decibels_to_nats(gap_threshold_db)
     threshold_column = None
     if threshold_row.reads_a_calibration_table:
         raw_column = section.get("threshold_column", "gth_eq4_wilson")
@@ -499,7 +499,7 @@ def _switching_settings(
         kind=kind,
         confidence=confidence,
         confidence_walk_microseconds=walk_microseconds,
-        gap_threshold_decibels=gap_threshold_decibels,
+        gap_threshold_db=gap_threshold_db,
         gap_threshold_nats=gap_threshold_nats,
         threshold_source=threshold_source,
         threshold_table=threshold_table,
@@ -540,7 +540,7 @@ def _restart_reread_buffer_regions(section: Mapping) -> int:
     return int(regions)
 
 
-def _gap_threshold_decibels(
+def _gap_threshold_db(
     section: Mapping, threshold_source: str, threshold_row
 ) -> Optional[float]:
     """The card's threshold; a row that reads a table computes it instead."""
@@ -699,12 +699,12 @@ def _certified_nats(
         f"p={physical_error_probability}"
     )
     try:
-        gap_threshold_decibels = float(cell)
+        gap_threshold_db = float(cell)
     except ValueError:
         raise ValueError(
             f"{entry} must be a number of decibels (got {cell!r})"
         ) from None
-    checked_decibels = _checked_decibels(gap_threshold_decibels, entry)
+    checked_decibels = _checked_decibels(gap_threshold_db, entry)
     return decibels_to_nats(checked_decibels)
 
 

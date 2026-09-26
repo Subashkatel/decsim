@@ -314,8 +314,12 @@ def summary_rows(totals: dict, counts: dict) -> list:
 
 
 def write_csv(rows: list, path: Path) -> None:
-    """The rows as a csv file, the first row's keys as the header."""
-    field_names = list(rows[0])
+    """The rows as a csv file, every column any row holds, first seen first."""
+    columns = {}
+    for row in rows:
+        row_columns = dict.fromkeys(row)
+        columns.update(row_columns)
+    field_names = list(columns)
     with open(path, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=field_names)
         writer.writeheader()
@@ -509,6 +513,16 @@ def read_rows(path: Path) -> list:
     return rows
 
 
+def rows_by_point(run_dir: Path) -> dict:
+    """sweep.csv's rows, keyed by their sweep point."""
+    sweep_path = run_dir / "sweep.csv"
+    rows = {}
+    for row in read_rows(sweep_path):
+        point = run_folder.point_of(row)
+        rows[point] = row
+    return rows
+
+
 def combine(run_dirs: list, out_dir: Path) -> list:
     """Fold several run folders into one report, and return its rows.
 
@@ -553,6 +567,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     _refuse_a_repeated_shot(folders, order)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = _fold_the_folders(folders, order, out_dir)
+    run_folder.copy_point_records(folders, out_dir)
     finished_utc = run_folder.utc_now()
     run_folder.write_combined_manifest(
         recorded_config,
@@ -561,6 +576,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
         started_utc,
         finished_utc=finished_utc,
     )
+    run_folder.mark_finished(out_dir)
     return rows
 
 

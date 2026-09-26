@@ -8,12 +8,14 @@ system before it wires a single port.
 
 import copy
 import dataclasses
+from collections.abc import Mapping
 from typing import Any
 
 import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.controller.settings as controller_settings
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
@@ -22,6 +24,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
 import decsim.windows.settings as window_settings
@@ -78,7 +81,7 @@ def build_plan(
         buffer_rounds_override=settings.windows.buffer_rounds,
     )
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
-        settings.workload, code
+        settings.workload
     )
     external_decode_operations = decode_operations + dynamic_streams
     every_operation = operations + external_decode_operations
@@ -107,10 +110,6 @@ def build_plan(
             "dynamic streams require a windowing scheme that supports them"
         )
     has_static_decode_plan = settings.workload.decode_operations is not None
-    workload_row = tables.row(
-        workload_settings.WORKLOADS, "workload.kind", settings.workload.kind
-    )
-    has_frontend = workload_row.has_frontend
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     run_shape = decoding_records.RunShape(
@@ -124,7 +123,6 @@ def build_plan(
         is_bulk_strong=settings.decoder_manager.bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
-        has_frontend=has_frontend,
     )
     escalation_policy.check_plan(run_shape)
     planned_operations = _decode_plan_operations(
@@ -151,7 +149,8 @@ def build_plan(
         strong_side_forms=strong_side_forms,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
-    device = _syndrome_source(settings.qpu, code)
+    physical_circuits = settings.workload.physical_circuits
+    device = _syndrome_source(settings.qpu, code, physical_circuits)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
         error_model_provider = device.window_model_source()
@@ -211,31 +210,18 @@ def _window_interaction(settings, reread_regions):
     )
 
 
-def _operations(settings: workload_settings.WorkloadSettings, code) -> tuple:
+def _operations(settings: workload_settings.WorkloadSettings) -> tuple:
     """The workload's private operation copies and its rounds policy.
 
     The run never mutates the caller's operations; an operation without
-    its own feedback boundary mode takes the workload's. A row that fixes
-    its rounds built its operations for that count, so a second policy
-    is refused rather than one of the two winning in silence.
+    its own feedback boundary mode takes the workload's.
     """
-    row = tables.row(
-        workload_settings.WORKLOADS, "workload.kind", settings.kind
-    )
-    source_operations, fixed_rounds_policy = row.operations(settings, code)
     rounds_policy = settings.rounds_policy
-    if fixed_rounds_policy is not None and rounds_policy is not None:
-        raise ValueError(
-            f"workload.kind {settings.kind} fixes its own rounds, so the "
-            "workload takes no rounds_policy"
-        )
-    if rounds_policy is None:
-        rounds_policy = fixed_rounds_policy
     if rounds_policy is None:
         rounds_policy = round_policies.GateRounds()
     decode_operations = settings.decode_operations or ()
     copies = {}
-    operations = _copies(source_operations, copies, settings)
+    operations = _copies(settings.operations, copies, settings)
     decode_copies = _copies(decode_operations, copies, settings)
     stream_copies = _copies(settings.dynamic_streams, copies, settings)
     planner.check_workload_identity(operations, decode_copies, stream_copies)
@@ -424,12 +410,16 @@ def _idle_policy(settings: controller_settings.IdlePolicySettings):
     return row(settings=settings.row_settings)
 
 
-def _syndrome_source(settings: qpu_settings.QpuSettings, code):
+def _syndrome_source(
+    settings: qpu_settings.QpuSettings, code, physical_circuits: Mapping
+):
     """The device of the qpu kind, or the Python-built one.
 
     A row that shapes its payloads by the code card is built with the
     run's card, so a yaml that names it needs no argument of its own; a
-    row with keys of its own is built with its Settings record too.
+    row that reads its widths off a circuit is built with the
+    workload's physical circuits instead; a row with keys of its own is
+    built with its Settings record too.
     """
     if settings.device is not None:
         return settings.device
@@ -437,9 +427,49 @@ def _syndrome_source(settings: qpu_settings.QpuSettings, code):
     arguments = {}
     if row.takes_code_card:
         arguments["code"] = code
+    else:
+        circuit_arguments = _circuit_arguments(physical_circuits)
+        arguments.update(circuit_arguments)
     if settings.row_settings is not None:
         arguments["settings"] = settings.row_settings
     return row(**arguments)
+
+
+def _circuit_arguments(physical_circuits: Mapping) -> dict:
+    """The source's constructor arguments for the workload's circuits.
+
+    A finite circuit is its measurement schedule and the round each
+    detector completes in, keyed by the stream that runs it, which is
+    StimDevice's declaration (qpu/stim_device.py); live fragments are
+    the programs StreamingStimDevice executes.
+    """
+    measurement_rounds = {}
+    detector_rounds = {}
+    programs = {}
+    for key, physical in physical_circuits.items():
+        if isinstance(physical, workload_records.FiniteCircuit):
+            measurement_rounds[key] = dict(physical.measurement_rounds)
+            detector_rounds[key] = _detector_rounds(physical)
+            continue
+        programs[key] = physical
+    arguments = {}
+    if measurement_rounds:
+        arguments["measurement_rounds"] = measurement_rounds
+        arguments["detector_rounds"] = detector_rounds
+    if programs:
+        arguments["programs"] = programs
+    return arguments
+
+
+def _detector_rounds(physical: workload_records.FiniteCircuit) -> dict:
+    """Each detector's round, formed off the declared measurement schedule."""
+    schedule = physical.measurement_rounds
+    rounds = schedule.values()
+    round_count = max(rounds)
+    table = detector_formation.build_formation_table(
+        physical.circuit, round_count, measurement_rounds=schedule
+    )
+    return table.detector_rounds()
 
 
 def _install_operation_circuits(device, model_provider, operations) -> None:

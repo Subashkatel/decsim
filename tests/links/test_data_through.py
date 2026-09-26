@@ -63,6 +63,7 @@ SEED = 0
 CODE_TASK = "surface_code:rotated_memory_z"
 # the decoder engines run at 250 MHz, a 4000-tick period
 ENGINE_CLOCK = config.Clock(4000)
+ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # every window escalates at this threshold, so the strong tier's traffic
 # is the plan rather than a sample of the weak decoder's confidence
 UNREACHABLE_GAP_DECIBELS = 1000.0
@@ -212,10 +213,12 @@ def machine_settings(shape: str, distance: int):
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     links = link_profiles.logical_reference_profile()
     weak = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     strong = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     if shape == "weak":
         escalation = escalation_settings.EscalationSettings(
@@ -241,7 +244,7 @@ def machine_settings(shape: str, distance: int):
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         confidence="complementary_gap",
-        gap_threshold_decibels=UNREACHABLE_GAP_DECIBELS,
+        gap_threshold_db=UNREACHABLE_GAP_DECIBELS,
         gap_threshold_nats=nats,
     )
     return machine_settings_module.MachineSettings(
@@ -475,7 +478,8 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     weak = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     links = link_profiles.logical_reference_profile()
     settings = machine_settings_module.MachineSettings(

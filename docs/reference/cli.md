@@ -25,6 +25,13 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | `run_dirs` | required | the folders to fold |
 | `--out` | None | the folder the combined rows go in |
 
+## `decsim diff`
+
+| Argument | Default | What it is |
+| --- | --- | --- |
+| `first` | required | the first run folder |
+| `second` | required | the run folder to compare it with |
+
 ## `decsim plot`
 
 | Argument | Default | What it is |
@@ -40,7 +47,7 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | --- | --- | --- |
 | `config` | required | the experiment yaml to run |
 | `--seed` | 0 | the shot's seed (default 0) |
-| `--out` | None | the folder the log and trace go in |
+| `--out` | None | the run folder the shot writes |
 | `--log` | None | the engine narrator, overriding the yaml for this run |
 | `--trace` | off unless the flag is given | write this shot's Chrome trace of the data path |
 

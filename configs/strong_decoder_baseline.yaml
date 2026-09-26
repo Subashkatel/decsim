@@ -6,9 +6,11 @@ qpu:
 escalation:
   kind: strong_only
 workload:
-  kind: memory_circuit
-  code_task: surface_code:rotated_memory_z
-  rounds_per_shot: 10d
+  kind: producer
+  function: decsim.producers:memory_circuit
+  arguments:
+    code_task: surface_code:rotated_memory_z
+    rounds_per_shot: 10d
 
 windows:
   kind: sliding

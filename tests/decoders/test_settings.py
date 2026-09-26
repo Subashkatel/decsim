@@ -109,8 +109,8 @@ def test_the_engine_card_reads_the_per_job_and_per_round_stage_cycles():
         section, clocks, "weak_decoder"
     )
 
-    assert settings.fetch_cycles_per_job == 1
-    assert settings.release_cycles_per_round == 4
+    assert settings.engine.fetch_cycles_per_job == 1
+    assert settings.engine.release_cycles_per_round == 4
 
 
 @pytest.mark.parametrize("section_name", ["weak_decoder", "strong_decoder"])

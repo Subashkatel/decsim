@@ -10,18 +10,21 @@ would leave them.
 import dataclasses
 
 import pytest
+import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.escalation.settings as escalation_settings
-import decsim.frontends.settings as workload_settings
-import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
@@ -30,7 +33,9 @@ import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 
-def _plan(*, escalation=None, windows=None, qpu=None, idle_policy=None):
+def _plan(
+    *, escalation=None, windows=None, qpu=None, idle_policy=None, workload=None
+):
     """The plan of a six-round memory run with the given sections."""
     if idle_policy is None:
         idle_policy = controller_settings.IdlePolicySettings()
@@ -40,7 +45,8 @@ def _plan(*, escalation=None, windows=None, qpu=None, idle_policy=None):
         windows = window_settings.WindowSettings()
     if qpu is None:
         qpu = declared_run.declared_qpu()
-    workload = declared_run.declared_workload(None, 6)
+    if workload is None:
+        workload = declared_run.declared_workload(None, 6)
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
@@ -93,6 +99,52 @@ def test_a_circuit_less_source_wires_the_model_source_that_builds_nothing():
     assert plan.error_model_provider is syndrome_devices.NO_WINDOW_MODELS
 
 
+def _live_fragments_workload():
+    """One live segment on a stream, its fragments a single measurement."""
+    segment = program_records.Operation(
+        1, "prefix", ("p",), patches=("p",), stream_id=100, stream_offset=0
+    )
+    fragment = stim.Circuit("M 0")
+    program = circuit_records.RepeatedStimCircuit(
+        fragment, fragment, fragment, fragment
+    )
+    workload = workload_records.Workload((segment,), {1: 3}, program)
+    section = declared_run.declared_workload(None, 6)
+    return section.running(workload)
+
+
+@pytest.mark.parametrize(
+    "kind, sentence",
+    [
+        ("recorded_stim", "required positional arguments: 'measurements'"),
+        ("streaming_stim", "required positional argument: 'programs'"),
+    ],
+)
+def test_a_source_the_workload_cannot_fill_stops_its_call(kind, sentence):
+    """Python's own call names the argument the source is not given."""
+    source = qpu_settings.QpuSettings(kind=kind, distance=3)
+
+    with pytest.raises(TypeError, match=sentence):
+        _plan(qpu=source)
+
+
+def test_live_fragments_under_a_finite_circuit_source_stop_its_call():
+    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    workload = _live_fragments_workload()
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        _plan(qpu=source, workload=workload)
+
+
+def test_live_fragments_build_the_streaming_source_from_a_yaml_kind():
+    source = qpu_settings.QpuSettings(kind="streaming_stim", distance=3)
+    workload = _live_fragments_workload()
+
+    plan = _plan(qpu=source, workload=workload)
+
+    assert isinstance(plan.device, streaming_stim_device.StreamingStimDevice)
+
+
 def test_a_run_that_never_escalates_gets_the_flush_tail():
     plan = _plan()
 
@@ -139,14 +191,6 @@ def test_a_boundaries_row_written_in_the_section_wins_over_the_default():
     plan = _plan(windows=windows)
 
     assert isinstance(plan.boundary_policy, boundary_policies.Held)
-
-
-def test_the_workload_row_declares_whether_the_run_has_a_frontend():
-    """The plan reads the declared fact, not the kind string."""
-    rows = workload_settings.WORKLOADS
-
-    for kind, row in rows.items():
-        assert isinstance(row.has_frontend, bool), kind
 
 
 def test_a_windows_kind_that_names_no_row_is_refused():
@@ -341,30 +385,3 @@ def test_an_outside_strong_window_row_names_the_escalations_default(
     plan = _plan(escalation=switching)
 
     assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)
-
-
-def test_a_row_that_fixes_its_rounds_refuses_a_second_rounds_policy():
-    """A memory circuit runs rounds_per_shot rounds; a policy may not move it.
-
-    A circuit-less source would otherwise run the policy's count in
-    silence, since no circuit is there to disagree.
-    """
-    seven_rounds = round_policies.FixedRounds(7)
-    fifteen_rounds = workload_settings.RoundsPerShot(fixed=15)
-    memory = workload_settings.MemoryCircuitWorkload.Settings(
-        code_task="surface_code:rotated_memory_z",
-        rounds_per_shot=fifteen_rounds,
-    )
-    workload = workload_settings.WorkloadSettings(
-        kind="memory_circuit",
-        physical_error_probability=0.001,
-        rounds_policy=seven_rounds,
-        row_settings=memory,
-    )
-    qpu = declared_run.declared_qpu()
-    settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-    with pytest.raises(ValueError, match="fixes its own rounds"):
-        plan_build.build_plan(settings, policy)

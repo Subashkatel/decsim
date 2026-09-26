@@ -15,11 +15,53 @@ import pytest
 import stim
 
 import decsim.config as config
+import decsim.experiments.experiment as experiment
+import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
-import decsim.qpu.streaming_stim_device as streaming_stim_device
+import decsim.producers as producers
 import decsim.records.circuits as circuit_records
+import tests.experiments.yaml_configs as yaml_configs
 import tests.qpu.memory_programs as memory_programs
 import tools.live_memory_example as example
+
+# The tool's protection workload as a decsim.ops/1 file: decode after
+# three rounds, wait for the answer, resume one round, read out. The
+# stream's owner, its protected region and its rounds are derived.
+LIVE_OPERATIONS = {
+    "schema": "decsim.ops/1",
+    "operations": [
+        {
+            "id": 1,
+            "name": "prefix",
+            "patches": ["memory-patch"],
+            "stream_id": 100,
+            "stream_offset": 0,
+            "rounds": 3,
+        },
+        {
+            "id": 2,
+            "name": "protect",
+            "patches": ["memory-patch"],
+            "emits_detector_data": False,
+            "rounds": 0,
+        },
+        {
+            "id": 3,
+            "name": "resume",
+            "patches": ["memory-patch"],
+            "blocked_by": 1,
+            "emits_detector_data": False,
+            "rounds": 1,
+        },
+        {
+            "id": 4,
+            "name": "readout",
+            "patches": ["memory-patch"],
+            "emits_detector_data": False,
+            "rounds": 0,
+        },
+    ],
+}
 
 
 def test_saved_fragments_reproduce_results_trace_and_actual_history(
@@ -29,12 +71,13 @@ def test_saved_fragments_reproduce_results_trace_and_actual_history(
     replay = tmp_path / "replay"
     inputs = _canonical_inputs(tmp_path)
     _run_example(inputs, original)
-    _run_example(original, replay)
+    saved = _saved_fragments(original)
+    _run_example(saved, replay)
     original_result = _read_json(original, "result.json")
     replay_result = _read_json(replay, "result.json")
     assert original_result == replay_result
-    original_trace = _read_json(original, "trace.json")
-    replay_trace = _read_json(replay, "trace.json")
+    original_trace = _read_json(original, "trace/seed17.trace.json")
+    replay_trace = _read_json(replay, "trace/seed17.trace.json")
     assert original_trace == replay_trace
     original_measurements = _read_json(original, "measurements.json")
     replay_measurements = _read_json(replay, "measurements.json")
@@ -42,6 +85,28 @@ def test_saved_fragments_reproduce_results_trace_and_actual_history(
     original_circuit = _executed_circuit(original)
     replay_circuit = _executed_circuit(replay)
     assert original_circuit == replay_circuit
+
+
+def test_a_rerun_from_a_run_folders_fragments_runs_its_recorded_point(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The point's distance and probability come back from its record."""
+    program = memory_programs.memory_program(distance=5)
+    program = dataclasses.replace(program, round_period_microseconds=1.1)
+    inputs = tmp_path / "distance_5" / "fragments"
+    _write_fragments(inputs, program)
+    original = tmp_path / "original"
+    replay = tmp_path / "replay"
+    physical = ("--distance", "5", "--physical-error-probability", "0.002")
+    _run_example(inputs, original, physical=physical)
+    saved = _saved_fragments(original)
+    _run_example(saved, replay)
+    original_result = _read_json(original, "result.json")
+    replay_result = _read_json(replay, "result.json")
+    assert replay_result == original_result
+    original_points = _resolved_names(original)
+    replay_points = _resolved_names(replay)
+    assert replay_points == original_points
 
 
 def test_later_feedback_extends_the_live_history_and_actual_readout(
@@ -101,11 +166,8 @@ def test_saved_actual_measurements_reproduce_the_final_logical_truth(
     assert result["event_queue_empty"]
 
 
-@pytest.mark.parametrize(
-    "flag,value", [("--round-period-microseconds", "1.2"), ("--distance", "5")]
-)
-def test_replay_refuses_changes_to_physical_inputs(
-    tmp_path: pathlib.Path, flag: str, value: str
+def test_replay_refuses_a_round_period_the_fragments_do_not_declare(
+    tmp_path: pathlib.Path,
 ) -> None:
     inputs = _canonical_inputs(tmp_path)
     output = tmp_path / "refused"
@@ -116,14 +178,28 @@ def test_replay_refuses_changes_to_physical_inputs(
         str(inputs),
         "--output",
         str(output),
-        flag,
-        value,
+        "--round-period-microseconds",
+        "1.2",
     ]
     refused = subprocess.run(
         command, check=False, capture_output=True, text=True
     )
     assert refused.returncode != 0
-    assert "differs from the exported physical parameters" in refused.stderr
+    assert "period differs from the QPU cadence" in refused.stderr
+
+
+def test_fragments_that_bind_no_period_replay_at_the_chosen_one(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A null period leaves the cadence to the run, as the files row does."""
+    program = memory_programs.memory_program()
+    inputs = tmp_path / "unbound" / "fragments"
+    _write_fragments(inputs, program)
+    output = tmp_path / "replay"
+    physical = ("--round-period-microseconds", "1.1")
+    _run_example(inputs, output, physical=physical)
+    result = _read_json(output, "result.json")
+    assert result["event_queue_empty"]
 
 
 def test_replay_does_not_select_the_optional_producer(
@@ -159,7 +235,8 @@ def test_optional_producer_saves_reusable_physical_inputs(
     output = tmp_path / noise_model
     command = _producer_command(output, noise_model)
     subprocess.run(command, check=True, capture_output=True)
-    parameters = _read_json(output, "physical_parameters.json")
+    saved = _saved_fragments(output)
+    parameters = _read_json(saved, workload_files.PHYSICAL_FILE_NAME)
     assert parameters["round_period_microseconds"] == 1.25
     result = _read_json(output, "result.json")
     assert result["terminal_status"] == "complete"
@@ -170,17 +247,28 @@ def test_optional_producer_saves_reusable_physical_inputs(
 
 
 def test_prefix_requires_a_physical_measurement_round() -> None:
-    with pytest.raises(ValueError, match="prefix_round_count must be positive"):
-        example.protection_workload(0, "patch")
+    """The QPU refuses a decode before the stream's first round."""
+    program = memory_programs.memory_program()
+    settings = example.live_settings(
+        program,
+        distance=3,
+        round_period_microseconds=1.1,
+        prefix_round_count=0,
+        patch="patch",
+        feedback_microseconds=4.0,
+        decoder_microseconds=0.1,
+    )
+
+    machine = machine_module.Machine.build(settings, seed=81)
+
+    with pytest.raises(ValueError, match="must finalize a stream round"):
+        machine.run()
 
 
 def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     program = memory_programs.memory_program()
-    source = streaming_stim_device.StreamingStimDevice(
-        programs={example.STREAM_OWNER_ID: program}
-    )
     settings = example.live_settings(
-        source,
+        program,
         distance=3,
         round_period_microseconds=1.1,
         prefix_round_count=3,
@@ -192,49 +280,107 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     assert owner.patches == ("user-patch",)
     machine = machine_module.Machine.build(settings, seed=81)
     result = machine.run()
+    source = machine.syndrome_source
     assert result.terminal_status == "complete"
-    assert source.logical_observable_truth(example.STREAM_OWNER_ID) is not None
+    assert source.logical_observable_truth(producers.LIVE_STREAM_ID) is not None
+
+
+@pytest.mark.parametrize("feedback_microseconds", [4.0, 8.0, 20.0])
+def test_the_files_row_runs_what_the_tool_builds_by_hand(
+    tmp_path: pathlib.Path, feedback_microseconds: float
+) -> None:
+    """The canonical fragments from a yaml, against the tool's own run."""
+    program = memory_programs.memory_program()
+    program = dataclasses.replace(program, round_period_microseconds=1.1)
+    folder = _live_files(tmp_path, program)
+    workload = {
+        "kind": "files",
+        "operations": "live/operations.json",
+        "fragments": "live/fragments",
+    }
+    config_path = yaml_configs.example_tool_config(
+        folder, "streaming_stim", workload, feedback_microseconds
+    )
+    config = experiment.load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.1,
+    )
+    machine = machine_module.Machine.build(settings, 17)
+    result = machine.run()
+    tool_settings = example.live_settings(
+        program,
+        distance=3,
+        round_period_microseconds=1.1,
+        prefix_round_count=3,
+        patch="memory-patch",
+        feedback_microseconds=feedback_microseconds,
+        decoder_microseconds=0.1,
+    )
+    tool_machine = machine_module.Machine.build(tool_settings, 17)
+    tool_result = tool_machine.run()
+    stream_id = producers.LIVE_STREAM_ID
+    yaml_source = machine.syndrome_source
+    source = tool_machine.syndrome_source
+    measurements = yaml_source.sampled_measurements(stream_id)
+    tool_measurements = source.sampled_measurements(stream_id)
+    executed = yaml_source.executed_circuit(stream_id)
+    tool_executed = source.executed_circuit(stream_id)
+
+    assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)
+    assert measurements == tool_measurements
+    assert executed == tool_executed
+
+
+def _live_files(folder: pathlib.Path, program) -> pathlib.Path:
+    """The live operations and the fragments, as the files row reads them."""
+    live = folder / "live"
+    live.mkdir()
+    operations_text = json.dumps(LIVE_OPERATIONS)
+    operations_path = live / "operations.json"
+    operations_path.write_text(operations_text)
+    fragments = live / "fragments"
+    _write_fragments(fragments, program)
+    return folder
 
 
 def _canonical_inputs(folder: pathlib.Path) -> pathlib.Path:
-    inputs = folder / "canonical"
-    inputs.mkdir()
+    """The canonical fragments, as a files row fragments folder."""
     program = memory_programs.memory_program()
     program = dataclasses.replace(program, round_period_microseconds=1.1)
-    _write_fragments(inputs, program)
-    parameters = {
-        "distance": 3,
-        "basis": "Z",
-        "physical_error_probability": 0.003,
-        "round_period_microseconds": 1.1,
-        "noise_model": "stim_fixture",
-        "relaxation_time_microseconds": None,
-        "dephasing_time_microseconds": None,
-    }
-    parameter_text = json.dumps(parameters)
-    path = inputs / "physical_parameters.json"
-    path.write_text(parameter_text)
-    return inputs
+    fragments = folder / "canonical" / "fragments"
+    _write_fragments(fragments, program)
+    return fragments
 
 
 def _write_fragments(
-    folder: pathlib.Path, program: circuit_records.RepeatedStimCircuit
+    fragments: pathlib.Path, program: circuit_records.RepeatedStimCircuit
 ) -> None:
-    for name in (
-        "first_round",
-        "repeated_round",
-        "final_round",
-        "single_round",
-    ):
+    """The four fragments and physical.json, as the files row reads them."""
+    fragments.mkdir(parents=True)
+    for name in workload_files.FRAGMENT_NAMES:
         fragment = getattr(program, name)
-        path = folder / f"{name}.stim"
+        path = fragments / f"{name}.stim"
         fragment.to_file(str(path))
+    physical = {"round_period_microseconds": program.round_period_microseconds}
+    physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
+    physical_text = json.dumps(physical)
+    physical_path.write_text(physical_text)
+
+
+def _saved_fragments(run_folder: pathlib.Path) -> pathlib.Path:
+    """The fragments a tool run saved with its one point's inputs."""
+    saved = run_folder.glob("inputs/*/fragments")
+    (fragments,) = saved
+    return fragments
 
 
 def _run_example(
     inputs: pathlib.Path,
     output: pathlib.Path,
     feedback_microseconds: float = 4.0,
+    physical: tuple = (),
 ) -> None:
     command = [
         sys.executable,
@@ -245,8 +391,15 @@ def _run_example(
         str(output),
         "--feedback-microseconds",
         str(feedback_microseconds),
+        *physical,
     ]
     subprocess.run(command, check=True, capture_output=True)
+
+
+def _resolved_names(folder: pathlib.Path) -> list:
+    """The point ids a run folder recorded, which name its every value."""
+    paths = folder.glob("resolved/*.json")
+    return sorted(path.name for path in paths)
 
 
 def _read_json(folder: pathlib.Path, filename: str) -> object:

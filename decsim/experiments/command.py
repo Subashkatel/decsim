@@ -10,6 +10,7 @@ loads Stim. The console script and `python -m decsim` both land here.
         [--shots-per-unit N]
     decsim combine <run_dir>... [--out DIR]
     decsim show <yaml>
+    decsim diff <run_dir> <run_dir>
     decsim plot <run_dir>... [--figure NAME] [--out PATH] [--probability P]
     decsim trace follow <file> --round k:n | --window k:n [--html PATH]
 
@@ -130,7 +131,11 @@ def _combine(argv: list) -> None:
 
 
 def _show(argv: list) -> None:
-    """What one yaml resolves to, before anything runs."""
+    """What one yaml resolves to, before anything runs.
+
+    The first point's machine is built and not run, so show refuses
+    whatever `decsim run` would refuse.
+    """
     import argparse
 
     import decsim.experiments.experiment as experiment
@@ -139,9 +144,22 @@ def _show(argv: list) -> None:
     parser.add_argument("config", help="the experiment yaml to resolve")
     parsed = parser.parse_args(argv)
     config = experiment.load_experiment(parsed.config)
+    first_point = config.first_point_task()
+    settings = first_point.shot_settings()
+    config.built_machine(settings, 0)
     lines = experiment.resolved_description(config)
+    lines.append("values:")
+    value_lines = experiment.value_lines(config)
+    lines.extend(value_lines)
     text = "\n".join(lines)
     print(text)
+
+
+def _diff(argv: list) -> None:
+    """How two run folders differ: settings, inputs, then results."""
+    import decsim.experiments.diff_command as diff_command
+
+    diff_command.main(argv)
 
 
 def _plot(argv: list) -> None:
@@ -264,6 +282,7 @@ _RUN_BY_VERB = {
     "collect": _collect,
     "combine": _combine,
     "show": _show,
+    "diff": _diff,
     "plot": _plot,
     "trace": _trace,
 }

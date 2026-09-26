@@ -10,9 +10,12 @@ edges.
 
 import dataclasses
 import math
-from collections.abc import Mapping
+import types
+from collections.abc import Iterator, Mapping
 
 TICKS_PER_MICROSECOND = 1_000_000
+# A clocks section that names no domain.
+_NO_DOMAINS = types.MappingProxyType({})
 
 
 def microseconds_to_ticks(microseconds: float) -> int:
@@ -98,42 +101,55 @@ class Clock:
         return whole_cycles + 1
 
 
-@dataclasses.dataclass(frozen=True)
-class ClockSettings:
+class ClockSettings(Mapping):
     """The clock domains of the yaml's `clocks` section: name to megahertz.
 
     A link, a controller, a decoder engine or a frame prices its cycles
     on the domain it names; more domains (an mK stage, a 4K SFQ decoder)
     are one more entry. Both shipped domains start at LILLIPUT's 250 MHz
-    (2108.06569 Table 4). `clock` hands out the domain's Clock, which is
-    what a component charges cycles on.
+    (2108.06569 Table 4). It is the section's own mapping, so a domain's
+    frequency is clocks.<name> as the yaml writes it. `clock` hands out
+    the domain's Clock, which is what a component charges cycles on.
     """
 
-    megahertz_by_name: Mapping[str, float] = dataclasses.field(
-        default_factory=dict
-    )
+    def __init__(self, megahertz_of: Mapping = _NO_DOMAINS) -> None:
+        self._megahertz_of = dict(megahertz_of)
+
+    def __getitem__(self, name: str) -> float:
+        return self._megahertz_of[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._megahertz_of)
+
+    def __len__(self) -> int:
+        return len(self._megahertz_of)
+
+    def __hash__(self) -> int:
+        items = self._megahertz_of.items()
+        frozen = frozenset(items)
+        return hash(frozen)
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ClockSettings":
         """The `clocks` section: every value a positive frequency."""
-        megahertz_by_name = {}
+        megahertz_of = {}
         for name, megahertz in section.items():
             if not _is_frequency(megahertz):
                 raise ValueError(
                     f"clock {name} must be a positive frequency in "
                     f"megahertz, got {megahertz!r}"
                 )
-            megahertz_by_name[name] = float(megahertz)
-        return cls(megahertz_by_name)
+            megahertz_of[name] = float(megahertz)
+        return cls(megahertz_of)
 
     def megahertz(self, clock: str) -> float:
         """The named domain's frequency."""
-        if clock not in self.megahertz_by_name:
-            known = sorted(self.megahertz_by_name)
+        if clock not in self:
+            known = sorted(self)
             raise ValueError(
                 f"clock {clock!r} is not a clocks entry; the clocks are {known}"
             )
-        return self.megahertz_by_name[clock]
+        return self[clock]
 
     def clock(self, clock: str) -> Clock:
         """The named domain's clock, its period rounded to whole ticks."""

@@ -63,6 +63,7 @@ and one table row. These guides are the recipe and its variants.
 - [How to add a decoder backend](how-to/add_a_decoder_backend.md)
 - [How to plug a component in without a table row](how-to/plug_in_without_a_table_row.md)
 - [How to add a yaml key](how-to/add_a_yaml_key.md)
+- [How to plug in a workload maker](how-to/plug_in_a_workload_maker.md)
 
 **Run and read an experiment.** Getting a sweep through a cluster,
 and reading what it wrote.

@@ -16,9 +16,9 @@ from decsim.experiments.experiment import load_experiment
 CARD_YAML = (
     "qpu: {kind: stim_device}\n"
     "escalation: {kind: weak_baseline}\n"
-    "workload: {kind: memory_circuit, "
-    "code_task: surface_code:rotated_memory_z,\n"
-    "           rounds_per_shot: 15}\n"
+    "workload: {kind: producer, function: decsim.producers:memory_circuit,\n"
+    "           arguments: {code_task: surface_code:rotated_memory_z,\n"
+    "                       rounds_per_shot: 15}}\n"
     "windows: {kind: sliding, commit_rounds: null, buffer_rounds: null}\n"
     "sweep: [{physical_error_probability: [0.001], distance: [3],\n"
     "         round_period_microseconds: [1.0], shots: 1}]\n"
@@ -78,8 +78,8 @@ def test_the_header_key_reaches_the_path(tmp_path):
     card_path.write_text(CARD_YAML)
     config = load_experiment(card_path)
     card = config.settings.links
-    assert card.decoder_to_decoder.header_bits == 448
-    assert card.weak_decoder_to_frame.header_bits == 0
+    assert card.decoder_to_decoder.header_bits_per_transfer == 448
+    assert card.weak_decoder_to_frame.header_bits_per_transfer == 0
 
 
 def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):

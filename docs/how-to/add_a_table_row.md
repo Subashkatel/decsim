@@ -82,7 +82,7 @@ study most often extends:
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
 | `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
-| `WORKLOADS` | not built (the `WorkloadRow` port): the root calls `row.operations(settings, code)` for the operations and the rounds policy the row fixes (or None), with the row's own `Settings` on `settings.row_settings`, and reads `row.has_frontend` | `decsim/build/plan.py`, `_operations` |
+| `WORKLOADS` | not built (the `WorkloadRow` port): the workload section calls `row.workload(settings.row_settings, sweep_values)` once per sweep point for the records.workload `Workload` it lowers | `decsim/frontends/settings.py`, `WorkloadSettings.at_point` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
 | `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
@@ -171,7 +171,7 @@ than any description of it.
 | a syndrome buffer | `tests/machine/test_machine.py::test_a_new_syndrome_buffer_is_one_class_and_one_table_row` |
 | a syndrome buffer with a key of its own | `tests/syndrome_buffer/test_settings.py::test_a_buffer_rows_own_key_reaches_its_settings` |
 | a syndrome source with a key of its own | `tests/experiments/test_yaml_surface.py::test_a_source_rows_own_key_reaches_the_built_source` |
-| a workload | `tests/frontends/test_settings.py::test_a_workload_row_written_outside_decsim_runs_from_a_yaml` |
+| a workload maker | `tests/frontends/test_settings.py::test_a_maker_written_outside_decsim_runs_from_a_yaml` |
 | a code card | `tests/machine/test_machine.py::test_a_code_card_written_outside_decsim_runs_with_no_registration` |
 | a code card with keys of its own, named in the yaml | `tests/experiments/test_yaml_surface.py::test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys` |
 | a layout | `tests/qpu/test_layouts.py::test_a_layout_written_outside_decsim_hears_every_hook_of_a_run` |

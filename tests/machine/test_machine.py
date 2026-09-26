@@ -61,7 +61,6 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
-import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
@@ -104,7 +103,9 @@ SIX_ROUND_WINDOW_BITS = {
 }
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
+FAST_ENGINE_CARD = decoder_settings.EngineSettings(clock=FAST_ENGINE_CLOCK)
 ENGINE_CLOCK = config.Clock(10_000)
+ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # The run helpers' default root seed: one call is one repeatable shot.
 RUN_SEED = 17
 
@@ -289,7 +290,7 @@ def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
         ValueError, match=r"the yaml has no section \['buffers'\]; the sections"
     ):
         machine_settings.MachineSettings.from_mapping(
-            {"buffers": {}}, name="x", base_directory=None
+            {"buffers": {}}, name="x", section_folders={}
         )
 
 
@@ -307,7 +308,7 @@ def test_a_section_missing_or_not_a_mapping_is_refused_with_a_sentence(
     sections.update(qpu_entry)
     with pytest.raises(ValueError, match=sentence):
         machine_settings.MachineSettings.from_mapping(
-            sections, name="x", base_directory=None
+            sections, name="x", section_folders={}
         )
 
 
@@ -354,7 +355,8 @@ def test_zero_delay_terminal_round_uses_its_actual_strong_model(
 ) -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", placement)
-    workload = _scheduled_workload(final_round)
+    physical = settings.workload.physical_circuits
+    workload = _scheduled_workload(final_round, physical)
     links = _zero_delay_links(settings.links)
     settings = dataclasses.replace(settings, workload=workload, links=links)
     run = _run(settings)
@@ -488,7 +490,8 @@ def test_single_terminal_window_matches_direct_pymatching(
 ) -> None:
     program = memory_programs.memory_program(physical_error_probability=0.08)
     settings = _settings(program, "live", placement)
-    workload = _scheduled_workload(2)
+    physical = settings.workload.physical_circuits
+    workload = _scheduled_workload(2, physical)
     settings = dataclasses.replace(settings, workload=workload)
     run = _run(settings)
     circuit = run.shots[0][0].circuit
@@ -642,7 +645,8 @@ def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
     pytest.importorskip("deltakit_explorer")
     program = _bb_memory(basis)
     settings = _bb_settings(program, placement, commit_round_count=10)
-    workload = _scheduled_workload(3)
+    physical = settings.workload.physical_circuits
+    workload = _scheduled_workload(3, physical)
     workload = _bb_logical_qubits(workload)
     settings = dataclasses.replace(settings, workload=workload)
 
@@ -913,7 +917,8 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     with a model holds the unit for its measured time.
     """
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=FAST_ENGINE_CLOCK
+        kind="pymatching",
+        engine=FAST_ENGINE_CARD,
     )
     settings = _two_patch_memory(weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
@@ -945,14 +950,16 @@ def _switching_memory(weak_kind: str, confidence: str):
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         confidence=confidence,
-        gap_threshold_decibels=decibels,
+        gap_threshold_db=decibels,
         gap_threshold_nats=nats,
     )
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=weak_kind, engine_clock=ENGINE_CLOCK
+        kind=weak_kind,
+        engine=ENGINE_CARD,
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_clock=ENGINE_CLOCK
+        kind="pymatching",
+        engine=ENGINE_CARD,
     )
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
@@ -1115,14 +1122,17 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
     """
     tiers = {
         "weak": decoder_settings.DecoderSettings(
-            kind="pymatching", engine_clock=ENGINE_CLOCK
+            kind="pymatching",
+            engine=ENGINE_CARD,
         ),
         "strong": decoder_settings.DecoderSettings(
-            kind="belief_matching", engine_clock=ENGINE_CLOCK
+            kind="belief_matching",
+            engine=ENGINE_CARD,
         ),
     }
     tiers[tier] = decoder_settings.DecoderSettings(
-        kind="union_find_cluster_gap", engine_clock=ENGINE_CLOCK
+        kind="union_find_cluster_gap",
+        engine=ENGINE_CARD,
     )
     escalation = escalation_settings.EscalationSettings(kind=escalation_kind)
     if escalation_kind == "switching":
@@ -2484,9 +2494,7 @@ def _protected_memory_settings(circuit, source):
         rounds_policy=policy,
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
-    decoder = decoder_settings.DecoderSettings(
-        kind=0.1, engine_clock=ENGINE_CLOCK
-    )
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=ENGINE_CARD)
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -2554,9 +2562,8 @@ def _physical_settings(
     period_microseconds: float,
 ) -> machine_settings.MachineSettings:
     if history == "live":
-        source = streaming_stim_device.StreamingStimDevice({100: program})
         return live_example.live_settings(
-            source,
+            program,
             distance=3,
             round_period_microseconds=period_microseconds,
             prefix_round_count=3,
@@ -2566,11 +2573,9 @@ def _physical_settings(
         )
     circuit, mapping = program.assemble(24)
     workload = finite_example.protection_workload(
-        circuit, 24, 3, "stream-patch"
+        circuit, mapping, 24, 3, "stream-patch"
     )
     return finite_example.supplied_settings(
-        circuit,
-        mapping,
         workload,
         distance=3,
         round_count=24,
@@ -2583,10 +2588,10 @@ def _run(
     settings: machine_settings.MachineSettings, seed: int = RUN_SEED
 ) -> _Run:
     """One run of the machine: one shot of the source at the seed."""
-    source = settings.qpu.device
-    shots = []
-    source.shot_sampled.connect(lambda *sample: shots.append(sample))
     machine = machine_module.Machine.build(settings, seed)
+    shots = []
+    source = machine.syndrome_source
+    source.shot_sampled.connect(lambda *sample: shots.append(sample))
     packets = []
     weak_writes = []
     strong_occupancies = []
@@ -2710,13 +2715,14 @@ def _declared_timing(
     links = _price_path(links, "controller_to_strong_buffer", 250_000)
     links = _price_path(links, "strong_buffer_to_strong_decoder", 350_000)
     links = _price_path(links, "strong_decoder_to_frame", 400_000)
-    decoder = dataclasses.replace(
-        settings.strong_decoder,
+    engine = dataclasses.replace(
+        settings.strong_decoder.engine,
         fetch_cycles_per_round=0,
         fetch_cycles_per_job=0,
         release_cycles_per_job=0,
         release_cycles_per_round=0,
     )
+    decoder = dataclasses.replace(settings.strong_decoder, engine=engine)
     return dataclasses.replace(settings, links=links, strong_decoder=decoder)
 
 
@@ -2743,7 +2749,14 @@ def _command_tick(run: _Run, kind: str, operation_id: int) -> int:
     return ticks[0]
 
 
-def _scheduled_workload(final_round: int) -> workload_settings.WorkloadSettings:
+def _scheduled_workload(
+    final_round: int, physical_circuits
+) -> workload_settings.WorkloadSettings:
+    """Protected from the first round, with no segment the lowering reads.
+
+    The live source is built from the physical circuits the replaced
+    section carried (decsim/build/plan.py _syndrome_source).
+    """
     owner = program_records.Operation(
         100, "memory", ("stream-patch",), patches=("stream-patch",)
     )
@@ -2770,6 +2783,7 @@ def _scheduled_workload(final_round: int) -> workload_settings.WorkloadSettings:
         dynamic_streams=(owner,),
         protected_regions=(region,),
         rounds_policy=policy,
+        physical_circuits=physical_circuits,
     )
 
 
@@ -2798,7 +2812,8 @@ def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
     source = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
     clock = config.Clock(4000)
-    strong = decoder_settings.DecoderSettings(kind=0.2, engine_clock=clock)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    strong = decoder_settings.DecoderSettings(kind=0.2, engine=engine)
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
     idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     settings = machine_settings.MachineSettings(
@@ -3009,7 +3024,7 @@ def _operations_on_group(operations: tuple, patches: tuple) -> tuple:
 
 
 def _assert_joint_acquisitions(run: _Run) -> None:
-    source = run.machine.settings.qpu.device
+    source = run.machine.syndrome_source
     identities = [
         (packet.operation_id, packet.round_index) for packet in run.packets
     ]

@@ -96,8 +96,9 @@ how to run a timing study that does not depend on your hardware.
 
 ## Step 3. Run the sweep and get a run folder
 
-`decsim run` is one shot and prints to the terminal. To get a folder of
-results, use `collect`, which runs every point of the yaml's sweep:
+`decsim run` is one shot: it prints to the terminal and keeps that
+shot's record in a folder. To get the results of every point, use
+`collect`, which runs every point of the yaml's sweep:
 
 ```bash
 decsim collect configs/reference.yaml --out results/reference
@@ -156,10 +157,14 @@ ls results/reference
 
 ```
 config
+finished
+inputs
 latency_samples.csv
 links.csv
 manifest.json
+producer.json
 residence.csv
+resolved
 shot_links.csv
 shots.csv
 sweep.csv
@@ -168,14 +173,17 @@ trace
 window_samples.csv
 ```
 
-`--out` names the folder, and running the command again writes over
-it. Without `--out`, `collect` writes a new folder named with the UTC
-time the run started, so no two collects share one.
+`--out` names the folder. A run writes `finished` into it last, and
+running the command again into a finished folder leaves it as it is.
+Without `--out`, `collect` writes a new folder named with the UTC time
+the run started, so no two collects share one.
 
 The folder is written under `results/`, which is output and is not
 tracked by git. `config/` holds a verbatim copy of the yaml files that
-produced it, `manifest.json` the git commit and the command line, and
-the csv files the facts.
+produced it, `manifest.json` the git commit and the command line,
+`resolved/` every value each point ran with, `inputs/` the workload each
+point ran, `producer.json` the function that made it, and the csv files
+the facts.
 [The run folder](../reference/run_folder.md) has one row per file.
 
 ## Step 5. Read one row and one figure

@@ -2,49 +2,47 @@
 
 Four canonical Stim fragments reproduce the same live history without the
 optional producer. Runtime feedback changes how long the data stays live.
+The fragments are read and written in the files row's form: a fragments
+folder with the four .stim files and physical.json, which a run folder
+keeps in inputs/<id>/fragments.
 """
 
 import argparse
-import dataclasses
 import json
 import pathlib
-from typing import Optional
 
-import stim
-
+import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.experiments.run_command as run_command
+import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
+import decsim.frontends.workload_files as workload_files
 import decsim.links.link_profiles as link_profiles
-import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
-import decsim.qpu.cycle_clock as cycle_clock
-import decsim.qpu.round_policies as round_policies
+import decsim.producers as producers
 import decsim.qpu.settings as qpu_settings
-import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.circuits as circuit_records
-import decsim.records.program as program_records
-import decsim.records.results as result_records
 import decsim.settings as machine_settings
-
-# The stream owner: the operation whose live stream the segments extend
-# and whose complete result the run scores.
-STREAM_OWNER_ID = 100
 
 
 def main() -> None:
-    """Save canonical inputs and the physical history selected by feedback."""
+    """Save canonical inputs and the physical history selected by feedback.
+
+    The output folder is a run folder (decsim/experiments/run_folder.py):
+    its manifest, every value of the run in resolved/, its workload in
+    inputs/, the shot's files as decsim run writes them and the finished
+    flag, beside the executed history and the arguments.
+    """
     arguments = _arguments()
-    parameters = _physical_parameters(arguments)
-    program = _program(arguments.input, parameters)
+    recorded = _recorded_values(arguments.input)
+    parameters = _physical_parameters(arguments, recorded)
+    program = _program(arguments, parameters)
     if arguments.prefix_round_count is None:
         arguments.prefix_round_count = parameters["distance"]
-    source = streaming_stim_device.StreamingStimDevice(
-        programs={STREAM_OWNER_ID: program}
-    )
     settings = live_settings(
-        source,
+        program,
         distance=parameters["distance"],
         round_period_microseconds=parameters["round_period_microseconds"],
         prefix_round_count=arguments.prefix_round_count,
@@ -53,20 +51,31 @@ def main() -> None:
         decoder_microseconds=arguments.decoder_microseconds,
     )
     machine = machine_module.Machine.build(settings, arguments.seed)
+    started_utc = run_folder.start_run(None, arguments.output)
+    metadata = {
+        "physical_error_probability": parameters["physical_error_probability"],
+        "distance": parameters["distance"],
+        "round_period_microseconds": parameters["round_period_microseconds"],
+    }
+    seeds = [(arguments.seed, 1)]
+    task = collect.Task(settings, 1, metadata)
+    run_folder.record_point(arguments.output, task, seeds)
     result = machine.run()
-    arguments.output.mkdir(parents=True, exist_ok=True)
-    _write_inputs(arguments.output, program, parameters)
-    _write_execution(arguments.output, source, machine, result)
+    label = f"seed{arguments.seed}"
+    run_command.write_shot(machine, settings, arguments.output, label, result)
+    _write_execution(arguments.output, machine)
     selected_arguments = vars(arguments)
     argument_values = dict(selected_arguments)
     argument_values.update(parameters)
     argument_path = arguments.output / "arguments.json"
-    _write_json(argument_path, argument_values)
+    argument_json = collect.json_value(argument_values)
+    run_folder.write_json(argument_path, argument_json)
+    run_folder.finish_run(None, arguments.output, started_utc)
     print(f"complete: {arguments.output}")
 
 
 def live_settings(
-    source: streaming_stim_device.StreamingStimDevice,
+    program: circuit_records.RepeatedStimCircuit,
     *,
     distance: int,
     round_period_microseconds: float,
@@ -75,85 +84,40 @@ def live_settings(
     feedback_microseconds: float,
     decoder_microseconds: float,
 ) -> machine_settings.MachineSettings:
-    """Use functional PyMatching with caller-declared service and link times."""
-    workload = protection_workload(prefix_round_count, patch)
+    """Use functional PyMatching with caller-declared service and link times.
+
+    The workload is decsim.producers live_memory on the fragments, the
+    one a yaml names, and the source is built from them as a yaml's
+    streaming_stim is (decsim/build/plan.py _syndrome_source).
+    """
+    workload = producers.live_memory(program, prefix_round_count, patch)
+    section = workload_settings.WorkloadSettings()
+    lowered = section.running(workload)
     qpu = qpu_settings.QpuSettings(
+        kind="streaming_stim",
         distance=distance,
-        device=source,
         round_period_microseconds=round_period_microseconds,
     )
     clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
     decoder = decoder_settings.DecoderSettings(
-        kind=decoder_microseconds, engine_clock=clock
+        kind=decoder_microseconds,
+        engine=engine,
     )
-    links = _feedback_links(feedback_microseconds)
+    reference = link_profiles.logical_reference_profile()
+    feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
+    links = link_profiles.with_path_latency(
+        reference, "frame_to_controller", feedback_ticks
+    )
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True
     )
     return machine_settings.MachineSettings(
-        workload=workload,
+        workload=lowered,
         qpu=qpu,
         weak_decoder=decoder,
         links=links,
         observation=observation,
-    )
-
-
-def protection_workload(
-    prefix_round_count: int, patch: str
-) -> workload_settings.WorkloadSettings:
-    """Keep the complete dependency graph together to expose its ownership.
-
-    The prefix requests decoding while the region protects the same stream.
-    Decoded release permits resume, whose completion requests final readout.
-    These operation and stream identities are local to this example.
-    """
-    if prefix_round_count < 1:
-        raise ValueError("prefix_round_count must be positive")
-    owner = program_records.Operation(
-        STREAM_OWNER_ID, "memory", (patch,), patches=(patch,)
-    )
-    prefix = program_records.Operation(
-        1,
-        "prefix",
-        (patch,),
-        patches=(patch,),
-        stream_id=STREAM_OWNER_ID,
-        stream_offset=0,
-    )
-    begin = program_records.Operation(
-        2,
-        "protect",
-        (patch,),
-        patches=(patch,),
-        predecessors=(1,),
-        emits_detector_data=False,
-    )
-    resume = program_records.Operation(
-        3,
-        "resume",
-        (patch,),
-        patches=(patch,),
-        predecessors=(2,),
-        blocked_by=1,
-        emits_detector_data=False,
-    )
-    finish = program_records.Operation(
-        4,
-        "readout",
-        (patch,),
-        patches=(patch,),
-        predecessors=(3,),
-        emits_detector_data=False,
-    )
-    region = program_records.ProtectedRegion(STREAM_OWNER_ID, 2, 4)
-    counts = {STREAM_OWNER_ID: 0, 1: prefix_round_count, 2: 0, 3: 1, 4: 0}
-    policy = round_policies.PerOperationRounds(counts)
-    return workload_settings.WorkloadSettings(
-        operations=(prefix, begin, resume, finish),
-        dynamic_streams=(owner,),
-        protected_regions=(region,),
-        rounds_policy=policy,
     )
 
 
@@ -167,6 +131,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--decoder-microseconds", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--patch", default="memory-patch")
+    # a fragments folder of the files row, such as a run's
+    # inputs/<id>/fragments
     parser.add_argument("--input", type=pathlib.Path)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     return parser.parse_args()
@@ -182,7 +148,37 @@ def _physical_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dephasing-time-microseconds", type=float)
 
 
-def _physical_parameters(arguments: argparse.Namespace) -> dict:
+def _recorded_values(fragments) -> dict:
+    """The physical values recorded beside a fragments folder.
+
+    physical.json's period when it binds one, and, for a run folder's
+    inputs/<id>/fragments, the point's values in resolved/<id>.json, so
+    a rerun from them runs the recorded point.
+    """
+    if fragments is None:
+        return {}
+    physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
+    physical = _read_json(physical_path)
+    recorded = {}
+    for name, value in physical.items():
+        if value is not None:
+            recorded[name] = value
+    point_folder = fragments.parent
+    run_dir = point_folder.parent.parent
+    resolved_path = (
+        run_dir / run_folder.RESOLVED_FOLDER / f"{point_folder.name}.json"
+    )
+    if resolved_path.exists():
+        record = _read_json(resolved_path)
+        recorded.update(record["metadata"])
+    return recorded
+
+
+def _physical_parameters(arguments: argparse.Namespace, recorded: dict) -> dict:
+    """The command line's physical parameters over the recorded ones.
+
+    The defaults stand where neither names a value.
+    """
     defaults = {
         "distance": 3,
         "basis": "Z",
@@ -192,40 +188,20 @@ def _physical_parameters(arguments: argparse.Namespace) -> dict:
         "relaxation_time_microseconds": None,
         "dephasing_time_microseconds": None,
     }
-    recorded = defaults
-    if arguments.input is not None:
-        path = arguments.input / "physical_parameters.json"
-        text = path.read_text()
-        recorded = json.loads(text)
     parameters = {}
-    for name in defaults:
+    for name, default in defaults.items():
         selected = getattr(arguments, name)
-        parameters[name] = _selected_physical_parameter(
-            arguments.input, name, selected, recorded[name]
-        )
+        parameters[name] = recorded.get(name, default)
+        if selected is not None:
+            parameters[name] = selected
     return parameters
 
 
-def _selected_physical_parameter(
-    input_folder: Optional[pathlib.Path],
-    name: str,
-    selected: object,
-    recorded: object,
-) -> object:
-    if selected is None:
-        return recorded
-    if input_folder is not None and selected != recorded:
-        raise ValueError(
-            f"{name} differs from the exported physical parameters"
-        )
-    return selected
-
-
 def _program(
-    input_folder: Optional[pathlib.Path], parameters: dict
+    arguments: argparse.Namespace, parameters: dict
 ) -> circuit_records.RepeatedStimCircuit:
-    if input_folder is not None:
-        return _load_program(input_folder, parameters)
+    if arguments.input is not None:
+        return workload_files.read_fragments(arguments.input)
     import decsim.frontends.deltakit as deltakit
 
     return deltakit.memory_rounds(
@@ -240,94 +216,26 @@ def _program(
     )
 
 
-def _load_program(
-    folder: pathlib.Path, parameters: dict
-) -> circuit_records.RepeatedStimCircuit:
-    fragments = {}
-    for name in (
-        "first_round",
-        "repeated_round",
-        "final_round",
-        "single_round",
-    ):
-        path = folder / f"{name}.stim"
-        fragments[name] = stim.Circuit.from_file(str(path))
-    return circuit_records.RepeatedStimCircuit(
-        **fragments,
-        round_period_microseconds=parameters["round_period_microseconds"],
-    )
-
-
-def _feedback_links(
-    feedback_microseconds: float,
-) -> link_settings.FabricSettings:
-    links = link_profiles.logical_reference_profile()
-    ticks = config.microseconds_to_ticks(feedback_microseconds)
-    channel = dataclasses.replace(
-        links.frame_to_controller.channel, propagation_latency_ticks=ticks
-    )
-    path = dataclasses.replace(links.frame_to_controller, channel=channel)
-    return dataclasses.replace(links, frame_to_controller=path)
-
-
-def _write_inputs(
-    folder: pathlib.Path,
-    program: circuit_records.RepeatedStimCircuit,
-    parameters: dict,
-) -> None:
-    for name in (
-        "first_round",
-        "repeated_round",
-        "final_round",
-        "single_round",
-    ):
-        circuit = getattr(program, name)
-        path = folder / f"{name}.stim"
-        circuit.to_file(str(path))
-    path = folder / "physical_parameters.json"
-    _write_json(path, parameters)
-
-
 def _write_execution(
-    folder: pathlib.Path,
-    source: streaming_stim_device.StreamingStimDevice,
-    machine: machine_module.Machine,
-    result: result_records.RunResult,
+    folder: pathlib.Path, machine: machine_module.Machine
 ) -> None:
-    circuit = source.executed_circuit(STREAM_OWNER_ID)
+    """The history feedback selected: the executed circuit and its readout."""
+    source = machine.syndrome_source
+    stream_id = producers.LIVE_STREAM_ID
+    circuit = source.executed_circuit(stream_id)
     circuit_path = folder / "executed.stim"
     circuit.to_file(str(circuit_path))
-    measurement_rounds = source.measurement_rounds_for_stream(STREAM_OWNER_ID)
+    measurement_rounds = source.measurement_rounds_for_stream(stream_id)
     mapping_path = folder / "measurement_rounds.json"
-    _write_json(mapping_path, measurement_rounds)
-    measurements = source.sampled_measurements(STREAM_OWNER_ID)
+    run_folder.write_json(mapping_path, measurement_rounds)
+    measurements = source.sampled_measurements(stream_id)
     measurement_path = folder / "measurements.json"
-    _write_json(measurement_path, measurements)
-    result_values = dataclasses.asdict(result)
-    result_path = folder / "result.json"
-    _write_json(result_path, result_values)
-    command_values = [
-        _command_value(event)
-        for event in machine.observation.command_events.events
-    ]
-    commands_path = folder / "commands.json"
-    _write_json(commands_path, command_values)
-    trace_path = folder / "trace.json"
-    machine.observation.trace_writer.write(str(trace_path))
+    run_folder.write_json(measurement_path, measurements)
 
 
-def _command_value(event: cycle_clock.QPUCommandEvent) -> dict:
-    return {
-        "kind": event.kind,
-        "tick": event.tick,
-        "operation_id": event.command.operation.id,
-    }
-
-
-def _write_json(path: pathlib.Path, value: object) -> None:
-    text = json.dumps(value, indent=2, default=str)
-    document = text + "\n"
-    path.write_text(document)
+def _read_json(path: pathlib.Path) -> object:
+    text = path.read_text()
+    return json.loads(text)
 
 
 if __name__ == "__main__":

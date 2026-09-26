@@ -70,9 +70,12 @@ MINIMAL_CONFIG = {
     "qpu": {"kind": "stim_device"},
     "escalation": {"kind": "weak_baseline"},
     "workload": {
-        "kind": "memory_circuit",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 15,
+        "kind": "producer",
+        "function": "decsim.producers:memory_circuit",
+        "arguments": {
+            "code_task": "surface_code:rotated_memory_z",
+            "rounds_per_shot": 15,
+        },
     },
     "windows": {
         "kind": "sliding",
@@ -120,6 +123,18 @@ MINIMAL_CONFIG = {
 }
 
 
+def memory_workload(rounds_per_shot) -> dict:
+    """The minimal config's workload section at another shot length."""
+    return {
+        "kind": "producer",
+        "function": "decsim.producers:memory_circuit",
+        "arguments": {
+            "code_task": "surface_code:rotated_memory_z",
+            "rounds_per_shot": rounds_per_shot,
+        },
+    }
+
+
 def write_config(tmp_path, overrides: dict) -> Path:
     raw = dict(MINIMAL_CONFIG)
     raw.update(overrides)
@@ -144,3 +159,88 @@ def strong_unit(algorithm) -> dict:
             },
         }
     }
+
+
+def online_threshold() -> dict:
+    """The overrides of a switching machine whose threshold learns online."""
+    weak_decoder = dict(MINIMAL_CONFIG["weak_decoder"], kind="pymatching")
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 15.0,
+        "threshold_source": "online",
+    }
+    overrides = {"escalation": escalation, "weak_decoder": weak_decoder}
+    strong_decoder = strong_unit("pymatching")
+    overrides.update(strong_decoder)
+    return overrides
+
+
+def example_tool_config(
+    tmp_path, qpu_kind: str, workload: dict, feedback_microseconds=4.0
+) -> Path:
+    """The machine tools/deltakit_example.py and live_memory_example.py build.
+
+    Their Python settings as a yaml: the logical reference links with the
+    feedback path's latency on the fridge clock, a 0.1 us weak decoder on
+    a 1 GHz engine, and the chrome trace with data movement. The frame
+    section is required in a yaml, so it is written as the free frame.
+    """
+    fridge_megahertz = 250.0
+    feedback_cycle_count = feedback_microseconds * fridge_megahertz
+    feedback_cycles = round(feedback_cycle_count)
+    raw = {
+        "clocks": {"engine": 1000.0, "fridge": fridge_megahertz},
+        "controller": {
+            "clock": "fridge",
+            "readout_to_bits_cycles": 0,
+            "decision_to_pulse_cycles": 0,
+            "packing_cycles_per_round": 0,
+        },
+        "links": {
+            "kind": "logical_reference",
+            "frame_to_controller": {
+                "latency_cycles": feedback_cycles,
+                "clock": "fridge",
+                "bits_per_cycle": 32,
+            },
+        },
+        "weak_syndrome_buffer": {"kind": "syndrome_buffer"},
+        "strong_syndrome_buffer": {"kind": "syndrome_buffer"},
+        "windows": {
+            "kind": "sliding",
+            "commit_rounds": None,
+            "buffer_rounds": None,
+        },
+        "pauli_frame": {
+            "kind": "logical_register",
+            "clock": "fridge",
+            "write_cycles": 0,
+        },
+        "weak_decoder": {
+            "kind": 0.1,
+            "units": 1,
+            "unit_memory": {"bits": None},
+            "engine": {
+                "clock": "engine",
+                "fetch_cycles_per_round": 1,
+                "fetch_cycles_per_job": 0,
+                "release_cycles_per_job": 1,
+                "release_cycles_per_round": 0,
+            },
+        },
+        "observation": {"trace": "chrome", "data_movement": True},
+        "qpu": {"kind": qpu_kind},
+        "workload": workload,
+        "sweep": [
+            {
+                "physical_error_probability": [0.001],
+                "distance": [3],
+                "round_period_microseconds": [1.1],
+                "shots": 1,
+            }
+        ],
+    }
+    config_path = tmp_path / "example_tool.yaml"
+    config_text = yaml.safe_dump(raw)
+    config_path.write_text(config_text)
+    return config_path

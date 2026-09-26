@@ -57,6 +57,7 @@ from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
     measure_point_shot,
+    memory_workload,
 )
 
 # the detection events of one round of the swept distance-three patch,
@@ -140,8 +141,7 @@ TWO_TIER_LINKS = {
 def slow_unit_shot(tmp_path, units: int, card_microseconds: float = 5.0):
     """One shot of 30 rounds on `units` weak units of that card."""
     raw = dict(MINIMAL_CONFIG)
-    workload = dict(MINIMAL_CONFIG["workload"])
-    workload["rounds_per_shot"] = 30
+    workload = memory_workload(30)
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
     raw["weak_decoder"] = {
@@ -186,7 +186,7 @@ def switching_run(
     run_both_at_once starts the strong sibling with the weak job and
     cancels it when the weak result is kept, which is Toshio et al.
     2510.25222 Sec. III A step 1. observation names the section's flags
-    the shot turns on; more than one patch runs the memory_patches row;
+    the shot turns on; more than one patch runs the memory_patches maker;
     commit_rounds sets windows.commit_rounds, the code distance when
     None.
     """
@@ -195,12 +195,11 @@ def switching_run(
     windows["commit_rounds"] = commit_rounds
     raw["windows"] = windows
     raw["observation"] = dict.fromkeys(observation, True)
-    workload = dict(MINIMAL_CONFIG["workload"])
-    workload["rounds_per_shot"] = 30
+    workload = memory_workload(30)
     raw["workload"] = workload
     if patch_count > 1:
-        workload["kind"] = "memory_patches"
-        workload["patch_count"] = patch_count
+        workload["function"] = "decsim.producers:memory_patches"
+        workload["arguments"]["patch_count"] = patch_count
     raw["links"] = TWO_TIER_LINKS
     raw["escalation"] = {
         "kind": "switching",
@@ -266,8 +265,7 @@ def bounded_store_shot(tmp_path):
     """
     six_rounds_bits = 5 * BITS_PER_ROUND + READOUT_ROUND_BITS
     raw = dict(MINIMAL_CONFIG)
-    workload = dict(MINIMAL_CONFIG["workload"])
-    workload["rounds_per_shot"] = 30
+    workload = memory_workload(30)
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
     raw["weak_syndrome_buffer"] = {"bits": six_rounds_bits}
@@ -976,8 +974,7 @@ def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it(tmp_path):
     no window owes anything and none waits before its input hop.
     """
     raw = dict(MINIMAL_CONFIG)
-    workload = dict(MINIMAL_CONFIG["workload"])
-    workload["rounds_per_shot"] = 30
+    workload = memory_workload(30)
     raw["workload"] = workload
     links = dict(ONE_TIER_LINKS)
     input_hop = fridge_hop(1)
@@ -1081,8 +1078,11 @@ def seam_streams_shot(stream_count: int):
         distance=3, device=device, round_period_microseconds=1.0
     )
     engine_clock = config_module.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=engine_clock)
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=1.0, units=8, engine_clock=engine_clock
+        kind=1.0,
+        units=8,
+        engine=engine,
     )
     manager = decoder_settings.DecoderManagerSettings(dispatch_cycles=0)
     windows = window_settings.WindowSettings(
@@ -1234,10 +1234,13 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     """
     raw = dict(MINIMAL_CONFIG)
     raw["workload"] = {
-        "kind": "memory_patches",
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": 6,
-        "patch_count": 2,
+        "kind": "producer",
+        "function": "decsim.producers:memory_patches",
+        "arguments": {
+            "code_task": "surface_code:rotated_memory_z",
+            "rounds_per_shot": 6,
+            "patch_count": 2,
+        },
     }
     raw["qpu"] = {
         "kind": "burst_stim",

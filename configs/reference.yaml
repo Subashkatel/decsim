@@ -11,9 +11,8 @@
 # settings.py). tests/experiments/test_yaml_surface.py loads this file, so
 # a key its section no longer knows fails there; a key a reader gained is
 # added here by hand, in the same commit. Knobs the yaml
-# cannot reach are Python objects on the settings records: multi-op
-# workloads, dynamic streams, routers, escalation families, schedulers,
-# devices, policies.
+# cannot reach are Python objects on the settings records: routers,
+# escalation families, schedulers, devices, policies.
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
@@ -32,10 +31,17 @@ qpu:
                                    # keeps a size and no data,
                                    # src/proto/packet.proto); syndrome_bits
                                    # fills that size with seeded random bits.
-                                   # streaming_stim takes repeated circuit
-                                   # records keyed by dynamic stream owner,
-                                   # which no yaml key carries: build it in
-                                   # Python (QpuSettings(device=...)).
+                                   # stim_device and streaming_stim read
+                                   # the workload's physical circuit: a
+                                   # finite circuit with its round map, or
+                                   # the four live fragments a
+                                   # streaming_stim stream executes as the
+                                   # controller asks for rounds.
+                                   # recorded_stim replays a released
+                                   # experiment's measurements, which no
+                                   # yaml key carries: build it in Python
+                                   # (QpuSettings(device=...)); a yaml
+                                   # naming it stops at its build.
                                    # burst_stim is stim_device drawing each
                                    # shot from the circuit plus one error
                                    # burst the decoders are not told of
@@ -330,23 +336,53 @@ burst_detector:
 #                                  # 334-340)
 
 workload:
-  kind: memory_circuit             # memory_circuit | memory_patches are the
-                                   # yaml rows; the other rows (circuit_list,
-                                   # surgery_ir) are built in Python.
-                                   # memory_patches runs patch_count copies of
-                                   # the memory circuit at once, one operation
-                                   # per patch sharing the decoder units
-                                   # (Elastic 2406.17995 lines 121-123), side
-                                   # by side along x, 2d + 2 Stim coordinate
-                                   # units apart, so a qpu burst region covers
-                                   # the patches it reaches
-  code_task: surface_code:rotated_memory_z   # stim generator task
-  rounds_per_shot: 15              # QEC rounds per shot: a fixed count, or
+  kind: producer                   # producer | files (WORKLOADS,
+                                   # frontends/settings.py): what makes the
+                                   # workload, an operation list and its
+                                   # physical circuit (records/workload.py).
+                                   # producer calls a maker function once
+                                   # per sweep point with its arguments and
+                                   # the sweep values its parameters name
+                                   # (physical_error_probability, distance,
+                                   # round_period_microseconds); files reads
+                                   # a maker's two outputs from disk
+                                   # (docs/how-to/plug_in_a_workload_maker.md)
+  function: decsim.producers:memory_circuit   # module:function. The
+                                   # makers decsim ships (decsim/producers.py):
+                                   # memory_circuit, Stim's generated memory
+                                   # circuit, one operation for the shot;
+                                   # memory_patches, patch_count such
+                                   # circuits, one operation per patch
+                                   # sharing the decoder units (Elastic
+                                   # 2406.17995 lines 121-123), side by side
+                                   # along x, 2d + 2 Stim coordinate units
+                                   # apart, so a qpu burst region covers the
+                                   # patches it reaches; deltakit_memory,
+                                   # Deltakit's finite memory for
+                                   # stim_device; deltakit_live_memory, a
+                                   # live memory for streaming_stim decoded
+                                   # after decode_after_rounds rounds, its
+                                   # stream owner, protected region and
+                                   # rounds derived (the deltakit extra)
+  arguments:                       # the maker's own arguments; a sweep value
+                                   # written here stops the maker's call
+    code_task: surface_code:rotated_memory_z   # stim generator task
+    rounds_per_shot: 15            # QEC rounds per shot: a fixed count, or
                                    # "<n>d" to scale with the swept distance
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
-  # patch_count: 4                 # memory_patches only, and required there:
+    # patch_count: 4               # memory_patches only, and required there:
                                    # the patches, at least 1
+  # The files row's keys, instead of function and arguments; paths are
+  # read from this file's folder:
+  # operations: ops.json           # the operation list, schema decsim.ops/1
+                                   # (frontends/workload_files.py
+                                   # OPERATION_KEYS); required
+  # circuit: history.stim          # a finite physical circuit, with
+  # measurement_rounds: rounds.json   # each measurement index's round
+  # fragments: live/               # or the four live fragments' .stim files
+                                   # and physical.json (their period); with
+                                   # neither, the code card sizes the rounds
 
 # The plan, a word the comments below use, is the list of windows the scheme
 # lays out for each operation before the run starts.

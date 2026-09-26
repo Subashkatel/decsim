@@ -117,7 +117,11 @@ which one.
 
 ## If a task dies
 
-Rerun those array indices, and name the count the sweep was cut into:
+A shard that ends writes `finished` into its folder last, and a
+`decsim collect` into a folder that holds it leaves the folder as it is.
+So the whole array can simply be submitted again: the finished shards
+return at once and only the others run. Or rerun just those array
+indices, naming the count the sweep was cut into:
 
 ```bash
 RUN=results/weak_ler SHARDS=500 sbatch -a 447-499 \
@@ -128,9 +132,9 @@ RUN=results/weak_ler SHARDS=500 sbatch -a 447-499 \
 array's own, `SLURM_ARRAY_TASK_COUNT`, which is 53 for `-a 447-499`, and
 task 447 would compute shard 447 of 53: a share of the sweep no folder
 of the first run holds. With it the printed line reads `shard: 447 of
-500`, the same shard the first run gave that index. The folder is
-written fresh, and `combine` reads whatever folders you hand it, so a
-rerun shard replaces the old one simply by being the one you pass.
+500`, the same shard the first run gave that index. A shard that did
+not finish is written again in its folder, and `combine` reads whatever
+folders you hand it.
 
 ## Read next
 

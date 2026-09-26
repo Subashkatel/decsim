@@ -135,12 +135,14 @@ class MachineSettings:
 
     @classmethod
     def from_mapping(
-        cls, sections: Mapping, *, name: str, base_directory
+        cls, sections: Mapping, *, name: str, section_folders: Mapping
     ) -> "MachineSettings":
         """One yaml's sections, each handed to the package that owns it.
 
-        name labels the links card in the traffic ledger; base_directory
-        resolves the escalation section's relative table path.
+        name labels the links card in the traffic ledger; section_folders
+        maps a section to the folder of the yaml that wrote it, which the
+        escalation section's relative table path and the workload's
+        relative files resolve against.
         """
         unknown = set(sections) - set(SECTIONS)
         if unknown:
@@ -193,8 +195,9 @@ class MachineSettings:
         decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
             decoder_manager_section, clocks
         )
+        escalation_folder = section_folders.get("escalation")
         escalation = escalation_settings.EscalationSettings.from_yaml(
-            escalation_section, clocks, base_directory, controller.clock
+            escalation_section, clocks, escalation_folder, controller.clock
         )
         burst_detector_section = sections.get("burst_detector", {})
         burst_detector = escalation_settings.BurstDetectorSettings.from_yaml(
@@ -203,8 +206,9 @@ class MachineSettings:
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks
         )
+        workload_folder = section_folders.get("workload")
         workload = workload_settings.WorkloadSettings.from_yaml(
-            sections["workload"]
+            sections["workload"], workload_folder
         )
         magic_state_factory = qpu_settings.FactorySettings.from_yaml(
             factory_section

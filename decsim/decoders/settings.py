@@ -168,6 +168,22 @@ class UnitMemorySettings:
 
 
 @dataclasses.dataclass(frozen=True)
+class EngineSettings:
+    """The yaml's `<tier>_decoder.engine` card.
+
+    clock is the domain the stages count on, resolved to its Clock once
+    at load; the four stage keys price the fetch and release stages
+    once a job and once a round, in cycles of that clock.
+    """
+
+    clock: Optional[config.Clock] = None
+    fetch_cycles_per_round: int = 1
+    fetch_cycles_per_job: int = 0
+    release_cycles_per_job: int = 1
+    release_cycles_per_round: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
 class DecoderSettings:
     """The yaml's `weak_decoder` and `strong_decoder` sections.
 
@@ -221,11 +237,7 @@ class DecoderSettings:
     boundary_fold: str = "copy"
     result_blocks_unit: bool = False
     unit_memory: UnitMemorySettings = UnitMemorySettings()
-    fetch_cycles_per_round: int = 1
-    fetch_cycles_per_job: int = 0
-    release_cycles_per_job: int = 1
-    release_cycles_per_round: int = 0
-    engine_clock: Optional[config.Clock] = None
+    engine: EngineSettings = EngineSettings()
     decoder: Optional[ports.Decoder] = None
     # the row's own Settings record, opaque to the tier
     row_settings: Optional[Any] = None
@@ -265,7 +277,7 @@ class DecoderSettings:
             result_blocks_unit=result_blocks_unit,
             unit_memory=unit_memory,
             row_settings=row_settings,
-            **engine,
+            engine=engine,
         )
 
 
@@ -374,12 +386,12 @@ def _block(section: Mapping, section_name: str, key: str) -> Mapping:
 
 def _engine_card(
     engine: Mapping, clocks: config.ClockSettings, section_name: str
-) -> dict:
-    """The engine card's fields: its clock and every stage it prices."""
+) -> EngineSettings:
+    """The engine card: its clock and every stage it prices."""
     _check_engine_keys(engine, section_name)
-    fields = _engine_stage_cycles(engine, section_name)
-    fields["engine_clock"] = _engine_clock(engine, clocks, section_name)
-    return fields
+    cycles = _engine_stage_cycles(engine, section_name)
+    clock = _engine_clock(engine, clocks, section_name)
+    return EngineSettings(clock=clock, **cycles)
 
 
 def _check_engine_keys(engine: Mapping, section_name: str) -> None:

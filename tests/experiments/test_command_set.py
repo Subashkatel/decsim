@@ -7,11 +7,19 @@ command line is never the only record of a number.
 """
 
 import csv
+import functools
+import hashlib
 import json
 import pathlib
+import shutil
+import subprocess
+import sys
 
 import pytest
+import stim
+import yaml
 
+import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -32,6 +40,13 @@ FOUR_POINT_SWEEP = {
         }
     ]
 }
+
+
+# The suite's container ships no git, so the tests that need it skip.
+_GIT_MISSING = shutil.which("git") is None
+requires_git = pytest.mark.skipif(
+    _GIT_MISSING, reason="git is not installed where the suite runs"
+)
 
 
 EVERY_FILE = (
@@ -161,6 +176,68 @@ def test_show_lists_every_sections_kind_of_every_shipped_config():
         assert "trace: " in text
 
 
+@pytest.mark.parametrize(
+    "qpu_kind, sentence",
+    [
+        ("recorded_stim", "required positional arguments: 'measurements'"),
+        ("streaming_stim", "required positional argument: 'programs'"),
+    ],
+)
+@pytest.mark.parametrize("verb", ["show", "run"])
+def test_show_and_run_stop_at_a_source_the_yaml_cannot_build(
+    tmp_path, verb, qpu_kind, sentence
+):
+    """The first point's machine is built, so show stops where run would."""
+    qpu = {"qpu": {"kind": qpu_kind}}
+    config_path = yaml_configs.write_config(tmp_path, qpu)
+
+    with pytest.raises(TypeError, match=sentence):
+        command.main([verb, str(config_path)])
+
+
+@pytest.mark.parametrize("verb", ["show", "run"])
+def test_show_and_run_refuse_a_maker_that_is_not_there_in_one_line(
+    tmp_path, capsys, verb
+):
+    """The first point makes the workload, so show refuses what run would."""
+    workload = {
+        "kind": "producer",
+        "function": "decsim.producers:no_such_maker",
+        "arguments": {},
+    }
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main([verb, str(config_path)])
+    printed = capsys.readouterr()
+
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "names no maker" in printed.err
+
+
+def test_show_builds_a_point_whose_threshold_learns_online(tmp_path, capsys):
+    """The first point's threshold is built per point, as the run builds it."""
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+
+    command.main(["show", str(config_path)])
+    printed = capsys.readouterr()
+
+    assert "escalation: kind switching" in printed.out
+
+
+def test_run_builds_a_point_whose_threshold_learns_online(tmp_path):
+    """The one shot runs its point's threshold, as a collect's shot does."""
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    out_dir = tmp_path / "run"
+
+    run_command.run_one_shot(config_path, out_dir=out_dir)
+
+    assert (out_dir / "finished").exists()
+
+
 def test_show_names_the_fabric_card_the_run_resolved_to():
     """The card is one line, because every hop on it is priced.
 
@@ -175,9 +252,190 @@ def test_show_names_the_fabric_card_the_run_resolved_to():
     assert "links: card reference.yaml" in text
 
 
-def test_run_prints_the_result_fields_the_gate_hashes():
+def _line_number_of(path, text: str) -> int:
+    file_text = path.read_text()
+    lines = file_text.splitlines()
+    return lines.index(text) + 1
+
+
+def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
+    """Every value, the layer that set it and the yaml line it came from.
+
+    A value your file writes, one a preset it extends writes, a swept
+    one and one no file writes (its line is the one reference.yaml
+    documents it on).
+    """
+    reference_path = CONFIGS_DIR / "reference.yaml"
+    preset_path = tmp_path / "preset.yaml"
+    preset_path.write_text(
+        f"extends: {reference_path}\n"
+        "controller:\n"
+        "  clock: fridge\n"
+        "  readout_to_bits_cycles: 0\n"
+        "  packing_cycles_per_round: 0\n"
+        "  decision_to_pulse_cycles: 3\n"
+    )
+    config_path = tmp_path / "mine.yaml"
+    config_path.write_text(
+        "extends: preset.yaml\n"
+        "pauli_frame:\n"
+        "  kind: logical_register\n"
+        "  clock: fridge\n"
+        "  write_cycles: 5\n"
+    )
+    config = experiment.load_experiment(config_path)
+
+    lines = experiment.value_lines(config)
+
+    sweep_line = _line_number_of(reference_path, "sweep:")
+    last_shots_line = _line_number_of(reference_path, "    shots: 2")
+    overflow_line = _line_number_of(
+        reference_path,
+        "  packing_overflow: stall          # stall | drop_round: what the "
+        "controller does",
+    )
+    assert (
+        f"controller.decision_to_pulse_cycles = 3  [preset preset.yaml, "
+        f"{preset_path}:6]"
+    ) in lines
+    assert (
+        f"pauli_frame.write_cycles = 5  [your file, {config_path}:5]" in lines
+    )
+    assert (
+        f"qpu.distance = [3]  [sweep, {reference_path}:{sweep_line}-"
+        f"{last_shots_line}]"
+    ) in lines
+    assert (
+        f'controller.packing_overflow = "STALL"  '
+        f"[default, configs/reference.yaml:{overflow_line}]"
+    ) in lines
+
+
+def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
+    """A derived or renamed value prints no source, never a guessed one.
+
+    A channel's ticks come from its card's latency and clock, and a
+    section's clock period from the domain it names and that domain's
+    frequency; neither is one yaml key's value. unit_memory.bits and
+    clocks.fridge are their own keys'.
+    """
+    reference_path = CONFIGS_DIR / "reference.yaml"
+    config_path = tmp_path / "mine.yaml"
+    config_path.write_text(
+        f"extends: {reference_path}\n"
+        "links:\n"
+        "  qpu_to_controller:\n"
+        "    clock: fridge\n"
+        "    bits_per_cycle: null\n"
+        "    latency_cycles: 7\n"
+    )
+    config = experiment.load_experiment(config_path)
+
+    lines = experiment.value_lines(config)
+
+    bits_line = _first_line_starting(reference_path, "    bits: null")
+    fridge_line = _first_line_starting(reference_path, "  fridge:")
+    assert (
+        "links.qpu_to_controller.channel.propagation_latency_ticks = 28000"
+    ) in lines
+    assert "controller.clock.period_ticks = 4000" in lines
+    assert (
+        "clocks.fridge = 250.0  "
+        f"[preset reference.yaml, {reference_path}:{fridge_line}]"
+    ) in lines
+    assert (
+        "weak_decoder.unit_memory.bits = null  "
+        f"[preset reference.yaml, {reference_path}:{bits_line}]"
+    ) in lines
+
+
+@functools.cache
+def _key_paths_by_line(path) -> dict:
+    """Each line of a yaml file that writes a mapping key, and that key."""
+    with open(path) as handle:
+        root = yaml.compose(handle)
+    by_line = {}
+    pending = [((), root)]
+    while pending:
+        prefix, node = pending.pop()
+        if node.id != "mapping":
+            continue
+        for key_node, value_node in node.value:
+            key = prefix + (key_node.value,)
+            line = key_node.start_mark.line + 1
+            by_line[line] = key
+            pending.append((key, value_node))
+    return by_line
+
+
+def _cited_line(value_line: str) -> tuple:
+    """The file and the first line a value line's bracket cites."""
+    _, _, bracket = value_line.rpartition("  [")
+    origin = bracket.removesuffix("]")
+    _, _, source = origin.rpartition(", ")
+    file_text, _, lines = source.rpartition(":")
+    first_line, _, _ = lines.partition("-")
+    return file_text, int(first_line)
+
+
+def _value_key(value_line: str) -> tuple:
+    """The yaml key a value line's value is read from."""
+    dotted, _, _ = value_line.partition(" = ")
+    names = dotted.split(".")
+    path = tuple(names)
+    key = experiment._yaml_key(path)
+    if key in experiment.SWEEP_PATHS:
+        return ("sweep",)
+    return key
+
+
+def _cites_its_own_key(value_line: str) -> bool:
+    """Whether the line a value line cites writes that value's key."""
+    file_text, first_line = _cited_line(value_line)
+    cited_path = CONFIGS_DIR.parent / file_text
+    key_paths = _key_paths_by_line(cited_path)
+    return key_paths[first_line] == _value_key(value_line)
+
+
+@pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
+def test_every_line_show_cites_holds_the_key_of_its_value(name):
+    """Run on a shipped config, show cites only its values' own keys."""
+    config_path = CONFIGS_DIR / name
+    config = experiment.load_experiment(config_path)
+    lines = experiment.value_lines(config)
+    cited = [line for line in lines if "  [" in line]
+
+    miscited = [line for line in cited if not _cites_its_own_key(line)]
+
+    assert cited
+    assert miscited == []
+
+
+def _first_line_starting(path, start: str) -> int:
+    text = path.read_text()
+    lines = text.splitlines()
+    for number, line in enumerate(lines, start=1):
+        if line.startswith(start):
+            return number
+    raise AssertionError(f"{path} has no line starting {start!r}")
+
+
+def test_show_prints_every_value_after_the_sections(capsys):
+    config_path = CONFIGS_DIR / "reference.yaml"
+    config = experiment.load_experiment(config_path)
+    value_lines = experiment.value_lines(config)
+
+    command.main(["show", str(config_path)])
+    printed = capsys.readouterr()
+
+    lines = printed.out.splitlines()
+    values_at = lines.index("values:")
+    assert lines[values_at + 1 :] == value_lines
+
+
+def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
     config_path = gate_point.CONFIG_PATH
-    lines = run_command.run_one_shot(config_path, seed=0)
+    lines = run_command.run_one_shot(config_path, seed=0, out_dir=tmp_path)
     config = experiment.load_experiment(config_path)
     block = config.sweep[0]
     settings = config.point_settings(
@@ -205,12 +463,336 @@ def test_run_with_trace_writes_the_shots_trace_file(tmp_path):
     assert len(written) == 1
 
 
-def test_run_without_a_log_or_a_trace_writes_no_folder(tmp_path):
+def _one_file(folder: pathlib.Path, pattern: str) -> pathlib.Path:
+    found = folder.glob(pattern)
+    matches = sorted(found)
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _sha256_of(path: pathlib.Path) -> str:
+    contents = path.read_bytes()
+    digest = hashlib.sha256(contents)
+    return digest.hexdigest()
+
+
+def _hashes_of(folder: pathlib.Path, *names: str) -> dict:
+    """Each named file of the folder, with its sha256."""
+    hashes = {}
+    for name in names:
+        path = folder / name
+        hashes[name] = _sha256_of(path)
+    return hashes
+
+
+def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
+    """What the run ran, every value of it, and the workload as files."""
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
     lines = run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
-    assert not out_dir.exists()
+    resolved_dir = out_dir / "resolved"
+    resolved_path = _one_file(resolved_dir, "*.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    inputs_dir = out_dir / "inputs" / resolved_path.stem
+    hashes_text = (inputs_dir / "hashes.json").read_text()
+    hashes = json.loads(hashes_text)
+    producer_text = (out_dir / "producer.json").read_text()
+    producer = json.loads(producer_text)
+
     assert "terminal status: complete" in lines[2]
+    assert resolved["seeds"] == [[0, 1]]
+    assert resolved["built"]["commit_rounds"] == 3
+    assert resolved["settings"]["qpu"]["distance"] == 3
+    assert hashes == _hashes_of(
+        inputs_dir, "operation_1.stim", "operations.json"
+    )
+    assert producer["function"] == "decsim.producers:memory_circuit"
+    assert producer["arguments"]["rounds_per_shot"] == 15
+    assert (out_dir / "result.json").exists()
+    assert (out_dir / "finished").exists()
+
+
+# A maker that answers a longer memory each time it is called, so a
+# point made twice records one workload and runs another.
+GROWING_MAKER = """
+import decsim.producers as producers
+
+CALLS = []
+
+
+def growing_memory(distance, physical_error_probability):
+    CALLS.append(distance)
+    rounds = 15 + 3 * (len(CALLS) - 1)
+    return producers.memory_circuit(
+        "surface_code:rotated_memory_z",
+        rounds,
+        distance,
+        physical_error_probability,
+    )
+"""
+
+
+def test_a_collect_makes_each_points_workload_once(tmp_path, monkeypatch):
+    """The workload recorded in inputs/ is the one the shots ran."""
+    maker_path = tmp_path / "growing_maker.py"
+    maker_path.write_text(GROWING_MAKER)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "growing_maker", raising=False)
+    workload = {"kind": "producer", "function": "growing_maker:growing_memory"}
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    run_dir = tmp_path / "run"
+
+    command.main(["collect", str(config_path), "--out", str(run_dir)])
+
+    growing_maker = sys.modules["growing_maker"]
+    assert growing_maker.CALLS == [3]
+
+
+def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
+    """The files row reads inputs/ back, and the shot is the same shot."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    first_dir = tmp_path / "first"
+    run_command.run_one_shot(config_path, seed=0, out_dir=first_dir)
+    resolved_dir = first_dir / "resolved"
+    resolved_path = _one_file(resolved_dir, "*.json")
+    inputs_dir = first_dir / "inputs" / resolved_path.stem
+    operations_path = inputs_dir / "operations.json"
+    files = {"kind": "files", "operations": str(operations_path)}
+    rerun_folder = tmp_path / "rerun"
+    rerun_folder.mkdir()
+    rerun_path = yaml_configs.write_config(rerun_folder, {"workload": files})
+    second_dir = tmp_path / "second"
+    run_command.run_one_shot(rerun_path, seed=0, out_dir=second_dir)
+    first_result = (first_dir / "result.json").read_text()
+    second_result = (second_dir / "result.json").read_text()
+
+    assert second_result == first_result
+
+
+@pytest.mark.parametrize(
+    "function",
+    ["decsim.producers:memory_circuit", "decsim.producers.memory_circuit"],
+)
+def test_producer_json_names_the_maker_in_either_of_its_forms(
+    tmp_path, function
+):
+    """pkgutil.resolve_name reads both forms, so the run records both."""
+    workload = yaml_configs.memory_workload(15)
+    workload["function"] = function
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    out_dir = tmp_path / "out"
+
+    run_command.run_one_shot(config_path, out_dir=out_dir)
+
+    producer_text = (out_dir / "producer.json").read_text()
+    producer = json.loads(producer_text)
+    assert producer["function"] == function
+    assert (out_dir / "finished").exists()
+
+
+def test_a_point_recorded_again_hashes_only_its_inputs(tmp_path):
+    """A retried folder records its points again over the first record."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    run_dir = tmp_path / "run"
+
+    point_id = run_folder.record_point(run_dir, task)
+    run_folder.record_point(run_dir, task)
+
+    inputs_dir = run_dir / "inputs" / point_id
+    hashes_path = inputs_dir / "hashes.json"
+    hashes_text = hashes_path.read_text()
+    hashes = json.loads(hashes_text)
+    assert sorted(hashes) == ["operation_1.stim", "operations.json"]
+
+
+def test_a_sweep_rerun_into_a_finished_folder_leaves_it_as_it_is(
+    tmp_path, capsys
+):
+    """A Slurm array rerun runs again only the shards that did not finish."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    sweep_path = out_dir / "sweep.csv"
+    first_status = sweep_path.stat()
+    capsys.readouterr()
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    printed = capsys.readouterr()
+
+    assert (out_dir / "finished").exists()
+    second_status = sweep_path.stat()
+    assert second_status.st_mtime_ns == first_status.st_mtime_ns
+    assert "holds a finished run" in printed.err
+
+
+def test_a_combined_folder_holds_every_shards_points(tmp_path):
+    """A point's records are named by content, so the union is every point."""
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    combined_dir = tmp_path / "combined"
+    _collect_one_shard(config_path, first_dir, "0/2", 1)
+    _collect_one_shard(config_path, second_dir, "1/2", 1)
+    _combined(first_dir, second_dir, combined_dir)
+    resolved_dir = combined_dir / "resolved"
+    resolved_files = resolved_dir.glob("*.json")
+    resolved = list(resolved_files)
+
+    assert len(resolved) == 4
+    assert (combined_dir / "producer.json").exists()
+    assert (combined_dir / "finished").exists()
+
+
+def _seeds_of_the_one_point(run_dir):
+    resolved_dir = run_dir / "resolved"
+    resolved_path = _one_file(resolved_dir, "*.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    return resolved["seeds"]
+
+
+def test_a_shards_record_holds_the_seeds_it_ran(tmp_path):
+    """Each shard records its own seeds, and the fold records all of them."""
+    four_shots = {"sweep": [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])]}
+    four_shots["sweep"][0]["shots"] = 4
+    config_path = yaml_configs.write_config(tmp_path, four_shots)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    combined_dir = tmp_path / "combined"
+    _collect_one_shard(config_path, first_dir, "0/2", 2)
+    _collect_one_shard(config_path, second_dir, "1/2", 2)
+    _combined(first_dir, second_dir, combined_dir)
+
+    assert _seeds_of_every_shot(second_dir) == ["2", "3"]
+    assert _seeds_of_the_one_point(first_dir) == [[0, 2]]
+    assert _seeds_of_the_one_point(second_dir) == [[2, 2]]
+    assert _seeds_of_the_one_point(combined_dir) == [[0, 4]]
+
+
+def test_a_second_combine_into_the_same_folder_keeps_its_seeds(tmp_path):
+    four_shots = {"sweep": [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])]}
+    four_shots["sweep"][0]["shots"] = 4
+    config_path = yaml_configs.write_config(tmp_path, four_shots)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    combined_dir = tmp_path / "combined"
+    _collect_one_shard(config_path, first_dir, "0/2", 2)
+    _collect_one_shard(config_path, second_dir, "1/2", 2)
+    _combined(first_dir, second_dir, combined_dir)
+    _combined(first_dir, second_dir, combined_dir)
+
+    assert _seeds_of_the_one_point(combined_dir) == [[0, 4]]
+
+
+def test_a_manifest_names_every_installed_package(tmp_path):
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    manifest = _manifest_of(out_dir)
+    packages = manifest["versions"]["packages"]
+
+    assert packages["stim"] == stim.__version__
+    assert "numpy" in packages
+
+
+def test_a_manifest_names_the_union_find_library_it_loads(
+    tmp_path, compiled_union_find_library
+):
+    """The library is built, not tracked, so the commit does not name it."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    manifest = _manifest_of(out_dir)
+    library_hash = _sha256_of(compiled_union_find_library)
+
+    assert manifest["union_find_library_sha256"] == library_hash
+
+
+def test_a_manifest_without_the_union_find_library_names_none(
+    tmp_path, monkeypatch
+):
+    """A run that decodes with PyMatching needs no library built."""
+    absent = tmp_path / "absent.so"
+    monkeypatch.setattr(compiled_decoder, "library_path", lambda: absent)
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+
+    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+
+    manifest = _manifest_of(out_dir)
+    assert manifest["union_find_library_sha256"] is None
+
+
+def test_a_run_where_git_cannot_answer_records_no_patch(tmp_path, monkeypatch):
+    """The container the suite runs in ships no git."""
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
+    config_path = yaml_configs.write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    run_folder.snapshot_code_state(config, out_dir)
+
+    assert not (out_dir / "code_state.patch").exists()
+
+
+def _git_tree_with_maker(folder: pathlib.Path) -> pathlib.Path:
+    """A new git tree holding an uncommitted maker.py."""
+    folder.mkdir()
+    subprocess.run(["git", "init", "-q", str(folder)], check=True)
+    (folder / "maker.py").write_text("VALUE = 1\n")
+    return folder
+
+
+@requires_git
+def test_an_uncommitted_edit_is_in_the_code_patch(tmp_path, monkeypatch):
+    """The patch carries the tracked file's edit beside the untracked file."""
+    tree_folder = tmp_path / "tree"
+    tree = _git_tree_with_maker(tree_folder)
+    replay_folder = tmp_path / "replay"
+    replay = _git_tree_with_maker(replay_folder)
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit"]
+    subprocess.run(["git", "-C", str(tree), "add", "maker.py"], check=True)
+    subprocess.run([*commit, "-q", "-m", "one"], cwd=tree, check=True)
+    (tree / "maker.py").write_text("VALUE = 2\n")
+    monkeypatch.setattr(run_folder, "_checkout", lambda: tree)
+    config_path = yaml_configs.write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    run_folder.snapshot_code_state(config, out_dir)
+
+    patch_path = out_dir / "code_state.patch"
+    apply = ["git", "-C", str(replay), "apply", str(patch_path)]
+    subprocess.run(apply, check=True)
+    assert (replay / "maker.py").read_text() == "VALUE = 2\n"
+
+
+@requires_git
+def test_an_untracked_file_is_in_the_code_patch(tmp_path, monkeypatch):
+    """The patch creates the file, so commit plus patch is the code that ran."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    subprocess.run(["git", "init", "-q", str(tree)], check=True)
+    new_module = tree / "maker.py"
+    new_module.write_text("VALUE = 1\n")
+    monkeypatch.setattr(run_folder, "_checkout", lambda: tree)
+    config_path = yaml_configs.write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    run_folder.snapshot_code_state(config, out_dir)
+    replay = tmp_path / "replay"
+    subprocess.run(["git", "init", "-q", str(replay)], check=True)
+    patch_path = out_dir / "code_state.patch"
+    apply = ["git", "-C", str(replay), "apply", str(patch_path)]
+    subprocess.run(apply, check=True)
+
+    assert (replay / "maker.py").read_text() == "VALUE = 1\n"
 
 
 def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):

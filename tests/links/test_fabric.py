@@ -396,7 +396,7 @@ def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
     payload_bits = 360
     header_bits = 448
     framed_path = link_settings.PathSettings(
-        channel, None, "test payload", header_bits=header_bits
+        channel, None, "test payload", header_bits_per_transfer=header_bits
     )
     fabric = fabric_with(engine, weak_decoder_to_strong_decoder=framed_path)
     delivered = []

@@ -49,6 +49,8 @@ RECORD_TYPES = frozenset(
         "evidence_records.Closed",
         "transfer_records.BoundaryTransferRelation",
         "window_records.DependencyResidual",
+        "workload_records.FiniteCircuit",
+        "workload_records.Workload",
     }
 )
 
@@ -70,13 +72,14 @@ PORTS = frozenset(
 )
 
 # Types decsim does not own, met at the edge of another library; an
-# enum member is written into json as its name and a number json cannot
-# hold as its exact text (collect.json_value).
+# enum member is written into json as its name, a number json cannot
+# hold as its exact text and an array as its values (collect.json_value).
 FOREIGN_TYPES = frozenset(
     {
         "enum.Enum",
         "numbers.Number",
         "numpy.generic",
+        "numpy.ndarray",
         "stim.Circuit",
         "stim.CircuitRepeatBlock",
         "TesseractDecoderConfig",

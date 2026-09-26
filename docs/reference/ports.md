@@ -713,12 +713,8 @@ A table row's own yaml keys, read into one record.
 
 ### `WorkloadRow`
 
-A workload row: what the machine runs, as the root reads it.
-
-| Member | Type |
-| --- | --- |
-| `has_frontend` | `bool` |
+A workload row: what makes the operations the machine runs.
 
 | Method | What it does |
 | --- | --- |
-| `operations` | The operations, and the rounds policy the row fixes or None. |
+| `workload` | The row's workload at one sweep point. |

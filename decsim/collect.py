@@ -329,16 +329,16 @@ def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
 
 
 def json_value(value: Any) -> Any:
-    """A settings record as plain json: dataclasses walked, objects named.
+    """A settings record as plain json: every value by its content.
 
     A dataclass (a settings record, a round policy) appears as its
-    fields. A Python-built component (a decoder, a device) appears as its
-    class name, since the machine binds its neighbours onto it; every
-    number appears exactly (a json number, or a Fraction's exact text),
-    every string and flag as written, and an enum member as its name.
-    A Stim circuit appears as its text, as sinter's strong id carries
-    the task's circuit (sinter/_data/_task.py:193), so two tasks
-    that run different circuits are two tasks.
+    fields. Every number appears exactly (a json number, or a Fraction's
+    exact text), every string and flag as written, and an enum member as
+    its name. A Stim circuit appears as its text, as sinter's strong id
+    carries the task's circuit (sinter/_data/_task.py:193), so two tasks
+    that run different circuits are two tasks. A Python-built component
+    (a decoder, a device) has no record form and appears by its content
+    too (_json_object).
     """
     if dataclasses.is_dataclass(value):
         return _json_record(value)
@@ -387,8 +387,49 @@ def _json_scalar(value: Any) -> Any:
         return value.name
     if isinstance(value, stim.Circuit):
         return str(value)
+    return _json_object(value)
+
+
+def _json_object(value: Any) -> Any:
+    """A Python-built component: its class, and its attributes walked.
+
+    Two instances that hold different values are two tasks. The id is
+    taken before a shot binds the component's neighbours onto it. An
+    array (recorded measurements) is its values; a value with no
+    attributes of its own (a lock) is its class.
+    """
+    if isinstance(value, numpy.ndarray):
+        return value.tolist()
     value_type = type(value)
-    return value_type.__name__
+    class_name = f"{value_type.__module__}.{value_type.__qualname__}"
+    attributes = _attributes_of(value)
+    if not attributes:
+        return class_name
+    content = _json_mapping(attributes)
+    return {"class": class_name, "attributes": content}
+
+
+def _attributes_of(value: Any) -> dict:
+    """Its __dict__, and every __slots__ name its classes declare and set."""
+    own = getattr(value, "__dict__", {})
+    attributes = dict(own)
+    value_type = type(value)
+    for name in _slot_names(value_type):
+        if hasattr(value, name):
+            attributes[name] = getattr(value, name)
+    return attributes
+
+
+def _slot_names(value_type: type) -> list:
+    """The __slots__ names of a class and its bases, a lone string as one."""
+    names = []
+    for value_class in value_type.__mro__:
+        declared = vars(value_class)
+        slots = declared.get("__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        names.extend(slots)
+    return [name for name in names if name not in ("__dict__", "__weakref__")]
 
 
 def _json_number(value: Any) -> Any:

@@ -817,6 +817,18 @@ def from_yaml(
     )
 
 
+def with_path_latency(
+    links: settings.FabricSettings, path_name: str, latency_ticks: int
+) -> settings.FabricSettings:
+    """The card with one path's wire at latency_ticks, the rest as it was."""
+    path = getattr(links, path_name)
+    channel = dataclasses.replace(
+        path.channel, propagation_latency_ticks=latency_ticks
+    )
+    changed = dataclasses.replace(path, channel=channel)
+    return dataclasses.replace(links, **{path_name: changed})
+
+
 def _roce_v2_measurement(coprocessor: str) -> tuple:
     """(round trip in microseconds, source) of one echo row of Table III."""
     if coprocessor == "cpu":
@@ -1051,7 +1063,7 @@ def _carded_path(
         path_settings,
         channel=channel,
         setup_ticks=setup_ticks,
-        header_bits=header_bits,
+        header_bits_per_transfer=header_bits,
     )
 
 

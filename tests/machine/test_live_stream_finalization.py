@@ -121,7 +121,8 @@ def _closed_boundary_run(
         feedback_boundary_mode="measurement_closed",
     )
     clock = config.Clock(1000)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine_clock=clock)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
     idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     settings = machine_settings.MachineSettings(
         workload=workload, weak_decoder=decoder, idle_policy=idle
@@ -149,7 +150,8 @@ def _machine(
         distance=3, device=source, round_period_microseconds=1.0
     )
     clock = config.Clock(1000)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine_clock=clock)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
     links = _zero_delay_links(data_hop_ticks)
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True

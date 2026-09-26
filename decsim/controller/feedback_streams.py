@@ -71,9 +71,9 @@ class NoFeedbackStreams:
     qpu = ports.Port(ports.Qpu)
     windows = ports.Port(ports.WindowInput)
 
-    def load(self, program) -> None:
+    def load(self, program, source_round_limits: dict) -> None:
         """Nothing to index."""
-        del program
+        del program, source_round_limits
 
     def binding_for(self, operation_id):
         """No operation is bound to a stream."""
@@ -155,12 +155,15 @@ class FeedbackStreams:
         self.bindings: dict = {}
         # patch -> the stream of the last segment that ran on it
         self.stream_by_patch: dict = {}
+        # stream id -> the rounds its source has, None when open-ended
+        self.source_round_limits: dict = {}
 
     # ---- program load
 
-    def load(self, program) -> None:
-        """Index the protected regions and the declared stream bindings."""
+    def load(self, program, source_round_limits: dict) -> None:
+        """Index the regions, the stream bindings and the source limits."""
         self.table.index(program)
+        self.source_round_limits = dict(source_round_limits)
         for operation in program.operations:
             has_stream = operation.stream_id is not None
             has_offset = operation.stream_offset is not None
@@ -268,17 +271,13 @@ class FeedbackStreams:
             return False
         if not self.windows.has_dynamic_stream(stream_id):
             return False
-        patches = self.table.patches_of_stream(stream_id)
         live = self._live(stream_id)
-        if not self.qpu.are_patches_idle(operation.id, patches):
-            if live.is_group_split:
-                return False
-            raise RuntimeError(
-                f"stream {stream_id!r} cannot extend a partially idle patch "
-                f"group {patches!r} after operation {operation.id}"
-            )
         if live.last_emission_tick == self.engine.now:
             return True
+        if self._is_past_source(stream_id, live):
+            return False
+        if not self._is_group_idle(operation, stream_id, live):
+            return False
         live.next_round += 1
         live.last_emission_tick = self.engine.now
         owner = self.table.owner_of(stream_id)
@@ -286,6 +285,22 @@ class FeedbackStreams:
             owner, stream_id, live.next_round, is_final=False
         )
         return True
+
+    def _is_group_idle(self, operation, stream_id, live) -> bool:
+        """Whether every patch of the stream's group idles after operation.
+
+        A split group's idle patches hold no stream; any other partly
+        idle group is refused.
+        """
+        patches = self.table.patches_of_stream(stream_id)
+        if self.qpu.are_patches_idle(operation.id, patches):
+            return True
+        if live.is_group_split:
+            return False
+        raise RuntimeError(
+            f"stream {stream_id!r} cannot extend a partially idle patch "
+            f"group {patches!r} after operation {operation.id}"
+        )
 
     def _seal(self, stream_id, stream_round_count: int) -> None:
         """The QPU attests the stream's length, then the windows close it.
@@ -354,11 +369,11 @@ class FeedbackStreams:
         live.is_group_split = True
 
     def _stream_held_after(self, operation, patch):
-        """The unsealed stream the patch holds while idle after the operation.
+        """The stream the patch continues while idle after the operation.
 
         A segment leaves its own stream until the next operation starts,
         even when that one is already issued; any other operation leaves
-        what the patch holds.
+        what the patch holds. A sealed stream holds nothing.
         """
         stream_id = self.stream_by_patch.get(patch)
         binding = self.bindings.get(operation.id)
@@ -368,6 +383,13 @@ class FeedbackStreams:
         if live is None or live.is_sealed:
             return None
         return stream_id
+
+    def _is_past_source(self, stream_id, live) -> bool:
+        """The stream has had every round its source holds."""
+        source_round_limit = self.source_round_limits.get(stream_id)
+        if source_round_limit is None:
+            return False
+        return live.next_round >= source_round_limit
 
     def _live(self, stream_id) -> _LiveStream:
         live = self.live_by_stream_id.get(stream_id)

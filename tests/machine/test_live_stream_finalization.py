@@ -211,6 +211,136 @@ def _window_recorder(windows: list):
     return listener
 
 
+def test_a_finished_finite_stream_leaves_its_idle_patch_to_the_policy():
+    """A three-round circuit fed back in full has no fourth round to give.
+
+    The waiting operation on another patch is released by the prefix's
+    closed boundary, and the prefix's patch idles past the circuit's
+    end; those idle rounds are the idle policy's, as for any patch.
+    """
+    circuit = memory_programs.memory_circuit(3, 3)
+    owner = program_records.Operation(
+        100, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    waiting = program_records.Operation(
+        2,
+        "waiting",
+        (1,),
+        patches=(1,),
+        predecessors=(1,),
+        blocked_by=1,
+        emits_detector_data=False,
+    )
+    policy = round_policies.PerOperationRounds({100: 3, 1: 3, 2: 2})
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, waiting),
+        dynamic_streams=(owner,),
+        rounds_policy=policy,
+        feedback_boundary_mode="measurement_closed",
+    )
+    device = stim_device.StimDevice()
+    machine = _stim_machine(workload, device)
+    rounds = _emitted_rounds(machine)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    assert rounds == [1, 2, 3]
+
+
+def test_a_finite_group_stream_gives_its_last_round_once():
+    """Both patches of a finite stream read its last round out together.
+
+    The two-patch prefix is fed back in full; its group idles past the
+    circuit's nine rounds, and the policy takes the same idle rounds
+    from each patch once the stream has none left.
+    """
+    workload, device = _finite_group_workload()
+    machine = _stim_machine(workload, device)
+    idle_rounds = {0: [], 1: []}
+
+    def listener(operation_id, patch, round_index) -> None:
+        del operation_id
+        idle_rounds[patch].append(round_index)
+
+    machine.idle_rounds.trace.idle_round_emitted.connect(listener)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    assert idle_rounds[0] == idle_rounds[1]
+
+
+def _finite_group_workload() -> tuple:
+    """(workload, source) of a nine-round two-patch circuit, three fed back.
+
+    A feedback-blocked operation on a third patch waits for the prefix.
+    """
+    program = memory_programs.joint_repetition_program(False)
+    circuit, measurement_rounds = program.assemble(9)
+    detector_rounds = {}
+    for detector in range(circuit.num_detectors):
+        detector_round = detector // 4 + 1
+        detector_rounds[detector] = min(detector_round, 9)
+    group = (0, 1)
+    owner = program_records.Operation(
+        100, "memory", group, patches=group, circuit=circuit
+    )
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    waiting = program_records.Operation(
+        2,
+        "waiting",
+        (2,),
+        patches=(2,),
+        predecessors=(1,),
+        blocked_by=1,
+        emits_detector_data=False,
+    )
+    policy = round_policies.PerOperationRounds({100: 9, 1: 3, 2: 8})
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, waiting),
+        dynamic_streams=(owner,),
+        rounds_policy=policy,
+    )
+    device = stim_device.StimDevice(
+        measurement_rounds={100: measurement_rounds},
+        detector_rounds={100: detector_rounds},
+    )
+    return workload, device
+
+
+def _stim_machine(
+    workload: workload_settings.WorkloadSettings, device
+) -> machine_module.Machine:
+    """A d=3 run of the workload on a Stim source, 1 us rounds."""
+    qpu = qpu_settings.QpuSettings(
+        distance=3, device=device, round_period_microseconds=1.0
+    )
+    clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=decoder
+    )
+    return machine_module.Machine.build(settings, 5)
+
+
+def _emitted_rounds(machine: machine_module.Machine) -> list:
+    """The index of every round the QPU reads out, in order."""
+    rounds = []
+
+    def listener(packet) -> None:
+        rounds.append(packet.round_index)
+
+    machine.qpu.trace.round_emitted.connect(listener)
+    return rounds
+
+
 @pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
 def test_a_stream_group_shrunk_to_one_patch_runs_to_completion(
     idle_policy: str,

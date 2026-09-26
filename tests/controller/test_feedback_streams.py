@@ -301,7 +301,7 @@ def _streams(
         streams.qpu = qpu
     if window_manager is not None:
         streams.windows = window_manager
-    streams.load(program)
+    streams.load(program, {})
     return streams
 
 
@@ -563,7 +563,7 @@ def test_the_empty_row_holds_no_operation_and_seals_nothing():
     empty = feedback_streams.NoFeedbackStreams()
     operation = _operation(1, patches=("p0",))
 
-    empty.load(None)
+    empty.load(None, {})
     empty.begin(operation)
     empty.seal_finished_streams()
 

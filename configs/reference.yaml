@@ -305,8 +305,9 @@ burst_detector:
 #                                  # catches it in time, the shots.csv
 #                                  # column burst_caught_in_time and the
 #                                  # sweep.csv caught_in_time_share. 300 is
-#                                  # the burst study's deadline, half a
-#                                  # radiation burst's 600-round decay
+#                                  # half the 600-round decay of the
+#                                  # burst the comparison folder draws
+#                                  # (configs/burst_detectors_compared)
 #
 # burst_detector:
 #   kind: event_count              # the simple count baseline: the patch's
@@ -399,9 +400,10 @@ burst_detector:
 #                                  # and 15 rounds, 0.03/s is 4.5e-7 of
 #                                  # shots. Thresholds are
 #                                  # set so that share of quiet shots
-#                                  # alarms, read by the burst study's rule
-#                                  # (empirical tail, else an exponential
-#                                  # fit to the top 20); a share of 1 or
+#                                  # alarms, each group's level read off
+#                                  # its maxima (the empirical tail, else
+#                                  # an exponential fit to the top 20);
+#                                  # a share of 1 or
 #                                  # more is refused
 #   calibration_shots: 20000       # quiet Stim shots of the operation's own
 #                                  # circuit the thresholds are read from,

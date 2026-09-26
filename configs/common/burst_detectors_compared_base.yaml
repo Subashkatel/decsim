@@ -6,9 +6,9 @@
 # It names no detector, so it is not a comparison itself. Every key is
 # documented in reference.yaml.
 #
-# The burst is the burst study's middle radiation burst at d = 5 over a
-# background of p = 3e-3: 15 qubits (radius 3.1), amplitude 0.01,
-# decaying over 600 rounds. It starts at round 50 of 400, so a flag up
+# The burst is a radiation-like burst at d = 5 over a background of
+# p = 3e-3: about 15 qubits (radius 3.1), amplitude 0.01, decaying over
+# 600 rounds. It starts at round 50 of 400, so a flag up
 # to burst_detector.catch_deadline_rounds (300) after it lands inside
 # the shot.
 

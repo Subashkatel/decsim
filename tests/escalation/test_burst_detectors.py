@@ -590,24 +590,34 @@ def test_the_tail_law_hands_bincount_counts_it_casts_safely(monkeypatch):
     assert tails[0] == 1.0
 
 
-# The masked regional CUSUM. Its referents are the burst study's
-# clean-room rebuild of mask_p8r8_D0_x2 from its written rules
-# (audit/cleanroom/x2_clean.py _rounds, rules R1 to R8), transcribed
-# below rule by rule, and the study's calibration rule (PROTOCOL.md
-# section 2; harness/analysis.py GroupTail and bank_thresholds).
+# The masked regional CUSUM, held against a reference written straight
+# from the method's rules, one function per rule and none of the row's
+# code:
+#   flag: a check whose repeats (fired this round and the one before),
+#     or whose joint firings with its same-basis pair, reach mask_count
+#     in the last 64 rounds is flagged that round;
+#   mask: a check flagged in the last 100 rounds is left out;
+#   regions: a disc of each radius around each check, then the patch;
+#   expected count: the region's usual count mu times f, the share of
+#     its usual rate still unmasked;
+#   step: for each design, c log rho - (rho - 1) mu f, the score kept
+#     at zero or above (Page 1954; Lucas 1985 for counts);
+#   tracking: mu moves toward c / f over 5000 rounds while f > 0.2;
+#   groups: each design's largest score at each radius;
+#   alarm: any group at or over its threshold (multichart CUSUM).
 CUSUM = burst_detectors.MaskedRegionalCusumBurstDetector
-STUDY_RADII = (0.0, 1.5, 2.3, 3.2)
-STUDY_DESIGNS = (2.0, 4.0, 20.0)
+REFERENCE_RADII = (0.0, 1.5, 2.3, 3.2)
+REFERENCE_DESIGNS = (2.0, 4.0, 20.0)
 # a stream long enough for the 64-round mask window and its 100-round
 # hold, with a burst loud enough to mask checks
 LONG_ROUNDS = 160
 LONG_BURST_ONSET = 40
-# the study's windows (x2_clean.py W, HOLD, TAU, MIN_SHARE)
-STUDY_WINDOW = 64
-STUDY_HOLD = 100
-STUDY_TRACKING = 5000.0
-STUDY_SHARE_FLOOR = 0.2
-# the study's grid units: neighbouring checks sqrt(2) apart
+# the rules' windows: flag, mask hold, tracking, and the share floor
+REFERENCE_WINDOW = 64
+REFERENCE_HOLD = 100
+REFERENCE_TRACKING = 5000.0
+REFERENCE_SHARE_FLOOR = 0.2
+# grid units: neighbouring checks sqrt(2) apart
 GRID_UNIT = 0.7071067811865476
 
 
@@ -640,8 +650,7 @@ def _bulk_rows(circuit, sampled, positions):
     """(bulk rounds, checks) of 0/1, read off Stim's detector coordinates.
 
     Stim's time coordinate 0 is the first round and its last is the
-    data readout, so the bulk rows are the times between (the study's
-    stream rows, harness layouts.py stream_rows).
+    data readout, so the bulk rows are the times between.
     """
     coordinates = circuit.get_detector_coordinates()
     column_by_position = {}
@@ -661,7 +670,7 @@ def _bulk_rows(circuit, sampled, positions):
 
 
 def _reference_regions(positions, radii):
-    """R3: discs of each radius around each check, then the whole patch."""
+    """Regions: discs of each radius around each check, then the patch."""
     coordinates = numpy.asarray(positions)
     grid = coordinates * GRID_UNIT
     members = []
@@ -682,7 +691,7 @@ def _reference_regions(positions, radii):
 
 
 def _reference_flags(rows, pairs, mask_count):
-    """R1 and R2: each check's flag per round, over the last 64 rounds.
+    """Flag: each check's flag per round, over the last 64 rounds.
 
     A repeat at round t is a firing at t and t - 1; a pair's joint
     firing is both its checks at t. mask_count None flags nothing.
@@ -704,7 +713,7 @@ def _reference_flags(rows, pairs, mask_count):
 
 def _window_start(round_index):
     """The first of the 64 rounds that end at round_index, from zero."""
-    start = round_index - STUDY_WINDOW + 1
+    start = round_index - REFERENCE_WINDOW + 1
     return max(0, start)
 
 
@@ -719,25 +728,25 @@ def _flag_joint_pairs(flags, rows, pairs, round_index, mask_count):
 
 
 def _reference_kept(flags, round_index):
-    """R2: a check counts unless it was flagged in [t - 100, t]."""
-    hold_start = round_index - STUDY_HOLD
+    """Mask: a check counts unless it was flagged in [t - 100, t]."""
+    hold_start = round_index - REFERENCE_HOLD
     first = max(0, hold_start)
     recent = flags[first : round_index + 1]
     return ~recent.any(axis=0)
 
 
 def _reference_scores(rows, positions, pairs, usual_rates, mask_count=8):
-    """R3 to R7, region by region as x2_clean.py _rounds runs them.
+    """Regions to groups, region by region, round by round.
 
     Returns (rounds, groups) design-major, and the masked check-rounds.
     """
-    members, scales = _reference_regions(positions, STUDY_RADII)
+    members, scales = _reference_regions(positions, REFERENCE_RADII)
     flags = _reference_flags(rows, pairs, mask_count)
     usual_counts = []
     for member in members:
         region_rate = usual_rates[member].sum()
         usual_counts.append(region_rate)
-    scores = numpy.zeros((len(STUDY_DESIGNS), len(members)))
+    scores = numpy.zeros((len(REFERENCE_DESIGNS), len(members)))
     group_scores = []
     masked = 0
     for round_index, row in enumerate(rows):
@@ -756,26 +765,26 @@ def _reference_scores(rows, positions, pairs, usual_rates, mask_count=8):
 def _reference_region_step(
     scores, usual_counts, region, member, row, kept, usual_rates
 ):
-    """R4 to R6 for one region: score with mu f, then track mu."""
+    """Expected count, step and tracking for one region, in that order."""
     kept_member = member[kept[member]]
     count = row[kept_member].sum()
     kept_rate = usual_rates[kept_member].sum()
     region_rate = usual_rates[member].sum()
     share = kept_rate / region_rate
     expected = usual_counts[region] * share
-    for design, multiplier in enumerate(STUDY_DESIGNS):
+    for design, multiplier in enumerate(REFERENCE_DESIGNS):
         fired = (1 - (1 - 2 * usual_rates[member]) ** multiplier) / 2
         ratio = fired.sum() / region_rate
         step = count * numpy.log(ratio) - (ratio - 1) * expected
         score = scores[design, region] + step
         scores[design, region] = max(0.0, score)
-    if share > STUDY_SHARE_FLOOR:
+    if share > REFERENCE_SHARE_FLOOR:
         error = count / share - usual_counts[region]
-        usual_counts[region] += error / STUDY_TRACKING
+        usual_counts[region] += error / REFERENCE_TRACKING
 
 
 def _reference_groups(scores, scales):
-    """R7: each design's largest region score at each radius."""
+    """Groups: each design's largest region score at each radius."""
     scale_count = max(scales) + 1
     groups = []
     for design_scores in scores:
@@ -814,7 +823,7 @@ def _bank_scores(detector, rows):
     return numpy.asarray(group_scores)
 
 
-def test_the_bank_scores_every_group_as_the_clean_room_rules_do():
+def test_the_bank_scores_every_group_as_the_written_rules_do():
     """All 15 group scores of every round, on a burst that trips the mask.
 
     Only the order of the float sums differs from the transcription.
@@ -832,8 +841,8 @@ def test_the_bank_scores_every_group_as_the_clean_room_rules_do():
     numpy.testing.assert_allclose(scores, reference, rtol=1e-9, atol=1e-9)
 
 
-def test_the_row_fires_on_the_rounds_the_clean_room_rules_alarm():
-    """R8 at the row's own thresholds, through observe_round."""
+def test_the_row_fires_on_the_rounds_the_written_rules_alarm():
+    """Alarm, at the row's own thresholds, through observe_round."""
     settings = CUSUM.Settings(calibration_shots=2000)
     detector = _cusum_detector(settings, rounds=LONG_ROUNDS)
     positions, pairs, usual_rates = _bank_inputs(detector)
@@ -878,15 +887,15 @@ def test_no_radii_leave_the_whole_patch_the_only_region():
     thresholds = detector.charts_by_operation[1].calibration.thresholds
 
     assert bank.incidence.shape == (24, 1)
-    assert len(thresholds) == len(STUDY_DESIGNS)
+    assert len(thresholds) == len(REFERENCE_DESIGNS)
 
 
-def _clean_room_pairs(circuit):
-    """For each data qubit, its two same-basis checks (x2_clean.py R1).
+def _reference_pairs(circuit):
+    """For each data qubit, its two same-basis checks, the flag's pairs.
 
-    Data qubits sit at odd Stim coordinates and X checks carry an H
-    (burst study harness layouts.py surface), and a check beside a data
-    qubit sits one unit off in both coordinates.
+    On Stim's rotated surface code data qubits sit at odd coordinates
+    and X checks carry an H, and a check beside a data qubit sits one
+    unit off in both coordinates.
     """
     coordinates = circuit.get_final_qubit_coordinates()
     x_checks = _hadamard_targets(circuit)
@@ -937,10 +946,10 @@ def test_the_pairs_are_the_checks_one_data_qubit_flip_fires_together():
         bank_pairs.add(pair)
 
     assert len(bank_pairs) == 30
-    assert bank_pairs == _clean_room_pairs(circuit)
+    assert bank_pairs == _reference_pairs(circuit)
 
 
-# the study's calibration rule on hand maxima: one group of maxima 1 to
+# the calibration rule on hand maxima: one group of maxima 1 to
 # 100, whose 21st largest is 80 and whose 20 largest exceed it by 10.5
 # on average
 HAND_MAXIMA = numpy.arange(1.0, 101.0)
@@ -960,7 +969,7 @@ def test_one_group_alarms_on_at_most_its_target_share_of_blocks():
 
     The fitted tail alone gives 80 + 10.5 ln(20 / 5) = 94.56, which
     admits 95 too, six blocks; one group goes through the bank's
-    bisection like any other bank, as the clean room calibrates it.
+    bisection like any other bank.
     """
     maxima = HAND_MAXIMA[:, None]
 
@@ -975,7 +984,7 @@ def test_a_shared_level_keeps_the_bank_at_its_target():
     """A group that never alarms leaves the other's level at the target.
 
     The bisection stays below the target share, so the level is the
-    next maximum up: 72, the harness's own answer on these maxima.
+    next maximum up: 72.
     """
     silent = numpy.zeros(100)
     maxima = numpy.stack([HAND_MAXIMA, silent], axis=1)
@@ -986,7 +995,11 @@ def test_a_shared_level_keeps_the_bank_at_its_target():
 
 
 def test_an_unmeasured_target_keeps_the_ratio_found_at_five_alarms():
-    """One expected alarm in 100 blocks: the harness gives 111.899."""
+    """One expected alarm in 100 blocks: the ratio at five gives 111.899.
+
+    Five alarms bisect to a group share, the bank-to-group ratio there
+    carries down to one alarm, and the fitted tail gives the level.
+    """
     silent = numpy.zeros(100)
     maxima = numpy.stack([HAND_MAXIMA, silent], axis=1)
 

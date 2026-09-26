@@ -1,10 +1,10 @@
 """The rounds the burst detector fired on, for a shot's catch columns.
 
-A listener on the BurstDetector port's round_flagged source. The burst
-study scores a detector by its first alarm at or after a burst's onset
-and whether it comes within a deadline (burst study PROTOCOL.md section
-3, "Delay" and "Caught within k"), so the record keeps every round the
-detector fired on and the measurement reads that alarm off it.
+A listener on the BurstDetector port's round_flagged source. A
+change-point detector is scored by its detection delay, its first alarm
+at or after the change less the change (Xie et al. 2104.04186 lines
+161-171), so the record keeps every round the detector fired on and the
+measurement reads that alarm off it.
 """
 
 

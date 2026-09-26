@@ -426,9 +426,9 @@ class BurstDetectorSettings:
     The row none, the default, builds no detector and takes no keys, so
     a run without the section is the machine without a detector.
     catch_deadline_rounds is how many rounds after a burst's onset a
-    flag may come and still catch it in time: the burst study's 300,
-    half a radiation burst's 600-round decay, so escalation covers most
-    of the burst (PROTOCOL.md section 17). The shot columns read it.
+    flag may come and still catch it in time. 300 is half the 600-round
+    decay of the comparison folder's burst, so a caught burst still has
+    most of its raised rounds ahead. The shot columns read it.
     """
 
     kind: str = "none"

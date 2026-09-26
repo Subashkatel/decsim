@@ -1507,8 +1507,8 @@ def detector_shot(tmp_path, qpu: dict, catch_deadline_rounds=300):
 def test_a_burst_shot_records_its_first_flag_and_a_catch_in_time(tmp_path):
     """Delay 9 is inside a 9-round deadline and outside an 8-round one.
 
-    The burst study's catch within k is a delay of at most k (PROTOCOL.md
-    section 3), so the deadline is inclusive.
+    A catch within k is a detection delay of at most k, so the deadline
+    is inclusive.
     """
     in_time = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
     late = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)

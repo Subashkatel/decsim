@@ -26,7 +26,7 @@ data (Toshio 2510.25222 lines 1248-1250).
 import dataclasses
 import functools
 from collections.abc import Callable
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.records.decoding as decoding_records
@@ -35,34 +35,10 @@ import decsim.trace_source as trace_source
 SendInput = Callable[[Callable[[], None]], int]
 
 
-@runtime_checkable
-class DecoderMemoryTransfer(Protocol):
-    """Carries one admitted job to the decoder side when its link delivers.
-
-    send_input(on_landed) sends the job's input over its link, calls
-    on_landed once at delivery, and returns the delay the link expects;
-    None means the job carries no input and lands now. receiver(job) runs
-    exactly once at the landing unless the request is cancelled first;
-    cancel is idempotent.
-    """
-
-    def deliver(
-        self,
-        job: decoding_records.DecodeJob,
-        send_input: Optional[SendInput],
-        receiver: Callable[[decoding_records.DecodeJob], None],
-    ) -> int:
-        """Send the input and land the job at delivery; the expected delay."""
-
-    def cancel(self, job: decoding_records.DecodeJob) -> None:
-        """Suppress the landing of a request that has not landed yet."""
-
-
 @dataclasses.dataclass
 class _AwaitedLanding:
     """One transfer in flight into a unit, and the jobs joining its landing."""
 
-    memory: Any
     expected_landing_ticks: int
     joined: list
 
@@ -127,7 +103,7 @@ class DecoderInputStaging:
         land = functools.partial(
             self._land, job, memory, landing_key, on_landed
         )
-        awaited = _AwaitedLanding(memory, self.engine.now, [])
+        awaited = _AwaitedLanding(self.engine.now, [])
         self.awaited_by_input[landing_key] = awaited
         expected_delay_ticks = self.transport.deliver(job, send_input, land)
         landing_ticks = self.engine.now + expected_delay_ticks

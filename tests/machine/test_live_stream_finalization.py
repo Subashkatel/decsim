@@ -375,6 +375,85 @@ def test_a_continuation_gives_its_decision_the_stream_s_buffer():
     assert rounds == list(range(1, 16))
 
 
+@pytest.mark.parametrize("is_finite", [False, True])
+def test_a_released_continuation_s_result_is_its_own_windows(is_finite: bool):
+    """A continuation after idle rounds starts a window of its stream.
+
+    The prefix's decision releases the continuation at round 7, after
+    four idle rounds, so it runs rounds 8 to 10; protect waits for its
+    result, which is the sum over the windows of those rounds alone.
+    """
+    workload, source = _released_continuation(is_finite)
+    machine = _stim_machine(workload, source)
+    guard = _refuse_past(100_000_000)
+    machine.engine.action_done.connect(guard)
+    rounds = _emitted_rounds(machine)
+
+    result = machine.run()
+
+    binding = machine.issuer.stream_binding_for(2)
+    assert result.terminal_status == "complete"
+    assert rounds == list(range(1, 25))
+    assert binding.stream_offset == 7
+
+
+def _released_continuation(is_finite: bool) -> tuple:
+    """(workload, source): a prefix's decision releases its continuation.
+
+    Protect waits for the continuation's decision, and the region reads
+    the stream out at round 24; a finite source's circuit has 24 rounds.
+    """
+    circuit = None
+    owner_rounds = 0
+    program = memory_programs.memory_program()
+    source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    if is_finite:
+        circuit = memory_programs.memory_circuit(24, 3)
+        owner_rounds = 24
+        source = stim_device.StimDevice()
+    owner = program_records.Operation(
+        100, "memory", (0,), patches=(0,), circuit=circuit
+    )
+    prefix = dataclasses.replace(
+        owner, id=1, name="prefix", stream_id=100, stream_offset=0
+    )
+    resumed = dataclasses.replace(
+        owner,
+        id=2,
+        name="resumed",
+        stream_id=100,
+        predecessors=(1,),
+        blocked_by=1,
+    )
+    protect = program_records.Operation(
+        3,
+        "protect",
+        (0,),
+        patches=(0,),
+        predecessors=(2,),
+        blocked_by=2,
+        emits_detector_data=False,
+    )
+    readout = dataclasses.replace(
+        protect,
+        id=4,
+        name="readout",
+        predecessors=(3,),
+        blocked_by=None,
+        scheduled_start_round=24,
+    )
+    region = program_records.ProtectedRegion(100, 3, 4)
+    counts = {100: owner_rounds, 1: 3, 2: 3, 3: 0, 4: 0}
+    policy = round_policies.PerOperationRounds(counts)
+    workload = workload_settings.WorkloadSettings(
+        operations=(prefix, resumed, protect, readout),
+        dynamic_streams=(owner,),
+        protected_regions=(region,),
+        rounds_policy=policy,
+    )
+    return workload, source
+
+
 def _continuation_workload(
     start_rounds: tuple = (8,),
     readout_round: int = 15,

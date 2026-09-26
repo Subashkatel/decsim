@@ -427,8 +427,19 @@ class WindowManager:
     def bind_stream_operation(
         self, operation_id: int, stream_id, stream_offset: int
     ) -> None:
-        """Note which stream and offset a segment's rounds fold into."""
+        """Note which stream and offset a segment's rounds fold into.
+
+        The segment's first round starts a window of its stream, so its
+        result is a sum over whole windows.
+        """
         self.results.bind_stream_segment(operation_id, stream_id, stream_offset)
+        if not self.planner.has_stream(stream_id):
+            return
+        clipped = self.planner.cut_stream_after(stream_id, stream_offset)
+        if clipped is None:
+            return
+        self.planner.refresh_stream_models(stream_id)
+        self._refresh_unqueued_stream_windows(stream_id)
 
     def bind_required_stream_end(
         self, operation_id: int, required_stream_end: int

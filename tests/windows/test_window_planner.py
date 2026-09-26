@@ -322,6 +322,75 @@ def test_a_closed_boundary_ends_a_commit_region_and_restarts_the_stride(
     assert stride_ends == [boundary + 3, boundary + 6]
 
 
+@pytest.mark.parametrize("known_round", [4, 7])
+def test_a_segment_cut_starts_a_window_on_the_segment_s_first_round(
+    known_round: int,
+) -> None:
+    """A segment after round 7 starts a window at round 8.
+
+    Laid or not yet laid, the window holding round 7 commits through
+    it, and the stride restarts on round 8.
+    """
+    planner = _planner()
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.grow_stream("stream", known_round, None)
+    planner.cut_stream_after("stream", 7)
+    planner.grow_stream("stream", 14, None)
+    commits = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in planner.windows_of("stream")
+    ]
+    assert commits == [
+        (1, 3, 5),
+        (4, 6, 8),
+        (7, 7, 9),
+        (8, 10, 12),
+        (11, 13, 15),
+        (14, 16, 18),
+    ]
+
+
+def test_a_cut_on_a_window_edge_leaves_the_stride():
+    planner = _planner()
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.grow_stream("stream", 4, None)
+    assert planner.cut_stream_after("stream", 6) is None
+    planner.grow_stream("stream", 7, None)
+    commits = [
+        (window.commit_lo, window.commit_hi)
+        for window in planner.windows_of("stream")
+    ]
+    assert commits == [(1, 3), (4, 6), (7, 9)]
+
+
+def test_a_finite_stream_cut_replans_the_rounds_after_it():
+    """The scheme lays the rounds after the cut as their own stretch."""
+    source = _FiniteSource(12)
+    planner = _planner(source)
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.grow_stream("stream", 1, None)
+    planner.cut_stream_after("stream", 4)
+    planner.grow_stream("stream", 12, None)
+    commits = [
+        (window.commit_lo, window.commit_hi)
+        for window in planner.windows_of("stream")
+    ]
+    scheme = sliding_scheme.SlidingWindowScheme()
+    rest = scheme.plan_operation(
+        "stream", 8, commit_round_count=3, buffer_round_count=2
+    )
+    rest_commits = []
+    for geometry in rest.windows:
+        commit_lo = geometry.commit_lo + 4
+        commit_hi = geometry.commit_hi + 4
+        rest_commits.append((commit_lo, commit_hi))
+    assert commits[:2] == [(1, 3), (4, 4)]
+    assert commits[2:] == rest_commits
+
+
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(

@@ -445,14 +445,74 @@ class WindowPlanner:
         growth = self.growth_by_stream[stream_id]
         for window in self.windows_of(stream_id):
             if window.commit_lo <= stream_round_count <= window.commit_hi:
-                window.commit_hi = stream_round_count
-                window.buffer_hi = stream_round_count + growth.buffer_rounds
-                window.round_count = window.buffer_hi - window.start_round + 1
-                growth.next_commit_lo = stream_round_count + 1
+                _clip(window, stream_round_count, growth)
                 return window
         return None
 
+    def cut_stream_after(
+        self, stream_id, last_round: int
+    ) -> Optional[window_records.Window]:
+        """End a commit region on the round: a segment starts after it.
+
+        A segment's result is the sum over whole windows of its rounds
+        (operation_results.py), so its first round starts a window. A
+        window already laid across the round commits through it, as at a
+        closed tail, but the stream's model stays open; a window not laid
+        yet is cut as it is laid. The window clipped is returned, or None.
+        """
+        growth = self.growth_by_stream[stream_id]
+        clipped = None
+        for window in self.windows_of(stream_id):
+            if window.commit_lo <= last_round < window.commit_hi:
+                _clip(window, last_round, growth)
+                clipped = window
+        if growth.finite_geometries is None:
+            growth.cut_after(last_round)
+        else:
+            self._replan_finite_after(stream_id, growth, last_round)
+        return clipped
+
     # ---- private
+
+    def _replan_finite_after(
+        self, stream_id, growth: "_StreamGrowth", last_round: int
+    ) -> None:
+        """Lay the finite source's windows not laid yet from the cut on.
+
+        The window across the cut commits through it, and the scheme
+        plans the rounds after it as its own stretch. A cut on a window
+        edge leaves the plan as it is.
+        """
+        geometries = growth.finite_geometries
+        index = growth.next_window_index
+        while index < len(geometries) and (
+            geometries[index].commit_hi <= last_round
+        ):
+            index += 1
+        if index == len(geometries):
+            return
+        following = geometries[index]
+        if following.commit_lo == last_round + 1:
+            return
+        kept = list(geometries[:index])
+        if following.commit_lo <= last_round:
+            buffer_hi = last_round + growth.buffer_rounds
+            clipped = dataclasses.replace(
+                following, commit_hi=last_round, buffer_hi=buffer_hi
+            )
+            kept.append(clipped)
+        round_limit = geometries[-1].commit_hi
+        rest_round_count = round_limit - last_round
+        rest = self.scheme.plan_operation(
+            stream_id,
+            rest_round_count,
+            commit_round_count=growth.commit_rounds,
+            buffer_round_count=growth.buffer_rounds,
+        )
+        for geometry in rest.windows:
+            shifted = _shifted(geometry, last_round)
+            kept.append(shifted)
+        growth.finite_geometries = tuple(kept)
 
     def _build_operation_models(
         self, operation: program_records.Operation
@@ -567,6 +627,31 @@ def _refuse_reads_past_the_model(
         )
 
 
+def _clip(window: window_records.Window, last_round: int, growth) -> None:
+    """The window commits through the round; the next starts after it."""
+    window.commit_hi = last_round
+    window.buffer_hi = last_round + growth.buffer_rounds
+    window.round_count = window.buffer_hi - window.start_round + 1
+    growth.next_commit_lo = last_round + 1
+
+
+def _shifted(
+    geometry: window_records.WindowGeometry, round_shift: int
+) -> window_records.WindowGeometry:
+    """The geometry moved later by the rounds."""
+    buffer_lo = geometry.buffer_lo + round_shift
+    commit_lo = geometry.commit_lo + round_shift
+    commit_hi = geometry.commit_hi + round_shift
+    buffer_hi = geometry.buffer_hi + round_shift
+    return dataclasses.replace(
+        geometry,
+        buffer_lo=buffer_lo,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=buffer_hi,
+    )
+
+
 def _stream_round_limit(physical_round_limit, model_round_limit):
     if physical_round_limit is None:
         return model_round_limit
@@ -589,6 +674,13 @@ class _StreamGrowth:
         self.next_window_index = 0
         # a closed boundary restarts the stride on the round after it
         self.next_commit_lo = 1
+        # rounds a commit region not laid yet must end on
+        self.cut_rounds: list = []
+
+    def cut_after(self, last_round: int) -> None:
+        """A window not laid yet commits through the round at most."""
+        if last_round >= self.next_commit_lo:
+            self.cut_rounds.append(last_round)
 
     def finite_geometries_begun(self, highest_known_round: int) -> list:
         """The source's next geometries whose commit region has begun."""
@@ -612,7 +704,7 @@ class _StreamGrowth:
         while True:
             if commit_lo > highest_known_round:
                 return begun
-            commit_hi = commit_lo + self.commit_rounds - 1
+            commit_hi = self._commit_end(commit_lo)
             if round_cap is not None:
                 commit_hi = min(commit_hi, round_cap)
             buffer_hi = commit_hi + self.buffer_rounds
@@ -624,6 +716,14 @@ class _StreamGrowth:
             )
             begun.append(geometry)
             commit_lo = commit_hi + 1
+
+    def _commit_end(self, commit_lo: int) -> int:
+        """A full stride after commit_lo, or the first cut inside it."""
+        commit_hi = commit_lo + self.commit_rounds - 1
+        for cut_round in self.cut_rounds:
+            if commit_lo <= cut_round < commit_hi:
+                commit_hi = cut_round
+        return commit_hi
 
 
 @dataclasses.dataclass(frozen=True)

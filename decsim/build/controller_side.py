@@ -37,7 +37,8 @@ def build_conditional_release(
     parts: build_parts.Parts,
 ) -> conditional_release_module.ConditionalRelease:
     """The gate a conditional operation's release waits at."""
-    return conditional_release_module.ConditionalRelease(parts.engine)
+    del parts
+    return conditional_release_module.ConditionalRelease()
 
 
 def build_strong_requests(
@@ -106,11 +107,12 @@ def build_detection_events(
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
 
-    controller.detection_events_formed_at names the row; a value that is
-    not one is refused here, before the first round is packed. Both rows
-    are built the same way, with the run's former and the controller's
-    own formation cost in cycles. A source that does not answer the
-    DetectionEventFormer port forms nothing either way. The decoder pool
+    controller.detection_events_formed_at names the row; the yaml's value
+    is refused where the file loads, a Python-built record's here, before
+    the first round is packed. Every row is built the same way, with the
+    run's former and the controller's own formation cost in cycles. A
+    source that does not answer the DetectionEventFormer port forms
+    nothing either way. The decoder pool
     is compiled from this seat, so the root builds it before the rest.
     """
     former = None

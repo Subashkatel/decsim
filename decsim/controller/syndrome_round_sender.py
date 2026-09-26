@@ -27,6 +27,7 @@ from typing import Callable
 
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -53,7 +54,7 @@ class HeldRounds:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         on_full: controller_settings.PackingOverflowPolicy,
     ) -> None:
         self.engine = engine
@@ -162,7 +163,7 @@ class SyndromeRoundSender:
     transmitter = ports.Port(round_transmission.RoundTransmitter)
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
 
     def start(self) -> None:
@@ -179,20 +180,19 @@ class SyndromeRoundSender:
         self.publishes_from_strong_store = not reads_from_buffer_zero
 
     def admit(self, packed: round_records.PackedRound) -> bool:
-        """Write the round where it belongs; False when it found no room."""
-        if self.publishes_from_strong_store:
-            if not self.strong_receiver.has_room(packed.wire_bits):
-                return self.held_rounds.refuse(packed, self.admit)
-            self._write_strong(packed)
-            return True
-        if not self.weak_receiver.has_room(packed.wire_bits):
-            return self.held_rounds.refuse(packed, self.admit)
-        # the round takes its weak syndrome buffer slot when its bits are
-        # there: the room is reserved here, and the landing stores and
-        # publishes it
-        self.weak_receiver.reserve_write(packed.wire_bits)
-        self.transmitter.send(packed)
-        return True
+        """Write the round where it belongs; False when it waits or drops.
+
+        A round that finds rounds already held joins the line behind them
+        without asking for room, even when its own bits would fit: gem5's
+        requester that was refused "must wait for a recvReqRetry" before
+        it sends again (src/mem/port.hh:244-255), and its packet queue
+        holds every later packet behind the refused front
+        (src/mem/packet_queue.cc:155-162 and 191-217), so a narrow round
+        never overtakes a wide one that waits.
+        """
+        if self.held_rounds.count:
+            return self.held_rounds.refuse(packed, self._write)
+        return self._write(packed)
 
     def check_settled(self) -> None:
         """At the end of a run no round may still wait for room."""
@@ -201,6 +201,22 @@ class SyndromeRoundSender:
                 f"run ended with {self.held_rounds.count} rounds held for "
                 f"store room"
             )
+
+    def _write(self, packed: round_records.PackedRound) -> bool:
+        """Write the round if its store has room; False when it has none."""
+        if self.publishes_from_strong_store:
+            if not self.strong_receiver.has_room(packed.wire_bits):
+                return self.held_rounds.refuse(packed, self._write)
+            self._write_strong(packed)
+            return True
+        if not self.weak_receiver.has_room(packed.wire_bits):
+            return self.held_rounds.refuse(packed, self._write)
+        # the round takes its weak syndrome buffer slot when its bits are
+        # there: the room is reserved here, and the landing stores and
+        # publishes it
+        self.weak_receiver.reserve_write(packed.wire_bits)
+        self.transmitter.send(packed)
+        return True
 
     def _write_strong(self, packed: round_records.PackedRound) -> None:
         """Carry the round over its link to the strong syndrome buffer.

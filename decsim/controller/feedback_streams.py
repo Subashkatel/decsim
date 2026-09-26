@@ -137,12 +137,12 @@ class FeedbackStreams:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         *,
         regions,
         resolved_operations,
         resolved_patches,
-    ):
+    ) -> None:
         self.engine = engine
         self.table = _StreamTable(
             regions, resolved_operations, resolved_patches
@@ -611,7 +611,8 @@ class _StreamTable:
         for region in regions:
             if region.stream_id in indexed_stream_ids:
                 raise ValueError(
-                    f"duplicate protected stream {region.stream_id}"
+                    f"protected stream {region.stream_id} has two protected "
+                    "regions; a stream has at most one"
                 )
             self._index_region(region, operations_by_id)
             indexed_stream_ids.add(region.stream_id)
@@ -668,7 +669,8 @@ class _StreamTable:
         owner = self.owner_by_stream_id.get(stream_id)
         if owner is None:
             raise ValueError(
-                f"protected stream {stream_id} owner/patch mismatch"
+                f"protected stream {stream_id} is none of the program's "
+                "dynamic streams, so nothing owns its region"
             )
         owner_patches = tuple(owner.patches)
         self._check_group_footprint(stream_id, owner_patches)
@@ -709,7 +711,13 @@ def _check_region_endpoint(
 ) -> None:
     stream_id = region.stream_id
     if operation is None:
-        raise ValueError(f"protected stream {stream_id} invalid {endpoint}")
+        raise ValueError(
+            f"protected stream {stream_id}'s {endpoint} operation is not "
+            "an operation of the program"
+        )
     required_patches = set(owner_patches)
     if not required_patches.issubset(operation.patches):
-        raise ValueError(f"protected stream {stream_id} invalid {endpoint}")
+        raise ValueError(
+            f"protected stream {stream_id}'s {endpoint} operation does not "
+            f"hold every patch of the stream {owner_patches!r}"
+        )

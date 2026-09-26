@@ -7,11 +7,12 @@ workspace; the idle policy says how an idle patch's rounds are charged.
 import dataclasses
 import enum
 from collections.abc import Mapping
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.controller.policies as policies
 import decsim.ports as ports
+import decsim.tables as tables
 from decsim.detector_error_model import detection_event_formation
 
 # idle_policy.kind names one of these rows: what the controller does
@@ -21,6 +22,9 @@ IDLE_POLICIES = {
     "ignore": policies.Ignore,
     "extend_stream": policies.ExtendStream,
 }
+# The keys every row of the idle_policy section shares; any other key is
+# the row's own (its Settings, decsim/tables.py row_settings).
+_IDLE_POLICY_KEYS = ("kind",)
 
 # controller.detection_events_formed_at names one of these rows: where
 # the machine turns a round's measurement outcomes into its detection
@@ -35,6 +39,26 @@ DETECTION_EVENT_FORMATION = {
     ),
     "decoder": detection_event_formation.DecoderSideFormation,
 }
+
+# The controller section's keys.
+_CONTROLLER_KEYS = (
+    "clock",
+    "readout_to_bits_cycles",
+    "packing_cycles_per_round",
+    "decision_to_pulse_cycles",
+    "detection_event_cycles_per_round",
+    "packing_rounds_in_flight",
+    "packing_overflow",
+    "detection_events_formed_at",
+)
+# The keys with no default: a controller card states its clock and its
+# three per-round costs.
+_REQUIRED_CONTROLLER_KEYS = (
+    "clock",
+    "readout_to_bits_cycles",
+    "packing_cycles_per_round",
+    "decision_to_pulse_cycles",
+)
 
 
 class PackingOverflowPolicy(enum.Enum):
@@ -117,6 +141,7 @@ class ControllerSettings:
             "detection_event_cycles_per_round",
             self.detection_event_cycles_per_round,
         )
+        self._check_rounds_in_flight()
         self._check_clock()
 
     @classmethod
@@ -124,6 +149,7 @@ class ControllerSettings:
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "ControllerSettings":
         """The `controller` section: its cycle counts, and its clock."""
+        _check_section_keys(section)
         clock = clocks.clock(section["clock"])
         readout_cycles = section["readout_to_bits_cycles"]
         packing_cycles = section["packing_cycles_per_round"]
@@ -132,6 +158,11 @@ class ControllerSettings:
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
         packing_overflow = _packing_overflow(section)
         formed_at = section.get("detection_events_formed_at", "controller")
+        tables.row(
+            DETECTION_EVENT_FORMATION,
+            "controller.detection_events_formed_at",
+            formed_at,
+        )
         return cls(
             clock=clock,
             readout_to_bits_cycles=readout_cycles,
@@ -141,6 +172,25 @@ class ControllerSettings:
             packing_rounds_in_flight=packing_rounds_in_flight,
             packing_overflow=packing_overflow,
             detection_events_formed_at=formed_at,
+        )
+
+    def _check_rounds_in_flight(self) -> None:
+        """The packing stage's bound is a whole count of rounds, or null.
+
+        A round enters the stage whole, so the bound counts whole rounds,
+        and a bound below one admits no round and stops the run at the
+        first fragment. gem5's integer parameters refuse a value outside
+        their range where the configuration is read
+        (src/python/m5/params/param_types.py:230-235, CheckedInt._check).
+        """
+        bound = self.packing_rounds_in_flight
+        if bound is None:
+            return
+        if _is_round_count(bound):
+            return
+        raise ValueError(
+            "controller.packing_rounds_in_flight must be a whole count of "
+            f"rounds, at least one, or null for no bound (got {bound!r})"
         )
 
     def _check_clock(self) -> None:
@@ -160,7 +210,7 @@ class ControllerSettings:
 
 @dataclasses.dataclass(frozen=True)
 class IdlePolicySettings:
-    """The yaml's `idle_policy` value: how an idle patch's rounds are charged.
+    """The yaml's `idle_policy` section: how an idle patch's rounds are charged.
 
     Table rows (IDLE_POLICIES, above): separate_decode_jobs, ignore,
     extend_stream. Idle rounds are decoder workload, because the backlog
@@ -169,11 +219,62 @@ class IdlePolicySettings:
     2303.00054 line 144), so separate_decode_jobs is the default; ignore
     is the optimistic card for active-path latency studies;
     extend_stream folds them into a live stream. A Python-built policy is
-    used as it is.
+    used as it is. row_settings is the row's own Settings, read from the
+    section's keys other than kind, or None for a row that declares
+    none.
     """
 
     kind: str = "separate_decode_jobs"
     policy: Optional[ports.IdlePolicy] = None
+    # the row's own Settings record, opaque to the section
+    row_settings: Optional[Any] = None
+
+    @classmethod
+    def from_yaml(cls, section: Mapping) -> "IdlePolicySettings":
+        """The `idle_policy` section: a kind of the table, the row's keys.
+
+        The section is a mapping with a kind key like every other, since
+        a row owns its parameters the way a gem5 SimObject declares its
+        own (src/mem/SimpleMemory.py:43-53).
+        """
+        kind = section.get("kind", "separate_decode_jobs")
+        row = tables.row(IDLE_POLICIES, "idle_policy.kind", kind)
+        row_settings = tables.row_settings(
+            row, "idle_policy", section, _IDLE_POLICY_KEYS
+        )
+        return cls(kind=kind, row_settings=row_settings)
+
+
+def _check_section_keys(section: Mapping) -> None:
+    """The section names its required keys and no key it does not have.
+
+    gem5 refuses a parameter its class does not declare
+    (src/python/m5/SimObject.py:932-936), as the decoder_manager and
+    escalation sections here do.
+    """
+    unknown = set(section) - set(_CONTROLLER_KEYS)
+    if unknown:
+        listed = sorted(unknown)
+        raise ValueError(
+            f"controller does not know {listed}; its keys are "
+            f"{list(_CONTROLLER_KEYS)}"
+        )
+    missing = set(_REQUIRED_CONTROLLER_KEYS) - set(section)
+    if missing:
+        listed = sorted(missing)
+        raise ValueError(
+            f"controller needs the keys {listed}; configs/reference.yaml "
+            "holds every key with its unit"
+        )
+
+
+def _is_round_count(value) -> bool:
+    """A number of rounds a stage can hold: a whole count, never a flag."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, int):
+        return False
+    return value >= 1
 
 
 def _formation_cycles(section: Mapping) -> int:

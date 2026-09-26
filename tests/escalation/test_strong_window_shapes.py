@@ -61,7 +61,7 @@ GATE_SWITCHING_CARD = {
         "packing_cycles_per_round": 0,
         "packing_rounds_in_flight": None,
     },
-    "idle_policy": "separate_decode_jobs",
+    "idle_policy": {"kind": "separate_decode_jobs"},
     "links": {
         "qpu_to_controller": ONE_FRIDGE_CYCLE,
         "controller_to_weak_buffer": ONE_FRIDGE_CYCLE,

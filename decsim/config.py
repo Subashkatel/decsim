@@ -118,13 +118,12 @@ class ClockSettings:
         """The `clocks` section: every value a positive frequency."""
         megahertz_by_name = {}
         for name, megahertz in section.items():
-            frequency = float(megahertz)
-            if not math.isfinite(frequency) or frequency <= 0:
+            if not _is_frequency(megahertz):
                 raise ValueError(
                     f"clock {name} must be a positive frequency in "
                     f"megahertz, got {megahertz!r}"
                 )
-            megahertz_by_name[name] = frequency
+            megahertz_by_name[name] = float(megahertz)
         return cls(megahertz_by_name)
 
     def megahertz(self, clock: str) -> float:
@@ -156,3 +155,20 @@ def _is_whole_bit_count(value) -> bool:
     if not isinstance(value, int):
         return False
     return value >= 1
+
+
+def _is_frequency(value) -> bool:
+    """A clock's megahertz: a finite positive number, never a flag or a word.
+
+    YAML reads `true` as a boolean, and Python's bool is a subclass of
+    int (the language reference, "The standard type hierarchy"), so a
+    flag would otherwise pass as one megahertz; a quoted number is a
+    word, as check_cycles treats it.
+    """
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    if not math.isfinite(value):
+        return False
+    return value > 0

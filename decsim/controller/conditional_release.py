@@ -33,8 +33,7 @@ class ConditionalRelease:
     # after the dispatch sends it
     runtime = ports.Port(ports.OperationRuntime)
 
-    def __init__(self, engine):
-        self.engine = engine
+    def __init__(self) -> None:
         self.waiting_by_blocker: dict[int, list[int]] = {}
 
     def register_blocked_operation(

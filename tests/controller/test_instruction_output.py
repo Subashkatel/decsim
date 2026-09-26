@@ -11,9 +11,9 @@ controller_to_qpu crossing before it is available at the QPU. The link
 law is the channel's (tests/links/test_channel.py); here the reference
 card prices the output hop.
 
-The pulse cost is the control processor's own work and stands even with
-no fabric at all (QubiC holds the conditional jump and the pulse on the
-core beside the qubit, Fruitwala et al. 2404.15260). The whole-run law
+The pulse cost is the control processor's own work (QubiC holds the
+conditional jump and the pulse on the core beside the qubit, Fruitwala
+et al. 2404.15260). The whole-run law
 at the end of the file composes the three stages the declared card of
 tests/declared_run.py prices, the closed loop Yang et al. 2605.04892
 measure end to end as the sum of its stages (550 ns from the end of the
@@ -100,13 +100,17 @@ def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
     cycles later, at 300.
     """
     engine = engine_module.Engine()
+    reference = link_profiles.logical_reference_profile()
+    link = fabric_module.LinkFabric(reference, engine)
+    recorder = round_events.RoundEventRecorder(engine)
     slow_clock = config.Clock(100)
     output = instruction_output.InstructionOutput(engine, slow_clock, 2)
+    output.link = link
+    output.trace.output_event.connect(recorder.output)
     result = program_records.Decision(9, releases_operation=False)
-    delivered = []
 
     def deliver(decision):
-        delivered.append((engine.now, decision))
+        del decision
 
     def relay_at_tick_ten():
         output.relay_instruction(result, deliver)
@@ -114,38 +118,12 @@ def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
     engine.schedule(10, relay_at_tick_ten)
     engine.run()
 
-    assert delivered == [(300, result)]
-
-
-def test_a_result_return_with_no_link_still_pays_the_pulse_cost():
-    """An unpriced fabric drops the crossing, not the local work.
-
-    The decision-to-pulse cost is the control processor's own work
-    between the decision and the pulse it triggers, which QubiC runs on
-    the core beside the qubit (Fruitwala et al. 2404.15260); a card
-    that prices no path therefore still charges it, and the result is
-    available at the QPU one pulse cost after the decision.
-    """
-    engine = engine_module.Engine()
-    recorder = round_events.RoundEventRecorder(engine)
-    output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
-    output.trace.output_event.connect(recorder.output)
-    result = program_records.Decision(9, releases_operation=False)
-    delivered = []
-
-    def deliver(decision):
-        delivered.append((engine.now, decision))
-
-    output.relay_instruction(result, deliver)
-    engine.run()
-
-    assert delivered == [(PULSE_TICKS, result)]
     kinds_and_ticks = [
         (event.kind, event.tick) for event in recorder.output_events
     ]
     assert kinds_and_ticks == [
-        ("DECISION_AVAILABLE", 0),
-        ("CONTROL_DECISION_ISSUED", PULSE_TICKS),
+        ("DECISION_AVAILABLE", 10),
+        ("CONTROL_DECISION_ISSUED", 300),
     ]
 
 

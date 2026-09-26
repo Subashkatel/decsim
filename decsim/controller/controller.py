@@ -16,6 +16,7 @@ import dataclasses
 
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.settings as controller_settings
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -35,7 +36,7 @@ class Controller:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         settings: controller_settings.ControllerSettings,
     ) -> None:
         self.engine = engine

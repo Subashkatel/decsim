@@ -16,6 +16,7 @@ from typing import Callable, Optional
 
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.idle_rounds as idle_rounds_module
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
@@ -29,7 +30,9 @@ class OperationIssuer:
     windows = ports.Port(ports.WindowInput)
     output = ports.Port(ports.InstructionReceiver)
 
-    def __init__(self, engine, resolved_operations) -> None:
+    def __init__(
+        self, engine: engine_module.Engine, resolved_operations
+    ) -> None:
         self.engine = engine
         operation_by_id = {
             operation.operation_id: operation

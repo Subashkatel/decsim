@@ -104,12 +104,26 @@ def test_a_span_of_ticks_is_rounded_up_to_whole_cycles():
     assert clock.cycles_for(4001) == 2
 
 
-def test_a_clock_that_is_not_a_positive_frequency_is_refused():
+@pytest.mark.parametrize(
+    "megahertz",
+    [0, -250.0, float("inf"), float("nan"), True, "250", "x", None],
+    ids=[
+        "zero",
+        "negative",
+        "infinity",
+        "nan",
+        "true",
+        "quoted_number",
+        "word",
+        "null",
+    ],
+)
+def test_a_clock_that_is_not_a_positive_frequency_is_refused(megahertz):
     with pytest.raises(
         ValueError,
-        match="clock fridge must be a positive frequency in megahertz, got 0",
+        match="clock fridge must be a positive frequency in megahertz, got",
     ):
-        config.ClockSettings.from_yaml({"fridge": 0})
+        config.ClockSettings.from_yaml({"fridge": megahertz})
 
 
 @pytest.mark.parametrize(

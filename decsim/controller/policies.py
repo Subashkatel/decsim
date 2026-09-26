@@ -1,8 +1,8 @@
 """How an idle round of a waiting patch travels: the idle policy rows.
 
-idle_policy names one of Ignore, ExtendStream or SeparateDecodeJobs; each
-fills the IdlePolicy seam (decsim/ports.py). The boundary policy rows
-live beside the windows they ship for (windows/boundary_policies.py).
+idle_policy.kind names one of Ignore, ExtendStream or SeparateDecodeJobs;
+each fills the IdlePolicy seam (decsim/ports.py). The boundary policy
+rows live beside the windows they ship for (windows/boundary_policies.py).
 
 Idle rounds are real decoder workload. Terhal's backlog bound sets the
 rate syndrome bits are generated, rgen, against the rate they are

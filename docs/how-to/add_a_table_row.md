@@ -77,7 +77,8 @@ study most often extends:
 | `CODE_CARDS` | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
 | `WORKLOADS` | not built: the root calls `row.operations(settings, code)` for the operations and the rounds policy the row fixes (or None), with the row's own `Settings` on `settings.row_settings`, and reads `row.has_frontend` | `decsim/build/plan.py`, `_operations` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
-| `IDLE_POLICIES`, `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
+| `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
+| `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
 
 A syndrome source also says where the run's window models come from,
 through its `window_model_source` method, unless Python names another

@@ -82,7 +82,8 @@ pauli_frame:
   clock: fridge
   write_cycles: 1
 
-idle_policy: separate_decode_jobs
+idle_policy:
+  kind: separate_decode_jobs
 observation:
   check_windows_with: none
   log_component_io: false

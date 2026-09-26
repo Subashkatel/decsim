@@ -97,7 +97,7 @@ In `decsim/pauli_frame/pauli_frame.py`. A row of it is named under `pauli_frame.
 
 ## `IDLE_POLICIES`
 
-In `decsim/controller/settings.py`. A row of it is named under `idle_policy`.
+In `decsim/controller/settings.py`. A row of it is named under `idle_policy.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |

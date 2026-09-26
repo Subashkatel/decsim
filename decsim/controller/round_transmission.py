@@ -20,6 +20,7 @@ of them; the packing stage's bound reads it (RoundsInFlight).
 import dataclasses
 import functools
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -40,7 +41,7 @@ class RoundTransmitter:
     # lands there and asks the store to send what leaves it
     weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.in_flight = 0
         self.trace = _TraceSources()

@@ -380,7 +380,8 @@ controller:                        # controller work per round, in cycles of its
                                    # bus transfer, result return and the
                                    # conditional together: an upper bound here
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
-                                   # through the packing stage. null = unbounded
+                                   # through the packing stage, a whole count of
+                                   # at least one. null = unbounded
   packing_overflow: stall          # stall | drop_round: what the controller does
                                    # with a finished round the weak syndrome buffer (or the packing
                                    # workspace) cannot take. stall holds it upstream
@@ -916,7 +917,8 @@ pauli_frame:
   write_cycles: 1                  # XOR of a correction into the frame register
                                    # (one cycle, XQsim PFU)
 
-idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
+idle_policy:
+  kind: separate_decode_jobs       # separate_decode_jobs | ignore | extend_stream.
                                    # How an idle patch's rounds are charged; idle
                                    # rounds are decoder workload, since the backlog
                                    # bound counts every generated syndrome bit

@@ -22,6 +22,7 @@ from typing import Optional
 
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
@@ -45,7 +46,7 @@ class RoundsInFlight:
     held_rounds = ports.Port(ports.HeldRounds)
     transmitter = ports.Port(round_transmission.RoundTransmitter)
 
-    def __init__(self, capacity: Optional[int]):
+    def __init__(self, capacity: Optional[int]) -> None:
         self.capacity = capacity
 
     def has_room(self, in_assembly: int) -> bool:
@@ -80,7 +81,7 @@ class RoundAssembler:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         settings: controller_settings.ControllerSettings,
     ) -> None:
         self.engine = engine

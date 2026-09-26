@@ -2078,7 +2078,7 @@ LATE_LANDING_ESCALATION = {
     "confidence": "complementary_gap",
     "gap_threshold_db": 20.0,
     "threshold_source": "fixed",
-    "strong_window": "two_sided_context",
+    "strong_window": "near_seam_pinned",
 }
 
 

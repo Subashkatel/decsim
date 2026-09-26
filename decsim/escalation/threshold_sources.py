@@ -183,7 +183,8 @@ class TargetAdjustment:
     kept_bad_budget is the bad rate the target may not exceed; one bad
     audit multiplies the target by adjust_factor, ceil(3 / kept_bad_
     budget) clean audits in a row divide it back; the target stays
-    inside [min_escalation_rate, max_escalation_rate].
+    inside [min_escalation_rate, max_escalation_rate - audit_rate]
+    (OnlineThresholdController).
     """
 
     kept_bad_budget: float
@@ -204,16 +205,16 @@ class OnlineThresholdController:
     3 / kept_bad_budget clean audits for a 95% upper bound at the
     budget; only a full clean quota shrinks the target.
 
-    The target always stays inside [min_escalation_rate,
-    max_escalation_rate], whatever accuracy would prefer. The max caps
-    the windows escalated on their gap, and the audited windows reach
-    the strong tier on top of them, audit_rate of the kept ones. The
-    switching rate of Toshio 2510.25222 Theorem 1 (lines 1272-1291)
-    counts every window the strong tier decodes (lines 1333-1340), so
-    the strong duty is at most max_escalation_rate plus audit_rate, and
-    a yaml that writes the theorem's backlog bound leaves room for the
-    audits under it. The number is the yaml's, and nothing here derives
-    it from the theorem's inputs.
+    The switching rate of Toshio 2510.25222 Theorem 1 (lines
+    1272-1291) counts every window the strong tier decodes (lines
+    1333-1340), and the audited windows reach the strong tier beside
+    the ones escalated on their gap: the strong duty is the target plus
+    audit_rate of the kept windows, target + audit_rate (1 - target).
+    So the target stays inside [min_escalation_rate,
+    max_escalation_rate - audit_rate], whatever accuracy would prefer,
+    and the strong duty stays at or under max_escalation_rate, the
+    number the yaml writes for the theorem's bound. That number is the
+    yaml's, and nothing here derives it from the theorem's inputs.
     """
 
     def __init__(
@@ -260,12 +261,17 @@ class OnlineThresholdController:
             relax_factor = 1.0 / self.adjustment.adjust_factor
             self._scale_target(relax_factor)
 
+    def target_cap(self) -> float:
+        """The largest target whose strong duty, audits included, fits."""
+        return self.adjustment.max_escalation_rate - self.audit.audit_rate
+
     def _scale_target(self, factor: float) -> None:
         proposed = self.tracker.target_escalation_rate * factor
+        cap = self.target_cap()
+        if proposed > cap:
+            proposed = cap
         if proposed < self.adjustment.min_escalation_rate:
             proposed = self.adjustment.min_escalation_rate
-        if proposed > self.adjustment.max_escalation_rate:
-            proposed = self.adjustment.max_escalation_rate
         self.tracker.target_escalation_rate = proposed
 
 

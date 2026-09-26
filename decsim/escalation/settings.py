@@ -37,9 +37,8 @@ ESCALATIONS = {
 # window the strong tier re-decodes. The root resolves the name once and
 # builds the row with the window components it needs.
 STRONG_WINDOW_SHAPES = {
-    "two_sided_context": strong_window_shapes.ContextWindow,
-    "forward": strong_window_shapes.ForwardWindow,
     "near_seam_pinned": strong_window_shapes.NearSeamWindow,
+    "forward": strong_window_shapes.ForwardWindow,
     "forward_seam_pinned": strong_window_shapes.ForwardSeamWindow,
 }
 # escalation.threshold_source names one of these rows: where the
@@ -53,11 +52,10 @@ THRESHOLD_SOURCES = {
 # window re-reads under the forward strong window (Toshio 2510.25222
 # Sec. III C). The text has the weak decoder resume once r_com + r_buf
 # rounds are stored after the strong region (lines 1229-1235), which
-# both values meet. 0, the default, reads nothing inside the region. 1
-# reads its last buffer region as the restart window's past context,
-# which is how Fig. 12 step 5 draws the restart window: that block is
-# half assigned to the strong decoder and half the weak decoder's
-# buffer.
+# both values meet. 1, the default, reads its last buffer region as the
+# restart window's past context, which is how Fig. 12 step 5 draws the
+# restart window: that block is half assigned to the strong decoder and
+# half the weak decoder's buffer. 0 reads nothing inside the region.
 RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
@@ -99,9 +97,10 @@ class OnlineThresholdSettings:
     windows; one revised audit multiplies the target by adjust_factor,
     and only ceil(3 / kept_bad_budget) consecutive clean audits divide it
     back. The target stays inside [min_escalation_rate,
-    max_escalation_rate]. The audits reach the strong tier on top of the
-    target, so the strong duty is at most max_escalation_rate plus
-    audit_rate (threshold_sources.py, OnlineThresholdController).
+    max_escalation_rate - audit_rate], because the audits reach the strong
+    tier beside the target and max_escalation_rate bounds the strong
+    duty they make together (threshold_sources.py,
+    OnlineThresholdController).
     Defaults are the validated drift-replay configuration.
     """
 
@@ -190,11 +189,13 @@ class OnlineThresholdSettings:
                 "escalation.online needs 0 < min_escalation_rate <= "
                 f"max_escalation_rate <= 1 (got {low} and {high})"
             )
-        if not low <= self.target_escalation_rate <= high:
+        target_cap = high - self.audit_rate
+        if not low <= self.target_escalation_rate <= target_cap:
             raise ValueError(
                 "escalation.online.target_escalation_rate must lie inside "
-                "[min_escalation_rate, max_escalation_rate] "
-                f"(got {self.target_escalation_rate})"
+                "[min_escalation_rate, max_escalation_rate - audit_rate], "
+                "since the audits reach the strong tier beside it "
+                f"(got {self.target_escalation_rate}, cap {target_cap})"
             )
 
 
@@ -217,17 +218,16 @@ class EscalationSettings:
     (false, the default, is the same section's on-demand variant, lines
     631-640); strong_window names the shape of the window the strong
     tier re-decodes (STRONG_WINDOW_SHAPES in
-    decsim/escalation/strong_window_shapes.py: two_sided_context, the
-    default, or forward, the paper's Sec. III C scheme), and
+    decsim/escalation/strong_window_shapes.py): near_seam_pinned, the
+    default, re-decodes the escalated window's commit region with its
+    past face pinned on the earlier neighbour's committed correction and
+    one buffer ahead (Bombin et al. 2303.04846 lines 775-788 and
+    1456-1458); forward is the paper's Sec. III C scheme, and
     restart_reread_buffer_regions is how many of the strong region's
     buffer regions the restarted weak window re-reads under the forward
-    shape; near_seam_pinned re-decodes the same commit region as
-    two_sided_context but pins its past face on the earlier neighbour's
-    committed correction and reads no context behind it (Bombin et al.
-    2303.04846 lines 775-788 and 1456-1458); forward_seam_pinned is
+    shapes; forward_seam_pinned is
     forward's extent read with no context, both faces pinned, which is
-    Toshio's Sec. III C as it is stated (lines 1248-1259) and which
-    needs restart_reread_buffer_regions 0.
+    Toshio's Sec. III C as it is stated (lines 1248-1259).
     confidence names the signal the weak tier reports and the threshold
     decides on (confidence/signals.py), and the yaml refuses a
     weak decoder whose decode cannot produce that signal's evidence;
@@ -254,8 +254,8 @@ class EscalationSettings:
     threshold_column: Optional[str] = None
     online: Optional[OnlineThresholdSettings] = None
     run_both_at_once: bool = False
-    strong_window: str = "two_sided_context"
-    restart_reread_buffer_regions: int = 0
+    strong_window: str = "near_seam_pinned"
+    restart_reread_buffer_regions: int = 1
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
     online_threshold: Optional[ports.ThresholdSource] = None
@@ -454,7 +454,6 @@ def _switching_settings(
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, threshold_row, strong_window)
     reread_regions = _restart_reread_buffer_regions(section)
-    _check_far_pin_reread(strong_window, reread_regions)
     threshold_table = section.get("threshold_table")
     threshold_cycles = section.get("threshold_cycles", 0)
     switch_cycles = section.get("switch_cycles", 0)
@@ -494,7 +493,7 @@ def _switching_boolean(section: Mapping, key: str) -> bool:
 
 def _restart_reread_buffer_regions(section: Mapping) -> int:
     """How far into the strong region the restart window re-reads."""
-    regions = section.get("restart_reread_buffer_regions", 0)
+    regions = section.get("restart_reread_buffer_regions", 1)
     is_a_count = type(regions) is int
     if not is_a_count or regions not in RESTART_REREAD_BUFFER_REGIONS:
         raise ValueError(
@@ -572,7 +571,7 @@ def _online_settings(
 
 def _strong_window(section: Mapping) -> str:
     """The strong window shape the section names, refused if not a row."""
-    named = section.get("strong_window", "two_sided_context")
+    named = section.get("strong_window", "near_seam_pinned")
     rows = sorted(STRONG_WINDOW_SHAPES)
     if named not in rows:
         raise ValueError(
@@ -580,33 +579,6 @@ def _strong_window(section: Mapping) -> str:
             f"table; the rows are {rows}"
         )
     return str(named)
-
-
-def _check_far_pin_reread(strong_window: str, reread_regions: int) -> None:
-    """A pinned far face and a re-reading restart window double count.
-
-    A row that pins its far face on the restart window's commit needs
-    the restart window to share no round with the strong region, which
-    is escalation.restart_reread_buffer_regions 0, the default (Toshio
-    et al. 2510.25222 Fig. 12 step 5 draws the restart window re-reading
-    one buffer region, which is 1). With a re-read the
-    restart window commits rounds inside the region, so pinning on its
-    correction would carry an explanation of those rounds into an input
-    that already holds them raw, the double count Bombin et al.
-    2303.04846 lines 775-788 rule out.
-    """
-    row = STRONG_WINDOW_SHAPES[strong_window]
-    if not row.pins_the_far_face:
-        return
-    if reread_regions == 0:
-        return
-    raise ValueError(
-        f"escalation.strong_window {strong_window} pins its far face on "
-        "the restart window's committed correction, so the restart window "
-        "must share no round with the strong region: "
-        "escalation.restart_reread_buffer_regions must be 0 (got "
-        f"{reread_regions})"
-    )
 
 
 def _check_serial_only(

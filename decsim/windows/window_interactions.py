@@ -246,7 +246,10 @@ class DefaultWindowInteraction:
         the strong region owns nothing past its committed edge (Toshio
         2510.25222 Sec. III C). With a re-read the crossing
         rounds are read twice, and the strong region keeps them: it
-        decoded them with both boundaries determined.
+        decoded them with both boundaries determined. A strong region
+        that reads no round past its edge and pins its far face there
+        leaves them to the restart window whatever the width
+        (escalation/strong_regions.py, forward_seam_region).
         """
         if self.restart_reread_buffer_regions == 0:
             return window_records.SeamFaultOwner.RESTART_WINDOW

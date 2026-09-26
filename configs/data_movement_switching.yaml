@@ -26,7 +26,7 @@ extends: data_movement.yaml
 escalation:
   kind: switching
   gap_threshold_db: 20.0
-  strong_window: two_sided_context
+  strong_window: near_seam_pinned
 
 links:
   qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}

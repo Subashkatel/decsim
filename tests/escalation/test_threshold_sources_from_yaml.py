@@ -208,6 +208,27 @@ def test_online_card_guards(tmp_path):
         load_experiment(high_audit_rate_path)
 
 
+def test_a_target_that_leaves_no_room_for_the_audits_is_refused(tmp_path):
+    """The audits reach the strong tier beside the target.
+
+    Toshio 2510.25222 lines 1333-1340 count every strong decode in the
+    backlog, so a target of 0.30 under a 0.30 cap with audit_rate 0.01
+    would put the strong duty past the cap.
+    """
+    card = {
+        "threshold_source": "online",
+        "gap_threshold_db": 20.0,
+        "online": {
+            "target_escalation_rate": 0.30,
+            "audit_rate": 0.01,
+            "max_escalation_rate": 0.30,
+        },
+    }
+    config_path = source_config(tmp_path, card)
+    with pytest.raises(ValueError, match="max_escalation_rate - audit_rate"):
+        load_experiment(config_path)
+
+
 @pytest.mark.parametrize(
     "online, sentence",
     [
@@ -419,13 +440,13 @@ def test_an_outside_row_built_per_point_gets_the_online_card(
     learning_card = {
         "threshold_source": "outside_learning",
         "gap_threshold_db": 20.0,
-        "online": {"audit_rate": 0.3},
+        "online": {"audit_rate": 0.2},
     }
     config_path = source_config(tmp_path, learning_card)
 
     config = load_experiment(config_path)
 
-    assert config.settings.escalation.online.audit_rate == 0.3
+    assert config.settings.escalation.online.audit_rate == 0.2
 
 
 def test_an_outside_row_built_per_point_is_the_installed_source(
@@ -450,7 +471,7 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     learning_card = {
         "threshold_source": "outside_learning",
         "gap_threshold_db": 20.0,
-        "online": {"audit_rate": 0.3},
+        "online": {"audit_rate": 0.2},
     }
     config_path = source_config(tmp_path, learning_card)
     config = load_experiment(config_path)

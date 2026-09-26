@@ -365,7 +365,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         exclude_faults_touching: Optional[tuple] = None,
         prior_faults: Optional[dict] = None,
     ) -> Optional[fault_models.WindowErrorModel]:
-        """An independent two-sided context model for a strong re-decode.
+        """An independent window model for a strong re-decode.
 
         One optional inclusive range is assigned to another seam side,
         and a pinned face's neighbour supplies the faults it has already

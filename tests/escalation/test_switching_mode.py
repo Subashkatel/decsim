@@ -655,6 +655,31 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
     assert counts.cancelled == 0
 
 
+def test_a_pinned_sibling_is_planned_when_its_weak_job_leaves_its_park():
+    """Step 1 on a pinned row starts the sibling with the unparked weak job.
+
+    Toshio arXiv:2510.25222 Sec. III A, Step 1 feeds both decoders the
+    window at once (lines 598-601), and near_seam_pinned pins its past
+    face on the earlier neighbour's final commit (Bombin arXiv:2303.04846
+    lines 775-788). Under held boundaries that commit is what unparks
+    the weak job, so the sibling is planned at that instant and every
+    window's strong result pins on a committed neighbour.
+    """
+    machine = fabric.switching_machine(
+        rounds=9,
+        escalated_windows={0, 1, 2},
+        strong_window="near_seam_pinned",
+        run_both_at_once=True,
+    )
+    machine.run()
+    counts = machine.decoder_manager.strong_requests.counts
+    tiers = fabric.frame_tiers(machine)
+
+    assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
+    assert counts.needed == 3
+    assert not machine.window_manager.strong_redecode.has_pending()
+
+
 def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
     """Each side's manager serves its own jobs and never the other's.
 

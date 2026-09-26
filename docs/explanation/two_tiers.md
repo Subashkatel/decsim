@@ -115,13 +115,12 @@ Not just the escalated window: a re-decode that saw only the escalated
 commit region would face the same artificial boundaries the weak decoder
 faced, and would have little reason to do better.
 
-`STRONG_WINDOW_SHAPES` has four rows.
+`STRONG_WINDOW_SHAPES` has three rows.
 
 | Row | The rounds it reads |
 | --- | --- |
-| `two_sided_context` | the escalated window's commit region with one buffer of raw context on each side. decsim's own geometry, not the paper's, built the moment it is asked for. |
+| `near_seam_pinned` | the escalated window's commit region and one buffer ahead, with its past face pinned on the neighbour's committed correction. Built the moment its rounds are stored. |
 | `forward` | Toshio Sec. III C and Fig. 12: it starts at the escalated commit and extends forward, absorbing the weak windows it covers. |
-| `near_seam_pinned` | the context row's commit region with its past face pinned on the neighbour's committed correction. |
 | `forward_seam_pinned` | the forward row's extent with both faces pinned. |
 
 A **face** is one end of a window, where it meets the window beside it:
@@ -138,7 +137,7 @@ re-deriving it. That is Bombin et al.'s input adaptation
 of the errors plus the corrections already committed. It is the
 `BoundaryCourier` port, and the courier lives in the windows package.
 
-A fifth shape suggests itself and is deliberately not a row: both faces
+A fourth shape suggests itself and is deliberately not a row: both faces
 pinned and absorbing nothing. It waits for the window after it, which
 waits for its own strong result, and a serial sliding chain deadlocks.
 It would become a row once it ran under a windowing scheme whose windows
@@ -152,12 +151,12 @@ The weak tier does not stop while the strong tier works. When the strong
 window absorbs the weak windows it covers, the weak chain has to resume
 somewhere, and where it resumes is the **restart window**
 (`PotentialRestart`). How far back into the strong region that restarted
-weak decode reads is `restart_reread_buffer_regions`, which defaults to
-0, reading nothing inside the region. The paper's text resumes the weak
-decoder once commit plus buffer rounds are stored after the region
-(Toshio 2510.25222 lines 1229-1235), which both values meet, and its
-Fig. 12 step 5 draws the restart window re-reading one buffer region,
-which is 1.
+weak decode reads is `restart_reread_buffer_regions`. It defaults to
+1, the width Fig. 12 step 5 draws: the restart window reads the
+region's last buffer region as its own past context. The paper's text
+resumes the weak decoder once commit plus buffer rounds are stored
+after the region (Toshio 2510.25222 lines 1229-1235), which 0, reading
+nothing inside the region, also meets.
 
 This is also why the weak syndrome buffer holds rounds past their weak
 decode. It streams to the weak tier round by round as the rounds arrive,

@@ -100,7 +100,7 @@ def test_the_audit_lane_estimate_is_inverse_propensity_weighted():
 
 def test_one_bad_audit_raises_the_target_and_a_clean_quota_relaxes_it():
     """Raising is immediate; a relax needs ceil(3 / 0.5) = 6 clean audits."""
-    controller = _controller(target=0.1, kept_bad_budget=0.5)
+    controller = _controller(target=0.1, kept_bad_budget=0.5, audit_rate=0.1)
     assert controller.relax_audit_quota() == 6
     controller.record_audit_outcome(weak_was_bad=True)
     assert controller.tracker.target_escalation_rate == pytest.approx(0.2)
@@ -116,13 +116,26 @@ def test_one_bad_audit_raises_the_target_and_a_clean_quota_relaxes_it():
     assert controller.tracker.target_escalation_rate == pytest.approx(0.1)
 
 
-def test_the_raised_target_respects_the_backlog_cap():
-    """The Theorem 1 duty cap bounds the target whatever the audits say."""
+def test_the_raised_target_leaves_room_under_the_cap_for_the_audits():
+    """The strong duty, audits included, stays under the Theorem 1 cap.
+
+    Toshio 2510.25222 lines 1333-1340 count every window the strong tier
+    decodes, and an audit is one of them: the duty is the target plus
+    audit_rate of the kept windows. A target raised to 1.2 stops at
+    0.9 - 0.1 = 0.8, whose duty 0.8 + 0.1 (1 - 0.8) = 0.82 is under 0.9.
+    """
     controller = _controller(
-        target=0.6, kept_bad_budget=0.5, max_escalation_rate=0.9
+        target=0.6,
+        kept_bad_budget=0.5,
+        audit_rate=0.1,
+        max_escalation_rate=0.9,
     )
     controller.record_audit_outcome(weak_was_bad=True)
-    assert controller.tracker.target_escalation_rate == pytest.approx(0.9)
+    target = controller.tracker.target_escalation_rate
+    kept_fraction = 1.0 - target
+    strong_duty = target + 0.1 * kept_fraction
+    assert target == pytest.approx(0.8)
+    assert strong_duty == pytest.approx(0.82)
 
 
 def test_an_online_threshold_audits_kept_windows_and_learns_from_the_strong():
@@ -163,11 +176,12 @@ def test_an_online_threshold_audits_kept_windows_and_learns_from_the_strong():
 
 
 def test_an_audited_window_reaches_the_strong_tier_outside_the_capped_target():
-    """The cap bounds the gap escalations; an audit escalates past it.
+    """The target bounds the gap escalations; an audit escalates past it.
 
     Toshio 2510.25222 lines 1333-1340 count every window the strong tier
     decodes in the backlog, and an audited window is one of them, so the
-    strong duty is the tracker's rate plus the audits.
+    strong duty is the tracker's rate plus the audits, and the target's
+    cap leaves room for them.
     """
     controller = _controller(target=0.0, threshold=0.0, step=0.0)
     draws = random.Random(0)

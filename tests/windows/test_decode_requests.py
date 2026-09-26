@@ -475,7 +475,7 @@ SWITCHING_FOLD_SWEEP = {
     "escalation": {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "two_sided_context",
+        "strong_window": "near_seam_pinned",
         "run_both_at_once": False,
     },
     "strong_decoder": {
@@ -627,4 +627,6 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     ]
     (restart,) = restarted
     assert result.terminal_status == "complete"
-    assert restart.input_round_count == 6
+    # W3 commits 10-12 past the strong region 1-9 and, at the default
+    # re-read width, reads 7-15: the region's last block and its own six
+    assert restart.input_round_count == 9

@@ -280,7 +280,6 @@ class _OutsideShape:
     """A strong window shape written outside decsim that absorbs nothing."""
 
     absorbs_weak_windows = False
-    pins_the_far_face = False
     default_boundary_policy = "outside_boundaries"
     window_absorbed = trace_source.SILENT
 

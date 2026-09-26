@@ -36,7 +36,7 @@ ESCALATING_SWEEP = {
     "escalation": {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "two_sided_context",
+        "strong_window": "near_seam_pinned",
         "run_both_at_once": False,
     },
     "strong_decoder": {

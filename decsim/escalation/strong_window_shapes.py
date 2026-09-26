@@ -1,13 +1,13 @@
 """The strong window's shape: which rounds the strong tier re-decodes, and when.
 
-Four rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
+Three rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
 escalation.strong_window
-(Toshio et al. 2510.25222). Two read every face raw and two pin a face
+(Toshio et al. 2510.25222). One reads every face raw and two pin a face
 on a neighbour's committed correction, which is Bombin et al.
 2303.04846's input adaptation (lines 775-788): NearSeamWindow is the
-context row's commit region with its past face pinned, and
+escalated window's commit region with its past face pinned, and
 ForwardSeamWindow is the forward row's extent with both faces pinned. A
-fifth shape, both faces pinned and absorbing nothing, is not a row: it
+fourth shape, both faces pinned and absorbing nothing, is not a row: it
 waits for the window after it, which waits for its own strong result,
 and the serial sliding chain deadlocks. What would make it a row is a
 windowing scheme whose windows do not commit in one serial chain, the
@@ -15,10 +15,8 @@ shape Skoric et al. 2209.08552 decode block by block (lines 398-401,
 1038-1040); the row would read that off a fact the scheme declares, the
 way it reads absorption off itself, and refuse a scheme that does not
 declare it.
-ContextWindow reads the escalated window's
-commit region with one buffer of raw context on each side, built the
-moment it is asked for; that geometry is decsim's own, not the paper's
-(see ContextWindow). ForwardWindow is Sec. III C and Fig. 12: a strong window
+NearSeamWindow is built the moment its rounds are stored in the strong
+syndrome buffer. ForwardWindow is Sec. III C and Fig. 12: a strong window
 that starts at the escalated commit and extends forward, absorbs the
 weak windows it covers, re-slices the window past it (the restart
 window) and is held until that window's weak commit or, at the
@@ -74,7 +72,7 @@ import decsim.trace_source as trace_source
 class StrongAssignment:
     """A strong window assigned to an escalated weak window.
 
-    job is the strong job when the row builds it now (the context
+    job is the strong job when the row builds it now (the near-seam
     window); None when the row holds it until the conditions it declares
     fire (the forward window). held_plan is then the row's own record of
     what it planned, handed back to the row when the redecode asks for
@@ -132,10 +130,7 @@ class StrongWindowShape(Protocol):
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
-    yaml flag. pins_the_far_face is its declaration that the far face is
-    pinned on the restart window's weak commit, which the escalation
-    section reads to refuse a restart window that re-reads the region
-    (escalation/settings.py). default_boundary_policy is the row of
+    yaml flag. default_boundary_policy is the row of
     BOUNDARY_POLICIES a
     run gets when windows.boundaries is null and the escalation may
     escalate: an absorbing region needs the weak chain to keep
@@ -149,7 +144,6 @@ class StrongWindowShape(Protocol):
     """
 
     absorbs_weak_windows: bool
-    pins_the_far_face: bool
     default_boundary_policy: str
     window_absorbed: Any
 
@@ -168,70 +162,6 @@ class StrongWindowShape(Protocol):
 
     def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
         """The rounds the row reads that the strong side does not have yet."""
-
-
-class ContextWindow(StrongWindowPorts):
-    """The commit region and one buffer of raw context on each side.
-
-    The geometry is decsim's own. Toshio et al. 2510.25222 Sec. III A
-    feeds the strong decoder the same window as the weak one, "a
-    sequence of syndrome data sigma is simultaneously fed to both the
-    weak and strong decoders" (lines 599-601), and the formula
-    r_strong = r_com + 2 r_buf is Sec. III C, stated with Fig. 12 (lines
-    1250-1251) for the forward window. decsim reads context on both
-    sides because escalation discards the weak result, which unpins the
-    past face, and a buffer of raw context is the standard answer to an
-    open face (Skoric 2209.08552 line 388; Tan 2209.09219 line 1021).
-
-    The job is built as soon as its context is stored in the strong
-    syndrome buffer, and priced for the context rounds that exist: a
-    window at the operation's edge has a shorter context than commit + 2 buffer.
-    Every context round is measured by the verdict, so the redecode
-    carries them all up with the escalation and the job is held until
-    they land (the paper's Monte-Carlo simulations set T_comm^strong to
-    ten times T_comm^weak, lines 1109-1114; its Table I is a notation
-    table and prices nothing). This shape absorbs no weak window, so its
-    window_absorbed source is the silent one.
-
-    Both faces are read raw, so the row folds no neighbour boundary
-    (FOLDS_NO_BOUNDARY): a mask on the commit_lo layer would flip a seam
-    whose rounds the input already carries as raw defects, which is the
-    double count Bombin et al. 2303.04846 lines 775-788 rule out.
-    """
-
-    absorbs_weak_windows = False
-    pins_the_far_face = False
-    default_boundary_policy = "held"
-    window_absorbed = trace_source.SILENT
-
-    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
-        """The two-sided context job, built now or held for its context."""
-        key = (weak_job.operation_id, weak_job.window_id)
-        region = self.regions.context_region(key)
-        held = _held_redo(
-            self,
-            weak_job,
-            region.window,
-            region.context_read_keys,
-            FOLDS_NO_BOUNDARY,
-        )
-        return _assignment_of(self, held)
-
-    def release_conditions(
-        self, assignment: StrongAssignment
-    ) -> pending_strong_windows.ReleaseConditions:
-        """The rounds of its own context, held in the strong syndrome buffer."""
-        return _stored_rounds_conditions(assignment.held_plan)
-
-    def held_job(
-        self, assignment: StrongAssignment
-    ) -> Optional[decoding_records.DecodeJob]:
-        """The job, once every context round that arrived is stored."""
-        return _job_once_stored(self, assignment.held_plan)
-
-    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
-        """The context rounds the strong syndrome buffer lacks."""
-        return _rounds_not_stored(self, assignment.held_plan)
 
 
 class NearSeamWindow(StrongWindowPorts):
@@ -259,17 +189,30 @@ class NearSeamWindow(StrongWindowPorts):
     which a committed boundary is a final one; and the neighbour has
     committed by the time its dependent escalates, since a window's weak
     decode starts only once every boundary it owes has arrived and the
-    escalation follows that decode. The escalated window that has no
+    escalation follows that decode; a Step 1 sibling is planned at that
+    same instant, when the weak job leaves its park (strong_redecode.py,
+    parallel_strong_submission). The escalated window that has no
     earlier neighbour pins nothing: its past face is the operation's
     first round layer, closed by the initialisation.
 
-    The job waits for what the two-sided context row waits for, its own
-    rounds stored in the strong syndrome buffer, and absorbs nothing, so the
-    weak chain runs on untouched and there is no restart window.
+    The job waits for its own rounds stored in the strong syndrome
+    buffer, and the rounds the chip still holds are carried up with the
+    escalation (the paper's Monte-Carlo simulations set T_comm^strong to
+    ten times T_comm^weak, lines 1109-1114); a window at the operation's
+    end reads the rounds that exist. It absorbs nothing, so the weak
+    chain runs on untouched and there is no restart window.
+
+    Its past face is pinned and its future face is read raw, one buffer
+    region. That is not Fig. 12's geometry, where the strong decoder
+    starts "after the boundary conditions at both ends have been
+    determined by the weak decoder" (Toshio et al. 2510.25222 lines
+    1249-1250): pinning the future face too without absorbing the
+    window after it is the both-faces shape this module refuses, since
+    that window waits for this one's strong result. The forward rows
+    are the Fig. 12 geometry.
     """
 
     absorbs_weak_windows = False
-    pins_the_far_face = False
     default_boundary_policy = "held"
     window_absorbed = trace_source.SILENT
 
@@ -320,7 +263,6 @@ class ForwardWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = True
-    pins_the_far_face = False
     default_boundary_policy = "eager"
 
     def __init__(self, engine: engine_module.Engine) -> None:
@@ -669,16 +611,15 @@ class ForwardSeamWindow(ForwardWindow):
     with one buffer region of raw context (Bombin lines 850-852), since
     there is no earlier commit to pin on.
 
-    The row needs escalation.restart_reread_buffer_regions 0, the
-    default (Fig. 12 step 5 draws a re-read of one buffer region, which
-    this row does not take): with a re-read the restart window shares
-    rounds with the strong region, and pinning the far face on a
-    correction that explains rounds inside the region is the double
-    count Bombin's input adaptation rules out. The escalation section
-    refuses the pairing at load.
+    The restart window owns the faults crossing the far face at every
+    escalation.restart_reread_buffer_regions width, since this region
+    reads no round past its commit (strong_regions.py,
+    forward_seam_region). At width 1, the width Fig. 12 step 5 draws,
+    the restart window reads the region's last buffer region raw as its
+    own past context and commits nothing inside the region, so the far
+    pin carries only those crossing faults and no round of the input is
+    explained twice (Bombin lines 775-788).
     """
-
-    pins_the_far_face = True
 
     def release_conditions(
         self, assignment: StrongAssignment
@@ -897,10 +838,10 @@ def _strong_redecode_job(
 class _HeldStrongRedo:
     """What a row that waits only for its own rounds keeps from its plan.
 
-    The two rows built on it lay a strong window over the escalated
-    window's commit region and build the job as soon as the rounds it
-    reads are stored; they differ in the rounds they read and in the
-    faces they pin, which is what read_keys and folded_boundaries carry.
+    The near-seam row lays a strong window over the escalated window's
+    commit region and builds the job as soon as the rounds it reads are
+    stored; read_keys and folded_boundaries are the rounds it reads and
+    the face it pins.
     """
 
     key: tuple
@@ -941,10 +882,10 @@ def strong_job_payloads(
 ) -> list:
     """The rounds a strong job reads, and the boundaries it folds into them.
 
-    Both shipped rows fold no boundary: their faces are raw context, so
-    the input is the stored rounds of the window, and a mask on a face
-    read raw would double count the rounds behind it (Bombin et al.
-    2303.04846 lines 775-788). A row that pins a face carries its
+    A row that reads a face raw folds no boundary there: the input is
+    the stored rounds of the window, and a mask on a face read raw would
+    double count the rounds behind it (Bombin et al. 2303.04846 lines
+    775-788). A row that pins a face carries its
     neighbour's committed correction into the input instead: the
     courier ships the committed boundary to this window over
     decoder_to_decoder and writes it into the window's boundary state,

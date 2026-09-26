@@ -22,7 +22,9 @@ every row of its table shares and hands your row the rest
 (`decsim/tables.py`, `row_settings`); a key that neither declares is
 refused by name when the yaml loads. A row with no keys of its own
 declares no `Settings`. A decoder row's `from_yaml` is also handed the
-run's clocks, since a decoder's own timing names a clock domain:
+run's clocks, since a decoder's own timing names a clock domain, and its
+tier's section name (`weak_decoder` or `strong_decoder`), which a
+refusal leads with, since both tiers take the same rows:
 
 ```python
 class MyDecoder(decoder_module.WindowDecoderBase):
@@ -31,8 +33,11 @@ class MyDecoder(decoder_module.WindowDecoderBase):
         step_count: int = 1
 
         @classmethod
-        def from_yaml(cls, section, clocks):
-            return cls(**section)
+        def from_yaml(cls, section, clocks, section_name):
+            step_count = section.get("step_count", 1)
+            if step_count < 1:
+                raise ValueError(f"{section_name}.step_count is at least 1")
+            return cls(step_count=step_count)
 
     def __init__(self, settings=None):
         decoder_module.WindowDecoderBase.__init__(self)

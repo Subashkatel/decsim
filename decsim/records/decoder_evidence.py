@@ -120,11 +120,18 @@ class UnionFindHardEvidence:
     forest_depth: int = 0
 
 
-def normalized_weight_step(weight_step) -> float:
-    """The weight step as a positive finite float; anything else is refused."""
+def normalized_weight_step(
+    weight_step, key: str = "Union-Find weight_step"
+) -> float:
+    """The weight step as a positive finite float; anything else is refused.
+
+    key is the name the refusal gives the value: the yaml reader passes
+    the whole path (weak_decoder.weight_step), since both tiers take the
+    union_find row; a Python caller keeps the row's name.
+    """
     if isinstance(weight_step, bool) or not isinstance(weight_step, Real):
-        raise ValueError("Union-Find weight_step must be a real number")
+        raise ValueError(f"{key} must be a real number")
     normalized = float(weight_step)
     if not math.isfinite(normalized) or normalized <= 0.0:
-        raise ValueError("Union-Find weight_step must be finite and positive")
+        raise ValueError(f"{key} must be finite and positive")
     return normalized

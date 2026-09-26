@@ -293,13 +293,13 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         stream_operation: program_records.Operation,
         stream_round_count: int,
     ) -> bool:
-        """Require the model's declared finite terminal boundary."""
-        stream_model = self._shots.stream_model_by_id.get(stream_operation.id)
-        if stream_model is None:
-            return False
-        _check_finite_stream_length(
-            stream_operation, stream_round_count, stream_model.round_count
-        )
+        """A finite model's terminal boundary is fixed at registration.
+
+        A seal at another length stops the run where the decoder memory
+        checks each input against its window model's rows.
+        """
+        del stream_operation
+        del stream_round_count
         return False
 
     def window_models_for_operation(

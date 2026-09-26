@@ -121,6 +121,27 @@ def _always_auditing_online_threshold(
 # ---- the paper's identity, Sec. IV C
 
 
+def _weak_gaps(machine) -> list[float]:
+    """The gap of every weak request that carries one, in request order.
+
+    One gap per window: the companion forced-class request carries none.
+    """
+    gaps = []
+    for record in machine.observation.decode_records.requests:
+        if record.request_key.tier is not window_records.DecoderTier.WEAK:
+            continue
+        if record.soft_output is None:
+            continue
+        gaps.append(record.soft_output.gap)
+    return gaps
+
+
+def _strong_frame_writes(machine) -> int:
+    """The frame's commits that the strong tier wrote."""
+    frame = machine.pauli_frame.snapshot()
+    return sum(1 for record in frame.records if record.tier == "strong")
+
+
 def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     """One d=3, 30-round memory shot at p=0.005 and g_th = 15 dB (seed 1)."""
     threshold_nats = 15.0 * math.log(10.0) / 10.0
@@ -179,21 +200,9 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     )
     machine = machine_module.Machine.build(settings, 1)
     machine.run()
-    weak_gaps = []
-    for record in machine.observation.decode_records.requests:
-        is_weak = record.request_key.tier is window_records.DecoderTier.WEAK
-        if is_weak and record.soft_output is not None:
-            weak_gaps.append(record.soft_output.gap)
-    # one gap per window: the companion forced-class request carries none
-    below = 0
-    for gap in weak_gaps:
-        if gap < threshold_nats:
-            below += 1
-    strong_frame_writes = 0
-    frame = machine.pauli_frame.snapshot()
-    for record in frame.records:
-        if record.tier == "strong":
-            strong_frame_writes += 1
+    weak_gaps = _weak_gaps(machine)
+    below = sum(1 for gap in weak_gaps if gap < threshold_nats)
+    strong_frame_writes = _strong_frame_writes(machine)
     assert len(weak_gaps) == 10
     assert below == 3
     assert machine.decoder_manager.strong_requests.counts.needed == 3

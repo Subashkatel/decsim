@@ -192,6 +192,54 @@ def test_an_engine_cycle_count_refusal_names_its_tier_and_card(
     )
 
 
+@pytest.mark.parametrize("section_name", ["weak_decoder", "strong_decoder"])
+@pytest.mark.parametrize(
+    ("key", "value", "sentence"),
+    [
+        ("delay_cycles", -1, "must not be negative"),
+        ("setup_cycles", True, "must be a nonnegative integer"),
+        ("setup_cycles_per_vertex", 1.5, "must be a nonnegative integer"),
+        ("setup_cycles_per_edge", -2, "must not be negative"),
+        ("cycles_per_edge", -0.5, "must be a finite nonnegative number"),
+        ("cycles_per_edge", "4", "must be a number"),
+    ],
+)
+def test_a_cycle_count_refusal_names_its_tier(
+    section_name, key, value, sentence
+):
+    """Both tiers take the union_find row, so the sentence says which."""
+    clocks = config.ClockSettings({"decoder": 250.0, "helios": 100.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = "union_find"
+    section["cycle_count"] = {"clock": "helios", key: value}
+
+    with pytest.raises(ValueError) as refusal:
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, section_name
+        )
+    message = str(refusal.value)
+    assert message.startswith(f"{section_name}.cycle_count.{key} {sentence}")
+
+
+@pytest.mark.parametrize("section_name", ["weak_decoder", "strong_decoder"])
+def test_a_cycle_count_key_it_does_not_read_is_refused_naming_its_tier(
+    section_name,
+):
+    clocks = config.ClockSettings({"decoder": 250.0, "helios": 100.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = "union_find"
+    section["cycle_count"] = {"clock": "helios", "cycles_per_edeg": 4}
+
+    with pytest.raises(ValueError) as refusal:
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, section_name
+        )
+    message = str(refusal.value)
+    assert message.startswith(
+        f"{section_name}.cycle_count has no key ['cycles_per_edeg']"
+    )
+
+
 def test_an_engine_card_without_a_stage_key_is_refused_by_name():
     """Every stage key is written out, and a missing one reads as a sentence."""
     clocks = config.ClockSettings({"decoder": 250.0})
@@ -276,10 +324,12 @@ def test_a_weight_step_that_is_not_positive_is_refused_with_a_sentence():
         },
     }
 
-    with pytest.raises(ValueError, match="finite and positive"):
+    with pytest.raises(ValueError) as refusal:
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+    message = str(refusal.value)
+    assert message == "weak_decoder.weight_step must be finite and positive"
 
 
 def test_the_cycle_count_block_is_read_and_absent_is_none():
@@ -424,9 +474,10 @@ def test_a_manager_clock_the_clocks_do_not_have_is_refused_at_no_cost():
         decoder_settings.DecoderManagerSettings.from_yaml(section, clocks)
 
 
+@pytest.mark.parametrize("section_name", ["weak_decoder", "strong_decoder"])
 @pytest.mark.parametrize("weight_step", [True, "0.1", None])
-def test_a_weight_step_that_is_not_a_number_is_refused_with_a_sentence(
-    weight_step,
+def test_a_weight_step_that_is_not_a_number_is_refused_naming_its_tier(
+    section_name, weight_step
 ):
     """A ValueError, so the experiments layer names the file it is in."""
     clocks = config.ClockSettings({"decoder": 250.0})
@@ -434,10 +485,12 @@ def test_a_weight_step_that_is_not_a_number_is_refused_with_a_sentence(
     section["kind"] = "union_find"
     section["weight_step"] = weight_step
 
-    with pytest.raises(ValueError, match="weight_step must be a real number"):
+    with pytest.raises(ValueError) as refusal:
         decoder_settings.DecoderSettings.from_yaml(
-            section, clocks, "weak_decoder"
+            section, clocks, section_name
         )
+    message = str(refusal.value)
+    assert message == f"{section_name}.weight_step must be a real number"
 
 
 def test_a_cycle_count_block_without_a_clock_is_refused_by_name():
@@ -446,7 +499,7 @@ def test_a_cycle_count_block_without_a_clock_is_refused_by_name():
     section["kind"] = "union_find"
     section["cycle_count"] = {"delay_cycles": 3}
 
-    with pytest.raises(ValueError, match="cycle_count needs clock"):
+    with pytest.raises(ValueError, match="weak_decoder.cycle_count needs"):
         decoder_settings.DecoderSettings.from_yaml(
             section, clocks, "weak_decoder"
         )

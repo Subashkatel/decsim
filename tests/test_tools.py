@@ -109,6 +109,27 @@ def test_the_recognition_check_reads_an_enum_member_as_a_value(
     assert "0 unlisted class tests" in captured.out
 
 
+def test_the_one_action_check_fails_a_call_or_sum_passed_as_an_argument(
+    tmp_path, capsys
+):
+    """Rule 1's argument check fails the run, by file and line."""
+    tool = _tool("check_one_action")
+    module = tmp_path / "busy_arguments.py"
+    module.write_text(
+        "def nested(x):\n"
+        "    return g(h(x))\n"
+        "\n"
+        "\n"
+        "def summed(x):\n"
+        "    return g(x + 1)\n"
+    )
+    exit_code = tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "busy_arguments.py:2: nested call" in captured.out
+    assert "busy_arguments.py:6: busy argument" in captured.out
+
+
 def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
     """The list stays honest: a name nobody tests against is deleted.
 

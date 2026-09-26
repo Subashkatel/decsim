@@ -53,9 +53,16 @@ class MeasuredTableSettings:
 
     @classmethod
     def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
+        cls,
+        section: Mapping,
+        clocks: config.ClockSettings,
+        section_name: str,
     ) -> "MeasuredTableSettings":
-        """Both keys, checked where they enter against the measured pairs."""
+        """Both keys, checked where they enter against the measured pairs.
+
+        section_name is the tier section the row sits in, which the
+        refusal names.
+        """
         del clocks
         device = section.get("device", "a100")
         partition = section.get("partition", "whole")
@@ -64,8 +71,9 @@ class MeasuredTableSettings:
             return cls(device=device, partition=partition)
         pairs = _measured_pairs()
         raise ValueError(
-            f"measured_table has no measurement of device {device!r} with "
-            f"partition {partition!r}; the measured pairs are {pairs}"
+            f"{section_name}.device {device!r} with partition "
+            f"{partition!r} has no measurement in measured_table; the "
+            f"measured pairs are {pairs}"
         )
 
 

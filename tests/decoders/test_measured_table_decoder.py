@@ -65,7 +65,9 @@ def test_a_multi_instance_gpu_slice_is_priced_by_its_own_measured_line(
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
     section = {"device": "a100", "partition": partition}
-    settings = measured_table.MeasuredTableSettings.from_yaml(section, None)
+    settings = measured_table.MeasuredTableSettings.from_yaml(
+        section, None, "strong_decoder"
+    )
     table = measured_table.MeasuredTable(settings)
     ticket = table.submit(job, 0)
     result = table.result(ticket)
@@ -149,10 +151,13 @@ def test_the_device_runs_one_decode_at_a_time():
 def test_a_device_and_partition_never_measured_are_refused():
     section = {"device": "gh200", "partition": "mps"}
     with pytest.raises(ValueError) as refusal:
-        measured_table.MeasuredTableSettings.from_yaml(section, None)
+        measured_table.MeasuredTableSettings.from_yaml(
+            section, None, "strong_decoder"
+        )
     assert str(refusal.value) == (
-        "measured_table has no measurement of device 'gh200' with "
-        "partition 'mps'; the measured pairs are [('a100', 'whole'), "
+        "strong_decoder.device 'gh200' with partition 'mps' has no "
+        "measurement in measured_table; the measured pairs are "
+        "[('a100', 'whole'), "
         "('a100', 'mps'), ('a100', '3g.40gb'), ('a100', '1g.10gb'), "
         "('gh200', 'whole')]"
     )

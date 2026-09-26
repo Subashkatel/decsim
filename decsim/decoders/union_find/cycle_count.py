@@ -126,16 +126,28 @@ class CycleCount:
 
     @classmethod
     def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
+        cls,
+        section: Mapping,
+        clocks: config.ClockSettings,
+        section_name: str,
     ) -> "CycleCount":
-        """The block's fields, its clock resolved to that domain's Clock."""
-        _check_keys(section)
+        """The block's fields, its clock resolved to that domain's Clock.
+
+        section_name is the tier section the block sits in. Every
+        refusal of the block leads with cycle_count, so the tier's name
+        before it is the key's whole yaml path, as the engine card's
+        refusals give it (decoders/settings.py _engine_stage_cycles).
+        """
+        _check_keys(section, section_name)
         clock = clocks.clock(section["clock"])
         fields = {}
         for name in CYCLE_FIELDS:
             fields[name] = section.get(name, 0)
         cycles_per_edge = section.get("cycles_per_edge", 0.0)
-        return cls(clock, cycles_per_edge=cycles_per_edge, **fields)
+        try:
+            return cls(clock, cycles_per_edge=cycles_per_edge, **fields)
+        except ValueError as refusal:
+            raise ValueError(f"{section_name}.{refusal}") from None
 
     def cycles(
         self, evidence: Optional[evidence_records.UnionFindHardEvidence]
@@ -237,7 +249,7 @@ def _fusion_changes(step: evidence_records.GrowthStep) -> int:
     return 1 + climbs
 
 
-def _check_keys(section: Mapping) -> None:
+def _check_keys(section: Mapping, section_name: str) -> None:
     """The block names its clock and no key the count does not read."""
     known = set(CYCLE_FIELDS)
     known.add("clock")
@@ -246,12 +258,13 @@ def _check_keys(section: Mapping) -> None:
     if unknown:
         listed = sorted(unknown)
         raise ValueError(
-            f"cycle_count has no key {listed}; its keys are clock, "
-            f"cycles_per_edge and {list(CYCLE_FIELDS)}"
+            f"{section_name}.cycle_count has no key {listed}; its keys are "
+            f"clock, cycles_per_edge and {list(CYCLE_FIELDS)}"
         )
     if "clock" not in section:
         raise ValueError(
-            "cycle_count needs clock, the domain its cycles are counted in"
+            f"{section_name}.cycle_count needs clock, the domain its "
+            "cycles are counted in"
         )
 
 

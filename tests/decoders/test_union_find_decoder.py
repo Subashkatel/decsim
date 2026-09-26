@@ -142,7 +142,7 @@ def growth_graph(check, priors):
     )
 
 
-def test_both_decoders_reproduce_every_syndrome_an_error_produces():
+def test_both_decoders_reproduce_every_syndrome_an_error_produces_property():
     """A property test: 200 random errors, both corrections reproduce them."""
     model = _model()
     referee = _referee()

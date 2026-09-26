@@ -57,7 +57,7 @@ def run_random_trace(seed: int):
     return listener, residences
 
 
-def test_the_occupancy_integral_equals_the_residence_sum_over_random_traces():
+def test_the_occupancy_integral_equals_the_residence_sum_property():
     for seed in range(10):
         listener, residences = run_random_trace(seed)
         assert listener.integral == listener.residence_sum, seed

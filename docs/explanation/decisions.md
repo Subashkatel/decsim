@@ -2,8 +2,8 @@
 
 # The design decisions
 
-Twenty-one decisions shape what decsim charges, where it charges it, and
-where a reader finds a thing. Each is recorded here with what was
+The decisions below shape what decsim charges, where it charges it,
+and where a reader finds a thing. Each is recorded here with what was
 decided, why, and the source the answer came from, because a modelling
 question is answered by reading the referent rather than by choosing
 (`STYLE.md` rule 8). The last section says what is not modelled yet.

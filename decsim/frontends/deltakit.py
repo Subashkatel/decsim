@@ -47,23 +47,32 @@ def memory_circuit(
     round. The final destructive data readout joins the last packet.
     Deltakit is imported only here; simulation uses the existing source.
     Circuit and schedule are exported together to keep their order explicit.
+
+    The native gates and the qubit numbering are memory_rounds', so one
+    memory at one round count has one error model on both paths. SD6
+    charges every idle location, and the Explorer's default gate set
+    decomposes CZ and MX into more layers, so more idle locations, than
+    its exhaustive set (Explorer qpu/_native_gate_set.py).
     """
     _require_explorer()
     _check_memory_parameters(distance, round_count, basis)
     check_probability(physical_error_probability)
     import deltakit_circuit.gates as gates
-    import deltakit_explorer.codes as codes
     import deltakit_explorer.qpu as qpu
 
     logical_basis = gates.PauliBasis[basis]
     code = _memory_code(code_family, distance, logical_basis)
-    original = codes.css_code_memory_circuit(code, round_count, logical_basis)
     noise = qpu.SD6Noise(p=physical_error_probability)
-    device = qpu.QPU(original.qubits, noise_model=noise)
-    noisy = device.compile_and_add_noise_to_circuit(original)
-    exported = noisy.as_stim_circuit()
-    circuit_text = str(exported)
-    circuit = stim.Circuit(circuit_text)
+    native_gates = qpu.ExhaustiveGateSet()
+    device = qpu.QPU(
+        code.qubits,
+        native_gates_and_times=native_gates,
+        noise_model=noise,
+        maximise_parallelism=False,
+    )
+    compiled = _compile_memory(code, logical_basis, round_count, device)
+    qubit_mapping = _qubit_mapping(code.qubits)
+    circuit = _export_compiled_memory(compiled, device, qubit_mapping)
     measurement_rounds = _measurement_rounds(code, round_count, basis)
     if len(measurement_rounds) != circuit.num_measurements:
         raise ValueError(
@@ -216,9 +225,11 @@ def check_positive_integer(value: int, name: str) -> None:
 
 
 def check_probability(probability: float) -> None:
-    """Refuse a physical error probability outside [0, 1] or not finite."""
-    if not math.isfinite(probability):
-        raise ValueError("physical_error_probability must be finite")
+    """Refuse a physical error probability outside [0, 1].
+
+    A NaN or an infinity is outside it: every comparison with a NaN is
+    false, so no separate finiteness test is needed.
+    """
     if not 0 <= probability <= 1:
         raise ValueError("physical_error_probability must lie in [0, 1]")
 

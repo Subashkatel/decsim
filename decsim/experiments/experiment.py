@@ -1,7 +1,7 @@
 """One yaml file is one experiment; this module is the only yaml reader.
 
 The file's sections are handed to the packages that own them, one
-settings record each (decsim.machine_settings.MachineSettings.from_mapping); the
+settings record each (decsim.settings.MachineSettings.from_mapping); the
 sweep blocks stay here, since the machine knows nothing of sweeps.
 `extends: other.yaml` starts from that file (same folder) and overrides
 the top-level keys this file names.
@@ -25,12 +25,12 @@ _REPOSITORY_ROOT = _FRONT_DIR.parents[2]
 # configs/ sits beside the decsim package, gem5's configs/ beside its
 # binary; the shipped experiments are what a refused path is listed with.
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
-SWEEP_KEYS = (
+SWEEP_AXES = (
     "physical_error_probability",
     "distance",
     "round_period_us",
-    "shots",
 )
+SWEEP_KEYS = SWEEP_AXES + ("shots",)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -203,6 +203,11 @@ def load_experiment(path) -> ExperimentConfig:
     path = Path(path)
     _refuse_a_path_that_is_not_a_file(path)
     sections, config_files = _yaml_sections(path)
+    if "sweep" not in sections:
+        raise refusal.RefusalError(
+            f"{path} has no sweep; a yaml names at least one sweep block "
+            "(configs/reference.yaml)"
+        )
     sweep_section = sections.pop("sweep")
     sweep = _sweep_blocks(sweep_section)
     settings = _settings_of(sections, path)
@@ -351,9 +356,42 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
             "plus shots (the algorithm lives on the decoder card, not in "
             "the sweep)"
         )
+    _check_axes(block, index)
+    shots = block["shots"]
+    _check_shots(shots, index)
     return SweepBlock(
         physical_error_probabilities=tuple(block["physical_error_probability"]),
         distances=tuple(block["distance"]),
         round_periods_microseconds=tuple(block["round_period_us"]),
-        shots=block["shots"],
+        shots=shots,
+    )
+
+
+def _check_axes(block: dict, index: int) -> None:
+    """Every key is there, and each axis lists the values it sweeps."""
+    missing = set(SWEEP_KEYS) - set(block)
+    if missing:
+        listed = sorted(missing)
+        raise refusal.RefusalError(
+            f"sweep block {index} lacks {listed}; a block lists "
+            "physical_error_probability, distance and round_period_us and "
+            "names its shots"
+        )
+    for axis in SWEEP_AXES:
+        values = block[axis]
+        if not isinstance(values, list) or not values:
+            raise refusal.RefusalError(
+                f"sweep block {index} {axis} must be a list of at least one "
+                f"value, got {values!r}"
+            )
+
+
+def _check_shots(shots, index: int) -> None:
+    """A point runs seeds 0 to shots - 1 (decsim/collect.py), so a count."""
+    is_whole_number = isinstance(shots, int) and not isinstance(shots, bool)
+    if is_whole_number and shots >= 1:
+        return
+    raise refusal.RefusalError(
+        f"sweep block {index} shots must be a whole number of at least 1, "
+        f"got {shots!r}"
     )

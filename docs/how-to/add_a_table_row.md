@@ -8,9 +8,20 @@ machine builds. There are seventeen of them, listed with every row in
 [The plug-in tables](../reference/tables.md). This is the recipe for adding a row to any
 of them.
 
-Adding a row must touch exactly three things: your class, the table, and
-`configs/reference.yaml`. If it takes more, something is wrong with the
-port rather than with your class.
+Adding a row touches your class, the table, `configs/reference.yaml`,
+and the generated page [The plug-in tables](../reference/tables.md),
+which `python tools/docs_map.py` rewrites from the tables. If it takes
+more, something is wrong with the port rather than with your class.
+
+Two parts take more today, and the recipe says where:
+
+- A row that reads a yaml key of its own needs a field on its
+  section's settings record and a line in that record's `from_yaml`
+  ([How to add a yaml key](add_a_yaml_key.md)), because a table's rows
+  share one record per section. Only a `workload` row reads its own
+  keys, and it still returns them as fields of that one record.
+- A code card has no table and no yaml key. It plugs in from Python
+  ([How to plug a component in without a table row](plug_in_without_a_table_row.md)).
 
 ## 1. Find the port and fill it
 
@@ -33,6 +44,23 @@ model contracts your decoder wants
 `Decoder.stage_recorded` says which trace source it fires, `SILENT` for
 a decoder with no internal stages. The members are listed per port in
 [The ports](../reference/ports.md).
+
+The port says what your class answers; the build says what its
+constructor is handed, and that is not on the port. For the tables a
+study most often extends:
+
+| Table | The root builds your row as | Where |
+| --- | --- | --- |
+| `DECODERS` | `row(latency_model=None)` | `decsim/build/decoders.py`, `_algorithm` |
+| `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard` | `decsim/build/plan.py`, `_chosen_scheme` |
+| `SYNDROME_SOURCES` | `row(**arguments)`, the arguments Python-only, with `code=card` added when `takes_code_card` | `decsim/build/plan.py`, `_syndrome_source` |
+| `SYNDROME_BUFFERS` | `row(settings)`, the section's record | `decsim/build/stores.py` |
+| `IDLE_POLICIES`, `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
+
+A syndrome source is also the run's window model source unless Python
+names another (`QpuSettings.error_model_provider`), so a new source
+answers `WindowModelSource` as well as `SyndromeSource`; a source with
+no circuit answers it with nothing, as `TimingOnlyDevice` does.
 
 ## 2. Add the row
 
@@ -58,10 +86,11 @@ weak_decoder:
   kind: my_decoder
 ```
 
-Then add it to `configs/reference.yaml` in the same commit. That file is
-the documentation of the yaml surface, and
-`tests/experiments/test_yaml_surface.py` fails when the file and the
-readers drift apart.
+Then add it to `configs/reference.yaml` in the same commit, beside the
+rows that section's comment lists: that file is the documentation of
+the yaml surface, and no test notices a row it leaves out. Last, run
+`python tools/docs_map.py` from the checkout to rewrite the tables page;
+`tests/test_docs.py` fails until the page matches the tables.
 
 ## What a typo gets
 

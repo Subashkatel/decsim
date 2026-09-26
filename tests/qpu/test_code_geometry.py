@@ -161,3 +161,8 @@ def test_a_negative_buffer_override_is_refused_for_a_bicycle_code():
 def test_an_odd_qubit_count_is_refused_for_a_bicycle_code():
     with pytest.raises(ValueError, match="qubit_count must be even"):
         code_geometry.BivariateBicycleCodeModel(qubit_count=143)
+
+
+def test_a_zero_commit_override_is_refused_for_a_bicycle_code():
+    with pytest.raises(ValueError, match="must be positive"):
+        code_geometry.BivariateBicycleCodeModel(commit_rounds_override=0)

@@ -47,6 +47,19 @@ SECTIONS = (
     "workload",
     "observation",
 )
+# The sections from_mapping reads without a default; the rest fall back
+# to their settings record's defaults when the yaml leaves them out.
+REQUIRED_SECTIONS = (
+    "clocks",
+    "qpu",
+    "controller",
+    "links",
+    "weak_syndrome_buffer",
+    "strong_syndrome_buffer",
+    "windows",
+    "pauli_frame",
+    "workload",
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -125,6 +138,7 @@ class MachineSettings:
                 f"the yaml has no section {listed}; the sections are "
                 f"{list(SECTIONS)}"
             )
+        _check_section_shapes(sections)
         clocks = config.ClockSettings.from_yaml(sections["clocks"])
         idle_policy = controller_settings.IdlePolicySettings()
         if "idle_policy" in sections:
@@ -190,6 +204,28 @@ class MachineSettings:
             workload=workload,
             observation=observation,
         )
+
+
+def _check_section_shapes(sections: Mapping) -> None:
+    """Every section the machine reads is there, and each holds its keys.
+
+    idle_policy is the one section that is a single word.
+    """
+    missing = set(REQUIRED_SECTIONS) - set(sections)
+    if missing:
+        listed = sorted(missing)
+        raise ValueError(
+            f"the yaml needs the sections {listed}; configs/reference.yaml "
+            "holds every section with its keys"
+        )
+    for name, section in sections.items():
+        if name == "idle_policy":
+            continue
+        if not isinstance(section, Mapping):
+            raise ValueError(
+                f"the yaml section {name} holds {section!r}; a section is "
+                "a mapping of its keys, as in configs/reference.yaml"
+            )
 
 
 def _tier_settings(

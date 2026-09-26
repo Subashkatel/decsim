@@ -213,14 +213,9 @@ def _parse_gate_line(raw_line: str) -> Optional[tuple]:
     line = code.strip()
     if not line:
         return None
-    tokens = line.split()
-    mnemonic = tokens[0]
-    blocked_by = None
-    if "blocked_by" in tokens:
-        token_index = tokens.index("blocked_by")
-        value_index = token_index + 1
-        blocked_by = int(tokens[value_index])
-        tokens = tokens[:token_index]
+    words = line.split()
+    mnemonic = words[0]
+    tokens, blocked_by = _split_blocked_by(words)
     qubits = _qubits_of(tokens)
     angle = None
     lowered = mnemonic.lower()
@@ -230,13 +225,38 @@ def _parse_gate_line(raw_line: str) -> Optional[tuple]:
     return (mnemonic, qubits, is_clifford, blocked_by)
 
 
+def _split_blocked_by(words: list[str]) -> tuple:
+    """The words before blocked_by, and the operation id it names."""
+    if "blocked_by" not in words:
+        return words, None
+    keyword_index = words.index("blocked_by")
+    value_start = keyword_index + 1
+    values = words[value_start:]
+    if len(values) != 1 or not values[0].isdigit():
+        raise ValueError(
+            f"blocked_by takes one operation id and nothing after it, got "
+            f"{values}"
+        )
+    blocked_by = int(values[0])
+    return words[:keyword_index], blocked_by
+
+
 def _qubits_of(tokens: list[str]) -> tuple[int, ...]:
     """The qubit indices named by q<index> tokens after the mnemonic."""
     qubits = []
     for token in tokens[1:]:
         if _is_qubit_token(token):
-            qubits.append(int(token[1:]))
+            qubit = _qubit_index(token)
+            qubits.append(qubit)
     return tuple(qubits)
+
+
+def _qubit_index(token: str) -> int:
+    """The index of a q<index> token; any other q word is refused."""
+    digits = token[1:]
+    if not digits.isdigit():
+        raise ValueError(f"qubit {token!r} is not q followed by an index")
+    return int(digits)
 
 
 def _angle_token(tokens: list[str]) -> Optional[str]:
@@ -304,33 +324,36 @@ def _rotation_is_clifford(angle_expression: Optional[str]) -> bool:
     return abs(distance) < 1e-9
 
 
-def _parse_angle(angle_expression) -> Optional[float]:
-    """A numeric or pi-fraction angle in radians; None when unreadable."""
+def _parse_angle(angle_expression: Optional[str]) -> Optional[float]:
+    """A number or a pi fraction in radians; None when the line gives none.
+
+    The text IR is input, so an angle the grammar cannot read is refused
+    with the line's angle rather than read as a non-Clifford rotation
+    that would ask the factory for a magic state (STYLE.md rule 4).
+    """
     if angle_expression is None:
         return None
-    if isinstance(angle_expression, (int, float)):
-        return float(angle_expression)
-    text = str(angle_expression)
-    normalized = text.strip()
-    normalized = normalized.lower()
-    normalized = normalized.replace(" ", "")
-    if not normalized:
-        return None
+    stripped = angle_expression.strip()
+    lowered = stripped.lower()
+    normalized = lowered.replace(" ", "")
     try:
         return _angle_from_text(normalized)
-    except (ValueError, ZeroDivisionError):
-        return None
+    except (ValueError, ZeroDivisionError) as error:
+        raise ValueError(
+            f"rotation angle {angle_expression!r} is not "
+            "[-]factor[*factor...][/factor] with each factor a number or pi"
+        ) from error
 
 
 def _angle_from_text(normalized: str) -> float:
-    """[-]<factor>[*<factor>...][/<denominator>] with pi as a factor."""
+    """[-]<factor>[*<factor>...][/<factor>] with pi as a factor."""
     is_negative = normalized.startswith("-")
     if is_negative:
         normalized = normalized[1:]
     denominator = 1.0
     if "/" in normalized:
         numerator_text, denominator_text = normalized.split("/", 1)
-        denominator = _denominator_value(denominator_text)
+        denominator = _factor_value(denominator_text)
         normalized = numerator_text
     coefficient = 1.0
     for factor_text in normalized.split("*"):
@@ -345,9 +368,3 @@ def _factor_value(factor_text: str) -> float:
     if factor_text == "pi":
         return math.pi
     return float(factor_text)
-
-
-def _denominator_value(denominator_text: str) -> float:
-    if "pi" in denominator_text:
-        return math.pi
-    return float(denominator_text)

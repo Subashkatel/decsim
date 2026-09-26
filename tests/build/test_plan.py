@@ -13,6 +13,7 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
+import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
@@ -263,3 +264,24 @@ def test_an_outside_strong_window_row_names_the_escalations_default(
     plan = _plan(escalation=switching)
 
     assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)
+
+
+def test_a_row_that_fixes_its_rounds_refuses_a_second_rounds_policy():
+    """A memory circuit runs rounds_per_shot rounds; a policy may not move it.
+
+    A circuit-less source would otherwise run the policy's count in
+    silence, since no circuit is there to disagree.
+    """
+    seven_rounds = round_policies.FixedRounds(7)
+    workload = workload_settings.WorkloadSettings(
+        kind="memory_circuit",
+        physical_error_probability=0.001,
+        rounds_policy=seven_rounds,
+    )
+    qpu = declared_run.declared_qpu()
+    settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
+    with pytest.raises(ValueError, match="fixes its own rounds"):
+        plan_build.build_plan(settings, policy)

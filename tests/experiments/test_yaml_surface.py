@@ -7,11 +7,13 @@ and a run writes its manifest and its per-shot records.
 """
 
 import pytest
+import yaml
 
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.report as report
+import decsim.experiments.run_folder as run_folder
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
@@ -154,6 +156,37 @@ def test_an_unknown_decoder_manager_key_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
+def test_a_yaml_without_a_sweep_is_refused(tmp_path):
+    config_path = write_config(tmp_path, {})
+    text = config_path.read_text()
+    sections = yaml.safe_load(text)
+    del sections["sweep"]
+    config_text = yaml.safe_dump(sections)
+    config_path.write_text(config_text)
+    with pytest.raises(ValueError, match="has no sweep"):
+        experiment.load_experiment(config_path)
+
+
+def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
+    block = {
+        "physical_error_probability": [0.001],
+        "distance": 3,
+        "round_period_us": [1.0],
+        "shots": 1,
+    }
+    config_path = write_config(tmp_path, {"sweep": [block]})
+    with pytest.raises(ValueError, match="distance must be a list"):
+        experiment.load_experiment(config_path)
+
+
+def test_a_qpu_key_other_than_kind_is_refused(tmp_path):
+    qpu = {"kind": "stim_device", "distance": 5}
+    config_path = write_config(tmp_path, {"qpu": qpu})
+    sentence = r"the qpu section takes one key, kind, and was given"
+    with pytest.raises(ValueError, match=sentence):
+        experiment.load_experiment(config_path)
+
+
 def test_a_mode_without_its_tier_is_refused(tmp_path):
     from decsim.machine import Machine
 
@@ -237,8 +270,14 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
             ]
         },
     )
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match=r"sweep block 1 lacks \['distance'\]"):
         experiment.load_experiment(fixed_distance_key)
+
+
+def test_a_qpu_kind_off_its_table_is_refused_when_the_yaml_loads(tmp_path):
+    misspelt_source = write_config(tmp_path, {"qpu": {"kind": "stim_devic"}})
+    with pytest.raises(ValueError, match="qpu.kind 'stim_devic' is not a row"):
+        experiment.load_experiment(misspelt_source)
 
 
 def test_a_cycle_count_on_a_kind_that_is_not_union_find_is_refused(tmp_path):
@@ -370,3 +409,22 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     assert run_dir.name.endswith("-unit_test_config")
     assert (run_dir / "config" / "unit_test_config.yaml").exists()
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
+
+
+def test_two_config_files_of_one_name_are_both_copied(tmp_path):
+    """The chain's files keep their places, so a base of one name stays."""
+    base_path = write_config(tmp_path, {})
+    child_folder = tmp_path / "child"
+    child_folder.mkdir()
+    child_path = child_folder / base_path.name
+    child_path.write_text(f"extends: ../{base_path.name}\n")
+    config = experiment.load_experiment(child_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    run_folder.snapshot_code_state(config, run_dir)
+
+    child_copy = run_dir / "config" / "child" / base_path.name
+    base_copy = run_dir / "config" / base_path.name
+    assert child_copy.read_text() == child_path.read_text()
+    assert base_copy.read_text() == base_path.read_text()

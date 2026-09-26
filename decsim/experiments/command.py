@@ -23,7 +23,6 @@ from typing import Optional
 
 import decsim.experiments.refusal as refusal
 
-VERBS = ("run", "collect", "combine", "show", "plot", "trace")
 HELP_WORDS = ("help", "-h", "--help")
 
 
@@ -44,26 +43,18 @@ def main(argv: Optional[list] = None) -> None:
 def usage() -> str:
     """The verbs, one per line, as the command prints them."""
     lines = ["the decsim commands are:"]
-    for verb in VERBS:
+    for verb in _RUN_BY_VERB:
         lines.append(f"    decsim {verb}")
     return "\n".join(lines)
 
 
 def _verb(verb: Optional[str], rest: list) -> None:
-    """The one verb the first word names, its module imported here."""
-    if verb == "run":
-        return _run(rest)
-    if verb == "collect":
-        return _collect(rest)
-    if verb == "combine":
-        return _combine(rest)
-    if verb == "show":
-        return _show(rest)
-    if verb == "plot":
-        return _plot(rest)
-    if verb == "trace":
-        return _trace(rest)
-    _report_no_verb(verb)
+    """The one verb the first word names, its module imported there."""
+    run_verb = _RUN_BY_VERB.get(verb)
+    if run_verb is None:
+        _report_no_verb(verb)
+        return
+    run_verb(rest)
 
 
 def _run(argv: list) -> None:
@@ -267,5 +258,12 @@ def _report_no_verb(verb: Optional[str]) -> None:
         raise SystemExit(1)
 
 
-if __name__ == "__main__":
-    main()
+# Each verb and the function that runs it, in the order usage lists them.
+_RUN_BY_VERB = {
+    "run": _run,
+    "collect": _collect,
+    "combine": _combine,
+    "show": _show,
+    "plot": _plot,
+    "trace": _trace,
+}

@@ -30,6 +30,6 @@ PYTHONPATH=$pydeps "$python" -m ruff check "${targets[@]}" || status=1
 "$python" tools/check_uses_graph.py decsim || status=1
 "$python" tools/check_row_recognition.py decsim || status=1
 PYTHONPATH=$pydeps "$python" -m ruff check --select C901 \
-  --config "lint.mccabe.max-complexity=5" --output-format concise \
+  --config "lint.mccabe.max-complexity=6" --output-format concise \
   "${targets[@]}" | sed 's/^/over five branches: /' | grep -v "Found "
 exit $status

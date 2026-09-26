@@ -180,7 +180,7 @@ def test_machine_decodes_the_compiled_noisy_experiment(
             2,
             "Z",
             float("nan"),
-            "physical_error_probability must be finite",
+            r"physical_error_probability must lie in \[0, 1\]",
         ),
     ],
 )

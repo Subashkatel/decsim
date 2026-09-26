@@ -1,14 +1,18 @@
 """The round policies: how many syndrome rounds an operation occupies.
 
 Every policy fills the RoundsPolicy port (decsim/ports.py): given an
-operation and its code card, return the round count, at least one. The
-lattice-surgery unit of d rounds per step comes from Horsman et al.
+operation and its code card, return the round count, one or more for
+an operation the plan decodes. The lattice-surgery unit of d rounds per
+step comes from Horsman et al.
 (arXiv 1111.4022v3, Sec. 3.1, 3.2 and 6: d rounds of error correction per
 merge, per split, and per operation) and Litinski (arXiv 1808.02892v3,
 "Translation to surface codes": a two-patch or multi-patch measurement is
-one time step of d code cycles).
+one time step of d code cycles). A policy is a dataclass, so its
+arguments are its content: two tasks whose policies differ in them have
+two strong ids (decsim/collect.py json_value).
 """
 
+import dataclasses
 from typing import Optional
 
 import decsim.ports as ports
@@ -16,11 +20,14 @@ import decsim.qpu.code_geometry as code_geometry
 import decsim.records.program as program_records
 
 
+@dataclasses.dataclass
 class FixedRounds:
     """Every operation runs the same number of rounds."""
 
-    def __init__(self, round_count: int):
-        round_count = int(round_count)
+    round_count: int
+
+    def __post_init__(self) -> None:
+        round_count = int(self.round_count)
         self.round_count = _at_least_one_round(round_count, "FixedRounds")
 
     def rounds_for(
@@ -33,6 +40,7 @@ class FixedRounds:
         return self.round_count
 
 
+@dataclasses.dataclass
 class PerOperationRounds:
     """A round count per operation id, with a fallback policy for the rest.
 
@@ -41,20 +49,18 @@ class PerOperationRounds:
     without occupying the QPU.
     """
 
-    def __init__(
-        self,
-        rounds_by_operation: dict,
-        fallback: Optional[ports.RoundsPolicy] = None,
-    ):
-        self.rounds_by_operation = {}
-        rounds_by_operation = dict(rounds_by_operation)
-        for operation_id, round_count in rounds_by_operation.items():
+    rounds_by_operation: dict
+    fallback: Optional[ports.RoundsPolicy] = None
+
+    def __post_init__(self) -> None:
+        checked_rounds = {}
+        for operation_id, round_count in self.rounds_by_operation.items():
             round_count = int(round_count)
-            self.rounds_by_operation[operation_id] = _at_least_zero_rounds(
+            checked_rounds[operation_id] = _at_least_zero_rounds(
                 round_count, operation_id
             )
-        self.fallback = fallback
-        if fallback is None:
+        self.rounds_by_operation = checked_rounds
+        if self.fallback is None:
             self.fallback = CodeRounds()
 
     def rounds_for(
@@ -68,11 +74,11 @@ class PerOperationRounds:
         return self.fallback.rounds_for(operation, code)
 
 
+@dataclasses.dataclass
 class CodeRounds:
     """Each code card's own rounds per logical cycle, optionally scaled."""
 
-    def __init__(self, scale: float = 1.0):
-        self.scale = scale
+    scale: float = 1.0
 
     def rounds_for(
         self,
@@ -87,6 +93,7 @@ class CodeRounds:
         return max(1, int(rounded_rounds))
 
 
+@dataclasses.dataclass
 class GateRounds:
     """Lattice-surgery round counts by operation kind, proportional to d.
 
@@ -98,8 +105,10 @@ class GateRounds:
     project coefficients that the cited sections do not establish.
     """
 
-    def __init__(self, merge_step_count: int = 2):
-        merge_step_count = int(merge_step_count)
+    merge_step_count: int = 2
+
+    def __post_init__(self) -> None:
+        merge_step_count = int(self.merge_step_count)
         self.merge_step_count = _at_least_one_round(
             merge_step_count, "GateRounds.merge_step_count"
         )
@@ -126,6 +135,7 @@ class GateRounds:
         return distance
 
 
+@dataclasses.dataclass
 class TemporalRounds:
     """A temporal distance for surgery, decoupled from the spatial distance.
 
@@ -134,17 +144,15 @@ class TemporalRounds:
     says (GateRounds by default).
     """
 
-    def __init__(
-        self,
-        temporal_distance: int,
-        base: Optional[ports.RoundsPolicy] = None,
-    ):
-        temporal_distance = int(temporal_distance)
+    temporal_distance: int
+    base: Optional[ports.RoundsPolicy] = None
+
+    def __post_init__(self) -> None:
+        temporal_distance = int(self.temporal_distance)
         self.temporal_distance = _at_least_one_round(
             temporal_distance, "TemporalRounds.temporal_distance"
         )
-        self.base = base
-        if base is None:
+        if self.base is None:
             self.base = GateRounds()
 
     def rounds_for(

@@ -118,6 +118,52 @@ def test_the_text_ir_reads_a_blocked_by_as_a_feedback_source():
     assert indexed[1].blocked_by == 0
 
 
+def test_the_text_ir_refuses_a_rotation_angle_it_cannot_read():
+    frontend = circuit_frontend.SurgeryIRFrontend("rz q0 π/2\n")
+
+    with pytest.raises(ValueError, match="rotation angle 'π/2' is not"):
+        frontend.build()
+
+
+def test_a_qubit_word_without_an_index_is_refused():
+    frontend = circuit_frontend.SurgeryIRFrontend("cnot q0 qx\n")
+
+    with pytest.raises(ValueError, match="qubit 'qx' is not q followed by"):
+        frontend.build()
+
+
+def test_a_blocked_by_without_its_operation_id_is_refused():
+    frontend = circuit_frontend.SurgeryIRFrontend("cnot q0 q1 blocked_by\n")
+
+    with pytest.raises(ValueError, match="blocked_by takes one operation id"):
+        frontend.build()
+
+
+def test_a_quarter_turn_rotation_is_clifford():
+    """rz(pi/2) is S up to a global phase."""
+    frontend = circuit_frontend.SurgeryIRFrontend("rz q0 pi/2\n")
+
+    operations = frontend.build()
+
+    assert operations[0].clifford is True
+
+
+def test_an_eighth_turn_rotation_is_not_clifford():
+    """rz(pi/4) is T up to a global phase."""
+    frontend = circuit_frontend.SurgeryIRFrontend("rz q0 pi/4\n")
+
+    operations = frontend.build()
+
+    assert operations[0].clifford is False
+
+
+def test_an_angle_the_grammar_cannot_read_is_refused():
+    frontend = circuit_frontend.SurgeryIRFrontend("rz q0 3pi/2\n")
+
+    with pytest.raises(ValueError, match="rotation angle '3pi/2' is not"):
+        frontend.build()
+
+
 def test_a_named_circuit_is_wired_before_it_is_handed_out():
     """The four named circuits are what the guides and slides run."""
     operations = circuit_frontend.cnot_plus_two_t_circuit()

@@ -84,9 +84,10 @@ Line by line:
   (0,)` is what the decoder concluded, `truth (0,)` is what Stim knows
   it really was. They agree, so this shot did not fail.
 
-Your two tick numbers will differ from the ones above. The default
-decoder is a real PyMatching call, and decsim charges the decoder unit
-the wall-clock time that call actually took on your machine
+Your `fully done` number will differ from the one above; `execution
+done` will not, since the QPU's rounds do not wait on the decoder here.
+The default decoder is a real PyMatching call, and decsim charges the
+decoder unit the wall-clock time that call actually took on your machine
 (`decsim/decoders/decoder.py`, `decode_timed`). A faster computer gives
 a faster machine. [Time](../explanation/time.md) says what that means and
 how to run a timing study that does not depend on your hardware.

@@ -148,13 +148,9 @@ class BivariateBicycleCodeModel:
                 "distance must not exceed qubit_count; got "
                 f"distance={self.distance!r}, qubit_count={self.qubit_count!r}"
             )
-        if self.commit_rounds_override is not None:
-            _require_positive_int(
-                self.commit_rounds_override, "commit_rounds_override"
-            )
-        has_buffer_override = self.buffer_rounds_override is not None
-        if has_buffer_override and self.buffer_rounds_override < 0:
-            raise ValueError("buffer_rounds_override must be nonnegative")
+        _check_window_overrides(
+            self.commit_rounds_override, self.buffer_rounds_override
+        )
         round_microseconds = _optional_float(self.round_microseconds)
         object.__setattr__(self, "round_microseconds", round_microseconds)
 
@@ -193,6 +189,19 @@ class BivariateBicycleCodeModel:
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Bits read out per round: the n X-plus-Z checks of every patch."""
         return num_patches * self.qubit_count
+
+
+def _check_window_overrides(
+    commit_rounds_override: Optional[int],
+    buffer_rounds_override: Optional[int],
+) -> None:
+    """A commit override is positive and a buffer override not negative."""
+    if commit_rounds_override is not None:
+        _require_positive_int(commit_rounds_override, "commit_rounds_override")
+    if buffer_rounds_override is None:
+        return
+    if buffer_rounds_override < 0:
+        raise ValueError("buffer_rounds_override must be nonnegative")
 
 
 def _require_positive_int(value, field_name: str) -> None:

@@ -14,6 +14,8 @@ import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
+# The workload keys the memory_circuit row reads beside kind.
+_MEMORY_CIRCUIT_KEYS = ("code_task", "rounds_per_shot")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -29,15 +31,20 @@ class RoundsPerShot:
 
     @classmethod
     def from_yaml(cls, value) -> "RoundsPerShot":
-        """`rounds_per_shot`: an int, or "<n>d"."""
-        if isinstance(value, int):
+        """`rounds_per_shot`: a count, or "<n>d", each at least one round.
+
+        Stim's generator refuses fewer: "Need rounds >= 1."
+        """
+        is_count = isinstance(value, int) and not isinstance(value, bool)
+        if is_count and value >= 1:
             return cls(fixed=value)
         if _is_per_distance_text(value):
             per_distance = int(value[:-1])
             return cls(per_distance=per_distance)
         raise ValueError(
-            "workload.rounds_per_shot is a round count or '<n>d' (rounds "
-            f"per unit of distance), got {value!r}"
+            "workload.rounds_per_shot is a round count of at least 1 or "
+            f"'<n>d' (n rounds per unit of distance, n at least 1), got "
+            f"{value!r}"
         )
 
     def rounds_for(self, distance: int) -> int:
@@ -63,11 +70,11 @@ class WorkloadSettings:
     line-based text IR), qlx (a lowered QLX program). The other fields
     are Python-only: the decode owners, the dynamic streams and
     protected regions of a feedback workload, the round policy
-    (GateRounds by default; the memory circuit fixes its rounds), the
-    feedback boundary mode every operation takes unless it names its
-    own, and the window error models a task built once for all of its
-    shots (built_window_models; a Machine built alone gets none and
-    builds its own).
+    (GateRounds by default; the memory circuit fixes its rounds and
+    refuses one), the feedback boundary mode every operation takes
+    unless it names its own, and the window error models a task built
+    once for all of its shots (built_window_models; a Machine built
+    alone gets none and builds its own).
     """
 
     kind: str = "circuit_list"
@@ -95,8 +102,12 @@ class WorkloadSettings:
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "WorkloadSettings":
-        """The `workload` section: the kind's row reads its own keys."""
-        kind = section.get("kind", "memory_circuit")
+        """The `workload` section: the kind's row reads its own keys.
+
+        The yaml names its kind: the dataclass's default, circuit_list, is
+        for Python-built runs, and a section without one is refused.
+        """
+        kind = section.get("kind")
         row = tables.row(WORKLOADS, "workload.kind", kind)
         fields = row.from_yaml(section)
         return cls(kind=kind, **fields)
@@ -131,7 +142,19 @@ class MemoryCircuitWorkload:
 
     @staticmethod
     def from_yaml(section: Mapping) -> dict:
-        """The `workload` keys this row reads, as settings fields."""
+        """The `workload` keys this row reads, as settings fields.
+
+        The row reads exactly its two keys, so a misspelt or a missing
+        one is refused here rather than run on a default.
+        """
+        given = set(section) - {"kind"}
+        if given != set(_MEMORY_CIRCUIT_KEYS):
+            listed = sorted(given)
+            raise ValueError(
+                "workload.kind memory_circuit reads the keys "
+                f"{list(_MEMORY_CIRCUIT_KEYS)} beside kind; the section "
+                f"has {listed}"
+            )
         rounds_per_shot = RoundsPerShot.from_yaml(section["rounds_per_shot"])
         return {
             "code_task": section["code_task"],
@@ -234,13 +257,15 @@ class QlxWorkload:
 
 
 def _is_per_distance_text(value) -> bool:
-    """True for "<n>d": digits then a d."""
+    """True for "<n>d": digits naming at least one round, then a d."""
     if not isinstance(value, str):
         return False
     if not value.endswith("d"):
         return False
     digits = value[:-1]
-    return digits.isdigit()
+    if not digits.isdigit():
+        return False
+    return int(digits) >= 1
 
 
 # workload.kind names one of these rows: a row reads its own section

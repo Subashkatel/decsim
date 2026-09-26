@@ -407,13 +407,14 @@ def _logical_fault_after_first_round(circuit, data_qubit_count):
     data_qubits = _final_data_qubits(circuit, data_qubit_count)
     flattened = circuit.flattened()
     faulty = stim.Circuit()
-    reset_count = 0
+    is_fault_placed = False
     for instruction in flattened:
-        if instruction.name == "R":
-            reset_count += 1
-        if instruction.name == "R" and reset_count == 2:
-            faulty.append("X_ERROR", data_qubits, 1.0)
         faulty.append(instruction)
+        if is_fault_placed or instruction.name not in ("M", "MX"):
+            continue
+        # the first check readout ends round one, whatever the native set
+        faulty.append("X_ERROR", data_qubits, 1.0)
+        is_fault_placed = True
     return faulty
 
 

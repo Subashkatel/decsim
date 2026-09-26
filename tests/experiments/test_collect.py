@@ -33,9 +33,11 @@ import pathlib
 import re
 
 import pytest
+import stim
 import yaml
 
 import decsim.collect as collect
+import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
@@ -43,7 +45,11 @@ import decsim.experiments.collect_command as run
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
+import decsim.frontends.settings as workload_settings
+import decsim.qpu.round_policies as round_policies
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
 import tests.experiments.yaml_configs as yaml_configs
 
@@ -453,3 +459,62 @@ def test_an_outside_escalation_row_is_measured_over_its_tiers_links(
     assert outside.samples == shipped.samples
     assert outside.means == shipped.means
     assert outside.logical_failure == shipped.logical_failure
+
+
+def _memory_task(rounds: int) -> collect.Task:
+    """A one-shot task running Stim's d=3 memory circuit of that length."""
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", rounds=rounds, distance=3
+    )
+    operation = program_records.Operation(
+        id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
+    )
+    workload = workload_settings.WorkloadSettings(operations=(operation,))
+    settings = machine_settings.MachineSettings(workload=workload)
+    return collect.Task(settings, 1, {"point": 1})
+
+
+def test_two_tasks_that_run_different_circuits_are_two_tasks():
+    """The strong id carries the circuit text, as sinter's does."""
+    three_rounds = _memory_task(3)
+    five_rounds = _memory_task(5)
+
+    unique = collect.unique_tasks([three_rounds, five_rounds])
+
+    assert len(unique) == 2
+
+
+def test_two_tasks_whose_controllers_stall_or_drop_are_two_tasks():
+    """An enum setting enters the strong id as its member's name."""
+    settings = machine_settings.MachineSettings()
+    drop_round = controller_settings.PackingOverflowPolicy.DROP_ROUND
+    dropping_controller = dataclasses.replace(
+        settings.controller, packing_overflow=drop_round
+    )
+    dropping = dataclasses.replace(settings, controller=dropping_controller)
+    stalling_task = collect.Task(settings, 1, {"point": 1})
+    dropping_task = collect.Task(dropping, 1, {"point": 1})
+
+    unique = collect.unique_tasks([stalling_task, dropping_task])
+
+    assert len(unique) == 2
+
+
+def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
+    """A round policy enters the strong id by its arguments."""
+    three_rounds = round_policies.FixedRounds(3)
+    five_rounds = round_policies.FixedRounds(5)
+    three_workload = workload_settings.WorkloadSettings(
+        rounds_policy=three_rounds
+    )
+    five_workload = workload_settings.WorkloadSettings(
+        rounds_policy=five_rounds
+    )
+    three_settings = machine_settings.MachineSettings(workload=three_workload)
+    five_settings = machine_settings.MachineSettings(workload=five_workload)
+    three_task = collect.Task(three_settings, 1, {"point": 1})
+    five_task = collect.Task(five_settings, 1, {"point": 1})
+
+    unique = collect.unique_tasks([three_task, five_task])
+
+    assert len(unique) == 2

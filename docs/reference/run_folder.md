@@ -20,14 +20,14 @@ without any number changing (`decsim/experiments/report.py`).
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
-| `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a wall-clock decoder |
+| `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
 | `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, summarized from `shots.csv` and `window_samples.csv` |
 | `links.csv` | `decsim/experiments/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
 | `data_movement.csv` | `decsim/experiments/report.py`, `data_movement_rows` | one row per sweep point per path, then per memory class, averaged over the point's shots |
 | `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `manifest.json` | `decsim/experiments/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
-| `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain |
+| `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain, each at its place relative to the others, so every `extends` still resolves |
 | `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, written only when the checkout was dirty |
 | `trace/<shot>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot |
 | `log/<shot>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
@@ -191,7 +191,8 @@ process to reach the same numbers.
 
 One row per decoded window, written only for a decoder named by a table
 row: the time that held the unit, its measured wall clock or its own
-cycle count. A decoder priced by a number produces no rows here.
+cycle count. A decoder priced by a number produces no rows, and a run
+with no rows writes no file.
 
 | Column | What it is |
 | --- | --- |

@@ -155,7 +155,8 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             """The keys the yaml wrote; the three with no default must be."""
             required = ("unit_count", "attempt_ticks", "correction_round_count")
             _check_required_keys("distillation", section, required)
-            return cls(**section)
+            fields = _with_numbers(section, ("success_probability",))
+            return cls(**fields)
 
     # the run's decoder manager, where the correction decodes compete
     # with the core's windows
@@ -458,7 +459,8 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             """The keys the yaml wrote; levels is a list of level mappings."""
             _check_required_keys("multi_level", section, ("levels",))
             levels = _levels_from_yaml(section["levels"])
-            fields = dict(section)
+            probability_keys = ("preparation_success_probability",)
+            fields = _with_numbers(section, probability_keys)
             fields["levels"] = levels
             return cls(**fields)
 
@@ -797,6 +799,20 @@ def _check_probability(name: str, value) -> None:
         raise ValueError(f"{name} must be finite and in [0, 1]")
 
 
+def _with_numbers(section: Mapping, keys: tuple) -> dict:
+    """The section's keys, each named one read as the number it writes.
+
+    YAML 1.1 loads `1e-3` as text, so a probability the yaml writes that
+    way arrives as a string, as escalation's online card reads it too
+    (decsim/escalation/settings.py _online_float).
+    """
+    fields = dict(section)
+    for key in keys:
+        if key in fields:
+            fields[key] = float(fields[key])
+    return fields
+
+
 def _check_required_keys(kind: str, section: Mapping, required: tuple) -> None:
     """A row's keys with no default are written, or named as missing."""
     missing = []
@@ -822,7 +838,8 @@ def _levels_from_yaml(level_sections) -> tuple:
                 f"magic_state_factory.levels[{index}] does not know "
                 f"{listed}; its keys are {list(level_keys)}"
             )
-        level = DistillLevel(**level_section)
+        level_fields = _with_numbers(level_section, ("success_probability",))
+        level = DistillLevel(**level_fields)
         levels.append(level)
     return tuple(levels)
 

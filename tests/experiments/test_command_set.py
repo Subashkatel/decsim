@@ -159,8 +159,11 @@ def test_an_unknown_verb_prints_the_verbs_and_fails():
         command.main(["decode-everything"])
 
 
-def test_help_prints_the_verbs_without_failing():
+def test_help_prints_the_verbs_without_failing(capsys):
     command.main(["--help"])
+
+    printed = capsys.readouterr()
+    assert printed.err.strip() == command.usage()
 
 
 def test_show_lists_every_sections_kind_of_every_shipped_config():

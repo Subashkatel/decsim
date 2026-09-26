@@ -17,6 +17,7 @@ emits seeded random bits sized by the same width, to exercise the
 payload path end to end without Stim.
 """
 
+import random
 from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -186,8 +187,16 @@ class TimingOnlyDevice:
         """No circuit, so no strong re-decode has an error model."""
 
 
-class SyndromeBitDevice(seeding._RandomSeedConsumer):
-    """Emits seeded random bits shaped like the code card's syndrome."""
+class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
+    """Emits seeded random bits shaped like the code card's syndrome.
+
+    Each payload draws from a generator of its own, seeded by the
+    device's seed, the stream, the round and the patches, the way the
+    Stim source samples each stream under its own substream
+    (stim_device.py, _sample_seed_for). A round's bits therefore depend
+    on the seed and the round alone, and not on how many rounds another
+    operation drew before it, which another component's timing decides.
+    """
 
     operation_circuit_scope = "none"
     takes_code_card = True
@@ -209,7 +218,8 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     ):
         self.code = code
         self.one_payload_per_patch = one_payload_per_patch
-        self._initialize_run_seed_state(seed)
+        self._seed = seed
+        self._initialize_run_seed_binding(seed)
 
     def run_seed_children(self) -> tuple[seed_records.RunSeedChild, ...]:
         """The code card, which shapes every payload."""
@@ -236,8 +246,8 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         if self.one_payload_per_patch:
             return self._payload_per_patch(operation, target, global_round)
         patch_count = _patch_count_of(operation)
-        bits = self._fake_bits(patch_count)
         patches = program_records.patches_of(operation)
+        bits = self._fake_bits(target, global_round, patches, patch_count)
         return [self._payload(target, patches, global_round, bits)]
 
     def idle_round_payloads(
@@ -255,7 +265,8 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         if self.one_payload_per_patch:
             return self._payload_per_patch(operation, stream_id, global_round)
         patches = program_records.patches_of(operation)
-        bits = self._fake_bits(len(patches))
+        patch_count = len(patches)
+        bits = self._fake_bits(stream_id, global_round, patches, patch_count)
         return [self._payload(stream_id, patches, global_round, bits)]
 
     def finalize_stream_round(
@@ -342,10 +353,30 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
-    def _fake_bits(self, patch_count: int) -> list:
+    def _install_run_seed_state(self, prepared_state) -> None:
+        self._seed = prepared_state
+
+    def _fake_bits(
+        self, target: Any, global_round: int, patches: tuple, patch_count: int
+    ) -> list:
         bit_count = self.code.syndrome_bits_per_round(patch_count)
         self._mark_stochastic_use()
-        return [self._rng.randint(0, 1) for _ in range(bit_count)]
+        generator = self._payload_generator(target, global_round, patches)
+        return [generator.randint(0, 1) for _ in range(bit_count)]
+
+    def _payload_generator(
+        self, target: Any, global_round: int, patches: tuple
+    ) -> random.Random:
+        """The generator of one payload; an unseeded device draws entropy.
+
+        random.Random hashes a text seed with SHA-512, so the same text
+        gives the same bits in every process (Python's random module,
+        seed version 2).
+        """
+        if self._seed is None:
+            return random.Random()
+        payload_identity = f"{self._seed}|{target!r}|{global_round}|{patches!r}"
+        return random.Random(payload_identity)
 
     def _payload(
         self, target: Any, patches: tuple, global_round: int, bits: list
@@ -355,7 +386,6 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
             patches,
             global_round,
             bits=bits,
-            code=self.code.name,
             size_bits=len(bits),
         )
 
@@ -370,8 +400,9 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
             patches = operation.qubits
         payloads = []
         for patch in patches:
-            bits = self._fake_bits(1)
-            payload = self._payload(target, (patch,), global_round, bits)
+            patch_ids = (patch,)
+            bits = self._fake_bits(target, global_round, patch_ids, 1)
+            payload = self._payload(target, patch_ids, global_round, bits)
             payloads.append(payload)
         return payloads
 

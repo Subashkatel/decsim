@@ -19,9 +19,8 @@ import types
 
 import pytest
 
+import decsim.decoders.decoders as decoders
 import decsim.decoders.relay_belief_propagation.window_decoder as relay
-import decsim.qpu.code_geometry as code_geometry
-import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
@@ -257,43 +256,43 @@ def test_a_components_own_seed_conflicts_with_the_runs_root_seed():
         decoder.reserve_run_seed(9)
 
 
-def seeded_bit_device():
-    """A stochastic leaf of the machine: the fake-bit syndrome device."""
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    return syndrome_devices.SyndromeBitDevice(code)
+def seeded_generator_leaf():
+    """A stochastic leaf that draws from one seeded random.Random."""
+    inner = decoders.PresetLatencyDecoder(0.0)
+    return decoders.SampledConfidenceDecoder(inner, 0.5)
 
 
 def test_a_reserved_generator_is_installed_only_at_commit():
-    device = seeded_bit_device()
-    live_generator = device._rng
+    leaf = seeded_generator_leaf()
+    live_generator = leaf._rng
 
-    reservation = device.reserve_run_seed(29)
-    assert device._rng is live_generator
+    reservation = leaf.reserve_run_seed(29)
+    assert leaf._rng is live_generator
 
-    device.commit_run_seed(reservation)
-    assert device._rng is not live_generator
+    leaf.commit_run_seed(reservation)
+    assert leaf._rng is not live_generator
 
 
 def test_a_committed_seed_reproduces_the_drawn_numbers():
-    device = seeded_bit_device()
-    reservation = device.reserve_run_seed(29)
-    device.commit_run_seed(reservation)
+    leaf = seeded_generator_leaf()
+    reservation = leaf.reserve_run_seed(29)
+    leaf.commit_run_seed(reservation)
     reference = random.Random(29)
 
-    drawn = [device._rng.random() for _ in range(4)]
+    drawn = [leaf._rng.random() for _ in range(4)]
     expected = [reference.random() for _ in range(4)]
 
     assert drawn == expected
 
 
 def test_a_cancelled_reservation_leaves_the_live_generator_alone():
-    device = seeded_bit_device()
-    live_state = device._rng.getstate()
+    leaf = seeded_generator_leaf()
+    live_state = leaf._rng.getstate()
 
-    reservation = device.reserve_run_seed(29)
-    device.cancel_run_seed(reservation)
+    reservation = leaf.reserve_run_seed(29)
+    leaf.cancel_run_seed(reservation)
 
-    assert device._rng.getstate() == live_state
+    assert leaf._rng.getstate() == live_state
 
 
 def test_a_component_that_draws_nothing_is_walked_and_skipped():

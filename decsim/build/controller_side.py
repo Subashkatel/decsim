@@ -130,12 +130,12 @@ def build_detection_events(
 def build_factory(parts: build_parts.Parts) -> ports.MagicStateFactory:
     """The factory of the kind, from the one collaborators record.
 
-    A distillation row decodes its corrections on the run's decoder
-    manager; the multi-level row paces its levels on the run's round; a
-    row that needs neither reads the engine alone. The card refuses an
-    ambiguous decode service as it is read, so the decode service is the
-    one neighbour a seat still takes at construction and this row sits
-    after the decoder manager's.
+    Every row is handed the run's decoder manager and round: a row whose
+    card asks for correction decodes submits them there, the multi-level
+    row paces its levels on the round, and a row ignores what its card
+    does not use. The card refuses a missing decode service as it is
+    read, so the decode service is the one neighbour a seat still takes
+    at construction and this row sits after the decoder manager's.
     """
     settings = parts.settings.magic_state_factory
     row = tables.row(
@@ -186,7 +186,7 @@ def build_qpu(parts: build_parts.Parts) -> cycle_clock.QPUDevice:
     """The device on its cycle clock, one QEC round per cycle."""
     cycle_clock_domain = config.Clock(parts.plan.round_ticks)
     return cycle_clock.QPUDevice(
-        parts.engine, parts.plan.device, cycle_clock_domain
+        parts.engine, parts.plan.device, cycle_clock_domain, parts.plan.code
     )
 
 

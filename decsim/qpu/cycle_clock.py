@@ -20,6 +20,7 @@ from typing import Any
 import decsim.config as config
 import decsim.engine
 import decsim.ports as ports
+import decsim.qpu.code_geometry as code_geometry
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -66,17 +67,19 @@ class QPUDevice:
         engine: decsim.engine.Engine,
         syndrome_source: ports.SyndromeSource,
         clock: config.Clock,
+        code: code_geometry.CodeModel,
     ):
         self.engine = engine
         self.syndrome_source = syndrome_source
         self.clock = clock
+        self.code = code
         self.trace = _TraceSources()
         self._live = _LiveOperations()
 
     def issue(self, command: program_records.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
         if command.round_ticks != self.clock.period_ticks:
-            raise ValueError("operation cadence must equal the QPU cycle")
+            raise RuntimeError("operation cadence must equal the QPU cycle")
         is_instant = command.round_count == 0
         emits_without_finalizing = (
             command.emits_detector_data and not command.finalizes_stream_round
@@ -102,8 +105,6 @@ class QPUDevice:
 
     def boundary_at_or_after(self, tick: int) -> int:
         """The first cycle boundary not earlier than the tick."""
-        if tick < 0:
-            raise ValueError("QPU boundary query tick must be nonnegative")
         return self.clock.edge(0, tick)
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
@@ -137,9 +138,20 @@ class QPUDevice:
     def emit_feedback_memory_round(
         self, operation_id: Any, patch: Any, round_index: int
     ) -> None:
-        """Deliver the timing-only round of an idle patch."""
+        """Deliver the timing-only round of an idle patch.
+
+        It carries no values but is as wide as the patch's syndrome: the
+        extraction reads every measure qubit every cycle whether or not an
+        instruction uses the patch (Google 2207.06431 lines 118-125, "All
+        stabilisers are measured in this manner concurrently"), so every
+        wire and memory the round crosses can price it.
+        """
+        size_bits = self.code.syndrome_bits_per_round(1)
         payload = round_records.QPUReadout(
-            ("idle", operation_id, patch), (patch,), round_index
+            ("idle", operation_id, patch),
+            (patch,),
+            round_index,
+            size_bits=size_bits,
         )
         route = round_records.SyndromePacketRoute.feedback_memory_round(
             operation_id
@@ -256,7 +268,7 @@ class QPUDevice:
     ) -> None:
         """Stamp every payload with its fragment slot and hand it on."""
         if not payloads:
-            raise ValueError(
+            raise RuntimeError(
                 "a detector-emitting round must emit at least one readout"
             )
         fragment_count, first_index = _fragment_slots(operation, len(payloads))

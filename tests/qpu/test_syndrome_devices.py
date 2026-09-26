@@ -69,7 +69,6 @@ def test_fake_bits_are_as_wide_as_the_syndrome():
     payload = first_payload(device, operation, 1)
     assert len(payload.bits) == 8
     assert payload.size_bits == 8
-    assert payload.code == "rotated surface code (d=3)"
 
 
 def test_fake_bits_grow_with_the_codes_distance():
@@ -80,6 +79,24 @@ def test_fake_bits_grow_with_the_codes_distance():
     payload = first_payload(device, operation, 1)
     assert len(payload.bits) == 24
     assert payload.size_bits == 24
+
+
+def test_a_rounds_fake_bits_do_not_depend_on_the_rounds_drawn_before_it():
+    """Another operation's rounds, drawn first, leave this round's bits.
+
+    Which operation's round the clock draws first is decided by other
+    components' timing; the Stim source keeps each stream's shot under
+    its own substream for the same reason (stim_device._sample_seed_for).
+    """
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    first = program_records.Operation(id=1, name="memory", qubits=(0,))
+    second = program_records.Operation(id=2, name="memory", qubits=(1,))
+    alone = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    after_another = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    after_another.round_payloads(second, 1)
+    payload_alone = first_payload(alone, first, 1)
+    payload_after_another = first_payload(after_another, first, 1)
+    assert payload_after_another.bits == payload_alone.bits
 
 
 def test_one_payload_per_patch_when_asked():

@@ -808,13 +808,15 @@ def _check_production_mode(
 
 
 def _check_decode_service(decode_service, correction_decode_count: int) -> None:
-    """Require one unambiguous correction-service disposition."""
+    """Require a decode service when the card asks for correction decodes.
+
+    A card with no correction decode ignores the service the root hands
+    it, as FactoryCollaborators says of every collaborator: Silva
+    2411.04270 line 249 counts the correction inside a level's 13
+    logical cycles, so the multi-level card's own default decodes nothing.
+    """
     if correction_decode_count < 0:
         raise ValueError("correction_decode_count must be nonnegative")
-    if correction_decode_count == 0 and decode_service is not None:
-        raise ValueError(
-            "decode_service must be None when correction_decode_count is zero"
-        )
     if correction_decode_count > 0 and decode_service is None:
         raise ValueError(
             "decode_service is required when correction_decode_count is "

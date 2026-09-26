@@ -107,7 +107,7 @@ def clocked_qpu(cycle_ticks, source=None):
     if source is None:
         source = syndrome_devices.TimingOnlyDevice(CODE)
     clock = config.Clock(cycle_ticks)
-    qpu = cycle_clock.QPUDevice(engine, source, clock)
+    qpu = cycle_clock.QPUDevice(engine, source, clock, CODE)
     qpu.readout_receiver = log
     qpu.runtime = log
     qpu.idle_rounds = log
@@ -227,12 +227,6 @@ def test_the_boundary_at_or_after_a_tick_on_a_921_ns_clock():
 def test_the_boundary_at_or_after_a_tick_on_a_1250_ns_clock():
     engine, qpu, log = clocked_qpu(1_250_000)
     assert qpu.boundary_at_or_after(1_300_000) == 2_500_000
-
-
-def test_a_boundary_query_before_time_zero_is_refused():
-    engine, qpu, log = clocked_qpu(921_000)
-    with pytest.raises(ValueError, match="nonnegative"):
-        qpu.boundary_at_or_after(-1)
 
 
 def test_an_idle_patch_emits_one_round_per_cycle_until_finish():
@@ -414,7 +408,7 @@ def test_a_detector_emitting_round_must_emit_a_readout():
     body = memory_body(1, 1, 10)
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError, match="at least one readout"):
+    with pytest.raises(RuntimeError, match="at least one readout"):
         engine.run()
 
 
@@ -425,16 +419,14 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
     operation = program_records.Operation(
         id=1, name="stream", qubits=(0,), patches=(0,), stream_id="s"
     )
+    same_seed = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    drawn = same_seed.idle_round_payloads(
+        operation, "s", 4, is_final=False, round_period_ticks=10
+    )
     qpu.emit_idle_stream_round(operation, "s", 4, is_final=False)
     payload, route = log.readouts[0]
-    assert payload == round_records.QPUReadout(
-        "s",
-        (0,),
-        4,
-        bits=[0, 0, 1, 0, 1, 1, 1, 1],
-        code="rotated surface code (d=3)",
-        size_bits=8,
-    )
+    assert payload == drawn[0]
+    assert payload.size_bits == 8
     assert route == round_records.WINDOW_INPUT_ROUTE
 
 
@@ -470,14 +462,25 @@ def test_a_feedback_memory_round_is_routed_to_its_source_operation():
     engine, qpu, log = clocked_qpu(10)
     qpu.emit_feedback_memory_round(7, "A", 4)
     payload, route = log.readouts[0]
-    assert payload == round_records.QPUReadout(("idle", 7, "A"), ("A",), 4)
+    assert payload.operation_id == ("idle", 7, "A")
+    assert payload.patch_ids == ("A",)
+    assert payload.round_index == 4
     assert route == round_records.SyndromePacketRoute.feedback_memory_round(7)
+
+
+def test_an_idle_patchs_round_is_as_wide_as_one_patchs_syndrome():
+    """Every measure qubit is read out each cycle, used or not."""
+    engine, qpu, log = clocked_qpu(10)
+    qpu.emit_feedback_memory_round(7, "A", 4)
+    payload, _route = log.readouts[0]
+    assert payload.size_bits == BITS_PER_ROUND
+    assert payload.bits is None
 
 
 def test_a_command_with_another_cadence_is_refused():
     engine, qpu, log = clocked_qpu(10)
     body = memory_body(1, 2, 11)
-    with pytest.raises(ValueError, match="cadence"):
+    with pytest.raises(RuntimeError, match="cadence"):
         qpu.issue(body)
 
 

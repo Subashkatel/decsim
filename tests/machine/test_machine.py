@@ -919,7 +919,6 @@ def _three_stream_rounds(
 
 
 def _payload_bits_on(result: result_records.RunResult, path: str) -> list:
-    """The payload of every transfer the run booked on one path, in order."""
     bits = []
     for transfer in result.link_traffic["transfers"]:
         if transfer["path"] == path:

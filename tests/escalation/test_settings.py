@@ -1,5 +1,7 @@
 """Escalation control stages use gem5's integer cycles and named domains."""
 
+import math
+
 import pytest
 
 import decsim.config as config
@@ -37,3 +39,12 @@ def test_a_charged_escalation_cost_needs_its_clock():
         ValueError, match="charged escalation costs need a clock"
     ):
         escalation_settings.EscalationSettings(threshold_cycles=1)
+
+
+def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
+    """Decibels are 10 log10 of the ratio, the weight its natural log."""
+    weight_nats = math.log(100.0)
+
+    assert escalation_settings.nats_to_decibels(weight_nats) == pytest.approx(
+        20.0
+    )

@@ -38,6 +38,7 @@ import decsim.config as config_module
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
+import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -1444,3 +1445,24 @@ def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):
     assert kept_record.shots[0]["strong_wait_max_us"] > 0
     assert kept_rows[0]["escalated_fraction"] == 1.0
     assert kept_rows[0]["backlog_peak_rounds"] == kept.backlog_peak_rounds
+
+
+def test_a_source_that_samples_no_shot_is_refused_with_a_sentence(tmp_path):
+    """timing_only draws no shot, so the loop has no truth to be judged by."""
+    raw = dict(MINIMAL_CONFIG)
+    raw["qpu"] = {"kind": "timing_only"}
+    config_path = tmp_path / "timing_only.yaml"
+    config_text = yaml.safe_dump(raw)
+    config_path.write_text(config_text)
+    config = experiment.load_experiment(config_path)
+
+    with pytest.raises(
+        refusal.RefusalError, match="sampled none for operation"
+    ):
+        measure_point_shot(
+            config,
+            physical_error_probability=0.001,
+            distance=3,
+            round_period_microseconds=1.0,
+            seed=0,
+        )

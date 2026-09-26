@@ -447,6 +447,12 @@ def decibels_to_nats(decibels: float) -> float:
     return scaled / 10.0
 
 
+def nats_to_decibels(nats: float) -> float:
+    """A matching weight in the paper's decibels: decibels_to_nats undone."""
+    decibels_per_nat = 10.0 / LN_TEN
+    return nats * decibels_per_nat
+
+
 def _switching_settings(
     kind: str,
     section: Mapping,

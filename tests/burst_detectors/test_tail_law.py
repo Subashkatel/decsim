@@ -109,6 +109,16 @@ def _assert_the_law_is_the_exact_tail(priors, incidence, exact_tails):
     assert numpy.all(is_within)
 
 
+def _grid_priors(prior, fault_count, is_mixed):
+    """fault_count priors at prior, or spread 0.2 to 1.8 times it."""
+    priors = numpy.full(fault_count, prior)
+    if not is_mixed:
+        return priors
+    generator = numpy.random.default_rng(fault_count)
+    spread = generator.uniform(0.2, 1.8, fault_count)
+    return priors * spread
+
+
 @pytest.mark.parametrize("prior", GRID_PRIORS)
 @pytest.mark.parametrize("fault_count", INDEPENDENT_FAULT_COUNTS)
 @pytest.mark.parametrize("is_mixed", [False, True])
@@ -121,11 +131,7 @@ def test_the_tail_law_is_the_poisson_binomial_tail(
     every count whose tail is at least 1e-9; a law that fired each fault
     at a Poisson rate equal to its prior sat as much as 75 errors low.
     """
-    priors = numpy.full(fault_count, prior)
-    if is_mixed:
-        generator = numpy.random.default_rng(fault_count)
-        spread = generator.uniform(0.2, 1.8, fault_count)
-        priors = priors * spread
+    priors = _grid_priors(prior, fault_count, is_mixed)
     incidence = numpy.eye(fault_count, dtype=numpy.uint8)
     exact_tails = _exact_independent_tails(priors)
 

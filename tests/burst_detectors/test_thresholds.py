@@ -1,4 +1,8 @@
-"""The chart bank's thresholds on hand maxima."""
+"""The chart bank's thresholds on hand maxima.
+
+Closed forms on the maxima 1 to 100: the observed tail, and past it the
+exponential fitted to the largest maxima, u + beta ln(k / (n share)).
+"""
 
 import numpy
 import pytest

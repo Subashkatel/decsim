@@ -1,4 +1,9 @@
-"""A flag's onset, its end, and when it is published."""
+"""A flag's onset, its end, and when it is published.
+
+A count flag reaches back one window from the round that fired (Q3DE
+2501.00331 lines 727-728); a verdict is read only once the unit has
+served its round, charged on its clock's edges (gem5's Clocked).
+"""
 
 import decsim.burst_detectors.event_count.detector as event_count
 import decsim.config as config

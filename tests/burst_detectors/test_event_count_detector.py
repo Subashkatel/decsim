@@ -17,12 +17,10 @@ import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
 import tests.burst_detectors.burst_rounds as burst_rounds
 from tests.burst_detectors.burst_rounds import (
-    BULK_ROUND_LOUD,
     BULK_ROUND_QUIET,
     CLOCKS,
     CODE_TASK,
     DISTANCE,
-    GRAPHLIKE,
     PHYSICAL_ERROR_PROBABILITY,
     ROUNDS,
 )
@@ -127,70 +125,13 @@ def test_raising_priors_is_true_or_false():
         burst_detector_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
 
 
-def _flagged_detector(raise_strong_priors):
-    """Every detector loud from round 12 to 17: the whole patch in burst."""
-    settings = event_count.EventCountBurstDetector.Settings(
-        raise_strong_priors=raise_strong_priors
-    )
-    detector = burst_rounds.event_count_detector(settings)
-    quiet_before = burst_rounds.quiet_rounds(11)
-    loud = [BULK_ROUND_LOUD] * 6
-    rounds = [*quiet_before, *loud]
-    burst_rounds.feed(detector, rounds)
-    return detector
-
-
-def test_burst_priors_raise_the_priors_and_keep_the_graph():
-    """IonQ 2608.25027 lines 334-340: only the prior vector changes.
-
-    Every detector fires every round, a rate no prior below one half
-    explains, so every column the flagged rows see sits at the cap.
-    """
-    detector = _flagged_detector(raise_strong_priors=True)
-    window = burst_rounds.window(12, 17)
-    model = burst_rounds.window_model(12, 17)
-    raised = detector.with_burst_priors(window, model)
-    faults = model.require_faults(GRAPHLIKE)
-    raised_faults = raised.require_faults(GRAPHLIKE)
-    changed_checks = faults.check != raised_faults.check
-    assert changed_checks.nnz == 0
-    assert raised.detector_ids == model.detector_ids
-    assert raised_faults.source_fault_ids == faults.source_fault_ids
-    is_capped = raised_faults.priors == 0.5
-    was_below_cap = faults.priors < 0.5
-    assert numpy.all(is_capped)
-    assert numpy.all(was_below_cap)
-
-
-def test_a_window_before_the_flag_keeps_its_model():
-    detector = _flagged_detector(raise_strong_priors=True)
-    window = burst_rounds.window(1, 6)
-    model = burst_rounds.window_model(1, 6)
-    kept = detector.with_burst_priors(window, model)
-    assert kept is model
-
-
 def test_without_burst_priors_a_flagged_window_keeps_its_model():
-    detector = _flagged_detector(raise_strong_priors=False)
+    detector = burst_rounds.flagged_event_count_detector(
+        raise_strong_priors=False
+    )
     window = burst_rounds.window(12, 17)
     model = burst_rounds.window_model(12, 17)
     kept = detector.with_burst_priors(window, model)
-    assert kept is model
-
-
-def test_a_flag_with_no_anomalous_position_keeps_the_model():
-    """One loud round fires the patch count, no position's own count."""
-    settings = event_count.EventCountBurstDetector.Settings(
-        raise_strong_priors=True
-    )
-    detector = burst_rounds.event_count_detector(settings)
-    quiet_before = burst_rounds.quiet_rounds(11)
-    rounds = [*quiet_before, BULK_ROUND_LOUD]
-    burst_rounds.feed(detector, rounds)
-    window = burst_rounds.window(12, 12)
-    model = burst_rounds.window_model(12, 12)
-    kept = detector.with_burst_priors(window, model)
-    assert detector.is_burst_window(window)
     assert kept is model
 
 

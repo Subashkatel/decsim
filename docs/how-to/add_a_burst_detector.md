@@ -78,8 +78,9 @@ circuits, and the escalation reaches it only through the port.
 `tests/burst_detectors/burst_rounds.py` builds the d = 5 memory, feeds
 it round by round and makes windows. Hold your row against a reference
 written straight from the method's rules, as
-`tests/burst_detectors/test_masked_regional_cusum_detector.py` does, and
-add your row to `test_each_row_reports_every_round_it_fires_on` in
+`tests/burst_detectors/written_rules.py` is for `masked_regional_cusum`,
+give each of your modules its own test file, and add your row to
+`test_each_row_reports_every_round_it_fires_on` in
 `tests/burst_detectors/test_settings.py`.
 
 ## 5. Compare it

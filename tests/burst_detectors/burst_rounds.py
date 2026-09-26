@@ -5,6 +5,8 @@ memory_circuit generates, its rounds in formation order, and the two
 rows built on it.
 """
 
+import numpy
+
 import decsim.burst_detectors.event_count.detector as event_count
 import decsim.config as config
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -30,6 +32,10 @@ BULK_ROUND_LOUD = (1,) * 24
 CLOCKS = config.ClockSettings({"fridge": 250.0})
 GRAPHLIKE = fault_contracts.FaultRepresentation.GRAPHLIKE
 CUSUM = masked_regional_cusum.MaskedRegionalCusumBurstDetector
+# a stream long enough for the 64-round mask window and its 100-round
+# hold, with a burst loud enough to mask checks
+LONG_ROUNDS = 160
+LONG_BURST_ONSET = 40
 
 
 def memory_circuit():
@@ -128,3 +134,78 @@ def window_model(first_round, last_round):
     return slicer.slice_window(
         first_round, first_round, last_round, last_round, is_last=False
     )
+
+
+def long_burst_shot(seed):
+    """A d = 5 shot of LONG_ROUNDS rounds, bursting from LONG_BURST_ONSET."""
+    circuit = workload_settings.memory_circuit(
+        CODE_TASK, LONG_ROUNDS, DISTANCE, PHYSICAL_ERROR_PROBABILITY
+    )
+    table = detector_formation.build_formation_table(circuit, LONG_ROUNDS)
+    burst = stim_device.BurstStimDevice.Settings(
+        burst_onset_round=LONG_BURST_ONSET, burst_error_probability=0.05
+    )
+    shot_circuit = stim_device.burst_circuit(circuit, table, burst)
+    sampler = shot_circuit.compile_detector_sampler(seed=seed)
+    shots = sampler.sample(1)
+    return circuit, shots[0]
+
+
+def bulk_rows(circuit, sampled, positions):
+    """(bulk rounds, checks) of 0/1, read off Stim's detector coordinates.
+
+    Stim's time coordinate 0 is the first round and its last is the
+    data readout, so the bulk rows are the times between.
+    """
+    coordinates = circuit.get_detector_coordinates()
+    column_by_position = {}
+    for column, position in enumerate(positions):
+        column_by_position[position] = column
+    times = [coordinates[detector][2] for detector in coordinates]
+    readout_time = int(max(times))
+    shape = (readout_time - 1, len(positions))
+    rows = numpy.zeros(shape, dtype=int)
+    for detector, coordinate in coordinates.items():
+        time = int(coordinate[2])
+        if 1 <= time < readout_time:
+            position = (coordinate[0], coordinate[1])
+            column = column_by_position[position]
+            rows[time - 1, column] = sampled[detector]
+    return rows
+
+
+def bank_inputs(detector):
+    """The bank's positions, pairs and floored usual rates."""
+    calibration = detector.charts_by_operation[1].calibration
+    bank = calibration.bank
+    positions = calibration.layout.positions
+    pair_rows = bank.pair_incidence
+    pairs = []
+    for row in pair_rows:
+        checks = numpy.flatnonzero(row)
+        pairs.append(tuple(checks))
+    return positions, pairs, bank.usual_rates
+
+
+def flagged_event_count_detector(raise_strong_priors):
+    """Every detector loud from round 12 to 17: the whole patch in burst."""
+    settings = event_count.EventCountBurstDetector.Settings(
+        raise_strong_priors=raise_strong_priors
+    )
+    detector = event_count_detector(settings)
+    quiet_before = quiet_rounds(11)
+    loud = [BULK_ROUND_LOUD] * 6
+    rounds = [*quiet_before, *loud]
+    feed(detector, rounds)
+    return detector
+
+
+def flagged_cusum_detector(raise_strong_priors):
+    """Every check loud from round 12 to 17: the whole patch in burst."""
+    settings = CUSUM.Settings(raise_strong_priors=raise_strong_priors)
+    detector = cusum_detector(settings)
+    quiet_before = quiet_rounds(11)
+    loud = [BULK_ROUND_LOUD] * 6
+    rounds = [*quiet_before, *loud]
+    feed(detector, rounds)
+    return detector

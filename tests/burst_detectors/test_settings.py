@@ -1,4 +1,8 @@
-"""The burst_detector section and the rows of BURST_DETECTORS."""
+"""The burst_detector section and the rows of BURST_DETECTORS.
+
+No paper applies: the refusals are the yaml boundary's own sentences,
+and every row fires the BurstDetector port's round_flagged source.
+"""
 
 import pytest
 

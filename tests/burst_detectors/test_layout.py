@@ -1,4 +1,9 @@
-"""Where an operation's checks sit, and the scale on their priors."""
+"""Where an operation's checks sit, and the scale on their priors.
+
+The scale solves the odd-number marginal of Tan et al. (2406.18897
+lines 956-960) for the measured rate, on a Stim circuit whose Z checks
+see no fault.
+"""
 
 import numpy
 import pytest
@@ -38,6 +43,25 @@ def _dephasing_circuit(probability):
     return circuit
 
 
+def _bulk_window(circuit):
+    """Rounds 2 to 30 of the 30-round circuit as one window, and its model."""
+    window = window_records.Window(
+        operation_id=1,
+        window_index=0,
+        commit_lo=2,
+        commit_hi=30,
+        buffer_hi=30,
+        round_count=29,
+    )
+    slicer = window_slicer.WindowSlicer(
+        circuit,
+        round_count=30,
+        fault_model_requirement=fault_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
+    model = slicer.slice_window(2, 2, 30, 30, is_last=True)
+    return window, model
+
+
 def test_burst_priors_over_noiseless_checks_scale_the_noisy_ones():
     """The whole patch under a 0.1 dephasing burst, half its checks silent.
 
@@ -60,20 +84,7 @@ def test_burst_priors_over_noiseless_checks_scale_the_noisy_ones():
     shots = sampler.sample(1)
     rounds = burst_rounds.rounds_of_events(usual, 30, shots[0])
     burst_rounds.feed(detector, rounds)
-    window = window_records.Window(
-        operation_id=1,
-        window_index=0,
-        commit_lo=2,
-        commit_hi=30,
-        buffer_hi=30,
-        round_count=29,
-    )
-    slicer = window_slicer.WindowSlicer(
-        usual,
-        round_count=30,
-        fault_model_requirement=fault_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED,
-    )
-    model = slicer.slice_window(2, 2, 30, 30, is_last=True)
+    window, model = _bulk_window(usual)
 
     raised = detector.with_burst_priors(window, model)
     faults = model.require_faults(GRAPHLIKE)

@@ -796,19 +796,26 @@ def _add_load_columns(row: dict, totals) -> None:
 def strong_service_bound_us(
     totals, distance: int, round_period_microseconds: float
 ) -> float:
-    """Toshio's Theorem 1 bound on the strong decode time, per point.
+    """Toshio's Theorem 1 bound on one strong decode's time, per point.
 
-    tau_strong <= (1 / gamma_switch)(d / r_strong) tau_gen (2510.25222
-    lines 1270-1300), with gamma_switch the escalated share of the
-    point's windows and r_strong the mean rounds a strong decode read,
-    so the bound is tau_gen d windows / strong rounds; infinite when
-    nothing escalated. It is read beside strong_service_mean_us.
+    Theorem 1 bounds the strong decoder's time per round (2510.25222
+    line 1794), tau_strong <= (1 / gamma_switch)(d / r_strong) tau_gen
+    (eq. (6), lines 1206-1214), with gamma_switch per d rounds (line
+    1788). A decode reads r_strong rounds, so one decode's time is
+    bounded by d tau_gen / gamma_switch. A window escalates with
+    probability gamma_switch r_com / d (lines 1254-1255), the point's
+    escalated windows over its windows, so the bound is tau_gen r_com
+    windows / escalated windows, the same unit as
+    strong_service_mean_us beside it; infinite when nothing escalated.
+    r_com is d, the commit size every window scheme defaults to.
     """
-    strong_rounds = totals.sums["strong_decoded_rounds"]
-    if strong_rounds == 0:
+    escalated_windows = totals.sums["escalated_windows"]
+    if escalated_windows == 0:
         return math.inf
     windows = totals.sums["windows"]
-    return round_period_microseconds * distance * windows / strong_rounds
+    commit_rounds = distance
+    committed_microseconds = round_period_microseconds * commit_rounds
+    return committed_microseconds * windows / escalated_windows
 
 
 def _shot_totals(row: dict) -> fold.RowTotals:

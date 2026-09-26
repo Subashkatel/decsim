@@ -520,17 +520,18 @@ def test_skorics_process_count_is_above_one_when_a_decode_outlasts_the_layers(
     assert measurement.parallel_processes_needed == expected
 
 
-def test_toshios_bound_is_the_round_time_d_windows_over_the_strong_rounds(
+def test_toshios_per_decode_bound_is_commit_time_over_escalated_share(
     tmp_path,
 ):
-    """Theorem 1 read off a point where every window escalated.
+    """Theorem 1 per decode, read off a point where every window escalated.
 
     Ten windows escalated and their strong decodes read 57 rounds in
-    all, so gamma_switch is 1 and r_strong is 5.7, and the bound
-    (1 / gamma)(d / r_strong) tau_gen is 3 / 5.7 microseconds
-    (2510.25222 lines 1270-1300). The strong service it bounds is the
-    10.0 us card plus its fetch and release, which is above it, as a
-    card ten times the round time must be.
+    all. Eq. (6) bounds the time per round by (1 / gamma)(d / r_strong)
+    tau_gen = 3 / 5.7 us (2510.25222 lines 1206-1214), so one decode of
+    r_strong = 5.7 rounds is bounded by 3 us: tau_gen r_com windows /
+    escalated windows with r_com = d = 3. The strong service it bounds
+    is the 10.0 us card plus its fetch and release, above it, as a card
+    ten times the round time must be.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
     record = report.record_of([measurement])
@@ -539,7 +540,7 @@ def test_toshios_bound_is_the_round_time_d_windows_over_the_strong_rounds(
     assert measurement.escalated_windows == 10
     assert measurement.strong_decoded_rounds == 57
     assert measurement.strong_service_mean_us == 10.0628
-    assert rows[0]["strong_service_bound_us"] == 3 * 10 / 57
+    assert rows[0]["strong_service_bound_us"] == 3.0
     assert rows[0]["escalated_windows"] == 10
 
 

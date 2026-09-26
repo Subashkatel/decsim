@@ -160,8 +160,19 @@ class DataMovement:
         self._add(self.copies, path, bits, rounds, memory_class)
 
     def transfer_delivered(self, record) -> None:
-        """One move landed on its link."""
-        bits = record.transfer.payload_bits
+        """One move landed on its link, its header with its payload.
+
+        The wire serializes the path's framing beside the payload, and the
+        link ledger charges both (ns-3's point-to-point device adds its
+        header in Send and times the whole packet, ns-3
+        src/point-to-point/model/point-to-point-net-device.cc lines 528
+        and 243), so a move counts the same bits: every header, and the
+        payload when its size is known.
+        """
+        transfer = record.transfer
+        bits = transfer.header_bits
+        if transfer.payload_bits is not None:
+            bits += transfer.payload_bits
         rounds = _attributed_rounds(record.attribution)
         path = record.path.value
         memory_class = memory_class_of_link_path(path)

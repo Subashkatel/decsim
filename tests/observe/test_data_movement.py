@@ -13,6 +13,7 @@ rather than guessed: the grouped rows still sum to the run's total.
 """
 
 import decsim.observe.data_movement as data_movement
+import decsim.records.transfers as transfer_records
 
 
 def test_a_named_structure_takes_the_class_its_row_gives_it():
@@ -137,6 +138,25 @@ def test_handing_a_live_reference_on_copies_nothing():
     assert counted["copies"] == 0
 
 
+def test_a_move_counts_the_header_and_known_payload_bits_the_ledger_charges():
+    """The link ledger's known payload plus header bits, per move.
+
+    ns-3's device adds the header before it times the packet
+    (src/point-to-point/model/point-to-point-net-device.cc lines 528 and
+    243); a transfer of unknown size still carries its header.
+    """
+    movement = data_movement.DataMovement()
+    framed = _Delivered(payload_bits=44, header_bits=16)
+    unknown_size = _Delivered(payload_bits=None, header_bits=16)
+
+    movement.transfer_delivered(framed)
+    movement.transfer_delivered(unknown_size)
+    counted = movement.json_value()
+
+    assert counted["moves"] == 2
+    assert counted["move_bits"] == 44 + 16 + 16
+
+
 def test_the_same_round_emitted_twice_is_one_round():
     movement = data_movement.DataMovement()
 
@@ -167,3 +187,27 @@ class _JobKey:
 
     def __init__(self, round_count: int) -> None:
         self.decoder_input = _DecoderInput(round_count)
+
+
+class _Transfer:
+    """The two sizes a move reads off a transfer."""
+
+    def __init__(self, payload_bits, header_bits: int) -> None:
+        self.payload_bits = payload_bits
+        self.header_bits = header_bits
+
+
+class _Attribution:
+    """A move that carried one round."""
+
+    first_round = 1
+    last_round = 1
+
+
+class _Delivered:
+    """The three fields a move reads off a delivered transfer record."""
+
+    def __init__(self, payload_bits, header_bits: int) -> None:
+        self.transfer = _Transfer(payload_bits, header_bits)
+        self.attribution = _Attribution()
+        self.path = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER

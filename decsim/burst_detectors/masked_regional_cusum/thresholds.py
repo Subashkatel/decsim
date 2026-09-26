@@ -30,6 +30,12 @@ def bank_thresholds(
     share of blocks where any group reaches its level is at most the
     target. A target the blocks hold fewer than _MEASURED_ALARMS alarms
     at keeps the bank-to-group ratio found where they hold that many.
+
+    The sources are silent on that last step; it is decsim's own rule.
+    A bank share below a few alarms cannot be counted off the blocks,
+    and the bank's share is always between one group's share and the
+    groups' count times it (the union bound), so the ratio measured
+    where it can be counted is carried down to the target.
     """
     block_count, group_count = maxima.shape
     tails = []

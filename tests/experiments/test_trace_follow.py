@@ -12,6 +12,7 @@ import pytest
 import decsim.experiments.trace_file as trace_file
 import decsim.experiments.trace_follow as trace_follow
 import decsim.machine as machine_module
+import tests.escalation.declared_fabric as declared_fabric
 import tests.observe.gate_point as gate_point
 
 
@@ -272,6 +273,30 @@ def test_a_key_that_is_not_an_operation_and_an_index_is_refused():
         trace_follow.main(["follow", "somewhere.json", "--round", "seven"])
 
     assert "is not a round key" in str(refusal.value)
+
+
+def test_a_round_is_followed_through_a_strong_window_hold(tmp_path):
+    """The hold names its round count apart from the rounds it reads.
+
+    Weak-primary switching with both tiers at once holds window 0's
+    strong job until its context lands, and round 1 still reaches the
+    strong unit's memory at 24 us on the declared fabric.
+    """
+    trace_path = tmp_path / "held.trace.json"
+    machine = declared_fabric.switching_machine(
+        rounds=9,
+        escalated_windows=set(),
+        run_both_at_once=True,
+        trace_path=trace_path,
+    )
+    machine.run()
+    machine.observation.trace_writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+
+    followed = trace_follow.follow(document, "round", "1:1")
+
+    landed = _row_of(followed, "Decoder unit strong#0", "memory copy")
+    assert landed.tick == 24_000_000
 
 
 def test_trace_does_only_what_it_says_it_does():

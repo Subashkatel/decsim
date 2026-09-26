@@ -434,14 +434,14 @@ class TraceWriter:
         self._instant("Window planner", name, "window", args)
 
     def strong_window_held(
-        self, request_key, window_key, waits_for: str, rounds: int
+        self, request_key, window_key, waits_for: str, round_count: int
     ) -> None:
         """A strong window's job waits for the condition its row declared."""
         args = {
             "window": window_text(window_key),
             "request": request_text(request_key),
             "waits_for": waits_for,
-            "rounds": rounds,
+            "round_count": round_count,
         }
         name = f"W{window_key[1]} strong window held"
         self._begin_residence(

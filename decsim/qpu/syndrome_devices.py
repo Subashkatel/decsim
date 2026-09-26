@@ -497,7 +497,8 @@ def _reads_the_data_out(
     if global_round != last_round:
         return False
     is_first_half = operation.syndrome_fragment_index == 0
-    has_two_halves = operation.syndrome_fragment_count == 2 * payload_count
+    split_fragment_count = 2 * payload_count
+    has_two_halves = operation.syndrome_fragment_count == split_fragment_count
     return not (is_first_half and has_two_halves)
 
 

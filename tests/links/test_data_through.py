@@ -403,7 +403,8 @@ def bounded_strong_hops_run() -> dict:
     13 bits per us.
     """
     distance = 5
-    syndrome_bits_per_round = distance * distance - 1
+    data_qubit_count = distance * distance
+    syndrome_bits_per_round = data_qubit_count - 1
     bounded = link_profiles.bandwidth_limited_profile(
         syndrome_bits_per_round=syndrome_bits_per_round,
         round_microseconds=1.0,

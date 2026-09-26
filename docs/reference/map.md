@@ -323,6 +323,7 @@ docstring.
 - `decsim/experiments/__init__.py`: The experiments layer: the yaml experiment, the sweep, the rows and figures.
 - `decsim/experiments/collect_command.py`: `decsim collect`: every shot of every sweep point of one yaml.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
+- `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
 - `decsim/experiments/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.

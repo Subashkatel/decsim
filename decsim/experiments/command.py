@@ -157,17 +157,9 @@ def _show(argv: list) -> None:
 
 def _diff(argv: list) -> None:
     """How two run folders differ: settings, inputs, then results."""
-    import argparse
+    import decsim.experiments.diff_command as diff_command
 
-    import decsim.experiments.report as report
-
-    parser = argparse.ArgumentParser(prog="decsim diff")
-    parser.add_argument("first", help="the first run folder")
-    parser.add_argument("second", help="the run folder to compare it with")
-    parsed = parser.parse_args(argv)
-    lines = report.diff(parsed.first, parsed.second)
-    text = "\n".join(lines)
-    print(text)
+    diff_command.main(argv)
 
 
 def _plot(argv: list) -> None:

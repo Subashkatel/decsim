@@ -21,7 +21,8 @@ the verdict declares it as a port and a port carries the class it names.
 
 import dataclasses
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.config as config
 import decsim.engine as engine_module
@@ -320,7 +321,7 @@ def _with_the_crossing_commit(
     kept_flips = crossing.logical_observables
     prediction = tuple(
         strong_flip ^ kept_flip
-        for strong_flip, kept_flip in zip(strong_flips, kept_flips)
+        for strong_flip, kept_flip in zip(strong_flips, kept_flips, strict=True)
     )
     return dataclasses.replace(result, logical_observables=prediction)
 

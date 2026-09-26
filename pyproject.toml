@@ -7,7 +7,7 @@ name = "decsim"
 version = "0.1.0"
 description = "QEC control/decoding simulator package scaffold"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
@@ -16,24 +16,32 @@ decsim = "decsim.experiments.command:main"
 [project.optional-dependencies]
 stim = ["stim"]
 pymatching = ["pymatching"]
-run = ["stim", "pymatching", "numpy", "scipy", "matplotlib"]
+# The yaml layer reads PyYAML, and the decoder table imports ldpc for its
+# BP-OSD and belief matching rows.
+run = ["stim", "pymatching", "numpy", "scipy", "matplotlib", "pyyaml", "ldpc"]
 deltakit = [
     "stim",
-    "deltakit-explorer==0.9.2; python_version >= '3.10'",
-    "deltakit-circuit==0.9.1; python_version >= '3.10'",
-    "deltakit-core==0.9.1; python_version >= '3.10'",
-    "deltakit-decode==0.9.1; python_version >= '3.10'",
-    "deltakit-stim==0.2.5; python_version >= '3.10'",
+    "deltakit-explorer==0.9.2",
+    "deltakit-circuit==0.9.1",
+    "deltakit-core==0.9.1",
+    "deltakit-decode==0.9.1",
+    "deltakit-stim==0.2.5",
 ]
 deltakit-compile = [
     "stim",
-    "deltakit-explorer==0.9.2; python_version >= '3.10'",
-    "deltakit-circuit==0.9.1; python_version >= '3.10'",
-    "deltakit-core==0.9.1; python_version >= '3.10'",
-    "deltakit-decode==0.9.1; python_version >= '3.10'",
-    "deltakit-stim==0.2.5; python_version >= '3.10'",
-    "deltakit-compile==0.1.0; python_version >= '3.10'",
+    "deltakit-explorer==0.9.2",
+    "deltakit-circuit==0.9.1",
+    "deltakit-core==0.9.1",
+    "deltakit-decode==0.9.1",
+    "deltakit-stim==0.2.5",
+    "deltakit-compile==0.1.0",
 ]
+# The suite and the referees it checks decsim against (sinter's decoders,
+# beliefmatching, qLDPC's sliding windows, Ciw's blocking queue), at the
+# versions it passes on; the tests cite their source lines at these.
+test = ["pytest==9.1.1", "sinter==1.16.0", "beliefmatching==0.2.0", "qldpc==0.3.3", "ciw==3.2.7"]
+# The style gate tools/check.sh runs, at the ruff whose rules STYLE.md reads.
+dev = ["ruff==0.16.5"]
 bb-decoders = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]
 
 # Flat layout: the decsim/ package sits at the repo root. Discover it and every
@@ -58,7 +66,7 @@ norecursedirs = [".*", "*.egg", "_darcs", "CVS", "dist", "node_modules", "venv",
 # separately by tools/check_one_action.py.
 [tool.ruff]
 line-length = 80
-target-version = "py39"
+target-version = "py310"
 extend-exclude = [
     ".pydeps",
     ".venv",
@@ -76,7 +84,7 @@ ignore = [
   "D107",  # __init__ is described by the class docstring
   "D203",  # no blank line before a class docstring
   "D213",  # summary on the first line
-  "UP007", # Optional[X] stays readable and runs on 3.9
+  "UP007", # Optional[X] stays, the form the package is written in
   "UP045", # same
 ]
 

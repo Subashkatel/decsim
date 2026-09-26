@@ -13,18 +13,15 @@ permits final readout. Neither adds a yaml workload row.
 From the checkout root, with Python 3.10 or newer:
 
 ```bash
-python3.11 -m venv .venv-deltakit
+python -m venv .venv-deltakit
 .venv-deltakit/bin/python -m pip install -e '.[run,deltakit]'
-.venv-deltakit/bin/python -m pip install 'ldpc==2.4.1' 'beliefmatching==0.2.0'
 ```
 
-The second install is required: the machine imports the `ldpc` and
-`beliefmatching` decoder backends at build time, and neither extra pins
-them. The examples do not select them. Keep this environment separate
-from another checkout's editable installation.
+Keep this environment separate from another checkout's editable
+installation.
 The Deltakit extra pins component versions in `pyproject.toml`; it does
-not require the umbrella SDK or a cloud account. Core Python 3.9 support
-is unchanged; the pinned SDK supports Python >=3.10,<3.15. For the compiler
+not require the umbrella SDK or a cloud account. The pinned SDK supports
+Python >=3.10,<3.15, the same floor as decsim. For the compiler
 entrypoint below, install its separate extra in the same isolated
 environment:
 

@@ -24,7 +24,6 @@ import tools.deltakit_example as example
 
 COMPILER_SPECIFICATION = importlib.util.find_spec("deltakit_compile")
 HAS_COMPILER = COMPILER_SPECIFICATION is not None
-REQUIRES_NEWER_PYTHON = sys.version_info < (3, 10)
 
 
 @pytest.fixture
@@ -45,7 +44,6 @@ def test_importing_the_provider_keeps_compiler_dependencies_optional() -> None:
 
 
 @pytest.mark.skipif(HAS_COMPILER, reason="requires a dependency-absent job")
-@pytest.mark.skipif(REQUIRES_NEWER_PYTHON, reason="Python is checked first")
 def test_selecting_an_absent_compiler_names_its_extra() -> None:
     with pytest.raises(
         ValueError, match=r"optional decsim\[deltakit-compile\] extra"

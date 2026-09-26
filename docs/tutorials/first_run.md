@@ -7,7 +7,7 @@ shot of the reference configuration, opened the folder it wrote, read a
 figure and followed one round of syndrome data through the machine.
 
 You do not need to know anything about decsim, and the words you need
-are defined as they appear. You do need a terminal and a Python 3.9 or
+are defined as they appear. You do need a terminal and a Python 3.10 or
 newer interpreter.
 
 ## What decsim is, in one paragraph
@@ -30,25 +30,27 @@ answer wrong.
 From the checkout:
 
 ```bash
-python -m pip install -e ".[run]"
+python -m pip install -e ".[run]" -c constraints.txt
 ```
 
 The `run` extra brings Stim (which simulates the quantum circuit and
-produces the syndrome), PyMatching (the default decoder), numpy, scipy
-and matplotlib. Without it decsim imports but cannot run a shot on real
-syndrome data.
+produces the syndrome), PyMatching (the default decoder), ldpc (the
+BP-OSD and belief matching decoders), PyYAML (which reads the config),
+numpy, scipy and matplotlib. Without it decsim imports but cannot run a
+shot.
 
 ## Step 2. Run one shot
 
 ```bash
-decsim run configs/reference.yaml --seed 0 --trace
+decsim run configs/reference.yaml --seed 0 --trace --out results/first_shot
 ```
 
 A **shot** is one complete run of the workload from start to finish,
 with one random seed. `configs/reference.yaml` is the reference
 configuration: it carries every key the yaml layer reads, and its sweep
 is deliberately tiny so that it runs in seconds. `--trace` asks for a
-record of the data path, which step 6 reads.
+record of the data path, which step 6 reads, and `--out` names the
+folder it goes in.
 
 The output:
 
@@ -57,9 +59,9 @@ config: reference
 point: p0.001 d3 round period 1 us seed 0
 terminal status: complete
 execution done: 15000000 ticks
-fully done: 60969000 ticks
+fully done: 37356000 ticks
 operation 1: logical_observables, observables (0,), truth (0,)
-run dir: results/2026-09-10T02-29-32Z-reference
+run dir: results/first_shot
 ```
 
 Line by line:
@@ -74,7 +76,7 @@ Line by line:
   unit of time, and one microsecond is a million ticks
   (`decsim/config.py`). So the QPU finished its quantum work after 15
   microseconds: 15 rounds at one microsecond each.
-- `fully done: 60969000 ticks`. The classical loop finished 61
+- `fully done: 37356000 ticks`. The classical loop finished 37
   microseconds in. The gap between the two numbers is the point of the
   whole simulator: the decoder was still working long after the QPU
   stopped.
@@ -98,7 +100,7 @@ how to run a timing study that does not depend on your hardware.
 results, use `collect`, which runs every point of the yaml's sweep:
 
 ```bash
-decsim collect configs/reference.yaml
+decsim collect configs/reference.yaml --out results/reference
 ```
 
 It first prints what the yaml resolved to, one line per component, then
@@ -110,17 +112,17 @@ distance: 3
 physical error rate: 0.001
 algorithm: pymatching
 round period: 1 us
-load (service per window / window inter-arrival): 7.31
+load (service per window / window inter-arrival): 2.39
 logical failures: 0 of 2 shots
 mismatches vs direct PyMatching: 0
-throughput: 0.267 rounds per us
-queue wait, mean: 7.150 us
-service time per window, mean: 21.922 us
-ready to frame commit: median 32.910 us, p99 42.246 us
+throughput: 0.449 rounds per us
+queue wait, mean: 2.603 us
+service time per window, mean: 7.158 us
+ready to frame commit: median 15.772 us, p99 22.726 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/2026-09-10T02-29-33Z-reference/sweep.csv
+every column: results/reference/sweep.csv
 ```
 
 Two new words:
@@ -137,7 +139,7 @@ Two new words:
 
 `load` is the ratio of the time a window spends being decoded to the
 time between windows arriving. Above 1 the decoder cannot keep up, and
-work queues. It is far above 1 here because PyMatching in Python on a
+work queues. It is above 1 here because PyMatching in Python on a
 small window is slow compared to one microsecond a round; the figure
 itself is this host's, like every tick in the block.
 
@@ -149,7 +151,7 @@ references and moves, because the key `data_movement` in the
 ## Step 4. Open the run folder
 
 ```bash
-ls results/2026-09-10T02-29-33Z-reference
+ls results/reference
 ```
 
 ```
@@ -166,9 +168,9 @@ trace
 window_samples.csv
 ```
 
-Your folder has a different name: it is stamped with the UTC time the
-run started, so no two collects ever share one. Substitute yours in the
-commands below.
+`--out` names the folder, and running the command again writes over
+it. Without `--out`, `collect` writes a new folder named with the UTC
+time the run started, so no two collects share one.
 
 The folder is written under `results/`, which is output and is not
 tracked by git. `config/` holds a verbatim copy of the yaml files that
@@ -182,7 +184,7 @@ the csv files the facts.
 columns. The first few:
 
 ```bash
-cut -d, -f1-10 results/2026-09-10T02-29-33Z-reference/sweep.csv
+cut -d, -f1-10 results/reference/sweep.csv
 ```
 
 ```
@@ -200,11 +202,11 @@ shots to make it narrow.
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/2026-09-10T02-29-33Z-reference --figure stage_breakdown
+decsim plot results/reference --figure stage_breakdown
 ```
 
 ```
-results/2026-09-10T02-29-33Z-reference/stage_breakdown.png
+results/reference/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
@@ -228,7 +230,7 @@ For one round, decsim prints the path itself:
 
 ```bash
 decsim trace follow \
-  results/2026-09-10T02-29-33Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
   --round 1:1
 ```
 
@@ -248,10 +250,10 @@ tick (us)  where                        what                                    
 6.012      Window planner               W0 ready
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
-6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done         16.926    copy       44
+6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done         11.548    copy       44
 
 copies 4, references 1 job and 1 hold, moves 3
-longest residence: 16.926 us in Decoder unit default#0 (residence, unbounded, data ready 6.016, freed at decode done)
+longest residence: 11.548 us in Decoder unit default#0 (residence, unbounded, data ready 6.016, freed at decode done)
 longest queue wait: none
 ```
 
@@ -267,7 +269,7 @@ only half the checks have a value to compare against
 round moved into the weak syndrome buffer, the store the decoder reads from, and sat
 there 5 microseconds waiting for the rest of its window. At 6.012 microseconds window 0 had all six of its rounds, so
 all 44 bits moved together into the decoder unit's memory, and the
-decode held that unit for the wall clock PyMatching took, 16.9
+decode held that unit for the wall clock PyMatching took, 11.5
 microseconds on this host.
 
 The `transfer` column is the vocabulary decsim uses for data movement: a
@@ -283,7 +285,7 @@ The same command follows a window instead of a round:
 
 ```bash
 decsim trace follow \
-  results/2026-09-10T02-29-33Z-reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
   --window 1:0
 ```
 

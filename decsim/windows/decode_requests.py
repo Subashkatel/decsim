@@ -18,7 +18,8 @@ input has no submission to make here.
 
 import dataclasses
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.config as config
 import decsim.ports as ports

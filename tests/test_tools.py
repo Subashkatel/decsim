@@ -12,13 +12,18 @@ import ast
 import importlib.util
 import os
 import pathlib
+import re
 import subprocess
+
+import pytest
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 TOOLS = PACKAGE_ROOT / "tools"
 SLURM_RUNNER = PACKAGE_ROOT / "slurm" / "slurm_run.sh"
+EXPERIMENT_RUNNER = PACKAGE_ROOT / "slurm" / "experiment_run.sh"
+CHECK_SCRIPT = TOOLS / "check.sh"
 
 
 def _tool(name: str):
@@ -222,6 +227,39 @@ def test_the_slurm_runner_falls_back_to_the_arrays_own_count(tmp_path):
     assert arguments[arguments.index("--shard") + 1] == "3/200"
 
 
+def test_the_experiment_runner_runs_the_python_of_the_jobs_environment(
+    tmp_path,
+):
+    """With DECSIM_PYTHON unset, the task runs the python on PATH.
+
+    The shard is the offset plus the task id, of the experiment's count.
+    """
+    _stub, recorded = _stub_python(tmp_path)
+    environment = dict(os.environ)
+    environment.pop("DECSIM_PYTHON", None)
+    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
+    environment["SLURM_ARRAY_TASK_ID"] = "3"
+    run_dir = tmp_path / "run"
+    environment["RUN"] = str(run_dir)
+    environment["SHARDS"] = "500"
+    environment["OFFSET"] = "150"
+    path = environment.get("PATH", "")
+    environment["PATH"] = f"{tmp_path}:{path}"
+
+    completed = subprocess.run(
+        ["bash", str(EXPERIMENT_RUNNER), "configs/weak_ler.yaml"],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    recorded_text = recorded.read_text()
+    arguments = recorded_text.splitlines()
+    assert completed.returncode == 0, completed.stderr
+    assert arguments[:3] == ["-m", "decsim", "collect"]
+    assert arguments[arguments.index("--shard") + 1] == "153/500"
+
+
 def _stub_git(tmp_path, status):
     """A git that answers about the checkout without one existing.
 
@@ -248,15 +286,19 @@ def _stub_git(tmp_path, status):
 
 
 def _refused_run(tmp_path, status):
-    """The runner started against a tree, with no ALLOW_DIRTY to excuse it."""
+    """The runner started against a tree, with no ALLOW_DIRTY to excuse it.
+
+    No DECSIM_PYTHON is set, so the runner takes the python on PATH,
+    which is the stub.
+    """
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    stub, _recorded = _stub_python(tmp_path, checkout)
+    _stub_python(tmp_path, checkout)
     _stub_git(tmp_path, status)
     environment = dict(os.environ)
     environment.pop("ALLOW_DIRTY", None)
+    environment.pop("DECSIM_PYTHON", None)
     environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
-    environment["DECSIM_PYTHON"] = str(stub)
     path = environment.get("PATH", "")
     environment["PATH"] = f"{tmp_path}:{path}"
     return subprocess.run(
@@ -296,8 +338,125 @@ def test_the_slurm_runner_refuses_a_tree_git_cannot_read(tmp_path):
 
 
 def test_the_slurm_runner_starts_from_a_clean_tree(tmp_path):
-    """A tree git vouches for runs, and the refusals read only the tree."""
+    """A tree git vouches for runs, on the python of the job's environment.
+
+    The refusals read only the tree, and with DECSIM_PYTHON unset the
+    collect runs on the python on PATH, as a fresh clone's job does.
+    """
     completed = _refused_run(tmp_path, "clean")
 
+    recorded = tmp_path / "argv.txt"
+    recorded_text = recorded.read_text()
     assert completed.returncode == 0, completed.stderr
     assert "dirty: 0" in completed.stdout
+    assert "collect" in recorded_text
+
+
+def test_the_check_script_runs_the_active_environments_python(tmp_path):
+    """With DECSIM_PYTHON unset, check.sh runs the python on PATH.
+
+    A fresh clone has no .venv of its own, so a default naming one
+    refused to start in every environment but the maintainer's.
+    """
+    _stub, recorded = _stub_python(tmp_path)
+    environment = dict(os.environ)
+    environment.pop("DECSIM_PYTHON", None)
+    environment.pop("DECSIM_PYDEPS", None)
+    path = environment.get("PATH", "")
+    environment["PATH"] = f"{tmp_path}:{path}"
+
+    completed = subprocess.run(
+        ["bash", str(CHECK_SCRIPT), "tools/check.sh"],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    recorded_text = recorded.read_text()
+    assert completed.returncode == 0, completed.stderr
+    assert "ruff" in recorded_text
+
+
+def _page_and_its_own_output(check, page: str):
+    """A page, and outputs that print exactly what its blocks show."""
+    path = PACKAGE_ROOT / page
+    text = path.read_text()
+    outputs = []
+    for block in check.fenced_blocks(text):
+        printed = check.Printed(command="decsim", lines=tuple(block.lines))
+        outputs.append(printed)
+    return text, outputs
+
+
+def test_the_tutorial_check_runs_the_pages_own_commands():
+    """decsim, cut and ls lines, a continued line joined, nothing else."""
+    check = _tool("check_tutorial_runs")
+    text = (
+        "```bash\n"
+        'python -m pip install -e ".[run]"\n'
+        "decsim trace follow \\\n"
+        "  results/shot/trace/one.trace.json \\\n"
+        "  --round 1:1\n"
+        "cut -d, -f1 results/shot/sweep.csv\n"
+        "```\n"
+    )
+
+    commands = check.page_commands(text)
+
+    assert len(commands) == 2
+    assert commands[0].split() == [
+        "decsim",
+        "trace",
+        "follow",
+        "results/shot/trace/one.trace.json",
+        "--round",
+        "1:1",
+    ]
+    assert commands[1] == "cut -d, -f1 results/shot/sweep.csv"
+
+
+@pytest.mark.parametrize(
+    "shown_line, moved_line",
+    [
+        (r"^(queue wait, mean: )[0-9.]+", r"\g<1>999.000"),
+        (r"^27\.224 ", "27.225 "),
+    ],
+    ids=["summary timing", "trace tick"],
+)
+def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
+    shown_line, moved_line
+):
+    """On two_tiers every tick is priced, so every line is held."""
+    check = _tool("check_tutorial_runs")
+    tutorial = check.TUTORIALS[2]
+    text, outputs = _page_and_its_own_output(check, tutorial.page)
+    moved = re.sub(shown_line, moved_line, text, count=1, flags=re.MULTILINE)
+
+    unmoved_differences = check.page_differences(tutorial, text, outputs)
+    moved_differences = check.page_differences(tutorial, moved, outputs)
+
+    assert tutorial.is_priced
+    assert moved != text
+    assert unmoved_differences == []
+    assert len(moved_differences) == 1
+
+
+def test_a_wall_clock_tutorial_holds_its_counts_and_not_its_timings():
+    """first_run's load is the host's; its failure count is the seed's."""
+    check = _tool("check_tutorial_runs")
+    tutorial = check.TUTORIALS[0]
+    text, outputs = _page_and_its_own_output(check, tutorial.page)
+    new_load = re.sub(
+        r"^(load .*: )[0-9.]+", r"\g<1>99.99", text, count=1, flags=re.MULTILINE
+    )
+    new_count = text.replace(
+        "logical failures: 0 of 2 shots", "logical failures: 1 of 2 shots"
+    )
+
+    load_differences = check.page_differences(tutorial, new_load, outputs)
+    count_differences = check.page_differences(tutorial, new_count, outputs)
+
+    assert not tutorial.is_priced
+    assert new_load != text
+    assert load_differences == []
+    assert len(count_differences) == 1

@@ -19,6 +19,7 @@ the controller, the stores, the windows and the frame produced.
 
 import dataclasses
 import functools
+import importlib.util
 import pathlib
 import re
 
@@ -2162,6 +2163,12 @@ CAMPAIGN_FIRST_SEED = 9
 CAMPAIGN_SEED_END = CAMPAIGN_FIRST_SEED + CAMPAIGN_SHOT_COUNT
 CAMPAIGN_SEEDS = range(CAMPAIGN_FIRST_SEED, CAMPAIGN_SEED_END)
 CAMPAIGN_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
+RELAY_BP_SPECIFICATION = importlib.util.find_spec("relay_bp")
+LACKS_RELAY_BP = RELAY_BP_SPECIFICATION is None
+# relay_bp is the bb-decoders extra, which a test install leaves out
+NEEDS_RELAY_BP = pytest.mark.skipif(
+    LACKS_RELAY_BP, reason="could not import 'relay_bp'"
+)
 SINGLE_TIER_FAMILIES = (
     "pymatching_weak",
     "pymatching_strong",
@@ -2170,17 +2177,17 @@ SINGLE_TIER_FAMILIES = (
     "bposd_weak",
     "bposd_strong",
     "belief_matching_strong",
-    "relay_bp_weak",
-    "relay_bp_strong",
+    pytest.param("relay_bp_weak", marks=NEEDS_RELAY_BP),
+    pytest.param("relay_bp_strong", marks=NEEDS_RELAY_BP),
 )
 SWITCHING_FAMILIES = (
     "pymatching_bposd_switching",
     "pymatching_belief_matching_switching",
-    "pymatching_relay_bp_switching",
+    pytest.param("pymatching_relay_bp_switching", marks=NEEDS_RELAY_BP),
     "union_find_bposd_switching",
     "union_find_belief_matching_switching",
     "union_find_pymatching_switching",
-    "union_find_relay_bp_switching",
+    pytest.param("union_find_relay_bp_switching", marks=NEEDS_RELAY_BP),
 )
 MATCHING_FAMILIES = ("pymatching_weak", "pymatching_strong")
 KEPT_WEAK_REQUEST = (

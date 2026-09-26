@@ -125,7 +125,11 @@ def _peak_rows_alive(monkeypatch, run_dirs, out_dir):
 
 
 def _running_float_sum(values) -> float:
-    """A plain running float sum, the thing an exact sum is not."""
+    """A plain running float sum, the thing an exact sum is not.
+
+    The builtin sum is not it from CPython 3.12 on, which sums floats
+    with Neumaier's compensation (What's New in Python 3.12, gh-100425).
+    """
     total = 0.0
     for value in values:
         total += float(value)
@@ -138,7 +142,7 @@ def test_an_exact_sum_equals_math_fsum_of_the_values_it_was_given():
     for value in CANCELLING:
         running.add(value)
     assert running.total() == math.fsum(CANCELLING)
-    assert sum(CANCELLING) != math.fsum(CANCELLING)
+    assert _running_float_sum(CANCELLING) != math.fsum(CANCELLING)
 
     generator = random.Random(2026)
     for _attempt in range(200):

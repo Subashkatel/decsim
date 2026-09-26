@@ -319,7 +319,7 @@ def _check_every_fault_is_graphlike(
     detector_sets: list, observable_sets: list
 ) -> None:
     """A graphlike catalog holds only faults a matching decoder can take."""
-    identities = zip(detector_sets, observable_sets)
+    identities = zip(detector_sets, observable_sets, strict=True)
     for fault_index, (detectors, observables) in enumerate(identities):
         fault_identity_validation.validate_graphlike_fault(
             detectors,
@@ -363,7 +363,9 @@ def _prepare_linked_fault_catalogs(
 
 def _column_by_identity(catalog: fault_model_contracts.FaultCatalog) -> dict:
     """Each (detectors, observables) identity's column in the catalog."""
-    identities = zip(catalog.detector_sets, catalog.observable_sets)
+    identities = zip(
+        catalog.detector_sets, catalog.observable_sets, strict=True
+    )
     return {identity: column for column, identity in enumerate(identities)}
 
 
@@ -425,15 +427,21 @@ def _check_same_physical_faults(
     """Stim's two models must agree on every physical fault and prior."""
     undecomposed = {}
     undecomposed_identities = zip(
-        undecomposed_catalog.detector_sets, undecomposed_catalog.observable_sets
+        undecomposed_catalog.detector_sets,
+        undecomposed_catalog.observable_sets,
+        strict=True,
     )
-    for key, prior in zip(undecomposed_identities, undecomposed_catalog.priors):
+    for key, prior in zip(
+        undecomposed_identities, undecomposed_catalog.priors, strict=True
+    ):
         undecomposed[key] = prior
     reconstructed: dict = {}
     identities = zip(
-        physical_catalog.detector_sets, physical_catalog.observable_sets
+        physical_catalog.detector_sets,
+        physical_catalog.observable_sets,
+        strict=True,
     )
-    for key, prior in zip(identities, physical_catalog.priors):
+    for key, prior in zip(identities, physical_catalog.priors, strict=True):
         current_probability = reconstructed.get(key, 0.0)
         reconstructed[key] = merge_probability(current_probability, prior)
     if set(reconstructed) != set(undecomposed):

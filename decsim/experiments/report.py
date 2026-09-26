@@ -1105,7 +1105,7 @@ def _refuse_folders_of_different_sweeps(
     """Folders that ran different experiments are not one sweep's shards."""
     first_config = recorded_configs[0]
     first_dir = run_dirs[0]
-    for run_dir, recorded in zip(run_dirs, recorded_configs):
+    for run_dir, recorded in zip(run_dirs, recorded_configs, strict=True):
         if recorded == first_config:
             continue
         raise refusal.RefusalError(

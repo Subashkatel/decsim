@@ -55,7 +55,7 @@ def closed_form(arrivals, bits, rate_bits_per_us, propagation_ticks):
     serializer_free = 0
     rate_text = str(rate_bits_per_us)
     rate = fractions.Fraction(rate_text)
-    for arrival, payload in zip(arrivals, bits):
+    for arrival, payload in zip(arrivals, bits, strict=True):
         start = max(arrival, serializer_free)
         payload_fraction = fractions.Fraction(payload)
         exact = payload_fraction * config.TICKS_PER_MICROSECOND / rate
@@ -78,7 +78,7 @@ def test_random_traces_match_the_point_to_point_closed_form_property():
         engine = decsim.engine.Engine()
         channel = bounded_channel(engine, rate, propagation)
         delivered = []
-        for arrival, payload in zip(arrivals, bits):
+        for arrival, payload in zip(arrivals, bits, strict=True):
             send_at(engine, channel, arrival, payload, 0, delivered)
         engine.run()
         deliveries = [transfer.delivery_ticks for transfer in delivered]

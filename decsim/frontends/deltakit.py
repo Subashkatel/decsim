@@ -9,7 +9,6 @@ import dataclasses
 import importlib.util
 import itertools
 import math
-import sys
 from typing import TYPE_CHECKING, Optional
 
 import stim
@@ -235,8 +234,6 @@ def check_probability(probability: float) -> None:
 
 
 def _require_explorer() -> None:
-    if sys.version_info < (3, 10):
-        raise ValueError("Deltakit memory requires Python 3.10 or newer")
     specification = importlib.util.find_spec("deltakit_explorer")
     if specification is None:
         raise ValueError(
@@ -616,7 +613,7 @@ def _bell_protection(
 
     left_data = sorted(left.data_qubits, key=_qubit_coordinates)
     right_data = sorted(right.data_qubits, key=_qubit_coordinates)
-    pairs = zip(left_data, right_data)
+    pairs = zip(left_data, right_data, strict=True)
     coupling = [gates.CX(control, target) for control, target in pairs]
     checks = left.stabilisers[0] + right.stabilisers[0]
     return codes.CSSStage(
@@ -726,7 +723,7 @@ def _bell_initial_detectors(
     """Bell preparation fixes matching X and Z check products across patches."""
     left_checks = sorted(left.stabilisers[0], key=_ancilla_coordinates)
     right_checks = sorted(right.stabilisers[0], key=_ancilla_coordinates)
-    pairs = zip(left_checks, right_checks)
+    pairs = zip(left_checks, right_checks, strict=True)
     ancillas = [
         (first.ancilla_qubit, second.ancilla_qubit) for first, second in pairs
     ]

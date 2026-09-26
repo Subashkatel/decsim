@@ -167,9 +167,8 @@ ordinary decoder. No cloud service or upstream source modification is used.
 
 The `deltakit` and `deltakit-compile` extras in `pyproject.toml` pin
 Explorer 0.9.2, circuit, core and decode 0.9.1, Deltakit-Stim 0.2.5 and
-compiler 0.1.0. Both extras keep core Python 3.9 support; the pinned SDK
-requires Python 3.10 through 3.14. Python 3.9 imports the core and runs direct
-Stim, then refuses optional provider selection by name.
+compiler 0.1.0. The pinned SDK requires Python 3.10 through 3.14, and
+decsim's own floor is Python 3.10.
 
 ## What changed in the tree
 

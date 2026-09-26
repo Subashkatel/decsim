@@ -291,8 +291,8 @@ The Google Python Style Guide applies wherever the rules above are
 silent. Import modules, not names: `import decsim.records.program as
 program_records`, then `program_records.Decision`; the exceptions are
 `typing`, `dataclasses`, `collections.abc` and `enum`. No module uses
-`from __future__ import annotations`; `Optional[X]` is written out
-because the package runs on Python 3.9.
+`from __future__ import annotations`; `Optional[X]` is written out, the
+form the whole package uses.
 
 `ruff` enforces the rest with the settings in `pyproject.toml`: 80
 columns, pycodestyle (E, W), pyflakes (F), pep8-naming (N), Google
@@ -302,20 +302,20 @@ it asks for inline conditionals and merged conditions, the opposite of
 rule 1. `ruff format` runs before `ruff check` and settles line breaks
 and trailing commas.
 
-Run, from the repo root, before every commit:
+The `dev` extra installs the ruff these rules are read with. Run, from
+the repo root, in that environment, before every commit:
 
-    PYTHONPATH=.pydeps .venv/bin/python -m ruff format decsim tests tools
-    PYTHONPATH=.pydeps .venv/bin/python -m ruff check decsim tests tools
-    .venv/bin/python tools/check_one_action.py decsim tests tools
+    python -m ruff format decsim tests tools
+    python -m ruff check decsim tests tools
+    python tools/check_one_action.py decsim tests tools
 
-`tools/check.sh` runs all three, on the whole tree when given no paths.
-The ruff binary lives at `.pydeps/bin/ruff`; if `-m ruff` reports
-RuffNotFound, copy it from the ruff wheel's `data/scripts/ruff` into
-that folder. A worktree has no `.venv`, so pass the main checkout's
-interpreter and dependency folder to the script:
+`tools/check.sh` runs all three, on the whole tree when given no paths,
+with the active environment's `python`. `DECSIM_PYTHON` names another
+interpreter, and `DECSIM_PYDEPS` a folder of packages to put first on
+its path:
 
-    DECSIM_PYTHON=/path/to/decsim/.venv/bin/python \
-    DECSIM_PYDEPS=/path/to/decsim/.pydeps tools/check.sh
+    DECSIM_PYTHON=/path/to/python DECSIM_PYDEPS=/path/to/packages \
+      tools/check.sh
 
 For anything you run by hand from a worktree, set `PYTHONPATH=.` and
 confirm `decsim.__file__` is the worktree before trusting any result.

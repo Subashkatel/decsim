@@ -27,7 +27,7 @@ host's, so yours will differ:
 
 ```
 distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
-3,pymatching,2,7.308208333333333,7.149500000000001,12.753125,32.91
+3,pymatching,2,2.387,2.6029999999999998,7.12875,15.772
 ```
 
 and the same point with the decoder priced at one microsecond by a

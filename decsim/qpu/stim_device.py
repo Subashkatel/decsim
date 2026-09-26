@@ -1136,7 +1136,7 @@ def _pairs_touching(targets: list, region: frozenset) -> list:
     kept = []
     firsts = targets[::2]
     seconds = targets[1::2]
-    for first, second in zip(firsts, seconds):
+    for first, second in zip(firsts, seconds, strict=True):
         if first.value in region or second.value in region:
             kept.extend((first, second))
     return kept

@@ -69,10 +69,10 @@ tick (us)  where                        what                                    
 6.012      Window planner               W0 ready
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
-6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done         16.926    copy       44
+6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done         11.548    copy       44
 
 copies 4, references 1 job and 1 hold, moves 3
-longest residence: 16.926 us in Decoder unit default#0 (residence, unbounded, data ready 6.016, freed at decode done)
+longest residence: 11.548 us in Decoder unit default#0 (residence, unbounded, data ready 6.016, freed at decode done)
 longest queue wait: none
 ```
 
@@ -100,19 +100,19 @@ tick (us)  where                        what                                    
 6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                     0.004     move      44
 6.016      Decoder unit default#0       unit default#0 memory copy                                              copy      44
 6.016      Decoder unit default#0       stage fetch                                                   0.024
-6.016      Decoder unit default#0       decode service                                                16.926
-6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done  16.926    copy      44
-6.040      Decoder unit default#0       stage algorithm                                               16.898
-22.938     Decoder unit default#0       stage release                                                 0.004
-22.942     Window planner               verdict
-22.942     decoder_to_decoder           move, with W0 rounds 1..6                                     0.004     move      8
-22.942     weak_decoder_to_frame        move, with W0 rounds 1..6                                     0.004     move      1
-22.946     Frame                        residence, unbounded, committed 22.950, freed at end of run   34.115    copy
-22.950     Window planner               W0 committed
-22.950     Frame                        1:0 committed
+6.016      Decoder unit default#0       decode service                                                11.548
+6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done  11.548    copy      44
+6.040      Decoder unit default#0       stage algorithm                                               11.520
+17.560     Decoder unit default#0       stage release                                                 0.004
+17.564     Window planner               verdict
+17.564     decoder_to_decoder           move, with W0 rounds 1..6                                     0.004     move      8
+17.564     weak_decoder_to_frame        move, with W0 rounds 1..6                                     0.004     move      1
+17.568     Frame                        residence, unbounded, committed 17.572, freed at end of run   20.172    copy
+17.572     Window planner               W0 committed
+17.572     Frame                        1:0 committed
 
 copies 1, references 1 job and 0 holds, moves 3
-longest residence: 34.115 us in Frame (residence, unbounded, committed 22.950, freed at end of run)
+longest residence: 20.172 us in Frame (residence, unbounded, committed 17.572, freed at end of run)
 longest queue wait: 0.000 us in Window planner (queued, dispatched to default#0)
 ```
 

@@ -6,6 +6,8 @@ decode a d=3 memory shot. Toshio arXiv 2510.25222: lightweight decoders
 decode constantly, a separate accurate decoder is invoked on demand.
 """
 
+import pytest
+
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
@@ -111,6 +113,7 @@ def test_a_measured_table_tier_is_held_by_the_measured_line(tmp_path):
     yaml is the one the unit prices by: a100, whole, the 360-detector
     region nearest a d = 5 window (decoders/measured_table).
     """
+    pytest.importorskip("relay_bp")
     strong_decoder = strong_unit("measured_table")
     strong_decoder["strong_decoder"]["device"] = "a100"
     card = {"escalation": {"kind": "strong_only"}}

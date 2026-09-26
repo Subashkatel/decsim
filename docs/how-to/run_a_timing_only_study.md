@@ -14,7 +14,7 @@ decode's core latency in microseconds, charged on the
 minimum-weight-perfect-matching path. `configs/priced_cards_example.yaml`
 is a worked one:
 
-```yaml
+```yaml configs/priced_cards_example.yaml
 # Priced cards: the decoder costs a stated number, not a measured one.
 extends: weak_decoder_baseline.yaml
 

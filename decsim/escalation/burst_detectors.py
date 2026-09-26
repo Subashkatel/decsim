@@ -540,7 +540,9 @@ class _OperationCounts:
         calibrated_rates = self.calibration.calibrated_rates
         rate_scales = _rate_scales(self.tracked_rates, calibrated_rates)
         thresholds = []
-        for law, rate_scale in zip(self.calibration.position_laws, rate_scales):
+        for law, rate_scale in zip(
+            self.calibration.position_laws, rate_scales, strict=True
+        ):
             threshold = law.threshold(false_alarms, rate_scale)
             thresholds.append(threshold)
         return numpy.asarray(thresholds)
@@ -826,7 +828,10 @@ def _drawn_tail(
     picked_rows = packed[picks]
     parity = numpy.bitwise_xor.reduce(picked_rows, axis=1)
     flipped_bits = numpy.unpackbits(parity, axis=1)
-    flipped_counts = flipped_bits.sum(axis=1)
+    # bincount converts its input to intp (numpy
+    # _core/src/multiarray/compiled_base.c, arr_bincount); a sum of uint8
+    # is uint64, which numpy 2.0 and 2.1 refuse to cast to intp.
+    flipped_counts = flipped_bits.sum(axis=1, dtype=numpy.intp)
     histogram = numpy.bincount(flipped_counts, minlength=tail_width)
     reversed_histogram = histogram[::-1]
     reversed_tails = numpy.cumsum(reversed_histogram)
@@ -930,7 +935,7 @@ def _mean_rate(flagged_rows: list, is_in_region) -> float:
 
 def _positions_where(positions: tuple, is_in_region) -> frozenset:
     members = []
-    for position, is_member in zip(positions, is_in_region):
+    for position, is_member in zip(positions, is_in_region, strict=True):
         if is_member:
             members.append(position)
     return frozenset(members)
@@ -952,7 +957,7 @@ def _episodes(firing_windows: list) -> list:
         last_rounds.append(round_index)
     newest_round = len(firing_windows)
     episodes = []
-    for first_round, last_round in zip(first_rounds, last_rounds):
+    for first_round, last_round in zip(first_rounds, last_rounds, strict=True):
         is_open = last_round == newest_round
         episode = _Episode(first_round, last_round, is_open)
         episodes.append(episode)

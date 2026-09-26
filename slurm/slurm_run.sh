@@ -34,7 +34,7 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 config=$1
 shift
-python=${DECSIM_PYTHON:-.venv/bin/python}
+python=${DECSIM_PYTHON:-python}
 
 # The tree the interpreter imports decsim from, which is the code this
 # task runs, and which is not always the folder the job was submitted

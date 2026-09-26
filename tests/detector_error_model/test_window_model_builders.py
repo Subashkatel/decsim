@@ -17,7 +17,6 @@ uncommitted, decsim/escalation/strong_window_shapes) with no paper referent.
 
 import numpy
 import pytest
-import qldpc.decoders
 import stim
 
 from decsim.detector_error_model import (
@@ -26,6 +25,8 @@ from decsim.detector_error_model import (
     stim_fault_catalog,
     window_model_builders,
 )
+
+qldpc_decoders = pytest.importorskip("qldpc.decoders")
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -45,7 +46,9 @@ def owned_faults(model):
     faults = model.require_faults(GRAPHLIKE)
     return [
         fault_index
-        for fault_index, is_owned in zip(faults.source_fault_ids, faults.owned)
+        for fault_index, is_owned in zip(
+            faults.source_fault_ids, faults.owned, strict=True
+        )
         if is_owned
     ]
 
@@ -84,7 +87,7 @@ def qldpc_sliding_windows(circuit, rounds, window_size, stride):
         circuit, None, rounds
     )
     model = circuit.detector_error_model(decompose_errors=True)
-    decoder = qldpc.decoders.SlidingWindowDecoder(
+    decoder = qldpc_decoders.SlidingWindowDecoder(
         window_size,
         stride,
         detector_to_time=lambda detector: round_of_detector[detector],
@@ -95,7 +98,7 @@ def qldpc_sliding_windows(circuit, rounds, window_size, stride):
     observable_matrix = compiled.dem_arrays.observable_flip_matrix.tocsc()
     windows = []
     for (detection, commit), errors in zip(
-        decoder.windows, compiled.window_errors
+        decoder.windows, compiled.window_errors, strict=True
     ):
         committed_columns = numpy.nonzero(errors[0])
         committed = {

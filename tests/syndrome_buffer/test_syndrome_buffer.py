@@ -7,8 +7,8 @@ leave in order; that is Ciw's blocking law
 (Ciw's ciw/node.py: finish_service blocks when
 the next node is at node_capacity, release_blocked_individual releases
 the longest blocked one when a customer leaves); the same trace runs
-through a two-node Ciw network when Ciw imports from the resources
-folder, one slot standing for one round's bits. gem5's packet store
+through a two-node Ciw network, Ciw 3.2.7 from the test extra, one slot
+standing for one round's bits. gem5's packet store
 answers `avail()` against the packet's own length before it lands (gem5
 src/dev/net/pktfifo.hh) and its blocked port retries the requester
 (src/mem/cache/base.cc: clearBlocked, processSendRetry); the store

@@ -17,7 +17,7 @@ event): the runtime never receives a call back from the controller.
 import dataclasses
 import functools
 import types
-from typing import Callable
+from collections.abc import Callable
 
 import decsim.engine
 import decsim.ports as ports

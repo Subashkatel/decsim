@@ -652,7 +652,7 @@ def _lane_spans_overlap(accesses, tid) -> bool:
     spans = [row for row in accesses if row["tid"] == tid]
     ends = [row["ts"] + row["dur"] for row in spans[:-1]]
     starts = [row["ts"] for row in spans[1:]]
-    return any(start < end for start, end in zip(starts, ends))
+    return any(start < end for start, end in zip(starts, ends, strict=True))
 
 
 def test_each_transfer_is_one_frame_on_its_channels_frame_lane(traced):

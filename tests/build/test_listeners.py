@@ -7,7 +7,8 @@ holds. The load order is the other rule here: streams first, then every
 operation with the windows, then the idle accounting, then the runtime.
 """
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import pytest
 

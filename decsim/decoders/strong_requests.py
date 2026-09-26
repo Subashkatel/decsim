@@ -225,7 +225,9 @@ class StrongRequests:
         batch: decoding_records.DecodeJob,
     ) -> None:
         """One merged batch now serves every member request."""
-        for window_key, request_job in zip(window_keys, request_jobs):
+        for window_key, request_job in zip(
+            window_keys, request_jobs, strict=True
+        ):
             record = self._record(window_key)
             record.live = LiveStrongRequest(request_job, batch)
 

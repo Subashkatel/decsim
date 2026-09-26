@@ -788,7 +788,7 @@ def covered_boundaries(cycle, operations, round_ticks, idle_ticks):
 def strides_of(ticks):
     """The gaps between the boundaries, one gap value per pair."""
     strides = set()
-    for earlier, later in zip(ticks, ticks[1:]):
+    for earlier, later in zip(ticks, ticks[1:], strict=False):
         stride = later - earlier
         strides.add(stride)
     return strides

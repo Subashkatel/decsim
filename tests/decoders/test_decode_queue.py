@@ -125,7 +125,7 @@ def test_poisson_arrivals_on_one_unit_wait_pollaczek_khinchine_property():
         arrivals.append(arrival)
     starts = _start_ticks(arrivals, 1)
     waits = []
-    for start, arrival in zip(starts, arrivals):
+    for start, arrival in zip(starts, arrivals, strict=True):
         wait = start - arrival
         waits.append(wait)
     settled = waits[job_count // 10 :]

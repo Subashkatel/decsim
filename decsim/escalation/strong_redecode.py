@@ -30,7 +30,8 @@ accept_strong_result as the return path.
 
 import dataclasses
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_window_shapes as strong_window_shapes

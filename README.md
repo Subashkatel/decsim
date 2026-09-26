@@ -17,13 +17,22 @@ a decoder with a number instead of measuring one.
 
 ## Install
 
-Python 3.9 or newer, and the `run` extra: the root imports Stim, and a
-run on real syndrome data needs PyMatching, numpy, scipy and matplotlib
-as well.
+Python 3.10 or newer, and the `run` extra: the root imports Stim, the
+yaml layer reads PyYAML, the decoder table imports ldpc, and a run on
+real syndrome data needs PyMatching, numpy, scipy and matplotlib as
+well.
 
 ```bash
-python -m pip install -e ".[run]"
+python -m pip install -e ".[run]" -c constraints.txt
 ```
+
+`constraints.txt` pins every package the `run`, `test` and `dev` extras
+install, at versions tested together on Python 3.10, 3.12 and 3.13; pip
+installs only what the extras ask for, at those versions. It is uv's
+universal resolution, one file for every platform, and its first lines
+are the command that regenerates it after an extra changes.
+beliefmatching caps numpy at 2.2.6, which ships no wheel past Python
+3.13.
 
 The `bb-decoders` extra adds the three optional backends (Relay-BP,
 Tesseract, BP-OSD through quits). decsim keeps its choices in tables: a
@@ -47,7 +56,7 @@ sentence naming this command.
 ## One run
 
 ```bash
-decsim run configs/reference.yaml --seed 0 --trace
+decsim run configs/reference.yaml --seed 0 --trace --out results/first_shot
 ```
 
 That is one shot of the reference config, the one that documents every
@@ -64,9 +73,32 @@ in, explanation for the design and its sources, and a link to every page.
 
 ## The tests
 
+The `test` extra adds pytest and the reference decoders the suite checks
+decsim against:
+
 ```bash
+python -m pip install -e ".[run,test]" -c constraints.txt
 python -m pytest tests
 ```
 
+A test whose optional backend is absent (the `bb-decoders` and Deltakit
+extras) is skipped and says which module it could not import.
+
+The tutorials show what their commands print.
+`tools/check_tutorial_runs.py` runs each page's commands and holds what
+the page shows to what they print: every line on a page whose decoders
+are priced by cards, and the lines no decoder's wall clock moves on the
+others. It needs only the `run` extra and takes about ten minutes on
+four cores:
+
+```bash
+python tools/check_tutorial_runs.py
+```
+
 `tools/check.sh` runs the style and structure checks that `STYLE.md`
-describes.
+describes, with the ruff the `dev` extra installs:
+
+```bash
+python -m pip install -e ".[run,test,dev]" -c constraints.txt
+tools/check.sh
+```

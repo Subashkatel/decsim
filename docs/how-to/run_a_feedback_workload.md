@@ -140,7 +140,7 @@ the QPU at 7.799125, which is 7.703125 plus 0.096. Run the same script with `blo
 removed and both lines disappear: no operation waits, so no decision
 travels.
 
-The second STARTED line at 15.4 is later than its ARRIVED line because
+The second STARTED line at 8.8 is later than its ARRIVED line because
 the QPU's own cycle clock takes the command at the next boundary it can
 start on, which is its business and not the loop's.
 

@@ -23,8 +23,8 @@ one clock cycle, 4 ns at 250 MHz (Yang et al. 2605.04892 Table I).
 """
 
 import dataclasses
-from collections.abc import Mapping
-from typing import Callable, Optional
+from collections.abc import Callable, Mapping
+from typing import Optional
 
 import decsim.config as config
 import decsim.records.identity as identity_records

@@ -25,7 +25,8 @@ data (Toshio 2510.25222 lines 1248-1250).
 
 import dataclasses
 import functools
-from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.records.decoding as decoding_records

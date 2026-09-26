@@ -48,7 +48,7 @@ import dataclasses
 import pathlib
 
 import numpy
-import qldpc.decoders.dems as qldpc_dems
+import pytest
 import stim
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -59,6 +59,8 @@ import decsim.windows.decode_requests as decode_requests
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_commits as window_commits
 import tests.escalation.test_strong_window_shapes as shape_tests
+
+qldpc_dems = pytest.importorskip("qldpc.decoders.dems")
 
 # One shot per distance, at a round count that is no multiple of the
 # stride, on seeds whose run has a nonempty pinned seam (the seeds the

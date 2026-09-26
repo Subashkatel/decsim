@@ -8,7 +8,8 @@ and the buffers read the plan and never change it.
 
 import dataclasses
 import math
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.config as config
 import decsim.records.decoding as decoding_records
@@ -545,7 +546,11 @@ def _materialize_execution_plan(
     operation_window_plans: tuple[window_records.OperationWindowPlan, ...],
 ) -> window_records.WindowPlan:
     """Materialize exactly the typed scheme ledgers and direct DAG edges."""
-    rows = list(zip(operations, resolved_operations, operation_window_plans))
+    rows = list(
+        zip(
+            operations, resolved_operations, operation_window_plans, strict=True
+        )
+    )
     windows = {}
     plan_by_operation_id = {}
     for operation, _resolved, operation_plan in rows:

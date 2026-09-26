@@ -50,11 +50,11 @@ The commit and the dirty flag go into every folder's `manifest.json`, so
 a result names its code. Two things to get right:
 
 - **The interpreter decides which tree is imported, not the directory
-  you submit from.** Where `.venv/bin/python` is a container wrapper
-  that pins the main checkout on `PYTHONPATH`, a worktree needs to come
-  first: `DECSIM_PYTHON` pointing at the worktree's own
-  wrapper, or `PYTHONPATH` naming the worktree. The line the runner
-  prints is the check: it is the tree the interpreter actually imported.
+  you submit from.** An environment installed with `pip install -e`
+  from another checkout imports that checkout, so a worktree needs
+  `DECSIM_PYTHON` pointing at an environment installed from it, or
+  `PYTHONPATH` naming the worktree. The line the runner prints is the
+  check: it is the tree the interpreter actually imported.
 - **`RUN` must be an absolute path.** The tasks `cd` to the directory
   the job was submitted from, which is the worktree, and a relative
   `RUN` would write the shards inside it.
@@ -91,8 +91,9 @@ The script's own `#SBATCH` lines are the defaults: one node, one task,
 two cpus, 16 gigabytes, 16 hours, on the `cpu` partition. Override them
 on the `sbatch` command line, or edit the script for your cluster.
 
-The interpreter is `${DECSIM_PYTHON:-.venv/bin/python}`, so a cluster
-whose Python is elsewhere sets `DECSIM_PYTHON` in the environment.
+The interpreter is the `python` of the environment the job starts in,
+which `sbatch` copies from the shell that submits it; `DECSIM_PYTHON`
+names another one.
 
 ## 4. Fold the shards
 

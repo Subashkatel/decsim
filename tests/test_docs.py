@@ -25,6 +25,17 @@ a page is enforced here.
 7. Every relative link in docs/ and README.md opens a file in the tree,
    its anchor names a heading of that file, and docs/README.md links to
    every page, so a reader can reach any page from the front page.
+8. Every page that says which Python to install names the floor
+   pyproject.toml's requires-python declares, the one pip enforces.
+9. constraints.txt, which the install commands read, pins every package
+   the run, test and dev extras name.
+10. No page names one maintainer's private environment: the QLX
+    container image, the container wrapper around its interpreter, or the
+    .pydeps dependency folder. A portable setup (a venv, Apptainer in
+    general) is a page's to describe.
+11. A yaml block whose fence names a config (```yaml configs/x.yaml) is
+    that file, byte for byte, and every yaml block of a tutorial names
+    one, because a tutorial's results come from the file, not the page.
 """
 
 import ast
@@ -61,6 +72,19 @@ MERMAID_CLOSE = "```"
 RELATIVE_LINK = re.compile(r"\]\(([^)#:]+)(?:#([^)]+))?\)")
 HEADING = re.compile(r"^#+\s+(.*?)\s*$", re.MULTILINE)
 NOT_A_SLUG_CHARACTER = re.compile(r"[^a-z0-9 _-]")
+REQUIRED_PYTHON = re.compile(r'requires-python = ">=(3\.\d+)"')
+NAMED_PYTHON = re.compile(r"Python (3\.\d+)\s+or\s+newer")
+PINNED_EXTRA = re.compile(r"^(?:run|test|dev) = \[(.*)\]$", re.MULTILINE)
+REQUIREMENT_NAME = re.compile(r'"([A-Za-z0-9_.-]+)')
+PINNED_NAME = re.compile(r"^([A-Za-z0-9_.-]+)==", re.MULTILINE)
+LISTING_FLAGS = re.MULTILINE | re.DOTALL
+CONFIG_LISTING = re.compile(
+    r"^```yaml (configs/\S+\.yaml)\n(.*?)^```$", LISTING_FLAGS
+)
+YAML_FENCE = re.compile(r"^```yaml(.*)$", re.MULTILINE)
+PRIVATE_ENVIRONMENT = re.compile(
+    r"qlx|container wrapper|\.pydeps", re.IGNORECASE
+)
 
 # Names decsim does not define, written in backticks because they name
 # the referent a decision came from.
@@ -529,3 +553,85 @@ def test_the_front_page_links_to_every_page():
         assert page.resolve() in linked, (
             f"docs/README.md does not link to {page.name}"
         )
+
+
+def test_every_page_names_the_python_floor_pyproject_declares():
+    """A reader installs on the Python pip will accept, and no older one."""
+    pyproject = CHECKOUT / "pyproject.toml"
+    declaration = pyproject.read_text()
+    required = REQUIRED_PYTHON.search(declaration)
+    floor = required.group(1)
+    for page in _prose_files():
+        text = page.read_text()
+        named = NAMED_PYTHON.findall(text)
+        _check_one_python_floor(named, floor, page)
+
+
+def _check_one_python_floor(named: list, floor: str, page) -> None:
+    """Every "Python 3.N or newer" of one page."""
+    for version in named:
+        assert version == floor, (
+            f"{page.name} says Python {version} or newer, and "
+            f"pyproject.toml requires Python {floor} or newer"
+        )
+
+
+def test_the_constraints_file_pins_every_package_the_extras_name():
+    """An extra that grew without a new constraints.txt installs unpinned."""
+    pyproject = CHECKOUT / "pyproject.toml"
+    declaration = pyproject.read_text()
+    extras = PINNED_EXTRA.findall(declaration)
+    named = set()
+    for listed in extras:
+        names = REQUIREMENT_NAME.findall(listed)
+        named.update(names)
+    constraints = CHECKOUT / "constraints.txt"
+    pinned_text = constraints.read_text()
+    pinned = PINNED_NAME.findall(pinned_text)
+    unpinned = named.difference(pinned)
+    assert len(extras) == 3
+    assert unpinned == set(), (
+        f"constraints.txt pins no version of {sorted(unpinned)}; rerun "
+        "the command in its first lines"
+    )
+
+
+def test_no_page_names_a_maintainers_private_environment():
+    """A reader has the README's install and nothing only one host has."""
+    for page in _markdown_pages():
+        text = page.read_text()
+        named = PRIVATE_ENVIRONMENT.findall(text)
+        assert named == [], f"{page.name} names {named}"
+
+
+def _markdown_pages() -> tuple:
+    """The pages a reader reads, without pyproject.toml's tool settings."""
+    pages = []
+    for path in _prose_files():
+        if path.suffix == ".md":
+            pages.append(path)
+    return tuple(pages)
+
+
+def test_every_config_listing_in_the_docs_is_the_file_it_names():
+    """A page that copies a config shows the one its results come from."""
+    for page in _markdown_pages():
+        text = page.read_text()
+        for name, listing in CONFIG_LISTING.findall(text):
+            config = CHECKOUT / name
+            contents = config.read_text()
+            assert listing == contents, (
+                f"{page.name} lists {name}, and the file differs from it"
+            )
+
+
+def test_every_yaml_block_of_a_tutorial_names_its_config():
+    """An unnamed listing would escape the check above."""
+    tutorials = DOCS / "tutorials"
+    pages = tutorials.glob("*.md")
+    for page in sorted(pages):
+        text = page.read_text()
+        for named in YAML_FENCE.findall(text):
+            assert named.startswith(" configs/"), (
+                f"{page.name} has a yaml block naming no config"
+            )

@@ -14,5 +14,5 @@ run_dir=${RUN:?the folder the shards write in}
 shards=${SHARDS:?the shard count of the whole experiment distance}
 offset=${OFFSET:-0}
 shard=$((offset + SLURM_ARRAY_TASK_ID))
-exec "${DECSIM_PYTHON:-.venv/bin/python}" -m decsim collect \
+exec "${DECSIM_PYTHON:-python}" -m decsim collect \
   "$config" --shard "${shard}/${shards}" --out "${run_dir}/${shard}" "$@"

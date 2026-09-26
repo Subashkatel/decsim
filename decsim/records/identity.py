@@ -30,7 +30,7 @@ def same_stable_identity(left: Any, right: Any) -> bool:
             return False
         return all(
             same_stable_identity(left_item, right_item)
-            for left_item, right_item in zip(left, right)
+            for left_item, right_item in zip(left, right, strict=True)
         )
     if type(left) is int or type(left) is str:
         return left == right

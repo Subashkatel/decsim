@@ -15,6 +15,7 @@ detectors the correction leaves unexplained reported in the evidence.
 import random
 
 import numpy
+import pytest
 import scipy.sparse
 from ldpc.union_find_decoder import UnionFindDecoder as LdpcUnionFind
 
@@ -165,23 +166,23 @@ def test_both_decoders_reproduce_every_syndrome_an_error_produces_property():
         assert _reproduces(decsim_correction, syndrome)
 
 
-def test_a_single_fault_is_named_by_both_decoders():
+@pytest.mark.parametrize("fault", range(FAULT_COUNT))
+def test_a_single_fault_is_named_by_both_decoders(fault):
     model = _model()
     referee = _referee()
     settings = union_find.UnionFindDecoder.Settings(weight_step=0.1)
     row = union_find.UnionFindDecoder(settings=settings)
-    for fault in range(FAULT_COUNT):
-        syndrome = CHECK[:, fault]
-        ldpc_correction = referee.decode(syndrome)
-        ldpc_correction = numpy.asarray(ldpc_correction, dtype=numpy.uint8)
-        job = _job(model, syndrome)
-        result = row.decode(job)
-        decsim_correction = numpy.asarray(
-            result.cluster_evidence.selected_faults, dtype=numpy.uint8
-        )
-        assert decsim_correction.tolist() == ldpc_correction.tolist()
-        selected_count = decsim_correction.sum()
-        assert int(selected_count) == 1
+    syndrome = CHECK[:, fault]
+    ldpc_correction = referee.decode(syndrome)
+    ldpc_correction = numpy.asarray(ldpc_correction, dtype=numpy.uint8)
+    job = _job(model, syndrome)
+    result = row.decode(job)
+    decsim_correction = numpy.asarray(
+        result.cluster_evidence.selected_faults, dtype=numpy.uint8
+    )
+    assert decsim_correction.tolist() == ldpc_correction.tolist()
+    selected_count = decsim_correction.sum()
+    assert int(selected_count) == 1
 
 
 def test_an_unsatisfiable_syndrome_is_marked_and_a_satisfiable_one_is_not():

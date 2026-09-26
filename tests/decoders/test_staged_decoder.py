@@ -164,6 +164,15 @@ def memory_machine(decoder, circuit):
     return machine_module.Machine.build(settings, 3)
 
 
+def _algorithm_records(machine) -> list:
+    """The stage records of every decode's algorithm stage."""
+    records = []
+    for record in machine.observation.stages.records:
+        if record.stage == staged_decoder.ALGORITHM_STAGE:
+            records.append(record)
+    return records
+
+
 def test_the_result_is_produced_when_the_algorithm_stage_time_ends():
     """The inner decode runs once, at the algorithm record's end.
 
@@ -448,12 +457,7 @@ def test_every_measured_algorithm_holds_the_unit_for_its_own_wall_clock():
     circuit = memory_circuit(stim)
     machine = memory_machine(unit, circuit)
     result = machine.run()
-    records = machine.observation.stages.records
-    algorithm = [
-        record
-        for record in records
-        if record.stage == staged_decoder.ALGORITHM_STAGE
-    ]
+    algorithm = _algorithm_records(machine)
     held_ticks = [record.end_ticks - record.start_ticks for record in algorithm]
     measured_ticks = [
         ticks_for_nanoseconds(elapsed)

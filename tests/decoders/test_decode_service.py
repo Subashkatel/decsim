@@ -154,11 +154,18 @@ def test_the_managers_dispatch_cost_delays_every_input_send_by_itself():
     charged = config.microseconds_to_ticks(2.0)
     charged_ticks = _input_landing_ticks(charged)
     assert len(free_ticks) == 2
-    shifts = []
-    for index, tick in enumerate(charged_ticks):
-        shift = tick - free_ticks[index]
-        shifts.append(shift)
+    tick_pairs = zip(charged_ticks, free_ticks, strict=True)
+    shifts = [
+        charged_tick - free_tick for charged_tick, free_tick in tick_pairs
+    ]
     assert shifts == [charged, charged]
+
+
+def _enqueue_windows(manager, window_count, send_input, on_decoded):
+    """Windows w0, w1, ... enqueued at once, in label order."""
+    for index in range(window_count):
+        job = _job(index)
+        manager.enqueue(job, send_input, on_decoded)
 
 
 def _resolving(manager):
@@ -280,11 +287,9 @@ def test_the_second_slots_transfer_overlaps_the_compute():
     manager = _manager(engine, decoder)
     starts = _recording(manager, engine)
     transfer_ticks = config.microseconds_to_ticks(1.0)
-    for index in range(3):
-        job = _job(index)
-        send_input = _send_after(engine, transfer_ticks)
-        on_decoded = _resolving(manager)
-        manager.enqueue(job, send_input, on_decoded)
+    send_input = _send_after(engine, transfer_ticks)
+    on_decoded = _resolving(manager)
+    _enqueue_windows(manager, 3, send_input, on_decoded)
     engine.run()
     assert starts == {
         "w0": config.microseconds_to_ticks(1.0),
@@ -306,9 +311,7 @@ def test_a_pipelined_unit_issues_at_its_initiation_interval():
     starts = _recording(manager, engine)
     ends = {}
     on_decoded = _ending_in(ends, engine, manager)
-    for index in range(3):
-        job = _job(index)
-        manager.enqueue(job, None, on_decoded)
+    _enqueue_windows(manager, 3, None, on_decoded)
     engine.run()
     interval = config.microseconds_to_ticks(0.5)
     latency = config.microseconds_to_ticks(4.0)
@@ -388,10 +391,8 @@ def test_a_declared_pipeline_depth_bounds_the_decodes_in_flight():
     manager.service.trace.job_dispatched.connect(note_dispatch)
     on_decoded = _ending_in(ends, engine, manager)
     transfer_ticks = config.microseconds_to_ticks(5.0)
-    for index in range(4):
-        job = _job(index)
-        send_input = _send_after(engine, transfer_ticks)
-        manager.enqueue(job, send_input, on_decoded)
+    send_input = _send_after(engine, transfer_ticks)
+    _enqueue_windows(manager, 4, send_input, on_decoded)
     engine.run()
     assert starts == {
         "w0": config.microseconds_to_ticks(5.0),

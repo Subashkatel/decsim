@@ -45,7 +45,7 @@ def _qldpc_referee(physical):
     )
 
 
-def test_the_row_matches_qldpcs_bp_osd_on_the_same_matrix():
+def test_the_row_matches_qldpcs_bp_osd_on_the_same_matrix_property():
     model, detection_events = _window_and_shots()
     physical = model.require_faults(PHYSICAL)
     referee = _qldpc_referee(physical)

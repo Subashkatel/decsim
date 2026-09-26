@@ -17,7 +17,7 @@ ROUNDS = 3
 PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 
 
-def test_the_row_returns_the_backends_correction():
+def test_the_row_returns_the_backends_correction_property():
     pytest.importorskip("relay_bp")
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
     model = windows.whole_circuit_window(
@@ -39,7 +39,7 @@ def test_the_row_returns_the_backends_correction():
         assert result.correction.tolist() == expected
 
 
-def test_the_row_reports_the_backends_iteration_count():
+def test_the_row_reports_the_backends_iteration_count_property():
     """A measured device time law reads the count relay-bp itself reports.
 
     decode_detailed's `iterations` is the count the relay-bp package

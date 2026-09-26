@@ -160,9 +160,7 @@ def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
     syndrome = numpy.asarray([1, 0, 0], dtype=numpy.uint8)
     evidence = window_decoder.decode_graph(graph, syndrome)
 
-    lengths = set()
-    for edge in graph.edges:
-        lengths.add(edge.length_half_ticks)
+    lengths = {edge.length_half_ticks for edge in graph.edges}
     assert lengths == {2}
     assert evidence.forest_depth == 1
     assert HELIOS.cycles(evidence) == 19

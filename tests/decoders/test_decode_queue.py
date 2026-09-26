@@ -178,9 +178,7 @@ def test_the_depth_is_reported_at_every_change():
     engine.run()
     # a queues and leaves at once; b queues behind a's compute and
     # leaves when a's decode ends
-    depths = []
-    for _tick, depth in depth_log.samples:
-        depths.append(depth)
+    depths = [depth for _tick, depth in depth_log.samples]
     assert depths == [1, 0, 1, 0]
     assert depth_log.peak == 1
 
@@ -228,10 +226,9 @@ def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
     are batched into a single decode, whose result answers both
     requests, so every window still commits from the strong tier.
     """
-    operations = []
-    for patch in (1, 2, 3, 4):
-        operation = declared_run.memory_operation(patch)
-        operations.append(operation)
+    operations = [
+        declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
+    ]
     unit_pools = {"default": 4, "strong": 1}
     machine = declared_run.switching_run(
         rounds=6,

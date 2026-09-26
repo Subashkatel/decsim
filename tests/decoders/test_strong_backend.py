@@ -223,6 +223,23 @@ def _served(capacity: int, regions: tuple) -> dict:
     return ends
 
 
+def _part_ticks_by_label(regions: tuple) -> dict:
+    """Each region's X and Z part ticks, by the part's label."""
+    ticks_by_label = {}
+    for label, (_, x_ticks, z_ticks) in enumerate(regions):
+        ticks_by_label[f"{label} X"] = x_ticks
+        ticks_by_label[f"{label} Z"] = z_ticks
+    return ticks_by_label
+
+
+def _schedule_starts(engine, decoder, ended: dict, arrivals: tuple, jobs):
+    """Job n starts at arrivals[n], and its end tick lands in ended[str(n)]."""
+    for index, (arrival, job) in enumerate(zip(arrivals, jobs, strict=True)):
+        record = _recorder(ended, str(index), engine)
+        start = functools.partial(decoder.start, job, engine, record)
+        engine.schedule(arrival, start)
+
+
 @pytest.mark.parametrize("capacity", [1, 2, 3])
 @pytest.mark.parametrize(
     "regions",
@@ -235,19 +252,13 @@ def _served(capacity: int, regions: tuple) -> dict:
 def test_a_split_regions_parts_queue_as_two_requests(capacity, regions):
     """Series on one server, side by side on two: the recursion decides."""
     engine = engine_module.Engine()
-    ticks_by_label = {}
-    for label, (_, x_ticks, z_ticks) in enumerate(regions):
-        ticks_by_label[f"{label} X"] = x_ticks
-        ticks_by_label[f"{label} Z"] = z_ticks
+    ticks_by_label = _part_ticks_by_label(regions)
     device = _FixedAnsweringDevice(capacity, ticks_by_label, engine)
     decoder = strong_backend.StrongBackendDecoder(device, "apart")
     ended = {}
-    for label, (arrival, _, _) in enumerate(regions):
-        name = str(label)
-        job = _region_job(name, label)
-        record = _recorder(ended, name, engine)
-        start = functools.partial(decoder.start, job, engine, record)
-        engine.schedule(arrival, start)
+    arrivals = tuple(arrival for arrival, _, _ in regions)
+    jobs = [_region_job(str(index), index) for index in range(len(regions))]
+    _schedule_starts(engine, decoder, ended, arrivals, jobs)
     engine.run()
     assert ended == _served(capacity, regions)
 
@@ -282,6 +293,18 @@ class _RelayDevice:
         return ticket
 
 
+def _decoded_alone(reference, parts, shot) -> tuple:
+    """The XOR of each part's observables, and every detector it flipped."""
+    observables = numpy.zeros(1, dtype=numpy.uint8)
+    flipped = []
+    for part in parts:
+        part_job = windows.job_for(part, shot)
+        answer = reference.decode(part_job)
+        observables ^= numpy.asarray(answer.logical_observables, dtype="uint8")
+        flipped.extend(answer.boundary_data.detector_ids)
+    return observables, flipped
+
+
 def test_a_split_regions_answer_joins_its_two_parts_decoded_alone():
     """Observables XOR and flipped detectors union, as each part says."""
     pytest.importorskip("relay_bp")
@@ -294,13 +317,7 @@ def test_a_split_regions_answer_joins_its_two_parts_decoded_alone():
     reference = relay.RelayBeliefPropagationDecoder(gamma_table_seed=5)
     part_by_basis = basis_split.split_by_basis(model)
     parts = part_by_basis.values()
-    observables = numpy.zeros(1, dtype=numpy.uint8)
-    flipped = []
-    for part in parts:
-        part_job = windows.job_for(part, detection_events[0])
-        answer = reference.decode(part_job)
-        observables ^= numpy.asarray(answer.logical_observables, dtype="uint8")
-        flipped.extend(answer.boundary_data.detector_ids)
+    observables, flipped = _decoded_alone(reference, parts, detection_events[0])
     joined = decoder.decode(job)
     expected_observables = decoder_module.bit_tuple(observables)
     assert joined.logical_observables == expected_observables
@@ -393,11 +410,8 @@ def test_host_path_decodes_overlap_on_workers_as_the_monitor_launches(
     device = _HostPathDevice(workers, 3, 10)
     decoder = strong_backend.StrongBackendDecoder(device)
     ended = {}
-    for index, arrival in enumerate(arrivals):
-        job = _job(str(index), index)
-        record = _recorder(ended, str(index), engine)
-        start = functools.partial(decoder.start, job, engine, record)
-        engine.schedule(arrival, start)
+    jobs = [_job(str(index), index) for index in range(len(arrivals))]
+    _schedule_starts(engine, decoder, ended, arrivals, jobs)
     engine.run()
     expected = _host_monitor(arrivals, workers, 3, 10)
     assert [ended[str(index)] for index in range(len(arrivals))] == expected

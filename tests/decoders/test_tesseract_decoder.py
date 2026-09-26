@@ -47,7 +47,7 @@ def _direct_backend(backend, detector_error_model):
     return configuration.compile_decoder()
 
 
-def test_the_row_returns_the_backends_error_indices():
+def test_the_row_returns_the_backends_error_indices_property():
     backend = pytest.importorskip("tesseract_decoder")
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
     model = windows.whole_circuit_window(

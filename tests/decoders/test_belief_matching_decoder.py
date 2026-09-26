@@ -42,7 +42,7 @@ def _reference_prediction(referee: BeliefMatching, syndrome):
     return matching.decode(syndrome)
 
 
-def test_the_row_predicts_what_beliefmatchings_matching_branch_predicts():
+def test_the_row_predicts_what_beliefmatchings_matching_branch_property():
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
     model = windows.whole_circuit_window(
         circuit, ROUNDS, fault_models.LINKED_FAULT_MODELS_REQUIRED
@@ -55,13 +55,14 @@ def test_the_row_predicts_what_beliefmatchings_matching_branch_predicts():
     row = belief_matching.BeliefMatchingDecoder(
         max_iterations=30, belief_propagation_method="product_sum"
     )
-    disagreements = []
-    for index, shot in enumerate(detection_events):
+    expected_observables = []
+    decoded_observables = []
+    for shot in detection_events:
         syndrome = numpy.asarray(shot, dtype=numpy.uint8)
         expected = _reference_prediction(referee, syndrome)
         prediction = int(expected[0])
+        expected_observables.append((prediction,))
         job = windows.job_for(model, shot)
         result = row.decode(job)
-        if result.logical_observables != (prediction,):
-            disagreements.append(index)
-    assert disagreements == []
+        decoded_observables.append(result.logical_observables)
+    assert decoded_observables == expected_observables

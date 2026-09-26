@@ -68,7 +68,7 @@ class WorkloadSettings:
     memory circuit for the code task, one physical error probability on
     all four of Stim's noise channels, rounds_per_shot rounds, both keys
     its own Settings), circuit_list (a Python-built operation list),
-    surgery_ir (the line-based text IR), qlx (a lowered QLX program).
+    surgery_ir (the line-based text IR).
     The other fields are Python-only: the decode owners, the dynamic
     streams and protected regions of a feedback workload, the round policy
     (GateRounds by default; the memory circuit fixes its rounds and
@@ -84,7 +84,6 @@ class WorkloadSettings:
     physical_error_probability: Optional[float] = None
     operations: tuple = ()
     text: str = ""
-    program: Optional[ports.Workload] = None
     qubit_to_patch: Optional[dict] = None
     decode_operations: Optional[tuple] = None
     dynamic_streams: tuple = ()
@@ -252,35 +251,6 @@ class SurgeryIRWorkload:
         return tuple(operations), None
 
 
-class QlxWorkload:
-    """The qlx row: a lowered QLX program's operations."""
-
-    has_frontend = True
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """No key: the yaml cannot name this row at all."""
-
-        @classmethod
-        def from_yaml(cls, section: Mapping):
-            """Refused: this row takes a lowered program object."""
-            del section
-            raise ValueError(
-                "workload.kind qlx takes a lowered QLX program object, which "
-                "a yaml cannot carry; lower it and build it in Python "
-                "(WorkloadSettings(program=...))"
-            )
-
-    @staticmethod
-    def operations(settings: "WorkloadSettings", code) -> tuple:
-        """The lowered program's operations."""
-        del code
-        if settings.program is None:
-            raise ValueError("a qlx workload needs its lowered program")
-        operations = settings.program.build()
-        return tuple(operations), None
-
-
 def _is_per_distance_text(value) -> bool:
     """True for "<n>d": digits naming at least one round, then a d."""
     if not isinstance(value, str):
@@ -302,5 +272,4 @@ WORKLOADS = {
     "memory_circuit": MemoryCircuitWorkload,
     "circuit_list": CircuitListWorkload,
     "surgery_ir": SurgeryIRWorkload,
-    "qlx": QlxWorkload,
 }

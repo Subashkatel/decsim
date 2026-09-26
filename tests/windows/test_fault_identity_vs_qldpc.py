@@ -18,9 +18,10 @@ decsim/detector_error_model/window_placement.py: a window owns the
 faults touching its commit rounds that no earlier window owned. The
 last window absorbs the remainder in both.
 
-The installed qldpc is byte-identical to the on-disk clone at
-/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/tmp/reference-decoders/qLDPC,
-so the reference here is the same code the harness ran.
+The installed qldpc is 0.3.3; its qldpc/decoders/sinter.py is
+byte-identical to src/qldpc/decoders/sinter.py of
+github.com/qLDPCOrg/qLDPC at commit
+6e1c4cd4b0b0ccb183ca6731c51f8e06b7bcb8a8.
 
 These are referent tests and each builds a real Stim circuit and a real
 detector error model at d=3, so they cost seconds rather than

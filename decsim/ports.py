@@ -13,7 +13,7 @@ the QPU, and every hop between components rides a link.
 
 The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder, Link,
 EscalationPolicy, ThresholdSource, ConfidenceSignal, WindowingScheme,
-IdlePolicy, Workload) have their abstract class here, sinter's Decoder shape
+IdlePolicy) have their abstract class here, sinter's Decoder shape
 (sinter/_decoding/_decoding_decoder_class.py, one class with the methods
 a row of the table must offer), written as a Protocol because the
 implementations fill it without inheriting. Observation (metrics, the
@@ -1848,10 +1848,9 @@ class RoundsPolicy(Protocol):
 
     The policies are FixedRounds, PerOperationRounds, CodeRounds,
     GateRounds and TemporalRounds (qpu/round_policies.py), with no table
-    and no yaml key: the memory_circuit row fixes its rounds, the QLX
-    frontend fills a PerOperationRounds from each task's duration (a
-    zero-duration task there runs none), a Python workload may pass its
-    own, and GateRounds is the default. The lattice-surgery unit of d
+    and no yaml key: the memory_circuit row fixes its rounds, a Python
+    workload may pass its own (a PerOperationRounds may give an operation
+    none), and GateRounds is the default. The lattice-surgery unit of d
     rounds per step is Horsman 1111.4022 Sec. 3.1 and Litinski
     1808.02892.
     """
@@ -1905,17 +1904,3 @@ class IdlePolicy(Protocol):
 
     def end_idle_period(self, idle_rounds, operation, patch) -> None:
         """Settle the uncharged rounds when an operation claims the patch."""
-
-
-@runtime_checkable
-class Workload(Protocol):
-    """What the machine runs: the operations, wired in program order.
-
-    The lowered program a Python workload hands the qlx row
-    (WorkloadSettings.program): QLXProgram answers it, as the two hand
-    frontends in frontends/circuit_frontend.py do. The rows of WORKLOADS
-    are not Workloads; they turn a workload section into operations.
-    """
-
-    def build(self) -> list[program_records.Operation]:
-        """The operations, each with its patches and its predecessors."""

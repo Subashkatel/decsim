@@ -165,7 +165,7 @@ does not already say it. Review checks this; no tool can.
 A check is necessary in exactly two places.
 
 Where input enters decsim: a yaml file, a call on the experiments
-layer, a Stim circuit, a QLX program, a data file, a device reading.
+layer, a Stim circuit, a Deltakit circuit, a data file, a device reading.
 That input is checked once, at that boundary, loudly, with a message
 that reads as a sentence, and raises ValueError.
 

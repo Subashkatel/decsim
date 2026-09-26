@@ -51,9 +51,10 @@ def checked_detector_round_map(
 ) -> dict[int, int]:
     """The map it was given, covering every detector inside 1..round_count.
 
-    A QLX program declares the map, so this is the boundary check for it;
-    detector_formation holds a declared map to the same law through this
-    function.
+    A supplied circuit may declare the map (StimDevice's detector_rounds,
+    as tools/deltakit_example.py does), so this is the boundary check for
+    it; detector_formation holds a declared map to the same law through
+    this function.
     """
     every_detector = set(range(detector_count))
     if set(detector_rounds) != every_detector:

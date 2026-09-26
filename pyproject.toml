@@ -59,16 +59,12 @@ norecursedirs = [".*", "*.egg", "_darcs", "CVS", "dist", "node_modules", "venv",
 [tool.ruff]
 line-length = 80
 target-version = "py39"
-# tests/data holds the frozen QLX artifacts and the scripts that
-# produced them inside the QLX container. They are provenance, not
-# decsim code, and are kept exactly as they ran.
 extend-exclude = [
     ".pydeps",
     ".venv",
     "tmp",
     "archive",
     "results",
-    "tests/data",
 ]
 
 [tool.ruff.lint]

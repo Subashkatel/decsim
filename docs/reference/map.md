@@ -230,7 +230,6 @@ docstring.
 - `decsim/frontends/deltakit_compiler.py`: Compile finite rotated-code experiments through Deltakit's CircuitBuilder.
 - `decsim/frontends/execution_runtime.py`: Which operation runs when: readiness, resource ownership, timestamps.
 - `decsim/frontends/planner.py`: The plan of one run: cadence, geometry, windows and buffer holds.
-- `decsim/frontends/qlx_frontend.py`: Lower a QLX schedule into decsim operations and decode streams.
 - `decsim/frontends/settings.py`: The workload settings: what the machine runs, and for how many rounds.
 
 ### observe

@@ -32,7 +32,7 @@ BURST_DETECTORS = {
 
 @dataclasses.dataclass(frozen=True)
 class BurstDetectorSettings:
-    """The yaml's `burst_detector` section: the row and its own keys.
+    """The yaml's `burst_detector` section, which names one row.
 
     The row none, the default, builds no detector and takes no keys, so
     a run without the section is the machine without a detector.

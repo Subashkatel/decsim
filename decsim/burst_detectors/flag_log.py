@@ -15,7 +15,7 @@ import decsim.records.windows as window_records
 
 @dataclasses.dataclass(frozen=True)
 class Flag:
-    """A firing round's estimated onset, and the region that fired.
+    """A firing round's estimated onset, with the region that fired.
 
     region is the CUSUM's leading chart's region; a count flag has none
     of its own and takes its region when the priors ask.
@@ -47,7 +47,7 @@ class Episode:
 
 
 class FlagLog:
-    """One operation's verdicts and when each was published."""
+    """One operation's verdicts, each with the tick it was published at."""
 
     def __init__(self, first_round: int) -> None:
         self.first_round = first_round

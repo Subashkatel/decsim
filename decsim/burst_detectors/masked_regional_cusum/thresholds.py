@@ -49,7 +49,7 @@ def bank_thresholds(
 
 @dataclasses.dataclass(frozen=True)
 class _GroupTail:
-    """One group's block maxima: their observed tail and a fitted one.
+    """One group's level for a tail share, read off its block maxima.
 
     level(share) is the smallest observed maximum whose tail is at most
     share while the blocks reach that share (share x blocks at least the

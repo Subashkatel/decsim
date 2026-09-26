@@ -16,7 +16,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_models
 
 @dataclasses.dataclass(frozen=True)
 class BurstRegion:
-    """The positions and rounds whose faults get the burst priors."""
+    """The stretch of checks and rounds whose faults get the burst priors."""
 
     positions: frozenset
     first_round: int

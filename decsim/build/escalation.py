@@ -5,12 +5,20 @@ only how the yaml names it (sinter's _mux_sampler.py:33-40, which
 resolves the caller's object before its own table).
 """
 
+from typing import TYPE_CHECKING, Optional
+
 import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.confidence.signals as confidence_signals
 import decsim.decoders.settings as decoder_settings
+import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.ports as ports
+import decsim.settings as machine_settings
 import decsim.tables as tables
+
+if TYPE_CHECKING:
+    import decsim.build.plan as plan_build
 
 
 def primary_tier(settings: escalation_settings.EscalationSettings) -> str:
@@ -102,6 +110,33 @@ def confidence_signal(
     return row.from_settings(escalation, weak_decoder)
 
 
+def build_burst_detector(
+    settings: machine_settings.MachineSettings,
+    engine: engine_module.Engine,
+    plan: "plan_build.Plan",
+    escalation_policy: ports.EscalationPolicy,
+) -> Optional[ports.BurstDetector]:
+    """The detector burst_detector.kind names; None for the row none.
+
+    The detector feeds escalation, so a policy that never escalates is
+    refused beside it; it scores detection events, so every operation
+    it scores brings the circuit they are formed from, and it is
+    calibrated from that circuit, its round count and the round period.
+    """
+    section = settings.burst_detector
+    row = tables.row(
+        burst_detector_settings.BURST_DETECTORS,
+        "burst_detector.kind",
+        section.kind,
+    )
+    if row is None:
+        return None
+    _refuse_a_policy_that_cannot_escalate(section.kind, escalation_policy)
+    circuits = _counted_circuits(plan)
+    round_period = settings.qpu.round_period_microseconds
+    return row(section.row_settings, engine, circuits, round_period)
+
+
 def _collaborators(
     row,
     settings: escalation_settings.EscalationSettings,
@@ -162,28 +197,6 @@ def _sweep_point_source(settings: escalation_settings.EscalationSettings):
             "through it"
         )
     return settings.online_threshold
-
-
-def build_burst_detector(settings, engine, plan, escalation_policy):
-    """The detector burst_detector.kind names; None for the row none.
-
-    The detector feeds escalation, so a policy that never escalates is
-    refused beside it; it scores detection events, so every operation
-    it scores brings the circuit they are formed from, and it is
-    calibrated from that circuit, its round count and the round period.
-    """
-    section = settings.burst_detector
-    row = tables.row(
-        burst_detector_settings.BURST_DETECTORS,
-        "burst_detector.kind",
-        section.kind,
-    )
-    if row is None:
-        return None
-    _refuse_a_policy_that_cannot_escalate(section.kind, escalation_policy)
-    circuits = _counted_circuits(plan)
-    round_period = settings.qpu.round_period_microseconds
-    return row(section.row_settings, engine, circuits, round_period)
 
 
 def _refuse_a_policy_that_cannot_escalate(kind: str, escalation_policy):

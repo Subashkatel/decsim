@@ -43,13 +43,12 @@ _NEVER_FLAGGED = -(10**9)
 
 @dataclasses.dataclass(frozen=True)
 class ChartBank:
-    """The regions, the designs and the pairs of one operation's checks.
+    """One operation's CUSUM charts, one per region of its checks per design.
 
-    settings are the masked_regional_cusum row's. incidence is (checks,
-    regions), region_scales names each region's radius (len(radii) for
-    the whole patch), and pair_incidence is (pairs, checks). A group is
-    one design and one radius: its score is the largest of its
-    regions', design-major.
+    incidence is (checks, regions), region_scales names each region's
+    radius (len(radii) for the whole patch), and pair_incidence is
+    (pairs, checks). A group is one design and one radius: its score is
+    the largest of its regions', design-major.
     """
 
     settings: "detector.MaskedRegionalCusumBurstDetector.Settings"

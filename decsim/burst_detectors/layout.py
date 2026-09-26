@@ -30,7 +30,7 @@ class Fault:
 
 @dataclasses.dataclass(frozen=True)
 class Layout:
-    """Where one operation's checks sit, and their usual rates.
+    """Where one operation's checks sit, with their usual rates.
 
     positions are the stabiliser positions, a bulk detector's first two
     Stim coordinates; position_by_value maps each round's events, in
@@ -81,7 +81,9 @@ class Layout:
             faults_by_position=faults_by_position,
         )
 
-    def position_counts(self, round_index: int, events: Sequence[int]):
+    def position_counts(
+        self, round_index: int, events: Sequence[int]
+    ) -> numpy.ndarray:
         """The round's bulk detection events, per position."""
         value_positions = self.position_by_value[round_index]
         assert len(events) == len(value_positions), (
@@ -124,7 +126,6 @@ class Layout:
         return _bisected_scale(region_priors, measured_rate, largest_scale)
 
     def _region_priors(self, is_in_region: numpy.ndarray) -> list:
-        """The priors behind each position of the region."""
         region_priors = []
         for position, is_member in enumerate(is_in_region):
             if is_member:

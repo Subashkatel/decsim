@@ -33,6 +33,8 @@ import decsim.trace_source as trace_source
 # 1076-1078): a position is in the flagged region when its count reaches
 # the count its usual rate reaches this rarely.
 REGION_FALSE_ALARMS = 0.01
+# Operation ids are opaque identities chosen by the workload; Any names
+# them in the port's signatures.
 
 
 class EventCountBurstDetector:
@@ -182,7 +184,7 @@ class _CountCalibration:
 
 
 class _OperationCounts:
-    """The counters of one operation, and what they published when."""
+    """One operation's counters, fed round by round."""
 
     def __init__(
         self,

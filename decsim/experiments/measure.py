@@ -824,8 +824,8 @@ def _burst_catch(
     onset, and it catches the burst within k rounds when that delay is
     at most k, as detection delay is scored for change-point detectors
     (Xie et al. 2104.04186 lines 161-171). A shot with no burst counts
-    from round 1,
-    so any flag on it is a false alarm. (None, None) without a detector.
+    from round 1, so any flag on it is a false alarm. (None, None)
+    without a detector.
     """
     flags = observation.burst_flags
     if flags is None:

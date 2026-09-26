@@ -7,6 +7,8 @@ at or after the change less the change (Xie et al. 2104.04186 lines
 measurement reads that alarm off it.
 """
 
+from typing import Any
+
 
 class BurstFlags:
     """Every round the detector fired on, in the order it fired."""
@@ -14,7 +16,8 @@ class BurstFlags:
     def __init__(self) -> None:
         self.flagged_rounds: list = []
 
-    def round_flagged(self, operation_id, round_index: int) -> None:
+    # the operation id is an opaque identity chosen by the workload
+    def round_flagged(self, operation_id: Any, round_index: int) -> None:
         """The detector fired on one more round."""
         del operation_id
         self.flagged_rounds.append(round_index)

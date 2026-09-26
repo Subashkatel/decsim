@@ -108,7 +108,7 @@ def boolean(section: Mapping, section_name: str, key: str) -> bool:
     )
 
 
-def is_number(value) -> bool:
+def is_number(value: object) -> bool:
     """Whether a yaml value is a number; a bool is not one."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 

@@ -36,6 +36,8 @@ CALIBRATION_SEED = 0
 # calibration holds.
 CALIBRATION_BATCH_SHOTS = 1000
 MICROSECONDS_PER_SECOND = 1e6
+# Operation ids are opaque identities chosen by the workload; Any names
+# them in the port's signatures.
 
 
 class MaskedRegionalCusumBurstDetector:
@@ -51,7 +53,7 @@ class MaskedRegionalCusumBurstDetector:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The masked_regional_cusum row's keys and the method's defaults.
+        """The masked_regional_cusum row's keys, defaulting to the method's.
 
         mask_window_rounds is the window of each check's repeat count
         and each pair's joint count; mask_count is the count at which
@@ -181,7 +183,7 @@ class _ChartCalibration:
 
 
 class _OperationCharts:
-    """The chart bank of one operation, and what it published when."""
+    """One operation's chart bank, scored round by round."""
 
     def __init__(self, calibration: _ChartCalibration) -> None:
         self.calibration = calibration

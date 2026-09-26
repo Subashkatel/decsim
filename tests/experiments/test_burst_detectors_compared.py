@@ -32,15 +32,19 @@ def _written(path) -> dict:
 
 
 def test_the_folder_holds_a_burst_and_a_quiet_file_per_detector():
-    names = []
-    for path in FOLDER.glob("*.yaml"):
-        names.append(path.stem)
-    expected = []
-    for detector in DETECTORS:
-        expected.append(f"{detector}_burst")
-        expected.append(f"{detector}_quiet")
+    paths = FOLDER.glob("*.yaml")
+    names = sorted(path.stem for path in paths)
 
-    assert sorted(names) == sorted(expected)
+    assert names == [
+        "event_count_burst",
+        "event_count_quiet",
+        "masked_regional_cusum_burst",
+        "masked_regional_cusum_quiet",
+        "regional_cusum_burst",
+        "regional_cusum_quiet",
+        "whole_patch_cusum_burst",
+        "whole_patch_cusum_quiet",
+    ]
 
 
 @pytest.mark.parametrize("detector", DETECTORS)

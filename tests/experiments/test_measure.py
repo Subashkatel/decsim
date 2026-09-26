@@ -1490,6 +1490,11 @@ def burst_detector_shot(
         "burst_onset_round": BURST_ONSET_ROUND,
         "burst_error_probability": burst_error_probability,
     }
+    return detector_shot(tmp_path, qpu, catch_deadline_rounds)
+
+
+def detector_shot(tmp_path, qpu: dict, catch_deadline_rounds=300):
+    """That shot on any qpu section."""
     detector = {
         "kind": "masked_regional_cusum",
         "catch_deadline_rounds": catch_deadline_rounds,
@@ -1514,9 +1519,16 @@ def test_a_burst_shot_records_its_first_flag_and_a_catch_in_time(tmp_path):
     assert late.burst_caught_in_time is False
 
 
-def test_a_shot_with_no_burst_records_no_flag_and_no_catch(tmp_path):
+@pytest.mark.parametrize(
+    "qpu",
+    [
+        {"kind": "burst_stim", "burst_error_probability": 0.0},
+        {"kind": "stim_device"},
+    ],
+)
+def test_a_shot_with_no_burst_records_no_flag_and_no_catch(tmp_path, qpu):
     """A burst of probability 0 draws the operation's own circuit."""
-    quiet = burst_detector_shot(tmp_path, 0.0)
+    quiet = detector_shot(tmp_path, qpu)
 
     assert quiet.burst_first_flag_round == 0
     assert quiet.burst_caught_in_time is None

@@ -98,10 +98,9 @@ a value on the command line replaces the recorded one.
 
 The default noise model is SD6. The prefix requests decoding, protection
 continues on the same live stream, and decoded release permits resume
-and actual final readout. The prefix ends on a window boundary, so
-`--prefix-rounds` is a whole number of the distance; left unset it is
-one window, the distance's rounds. A prefix that ends inside a window
-is refused by the first commit. There is no fixed round horizon. Longer feedback
+and actual final readout. The prefix's last round ends a window, so its
+result is its own windows; left unset, `--prefix-rounds` is one window,
+the distance's rounds. There is no fixed round horizon. Longer feedback
 adds physical syndrome rounds before destructive readout. The ordinary
 `StreamingStimDevice` retains the quantum state across those rounds;
 decsim owns the wait, the QPU cadence and the stopping decision. The provider
@@ -256,11 +255,10 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/deltakit_example.py \
 The prefix's decoded decision releases the continuation. The controller
 keeps the patch protected while it waits; the QPU starts the continuation
 on its eligible cycle boundary. Arrival and start are separate events.
-The prefix ends on a window boundary: the rotated surface card commits
-`distance` rounds per window, so `--prefix-rounds` is a multiple of the
-distance (3 or 6 at distance 3), and left unset it is one window. A
-prefix that ends inside a window is refused by the window's commit,
-because a scored segment cannot share a window with its continuation.
+A segment's first round starts a window and its last round ends one,
+so a scored segment never shares a window with its continuation: a
+`--prefix-rounds` of 4 at distance 3 commits rounds 1 to 3, then round 4
+alone. Left unset it is one window, `distance` rounds.
 The declared decoder service time prices actual functional PyMatching.
 It is not a measured decoder benchmark or a timing-only substitute.
 

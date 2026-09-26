@@ -469,7 +469,7 @@ def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
 
 @pytest.mark.parametrize(
     ("idle_policy", "load_job_count"),
-    [("separate_decode_jobs", 2), ("ignore", 0), ("extend_stream", 0)],
+    [("separate_decode_jobs", 2), ("ignore", 0)],
 )
 def test_static_idle_rounds_use_strong_slots_until_the_decoder_arrival(
     idle_policy: str, load_job_count: int

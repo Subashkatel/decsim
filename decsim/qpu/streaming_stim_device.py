@@ -199,10 +199,20 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         stream_operation: program_records.Operation,
         stream_round_count: int,
     ) -> None:
-        """Require the sealed length to include the actual final readout."""
+        """Require the sealed length to include the actual final readout.
+
+        The end operation of the stream's protected region is the one
+        instruction that reads a live stream out, the way a controller
+        instructs the codeword readout (Maurer et al. 2510.21600 line 511).
+        """
         stream = self._stream_for(stream_operation.id)
         if not stream.history.is_final:
-            raise RuntimeError("live Stim stream sealed without final readout")
+            raise RuntimeError(
+                f"live Stim stream {stream_operation.id!r} sealed without "
+                "final readout: no protected region ends it, and the end "
+                "operation of a ProtectedRegion is what reads a live stream "
+                "out"
+            )
         if stream.history.round_count != stream_round_count:
             raise RuntimeError(
                 "sealed length differs from executed Stim rounds"

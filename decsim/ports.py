@@ -138,6 +138,15 @@ class IdleRoundReceiver(Protocol):
     def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
         """Take one idle cycle of a patch nobody is operating on."""
 
+    def bind_at_start(
+        self, command: program_records.RunOperationBody
+    ) -> program_records.RunOperationBody:
+        """The command as it starts after its patches' idle rounds.
+
+        A segment that declares no stream offset continues its stream
+        after every round the stream has had, idle ones included.
+        """
+
 
 # --------------------------------------- the store holds the packed round
 
@@ -1330,7 +1339,6 @@ class OperationIssuer(Protocol):
     def after_successor_release(
         self,
         operation: program_records.Operation,
-        waits_for_blocked: bool,
         is_workload_complete: bool,
     ) -> None:
         """Successors released: close boundaries, seal streams, stop the QPU."""
@@ -2169,10 +2177,9 @@ class MagicStateFactory(Protocol):
 class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 
-    Table rows: separate_decode_jobs, ignore, extend_stream
-    (controller/policies.py, beside the accounting they serve). relay
-    carries one idle round through the
-    idle accounting it is given (controller/idle_rounds.py);
+    Table rows: separate_decode_jobs, ignore (controller/policies.py,
+    beside the accounting they serve). relay carries one idle round
+    through the idle accounting it is given (controller/idle_rounds.py);
     end_idle_period runs when an operation claims the patch and, for
     every idle patch, when the workload completes, so rounds the policy
     has not charged yet can be settled.

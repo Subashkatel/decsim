@@ -22,9 +22,13 @@ from typing import Any, Optional
 
 import pytest
 
+import decsim.config as config
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.engine as engine_module
 import decsim.records.program as program_records
+
+# the fixture's 1000-tick controller cycle
+CYCLE = config.Clock(1000)
 
 
 def test_a_protected_group_emits_and_releases_once_per_shared_cycle() -> None:
@@ -51,6 +55,30 @@ def test_a_protected_group_emits_and_releases_once_per_shared_cycle() -> None:
     assert windows.seals == [(7, 2)]
     assert not streams.is_live_protected_patch("A")
     assert not streams.is_live_protected_patch("B")
+
+
+def test_a_region_begun_between_edges_emits_on_the_qpu_cycle() -> None:
+    """A released operation starts a region between two QPU cycle edges."""
+    program = _group_program()
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine)
+    windows = _Windows()
+    streams = _streams(
+        program,
+        regions=program.protected_regions,
+        engine=engine,
+        qpu=qpu,
+        window_manager=windows,
+    )
+    streams.runtime = _Runtime()
+    first, final = program.operations
+    begin = functools.partial(streams.begin, first)
+    close = functools.partial(streams.request_closes, final)
+    engine.schedule(400, begin)
+    engine.schedule(2000, close)
+    engine.run()
+    assert qpu.emissions == [(7, 1, 1000, False), (7, 2, 2000, True)]
+    assert windows.seals == [(7, 2)]
 
 
 def test_a_seal_the_qpu_refuses_never_reaches_the_windows() -> None:
@@ -112,8 +140,9 @@ def test_a_protected_owner_requires_nonempty_unique_patches(
 def test_a_new_group_waits_while_any_member_is_protected() -> None:
     program = _overlapping_group_program()
     engine = engine_module.Engine()
+    qpu = _Qpu(engine)
     streams = _streams(
-        program, regions=program.protected_regions, engine=engine
+        program, regions=program.protected_regions, engine=engine, qpu=qpu
     )
     streams.begin(program.operations[0])
     assert streams.blocks_start(program.operations[2])
@@ -133,13 +162,167 @@ def test_per_patch_idle_callbacks_advance_a_joint_stream_only_once() -> None:
         window_manager=windows,
     )
     streams.begin(operation)
-    assert streams.extend_live_stream(operation)
-    assert streams.extend_live_stream(operation)
-    extend = functools.partial(streams.extend_live_stream, operation)
+    assert streams.extend_live_stream(operation, "A")
+    assert streams.extend_live_stream(operation, "B")
+    extend = functools.partial(streams.extend_live_stream, operation, "A")
     engine.schedule(1000, extend)
     engine.run()
     assert qpu.emissions == [(7, 7, 0, False), (7, 8, 1000, False)]
     assert qpu.emission_owner_ids == [7, 7]
+
+
+@pytest.mark.parametrize(
+    ("emits_detector_data", "is_held"), [(False, True), (True, False)]
+)
+def test_an_idle_group_continues_the_stream_its_last_segment_left(
+    emits_detector_data: bool, is_held: bool
+) -> None:
+    follower = _operation(
+        2, patches=("A", "B"), emits_detector_data=emits_detector_data
+    )
+    program = _unprotected_group_program()
+    operations = program.operations + (follower,)
+    program = dataclasses.replace(program, operations=operations)
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(2, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(program.operations[0])
+    streams.begin(follower)
+
+    assert streams.extend_live_stream(follower, "A") is is_held
+
+
+def test_a_segment_issued_at_a_declared_offset_holds_the_stream() -> None:
+    """Only the declared segment's patches continue the stream after it.
+
+    Its rounds are the stream's next, so an idle patch of the segment
+    before it holds no stream, and the declared one continues after its
+    own last round.
+    """
+    program = _unprotected_group_program()
+    segment = program.operations[0]
+    declared = _operation(2, patches=("A", "B"))
+    declared = dataclasses.replace(declared, stream_id=7, stream_offset=6)
+    operations = (segment, declared)
+    program = dataclasses.replace(program, operations=operations)
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(2, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(segment)
+    streams.begin(declared)
+
+    assert streams.extend_live_stream(segment, "A") is False
+    assert streams.extend_live_stream(declared, "A") is True
+    assert qpu.emissions == [(7, 13, 0, False)]
+
+
+def test_a_stream_the_windows_do_not_plan_is_continued_by_no_patch() -> None:
+    """Only a stream whose windows are planned as it runs grows idle rounds."""
+    owner = _operation(8, patches=("A", "B"))
+    segment = _operation(1, patches=("A", "B"))
+    segment = dataclasses.replace(segment, stream_id=8, stream_offset=0)
+    program = program_records.ExecutionProgram(
+        operations=(segment,), dynamic_streams=(owner,)
+    )
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(segment)
+
+    assert streams.extend_live_stream(segment, "A") is False
+    assert qpu.emissions == []
+
+
+def test_a_split_group_leaves_a_member_s_hold_on_another_stream() -> None:
+    """Splitting stream seven's group frees only the patches it holds.
+
+    Patch B went on to stream nine, so when an operation on patch A
+    alone splits seven's group, B still holds nine and continues it.
+    """
+    group_owner = _operation(7, patches=("A", "B"))
+    other_owner = _operation(9, patches=("B",))
+    first = _operation(1, patches=("A",))
+    first = dataclasses.replace(first, stream_id=7, stream_offset=0)
+    second = _operation(2, patches=("B",))
+    second = dataclasses.replace(second, stream_id=9, stream_offset=0)
+    splitter = _operation(3, patches=("A",))
+    waiting = _operation(4, patches=("B",), emits_detector_data=False)
+    operations = (first, second, splitter, waiting)
+    program = program_records.ExecutionProgram(
+        operations=operations, dynamic_streams=(group_owner, other_owner)
+    )
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(4, ("B",)))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(first)
+    streams.begin(second)
+    streams.begin(splitter)
+    streams.begin(waiting)
+
+    assert streams.extend_live_stream(waiting, "B") is True
+    assert qpu.emissions == [(9, 7, 0, False)]
+
+
+def test_a_sealed_stream_is_continued_by_no_idle_patch() -> None:
+    program = _unprotected_group_program()
+    operation = program.operations[0]
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    streams.begin(operation)
+    streams.seal_finished_streams()
+
+    assert windows.seals == [(7, 6)]
+    assert streams.extend_live_stream(operation, "A") is False
+    assert qpu.emissions == []
+
+
+@pytest.mark.parametrize("emits_detector_data", [True, False])
+def test_an_operation_on_part_of_a_group_ends_the_groups_stream(
+    emits_detector_data: bool,
+) -> None:
+    """The group keeps the stream until the operation starts, then none.
+
+    Taking part of the group shrinks the logical qubit's footprint, so
+    the patch left idle holds no stream and its round is the policy's.
+    """
+    follower = _operation(
+        2, patches=("A",), emits_detector_data=emits_detector_data
+    )
+    program = _unprotected_group_program()
+    operations = program.operations + (follower,)
+    program = dataclasses.replace(program, operations=operations)
+    engine = engine_module.Engine()
+    qpu = _RoundLogQpu(engine, idle_group=(1, ("A", "B")))
+    windows = _Windows()
+    streams = _streams(
+        program, regions=(), engine=engine, qpu=qpu, window_manager=windows
+    )
+    segment = program.operations[0]
+    streams.begin(segment)
+    streams.begin(follower)
+    assert streams.extend_live_stream(segment, "B") is True
+    qpu.idle_group = (1, ("B",))
+    extend = functools.partial(streams.extend_live_stream, segment, "B")
+    engine.schedule(1000, extend)
+    engine.run()
+    assert qpu.emissions == [(7, 7, 0, False)]
+    assert streams.extend_live_stream(follower, "A") is False
 
 
 def test_a_partial_idle_group_cannot_advance_its_joint_physical_history() -> (
@@ -161,7 +344,7 @@ def test_a_partial_idle_group_cannot_advance_its_joint_physical_history() -> (
     with pytest.raises(
         RuntimeError, match="cannot extend a partially idle patch group"
     ):
-        streams.extend_live_stream(operation)
+        streams.extend_live_stream(operation, "A")
     assert qpu.emissions == []
 
 
@@ -202,7 +385,7 @@ def _streams(
         streams.qpu = qpu
     if window_manager is not None:
         streams.windows = window_manager
-    streams.load(program)
+    streams.load(program, {})
     return streams
 
 
@@ -377,7 +560,7 @@ def test_every_cadence_change_of_a_protected_region_reaches_the_runtime():
     region = _region(7, 1, 2)
     engine = engine_module.Engine()
     patch = _resolved_patch("p0")
-    qpu = _Qpu()
+    qpu = _Qpu(engine)
     windows = _Windows()
     streams = _streams(
         program,
@@ -464,14 +647,14 @@ def test_the_empty_row_holds_no_operation_and_seals_nothing():
     empty = feedback_streams.NoFeedbackStreams()
     operation = _operation(1, patches=("p0",))
 
-    empty.load(None)
+    empty.load(None, {})
     empty.begin(operation)
     empty.seal_finished_streams()
 
     assert empty.binding_for(1) is None
     assert empty.blocks_start(operation) is False
     assert empty.is_live_protected_patch("p0") is False
-    assert empty.extend_live_stream(operation) is False
+    assert empty.extend_live_stream(operation, "p0") is False
 
 
 def _resolved_patch(patch_identity):
@@ -504,6 +687,13 @@ class _Runtime:
 
 class _Qpu:
     """The protected-round QPU, with opaque stream and patch identities."""
+
+    def __init__(self, engine: engine_module.Engine) -> None:
+        self.engine = engine
+
+    def next_boundary(self) -> int:
+        """The cycle edge at or after now, on the fixture's 1000-tick cycle."""
+        return CYCLE.edge(0, self.engine.now)
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """The protected fixture owns no ordinary idle group."""
@@ -542,8 +732,8 @@ class _Windows:
         del stream_offset
 
     def has_dynamic_stream(self, stream_id: Any) -> bool:
-        """The fixture declares stream seven."""
-        return stream_id == 7
+        """The fixture declares streams seven and nine."""
+        return stream_id in (7, 9)
 
     def seal_stream(self, stream_id, stream_round_count: int) -> None:
         """One sealed stream."""
@@ -563,6 +753,10 @@ class _RoundLogQpu:
         self.attested_lengths: list[tuple] = []
         # a seal at this length differs from the rounds executed
         self.refused_length: Optional[int] = None
+
+    def next_boundary(self) -> int:
+        """The cycle edge at or after now, on the fixture's 1000-tick cycle."""
+        return CYCLE.edge(0, self.engine.now)
 
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """Only the explicitly declared group is idle after that operation."""

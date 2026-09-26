@@ -1,11 +1,12 @@
 """Idle rounds per patch: how they travel and what decode work they cost.
 
 Syndrome extraction never stops, so a patch nobody is operating on
-emits a round every cycle. The QPU reports each one here; the idle policy
-(controller/policies.py) decides how it travels (a feedback-memory round
-of the operation that left the patch, or the next round of a live
-stream) and whether it is charged as decode work (one load-only job per
-commit region of idle rounds, the last one shorter). An operation that
+emits a round every cycle. The QPU reports each one here. A patch that
+holds an unsealed stream sends it as that stream's next round; for any
+other patch the idle policy (controller/policies.py) decides how it
+travels (a feedback-memory round of the operation that left the patch)
+and whether it is charged as decode work (one load-only job per commit
+region of idle rounds, the last one shorter). An operation that
 claims the patch takes the rounds emitted since the last claim, so the
 window manager can prepend them to its plan; the rounds of a patch no
 operation claims again settle when the workload completes. Idle rounds
@@ -65,16 +66,26 @@ class IdleRoundAccounting:
 
         The round is produced, transmitted and accounted; the policy
         decides how it travels and whether it costs decode work. A patch
-        on a live protected stream emits through that stream instead.
+        on a live protected stream emits through that stream instead, and
+        a patch that holds an unsealed stream continues it whatever the
+        policy.
         """
         if self.streams.is_live_protected_patch(patch):
             return
         operation = self.operation_by_id[operation_id]
+        if self.streams.extend_live_stream(operation, patch):
+            return
         self.policy.relay(self, operation, patch, round_index)
         idle = self._idle(patch)
         idle.operation = operation
         idle.unclaimed += 1
         self.trace.idle_round_emitted.fire(operation_id, patch, round_index)
+
+    def bind_at_start(
+        self, command: program_records.RunOperationBody
+    ) -> program_records.RunOperationBody:
+        """The streams bind a continuation after its patches' idle rounds."""
+        return self.streams.bind_at_start(command)
 
     def claim(self, operation) -> int:
         """The idle rounds on the operation's patches since the last claim."""
@@ -110,10 +121,6 @@ class IdleRoundAccounting:
     def emit_memory_round(self, operation, patch, round_index: int) -> None:
         """The round travels as a feedback-memory round of the operation."""
         self.qpu.emit_feedback_memory_round(operation.id, patch, round_index)
-
-    def extend_live_stream(self, operation: program_records.Operation) -> bool:
-        """Advance the operation's live physical group once per cycle."""
-        return self.streams.extend_live_stream(operation)
 
     def submit_idle_decode_if_due(self, operation, patch, round_index) -> None:
         """Count one idle round toward the patch's next decode job.

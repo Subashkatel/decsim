@@ -1,8 +1,10 @@
 """How an idle round of a waiting patch travels: the idle policy rows.
 
-idle_policy.kind names one of Ignore, ExtendStream or SeparateDecodeJobs;
-each fills the IdlePolicy seam (decsim/ports.py). The boundary policy
-rows live beside the windows they ship for (windows/boundary_policies.py).
+idle_policy.kind names one of Ignore or SeparateDecodeJobs; each fills
+the IdlePolicy seam (decsim/ports.py). The boundary policy rows live
+beside the windows they ship for (windows/boundary_policies.py). A patch
+that holds a stream never reaches a policy: its idle rounds continue the
+stream (controller/idle_rounds.py).
 
 Idle rounds are real decoder workload. Terhal's backlog bound sets the
 rate syndrome bits are generated, rgen, against the rate they are
@@ -29,26 +31,6 @@ class Ignore:
     def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
         """Send the round as a memory round."""
         idle_rounds.emit_memory_round(operation, patch, round_index)
-
-    def end_idle_period(self, idle_rounds, operation, patch) -> None:
-        """Nothing was charged, so nothing settles."""
-        del idle_rounds
-        del operation
-        del patch
-
-
-class ExtendStream:
-    """Idle rounds extend the operation's live stream when it has one.
-
-    They travel as memory rounds otherwise. The stream rounds carry
-    sampled content and are decoded: the XQsim continuous-stream shape.
-    """
-
-    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
-        """Extend the live stream, or send a memory round."""
-        extended = idle_rounds.extend_live_stream(operation)
-        if not extended:
-            idle_rounds.emit_memory_round(operation, patch, round_index)
 
     def end_idle_period(self, idle_rounds, operation, patch) -> None:
         """Nothing was charged, so nothing settles."""

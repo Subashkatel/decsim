@@ -25,6 +25,7 @@ The idle accounting, as the QPU sees it: it takes every idle round.
 | Method | What it does |
 | --- | --- |
 | `emit_idle_round` | Take one idle cycle of a patch nobody is operating on. |
+| `bind_at_start` | The command as it starts after its patches' idle rounds. |
 
 ## the store holds the packed round
 

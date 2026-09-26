@@ -180,9 +180,9 @@ def test_the_last_release_stops_the_qpu():
     issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
 
-    issuer.after_successor_release(operation, False, False)
+    issuer.after_successor_release(operation, False)
     running = qpu.finished
-    issuer.after_successor_release(operation, False, True)
+    issuer.after_successor_release(operation, True)
 
     assert running is False
     assert qpu.finished is True
@@ -196,9 +196,9 @@ def test_the_last_release_settles_every_idle_patch():
     issuer = issuer_with(engine, qpu, idle_rounds, windows, None)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
 
-    issuer.after_successor_release(operation, False, False)
+    issuer.after_successor_release(operation, False)
     settled_before_the_end = list(idle_rounds.ended)
-    issuer.after_successor_release(operation, False, True)
+    issuer.after_successor_release(operation, True)
 
     assert settled_before_the_end == []
     assert idle_rounds.ended == ["every idle patch"]

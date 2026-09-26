@@ -1206,7 +1206,7 @@ pauli_frame:
                                    # (one cycle, XQsim PFU)
 
 idle_policy:
-  kind: separate_decode_jobs       # separate_decode_jobs | ignore | extend_stream.
+  kind: separate_decode_jobs       # separate_decode_jobs | ignore.
                                    # How an idle patch's rounds are charged; idle
                                    # rounds are decoder workload, since the backlog
                                    # bound counts every generated syndrome bit

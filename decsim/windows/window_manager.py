@@ -209,11 +209,18 @@ class WindowManager:
         self.results.finish_workload_if_ready()
 
     def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
-        """Mark a live stream round as a measurement-closed boundary."""
+        """Mark a live stream round as a measurement-closed boundary.
+
+        The window whose commit region holds the boundary commits through
+        it, and the next window starts after it. A finite source's
+        windows are its own, and it closes only at its end.
+        """
         if not self.planner.has_stream(stream_id):
             return
         self.tracker.close_boundary(stream_id, stream_round_count)
         self._grow_stream(stream_id, stream_round_count, None)
+        if not self.planner.is_finite_stream(stream_id):
+            self.planner.trim_stream_tail(stream_id, stream_round_count)
         self._refresh_unqueued_stream_windows(stream_id)
         self.check_windows_for_operation(stream_id)
 
@@ -223,6 +230,14 @@ class WindowManager:
             if window.queued or window.committed:
                 continue
             self.retention.replace_window_reads(window.key, window)
+
+    def _cut_stream_after(self, stream_id, last_round: int) -> None:
+        """End a window of the stream on the round; refresh one clipped."""
+        clipped = self.planner.cut_stream_after(stream_id, last_round)
+        if clipped is None:
+            return
+        self.planner.refresh_stream_models(stream_id)
+        self._refresh_unqueued_stream_windows(stream_id)
 
     def has_dynamic_stream(self, stream_id) -> bool:
         """True for a stream whose windows are planned at runtime."""
@@ -420,8 +435,21 @@ class WindowManager:
     def bind_stream_operation(
         self, operation_id: int, stream_id, stream_offset: int
     ) -> None:
-        """Note which stream and offset a segment's rounds fold into."""
+        """Note which stream and offset a segment's rounds fold into.
+
+        The segment's first round starts a window of its stream and its
+        last round ends one, the interval its result reads
+        (operation_results.py), so its result is a sum over whole
+        windows even when idle rounds of the stream come before or after
+        it.
+        """
         self.results.bind_stream_segment(operation_id, stream_id, stream_offset)
+        if not self.planner.has_stream(stream_id):
+            return
+        round_count = self.planner.round_count_of(operation_id)
+        segment_end = stream_offset + round_count
+        self._cut_stream_after(stream_id, stream_offset)
+        self._cut_stream_after(stream_id, segment_end)
 
     def bind_required_stream_end(
         self, operation_id: int, required_stream_end: int

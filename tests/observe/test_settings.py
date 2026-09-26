@@ -147,9 +147,8 @@ def test_a_list_of_referees_is_refused_with_the_rows_by_name():
 
 def test_every_study_knob_is_read_from_the_section():
     """The five knobs the Machine builds listeners for are yaml keys."""
-    text = "observation:\n"
-    for knob in STUDY_KNOBS:
-        text += f"  {knob}: true\n"
+    knob_lines = [f"  {knob}: true\n" for knob in STUDY_KNOBS]
+    text = "observation:\n" + "".join(knob_lines)
     section = _section(text)
 
     settings = observe_settings.ObservationSettings.from_yaml(section)

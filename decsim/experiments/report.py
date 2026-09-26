@@ -123,6 +123,13 @@ SHOT_SUMS = (
     "strong_decoded_rounds",
 )
 SHOT_TRUE_COUNTS = ("logical_failure", "direct_failure", "direct_mismatch")
+# the burst detector's shot columns, counted true per point when a run
+# with a detector wrote them: a first flag round is true when the
+# detector flagged a round, since rounds count from 1 and 0 is none
+BURST_SHARES = {
+    "burst_first_flag_round": "flagged_share",
+    "burst_caught_in_time": "caught_in_time_share",
+}
 # the files a fold reads row by row and writes back out, which one
 # header each: the folders of one fold hold the same columns in them
 FOLDED_FILES = (
@@ -283,6 +290,7 @@ def summarize_point(point: tuple, totals, counts: dict) -> dict:
     }
     _add_pool_columns(row, totals, round_period_microseconds)
     _add_load_columns(row, totals)
+    _add_burst_columns(row, totals)
     for name in _points_held(totals.means):
         multiset = counts.get((point, name), {})
         _add_latency_point_columns(row, totals, name, multiset)
@@ -815,6 +823,18 @@ def _add_load_columns(row: dict, totals) -> None:
     row["escalated_fraction"] = escalated / windows
 
 
+def _add_burst_columns(row: dict, totals) -> None:
+    """The share of the point's shots flagged, and caught in time.
+
+    On shots with no burst the flagged share is the share holding a
+    false alarm; over one shot's time it is the false-alarm rate.
+    """
+    for column, share in BURST_SHARES.items():
+        if column in totals.true_counts:
+            flagged = totals.true_counts[column]
+            row[share] = flagged / totals.rows
+
+
 def strong_service_bound_us(totals, round_period_microseconds: float) -> float:
     """Toshio's Theorem 1 bound on one strong decode's time, per point.
 
@@ -847,6 +867,7 @@ def _shot_totals(row: dict) -> fold.RowTotals:
     means = _held_by(row, SHOT_MEANS)
     maxes = _held_by(row, SHOT_MAXES)
     sums = _held_by(row, SHOT_SUMS)
+    burst_counts = _held_by(row, tuple(BURST_SHARES))
     for name in _points_held(row):
         means.append(f"{name}_mean_us")
         maxes.append(f"{name}_max_us")
@@ -854,7 +875,7 @@ def _shot_totals(row: dict) -> fold.RowTotals:
         means=means,
         maxes=maxes,
         sums=sums,
-        true_counts=SHOT_TRUE_COUNTS,
+        true_counts=(*SHOT_TRUE_COUNTS, *burst_counts),
     )
 
 

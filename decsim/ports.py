@@ -1945,7 +1945,13 @@ class BurstDetector(Protocol):
     Both answers read only the rounds the detector has published by the
     engine's current tick, so its own latency delays them. The model is
     the detector error model's record, named here by position only.
+
+    trace holds round_flagged(operation_id, round_index), fired for each
+    round the detector fires on; it is on the port because the machine
+    connects the run's burst flag record to whatever answers this port.
     """
+
+    trace: Any
 
     def observe_round(
         self, operation_id: Any, round_index: int, events: Sequence[int]

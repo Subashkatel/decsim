@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
+import decsim.observe.burst_flags as burst_flags_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -113,6 +114,8 @@ def observe(
         observation, engine, decoder_managers
     )
     frame_corrections = _frame_corrections(pauli_frame)
+    burst_detector = seats.get("burst_detector")
+    burst_flags = _connect_burst_flags(burst_detector)
     flight_recorder = flight_recorder_module.FlightRecorder(
         round_events,
         window_ledger,
@@ -143,6 +146,7 @@ def observe(
         decoder_memory_occupancy=decoder_memory_occupancy,
         round_events=round_events,
         syndrome_buffer_occupancy=syndrome_buffer_occupancy,
+        burst_flags=burst_flags,
     )
 
 
@@ -547,6 +551,17 @@ def _frame_corrections(
         corrections.correction_committed
     )
     return corrections
+
+
+def _connect_burst_flags(
+    burst_detector,
+) -> Optional[burst_flags_module.BurstFlags]:
+    """The rounds the detector fired on; a run without one has none."""
+    if burst_detector is None:
+        return None
+    flags = burst_flags_module.BurstFlags()
+    burst_detector.trace.round_flagged.connect(flags.round_flagged)
+    return flags
 
 
 def _decoder_utilization(

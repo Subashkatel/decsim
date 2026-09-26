@@ -57,6 +57,7 @@ import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
 
 # Q3DE's counter confidence, 1 - alpha = 0.99 (2501.00331 lines
 # 1076-1078): a position is in the flagged region when its count reaches
@@ -121,6 +122,9 @@ class EventCountBurstDetector:
     its events and frozen while the detector fires, as Q3DE removes the
     flagged positions from its count for the burst's lifetime (lines
     730-733).
+
+    Trace source: round_flagged(operation_id, round_index) when a round
+    fires.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -191,6 +195,7 @@ class EventCountBurstDetector:
         self.settings = settings
         self.engine = engine
         self.counts_by_operation = _counts_by_operation(circuits, settings)
+        self.trace = _TraceSources()
 
     def observe_round(
         self, operation_id: Any, round_index: int, events: Sequence[int]
@@ -204,7 +209,9 @@ class EventCountBurstDetector:
             self.settings.clock,
             self.settings.cycles_per_round,
         )
-        counts.count_round(round_index, events, published_tick)
+        is_firing = counts.count_round(round_index, events, published_tick)
+        if is_firing:
+            self.trace.round_flagged.fire(operation_id, round_index)
 
     def is_burst_window(self, window: window_records.Window) -> bool:
         """Whether a flag published by now meets the window's rounds."""
@@ -230,6 +237,9 @@ class MaskedRegionalCusumBurstDetector:
     One chart bank per operation, calibrated at build from that
     operation's own circuit, the calibration Q3DE assumes is known in
     advance (2501.00331 lines 1078-1080).
+
+    Trace source: round_flagged(operation_id, round_index) when a round
+    fires.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -306,6 +316,7 @@ class MaskedRegionalCusumBurstDetector:
         self.charts_by_operation = _charts_by_operation(
             circuits, settings, round_period_microseconds
         )
+        self.trace = _TraceSources()
 
     def observe_round(
         self, operation_id: Any, round_index: int, events: Sequence[int]
@@ -320,7 +331,9 @@ class MaskedRegionalCusumBurstDetector:
         published_tick = _publication_tick(
             self.engine, newest, self.settings.clock, cycles
         )
-        charts.score_round(round_index, events, published_tick)
+        is_firing = charts.score_round(round_index, events, published_tick)
+        if is_firing:
+            self.trace.round_flagged.fire(operation_id, round_index)
 
     def is_burst_window(self, window: window_records.Window) -> bool:
         """Whether a flag published by now meets the window's rounds."""
@@ -426,6 +439,13 @@ def tail_law(priors: Any, incidence: Any, smallest_false_alarms: float):
         fault_rates, incidence, largest_fault_count, generator
     )
     return TailLaw(fault_rate, conditional_tails)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event a burst detector reports, as one member."""
+
+    round_flagged: trace_source.TraceSource = trace_source.new_source()
 
 
 @dataclasses.dataclass(frozen=True)

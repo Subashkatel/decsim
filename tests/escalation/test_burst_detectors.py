@@ -20,6 +20,7 @@ import decsim.engine as engine_module
 import decsim.escalation.burst_detectors as burst_detectors
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
+import decsim.observe.burst_flags as burst_flags
 import decsim.qpu.stim_device as stim_device
 import decsim.records.windows as window_records
 
@@ -223,6 +224,33 @@ def test_the_row_none_takes_no_keys():
     section = {"kind": "none", "patch_window_rounds": 4}
     with pytest.raises(ValueError, match="burst_detector does not know"):
         escalation_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+
+
+def test_the_row_none_takes_no_catch_deadline():
+    section = {"kind": "none", "catch_deadline_rounds": 300}
+    with pytest.raises(ValueError, match="burst_detector does not know"):
+        escalation_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+
+
+def test_the_catch_deadline_is_a_whole_number_of_rounds():
+    section = {"kind": "event_count", "catch_deadline_rounds": -1}
+    with pytest.raises(ValueError, match="catch_deadline_rounds must be"):
+        escalation_settings.BurstDetectorSettings.from_yaml(section, CLOCKS)
+
+
+def test_the_catch_deadline_reaches_the_section():
+    default_section = {"kind": "event_count"}
+    written_section = {"kind": "event_count", "catch_deadline_rounds": 0}
+
+    default = escalation_settings.BurstDetectorSettings.from_yaml(
+        default_section, CLOCKS
+    )
+    written = escalation_settings.BurstDetectorSettings.from_yaml(
+        written_section, CLOCKS
+    )
+
+    assert default.catch_deadline_rounds == 300
+    assert written.catch_deadline_rounds == 0
 
 
 def test_a_priced_count_needs_a_clock():
@@ -1201,3 +1229,23 @@ def test_the_cusum_keys_reach_the_rows_settings():
     assert settings.fault_rate_multipliers == (3.0,)
     assert settings.datapaths == 2
     assert settings.clock == CLOCKS.clock("fridge")
+
+
+@pytest.mark.parametrize(
+    ("build", "row"),
+    [
+        (_detector, burst_detectors.EventCountBurstDetector),
+        (_cusum_detector, CUSUM),
+    ],
+)
+def test_each_row_reports_every_round_it_fires_on(build, row):
+    """Quiet to round 11, every check loud from 12 to 17."""
+    settings = row.Settings()
+    detector = build(settings)
+    flags = burst_flags.BurstFlags()
+    detector.trace.round_flagged.connect(flags.round_flagged)
+    quiet_before = _quiet_rounds(11)
+    loud = [BULK_ROUND_LOUD] * 6
+    _feed(detector, [*quiet_before, *loud])
+
+    assert flags.flagged_rounds == [12, 13, 14, 15, 16, 17]

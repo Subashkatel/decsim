@@ -583,6 +583,10 @@ Whether and when a window is decoded again by the strong tier.
 
 Whether an error burst is under way, read off the detection events.
 
+| Member | Type |
+| --- | --- |
+| `trace` | `Any` |
+
 | Method | What it does |
 | --- | --- |
 | `observe_round` | Count one round's detection events, in detector order. |

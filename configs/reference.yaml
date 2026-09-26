@@ -300,6 +300,15 @@ burst_detector:
                                    # (refused under none, so documented as
                                    # comments):
 # burst_detector:
+#   catch_deadline_rounds: 300     # either row: a flag at most this many
+#                                  # rounds after a burst_stim burst's onset
+#                                  # catches it in time, the shots.csv
+#                                  # column burst_caught_in_time and the
+#                                  # sweep.csv caught_in_time_share. 300 is
+#                                  # the burst study's deadline, half a
+#                                  # radiation burst's 600-round decay
+#
+# burst_detector:
 #   kind: event_count              # the simple count baseline: the patch's
 #                                  # detection events over a window, the
 #                                  # Hamming weight of Tan 2406.18897

@@ -178,6 +178,7 @@ def switching_run(
     observation: tuple = (),
     patch_count: int = 1,
     commit_rounds: Optional[int] = None,
+    sections: Optional[dict] = None,
 ):
     """One collected shot of a 1.0 us weak tier beside a 10.0 us one.
 
@@ -188,7 +189,7 @@ def switching_run(
     2510.25222 Sec. III A step 1. observation names the section's flags
     the shot turns on; more than one patch runs the memory_patches maker;
     commit_rounds sets windows.commit_rounds, the code distance when
-    None.
+    None; sections replaces whole sections last.
     """
     raw = dict(MINIMAL_CONFIG)
     windows = dict(MINIMAL_CONFIG["windows"])
@@ -231,6 +232,8 @@ def switching_run(
             "release_cycles_per_round": 0,
         },
     }
+    if sections is not None:
+        raw.update(sections)
     config_path = tmp_path / "switching.yaml"
     config_text = yaml.safe_dump(raw)
     config_path.write_text(config_text)
@@ -1469,3 +1472,78 @@ def test_a_source_that_samples_no_shot_is_refused_with_a_sentence(tmp_path):
             round_period_microseconds=1.0,
             seed=0,
         )
+
+
+# A whole-patch burst from round 12 on the 30-round switching shot; the
+# masked regional CUSUM, at its per-second budget over a 30 us shot,
+# first fires on round 21 at seed 0, nine rounds after the onset
+BURST_ONSET_ROUND = 12
+FIRST_FLAG_ROUND = 21
+
+
+def burst_detector_shot(
+    tmp_path, burst_error_probability: float, catch_deadline_rounds=300
+):
+    """One switching shot with the masked regional CUSUM watching it."""
+    qpu = {
+        "kind": "burst_stim",
+        "burst_onset_round": BURST_ONSET_ROUND,
+        "burst_error_probability": burst_error_probability,
+    }
+    detector = {
+        "kind": "masked_regional_cusum",
+        "catch_deadline_rounds": catch_deadline_rounds,
+    }
+    sections = {"qpu": qpu, "burst_detector": detector}
+    shot = switching_run(tmp_path, 0.0, sections=sections)
+    return measure.measure_shot(shot)
+
+
+def test_a_burst_shot_records_its_first_flag_and_a_catch_in_time(tmp_path):
+    """Delay 9 is inside a 9-round deadline and outside an 8-round one.
+
+    The burst study's catch within k is a delay of at most k (PROTOCOL.md
+    section 3), so the deadline is inclusive.
+    """
+    in_time = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
+    late = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
+
+    assert in_time.burst_first_flag_round == FIRST_FLAG_ROUND
+    assert in_time.burst_caught_in_time is True
+    assert late.burst_first_flag_round == FIRST_FLAG_ROUND
+    assert late.burst_caught_in_time is False
+
+
+def test_a_shot_with_no_burst_records_no_flag_and_no_catch(tmp_path):
+    """A burst of probability 0 draws the operation's own circuit."""
+    quiet = burst_detector_shot(tmp_path, 0.0)
+
+    assert quiet.burst_first_flag_round == 0
+    assert quiet.burst_caught_in_time is None
+
+
+def test_the_point_holds_the_shares_flagged_and_caught_in_time(tmp_path):
+    caught = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
+    late = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
+    quiet = burst_detector_shot(tmp_path, 0.0)
+    burst_record = report.record_of([caught, late])
+    quiet_record = report.record_of([quiet])
+
+    burst_rows = report.summarize(burst_record.shots, [])
+    quiet_rows = report.summarize(quiet_record.shots, [])
+
+    assert burst_rows[0]["flagged_share"] == 1.0
+    assert burst_rows[0]["caught_in_time_share"] == 0.5
+    assert quiet_rows[0]["flagged_share"] == 0.0
+    assert "caught_in_time_share" not in quiet_rows[0]
+
+
+def test_a_run_without_a_detector_writes_no_burst_column(tmp_path):
+    measurement = switching_shot(tmp_path, 1000000.0)
+    record = report.record_of([measurement])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert "burst_first_flag_round" not in record.shots[0]
+    assert "burst_caught_in_time" not in record.shots[0]
+    assert "flagged_share" not in rows[0]
+    assert "caught_in_time_share" not in rows[0]

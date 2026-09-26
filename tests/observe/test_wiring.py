@@ -362,6 +362,7 @@ def _bare_observation(
         syndrome_buffer_occupancy=None,
         referee_audit=audit,
         sampled_shots=shots,
+        burst_flags=None,
     )
 
 

@@ -251,6 +251,7 @@ docstring.
 ### observe
 
 - `decsim/observe/__init__.py`: Observation: every listener of a run, and the files a run leaves behind.
+- `decsim/observe/burst_flags.py`: The rounds the burst detector fired on, for a shot's catch columns.
 - `decsim/observe/command_events.py`: When each command arrived at the QPU and when it started.
 - `decsim/observe/controller_counters.py`: The controller's counters: how many idle rounds it emitted.
 - `decsim/observe/data_movement.py`: How often a run copied bits, referenced them and moved them.

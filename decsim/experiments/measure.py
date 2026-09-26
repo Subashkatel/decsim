@@ -29,6 +29,7 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
+import decsim.qpu.stim_device as stim_device
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.transfers as transfer_records
@@ -196,6 +197,13 @@ class ShotMeasurement:
     # where this shot's Chrome trace was written, None when the shot was
     # not one of observation.trace_shots; the residence table reads it
     trace_path: Optional[str]
+    # the burst detector's first flagged round at or after the burst's
+    # onset, from round 1 on a shot with no burst, 0 when it flagged none;
+    # and whether that flag came within burst_detector.catch_deadline_rounds
+    # of the onset. None, and no column, without a detector; the second
+    # is None on a shot with no burst
+    burst_first_flag_round: Optional[int]
+    burst_caught_in_time: Optional[bool]
 
 
 def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
@@ -762,6 +770,7 @@ def _measurement(
     totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
+    catch = _burst_catch(settings, observation)
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
         distance=distance,
@@ -801,7 +810,51 @@ def _measurement(
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,
         trace_path=trace_path,
+        burst_first_flag_round=catch.first_flag_round,
+        burst_caught_in_time=catch.caught_in_time,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class _BurstCatch:
+    """The detector's first flag after the burst's onset, and if in time."""
+
+    first_flag_round: Optional[int] = None
+    caught_in_time: Optional[bool] = None
+
+
+def _burst_catch(
+    settings: machine_settings.MachineSettings,
+    observation: observation_module.Observation,
+) -> _BurstCatch:
+    """The burst study's catch: its first alarm at or after the onset.
+
+    A burst is caught within k rounds when that alarm's delay from the
+    onset is at most k (burst study PROTOCOL.md section 3). A shot with
+    no burst counts from round 1, so any flag on it is a false alarm.
+    """
+    flags = observation.burst_flags
+    if flags is None:
+        return _BurstCatch()
+    onset_round = _burst_onset_round(settings.qpu.row_settings)
+    if onset_round is None:
+        first_flag_round = flags.first_flag_from(1)
+        return _BurstCatch(first_flag_round)
+    first_flag_round = flags.first_flag_from(onset_round)
+    delay = first_flag_round - onset_round
+    deadline = settings.burst_detector.catch_deadline_rounds
+    is_caught = first_flag_round > 0 and delay <= deadline
+    return _BurstCatch(first_flag_round, is_caught)
+
+
+def _burst_onset_round(qpu_row_settings) -> Optional[int]:
+    """The burst's first round; None when the shot draws no burst."""
+    burst_settings = stim_device.BurstStimDevice.Settings
+    if not isinstance(qpu_row_settings, burst_settings):
+        return None
+    if qpu_row_settings.burst_error_probability == 0:
+        return None
+    return qpu_row_settings.burst_onset_round
 
 
 @dataclasses.dataclass(frozen=True)

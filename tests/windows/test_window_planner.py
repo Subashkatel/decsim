@@ -305,20 +305,13 @@ def test_a_closed_boundary_ends_a_commit_region_and_restarts_the_stride(
     stream_round_count = boundary + 7
     planner.grow_stream("stream", stream_round_count, stream_round_count)
     planner.trim_stream_tail("stream", stream_round_count)
-    commits = [
-        (window.commit_lo, window.commit_hi)
-        for window in planner.windows_of("stream")
-    ]
-    after = [commit for commit in commits if commit[0] > boundary]
+    commits = _commit_spans(planner)
+    after = _spans_after(commits, boundary)
     first_round_after = boundary + 1
     assert after[0][0] == first_round_after
-    covered = []
-    for commit_lo, commit_hi in commits:
-        stop = commit_hi + 1
-        covered.extend(range(commit_lo, stop))
     after_last_round = stream_round_count + 1
     every_round = range(1, after_last_round)
-    assert covered == list(every_round)
+    assert _rounds_covered(commits) == list(every_round)
     stride_ends = [commit_hi for _, commit_hi in after[:-1]]
     first_stride_end = boundary + 3
     second_stride_end = boundary + 6
@@ -361,10 +354,7 @@ def test_a_cut_on_a_window_edge_leaves_the_stride():
     planner.grow_stream("stream", 4, None)
     assert planner.cut_stream_after("stream", 6) is None
     planner.grow_stream("stream", 7, None)
-    commits = [
-        (window.commit_lo, window.commit_hi)
-        for window in planner.windows_of("stream")
-    ]
+    commits = _commit_spans(planner)
     assert commits == [(1, 3), (4, 6), (7, 9)]
 
 
@@ -383,19 +373,12 @@ def test_a_finite_stream_cut_replans_the_rounds_after_it(
     planner.grow_stream("stream", known_round, None)
     planner.cut_stream_after("stream", 4)
     planner.grow_stream("stream", 12, None)
-    commits = [
-        (window.commit_lo, window.commit_hi)
-        for window in planner.windows_of("stream")
-    ]
+    commits = _commit_spans(planner)
     scheme = sliding_scheme.SlidingWindowScheme()
     rest = scheme.plan_operation(
         "stream", 8, commit_round_count=3, buffer_round_count=2
     )
-    rest_commits = []
-    for geometry in rest.windows:
-        commit_lo = geometry.commit_lo + 4
-        commit_hi = geometry.commit_hi + 4
-        rest_commits.append((commit_lo, commit_hi))
+    rest_commits = _shifted_spans(rest.windows, 4)
     assert commits[:2] == [(1, 3), (4, 4)]
     assert commits[2:] == rest_commits
 
@@ -409,11 +392,40 @@ def test_a_cut_in_a_finite_stream_s_laid_last_window_plans_the_rest():
     planner.grow_stream("stream", 10, None)
     planner.cut_stream_after("stream", 10)
     planner.grow_stream("stream", 12, None)
-    commits = [
+    commits = _commit_spans(planner)
+    assert commits == [(1, 3), (4, 6), (7, 10), (11, 12)]
+
+
+def _commit_spans(planner: window_planner.WindowPlanner) -> list:
+    """(commit_lo, commit_hi) of each window of the stream, in order."""
+    return [
         (window.commit_lo, window.commit_hi)
         for window in planner.windows_of("stream")
     ]
-    assert commits == [(1, 3), (4, 6), (7, 10), (11, 12)]
+
+
+def _spans_after(spans: list, last_round: int) -> list:
+    """The spans that commit only rounds after the given one."""
+    return [span for span in spans if span[0] > last_round]
+
+
+def _rounds_covered(spans: list) -> list:
+    """Every round the spans commit, in their order."""
+    covered = []
+    for commit_lo, commit_hi in spans:
+        stop = commit_hi + 1
+        covered.extend(range(commit_lo, stop))
+    return covered
+
+
+def _shifted_spans(geometries: tuple, round_shift: int) -> list:
+    """The geometries' commit spans, later by the shift."""
+    spans = []
+    for geometry in geometries:
+        commit_lo = geometry.commit_lo + round_shift
+        commit_hi = geometry.commit_hi + round_shift
+        spans.append((commit_lo, commit_hi))
+    return spans
 
 
 def test_idle_rounds_fold_only_into_a_batch_style_operation():

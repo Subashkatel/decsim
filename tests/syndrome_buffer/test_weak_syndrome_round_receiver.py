@@ -342,7 +342,7 @@ def test_write_cycles_move_every_reaction_point_by_the_store_periods():
     charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
-    paired = zip(charged_ticks, free_ticks)
+    paired = zip(charged_ticks, free_ticks, strict=True)
     shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
     expected = 3 * settings.clock.period_ticks
     assert shifts == [expected] * 6

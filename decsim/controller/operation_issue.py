@@ -12,7 +12,8 @@ on_started, so the issuer never calls the runtime.
 
 import dataclasses
 import types
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.idle_rounds as idle_rounds_module

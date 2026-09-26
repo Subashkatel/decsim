@@ -22,7 +22,8 @@ one, a job holds the unit from first stage to release.
 
 import dataclasses
 import math
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module

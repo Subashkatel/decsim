@@ -540,7 +540,9 @@ class _OperationCounts:
         calibrated_rates = self.calibration.calibrated_rates
         rate_scales = _rate_scales(self.tracked_rates, calibrated_rates)
         thresholds = []
-        for law, rate_scale in zip(self.calibration.position_laws, rate_scales):
+        for law, rate_scale in zip(
+            self.calibration.position_laws, rate_scales, strict=True
+        ):
             threshold = law.threshold(false_alarms, rate_scale)
             thresholds.append(threshold)
         return numpy.asarray(thresholds)
@@ -933,7 +935,7 @@ def _mean_rate(flagged_rows: list, is_in_region) -> float:
 
 def _positions_where(positions: tuple, is_in_region) -> frozenset:
     members = []
-    for position, is_member in zip(positions, is_in_region):
+    for position, is_member in zip(positions, is_in_region, strict=True):
         if is_member:
             members.append(position)
     return frozenset(members)
@@ -955,7 +957,7 @@ def _episodes(firing_windows: list) -> list:
         last_rounds.append(round_index)
     newest_round = len(firing_windows)
     episodes = []
-    for first_round, last_round in zip(first_rounds, last_rounds):
+    for first_round, last_round in zip(first_rounds, last_rounds, strict=True):
         is_open = last_round == newest_round
         episode = _Episode(first_round, last_round, is_open)
         episodes.append(episode)

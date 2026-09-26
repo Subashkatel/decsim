@@ -28,7 +28,8 @@ src/mem/simple_mem.cc:154-174).
 """
 
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.engine as engine_module
 import decsim.ports as ports

@@ -14,7 +14,7 @@ and a listener connects to all of them by name.
 """
 
 import dataclasses
-from typing import Callable
+from collections.abc import Callable
 
 
 class TraceSource:

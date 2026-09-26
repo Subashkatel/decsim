@@ -249,7 +249,7 @@ class StrongSyndromeRoundReceiver:
             self._land(packets[0], packet_bits[0], hop)
             packets = packets[1:]
             packet_bits = packet_bits[1:]
-        for packet, bits in zip(packets, packet_bits):
+        for packet, bits in zip(packets, packet_bits, strict=True):
             fragments = self.detection_events.form_at(
                 _SEAT, packet.fragments, round_before
             )

@@ -495,7 +495,7 @@ def _row_line(key: str, value: ast.AST, module, checkout) -> str:
 def _row_lines(node: ast.Dict, module: pathlib.Path, checkout) -> list:
     """Every row of one table, in the order the code declares them."""
     lines = []
-    pairs = zip(node.keys, node.values)
+    pairs = zip(node.keys, node.values, strict=True)
     for key_node, value in pairs:
         key = key_node.value
         line = _row_line(key, value, module, checkout)

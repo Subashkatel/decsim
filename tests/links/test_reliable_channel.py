@@ -98,7 +98,7 @@ def seed_losing(pattern):
     for seed in range(2_000_000):
         generator = random.Random(seed)
         draws = [generator.random() for _ in pattern]
-        pairs = list(zip(draws, pattern))
+        pairs = list(zip(draws, pattern, strict=True))
         lost_draws = [draw for draw, is_lost in pairs if is_lost]
         kept_draws = [draw for draw, is_lost in pairs if not is_lost]
         highest_lost = max(lost_draws, default=0.0)
@@ -332,7 +332,7 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
         credit = credit_channel.CreditChannel(credit_settings, engine)
         by_reliable = []
         by_credit = []
-        for arrival, payload in zip(arrivals, sizes):
+        for arrival, payload in zip(arrivals, sizes, strict=True):
             send_at(engine, reliable, arrival, payload, by_reliable)
             send_at(engine, credit, arrival, payload, by_credit)
         engine.run()
@@ -355,7 +355,7 @@ def test_every_message_arrives_once_in_order_under_loss_property():
         )
         channel = seeded_channel(engine, settings, trace)
         delivered = []
-        for arrival, payload in zip(arrivals, sizes):
+        for arrival, payload in zip(arrivals, sizes, strict=True):
             send_at(engine, channel, arrival, payload, delivered)
         engine.run()
         sequences = [transfer.physical_sequence for transfer in delivered]

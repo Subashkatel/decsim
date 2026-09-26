@@ -464,7 +464,7 @@ def _growth_steps(
     hop_counts = _prefix(step_hop_counts, step_count)
     growth_ticks = _prefix(step_growth_ticks, step_count)
     fusion_kinds = _prefix(step_fusion_kinds, step_count)
-    rows = zip(edge_counts, hop_counts, growth_ticks, fusion_kinds)
+    rows = zip(edge_counts, hop_counts, growth_ticks, fusion_kinds, strict=True)
     steps = []
     for edge_count, hop_count, ticks, kind in rows:
         fusion = evidence_records.FUSION_KINDS[kind]

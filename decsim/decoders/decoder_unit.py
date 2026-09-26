@@ -25,7 +25,8 @@ compute and the input slots are freed at the decode's end as before.
 
 import dataclasses
 import math
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.records.decoding as decoding_records

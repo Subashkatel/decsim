@@ -552,7 +552,7 @@ def _check_region_bounds(
 
 
 def _is_nondecreasing(values: tuple) -> bool:
-    for left, right in zip(values, values[1:]):
+    for left, right in zip(values, values[1:], strict=False):
         if right < left:
             return False
     return True

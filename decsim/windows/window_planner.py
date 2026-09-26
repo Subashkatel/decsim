@@ -468,7 +468,7 @@ class WindowPlanner:
             _refuse_reads_past_the_model(
                 operation, windows, models, resolved.round_count
             )
-        for window, model in zip(windows, models):
+        for window, model in zip(windows, models, strict=True):
             self.models.model_by_window[window.key] = model
 
     def _create_stream_window(
@@ -545,7 +545,7 @@ def _refuse_reads_past_the_model(
     middle of the run (decoders/decoder_memory.py). The flush terminal
     policy ends the last window inside its operation.
     """
-    for window, model in zip(windows, models):
+    for window, model in zip(windows, models, strict=True):
         if model is None:
             continue
         if window.buffer_hi <= round_count:

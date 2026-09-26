@@ -17,7 +17,7 @@ simulated interval.
 
 import dataclasses
 import functools
-from typing import Callable
+from collections.abc import Callable
 
 import decsim.config as config
 import decsim.engine as engine_module

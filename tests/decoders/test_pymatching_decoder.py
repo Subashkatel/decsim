@@ -114,7 +114,7 @@ def test_the_row_predicts_what_sinters_pymatching_row_predicts():
     graphs = row.compiled_for(faults, model)
     matching = graphs.plain
     ties = 0
-    for shot, predicted in zip(detection_events, predictions):
+    for shot, predicted in zip(detection_events, predictions, strict=True):
         job = windows.job_for(model, shot)
         result = row.decode(job)
         prediction = int(predicted[0])

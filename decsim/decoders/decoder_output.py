@@ -24,7 +24,8 @@ side's record and leaves by the object that holds it
 """
 
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.engine as engine_module
 import decsim.ports as ports

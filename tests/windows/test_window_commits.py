@@ -324,7 +324,7 @@ def test_threshold_cycles_delay_kept_and_escalated_frame_points(probability):
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
-    paired = zip(charged_ticks, free_ticks)
+    paired = zip(charged_ticks, free_ticks, strict=True)
     shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
     expected = 3 * clock.period_ticks
     assert shifts == [0, 0, 0, 0, expected, expected]
@@ -345,7 +345,7 @@ def test_switch_cycles_delay_the_strong_request_and_frame_points():
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
-    paired = zip(charged_ticks, free_ticks)
+    paired = zip(charged_ticks, free_ticks, strict=True)
     shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
     expected = 3 * clock.period_ticks
     assert shifts == [0, 0, 0, 0, expected, expected]

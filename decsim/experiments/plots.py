@@ -767,7 +767,7 @@ def _round_period_microseconds(moves_by_round: dict) -> float:
         sends.append(span.start_us)
     ordered = sorted(sends)
     gaps = []
-    for earlier, later in zip(ordered, ordered[1:]):
+    for earlier, later in zip(ordered, ordered[1:], strict=False):
         gap = later - earlier
         gaps.append(gap)
     if not gaps:
@@ -1440,7 +1440,7 @@ def _stage_widths(
 def _stacked(stacked_left: list, stage_widths: list) -> list:
     """The running totals after one stage's segment is laid down."""
     totals = []
-    for left, width in zip(stacked_left, stage_widths):
+    for left, width in zip(stacked_left, stage_widths, strict=True):
         total = left + width
         totals.append(total)
     return totals
@@ -1448,7 +1448,7 @@ def _stacked(stacked_left: list, stage_widths: list) -> list:
 
 def _label_stage_totals(axis, bar_positions, stacked_left: list) -> None:
     """The total beside each stacked bar."""
-    for position, total in zip(bar_positions, stacked_left):
+    for position, total in zip(bar_positions, stacked_left, strict=True):
         label = f"{total:,.0f}"
         if total < 100:
             label = f"{total:.3g}"

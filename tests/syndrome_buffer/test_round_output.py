@@ -287,7 +287,7 @@ def test_read_cycles_delay_the_decode_from_dispatch_on(decoder_input):
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
-    paired = zip(charged_ticks, free_ticks)
+    paired = zip(charged_ticks, free_ticks, strict=True)
     shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
     expected = 3 * settings.clock.period_ticks
     assert shifts == [0, 0, 0, expected, expected, expected]

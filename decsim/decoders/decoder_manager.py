@@ -27,7 +27,8 @@ seat both take, since a strong request is opened by the chip side and
 served by the host side.
 """
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.decode_dispatch as decode_dispatch

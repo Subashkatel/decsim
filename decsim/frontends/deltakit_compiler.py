@@ -6,9 +6,9 @@ public terminal MeasurementReg outputs using the declared logical support.
 
 import contextlib
 import importlib.util
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Optional
 
 import stim
 

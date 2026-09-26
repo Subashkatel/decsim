@@ -96,7 +96,7 @@ def _gaps_and_failures() -> tuple:
     events, observables = windows.sampled_shots(circuit, SHOTS, 1)
     gap_decibels = []
     failures = []
-    for shot, observable in zip(events, observables):
+    for shot, observable in zip(events, observables, strict=True):
         solves = _forced_class_solves(row, model, shot)
         computation = signal.compute(solves)
         soft_output = computation.soft_output
@@ -116,7 +116,7 @@ def test_the_gap_is_calibrated_to_the_published_law_in_every_populated_bin():
     gap_decibels, failures = _gaps_and_failures()
     counts = {}
     failure_counts = {}
-    for gap, failed in zip(gap_decibels, failures):
+    for gap, failed in zip(gap_decibels, failures, strict=True):
         rounded = round(gap)
         bin_decibels = int(rounded)
         counts[bin_decibels] = counts.get(bin_decibels, 0) + 1

@@ -111,7 +111,7 @@ def test_with_credits_to_spare_whole_frames_cross_as_the_ideal_row_property():
         ideal = channel_module.Channel(ideal_settings, engine)
         by_credit = []
         by_ideal = []
-        for arrival, payload, setup in zip(arrivals, bits, setups):
+        for arrival, payload, setup in zip(arrivals, bits, setups, strict=True):
             send_at(engine, credit, arrival, payload, setup, by_credit)
             send_at(engine, ideal, arrival, payload, setup, by_ideal)
         engine.run()

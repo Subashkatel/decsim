@@ -10,7 +10,8 @@ store's own business and never reaches this module.
 """
 
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.engine
 import decsim.ports as ports

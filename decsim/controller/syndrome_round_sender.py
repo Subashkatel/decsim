@@ -23,7 +23,7 @@ write (RoundTransmitter) and takes its slot where it lands.
 
 import dataclasses
 import functools
-from typing import Callable
+from collections.abc import Callable
 
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings

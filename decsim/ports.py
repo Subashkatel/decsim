@@ -25,8 +25,8 @@ A component names its neighbours by declaring a Port (below) for each
 one, and the root binds them by assignment once every component exists.
 """
 
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.config as config
 import decsim.records.decoding as decoding_records

@@ -53,7 +53,8 @@ nothing to prefetch and waits in the queue for free compute.
 import dataclasses
 import functools
 import math
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_unit as decoder_unit_module

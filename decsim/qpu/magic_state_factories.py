@@ -32,8 +32,8 @@ import collections
 import dataclasses
 import functools
 import math
-from collections.abc import Mapping
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Mapping
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.engine

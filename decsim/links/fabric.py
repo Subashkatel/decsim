@@ -19,8 +19,8 @@ channel that draws (the reliable row's losses) is seeded under its name.
 """
 
 import dataclasses
-from collections.abc import Mapping
-from typing import Callable, Optional
+from collections.abc import Callable, Mapping
+from typing import Optional
 
 import decsim.config as config
 import decsim.engine

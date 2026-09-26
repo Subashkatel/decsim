@@ -744,7 +744,7 @@ def _bell_reference_experiment(distance: int, basis: str, round_count: int):
     target_resets = [gates.RZ(qubit) for qubit in right.data_qubits]
     resets.extend(target_resets)
     initial = codes.CSSStage(final_round_resets=resets)
-    pairs = zip(left_data, right_data)
+    pairs = zip(left_data, right_data, strict=True)
     coupling = [gates.CX(control, target) for control, target in pairs]
     checks = left.stabilisers[0] + right.stabilisers[0]
     protected = codes.CSSStage(
@@ -908,7 +908,7 @@ def _uncoupled_targets(
 ) -> list[stim.GateTarget]:
     targets = instruction.targets_copy()
     retained = []
-    for control, target in zip(targets[::2], targets[1::2]):
+    for control, target in zip(targets[::2], targets[1::2], strict=True):
         if control.value in left_indices and target.value in right_indices:
             continue
         retained.extend([control, target])

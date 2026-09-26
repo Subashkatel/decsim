@@ -16,7 +16,8 @@ and keeps at most its depth in flight (Hennessy and Patterson App. C).
 
 import dataclasses
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import numpy
 

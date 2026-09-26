@@ -25,7 +25,8 @@ enabling pipelined execution" (cuda-quantum host_api.md lines
 
 import collections
 import dataclasses
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import numpy
 

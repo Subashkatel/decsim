@@ -22,7 +22,7 @@ import dataclasses
 import enum
 import heapq
 import itertools
-from typing import Callable
+from collections.abc import Callable
 
 import decsim.config as config
 import decsim.trace_source as trace_source

@@ -62,7 +62,8 @@ never published: no window reads it.
 
 import dataclasses
 import functools
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.engine as engine_module
 import decsim.ports as ports

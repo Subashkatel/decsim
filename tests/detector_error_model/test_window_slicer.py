@@ -74,7 +74,9 @@ def owned_faults(model):
     faults = model.require_faults(GRAPHLIKE)
     return [
         fault_index
-        for fault_index, is_owned in zip(faults.source_fault_ids, faults.owned)
+        for fault_index, is_owned in zip(
+            faults.source_fault_ids, faults.owned, strict=True
+        )
         if is_owned
     ]
 

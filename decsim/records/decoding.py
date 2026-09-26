@@ -7,9 +7,10 @@ whole run that the root checks before planning are here too, because the
 escalation policy reads them together with the result.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import decsim.records.windows as window_records
 

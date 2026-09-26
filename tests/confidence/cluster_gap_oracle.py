@@ -28,7 +28,7 @@ def _quotient_cluster_gap(
     back to itself with parity one (Meister et al. Algorithm 2).
     """
     adjacency = {}
-    edges = zip(graph.edges, edge_intervals)
+    edges = zip(graph.edges, edge_intervals, strict=True)
     for edge_index, (edge, interval) in enumerate(edges):
         _add_edge_segments(adjacency, edge_index, edge, interval)
     shortest = math.inf
@@ -49,7 +49,7 @@ def _add_edge_segments(
     for split_index in range(1, split_count):
         path_nodes.append(("union_find_edge", edge_index, split_index))
     path_nodes.append(edge.detector_b)
-    segments = zip(coordinates, coordinates[1:])
+    segments = zip(coordinates, coordinates[1:], strict=False)
     for segment_index, (lower, upper) in enumerate(segments):
         weight = _segment_weight(interval, lower, upper)
         parity = 0

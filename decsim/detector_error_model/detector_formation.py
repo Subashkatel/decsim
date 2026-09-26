@@ -455,7 +455,10 @@ def _flat_instructions(circuit):
 
 
 def _has_a_backward_step(values: list[int]) -> bool:
-    return any(later < earlier for earlier, later in zip(values, values[1:]))
+    return any(
+        later < earlier
+        for earlier, later in zip(values, values[1:], strict=False)
+    )
 
 
 def _round_of_each_measurement(

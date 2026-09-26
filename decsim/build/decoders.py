@@ -141,6 +141,11 @@ def build_decoder_pool(
     )
 
 
+def build_memory_round_arrivals(parts):
+    """The decoders' end of the memory route."""
+    return memory_rounds_module.MemoryRoundArrivals(parts.engine)
+
+
 def _check_the_active_tier_decodes(
     manager: decoder_settings.DecoderManagerSettings,
     active,
@@ -450,8 +455,3 @@ def _formation_stage(
     return detection_events_module.DetectionEventFormationStage(
         FORMATION_STAGE, formation=formation
     )
-
-
-def build_memory_round_arrivals(parts):
-    """The decoders' end of the memory route."""
-    return memory_rounds_module.MemoryRoundArrivals(parts.engine)

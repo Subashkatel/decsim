@@ -744,6 +744,32 @@ class DecodeService:
             self.manager.dispatch()
 
 
+def job_defects_text(job: decoding_records.DecodeJob) -> str:
+    """The landed window input's cargo, sparse, for the I/O trace.
+
+    The set detection-event indices of the rounds now in this unit's
+    memory (the algorithm stage reads the same fragments).
+    """
+    fragments = _landed_fragments(job)
+    bit_arrays = []
+    for fragment in fragments:
+        if fragment.bits is None:
+            continue
+        bits = numpy.asarray(fragment.bits, dtype=numpy.uint8)
+        bit_arrays.append(bits)
+    if not bit_arrays:
+        return "no payload bits"
+    all_bits = numpy.concatenate(bit_arrays)
+    defects = numpy.flatnonzero(all_bits)
+    if defects.size == 0:
+        return "no defects"
+    defect_texts = []
+    for defect in defects.tolist():
+        defect_texts.append(str(defect))
+    listed = ", ".join(defect_texts)
+    return f"defects {{{listed}}}"
+
+
 def _is_outside_pipelined_model(job: decoding_records.DecodeJob) -> bool:
     if job.kind not in PIPELINED_JOB_KINDS:
         return True
@@ -770,32 +796,6 @@ def _receiving_text(member: decoding_records.DecodeJob) -> str:
         f"receiving {member.label} input "
         f"({member.round_count} rounds from the syndrome buffer)"
     )
-
-
-def job_defects_text(job: decoding_records.DecodeJob) -> str:
-    """The landed window input's cargo, sparse, for the I/O trace.
-
-    The set detection-event indices of the rounds now in this unit's
-    memory (the algorithm stage reads the same fragments).
-    """
-    fragments = _landed_fragments(job)
-    bit_arrays = []
-    for fragment in fragments:
-        if fragment.bits is None:
-            continue
-        bits = numpy.asarray(fragment.bits, dtype=numpy.uint8)
-        bit_arrays.append(bits)
-    if not bit_arrays:
-        return "no payload bits"
-    all_bits = numpy.concatenate(bit_arrays)
-    defects = numpy.flatnonzero(all_bits)
-    if defects.size == 0:
-        return "no defects"
-    defect_texts = []
-    for defect in defects.tolist():
-        defect_texts.append(str(defect))
-    listed = ", ".join(defect_texts)
-    return f"defects {{{listed}}}"
 
 
 def _landed_fragments(job: decoding_records.DecodeJob) -> list:

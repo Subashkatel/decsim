@@ -1935,10 +1935,11 @@ class EscalationPolicy(Protocol):
 class BurstDetector(Protocol):
     """Whether an error burst is under way, read off the detection events.
 
-    Table rows: none and event_count (BURST_DETECTORS,
-    escalation/settings.py), named by burst_detector.kind; none builds
-    no detector. The former the detection event placement forms through
-    hands every round to observe_round as it forms it, in round order;
+    Table rows: none, event_count and masked_regional_cusum
+    (BURST_DETECTORS, escalation/settings.py), named by
+    burst_detector.kind; none builds no detector. The former the
+    detection event placement forms through hands every round to
+    observe_round as it forms it, in round order;
     the switching policy asks is_burst_window at a verdict, and the
     strong regions ask with_burst_priors for a strong window's model.
     Both answers read only the rounds the detector has published by the

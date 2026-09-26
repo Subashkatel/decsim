@@ -203,7 +203,7 @@ docstring.
 ### escalation
 
 - `decsim/escalation/__init__.py`: The escalation: a window decoded again by the strong tier.
-- `decsim/escalation/burst_detectors.py`: The burst detector: detection events counted against their usual rates.
+- `decsim/escalation/burst_detectors.py`: The burst detectors: detection events scored against their usual rates.
 - `decsim/escalation/pending_strong_windows.py`: The strong windows held until the conditions their row declared fire.
 - `decsim/escalation/policies.py`: The escalation policies: Baseline, StrongOnly and Switching.
 - `decsim/escalation/settings.py`: The escalation section: when a window is decoded again, and on what.

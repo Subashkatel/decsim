@@ -39,7 +39,8 @@ In `decsim/escalation/settings.py`. A row of it is named under `burst_detector.k
 | Row | Class | What it is |
 | --- | --- | --- |
 | `none` | none | the check is off |
-| `event_count` | `EventCountBurstDetector` in `decsim/escalation/burst_detectors.py` | Fires when a patch's detection events outrun its usual rates. |
+| `event_count` | `EventCountBurstDetector` in `decsim/escalation/burst_detectors.py` | Fires when a patch's or a position's event count outruns its usual rate. |
+| `masked_regional_cusum` | `MaskedRegionalCusumBurstDetector` in `decsim/escalation/burst_detectors.py` | Fires when a region's detection events outrun its usual rate. |
 
 ## `CODE_CARDS`
 

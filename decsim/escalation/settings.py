@@ -49,10 +49,12 @@ THRESHOLD_SOURCES = {
     "online": threshold_sources.OnlineThreshold,
 }
 # burst_detector.kind names one of these rows: none builds no detector,
-# event_count counts detection events against their usual rates.
+# event_count is the simple count baseline, masked_regional_cusum a
+# CUSUM bank over regions of the checks.
 BURST_DETECTORS = {
     "none": None,
     "event_count": burst_detectors.EventCountBurstDetector,
+    "masked_regional_cusum": burst_detectors.MaskedRegionalCusumBurstDetector,
 }
 # How many of the strong region's buffer regions the restarted weak
 # window re-reads under the forward strong window (Toshio 2510.25222

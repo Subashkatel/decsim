@@ -8,9 +8,14 @@ referee checks it or not.
 
 import pytest
 
+import decsim.decoders.decoders as decoders
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.verify_windows as verify_windows
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
+import tests.decoders.windows as windows
 import tests.experiments.yaml_configs as yaml_configs
 
 
@@ -51,3 +56,34 @@ def test_the_referee_leaves_a_measured_table_tiers_spans_unchanged(tmp_path):
 
     assert len(unchecked_spans) > 0
     assert checked_spans == unchecked_spans
+
+
+def test_a_cancelled_job_delivers_nothing_and_is_not_checked():
+    """A cancelled job's decode delivers None (DecoderBase.start).
+
+    The referee passes that None on and reaches no verdict, although the
+    job carries a window model it could have checked.
+    """
+    pytest.importorskip("tesseract_decoder")
+    circuit = windows.memory_circuit(3, 3, 0.001)
+    requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
+    model = windows.whole_circuit_window(circuit, 3, requirement)
+    events, _observables = windows.sampled_shots(circuit, 1, 3)
+    job = windows.job_for(model, events[0])
+    job.cancelled = True
+    inner = decoders.PresetLatencyDecoder(2.0)
+    referee = verify_windows.TesseractCheckedDecoder(inner)
+    verdicts = []
+    delivered = []
+
+    def note_verdict(window_key, is_agreement) -> None:
+        verdicts.append((window_key, is_agreement))
+
+    referee.window_checked.connect(note_verdict)
+    engine = engine_module.Engine()
+
+    referee.start(job, engine, delivered.append)
+    engine.run()
+
+    assert delivered == [None]
+    assert verdicts == []

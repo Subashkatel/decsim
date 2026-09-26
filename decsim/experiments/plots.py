@@ -89,11 +89,6 @@ MOVEMENT_SERIES = (
 TRACE_DIR = "trace"
 
 
-def ticks_to_microseconds(ticks) -> float:
-    """A tick count as a float of microseconds, the figures' time unit."""
-    return ticks / config_module.TICKS_PER_MICROSECOND
-
-
 def card_label(algorithm) -> str:
     """A named algorithm capitalized, a latency card as its microseconds."""
     if isinstance(algorithm, str):
@@ -684,7 +679,9 @@ def _timeline_windows(document) -> dict:
             continue
         window_id = trace_file.window_id_of(event)
         dispatch_ticks = trace_file.end_tick_of(event)
-        dispatch_us[window_id] = ticks_to_microseconds(dispatch_ticks)
+        dispatch_us[window_id] = config_module.ticks_to_microseconds(
+            dispatch_ticks
+        )
     windows = {}
     for event in document.of_phase("i"):
         if not event["name"].endswith(" ready"):
@@ -700,7 +697,7 @@ def _timeline_window(event: dict, dispatch_us: dict) -> _TimelineWindow:
     read_lo, read_hi = trace_file.range_of(event["args"]["rounds"])
     commit_lo, commit_hi = trace_file.range_of(event["args"]["commit"])
     ready_ticks = trace_file.tick_of(event)
-    ready_us = ticks_to_microseconds(ready_ticks)
+    ready_us = config_module.ticks_to_microseconds(ready_ticks)
     dispatch = dispatch_us.get(window_id, ready_us)
     return _TimelineWindow(
         window_id=window_id,
@@ -731,14 +728,16 @@ def _frame_spans(document) -> dict:
             continue
         window_id = trace_file.window_id_of(event)
         accepted_ticks = trace_file.tick_of(event)
-        accepted_us[window_id] = ticks_to_microseconds(accepted_ticks)
+        accepted_us[window_id] = config_module.ticks_to_microseconds(
+            accepted_ticks
+        )
     spans = {}
     for event in document.of_phase("i"):
         if not event["name"].endswith(" committed"):
             continue
         window_id = trace_file.window_id_of(event)
         committed_ticks = trace_file.tick_of(event)
-        committed = ticks_to_microseconds(committed_ticks)
+        committed = config_module.ticks_to_microseconds(committed_ticks)
         accepted = accepted_us.get(window_id, committed)
         spans[window_id] = _Span(start_us=accepted, end_us=committed)
     return spans
@@ -748,8 +747,8 @@ def _span_of(event: dict) -> _Span:
     """A complete event's bar, from its own ticks and not its float ts."""
     start_ticks = trace_file.tick_of(event)
     end_ticks = trace_file.end_tick_of(event)
-    start_us = ticks_to_microseconds(start_ticks)
-    end_us = ticks_to_microseconds(end_ticks)
+    start_us = config_module.ticks_to_microseconds(start_ticks)
+    end_us = config_module.ticks_to_microseconds(end_ticks)
     return _Span(start_us=start_us, end_us=end_us)
 
 

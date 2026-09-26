@@ -145,6 +145,6 @@ def _microseconds_each(ticks: list) -> list:
     """Every tick count as a float of microseconds."""
     spans = []
     for count in ticks:
-        span = count / config.TICKS_PER_MICROSECOND
+        span = config.ticks_to_microseconds(count)
         spans.append(span)
     return spans

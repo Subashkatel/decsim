@@ -25,6 +25,11 @@ def microseconds_to_ticks(microseconds: float) -> int:
     return int(rounded)
 
 
+def ticks_to_microseconds(ticks: int) -> float:
+    """A tick count as a float of microseconds."""
+    return ticks / TICKS_PER_MICROSECOND
+
+
 def format_ticks(ticks: int) -> str:
     """A tick count as the microsecond stamp every log line carries."""
     return f"{ticks / TICKS_PER_MICROSECOND:7.3f} us"

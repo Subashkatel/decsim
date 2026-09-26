@@ -551,7 +551,7 @@ def _padded(row, widths: list) -> str:
 
 def _microseconds(ticks: int) -> str:
     """A tick count in microseconds, as the table writes it."""
-    span = ticks / config.TICKS_PER_MICROSECOND
+    span = config.ticks_to_microseconds(ticks)
     return f"{span:.3f}"
 
 

@@ -236,11 +236,6 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
     )
 
 
-def ticks_to_microseconds(ticks: int) -> float:
-    """A tick count as a float of microseconds, for the csv columns."""
-    return ticks / config_module.TICKS_PER_MICROSECOND
-
-
 def link_totals(traffic: dict) -> dict:
     """The ledger's own counters for this shot by path, in microseconds."""
     counters_by_path = {}
@@ -256,13 +251,13 @@ def link_totals(traffic: dict) -> dict:
             "unknown_payload_transfers": counters[
                 "unknown_payload_transfer_count"
             ],
-            "queue_wait_us": ticks_to_microseconds(
+            "queue_wait_us": config_module.ticks_to_microseconds(
                 counters["queue_wait_ticks"]
             ),
-            "serialization_us": ticks_to_microseconds(
+            "serialization_us": config_module.ticks_to_microseconds(
                 counters["serialization_ticks"]
             ),
-            "propagation_us": ticks_to_microseconds(
+            "propagation_us": config_module.ticks_to_microseconds(
                 counters["propagation_ticks"]
             ),
         }
@@ -353,7 +348,7 @@ def controller_to_weak_buffer_delays_us(transfers: list) -> list:
     for row in transfers:
         if row["path"] != "controller_to_weak_buffer":
             continue
-        delay = ticks_to_microseconds(row["total_delay_ticks"])
+        delay = config_module.ticks_to_microseconds(row["total_delay_ticks"])
         delays.append(delay)
     return delays
 
@@ -388,7 +383,7 @@ def round_stall_delays_us(round_keys: list, waits: dict) -> list:
     delays = []
     for key in round_keys:
         ticks = waits.get(key, 0)
-        delay = ticks_to_microseconds(ticks)
+        delay = config_module.ticks_to_microseconds(ticks)
         delays.append(delay)
     return delays
 
@@ -503,18 +498,24 @@ def window_points_us(
             decode.compute_start_ticks, startable
         ),
         "queue_wait": _span_microseconds(first_dispatch, window.t_queued),
-        "input_link_per_window": ticks_to_microseconds(input_ticks),
+        "input_link_per_window": config_module.ticks_to_microseconds(
+            input_ticks
+        ),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
         "release": stage_us["release"],
         "service": _span_microseconds(
             decode.done_ticks, decode.compute_start_ticks
         ),
-        "confidence": ticks_to_microseconds(confidence_ticks),
+        "confidence": config_module.ticks_to_microseconds(confidence_ticks),
         "weak_attempt": _span_microseconds(attempt_end, first_dispatch),
-        "escalation_link_per_window": ticks_to_microseconds(escalation_ticks),
-        "dd_per_window": ticks_to_microseconds(handoff_ticks),
-        "output_link_per_window": ticks_to_microseconds(output_ticks),
+        "escalation_link_per_window": config_module.ticks_to_microseconds(
+            escalation_ticks
+        ),
+        "dd_per_window": config_module.ticks_to_microseconds(handoff_ticks),
+        "output_link_per_window": config_module.ticks_to_microseconds(
+            output_ticks
+        ),
         "frame_commit": _span_microseconds(
             committed, frame_record.accepted_ticks
         ),
@@ -1172,7 +1173,7 @@ def _strong_wait_microseconds(requests: list, lives: dict) -> list:
         queue_wait = life.dispatch - request.ready_ticks
         compute_wait = life.compute_start - life.ready
         wait_ticks = queue_wait + compute_wait
-        wait = ticks_to_microseconds(wait_ticks)
+        wait = config_module.ticks_to_microseconds(wait_ticks)
         waits.append(wait)
     return waits
 
@@ -1261,7 +1262,7 @@ def parallel_processes_needed(
 
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
-    return ticks_to_microseconds(span_ticks)
+    return config_module.ticks_to_microseconds(span_ticks)
 
 
 def _hop_start_ticks(row: dict) -> int:

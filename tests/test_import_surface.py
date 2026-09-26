@@ -15,11 +15,20 @@ import decsim
 
 
 def import_failure(module_name):
-    """The module's failure, or None when it imports or its extra is absent."""
+    """The module's failure, or None when it imports or its extra is absent.
+
+    An absent extra is a third-party module that is not installed; a
+    decsim module that cannot be found, or a name one cannot import, is
+    this package's own failure.
+    """
     try:
         importlib.import_module(module_name)
-    except (ImportError, ModuleNotFoundError):
-        return None
+    except ModuleNotFoundError as error:
+        missing = error.name or ""
+        missing_parts = missing.split(".")
+        if missing_parts[0] != "decsim":
+            return None
+        return (module_name, repr(error))
     except Exception as error:
         return (module_name, repr(error))
     return None

@@ -32,10 +32,12 @@ for config in configs/burst_detectors_compared/*.yaml; do
 done
 ```
 
-A shot takes about a minute and a half, so the folder takes a few hours
-on one core. [How to run a sweep on Slurm](run_a_sweep_on_slurm.md)
-runs the files side by side, and splits a file's shots with `--shard`
-when you raise `shots`.
+A quiet shot takes about four minutes on one core. A burst shot takes
+ten to twenty-five, most of it strong decodes: every window a flag
+meets is decoded again by belief matching. So one burst file is several
+hours on one core. [How to run a sweep on Slurm](run_a_sweep_on_slurm.md)
+runs the files side by side and splits a file's shots with `--shard`;
+`decsim combine` folds the shards back into one folder.
 
 ## Read the results
 

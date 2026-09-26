@@ -142,7 +142,8 @@ class RoundAssembler:
             return
         packing_cycles = self.settings.packing_cycles_per_round
         if packing_cycles > 0:
-            delay = self._delay(packing_cycles)
+            now = self.engine.now
+            delay = self.settings.clock.ticks_to_edge(packing_cycles, now)
             finish = functools.partial(self._finish_packing, context)
             self.engine.schedule(delay, finish, label="controller pack")
             return
@@ -256,12 +257,6 @@ class RoundAssembler:
     def _hand_on(self, packed, context) -> None:
         self.workspace.forget(context)
         self.syndrome_round_sender.admit(packed)
-
-    def _delay(self, cycles: int) -> int:
-        """The ticks from now to the controller clock edge `cycles` away."""
-        now = self.engine.now
-        edge = self.settings.clock.edge(cycles, now)
-        return edge - now
 
 
 @dataclasses.dataclass

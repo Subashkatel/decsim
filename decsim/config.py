@@ -133,6 +133,11 @@ class Clock:
         edge_cycles = aligned_cycles + cycles
         return edge_cycles * self.period_ticks
 
+    def ticks_to_edge(self, cycles: int, now: int) -> int:
+        """The ticks from `now` to the edge `cycles` periods away."""
+        edge = self.edge(cycles, now)
+        return edge - now
+
     def cycles_for(self, ticks: int) -> int:
         """The whole cycles a span of ticks covers; a part cycle counts one."""
         whole_cycles = ticks // self.period_ticks

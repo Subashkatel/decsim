@@ -27,7 +27,7 @@ def test_burst_priors_over_noiseless_checks_scale_the_noisy_ones():
     """
     usual = _dephasing_circuit(0.001)
     settings = burst_rounds.CUSUM.Settings(
-        calibration_shots=2000,
+        calibration_shot_count=2000,
         region_radii=(),
         mask_count=None,
         raise_strong_priors=True,

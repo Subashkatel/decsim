@@ -18,7 +18,7 @@ def test_the_bank_scores_every_group_as_the_written_rules_do():
 
     Only the order of the float sums differs from the transcription.
     """
-    settings = burst_rounds.CUSUM.Settings(calibration_shots=200)
+    settings = burst_rounds.CUSUM.Settings(calibration_shot_count=200)
     detector = burst_rounds.cusum_detector(
         settings, rounds=burst_rounds.LONG_ROUNDS
     )
@@ -37,7 +37,7 @@ def test_the_bank_scores_every_group_as_the_written_rules_do():
 
 def test_a_null_mask_count_scores_the_unmasked_regional_cusum():
     settings = burst_rounds.CUSUM.Settings(
-        mask_count=None, calibration_shots=200
+        mask_count=None, calibration_shot_count=200
     )
     detector = burst_rounds.cusum_detector(
         settings, rounds=burst_rounds.LONG_ROUNDS
@@ -57,7 +57,7 @@ def test_a_null_mask_count_scores_the_unmasked_regional_cusum():
 
 def test_no_radii_leave_the_whole_patch_the_only_region():
     settings = burst_rounds.CUSUM.Settings(
-        region_radii=(), calibration_shots=200
+        region_radii=(), calibration_shot_count=200
     )
     detector = burst_rounds.cusum_detector(settings)
     bank = detector.charts_by_operation[1].calibration.bank
@@ -68,7 +68,7 @@ def test_no_radii_leave_the_whole_patch_the_only_region():
 
 
 def test_the_pairs_are_the_checks_one_data_qubit_flip_fires_together():
-    settings = burst_rounds.CUSUM.Settings(calibration_shots=200)
+    settings = burst_rounds.CUSUM.Settings(calibration_shot_count=200)
     detector = burst_rounds.cusum_detector(settings)
     positions, pairs, _ = burst_rounds.bank_inputs(detector)
     circuit = workload_settings.memory_circuit(

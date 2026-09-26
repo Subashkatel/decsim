@@ -408,19 +408,20 @@ burst_detector:
 #                                  # an exponential fit to the top 20);
 #                                  # a share of 1 or
 #                                  # more is refused
-#   calibration_shots: 20000       # quiet Stim shots of the operation's own
+#   calibration_shot_count: 20000  # quiet Stim shots of the operation's own
 #                                  # circuit the thresholds are read from,
 #                                  # a fixed seed, once per run in memory
 #   clock: fridge                  # a clocks domain; with none the bank's
 #                                  # verdict is published as its round is
 #                                  # formed, and the two keys below are
 #                                  # refused
-#   datapaths: 1                   # the timing card: a round costs
-#   pipeline_cycles: 30            # ceil(regions x designs / datapaths)
-#                                  # + pipeline_cycles cycles (97 regions
+#   datapath_count: 1              # the timing card: a round costs
+#   pipeline_cycles: 30            # ceil(regions x designs /
+#                                  # datapath_count) + pipeline_cycles
+#                                  # cycles (97 regions
 #                                  # x 3 designs at d = 5 is 321 at the
 #                                  # defaults). regions x designs is the
-#                                  # algorithm's count; datapaths and
+#                                  # algorithm's count; datapath_count and
 #                                  # pipeline_cycles are hardware figures,
 #                                  # fitted by hand until a design is built
 #   raise_strong_priors: false     # as event_count's

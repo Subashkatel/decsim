@@ -17,7 +17,7 @@ import tests.burst_detectors.written_rules as written_rules
 
 def test_the_row_fires_on_the_rounds_the_written_rules_alarm():
     """Alarm, at the row's own thresholds, through observe_round."""
-    settings = burst_rounds.CUSUM.Settings(calibration_shots=2000)
+    settings = burst_rounds.CUSUM.Settings(calibration_shot_count=2000)
     detector = burst_rounds.cusum_detector(
         settings, rounds=burst_rounds.LONG_ROUNDS
     )
@@ -52,7 +52,7 @@ def test_quiet_shots_alarm_at_the_calibrated_rate():
     shot_seconds = burst_rounds.ROUNDS * 1e-6
     rate = 0.05 / shot_seconds
     settings = burst_rounds.CUSUM.Settings(
-        false_alarms_per_second=rate, calibration_shots=4000
+        false_alarms_per_second=rate, calibration_shot_count=4000
     )
     detector = burst_rounds.cusum_detector(settings)
     calibration = detector.charts_by_operation[1].calibration
@@ -146,13 +146,13 @@ def test_a_rate_of_a_false_alarm_a_shot_is_refused():
     [
         ("mask_count", "8", "whole number of firings"),
         ("mask_window_rounds", 0, "whole number of rounds"),
-        ("calibration_shots", 0, "whole number of shots"),
+        ("calibration_shot_count", 0, "whole number of shots"),
         ("region_radii", [-1.0], "each a number at least zero"),
         ("fault_rate_multipliers", [1.0], "each a number above one"),
         ("fault_rate_multipliers", [], "each a number above one"),
         ("unmasked_share_floor", 1.0, "not including, 1"),
         ("false_alarms_per_second", 0, "a rate above zero"),
-        ("datapaths", 2, "datapaths prices the chart bank"),
+        ("datapath_count", 2, "datapath_count prices the chart bank"),
         ("pipeline_cycles", 3, "pipeline_cycles prices the chart bank"),
     ],
 )
@@ -172,7 +172,7 @@ def test_the_cusum_keys_reach_the_rows_settings():
         "region_radii": [],
         "fault_rate_multipliers": [3],
         "clock": "fridge",
-        "datapaths": 2,
+        "datapath_count": 2,
     }
 
     detector_section = burst_detector_settings.BurstDetectorSettings.from_yaml(
@@ -183,7 +183,7 @@ def test_the_cusum_keys_reach_the_rows_settings():
     assert settings.mask_count is None
     assert settings.region_radii == ()
     assert settings.fault_rate_multipliers == (3.0,)
-    assert settings.datapaths == 2
+    assert settings.datapath_count == 2
     assert settings.clock == burst_rounds.CLOCKS.clock("fridge")
 
 

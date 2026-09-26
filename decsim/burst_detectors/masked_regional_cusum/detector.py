@@ -66,9 +66,10 @@ class MaskedRegionalCusumBurstDetector:
         rate_tracking_rounds is the time constant of each region's usual
         count, held while at most unmasked_share_floor of its usual rate
         is unmasked. false_alarms_per_second is the bank's budget, a
-        shot's share of it the shot's length in time; calibration_shots
-        are the quiet shots the thresholds are read from. clock,
-        datapaths and pipeline_cycles are the timing card, and
+        shot's share of it the shot's length in time;
+        calibration_shot_count is the quiet shots the thresholds are read
+        from. clock,
+        datapath_count and pipeline_cycles are the timing card, and
         raise_strong_priors gives a flagged strong window the burst
         priors. The papers cited fix the method, not these numbers: the
         defaults are the values the method was tuned at, so a study that
@@ -83,9 +84,9 @@ class MaskedRegionalCusumBurstDetector:
         rate_tracking_rounds: int = 5000
         unmasked_share_floor: float = 0.2
         false_alarms_per_second: float = 0.03
-        calibration_shots: int = 20_000
+        calibration_shot_count: int = 20_000
         clock: Optional[config.Clock] = None
-        datapaths: int = 1
+        datapath_count: int = 1
         pipeline_cycles: int = 30
         raise_strong_priors: bool = False
 
@@ -96,8 +97,8 @@ class MaskedRegionalCusumBurstDetector:
             """The timing card prices on a clock; a null mask_count is none."""
             method = _method_keys(section)
             clock = _bank_clock(section, clocks)
-            datapaths = config.whole_count(
-                section, "burst_detector", "datapaths", 1, "datapaths"
+            datapath_count = config.whole_count(
+                section, "burst_detector", "datapath_count", 1, "datapaths"
             )
             pipeline_cycles = section.get("pipeline_cycles", 30)
             config.check_cycles(
@@ -108,7 +109,7 @@ class MaskedRegionalCusumBurstDetector:
             )
             return cls(
                 clock=clock,
-                datapaths=datapaths,
+                datapath_count=datapath_count,
                 pipeline_cycles=pipeline_cycles,
                 raise_strong_priors=raise_priors,
                 **method,
@@ -305,7 +306,7 @@ def _quiet_block_maxima(circuit, layout, bank, settings):
     shot_rounds = max(rows_at) + 1
     check_count = len(layout.positions)
     batches = []
-    remaining = settings.calibration_shots
+    remaining = settings.calibration_shot_count
     while remaining > 0:
         shot_count = min(remaining, CALIBRATION_BATCH_SHOTS)
         samples = sampler.sample(shot_count)
@@ -349,8 +350,8 @@ def _method_keys(section: Mapping) -> dict:
         ),
         "unmasked_share_floor": _share_floor(section),
         "false_alarms_per_second": _false_alarms_per_second(section),
-        "calibration_shots": config.whole_count(
-            section, "burst_detector", "calibration_shots", 20_000, "shots"
+        "calibration_shot_count": config.whole_count(
+            section, "burst_detector", "calibration_shot_count", 20_000, "shots"
         ),
     }
 
@@ -425,7 +426,7 @@ def _bank_clock(section: Mapping, clocks: config.ClockSettings):
     name = section.get("clock")
     if name is not None:
         return clocks.clock(name)
-    for key in ("datapaths", "pipeline_cycles"):
+    for key in ("datapath_count", "pipeline_cycles"):
         if key in section:
             raise ValueError(
                 f"burst_detector.{key} prices the chart bank, which needs "

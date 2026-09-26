@@ -108,7 +108,7 @@ class ChartBank:
         self,
         settings: "detector.MaskedRegionalCusumBurstDetector.Settings",
     ) -> int:
-        """ceil(regions x designs / datapaths) + pipeline_cycles.
+        """ceil(regions x designs / datapath_count) + pipeline_cycles.
 
         A bank of U chart updates spread over P datapaths, each a
         pipeline L cycles deep, finishes a round in U / P + L cycles.
@@ -119,7 +119,7 @@ class ChartBank:
         region_count = self.incidence.shape[1]
         design_count = len(settings.fault_rate_multipliers)
         updates = region_count * design_count
-        updates_per_datapath = updates / settings.datapaths
+        updates_per_datapath = updates / settings.datapath_count
         update_cycles = math.ceil(updates_per_datapath)
         return update_cycles + settings.pipeline_cycles
 

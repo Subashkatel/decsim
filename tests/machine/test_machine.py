@@ -829,8 +829,13 @@ def test_a_timing_only_terminal_fragment_reads_the_round_out_whole():
     assert split_events == whole_events == [4, 8, 12]
 
 
-@pytest.mark.parametrize("is_split", [False, True])
-def test_a_payload_per_patch_reads_each_patch_out_whole(is_split: bool):
+@pytest.mark.parametrize(
+    ("is_split", "last_round_bits"),
+    [(False, [17, 17]), (True, [8, 8, 9, 9])],
+)
+def test_a_payload_per_patch_reads_each_patch_out_whole(
+    is_split: bool, last_round_bits: list
+):
     """Two patches, one payload each: 17 raw bits each on the last round.
 
     The operation's declared slots are the ones its payloads fill, so
@@ -841,9 +846,6 @@ def test_a_payload_per_patch_reads_each_patch_out_whole(is_split: bool):
         CIRCUIT_LESS_CODE, one_payload_per_patch=True
     )
     result = _circuit_less_terminal_run(source, (0, 1), is_split=is_split)
-    last_round_bits = [17, 17]
-    if is_split:
-        last_round_bits = [8, 8, 9, 9]
 
     assert result.terminal_status == "complete"
     readouts = _payload_bits_on(result, "qpu_to_controller")

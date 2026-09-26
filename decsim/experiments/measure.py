@@ -820,7 +820,6 @@ class _CommittedDecode:
     tier: window_records.DecoderTier
     compute_start_ticks: int
     done_ticks: int
-    dispatch_ticks: int  # a unit took this decode
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
     round_count: int  # the rounds it read, its job's own count
@@ -1257,13 +1256,10 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
         ends.append(record.end_ticks)
     first = min(starts)
     last = max(ends)
-    dispatch = _dispatch_ticks(records, first)
     ready = _ready_ticks(records)
     run_sequence = frame_record.run_sequence
     rounds = _rounds_read(records)
-    return _CommittedDecode(
-        tier, first, last, dispatch, ready, run_sequence, rounds
-    )
+    return _CommittedDecode(tier, first, last, ready, run_sequence, rounds)
 
 
 def _rounds_read(records: list) -> int:

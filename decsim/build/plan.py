@@ -56,7 +56,6 @@ class Plan:
     protected_regions: tuple
     all_operations: tuple
     planned_operations: tuple
-    view_by_id: dict
     run_plan: planner.RunPlan
     resource_claims: dict
     device: Any
@@ -169,7 +168,6 @@ def build_plan(
         protected_regions=tuple(settings.workload.protected_regions),
         all_operations=all_operations,
         planned_operations=tuple(planned_operations),
-        view_by_id=view_by_id,
         run_plan=run_plan,
         resource_claims=resource_claims,
         device=device,

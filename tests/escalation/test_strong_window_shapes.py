@@ -18,8 +18,7 @@ absorbed window's commit rounds must still be stored when the plan
 lands, in a backlog regime where the absorbed windows' inputs are in
 flight or have already landed in a unit. At width 0 the restart begins
 on the round after the strong region. The gate's switching card, priced
-on both tiers so the run is deterministic, is the regime the reviewer
-found.
+on both tiers so the run is deterministic, puts a run in that regime.
 """
 
 import copy
@@ -340,14 +339,13 @@ def test_a_forward_window_plan_claims_the_rounds_a_restart_would_read():
 
 
 def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
-    """The reviewer's reproduction: commit 3, buffer 3, weak 40 us.
+    """Commit 3, buffer 3, weak 40 us.
 
     W3 escalates at 166 us with W4's input landed and W5's in flight;
     the strong window 10-18 absorbs W4 and W5, and the restart W6
     re-reads 16-18, W5's commit rounds, whose last the weak syndrome buffer
-    holder was W5's request. The run used to die there with the retention
-    sentence; now W6's own claim carries the rounds across W5's
-    withdrawal and W6's stale request is withdrawn and rebuilt.
+    holder was W5's request. W6's own claim carries the rounds across
+    W5's withdrawal, and W6's stale request is withdrawn and rebuilt.
     """
     machine = _gate_forward_window_machine(3, 3, 40.0, 5.0, 1, 1)
     result = machine.run()
@@ -371,7 +369,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
 
 
 def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
-    """The reviewer's second shape: W2 escalates, W5 re-reads 17-20."""
+    """Commit 4, buffer 4: W2 escalates, W5 re-reads 17-20."""
     machine = _gate_forward_window_machine(4, 4, 40.0, 5.0, 1, 1)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]

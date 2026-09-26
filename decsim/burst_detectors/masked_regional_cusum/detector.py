@@ -70,7 +70,9 @@ class MaskedRegionalCusumBurstDetector:
         are the quiet shots the thresholds are read from. clock,
         datapaths and pipeline_cycles are the timing card, and
         raise_strong_priors gives a flagged strong window the burst
-        priors.
+        priors. The papers cited fix the method, not these numbers: the
+        defaults are the values the method was tuned at, so a study that
+        changes them departs from that tuning.
         """
 
         mask_window_rounds: int = 64

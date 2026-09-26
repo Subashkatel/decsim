@@ -364,7 +364,10 @@ burst_detector:
 #                                  # 1410.8765 lines 338-350) and stops
 #                                  # when every group is below it. A
 #                                  # flag's onset is the round after the
-#                                  # leading chart was last zero
+#                                  # leading chart was last zero. The
+#                                  # papers fix the method, not the
+#                                  # numbers below: those are the values
+#                                  # the method was tuned at
 #   mask_window_rounds: 64         # the window of each check's repeat
 #                                  # count (fired this round and the one
 #                                  # before) and each pair's joint count

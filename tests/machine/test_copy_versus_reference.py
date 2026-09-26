@@ -202,6 +202,15 @@ def _raw_rounds(machine) -> dict:
     return emitted
 
 
+def _mismatched_rounds(landed: list, expected: dict) -> list:
+    """The keys of the landed rounds whose bits are not Stim's."""
+    mismatched = []
+    for key, bits in landed:
+        if bits != expected[key]:
+            mismatched.append(key)
+    return mismatched
+
+
 def _stims_events_by_round(machine, emitted) -> dict:
     """Stim's own converter's events on the emitted rows, by round."""
     device = machine.syndrome_source
@@ -578,17 +587,17 @@ def test_events_formed_at_the_decoder_widen_the_tiers_input_link():
     assert _observables(decoder_result) == _observables(controller_result)
 
 
-def test_the_same_events_are_decoded_wherever_they_were_formed():
+@pytest.mark.parametrize("distance", (3, 5))
+def test_the_same_events_are_decoded_wherever_they_were_formed(distance):
     """The seat moves the width and the time, never a bit of the syndrome."""
-    for distance in (3, 5):
-        at_the_controller = _machine_formed_at("controller", distance)
-        controller_inputs = _decoder_inputs(at_the_controller)
-        controller_result = at_the_controller.run()
-        at_the_decoder = _machine_formed_at("decoder", distance)
-        decoder_inputs = _decoder_inputs(at_the_decoder)
-        decoder_result = at_the_decoder.run()
-        assert decoder_inputs == controller_inputs
-        assert _observables(decoder_result) == _observables(controller_result)
+    at_the_controller = _machine_formed_at("controller", distance)
+    controller_inputs = _decoder_inputs(at_the_controller)
+    controller_result = at_the_controller.run()
+    at_the_decoder = _machine_formed_at("decoder", distance)
+    decoder_inputs = _decoder_inputs(at_the_decoder)
+    decoder_result = at_the_decoder.run()
+    assert decoder_inputs == controller_inputs
+    assert _observables(decoder_result) == _observables(controller_result)
 
 
 def test_the_widths_the_two_seats_send_are_the_events_and_the_outcomes():
@@ -728,7 +737,7 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     machine.run()
 
     expected = _stims_events_by_round(machine, emitted)
-    mismatched = [key for key, bits in landed if bits != expected[key]]
+    mismatched = _mismatched_rounds(landed, expected)
     assert landed
     assert mismatched == []
 
@@ -752,7 +761,7 @@ def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
     machine.run()
 
     expected = _stims_events_by_round(machine, emitted)
-    mismatched = [key for key, bits in landed if bits != expected[key]]
+    mismatched = _mismatched_rounds(landed, expected)
     assert landed
     assert mismatched == []
 

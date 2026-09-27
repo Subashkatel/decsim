@@ -452,6 +452,12 @@ def _check_axes(axes, index: int) -> None:
             f"{axes!r}"
         )
     for path, values in axes.items():
+        if not isinstance(path, str):
+            raise refusal.RefusalError(
+                f"sweep block {index} axis {path!r} is not a yaml path; an "
+                "axis names the setting it sets by its dotted path, such as "
+                "qpu.distance"
+            )
         if not isinstance(values, list) or not values:
             raise refusal.RefusalError(
                 f"sweep block {index} axis {path} must be a list of at least "

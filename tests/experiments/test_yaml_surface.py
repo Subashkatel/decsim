@@ -411,6 +411,19 @@ def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
+def test_an_axis_path_that_is_not_text_is_refused(tmp_path):
+    block = {"axes": {3: [1]}, "shots": 1}
+    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
+    sentence = (
+        "sweep block 1 axis 3 is not a yaml path; an axis names the "
+        "setting it sets by its dotted path, such as qpu.distance"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        experiment.load_experiment(config_path)
+
+
 # A decoder row with keys of its own, one value of a weak_decoder axis.
 PRICED_DECODER_ROW = {
     "kind": 0.05,

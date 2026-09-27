@@ -4,9 +4,9 @@
 # total; d 9 and 11 at the two lowest p plot as upper bounds.
 #
 # 10.4 M shots outlast one job: at 0.22 s per shot at d7 a 16 h job
-# runs 262,000 shots. `decsim collect` saves each piece the moment it
-# ends, so the same job submitted again runs only the pieces it lacks
-# (docs/how-to/run_a_sweep_on_slurm.md).
+# runs 262,000 shots. On a cluster, `decsim plan` cuts the sweep into
+# rounds of pieces, slurm/round.sh submits each round and `decsim
+# status` folds them (docs/how-to/run_a_sweep_on_slurm.md).
 
 extends: weak_decoder_baseline.yaml
 

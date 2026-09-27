@@ -2,24 +2,37 @@
 
 # How to run a sweep on Slurm
 
-A real sweep is millions of shots. `decsim collect` saves every point's
-shots as pieces the moment each ends, so a job that hits its time limit
-loses only the pieces it was running, and the same job submitted again
-picks up where it stopped.
+A real sweep is millions of shots. On a cluster it runs in rounds. Each
+round is one written plan of pieces, and one Slurm array runs it. The
+steps are:
 
-## 1. Size the pieces
+1. `decsim plan` reads what the saved pieces say and writes the next round.
+2. `slurm/round.sh` submits the round.
+3. `decsim status` folds every saved piece into the numbers.
+
+Plan again after each round, until the plan says every point has stopped.
+
+## 1. Size the pieces and say when a point stops
 
 A piece is one point's block of shots that one process runs from start
-to finish. The yaml's `collection` section sets its size in QEC rounds,
-`piece_rounds`, 20,000 unless it says otherwise (`configs/reference.yaml`),
-so a piece takes about as long at any history length. A smaller piece
-loses less to a killed job, at the cost of building the window models
-more often, since they are cached per piece.
+to finish. The yaml's `collection` section sets its size in QEC rounds
+with `piece_rounds`, 20,000 unless it says otherwise
+(`configs/reference.yaml`). So a piece takes about as long at any
+history length.
 
-## 2. Pin the code the job will run
+The same section says when a point stops:
 
-A job imports the tree as it stands when it starts. A commit landing
-between submitting and starting gives the job code nobody chose. So
+- `max_failures` is the target.
+- `max_shots` and `max_core_seconds` are the caps.
+- `min_shots` is the minimum.
+
+A piece must finish inside one task's walltime, so size `piece_rounds`
+from a point's seconds a shot.
+
+## 2. Pin the code the rounds will run
+
+A task imports the tree as it stands when it starts. A commit landing
+between submitting and starting gives the task code nobody chose. So
 submit from a worktree pinned at a commit, and leave the tree you work
 in free:
 
@@ -28,40 +41,108 @@ git worktree add ../decsim-weak_ler <commit>
 cd ../decsim-weak_ler
 ```
 
-The commit and the dirty flag go into every run folder's
-`manifest.json` and every piece's `piece.json`, so a result names its
-code. The interpreter decides which tree is imported, not the directory
-you submit from: an environment installed with `pip install -e` from
-another checkout imports that checkout, so a worktree needs
-`PYTHONPATH` naming it.
+`slurm/round.sh` refuses a tree with uncommitted changes, or one git
+cannot read. It checks once when you submit and again in every task.
+`ALLOW_DIRTY=1` overrides both refusals.
 
-## 3. Submit the job
+Every piece's `piece.json` records the commit and the dirty flag, so a
+result names its code. The interpreter decides which tree is imported,
+not the directory you submit from. An environment installed with
+`pip install -e` from another checkout imports that checkout, so a
+worktree needs `PYTHONPATH` naming it.
+
+## 3. Plan a round
 
 ```bash
-sbatch -c 16 -t 16:00:00 --wrap \
-  "decsim collect configs/weak_ler.yaml --processes 16 --out $PWD/results/weak_ler"
+decsim plan configs/weak_ler.yaml --out $PWD/results/weak_ler --tasks 300
 ```
 
-`--out` must be an absolute path, so the job writes where you will look.
-`--processes` runs that many pieces at once, one per worker.
+This writes `results/weak_ler/round1/plan.csv`, with its pieces dealt to
+at most 300 tasks, and `tasks.csv`, with each task's cores, memory and
+hours.
 
-## 4. If the job dies
+Several yamls may share one experiment folder. Yamls of one
+configuration, such as a grid split into one file per distance, are
+planned as one.
 
-Submit the same line again. Every piece whose folder exists is skipped;
-a piece folder appears only once the piece is whole, so nothing is
-counted twice, and the pieces that were running are run again from
-their first seed.
+How the plan decides a point's pieces:
 
-## 5. Read the numbers
+- **Round one** gives each point one piece, since nothing is measured
+  yet. A point with no target but a shot cap gets every piece up to the
+  cap.
+- **Later rounds, a lost piece:** a piece a task never finished is
+  planned again first, with its own seeds.
+- **Later rounds, a point still running:** it is extended to the
+  shots its failure rate so far says the target needs, which is OpenMC's
+  trigger rule. With no failure yet, its shots double.
+- **Never past a cap.**
 
-The run folder is `results/weak_ler/combined/<name>-<id8>/`, folded from
-every piece. Its `sweep.csv` holds one row per point, its values and its
-counts, and `decsim.results.load` reads it beside every setting
+How the plan deals and sizes the tasks:
+
+- Pieces go to tasks longest first, costed by each point's measured
+  seconds a shot.
+- A task asks for `--cores` cores (default 4) and runs that many pieces
+  at once.
+- A task asks for `--hours` hours of walltime (default 24).
+- A task's memory is its cores times its points' largest measured peak,
+  with a margin of one half. Where nothing was measured, it uses
+  `--memory-mb` per piece.
+
+On Della's `short` QOS, a user may submit 1,000 jobs, run 400 at once
+and use 1,400 cores. So `--tasks` stays at or under 1,000, and 350
+four-core tasks fill the cores.
+
+## 4. Submit it
+
+```bash
+SBATCH_QOS=short slurm/round.sh results/weak_ler 1
+```
+
+The script submits one job array per shape of job in `tasks.csv`,
+since an array has one memory request. Each array task runs
+`decsim collect --plan results/weak_ler/round1/plan.csv --task <id>`,
+one process per core. Its log goes to `round1/<id>/log.txt`, beside its
+manifest.
+
+The script writes no account, partition or QOS. `sbatch` reads them from
+the environment variables SBATCH_ACCOUNT, SBATCH_PARTITION and
+SBATCH_QOS.
+
+`DRY_RUN=1` prints the `sbatch` lines and submits nothing.
+
+## 5. If a task dies
+
+Nothing is lost but the pieces it was running. A piece folder appears
+only once the piece is whole, so nothing is counted twice. The next
+`decsim plan` finds each planned piece with no folder and plans it again.
+Running the same task again (`decsim collect --plan ... --task <id>`)
+also skips every piece it saved.
+
+## 6. Read the numbers
+
+```bash
+decsim status results/weak_ler
+```
+
+This folds every piece of every configuration into its run folder,
+`results/weak_ler/combined/<name>-<id8>/`. It writes
+`results/weak_ler/status.csv`, one row per point, with these columns:
+
+- the point's state: `running`, `target`, `minimum`, `cap`, or `no data`
+- its shots, failures and unscored shots
+- the estimate and exact interval of its contiguous prefix
+- its core seconds
+
+Status can run while a round runs. Plan the next round when the last
+one ends.
+
+The run folder's `sweep.csv` holds one row per point, its values and
+its counts, and `decsim.results.load` reads it beside every setting
 ([How to compare two runs](compare_two_runs.md)).
 
 ## Read next
 
 - [Your first sweep](../tutorials/first_sweep.md): a small sweep end to end, with the
   error bars explained.
-- [The run folder](../reference/run_folder.md): what a piece and a run folder hold.
-- [The commands](../reference/cli.md): every flag of `collect`.
+- [The run folder](../reference/run_folder.md): what a piece, a plan and a run folder hold.
+- [The commands](../reference/cli.md): every flag of `plan`, `collect` and `status`.

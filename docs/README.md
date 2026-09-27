@@ -134,6 +134,7 @@ sources, and the ideas behind the tree.
 | `configs/` | the yaml experiments. `configs/reference.yaml` documents every key. |
 | `results/` | what a run writes, one folder per run. Not tracked by git. |
 | `tests/` | the test suite, one folder per package |
+| `slurm/` | `round.sh`, which submits a round of an experiment's plan as job arrays |
 | `tools/` | the checks `tools/check.sh` runs, the tutorials' check `tools/check_tutorial_runs.py`, and the documentation generator |
 | `STYLE.md` | the rules every line of the package is written to |
 

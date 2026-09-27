@@ -133,6 +133,31 @@ def contiguous_ranges(saved: dict, first_seed: int) -> list:
     return ranges
 
 
+def uncovered_ranges(saved: dict, first_seed: int, count: int) -> list:
+    """The parts of seeds [first_seed, first_seed + count) no saved piece holds.
+
+    saved maps each saved piece's first seed to its count, as
+    saved_counts gives it, whatever collection cut it. Returns (first
+    seed, count) ranges in seed order; none when every seed is saved.
+    """
+    end_seed = first_seed + count
+    ranges = []
+    next_seed = first_seed
+    saved_items = saved.items()
+    for saved_first, saved_count in sorted(saved_items):
+        saved_end = saved_first + saved_count
+        if saved_end <= next_seed or saved_first >= end_seed:
+            continue
+        if saved_first > next_seed:
+            gap_count = saved_first - next_seed
+            ranges.append((next_seed, gap_count))
+        next_seed = max(next_seed, saved_end)
+    if next_seed < end_seed:
+        tail_count = end_seed - next_seed
+        ranges.append((next_seed, tail_count))
+    return ranges
+
+
 def seed_ranges_of(folders: list) -> dict:
     """Each point's seed ranges, [first, count], from its pieces' names."""
     ranges = {}

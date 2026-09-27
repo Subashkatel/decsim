@@ -122,9 +122,14 @@ round again with fewer `--tasks`, or wait for queued jobs to end.
 
 Nothing is lost but the pieces it was running. A piece folder appears
 only once the piece is whole, so nothing is counted twice. The next
-`decsim plan` finds each planned piece with no folder and plans it again.
-Running the same task again (`decsim collect --plan ... --task <id>`)
-also skips every piece it saved.
+`decsim plan` finds each planned piece whose seeds no piece holds and
+plans it again. Running the same task again (`decsim collect --plan ...
+--task <id>`) runs only the seeds no saved piece holds.
+
+A plain `decsim collect` of the same yaml in the same folder cuts its
+pieces where planned pieces begin and end, so a round's task run after
+it finds those seeds saved and runs nothing. Each seed is saved once,
+whichever runs first.
 
 ## 6. Read the numbers
 

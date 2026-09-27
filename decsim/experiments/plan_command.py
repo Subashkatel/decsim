@@ -9,8 +9,9 @@ saved pieces, read shot by shot as a collect reads it:
 
 1. A point whose prefix has stopped by its collection's rule gets
    nothing.
-2. A planned piece with no folder, a task that died, is planned again
-   with its own seeds, before anything new; its point waits for it.
+2. A planned piece whose seeds no piece holds, a task that died, is
+   planned again with its own seeds, before anything new; its point
+   waits for it.
 3. Otherwise the point is extended above its highest planned seed to
    shots x (target / failures), the shots its failure rate so far needs
    for the target (the ratio squared, since the relative error goes as
@@ -206,13 +207,27 @@ def _next_pieces(
     saved_items = point.saved.items()
     saved = set(saved_items)
     planned_ranges = planned.get(point_id, [])
-    missing = [piece for piece in planned_ranges if piece not in saved]
+    missing = _unsaved_seeds(point.saved, planned_ranges)
     if missing:
         return _pieces_of(configuration_id, point_id, missing)
     highest_seed = _highest_seed(planned_ranges, saved)
     shots = _extension(point, point.tracker.counts, highest_seed)
     ranges = _cut(highest_seed, shots, point.piece_shots)
     return _pieces_of(configuration_id, point_id, ranges)
+
+
+def _unsaved_seeds(saved: dict, planned_ranges: list) -> list:
+    """The planned seeds no saved piece holds, as (first seed, count).
+
+    A planned piece a task never saved comes back with its own seeds;
+    one saved under another cut, by a plain collect, comes back only for
+    the seeds that cut left out.
+    """
+    missing = []
+    for first_seed, count in planned_ranges:
+        unsaved = pieces.uncovered_ranges(saved, first_seed, count)
+        missing.extend(unsaved)
+    return missing
 
 
 def _highest_seed(planned_ranges: list, saved: set) -> int:

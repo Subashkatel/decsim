@@ -2656,3 +2656,60 @@ def _rows_of_every_run_folder(experiment_dir: pathlib.Path) -> list:
         folder_rows = report.read_rows(sweep_path)
         rows.extend(folder_rows)
     return rows
+
+
+def test_a_plain_collect_and_an_older_planned_task_run_each_seed_once(
+    tmp_path,
+):
+    """A plain collect cuts its pieces where a planned piece begins or ends.
+
+    Round one plans seeds 0 to 5 and seed 6; only the first task runs.
+    The cap is raised to ten and a plain collect runs on: it saves seed
+    6 as the plan cut it, then seeds 7 to 9. The planned task run later
+    finds seed 6 saved and runs nothing, so every seed is saved once.
+    """
+    config_path = _capped_noisy_config(tmp_path, 7, 90)
+    out_dir = tmp_path / "out"
+    round_dir = _plan([config_path], out_dir, 2)
+    plan_path = round_dir / "plan.csv"
+    command.main(["collect", "--plan", str(plan_path), "--task", "0"])
+    _capped_noisy_config(tmp_path, 10, 90)
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    command.main(["collect", "--plan", str(plan_path), "--task", "1"])
+    command.main(["status", str(out_dir)])
+
+    (row,) = _typed_status_rows(out_dir)
+    (_first_piece, second_piece) = _planned_ranges(round_dir)
+    assert second_piece[1:] == (6, 1)
+    assert _piece_names(out_dir) == ["0-5", "6-6", "7-9"]
+    assert row["shots"] == 10
+
+
+def test_a_planned_piece_saved_under_another_cut_is_not_run_again(tmp_path):
+    """A planned task runs only the seeds no saved piece holds.
+
+    Round one plans seeds 0 to 5 and seed 6. Before it runs, a plain
+    collect with pieces of two shots saves seeds 0 to 6 in four pieces.
+    The round's tasks then find their seeds saved and run nothing.
+    """
+    config_path = _capped_noisy_config(tmp_path, 7, 90)
+    out_dir = tmp_path / "out"
+    round_dir = _plan([config_path], out_dir, 2)
+    _capped_noisy_config(tmp_path, 7, 30)
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    _run_the_round(round_dir)
+    command.main(["status", str(out_dir)])
+
+    (row,) = _typed_status_rows(out_dir)
+    assert _piece_names(out_dir) == ["0-1", "2-3", "4-5", "6-6"]
+    assert row["shots"] == 7
+    assert _plan([config_path], out_dir, 2) is None
+
+
+def _capped_noisy_config(tmp_path, max_shots: int, piece_rounds: int):
+    """The noisy point with a shot cap and no target, written in place."""
+    collection = {"max_shots": max_shots, "piece_rounds": piece_rounds}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    return yaml_configs.write_config(tmp_path, card)

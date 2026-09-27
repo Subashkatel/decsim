@@ -44,7 +44,8 @@ class PointCollection:
     shots.csv, as the report does (collection.PrefixTracker), so the
     collector stops on the shot the report's row stops on. saved maps
     the first seed of each piece saved before this collect to its
-    count, whatever collection cut it. pending holds the (first seed,
+    count, whatever collection cut it, and planned lists the (first
+    seed, count) of the pieces round plans named. pending holds the (first seed,
     count) of the pieces handed out past the counted prefix, in seed
     order; they are counted once they are all saved, so the prefix
     stays contiguous whatever order the pool ends them in. last_piece
@@ -61,6 +62,7 @@ class PointCollection:
     piece_shots: int
     rounds_per_shot: int
     saved: dict
+    planned: list = dataclasses.field(default_factory=list)
     next_seed: int = 0
     pending: list = dataclasses.field(default_factory=list)
     last_piece: Optional[tuple] = None
@@ -142,15 +144,16 @@ class PointCollection:
         """The next piece made pending; its unit, or None when it is saved.
 
         A saved piece that starts at the next seed is taken whole, and a
-        new one ends where the next saved piece starts, so a collect run
-        again under a raised cap or target runs no seed twice.
+        new one ends where the next saved piece starts or a planned piece
+        starts or ends, so a collect run again under a raised cap or
+        target, or beside a round's tasks, runs no seed twice.
         """
         first_seed = self.next_seed
         saved_count = self.saved.get(first_seed)
         if saved_count is not None:
             self._make_pending(first_seed, saved_count)
             return None
-        seeds_free = self._seeds_before_a_saved_piece(first_seed)
+        seeds_free = self._seeds_before_a_boundary(first_seed)
         new_count = min(count, seeds_free)
         task = self.task_as_its_last_piece_left_it(experiment_dir)
         self._make_pending(first_seed, new_count)
@@ -161,15 +164,21 @@ class PointCollection:
         self.pending.append((first_seed, count))
         self.last_piece = (first_seed, count)
 
-    def _seeds_before_a_saved_piece(self, first_seed: int) -> float:
-        """The seeds from first_seed to the next saved piece, or infinity."""
-        later_starts = []
-        for saved_first in self.saved:
-            if saved_first > first_seed:
-                later_starts.append(saved_first)
-        if not later_starts:
+    def _seeds_before_a_boundary(self, first_seed: int) -> float:
+        """The seeds from first_seed to the next piece's edge, or infinity.
+
+        An edge is where a saved piece starts, or where a planned piece
+        starts or ends.
+        """
+        edges = list(self.saved)
+        for planned_first, planned_count in self.planned:
+            planned_end = planned_first + planned_count
+            edges.append(planned_first)
+            edges.append(planned_end)
+        later_edges = [edge for edge in edges if edge > first_seed]
+        if not later_edges:
             return math.inf
-        return min(later_starts) - first_seed
+        return min(later_edges) - first_seed
 
     def _next_piece_count(self) -> int:
         """The next piece's shots: a piece, or what is left below max_shots."""
@@ -323,9 +332,10 @@ def recorded_points(experiment_dir: pathlib.Path, configs_by_id: dict) -> list:
     owned = owners.values()
     accepted = list(owned)
     _write_the_records(experiment_dir, accepted, configs_by_id)
+    planned = pieces.planned_pieces(experiment_dir)
     owned_points = []
     for resolved in accepted:
-        point = _point_collection(experiment_dir, resolved)
+        point = _point_collection(experiment_dir, resolved, planned)
         owned_points.append((resolved.configuration_id, point))
     return owned_points
 
@@ -469,19 +479,22 @@ def _planned_units(
     task_by_point: dict,
     configs: list,
 ) -> list:
-    """The planned pieces not yet saved, as work units of their tasks."""
+    """The planned pieces' seeds no saved piece holds, as work units.
+
+    A piece saved whole, or its seeds saved under another cut by a plain
+    collect, runs nothing; one partly saved runs the seeds left, so no
+    seed is saved twice.
+    """
     units = []
     for piece in config_pieces:
         task = task_by_point.get(piece.point_id)
         if task is None:
             _refuse_a_point_gone_from_its_yamls(piece, configs)
-        folder = pieces.piece_dir(
-            experiment_dir, piece.point_id, piece.first_seed, piece.count
-        )
-        if folder.is_dir():
-            continue
-        unit = collect.Unit(task, piece.first_seed, piece.count)
-        units.append(unit)
+        saved = pieces.saved_counts(experiment_dir, piece.point_id)
+        unsaved = pieces.uncovered_ranges(saved, piece.first_seed, piece.count)
+        for first_seed, count in unsaved:
+            unit = collect.Unit(task, first_seed, count)
+            units.append(unit)
     return units
 
 
@@ -634,16 +647,26 @@ def _check_one_collection(
 
 
 def _point_collection(
-    experiment_dir: pathlib.Path, resolved: _ResolvedPoint
+    experiment_dir: pathlib.Path, resolved: _ResolvedPoint, planned: dict
 ) -> PointCollection:
-    """A recorded point's collection state, its pieces sized by its rounds."""
+    """A recorded point's collection state, its pieces sized by its rounds.
+
+    planned maps a point id to its planned pieces, as round plans name
+    them (pieces.planned_pieces).
+    """
     point_id = resolved.record["id"]
     rounds_per_shot = resolved.record["rounds_per_shot"]
     settings = resolved.settings
     piece_shots = settings.piece_shots(rounds_per_shot)
     saved = pieces.saved_counts(experiment_dir, point_id)
+    point_planned = planned.get(point_id, [])
     return PointCollection(
-        resolved.task, settings, piece_shots, rounds_per_shot, saved
+        resolved.task,
+        settings,
+        piece_shots,
+        rounds_per_shot,
+        saved,
+        point_planned,
     )
 
 

@@ -252,6 +252,36 @@ def test_shots_fixed_in_advance_are_a_cap_at_the_shots_run():
     assert tracker.counts.shots == 2
 
 
+def test_a_point_stopped_by_its_time_cap_says_so():
+    """Its interval assumes a shot's time is independent of its failure.
+
+    Every shot row takes half a second, so a one-second cap stops the
+    prefix on its second shot, short of the shot cap: the state names
+    the time cap, the one stop whose limits rest on that assumption
+    (design section 7).
+    """
+    settings = _settings(max_shots=10, max_core_seconds=1.0)
+    rule = collection.PointRule(settings, False, 15)
+    rows = [_shot_row(0), _shot_row(1), _shot_row(2)]
+
+    tracker = _tracked(rule, rows)
+
+    assert tracker.state() == "time cap"
+    assert tracker.counts.shots == 2
+    assert tracker.stop_kind_for_limits() is StopKind.CAP
+
+
+def test_a_shot_cap_reached_with_the_time_cap_is_a_shot_cap():
+    """A count fixed in advance needs no assumption about time."""
+    settings = _settings(max_shots=2, max_core_seconds=1.0)
+    rule = collection.PointRule(settings, False, 15)
+    rows = [_shot_row(0), _shot_row(1)]
+
+    tracker = _tracked(rule, rows)
+
+    assert tracker.state() == "cap"
+
+
 def test_an_adaptive_point_says_so_whatever_its_counts():
     settings = _settings(max_shots=2)
     rule = collection.PointRule(settings, True, 15)

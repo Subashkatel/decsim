@@ -40,6 +40,9 @@ KEYS = (
 # max_shots for the same reason (sinter/_collection/_collection_manager.py:
 # 230-231): a point with no cap may never stop.
 CAP_KEYS = ("max_shots", "max_core_seconds")
+# the state of a prefix its time cap stopped, whose limits assume a
+# shot's time is independent of its failure
+TIME_CAP_STATE = "time cap"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,6 +115,18 @@ class CollectionSettings:
         if counts.core_seconds >= self.max_core_seconds:
             return failure_statistics.StopKind.CAP
         return None
+
+    def is_time_cap(self, counts: "PrefixCounts") -> bool:
+        """Whether a cap stop at these counts was the time cap alone.
+
+        A shot cap reached on the same shot fixed the count in advance,
+        which needs no assumption about time, so it names the stop.
+        """
+        if self.max_core_seconds is None:
+            return False
+        if self.max_shots is not None and counts.shots >= self.max_shots:
+            return False
+        return counts.core_seconds >= self.max_core_seconds
 
     def _has_reached_the_target(self, counts: "PrefixCounts") -> bool:
         """Whether the scored failures and scored shots are both far enough."""
@@ -194,16 +209,28 @@ class PrefixTracker:
             self.is_open = False
 
     def state(self) -> str:
-        """The row's state: the stop's kind, or why there is none."""
+        """The row's state: the stop's kind, or why there is none.
+
+        A time cap has a cap's limits, exact only when a shot's time
+        does not depend on whether it failed (design section 7), so its
+        state says it was the time cap.
+        """
         if self.counts.shots == 0:
             return "no data"
         if self.rule.is_adaptive:
             return "adaptive"
+        if self._is_a_time_cap_stop():
+            return TIME_CAP_STATE
         if self.stop_kind is not None:
             return self.stop_kind.value
         if self.rule.settings is None:
             return failure_statistics.StopKind.CAP.value
         return "running"
+
+    def _is_a_time_cap_stop(self) -> bool:
+        if self.stop_kind is not failure_statistics.StopKind.CAP:
+            return False
+        return self.rule.settings.is_time_cap(self.counts)
 
     def stop_kind_for_limits(self) -> failure_statistics.StopKind:
         """The kind whose limits hold for the prefix as it stands.

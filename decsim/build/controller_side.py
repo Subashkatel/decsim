@@ -81,29 +81,6 @@ def build_strong_decoder_manager(
     return _decoder_manager(parts, unit_pools)
 
 
-def _decoder_manager(
-    parts: build_parts.Parts, unit_pools: dict
-) -> decoder_manager_module.DecoderManager:
-    """One manager over the named pools, on the run's one manager card."""
-    pool = parts.pool
-    settings = parts.settings.decoder_manager
-    return decoder_manager_module.DecoderManager(
-        parts.engine,
-        router=pool.router,
-        scheduler=pool.scheduler,
-        strong_requests=parts.seats["strong_requests"],
-        unit_pools=unit_pools,
-        bulk_strong=settings.bulk_strong,
-        decoder_memory=pool.decoder_memory,
-        escalation_policy=parts.escalation_policy,
-        clock=settings.clock,
-        dispatch_cycles=settings.dispatch_cycles,
-        copies_input_by_pool=pool.copies_input_by_pool,
-        blocks_unit_by_pool=pool.blocks_unit_by_pool,
-        formation_by_pool=pool.formation_by_pool,
-    )
-
-
 def build_detection_events(
     settings: machine_settings.MachineSettings,
     device,
@@ -314,6 +291,29 @@ def resolved_patches_by_identity(plan) -> dict:
     for patch in plan.run_plan.resolved_patches:
         patch_by_identity[patch.patch_identity] = patch
     return patch_by_identity
+
+
+def _decoder_manager(
+    parts: build_parts.Parts, unit_pools: dict
+) -> decoder_manager_module.DecoderManager:
+    """One manager over the named pools, on the run's one manager card."""
+    pool = parts.pool
+    settings = parts.settings.decoder_manager
+    return decoder_manager_module.DecoderManager(
+        parts.engine,
+        router=pool.router,
+        scheduler=pool.scheduler,
+        strong_requests=parts.seats["strong_requests"],
+        unit_pools=unit_pools,
+        bulk_strong=settings.bulk_strong,
+        decoder_memory=pool.decoder_memory,
+        escalation_policy=parts.escalation_policy,
+        clock=settings.clock,
+        dispatch_cycles=settings.dispatch_cycles,
+        copies_input_by_pool=pool.copies_input_by_pool,
+        blocks_unit_by_pool=pool.blocks_unit_by_pool,
+        formation_by_pool=pool.formation_by_pool,
+    )
 
 
 def _check_forms_events(source) -> None:

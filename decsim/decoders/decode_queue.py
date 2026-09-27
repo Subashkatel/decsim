@@ -199,6 +199,13 @@ class WaitingJobs:
         return jobs
 
 
+def pool_tag_of(pool: str) -> str:
+    """The pool's name as a log prefix; the default pool has none."""
+    if pool == DEFAULT_POOL:
+        return ""
+    return f"{pool} "
+
+
 def _check_pools_bulk_strong_means(waiting_by_pool: dict) -> None:
     """bulk_strong merges the strong pool; another pool is not its business.
 
@@ -216,13 +223,6 @@ def _check_pools_bulk_strong_means(waiting_by_pool: dict) -> None:
         f"only, and this run also has {listed}; give those pools their "
         "own rule or turn bulk_strong off"
     )
-
-
-def pool_tag_of(pool: str) -> str:
-    """The pool's name as a log prefix; the default pool has none."""
-    if pool == DEFAULT_POOL:
-        return ""
-    return f"{pool} "
 
 
 def _refuse_bits_in_bulk_strong(job: decoding_records.DecodeJob) -> None:

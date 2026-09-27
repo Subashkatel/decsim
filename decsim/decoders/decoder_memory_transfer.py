@@ -35,14 +35,6 @@ import decsim.trace_source as trace_source
 SendInput = Callable[[Callable[[], None]], int]
 
 
-@dataclasses.dataclass
-class _AwaitedLanding:
-    """One transfer in flight into a unit, and the jobs joining its landing."""
-
-    expected_landing_ticks: int
-    joined: list
-
-
 class DecoderInputStaging:
     """Stages a job's input into a unit's memory and frees it again.
 
@@ -256,7 +248,7 @@ class DecoderInputStaging:
 
     def _join_landing(
         self,
-        awaited: _AwaitedLanding,
+        awaited: "_AwaitedLanding",
         job: decoding_records.DecodeJob,
         on_landed: Callable[[decoding_records.DecodeJob], None],
     ) -> None:
@@ -406,6 +398,14 @@ class CancellableDecoderMemoryTransfer:
         """Suppress the landing of a request that has not landed yet."""
         key = _transfer_key(job)
         self._in_flight_keys.discard(key)
+
+
+@dataclasses.dataclass
+class _AwaitedLanding:
+    """One transfer in flight into a unit, and the jobs joining its landing."""
+
+    expected_landing_ticks: int
+    joined: list
 
 
 def _transfer_key(job: decoding_records.DecodeJob):

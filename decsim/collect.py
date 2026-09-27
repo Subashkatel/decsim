@@ -211,6 +211,67 @@ def run_unit(unit: Unit, measure: Callable[[Shot], Any]) -> tuple:
     return rows, unit.task
 
 
+def unique_tasks(tasks: Iterable[Task]) -> list:
+    """The tasks in first-seen order, same strong id merged to one.
+
+    The merged task keeps the first block's calibrator, so an online
+    switching point named in two blocks calibrates once over all its
+    shots. No shipped or
+    frozen yaml names an online point twice.
+    """
+    task_by_id = {}
+    for task in tasks:
+        strong_id = task.strong_id()
+        if strong_id not in task_by_id:
+            task_by_id[strong_id] = task
+            continue
+        earlier = task_by_id[strong_id]
+        if task.shots > earlier.shots:
+            task_by_id[strong_id] = dataclasses.replace(
+                earlier, shots=task.shots
+            )
+    unique = task_by_id.values()
+    return list(unique)
+
+
+def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
+    """Build the task's machine for the seed and run it, timed.
+
+    built_models is the task's window error model cache: the first shot
+    fills it and the rest read it, which is most of a shot's build time
+    at a large distance. A shot run on its own passes none and builds
+    its own models.
+    """
+    settings = task.shot_settings(built_models)
+    wall_start = time.perf_counter()
+    machine = machine_module.Machine.build(settings, seed)
+    result = machine.run()
+    wall_end = time.perf_counter()
+    wall_seconds = wall_end - wall_start
+    return Shot(task, seed, machine, result, wall_seconds)
+
+
+def json_value(value: Any) -> Any:
+    """A settings record as plain json: every value by its content.
+
+    A dataclass (a settings record, a round policy) appears as its
+    fields. Every number appears exactly (a json number, or a Fraction's
+    exact text), every string and flag as written, and an enum member as
+    its name. A Stim circuit appears as its text, as sinter's strong id
+    carries the task's circuit (sinter/_data/_task.py:193), so two tasks
+    that run different circuits are two tasks. A Python-built component
+    (a decoder, a device) has no record form and appears by its content
+    too (_json_object).
+    """
+    if dataclasses.is_dataclass(value):
+        return _json_record(value)
+    if isinstance(value, Mapping):
+        return _json_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return _json_list(value)
+    return _json_scalar(value)
+
+
 def _units_of_one_task(task: Task, shots_per_unit: Optional[int]) -> list:
     """One task's seeds cut into units of at most `shots_per_unit`."""
     seeds_in_a_unit = task.shots
@@ -286,67 +347,6 @@ def _submitted(
         futures.append(future)
     pool.shutdown(wait=False)
     return futures
-
-
-def unique_tasks(tasks: Iterable[Task]) -> list:
-    """The tasks in first-seen order, same strong id merged to one.
-
-    The merged task keeps the first block's calibrator, so an online
-    switching point named in two blocks calibrates once over all its
-    shots. No shipped or
-    frozen yaml names an online point twice.
-    """
-    task_by_id = {}
-    for task in tasks:
-        strong_id = task.strong_id()
-        if strong_id not in task_by_id:
-            task_by_id[strong_id] = task
-            continue
-        earlier = task_by_id[strong_id]
-        if task.shots > earlier.shots:
-            task_by_id[strong_id] = dataclasses.replace(
-                earlier, shots=task.shots
-            )
-    unique = task_by_id.values()
-    return list(unique)
-
-
-def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
-    """Build the task's machine for the seed and run it, timed.
-
-    built_models is the task's window error model cache: the first shot
-    fills it and the rest read it, which is most of a shot's build time
-    at a large distance. A shot run on its own passes none and builds
-    its own models.
-    """
-    settings = task.shot_settings(built_models)
-    wall_start = time.perf_counter()
-    machine = machine_module.Machine.build(settings, seed)
-    result = machine.run()
-    wall_end = time.perf_counter()
-    wall_seconds = wall_end - wall_start
-    return Shot(task, seed, machine, result, wall_seconds)
-
-
-def json_value(value: Any) -> Any:
-    """A settings record as plain json: every value by its content.
-
-    A dataclass (a settings record, a round policy) appears as its
-    fields. Every number appears exactly (a json number, or a Fraction's
-    exact text), every string and flag as written, and an enum member as
-    its name. A Stim circuit appears as its text, as sinter's strong id
-    carries the task's circuit (sinter/_data/_task.py:193), so two tasks
-    that run different circuits are two tasks. A Python-built component
-    (a decoder, a device) has no record form and appears by its content
-    too (_json_object).
-    """
-    if dataclasses.is_dataclass(value):
-        return _json_record(value)
-    if isinstance(value, Mapping):
-        return _json_mapping(value)
-    if isinstance(value, (list, tuple)):
-        return _json_list(value)
-    return _json_scalar(value)
 
 
 def _json_record(record: Any) -> dict:

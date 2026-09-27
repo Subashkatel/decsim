@@ -74,7 +74,7 @@ def first_sentence(text: str) -> str:
     ("Sec. III C", "Fig. 12", "et al.") does not close the sentence, so
     the list below is checked before a period is believed.
     """
-    opening = first_paragraph(text)
+    opening = _first_paragraph(text)
     found = SENTENCE_END.finditer(opening)
     for match in found:
         end = match.end()
@@ -84,26 +84,6 @@ def first_sentence(text: str) -> str:
     return opening
 
 
-def _ends_a_sentence(sentence: str) -> bool:
-    """Whether the period that closes this candidate closes a sentence."""
-    stripped = sentence.rstrip(".!?")
-    words = stripped.split()
-    if not words:
-        return True
-    last = words[-1]
-    return last not in ABBREVIATIONS
-
-
-def first_paragraph(text: str) -> str:
-    """The opening paragraph of a docstring, on one line."""
-    stripped = text.strip()
-    paragraphs = stripped.split("\n\n")
-    opening = paragraphs[0]
-    unwrapped = opening.replace("\n", " ")
-    words = unwrapped.split()
-    return " ".join(words)
-
-
 def module_summary(path: pathlib.Path) -> str:
     """The first sentence of a module's docstring."""
     tree = _parsed(path)
@@ -111,18 +91,6 @@ def module_summary(path: pathlib.Path) -> str:
     if text is None:
         return ""
     return first_sentence(text)
-
-
-def _parsed(path: pathlib.Path) -> ast.Module:
-    """One source file as a syntax tree."""
-    source = path.read_text()
-    return ast.parse(source)
-
-
-def _relative(path: pathlib.Path, checkout: pathlib.Path) -> str:
-    """One file's path as a reader types it, from the checkout root."""
-    relative = path.relative_to(checkout)
-    return relative.as_posix()
 
 
 def module_paths(package_root: pathlib.Path) -> list:
@@ -151,6 +119,151 @@ def package_levels(package_root: pathlib.Path) -> dict:
 
 
 # ------------------------------------------------------------- the map page
+
+
+def map_page(checkout: pathlib.Path) -> str:
+    """docs/reference/map.md: every package and module in the uses order."""
+    package_root = checkout / "decsim"
+    grouped = modules_by_package(package_root)
+    levels = package_levels(package_root)
+    by_level = collections.defaultdict(list)
+    for package, level in levels.items():
+        by_level[level].append(package)
+    lines = _map_header()
+    root_section = _root_section(checkout)
+    lines.extend(root_section)
+    for level in sorted(by_level):
+        named_packages = by_level[level]
+        packages = sorted(named_packages)
+        named = ", ".join(packages)
+        lines.append(f"## Level {level}: {named}")
+        lines.append("")
+        sections = _level_sections(packages, grouped, checkout)
+        lines.extend(sections)
+    return "\n".join(lines)
+
+
+# ----------------------------------------------------------- the ports page
+
+
+def ports_page(checkout: pathlib.Path) -> str:
+    """docs/reference/ports.md: every port, in the order of the port file."""
+    path = checkout / "decsim" / "ports.py"
+    source = path.read_text()
+    tree = ast.parse(source)
+    items = _page_items(tree, source)
+    lines = _ports_header(tree)
+    for _, kind, body in items:
+        rendered = _item_lines(kind, body)
+        lines.extend(rendered)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------- the tables page
+
+
+def tables_of(checkout: pathlib.Path) -> list:
+    """Every plug-in table of the package, as (name, dict node, its module)."""
+    package_root = checkout / "decsim"
+    keys = _lookup_keys(package_root)
+    paths = module_paths(package_root)
+    found = []
+    for path in paths:
+        declared = _table_dicts(path)
+        named = _looked_up(declared, path, keys)
+        found.extend(named)
+    return sorted(found)
+
+
+def tables_page(checkout: pathlib.Path) -> str:
+    """docs/reference/tables.md: every plug-in table and every row of it."""
+    package_root = checkout / "decsim"
+    keys = _lookup_keys(package_root)
+    entries = tables_of(checkout)
+    count = len(entries)
+    lines = _tables_header(count)
+    for entry in entries:
+        section = _table_section(entry, keys, checkout)
+        lines.extend(section)
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------- the cli page
+
+
+def cli_page(checkout: pathlib.Path) -> str:
+    """docs/reference/cli.md: every decsim command and its arguments."""
+    experiments = checkout / "decsim" / "experiments"
+    command = experiments / "command.py"
+    lines = _cli_header(command)
+    globbed = experiments.glob("*.py")
+    paths = sorted(globbed)
+    entries = []
+    for path in paths:
+        found = _parsers_of(path)
+        entries.extend(found)
+    for entry in sorted(entries):
+        section = _command_section(entry)
+        lines.extend(section)
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------- the four pages
+
+
+def pages(checkout: pathlib.Path) -> dict:
+    """The four generated pages, by their file name under docs/reference/."""
+    return {
+        "map.md": map_page(checkout),
+        "ports.md": ports_page(checkout),
+        "tables.md": tables_page(checkout),
+        "cli.md": cli_page(checkout),
+    }
+
+
+def main(arguments) -> int:
+    """Write the four generated pages under docs/reference/."""
+    checkout = CHECKOUT
+    if arguments:
+        checkout = pathlib.Path(arguments[0])
+    written = pages(checkout)
+    for name, text in written.items():
+        path = checkout / "docs" / "reference" / name
+        path.write_text(text)
+        print(f"wrote {path}")
+    return 0
+
+
+def _first_paragraph(text: str) -> str:
+    """The opening paragraph of a docstring, on one line."""
+    stripped = text.strip()
+    paragraphs = stripped.split("\n\n")
+    opening = paragraphs[0]
+    unwrapped = opening.replace("\n", " ")
+    words = unwrapped.split()
+    return " ".join(words)
+
+
+def _ends_a_sentence(sentence: str) -> bool:
+    """Whether the period that closes this candidate closes a sentence."""
+    stripped = sentence.rstrip(".!?")
+    words = stripped.split()
+    if not words:
+        return True
+    last = words[-1]
+    return last not in ABBREVIATIONS
+
+
+def _parsed(path: pathlib.Path) -> ast.Module:
+    """One source file as a syntax tree."""
+    source = path.read_text()
+    return ast.parse(source)
+
+
+def _relative(path: pathlib.Path, checkout: pathlib.Path) -> str:
+    """One file's path as a reader types it, from the checkout root."""
+    relative = path.relative_to(checkout)
+    return relative.as_posix()
 
 
 def _module_line(path: pathlib.Path, checkout: pathlib.Path) -> str:
@@ -207,31 +320,6 @@ def _level_sections(packages: list, grouped: dict, checkout) -> list:
         section = _package_section(package, paths, checkout)
         lines.extend(section)
     return lines
-
-
-def map_page(checkout: pathlib.Path) -> str:
-    """docs/reference/map.md: every package and module in the uses order."""
-    package_root = checkout / "decsim"
-    grouped = modules_by_package(package_root)
-    levels = package_levels(package_root)
-    by_level = collections.defaultdict(list)
-    for package, level in levels.items():
-        by_level[level].append(package)
-    lines = _map_header()
-    root_section = _root_section(checkout)
-    lines.extend(root_section)
-    for level in sorted(by_level):
-        named_packages = by_level[level]
-        packages = sorted(named_packages)
-        named = ", ".join(packages)
-        lines.append(f"## Level {level}: {named}")
-        lines.append("")
-        sections = _level_sections(packages, grouped, checkout)
-        lines.extend(sections)
-    return "\n".join(lines)
-
-
-# ----------------------------------------------------------- the ports page
 
 
 def _is_a_protocol(node: ast.ClassDef) -> bool:
@@ -303,7 +391,7 @@ def _port_section(node: ast.ClassDef) -> list:
     lines = [f"### `{node.name}`", ""]
     text = ast.get_docstring(node)
     if text is not None:
-        paragraph = first_paragraph(text)
+        paragraph = _first_paragraph(text)
         lines.append(paragraph)
         lines.append("")
     member_table = _member_table(node)
@@ -331,7 +419,7 @@ def _ports_header(tree: ast.Module) -> list:
     lines = [CRUMB, "", "# The ports", "", GENERATED, ""]
     text = ast.get_docstring(tree)
     if text is not None:
-        paragraph = first_paragraph(text)
+        paragraph = _first_paragraph(text)
         lines.append(paragraph)
         lines.append("")
     lines.append(
@@ -376,22 +464,6 @@ def _item_lines(kind: str, body) -> list:
     if kind == "banner":
         return [f"## {body}", ""]
     return _port_section(body)
-
-
-def ports_page(checkout: pathlib.Path) -> str:
-    """docs/reference/ports.md: every port, in the order of the port file."""
-    path = checkout / "decsim" / "ports.py"
-    source = path.read_text()
-    tree = ast.parse(source)
-    items = _page_items(tree, source)
-    lines = _ports_header(tree)
-    for _, kind, body in items:
-        rendered = _item_lines(kind, body)
-        lines.extend(rendered)
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------- the tables page
 
 
 def _alias_targets(tree: ast.Module) -> dict:
@@ -621,19 +693,6 @@ def _key_part(part: ast.AST) -> str:
     return "<...>"
 
 
-def tables_of(checkout: pathlib.Path) -> list:
-    """Every plug-in table of the package, as (name, dict node, its module)."""
-    package_root = checkout / "decsim"
-    keys = _lookup_keys(package_root)
-    paths = module_paths(package_root)
-    found = []
-    for path in paths:
-        declared = _table_dicts(path)
-        named = _looked_up(declared, path, keys)
-        found.extend(named)
-    return sorted(found)
-
-
 def _looked_up(declared: dict, path: pathlib.Path, keys: dict) -> list:
     """The tables of one module that a yaml key names, sorted by name."""
     found = []
@@ -689,22 +748,6 @@ def _tables_header(count: int) -> list:
         "yaml key `configs/reference.yaml` carries.",
         "",
     ]
-
-
-def tables_page(checkout: pathlib.Path) -> str:
-    """docs/reference/tables.md: every plug-in table and every row of it."""
-    package_root = checkout / "decsim"
-    keys = _lookup_keys(package_root)
-    entries = tables_of(checkout)
-    count = len(entries)
-    lines = _tables_header(count)
-    for entry in entries:
-        section = _table_section(entry, keys, checkout)
-        lines.extend(section)
-    return "\n".join(lines)
-
-
-# ------------------------------------------------------------- the cli page
 
 
 def _parser_name(node: ast.Assign):
@@ -838,7 +881,7 @@ def _cli_header(path: pathlib.Path) -> list:
     """The cli page's title and the command file's own usage block."""
     tree = _parsed(path)
     text = ast.get_docstring(tree)
-    paragraph = first_paragraph(text)
+    paragraph = _first_paragraph(text)
     return [
         CRUMB,
         "",
@@ -867,49 +910,6 @@ def _command_section(entry: tuple) -> list:
     lines.extend(rows)
     lines.append("")
     return lines
-
-
-def cli_page(checkout: pathlib.Path) -> str:
-    """docs/reference/cli.md: every decsim command and its arguments."""
-    experiments = checkout / "decsim" / "experiments"
-    command = experiments / "command.py"
-    lines = _cli_header(command)
-    globbed = experiments.glob("*.py")
-    paths = sorted(globbed)
-    entries = []
-    for path in paths:
-        found = _parsers_of(path)
-        entries.extend(found)
-    for entry in sorted(entries):
-        section = _command_section(entry)
-        lines.extend(section)
-    return "\n".join(lines)
-
-
-# ------------------------------------------------------------- the four pages
-
-
-def pages(checkout: pathlib.Path) -> dict:
-    """The four generated pages, by their file name under docs/reference/."""
-    return {
-        "map.md": map_page(checkout),
-        "ports.md": ports_page(checkout),
-        "tables.md": tables_page(checkout),
-        "cli.md": cli_page(checkout),
-    }
-
-
-def main(arguments) -> int:
-    """Write the four generated pages under docs/reference/."""
-    checkout = CHECKOUT
-    if arguments:
-        checkout = pathlib.Path(arguments[0])
-    written = pages(checkout)
-    for name, text in written.items():
-        path = checkout / "docs" / "reference" / name
-        path.write_text(text)
-        print(f"wrote {path}")
-    return 0
 
 
 if __name__ == "__main__":

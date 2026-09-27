@@ -26,125 +26,10 @@ import decsim.records.program as program_records
 import decsim.trace_source as trace_source
 
 
-class ResourceLedger:
-    """Which operation holds which resource; one holder per resource."""
-
-    def __init__(self, claims_by_operation_id):
-        copied = dict(claims_by_operation_id)
-        self.claims_by_operation_id = types.MappingProxyType(copied)
-        self.holder_by_resource = {}
-
-    def claim(
-        self, operation: program_records.Operation, name_of: Callable
-    ) -> None:
-        """Claim every resource of the operation, or none of them."""
-        distinct_qubits = set(operation.qubits)
-        if len(distinct_qubits) != len(operation.qubits):
-            raise RuntimeError(
-                f"{operation.name} lists a qubit more than once: "
-                f"{operation.qubits}"
-            )
-        claims = self.claims_by_operation_id[operation.id]
-        keys_to_claim = []
-        for key in _resource_keys(claims):
-            holder_id = self._holder_of(key, keys_to_claim, operation.id)
-            if holder_id is None:
-                keys_to_claim.append(key)
-                continue
-            holder_name = name_of(holder_id)
-            kind, resource_id = key
-            raise RuntimeError(
-                f"{operation.name} and {holder_name} share {kind} "
-                f"resource {resource_id!r} but have no dependency edge. "
-                "The operation list is missing "
-                "program-order wiring (run it through _wire_circuit / a "
-                "frontend)"
-            )
-        for key in keys_to_claim:
-            self.holder_by_resource[key] = operation.id
-
-    def release(self, operation: program_records.Operation) -> None:
-        """Free every resource the operation holds."""
-        claims = self.claims_by_operation_id[operation.id]
-        held_keys = _resource_keys(claims)
-        for key in dict.fromkeys(held_keys):
-            holder_id = self.holder_by_resource.get(key)
-            assert holder_id == operation.id, (
-                f"{operation.name} releases {key!r} held by {holder_id!r}"
-            )
-            del self.holder_by_resource[key]
-
-    def _holder_of(self, key: tuple, prospective_keys: list, operation_id):
-        """Who holds the key: a live holder, this claim itself, or nobody."""
-        if key in self.holder_by_resource:
-            return self.holder_by_resource[key]
-        if key in prospective_keys:
-            return operation_id
-        return None
-
-
-class OperationSchedule:
-    """The program's dependency graph and every operation's readiness.
-
-    operations indexes the program; dependencies_remaining counts each
-    operation's unfinished predecessors and successors is the reverse
-    edge; schedule_released, requested and state_ready are the three
-    gates an operation passes before it may be issued. gem5 keeps the
-    same split between the workload's graph and the object that runs it
-    (configs/deprecated/example/se.py builds the process list, the
-    system runs it).
-    """
-
-    def __init__(self) -> None:
-        self.program = None
-        self.operations: dict = {}
-        self.dependencies_remaining: dict = {}
-        self.successors: dict = {}
-        self.gates = _StartGates()
-
-    def index(self, program: program_records.ExecutionProgram) -> None:
-        """Record the program's operations and both edges of its graph."""
-        self.program = program
-        for operation in program.operations:
-            self.operations[operation.id] = operation
-            predecessor_count = len(operation.predecessors)
-            self.dependencies_remaining[operation.id] = predecessor_count
-            self.successors[operation.id] = []
-        for operation in program.operations:
-            for predecessor_id in operation.predecessors:
-                self.successors[predecessor_id].append(operation.id)
-
-    def is_admissible(self, operation: program_records.Operation) -> bool:
-        """Predecessors done, schedule released, and not yet requested."""
-        if self.dependencies_remaining[operation.id] != 0:
-            return False
-        if operation.id not in self.gates.schedule_released:
-            return False
-        return operation.id not in self.gates.requested
-
-    def name_of(self, operation_id) -> str:
-        """The operation's name, for a log line or a refusal."""
-        return self.operations[operation_id].name
-
-
-@dataclasses.dataclass
-class _StartGates:
-    """The three gates an operation passes before it may be issued.
-
-    schedule_released is its scheduled start round having arrived,
-    requested is its resources claimed and its magic state asked for,
-    state_ready is that state in hand.
-    """
-
-    schedule_released: set = dataclasses.field(default_factory=set)
-    requested: set = dataclasses.field(default_factory=set)
-    state_ready: set = dataclasses.field(default_factory=set)
-
-
 class ExecutionRuntime:
     """Drive the operations' lifecycle: start each one, finish it, release.
 
-    OperationSchedule owns the program's dependency graph and readiness;
+    _OperationSchedule owns the program's dependency graph and readiness;
     this class owns what happens to an operation over its life, so the
     two responsibilities are two classes. The ticks are fired, not kept.
     """
@@ -158,8 +43,8 @@ class ExecutionRuntime:
         resource_claims_by_operation_id,
     ):
         self.engine = engine
-        self.schedule = OperationSchedule()
-        resources = ResourceLedger(resource_claims_by_operation_id)
+        self.schedule = _OperationSchedule()
+        resources = _ResourceLedger(resource_claims_by_operation_id)
         self.lifecycle = _OperationLifecycle(resources)
         self.trace = _TraceSources()
 
@@ -317,6 +202,121 @@ class ExecutionRuntime:
         self.issuer.issue_operation(operation, on_started)
 
 
+class _ResourceLedger:
+    """Which operation holds which resource; one holder per resource."""
+
+    def __init__(self, claims_by_operation_id):
+        copied = dict(claims_by_operation_id)
+        self.claims_by_operation_id = types.MappingProxyType(copied)
+        self.holder_by_resource = {}
+
+    def claim(
+        self, operation: program_records.Operation, name_of: Callable
+    ) -> None:
+        """Claim every resource of the operation, or none of them."""
+        distinct_qubits = set(operation.qubits)
+        if len(distinct_qubits) != len(operation.qubits):
+            raise RuntimeError(
+                f"{operation.name} lists a qubit more than once: "
+                f"{operation.qubits}"
+            )
+        claims = self.claims_by_operation_id[operation.id]
+        keys_to_claim = []
+        for key in _resource_keys(claims):
+            holder_id = self._holder_of(key, keys_to_claim, operation.id)
+            if holder_id is None:
+                keys_to_claim.append(key)
+                continue
+            holder_name = name_of(holder_id)
+            kind, resource_id = key
+            raise RuntimeError(
+                f"{operation.name} and {holder_name} share {kind} "
+                f"resource {resource_id!r} but have no dependency edge. "
+                "The operation list is missing "
+                "program-order wiring (run it through _wire_circuit / a "
+                "frontend)"
+            )
+        for key in keys_to_claim:
+            self.holder_by_resource[key] = operation.id
+
+    def release(self, operation: program_records.Operation) -> None:
+        """Free every resource the operation holds."""
+        claims = self.claims_by_operation_id[operation.id]
+        held_keys = _resource_keys(claims)
+        for key in dict.fromkeys(held_keys):
+            holder_id = self.holder_by_resource.get(key)
+            assert holder_id == operation.id, (
+                f"{operation.name} releases {key!r} held by {holder_id!r}"
+            )
+            del self.holder_by_resource[key]
+
+    def _holder_of(self, key: tuple, prospective_keys: list, operation_id):
+        """Who holds the key: a live holder, this claim itself, or nobody."""
+        if key in self.holder_by_resource:
+            return self.holder_by_resource[key]
+        if key in prospective_keys:
+            return operation_id
+        return None
+
+
+class _OperationSchedule:
+    """The program's dependency graph and every operation's readiness.
+
+    operations indexes the program; dependencies_remaining counts each
+    operation's unfinished predecessors and successors is the reverse
+    edge; schedule_released, requested and state_ready are the three
+    gates an operation passes before it may be issued. gem5 keeps the
+    same split between the workload's graph and the object that runs it
+    (configs/deprecated/example/se.py builds the process list, the
+    system runs it).
+    """
+
+    def __init__(self) -> None:
+        self.program = None
+        self.operations: dict = {}
+        self.dependencies_remaining: dict = {}
+        self.successors: dict = {}
+        self.gates = _StartGates()
+
+    def index(self, program: program_records.ExecutionProgram) -> None:
+        """Record the program's operations and both edges of its graph."""
+        self.program = program
+        for operation in program.operations:
+            self.operations[operation.id] = operation
+            predecessor_count = len(operation.predecessors)
+            self.dependencies_remaining[operation.id] = predecessor_count
+            self.successors[operation.id] = []
+        for operation in program.operations:
+            for predecessor_id in operation.predecessors:
+                self.successors[predecessor_id].append(operation.id)
+
+    def is_admissible(self, operation: program_records.Operation) -> bool:
+        """Predecessors done, schedule released, and not yet requested."""
+        if self.dependencies_remaining[operation.id] != 0:
+            return False
+        if operation.id not in self.gates.schedule_released:
+            return False
+        return operation.id not in self.gates.requested
+
+    def name_of(self, operation_id) -> str:
+        """The operation's name, for a log line or a refusal."""
+        return self.operations[operation_id].name
+
+
+@dataclasses.dataclass
+class _StartGates:
+    """The three gates an operation passes before it may be issued.
+
+    schedule_released is its scheduled start round having arrived,
+    requested is its resources claimed and its magic state asked for,
+    state_ready is that state in hand.
+    """
+
+    schedule_released: set = dataclasses.field(default_factory=set)
+    requested: set = dataclasses.field(default_factory=set)
+    state_ready: set = dataclasses.field(default_factory=set)
+
+
 @dataclasses.dataclass
 class _OperationLifecycle:
     """Where each operation is in its life, and what it holds.
@@ -326,7 +326,7 @@ class _OperationLifecycle:
     holds the resources it claimed between the first and the second.
     """
 
-    resources: ResourceLedger
+    resources: _ResourceLedger
     started_operation_ids: set = dataclasses.field(default_factory=set)
     finished_operation_ids: set = dataclasses.field(default_factory=set)
     released_operation_ids: set = dataclasses.field(default_factory=set)

@@ -137,7 +137,7 @@ def _delivery(defects: dict, destination) -> window_records.BoundaryDelivery:
 
 
 def test_a_mask_on_the_destinations_oldest_layer_is_accepted():
-    """W-3: the wire cost counts that layer, so the mask must land there."""
+    """The wire cost counts that layer, so the mask must land there."""
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(
         0, boundary_payload

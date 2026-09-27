@@ -205,7 +205,7 @@ def test_every_exemption_sentence_names_every_attribute_its_class_holds():
     """The entry is what a reader of rule 1 sees instead of the report.
 
     An entry that does not name a collaborator leaves that collaborator
-    unexplained, which is what C8 item 8 found on three of the eight.
+    unexplained.
     """
     checker = _checker()
     guide = (PACKAGE_ROOT / "STYLE.md").read_text()

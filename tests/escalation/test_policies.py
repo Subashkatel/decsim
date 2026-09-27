@@ -385,7 +385,8 @@ def test_a_forward_window_crossing_a_later_commit_region_is_refused(
 
     The strong region is commit plus two buffers; when twice the buffer
     is not a multiple of the commit, it ends inside a later window's
-    commit region, and the run used to die at its first escalation.
+    commit region, and that window commits across the region's end with
+    no owner.
     """
     settings = _forward_window_settings(commit_rounds, buffer_rounds)
     with pytest.raises(

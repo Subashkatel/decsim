@@ -18,8 +18,8 @@ The trace is read with `experiments/trace_file.py`, the reader
 `args.tick` is the only clock either of them trusts.
 """
 
+import pathlib
 import statistics
-from pathlib import Path
 
 import decsim.config as config
 import decsim.experiments.report as report
@@ -47,11 +47,11 @@ def rows_of(measurements: list) -> list:
     return rows
 
 
-def write_residence(rows: list, report_dir: Path) -> None:
+def write_residence(rows: list, report_dir: pathlib.Path) -> None:
     """residence.csv, left unwritten when no shot of the run was traced."""
     if not rows:
         return
-    path = Path(report_dir) / "residence.csv"
+    path = pathlib.Path(report_dir) / "residence.csv"
     report.write_csv(rows, path)
 
 
@@ -145,6 +145,6 @@ def _microseconds_each(ticks: list) -> list:
     """Every tick count as a float of microseconds."""
     spans = []
     for count in ticks:
-        span = count / config.TICKS_PER_MICROSECOND
+        span = config.ticks_to_microseconds(count)
         spans.append(span)
     return spans

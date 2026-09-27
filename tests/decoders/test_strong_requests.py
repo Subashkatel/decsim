@@ -9,7 +9,6 @@ import pytest
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
-from decsim.decoders.strong_requests import StrongCompletion
 
 
 def _request_key(sequence):
@@ -30,7 +29,7 @@ def _strong_job(request_key, window_key=(1, 0)):
 
 def _completion(job, now=50):
     result = decoding_records.DecodeResult(1, 0)
-    return StrongCompletion(job, result, now, None)
+    return strong_requests_module.StrongCompletion(job, result, now, None)
 
 
 def test_a_result_before_its_selection_is_not_consumed_yet():

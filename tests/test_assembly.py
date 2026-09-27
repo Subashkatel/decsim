@@ -1,8 +1,7 @@
-"""The assembly file describes the machine the root used to build by hand.
+"""The assembly file describes the machine the root builds.
 
-One thing is asked of this file: the root builds
-the same objects in the same order it did when that order was written
-out in machine.py. The order is checked here against a short expected
+One thing is asked of this file: the root builds the same objects in
+one fixed order. The order is checked here against a short expected
 list for one declared run, and both golden hashes of the frozen suite
 check the rest of it on every run of the gate.
 

@@ -1232,9 +1232,6 @@ mistake a gap for a result.
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
   the per-point settings.
-- **O6. `MAGIC_STATE_FACTORIES` has a table and no yaml section.** Its
-  rows cannot be selected from a config the way every other table's rows
-  can.
 - **O7. The parallel windowing scheme refuses the decoder-side formation
   row.** Skoric's A and B blocks read disjoint round ranges, and the
   formation component forms in round order, so it is asked for a later
@@ -1246,27 +1243,24 @@ mistake a gap for a result.
   builds and runs as a machine, but the experiments layer's per-shot
   measurement compares the loop's prediction against PyMatching on the
   sampled shot, and a timing-only device samples none, so `collect`
-  raises `KeyError`. A priced card on a real device is the way to a
-  host-independent run today.
-- **O9. A decoder section ignores a key it does not know.** The
-  `weak_decoder` and `strong_decoder` sections do not yet refuse an
-  unknown key by name the way `decoder_manager` does, so a misspelt key
-  there runs the default in silence.
+  refuses the shot and names a qpu.kind that samples. A priced card on
+  a real device is the way to a host-independent run today.
 - **O11. A staged job never moves to another unit.** A job that cannot
   start is staged with its rounds on one unit (D6) and stays there. If
   another unit frees first, the job still waits for its own, so it can
   start later than the pool as a whole allowed.
-- **O12. No yaml key names a noise model.** A yaml run uses the noise of
-  Stim's generated circuit, one physical error rate on its four noise
-  channels. A circuit with any other noise, such as a channel on every
-  idle step, can be handed to the machine from Python and not from a
-  yaml.
+- **O12. Only the live Deltakit producer names a noise model from a
+  yaml.** A yaml run on Stim's generated circuit uses its noise, one
+  physical error rate on its four noise channels. The producer
+  `decsim.producers:deltakit_live_memory` takes `noise_model` and the
+  relaxation and dephasing times as arguments; any other circuit's
+  noise is handed to the machine from Python.
 - **O13. No check sizes a store against its plan before the run.** A
   syndrome buffer too small for the rounds the plan's windows hold at
   once fills, and the run then stops and says how many rounds were left
   held for store room. The size that is always enough is the union of
   every hold, and an open-ended dynamic stream has none.
-O3, O4, O5 and O10 are closed: the sends name what they carry
+O3, O4, O5, O6, O9 and O10 are closed: the sends name what they carry
 (`QPUReadout.size_bits` on the readout hop; on the strong request's
 hops the request's name, alone for the selection and in front of the
 region's rounds and the answer's flips), the backward hand-off of the
@@ -1274,7 +1268,10 @@ parallel scheme is priced and tested,
 the boundary fold is written by the decoder side from the gate's mask
 (`decsim/decoders/decoder_memory_transfer.py`, D11), and a timing-only
 round ends in the decoders' own end for it
-(`decsim/decoders/memory_rounds.py`).
+(`decsim/decoders/memory_rounds.py`), the `magic_state_factory`
+section names a `MAGIC_STATE_FACTORIES` row, and a decoder section
+refuses a key it does not know by name (`decsim/tables.py`
+row_settings).
 
 O14 is closed by one rule: a memory counts what is written into it.
 When `detection_events.formed_at` seats the former at a decoder the tier's logic

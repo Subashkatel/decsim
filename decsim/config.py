@@ -25,6 +25,11 @@ def microseconds_to_ticks(microseconds: float) -> int:
     return int(rounded)
 
 
+def ticks_to_microseconds(ticks: int) -> float:
+    """Unrounded, so a report or a figure keeps every tick it was given."""
+    return ticks / TICKS_PER_MICROSECOND
+
+
 def format_ticks(ticks: int) -> str:
     """A tick count as the microsecond stamp every log line carries."""
     return f"{ticks / TICKS_PER_MICROSECOND:7.3f} us"
@@ -127,6 +132,11 @@ class Clock:
         aligned_cycles = self.cycles_for(now)
         edge_cycles = aligned_cycles + cycles
         return edge_cycles * self.period_ticks
+
+    def ticks_to_edge(self, cycles: int, now: int) -> int:
+        """The ticks from `now` to the edge `cycles` periods away."""
+        edge = self.edge(cycles, now)
+        return edge - now
 
     def cycles_for(self, ticks: int) -> int:
         """The whole cycles a span of ticks covers; a part cycle counts one."""

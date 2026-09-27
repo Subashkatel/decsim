@@ -11,10 +11,10 @@ copies no bits (observe/data_movement.py).
 
 import pytest
 
+import decsim.experiments.collect_command as collect_command
 import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
-from decsim.experiments.collect_command import run_experiment
-from tests.experiments.yaml_configs import write_config
+import tests.experiments.yaml_configs as yaml_configs
 
 COUNTING_SWEEP = {
     "observation": {"data_movement": True},
@@ -31,9 +31,9 @@ COUNTING_SWEEP = {
 
 def counting_run(tmp_path, out_name):
     """One small counting run, in a folder of its own."""
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     out_dir = tmp_path / out_name
-    run_dir, _rows = run_experiment(config_path, out_dir)
+    run_dir, _rows = collect_command.run_experiment(config_path, out_dir)
     return run_dir
 
 
@@ -92,7 +92,7 @@ def test_the_figure_is_drawn_from_several_study_folders(tmp_path):
 
 def test_a_run_that_counted_no_movement_is_refused(tmp_path):
     """A run with observation.data_movement off wrote no rows to draw."""
-    silent_path = write_config(
+    silent_path = yaml_configs.write_config(
         tmp_path,
         {
             "sweep": [
@@ -106,7 +106,7 @@ def test_a_run_that_counted_no_movement_is_refused(tmp_path):
         },
     )
     out_dir = tmp_path / "silent"
-    run_dir, _rows = run_experiment(silent_path, out_dir)
+    run_dir, _rows = collect_command.run_experiment(silent_path, out_dir)
     figure_path = tmp_path / "data_movement.png"
 
     with pytest.raises(refusal.RefusalError, match="data_movement.csv"):

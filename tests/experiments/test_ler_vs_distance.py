@@ -17,8 +17,8 @@ import csv
 import matplotlib.figure
 import pytest
 
+import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
-from decsim.experiments.plots import ler_vs_distance_plot
 
 # The first ten columns of sweep.csv (decsim/experiments/report.py
 # summarize_point), which is all the figure reads.
@@ -80,7 +80,7 @@ def two_tier_runs(tmp_path):
 def test_figure_written_with_zero_failure_point_left_off(tmp_path):
     weak, strong = two_tier_runs(tmp_path)
     figure_path = tmp_path / "ler_vs_d.png"
-    ler_vs_distance_plot([weak, strong], 0.001, figure_path)
+    plots.ler_vs_distance_plot([weak, strong], 0.001, figure_path)
     assert figure_path.exists()
 
 
@@ -99,7 +99,7 @@ def test_the_y_axis_names_no_round_count_the_sweep_did_not_write(
         labels.append(label)
 
     monkeypatch.setattr(matplotlib.figure.Figure, "savefig", record_the_label)
-    ler_vs_distance_plot([weak, strong], 0.001, figure_path)
+    plots.ler_vs_distance_plot([weak, strong], 0.001, figure_path)
 
     assert labels == ["Logical error rate per shot"]
 
@@ -108,7 +108,7 @@ def test_run_without_the_requested_p_is_refused(tmp_path):
     weak, strong = two_tier_runs(tmp_path)
     figure_path = tmp_path / "ler_vs_d.png"
     with pytest.raises(ValueError, match="p=0.002"):
-        ler_vs_distance_plot([weak, strong], 0.002, figure_path)
+        plots.ler_vs_distance_plot([weak, strong], 0.002, figure_path)
 
 
 def test_a_run_without_sweep_csv_is_refused(tmp_path):
@@ -116,4 +116,4 @@ def test_a_run_without_sweep_csv_is_refused(tmp_path):
     empty_run.mkdir()
     figure_path = tmp_path / "ler_vs_d.png"
     with pytest.raises(refusal.RefusalError, match="sweep.csv"):
-        ler_vs_distance_plot([empty_run], 0.001, figure_path)
+        plots.ler_vs_distance_plot([empty_run], 0.001, figure_path)

@@ -13,8 +13,8 @@ import shutil
 import subprocess
 import sys
 
+import matplotlib.figure as figure_module
 import pytest
-from matplotlib.figure import Figure
 
 import decsim.experiments.command as command
 import decsim.results as results
@@ -332,7 +332,7 @@ def _point_count(line) -> int:
 def test_the_plot_draws_a_labelled_curve_per_group_of_the_kept_rows(runs):
     """One probability is kept; each shot length is its own curve."""
     rows = results.load(runs["first"], runs["shorter"])
-    figure = Figure()
+    figure = figure_module.Figure()
     ax = figure.subplots()
 
     results.plot_error_rate(
@@ -355,7 +355,7 @@ def test_the_plot_draws_a_labelled_curve_per_group_of_the_kept_rows(runs):
 def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
     folders = [runs["first"], runs["shorter"]]
     rows = results.load(*folders)
-    figure = Figure()
+    figure = figure_module.Figure()
     ax = figure.subplots()
 
     results.plot_error_rate(
@@ -385,11 +385,11 @@ def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
 
 
 FIGURE_SCRIPT = """
-from matplotlib.figure import Figure
+import matplotlib.figure
 
 import decsim.results as results
 
-figure = Figure()
+figure = matplotlib.figure.Figure()
 figure.subplots()
 results.save_figure(figure, "plot.png", [{"distance": 3}], ["run"])
 """

@@ -11,7 +11,7 @@ point.
 
 import argparse
 import dataclasses
-from pathlib import Path
+import pathlib
 from typing import Optional
 
 import decsim.collect as collect
@@ -26,7 +26,7 @@ import decsim.settings as machine_settings
 def run_one_shot(
     config_path,
     seed: int = 0,
-    out_dir: Optional[Path] = None,
+    out_dir: Optional[pathlib.Path] = None,
     *,
     log: Optional[str] = None,
     trace: bool = False,
@@ -67,6 +67,24 @@ def main(argv: list) -> None:
     )
     text = "\n".join(lines)
     print(text)
+
+
+def write_shot(
+    machine: machine_module.Machine,
+    settings: machine_settings.MachineSettings,
+    run_dir: pathlib.Path,
+    label: str,
+    result: result_records.RunResult,
+) -> None:
+    """A shot's files in its run folder, the log and the trace named label.
+
+    result.json and commands.json always, and the log and the trace when
+    the observation asks for them. tools/deltakit_example.py and
+    tools/live_memory_example.py write their shot through it too.
+    """
+    _write_files(machine, settings, run_dir, label)
+    _write_result(result, run_dir)
+    _write_commands(machine, run_dir)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -111,24 +129,6 @@ def _parsed(argv: list) -> _Arguments:
     )
 
 
-def write_shot(
-    machine: machine_module.Machine,
-    settings: machine_settings.MachineSettings,
-    run_dir: Path,
-    label: str,
-    result: result_records.RunResult,
-) -> None:
-    """A shot's files in its run folder, the log and the trace named label.
-
-    result.json and commands.json always, and the log and the trace when
-    the observation asks for them. tools/deltakit_example.py and
-    tools/live_memory_example.py write their shot through it too.
-    """
-    _write_files(machine, settings, run_dir, label)
-    _write_result(result, run_dir)
-    _write_commands(machine, run_dir)
-
-
 def _with_observation(
     settings: machine_settings.MachineSettings,
     log: Optional[str],
@@ -146,14 +146,18 @@ def _with_observation(
     return dataclasses.replace(settings, observation=observation)
 
 
-def _write_result(result: result_records.RunResult, run_dir: Path) -> None:
+def _write_result(
+    result: result_records.RunResult, run_dir: pathlib.Path
+) -> None:
     """result.json: every field of the shot's result record."""
     value = collect.json_value(result)
     result_path = run_dir / "result.json"
     run_folder.write_json(result_path, value)
 
 
-def _write_commands(machine: machine_module.Machine, run_dir: Path) -> None:
+def _write_commands(
+    machine: machine_module.Machine, run_dir: pathlib.Path
+) -> None:
     """commands.json: when each QPU command arrived and when it started."""
     values = []
     for event in machine.observation.command_events.events:
@@ -170,7 +174,7 @@ def _write_commands(machine: machine_module.Machine, run_dir: Path) -> None:
 def _write_files(
     machine: machine_module.Machine,
     settings: machine_settings.MachineSettings,
-    run_dir: Path,
+    run_dir: pathlib.Path,
     label: str,
 ) -> None:
     """The shot's log and trace, each where its knob says."""
@@ -188,11 +192,11 @@ def _write_files(
     machine.observation.trace_writer.write(str(trace_path))
 
 
-def _trace_path(observation, run_dir: Path, label: str) -> Path:
+def _trace_path(observation, run_dir: pathlib.Path, label: str) -> pathlib.Path:
     """Where this shot's trace goes: the named path, or trace/ in the folder."""
     named = observation.trace_path
     if named is not None:
-        return Path(named)
+        return pathlib.Path(named)
     trace_dir = run_dir / "trace"
     trace_dir.mkdir(parents=True, exist_ok=True)
     return trace_dir / f"{label}.trace.json"
@@ -203,7 +207,7 @@ def _result_lines(
     settings: machine_settings.MachineSettings,
     seed: int,
     result: result_records.RunResult,
-    run_dir: Path,
+    run_dir: pathlib.Path,
 ) -> list:
     """The point, the terminal status, the ticks and every result."""
     lines = [

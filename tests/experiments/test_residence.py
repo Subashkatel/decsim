@@ -219,11 +219,11 @@ def test_a_shot_that_was_not_traced_writes_no_row(tmp_path):
 
 def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
     """The run folder's own file, off the trace the run already wrote."""
-    from decsim.experiments.collect_command import run_experiment
-    from tests.experiments.yaml_configs import write_config
+    import decsim.experiments.collect_command as collect_command
+    import tests.experiments.yaml_configs as yaml_configs
 
     monkeypatch.chdir(tmp_path)
-    config_path = write_config(
+    config_path = yaml_configs.write_config(
         tmp_path,
         {
             "observation": {"trace": "chrome", "trace_shots": [0]},
@@ -237,7 +237,7 @@ def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
             ],
         },
     )
-    run_dir, _rows = run_experiment(config_path)
+    run_dir, _rows = collect_command.run_experiment(config_path)
     written = run_dir / "residence.csv"
     rows = report.read_rows(written)
     seeds = {row["seed"] for row in rows}

@@ -686,11 +686,12 @@ def test_a_write_with_no_prediction_is_traced_without_observables(
 
 
 def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
-    """C8 item 6: catapult's importer makes one series per args key.
+    """Catapult's importer makes one series per args key.
 
     trace_event_importer 402-431 reads a counter's args as the series to
-    plot, so a tick beside the value plotted a second series five orders
-    of magnitude larger and flattened the occupancy the reader came for.
+    plot, so a tick beside the value would plot a second series five
+    orders of magnitude larger and flatten the occupancy the reader
+    came for.
     """
     _machine, _result, document = traced
     counters = _by_phase(document, "C")

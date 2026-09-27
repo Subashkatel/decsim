@@ -35,21 +35,6 @@ class RedoRegion:
 
 
 @dataclasses.dataclass(frozen=True)
-class _ForwardProposal:
-    """The extent an interaction proposes, before it is checked.
-
-    A row that reads the extent with no context narrows the plan here,
-    so the checks, the holds and the models that follow all read the
-    rounds the row will really read.
-    """
-
-    weak_window: window_records.Window
-    round_count: int
-    later_windows: list
-    plan: window_records.StrongRegionPlan
-
-
-@dataclasses.dataclass(frozen=True)
 class ForwardRegion:
     """One forward strong region, resolved against the live window graph."""
 
@@ -441,6 +426,21 @@ class StrongRegions:
         proposed = copy.deepcopy(restart)
         proposed.buffer_lo = plan.restart_buffer_lo
         return proposed
+
+
+@dataclasses.dataclass(frozen=True)
+class _ForwardProposal:
+    """The extent an interaction proposes, before it is checked.
+
+    A row that reads the extent with no context narrows the plan here,
+    so the checks, the holds and the models that follow all read the
+    rounds the row will really read.
+    """
+
+    weak_window: window_records.Window
+    round_count: int
+    later_windows: list
+    plan: window_records.StrongRegionPlan
 
 
 def _far_pinned_seam_owner(

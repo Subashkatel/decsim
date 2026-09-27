@@ -28,8 +28,8 @@ import csv
 import dataclasses
 import json
 import math
+import pathlib
 import statistics
-from pathlib import Path
 from typing import Optional
 
 import decsim.config as config_module
@@ -89,19 +89,7 @@ MOVEMENT_SERIES = (
 TRACE_DIR = "trace"
 
 
-def ticks_to_microseconds(ticks) -> float:
-    """A tick count as a float of microseconds, the figures' time unit."""
-    return ticks / config_module.TICKS_PER_MICROSECOND
-
-
-def card_label(algorithm) -> str:
-    """A named algorithm capitalized, a latency card as its microseconds."""
-    if isinstance(algorithm, str):
-        return algorithm.capitalize()
-    return f"{algorithm:g} µs"
-
-
-def timeline_plot(trace_path, path: Path) -> None:
+def timeline_plot(trace_path, path: pathlib.Path) -> None:
     """One traced shot's hops and stages, in the time they happened.
 
     Drawn from that shot's Chrome trace file alone (`decsim run --trace`,
@@ -151,14 +139,14 @@ def timeline_shot(document) -> "_TimelineShot":
     )
 
 
-def first_trace_file(run_dir) -> Optional[Path]:
+def first_trace_file(run_dir) -> Optional[pathlib.Path]:
     """The first trace file of a run folder, None when nothing traced.
 
     A sweep writes one file per traced shot under trace/, named after the
     point (experiments/measure.py); the first in name order is the first
     point's, which is the shot the timeline draws.
     """
-    trace_dir = Path(run_dir) / TRACE_DIR
+    trace_dir = pathlib.Path(run_dir) / TRACE_DIR
     if not trace_dir.is_dir():
         return None
     entries = trace_dir.iterdir()
@@ -201,7 +189,9 @@ def decoder_title(config) -> str:
     return f"{spelled} decoder ({tier})"
 
 
-def ler_plot(rows: list, path: Path, title: str = "Logical error rate") -> None:
+def ler_plot(
+    rows: list, path: pathlib.Path, title: str = "Logical error rate"
+) -> None:
     """Logical error rate against physical error rate, Wilson 95% bars.
 
     One line per card and round time that swept more than one p.
@@ -232,7 +222,7 @@ def ler_plot(rows: list, path: Path, title: str = "Logical error rate") -> None:
 
 
 def ler_vs_distance_plot(
-    run_dirs: list, probability: float, path: Path
+    run_dirs: list, probability: float, path: pathlib.Path
 ) -> None:
     """Both tiers' logical error rate against code distance at one p.
 
@@ -240,8 +230,7 @@ def ler_vs_distance_plot(
     a zero-failure point cannot sit on a log axis, so its curve simply
     ends at the last distance that saw failures.
 
-        python -m decsim.experiments.plots ler_vs_d <run_dir> <run_dir> <p>
-        <out.png>
+        decsim plot <run_dir> <run_dir> --figure ler_vs_d --probability <p>
     """
     import matplotlib
 
@@ -288,7 +277,7 @@ def memory_class_series(run_dir) -> dict:
     return series
 
 
-def data_movement_plot(run_dirs: list, path: Path) -> None:
+def data_movement_plot(run_dirs: list, path: pathlib.Path) -> None:
     """Bits copied and moved per shot by memory class, against distance.
 
     One panel per study config, read from each run folder's
@@ -324,12 +313,12 @@ def data_movement_plot(run_dirs: list, path: Path) -> None:
     plt.close(figure)
 
 
-def stage_breakdown_plot(run_dir, path: Path) -> None:
+def stage_breakdown_plot(run_dir, path: pathlib.Path) -> None:
     """One stacked bar per distance: where a window's time goes.
 
     From syndrome arrival in the buffer to the Pauli-frame commit.
 
-        python -m decsim.experiments.plots stage_breakdown <run_dir> <out.png>
+        decsim plot <run_dir> --figure stage_breakdown
     """
     import matplotlib
 
@@ -381,7 +370,7 @@ def latency_samples_by_distance(measurements: list) -> dict:
     return by_distance
 
 
-def latency_plot(config, measurements: list, path: Path) -> None:
+def latency_plot(config, measurements: list, path: pathlib.Path) -> None:
     """Decode wall clock per window against code distance.
 
     One violin per d (median marked, worst window flagged), microsecond
@@ -412,14 +401,14 @@ def latency_plot(config, measurements: list, path: Path) -> None:
     plt.close(figure)
 
 
-def combined_latency_plot(sample_files: list, path: Path) -> None:
+def combined_latency_plot(sample_files: list, path: pathlib.Path) -> None:
     """Both tiers on one axes from their runs' latency_samples.csv.
 
     One violin pair per distance. The log axis is what makes this
     legible: the tiers sit decades apart, which is itself the figure's
     message.
 
-        python -m decsim.experiments.plots latency <run_dir> <run_dir> <out.png>
+        decsim plot <run_dir> <run_dir> --figure latency
     """
     import matplotlib
 
@@ -455,7 +444,9 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
     plt.close(figure)
 
 
-def plots(config, rows: list, report_dir: Path, measurements=None) -> None:
+def plots(
+    config, rows: list, report_dir: pathlib.Path, measurements=None
+) -> None:
     """The figures of one run folder, each one drawn when its input is there.
 
     timeline.png needs a traced shot, so it is drawn only when the
@@ -500,19 +491,26 @@ def figure(name: str, run_dirs: list, out_path=None, probability=None):
         raise refusal.RefusalError(
             f"no figure named {name}; the figures are {listed}"
         )
-    first_dir = Path(run_dirs[0])
+    first_dir = pathlib.Path(run_dirs[0])
     if out_path is None:
         out_path = first_dir / FIGURES[name]
-    out_path = Path(out_path)
+    out_path = pathlib.Path(out_path)
     _draw_named_figure(name, run_dirs, out_path, probability)
     return out_path
 
 
+def _card_label(algorithm) -> str:
+    """A named algorithm capitalized, a latency card as its microseconds."""
+    if isinstance(algorithm, str):
+        return algorithm.capitalize()
+    return f"{algorithm:g} µs"
+
+
 def _draw_named_figure(
-    name: str, run_dirs: list, out_path: Path, probability
+    name: str, run_dirs: list, out_path: pathlib.Path, probability
 ) -> None:
     """The one figure the name asks for, from the folders it was given."""
-    first_dir = Path(run_dirs[0])
+    first_dir = pathlib.Path(run_dirs[0])
     if name == "timeline":
         trace_path = _timeline_source(first_dir)
         timeline_plot(trace_path, out_path)
@@ -535,7 +533,7 @@ def _draw_named_figure(
     ler_vs_distance_plot(run_dirs, probability, out_path)
 
 
-def _timeline_source(run_dir: Path) -> Path:
+def _timeline_source(run_dir: pathlib.Path) -> pathlib.Path:
     """The trace the timeline draws: a folder's first, or the file named."""
     if run_dir.is_file():
         return run_dir
@@ -681,30 +679,34 @@ def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
 
 def _timeline_windows(document) -> dict:
     """Window id -> the rounds it reads and the tick its unit took it."""
-    dispatch_us = {}
+    dispatch_microseconds = {}
     for event in document.of_phase("X"):
         if not event["name"].endswith(" queued"):
             continue
         window_id = trace_file.window_id_of(event)
         dispatch_ticks = trace_file.end_tick_of(event)
-        dispatch_us[window_id] = ticks_to_microseconds(dispatch_ticks)
+        dispatch_microseconds[window_id] = config_module.ticks_to_microseconds(
+            dispatch_ticks
+        )
     windows = {}
     for event in document.of_phase("i"):
         if not event["name"].endswith(" ready"):
             continue
-        window = _timeline_window(event, dispatch_us)
+        window = _timeline_window(event, dispatch_microseconds)
         windows[window.window_id] = window
     return windows
 
 
-def _timeline_window(event: dict, dispatch_us: dict) -> _TimelineWindow:
+def _timeline_window(
+    event: dict, dispatch_microseconds: dict
+) -> _TimelineWindow:
     """One window's rounds and the moment its unit was assigned."""
     window_id = trace_file.window_id_of(event)
     read_lo, read_hi = trace_file.range_of(event["args"]["rounds"])
     commit_lo, commit_hi = trace_file.range_of(event["args"]["commit"])
     ready_ticks = trace_file.tick_of(event)
-    ready_us = ticks_to_microseconds(ready_ticks)
-    dispatch = dispatch_us.get(window_id, ready_us)
+    ready_microseconds = config_module.ticks_to_microseconds(ready_ticks)
+    dispatch = dispatch_microseconds.get(window_id, ready_microseconds)
     return _TimelineWindow(
         window_id=window_id,
         read_lo=read_lo,
@@ -728,21 +730,23 @@ def _timeline_stages(document) -> dict:
 
 def _frame_spans(document) -> dict:
     """Window id -> the span from the frame accepting a write to landing."""
-    accepted_us = {}
+    accepted_microseconds = {}
     for event in document.of_phase("X"):
         if not event["name"].endswith(" correction"):
             continue
         window_id = trace_file.window_id_of(event)
         accepted_ticks = trace_file.tick_of(event)
-        accepted_us[window_id] = ticks_to_microseconds(accepted_ticks)
+        accepted_microseconds[window_id] = config_module.ticks_to_microseconds(
+            accepted_ticks
+        )
     spans = {}
     for event in document.of_phase("i"):
         if not event["name"].endswith(" committed"):
             continue
         window_id = trace_file.window_id_of(event)
         committed_ticks = trace_file.tick_of(event)
-        committed = ticks_to_microseconds(committed_ticks)
-        accepted = accepted_us.get(window_id, committed)
+        committed = config_module.ticks_to_microseconds(committed_ticks)
+        accepted = accepted_microseconds.get(window_id, committed)
         spans[window_id] = _Span(start_us=accepted, end_us=committed)
     return spans
 
@@ -751,9 +755,9 @@ def _span_of(event: dict) -> _Span:
     """A complete event's bar, from its own ticks and not its float ts."""
     start_ticks = trace_file.tick_of(event)
     end_ticks = trace_file.end_tick_of(event)
-    start_us = ticks_to_microseconds(start_ticks)
-    end_us = ticks_to_microseconds(end_ticks)
-    return _Span(start_us=start_us, end_us=end_us)
+    start_microseconds = config_module.ticks_to_microseconds(start_ticks)
+    end_microseconds = config_module.ticks_to_microseconds(end_ticks)
+    return _Span(start_us=start_microseconds, end_us=end_microseconds)
 
 
 def _round_period_microseconds(moves_by_round: dict) -> float:
@@ -1128,7 +1132,7 @@ def _label_swept_probabilities(axis, rows: list) -> None:
 
     A decades-only log axis labels two of our seven p values.
     """
-    from matplotlib.ticker import NullFormatter
+    import matplotlib.ticker as ticker
 
     swept = _column_values(rows, "physical_error_probability")
     axis.set_xticks(swept)
@@ -1137,7 +1141,7 @@ def _label_swept_probabilities(axis, rows: list) -> None:
         tick_label = _power_of_ten_label(probability)
         tick_labels.append(tick_label)
     axis.set_xticklabels(tick_labels, fontsize=8, rotation=30, ha="right")
-    no_minor_labels = NullFormatter()
+    no_minor_labels = ticker.NullFormatter()
     axis.xaxis.set_minor_formatter(no_minor_labels)
 
 
@@ -1175,7 +1179,7 @@ def _memory_class_rows(run_dir) -> list:
     A folder whose run had observation.data_movement off wrote no file
     and is refused, because the figure has nothing to draw for it.
     """
-    movement_path = Path(run_dir) / "data_movement.csv"
+    movement_path = pathlib.Path(run_dir) / "data_movement.csv"
     if not movement_path.is_file():
         raise refusal.RefusalError(
             f"{run_dir} has no data_movement.csv; the data movement figure "
@@ -1269,14 +1273,14 @@ def _series_of(rows: list, column: str) -> tuple:
 
 def _study_config_name(run_dir) -> str:
     """The yaml a run folder ran, off the manifest it recorded."""
-    folder = Path(run_dir)
+    folder = pathlib.Path(run_dir)
     manifest_path = folder / "manifest.json"
     if not manifest_path.is_file():
         return folder.name
     manifest_text = manifest_path.read_text()
     manifest = json.loads(manifest_text)
     config_files = manifest["config_files"]
-    named = Path(config_files[0])
+    named = pathlib.Path(config_files[0])
     return named.stem
 
 
@@ -1292,7 +1296,7 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
 
     A run that never swept that p is refused.
     """
-    sweep_path = Path(run_dir) / "sweep.csv"
+    sweep_path = pathlib.Path(run_dir) / "sweep.csv"
     if not sweep_path.is_file():
         raise refusal.RefusalError(
             f"{run_dir} has no sweep.csv; the ler_vs_d figure reads the "
@@ -1309,12 +1313,8 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
         raise refusal.RefusalError(
             f"{run_dir} swept no p={probability:g} point"
         )
-    selected_rows.sort(key=_by_distance_text)
+    selected_rows.sort(key=_row_distance)
     return selected_rows
-
-
-def _by_distance_text(row: dict) -> int:
-    return int(row["distance"])
 
 
 def _rows_with_failures(rows: list, swept_distances: set) -> list:
@@ -1356,7 +1356,7 @@ def _draw_measured_ler_points(axis, rows: list, color: str, label: str) -> None:
 
 def _shot_rows(run_dir) -> list:
     """Every row of the run's shots.csv; a run without one is refused."""
-    shots_path = Path(run_dir) / "shots.csv"
+    shots_path = pathlib.Path(run_dir) / "shots.csv"
     if not shots_path.exists():
         raise refusal.RefusalError(
             f"{run_dir} has no shots.csv; the stage breakdown reads the "
@@ -1462,7 +1462,7 @@ def _breakdown_title(algorithm) -> str:
     """The breakdown figure's title for the tier that ran."""
     if algorithm in BREAKDOWN_TITLES:
         return BREAKDOWN_TITLES[algorithm]
-    label = card_label(algorithm)
+    label = _card_label(algorithm)
     return f"Time breakdown: {label}"
 
 
@@ -1569,7 +1569,7 @@ def _sample_files(run_dirs) -> list:
     """Each folder's latency_samples.csv; one without it is refused."""
     paths = []
     for run_dir in run_dirs:
-        samples_path = Path(run_dir) / "latency_samples.csv"
+        samples_path = pathlib.Path(run_dir) / "latency_samples.csv"
         if not samples_path.is_file():
             raise refusal.RefusalError(
                 f"{run_dir} has no latency_samples.csv; the latency figure "

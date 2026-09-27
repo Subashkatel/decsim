@@ -33,7 +33,6 @@ import decsim.settings as machine_settings
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
-from decsim.config import microseconds_to_ticks
 
 # every declared stage of the fabric, in microseconds
 DECLARED_MICROSECONDS = {
@@ -93,7 +92,7 @@ def lookahead_sliding_scheme():
 
 def declared_edge(base_edge, latency_microseconds):
     """One path of the card, at a declared latency and no rate bound."""
-    latency_ticks = microseconds_to_ticks(latency_microseconds)
+    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     channel = link_settings.ChannelSettings(
         base_edge.channel.name,
         latency_ticks,
@@ -383,7 +382,7 @@ def log_tick(log_lines, needle):
         assert stamp.endswith("us"), line
         digits = stamp[:-2]
         microseconds = float(digits)
-        return microseconds_to_ticks(microseconds)
+        return config.microseconds_to_ticks(microseconds)
     raise AssertionError(f"no log line contains {needle!r}")
 
 

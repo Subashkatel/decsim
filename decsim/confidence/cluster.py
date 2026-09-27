@@ -36,9 +36,9 @@ noiseless model leaves behind. Thresholds are calibrated per weight
 step.
 """
 
+import fractions
 import math
 import time
-from fractions import Fraction
 from typing import Optional, Union
 
 import decsim.config as config
@@ -169,15 +169,6 @@ def require_weight_step(graph, weight_step: float) -> None:
     )
 
 
-def _cluster_gap(
-    hard_evidence: evidence_records.UnionFindHardEvidence, weight_step: float
-) -> float:
-    gap_half_ticks = compiled_decoder.cluster_gap(
-        hard_evidence.graph, hard_evidence.edge_intervals
-    )
-    return gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)
-
-
 def gap_half_ticks_to_natural_log_weight(
     gap_half_ticks: Union[int, float], weight_step: float
 ) -> float:
@@ -190,10 +181,19 @@ def gap_half_ticks_to_natural_log_weight(
     """
     if gap_half_ticks == math.inf:
         return math.inf
-    half_ticks = Fraction(gap_half_ticks, 2)
-    step = Fraction.from_float(weight_step)
+    half_ticks = fractions.Fraction(gap_half_ticks, 2)
+    step = fractions.Fraction.from_float(weight_step)
     exact_gap_nats = half_ticks * step
     try:
         return float(exact_gap_nats)
     except OverflowError:
         return math.inf
+
+
+def _cluster_gap(
+    hard_evidence: evidence_records.UnionFindHardEvidence, weight_step: float
+) -> float:
+    gap_half_ticks = compiled_decoder.cluster_gap(
+        hard_evidence.graph, hard_evidence.edge_intervals
+    )
+    return gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)

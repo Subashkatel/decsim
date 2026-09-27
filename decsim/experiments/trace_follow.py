@@ -84,17 +84,6 @@ def follow(document, kind: str, key: str) -> FollowedPath:
     )
 
 
-def report_lines(path: FollowedPath) -> list:
-    """The table and the counts, as the command prints them."""
-    lines = [f"{path.kind} {path.key} of {path.process_name}", ""]
-    table = table_lines(path.hops)
-    lines.extend(table)
-    lines.append("")
-    counted = count_lines(path.counts)
-    lines.extend(counted)
-    return lines
-
-
 def table_lines(hops) -> list:
     """One header line and one line per hop, columns aligned."""
     rows = [("tick (us)", "where", "what", "dur (us)", "transfer", "bits")]
@@ -143,19 +132,6 @@ def page(path: FollowedPath) -> str:
     return _PAGE.format(title=named, style=_STYLE, body=body)
 
 
-def carried_keys(document, kind: str) -> tuple:
-    """Every round or window key the trace's hops name, in key order."""
-    keys = set()
-    for event in document.events:
-        if event["ph"] not in HOP_PHASES:
-            continue
-        key = event["args"].get(kind)
-        if key is None:
-            continue
-        keys.add(key)
-    return tuple(sorted(keys, key=_key_parts))
-
-
 def main(argv: list) -> None:
     """`decsim trace follow <file> --round k:n | --window k:n`."""
     parser = argparse.ArgumentParser(prog="decsim trace")
@@ -170,7 +146,7 @@ def main(argv: list) -> None:
     document = trace_file.load(parsed.file)
     _refuse_a_key_the_trace_does_not_carry(document, kind, key)
     path = follow(document, kind, key)
-    lines = report_lines(path)
+    lines = _report_lines(path)
     text = "\n".join(lines)
     print(text)
     if parsed.html is None:
@@ -179,6 +155,30 @@ def main(argv: list) -> None:
     with open(parsed.html, "w") as handle:
         handle.write(written)
     print(f"\npage: {parsed.html}")
+
+
+def _report_lines(path: FollowedPath) -> list:
+    """The table and the counts, as the command prints them."""
+    lines = [f"{path.kind} {path.key} of {path.process_name}", ""]
+    table = table_lines(path.hops)
+    lines.extend(table)
+    lines.append("")
+    counted = count_lines(path.counts)
+    lines.extend(counted)
+    return lines
+
+
+def _carried_keys(document, kind: str) -> tuple:
+    """Every round or window key the trace's hops name, in key order."""
+    keys = set()
+    for event in document.events:
+        if event["ph"] not in HOP_PHASES:
+            continue
+        key = event["args"].get(kind)
+        if key is None:
+            continue
+        keys.add(key)
+    return tuple(sorted(keys, key=_key_parts))
 
 
 def _followed(round_key: Optional[str], window_key: Optional[str]) -> tuple:
@@ -224,7 +224,7 @@ def _refuse_a_key_the_trace_does_not_carry(
     document, kind: str, key: str
 ) -> None:
     """A key no hop names, with what this file does carry instead."""
-    carried = carried_keys(document, kind)
+    carried = _carried_keys(document, kind)
     if key in carried:
         return
     listed = _carried_text(carried)
@@ -551,7 +551,7 @@ def _padded(row, widths: list) -> str:
 
 def _microseconds(ticks: int) -> str:
     """A tick count in microseconds, as the table writes it."""
-    span = ticks / config.TICKS_PER_MICROSECOND
+    span = config.ticks_to_microseconds(ticks)
     return f"{span:.3f}"
 
 

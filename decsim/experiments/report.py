@@ -26,7 +26,7 @@ summaries.
 
 The per-value counts file stays small because every sample is a whole
 number of ticks divided by the ticks in a microsecond
-(measure.ticks_to_microseconds). Under a fixed-latency decoder card,
+(config.ticks_to_microseconds). Under a fixed-latency decoder card,
 which is what an LER sweep of a million shots runs, a point's windows
 take one of a handful of tick spans, so the file's length follows the
 spread of the values and not the shot count. A wall-clock decoder
@@ -552,9 +552,8 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     500 shards of a million-shot sweep are 115 million link rows. So
     the folders are read in a stream, one row of each folder at a time,
     and what stands between reading and writing is the totals of
-    experiments/fold.py and not a list of the rows (`decsim combine`
-    over those 500 folders was killed at 17 GB and then OOM-killed at
-    120 GB before this).
+    experiments/fold.py and not a list of the rows, whose memory would
+    grow with the shards.
 
     The combined folder is itself a run folder: the additive files and a
     manifest recording the sweep every folded folder shares, so a shard
@@ -1158,11 +1157,10 @@ def _refuse_a_point_this_tree_cannot_place(run_dirs: list) -> None:
     tree's own (_point_and_name_order calls measure.POINTS.index). A
     folder whose rows name a point this tree does not measure, which is
     the other half of two trees measuring different points, has no
-    place in that order, so without this check the fold raised a bare
-    ValueError out of a sort with sweep.csv and shots.csv already
-    written. It is checked here, at the boundary, before out_dir
-    exists, the way the folded files' columns are, and it costs one
-    pass over the small file: a shard's window_samples.csv is
+    place in that order, and the sort would fail with sweep.csv and
+    shots.csv already written. It is checked here, at the boundary,
+    before out_dir exists, the way the folded files' columns are, and it
+    costs one pass over the small file: a shard's window_samples.csv is
     188 rows and 9 KB.
 
     Only the names are checked, not that the folders name the same set.

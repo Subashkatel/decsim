@@ -457,13 +457,10 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
 ):
     """The row builds its own per-point source, and that is what runs.
 
-    online_threshold_for used to construct
-    threshold_sources.OnlineThreshold by direct class reference, so a row
-    that declared built_per_sweep_point had its card read and then got
-    the shipped calibrator instead of itself. The instance the
-    experiments layer puts on the point's task is now the row's own, and
-    it reaches the policy
-    the root builds for the shot (build/escalation.py _threshold_source,
+    A row that declares built_per_sweep_point has its card read and
+    builds the source itself; the instance the experiments layer puts on
+    the point's task is the row's own, and it reaches the policy the
+    root builds for the shot (build/escalation.py _threshold_source,
     which reads the same declaration).
     """
     monkeypatch.setitem(

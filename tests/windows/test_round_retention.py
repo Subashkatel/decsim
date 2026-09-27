@@ -123,14 +123,14 @@ def test_a_strong_side_that_does_not_form_reads_nothing_before_a_redo():
 
 
 def test_a_context_round_still_crossing_is_told_apart_from_one_released():
-    """The two states the strong context's readiness check conflated.
+    """The two states the strong context's readiness check tells apart.
 
     A round with a live hold and no fragments is on
     controller_to_strong_buffer and the strong window waits for it, the
     way a gem5 port waits for its retry rather than failing
     (src/mem/port.hh:244-255). A round that arrived at the weak syndrome buffer
     with neither fragments nor a hold was released while a reader still
-    needs it, which is the mistake the check was written to catch.
+    needs it, which is the mistake the check catches.
     """
     store = _store()
     retention = _strong_retention(store, rounds_arrived=3)

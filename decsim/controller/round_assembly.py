@@ -142,7 +142,8 @@ class RoundAssembler:
             return
         packing_cycles = self.settings.packing_cycles_per_round
         if packing_cycles > 0:
-            delay = self._delay(packing_cycles)
+            now = self.engine.now
+            delay = self.settings.clock.ticks_to_edge(packing_cycles, now)
             finish = functools.partial(self._finish_packing, context)
             self.engine.schedule(delay, finish, label="controller pack")
             return
@@ -256,12 +257,6 @@ class RoundAssembler:
     def _hand_on(self, packed, context) -> None:
         self.workspace.forget(context)
         self.syndrome_round_sender.admit(packed)
-
-    def _delay(self, cycles: int) -> int:
-        """The ticks from now to the controller clock edge `cycles` away."""
-        now = self.engine.now
-        edge = self.settings.clock.edge(cycles, now)
-        return edge - now
 
 
 @dataclasses.dataclass
@@ -396,15 +391,17 @@ def _concatenated(
     bits = None
     if prior.bits is not None and fragment.bits is not None:
         bits = prior.bits + fragment.bits
-    size_bits = None
-    if prior.size_bits is not None and fragment.size_bits is not None:
-        size_bits = prior.size_bits + fragment.size_bits
-    event_bits = None
-    if prior.event_bits is not None and fragment.event_bits is not None:
-        event_bits = prior.event_bits + fragment.event_bits
+    size_bits = _joined_width(prior.size_bits, fragment.size_bits)
+    event_bits = _joined_width(prior.event_bits, fragment.event_bits)
     return dataclasses.replace(
         prior, bits=bits, size_bits=size_bits, event_bits=event_bits
     )
+
+
+def _joined_width(first: Optional[int], second: Optional[int]) -> Optional[int]:
+    if first is None or second is None:
+        return None
+    return first + second
 
 
 @dataclasses.dataclass(frozen=True)

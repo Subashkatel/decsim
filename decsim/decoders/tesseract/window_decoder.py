@@ -10,11 +10,11 @@ merging is off so the physical columns keep their one-to-one identity.
 
 import dataclasses
 import math
+import numbers
 import os
 import secrets
 import threading
 import weakref
-from numbers import Integral, Real
 from typing import Optional
 
 import numpy
@@ -175,6 +175,37 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         return compiled
 
 
+def detector_error_model_of(model, physical_faults) -> tuple:
+    """(Stim detector error model, coordinates) of one physical view."""
+    check = physical_faults.check
+    # observables are few rows; dense per-fault columns are cheap to read
+    observables = physical_faults.observables.toarray()
+    observables = observables.astype(numpy.uint8, copy=False)
+    detector_count, fault_count = check.shape
+    if observables.shape[1] != fault_count:
+        raise ValueError(
+            "physical check and observable matrices have different fault counts"
+        )
+    if len(model.detector_ids) != detector_count:
+        raise ValueError(
+            "window detector identities do not match physical detector rows"
+        )
+    priors = _validated_priors(physical_faults.priors, fault_count)
+    coordinates = _normalized_coordinates(model, detector_count)
+    detector_error_model = stim.DetectorErrorModel()
+    _append_errors(detector_error_model, check, observables, priors)
+    _append_detectors(detector_error_model, coordinates)
+    _append_observables(detector_error_model, observables.shape[0])
+    _check_round_trip(
+        detector_error_model,
+        fault_count,
+        detector_count,
+        observables.shape[0],
+        coordinates,
+    )
+    return detector_error_model, coordinates
+
+
 class _BackendConstructionError(RuntimeError):
     """The optional backend rejected a locally validated configuration."""
 
@@ -310,7 +341,7 @@ def _normalized_coordinate(detector_index: int, coordinate) -> tuple:
 def _finite_coordinate(
     detector_index: int, coordinate_index: int, value
 ) -> float:
-    if isinstance(value, bool) or not isinstance(value, Real):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(
             f"detector coordinate {detector_index}[{coordinate_index}] "
             "must be a real number"
@@ -353,7 +384,7 @@ def _validated_priors(priors, fault_count: int) -> tuple:
 
 
 def _validated_prior(fault_index: int, value) -> float:
-    if isinstance(value, bool) or not isinstance(value, Real):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"physical prior at column {fault_index} must be real")
     probability = float(value)
     if not math.isfinite(probability) or not 0 < probability <= 0.5:
@@ -362,37 +393,6 @@ def _validated_prior(fault_index: int, value) -> float:
             f"satisfy 0 < p <= 0.5; got {probability!r}"
         )
     return probability
-
-
-def detector_error_model_of(model, physical_faults) -> tuple:
-    """(Stim detector error model, coordinates) of one physical view."""
-    check = physical_faults.check
-    # observables are few rows; dense per-fault columns are cheap to read
-    observables = physical_faults.observables.toarray()
-    observables = observables.astype(numpy.uint8, copy=False)
-    detector_count, fault_count = check.shape
-    if observables.shape[1] != fault_count:
-        raise ValueError(
-            "physical check and observable matrices have different fault counts"
-        )
-    if len(model.detector_ids) != detector_count:
-        raise ValueError(
-            "window detector identities do not match physical detector rows"
-        )
-    priors = _validated_priors(physical_faults.priors, fault_count)
-    coordinates = _normalized_coordinates(model, detector_count)
-    detector_error_model = stim.DetectorErrorModel()
-    _append_errors(detector_error_model, check, observables, priors)
-    _append_detectors(detector_error_model, coordinates)
-    _append_observables(detector_error_model, observables.shape[0])
-    _check_round_trip(
-        detector_error_model,
-        fault_count,
-        detector_count,
-        observables.shape[0],
-        coordinates,
-    )
-    return detector_error_model, coordinates
 
 
 def _append_errors(detector_error_model, check, observables, priors) -> None:
@@ -466,10 +466,10 @@ def _check_round_trip(
 
 
 def _float_tuple(values) -> tuple:
-    numbers = []
+    floats = []
     for value in values:
-        numbers.append(float(value))
-    return tuple(numbers)
+        floats.append(float(value))
+    return tuple(floats)
 
 
 def _correction_from_error_indices(indices, fault_count: int) -> tuple:
@@ -477,7 +477,7 @@ def _correction_from_error_indices(indices, fault_count: int) -> tuple:
     correction = numpy.zeros(fault_count, dtype=numpy.uint8)
     seen = set()
     for value in indices:
-        if isinstance(value, bool) or not isinstance(value, Integral):
+        if isinstance(value, bool) or not isinstance(value, numbers.Integral):
             reason = _Reason.CORRECTION_NOT_BINARY
             return None, reason
         fault_index = int(value)

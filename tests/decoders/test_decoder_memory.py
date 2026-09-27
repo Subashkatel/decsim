@@ -387,7 +387,7 @@ def test_a_memory_that_fits_one_window_and_not_two_serializes_the_cadence():
 
 
 def test_the_memory_refuses_a_second_write_of_one_input():
-    """C4 item 5: the single-writer rule is the memory's, not a caller's.
+    """The single-writer rule is the memory's, not a caller's.
 
     An input two jobs read is written once: the jobs that share one
     landed input are the forced-class solves of one window's request

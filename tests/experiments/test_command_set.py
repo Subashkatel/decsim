@@ -1216,12 +1216,10 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
 ):
     """A run writes its manifest twice and both name one reading.
 
-    One weak_ler experiment left 500 shard folders naming 18
-    different commits, four of which did not exist when those tasks
-    started: the tree was being committed to while the array ran, and
-    each task read it again as it finished. Here git answers one commit
-    for the first write and another for the second, and both manifests
-    name the first, which is the code the run imported.
+    A tree committed to while an array runs would give a task's second
+    reading another commit than the code it imported. Here git answers
+    one commit for the first write and another for the second, and both
+    manifests name the first, which is the code the run imported.
     """
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     out_dir = tmp_path / "run"

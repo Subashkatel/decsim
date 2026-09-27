@@ -24,7 +24,7 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import tests.escalation.declared_fabric as fabric
-from tests.escalation.test_strong_window_shapes import GATE_SWITCHING_CARD
+import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
 
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 # a window identity the run never requests, so its solve is never joined
@@ -35,7 +35,7 @@ def _switching_machine(
     weak_units: int, weak_microseconds: float = 4.0, trace_path=None
 ):
     """The gate's switching card at d=3, priced so its ticks are declared."""
-    sections = copy.deepcopy(GATE_SWITCHING_CARD)
+    sections = copy.deepcopy(test_strong_window_shapes.GATE_SWITCHING_CARD)
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = 20.0
@@ -315,13 +315,13 @@ def _two_solve_join(signal_ticks: int):
 
 
 def test_the_walk_is_charged_to_the_solve_that_delivered_last():
-    """C5 item 1: two solves, and the ticks go where a service still closes.
+    """Two solves, and the ticks go where a service still closes.
 
     The answering solve is the lightest, which is not in general the last
     to arrive. decode_outcomes.deliver_weak ends a service at
     now + job.soft_output_ticks for the job it is delivering, which is
-    the last one, so charging the lightest solve wrote the walk onto a
-    service record that had already closed. The complementary gap's card
+    the last one; the lightest solve's service record may have closed
+    already. The complementary gap's card
     (escalation.confidence_walk_microseconds) is the only way to price
     the walk at all, and it defaults to null, so no shipped config sees
     this.
@@ -353,12 +353,10 @@ def test_the_answer_is_still_the_lightest_solve_and_still_waits():
 
 
 def test_a_two_solve_runs_trace_carries_every_held_solve(tmp_path):
-    """C5 item 4: the source was fired and nobody listened.
+    """The trace listens to solve_held, as the join's docstring says.
 
-    solve_held was the only one of the declared trace sources with no
-    listener, while the join's own docstring said the trace shows the
-    held solve. Every window of this run needs two forced-class solves,
-    so every window holds exactly one.
+    Every window of this run needs two forced-class solves, so every
+    window holds exactly one.
     """
     path = tmp_path / "switching.trace.json"
     machine = _switching_machine(1, trace_path=path)

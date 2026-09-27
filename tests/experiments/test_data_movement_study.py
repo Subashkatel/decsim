@@ -1,9 +1,11 @@
 """The data-movement study's four configs: one setting apart, each.
 
-The study reads the data path against docs/rewrite/notes/
-data_movement_research.md, so its configs must differ in exactly the
-settings that note's section 5 names and in nothing else, and the pair
-that note calls refused must not be among them. The sweep grammar
+The study varies the two keys configs/reference.yaml gives for how a
+tier's unit gets its rounds, weak_decoder.input and
+weak_decoder.boundary_fold, both copy by default, and the switching
+config adds the strong tier and its two priced links. So the configs
+must differ in exactly those settings and in nothing else, and the pair
+the load refuses, both in place, must not be among them. The sweep grammar
 carries no setting axis, so each combination is its own yaml through
 `extends`, and these tests pin what each one changed.
 """
@@ -11,7 +13,7 @@ carries no setting axis, so each combination is its own yaml through
 import pytest
 
 import decsim.experiments.experiment as experiment
-from tests.experiments.yaml_configs import CONFIGS_DIR
+import tests.experiments.yaml_configs as yaml_configs
 
 BASE = "data_movement.yaml"
 INPUT_IN_PLACE = "data_movement_input_in_place.yaml"
@@ -22,13 +24,13 @@ STUDY_CONFIGS = (BASE, INPUT_IN_PLACE, FOLD_IN_PLACE, SWITCHING)
 
 def study_settings(name):
     """One study config's resolved settings."""
-    config_path = CONFIGS_DIR / name
+    config_path = yaml_configs.CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
     return config.settings
 
 
-def test_the_base_config_copies_at_both_of_the_notes_settings():
-    """Section 5's defaults: input copy, boundary_fold copy."""
+def test_the_base_config_copies_at_both_settings():
+    """The reference defaults: input copy, boundary_fold copy."""
     settings = study_settings(BASE)
 
     assert settings.weak_decoder.input == "copy"
@@ -77,7 +79,7 @@ def test_every_study_config_counts_its_data_movement(name):
 
 def swept_distances(name):
     """Every code distance one config's sweep blocks name."""
-    config_path = CONFIGS_DIR / name
+    config_path = yaml_configs.CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
     distances = set()
     for block in config.sweep:
@@ -96,7 +98,7 @@ def test_every_study_config_sweeps_the_same_points_on_priced_cards(name):
 
 
 def test_reading_the_input_in_place_and_folding_in_place_is_refused(tmp_path):
-    """The pair the note's table cannot name, refused where the yaml enters.
+    """Both in place, refused where the yaml enters.
 
     Folding into the unit's memory needs the unit's own copy of the
     rounds, and a tier that reads its input in place has none, so no
@@ -114,12 +116,10 @@ def _both_in_place_config(tmp_path):
     """The study's base yaml with both in-place settings named at once."""
     import yaml
 
-    from tests.experiments.yaml_configs import MINIMAL_CONFIG
-
-    weak = dict(MINIMAL_CONFIG["weak_decoder"])
+    weak = dict(yaml_configs.MINIMAL_CONFIG["weak_decoder"])
     weak["input"] = "in_place"
     weak["boundary_fold"] = "in_place"
-    raw = dict(MINIMAL_CONFIG)
+    raw = dict(yaml_configs.MINIMAL_CONFIG)
     raw["weak_decoder"] = weak
     raw["sweep"] = [
         {

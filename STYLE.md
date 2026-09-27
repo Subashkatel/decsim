@@ -257,7 +257,7 @@ depend on each other. Everything a second package implements or calls is
 a port and lives in the port file.
 
 One root object, `Machine`, builds every component from its settings and
-wires them by constructor; no component builds or looks up another. The
+binds their ports; no component builds or looks up another. The
 yaml has one section per component, each section builds one settings
 dataclass, and a pluggable component's section carries one `kind` key
 naming a row in the root's table (`qpu: {kind: stim_device, ...}`,

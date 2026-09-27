@@ -93,7 +93,9 @@ class Flits:
             cls, section: Mapping, section_name: str
         ) -> "Flits.Settings":
             """The flit width, a positive whole number of bits."""
-            flit_bits = _positive_count(section, "flit_bits", section_name)
+            flit_bits = link_settings.positive_count_key(
+                section, "flit_bits", section_name
+            )
             return cls(flit_bits=flit_bits)
 
     def __init__(self, settings: "Flits.Settings") -> None:
@@ -146,7 +148,7 @@ class PcieTlp:
             cls, section: Mapping, section_name: str
         ) -> "PcieTlp.Settings":
             """The Maximum Payload Size, a positive whole number of bytes."""
-            max_payload_bytes = _positive_count(
+            max_payload_bytes = link_settings.positive_count_key(
                 section, "max_payload_bytes", section_name
             )
             return cls(max_payload_bytes=max_payload_bytes)
@@ -187,7 +189,7 @@ class RoceV2:
             cls, section: Mapping, section_name: str
         ) -> "RoceV2.Settings":
             """The path MTU, a positive whole number of bytes."""
-            path_mtu_bytes = _positive_count(
+            path_mtu_bytes = link_settings.positive_count_key(
                 section, "path_mtu_bytes", section_name
             )
             return cls(path_mtu_bytes=path_mtu_bytes)
@@ -241,7 +243,9 @@ class EthernetUdp:
             cls, section: Mapping, section_name: str
         ) -> "EthernetUdp.Settings":
             """The MTU, a whole number of bytes above the two headers."""
-            mtu_bytes = _positive_count(section, "mtu_bytes", section_name)
+            mtu_bytes = link_settings.positive_count_key(
+                section, "mtu_bytes", section_name
+            )
             headers_bytes = IPV4_HEADER_BYTES + UDP_HEADER_BYTES
             if mtu_bytes <= headers_bytes:
                 raise ValueError(
@@ -346,16 +350,3 @@ def _chunk_count(total: int, chunk_size: int) -> int:
 def _ceiling_division(numerator: int, denominator: int) -> int:
     """gem5's divCeil: the whole units that hold numerator."""
     return -(-numerator // denominator)
-
-
-def _positive_count(section: Mapping, key: str, section_name: str) -> int:
-    """A key the row needs: a positive whole number, never a yaml boolean."""
-    if key not in section:
-        raise ValueError(f"{section_name} needs {key}")
-    value = section[key]
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if not is_whole or value <= 0:
-        raise ValueError(
-            f"{section_name}.{key} is {value!r}; it is a positive whole number"
-        )
-    return value

@@ -217,13 +217,13 @@ def compared_lines(tutorial: Tutorial, shown: list, printed: Printed) -> tuple:
     if tutorial.is_priced or is_clock_free:
         count = len(shown)
         return shown, list(printed.lines[:count])
-    shown_lines = clock_free_lines(shown)
-    printed_lines = clock_free_lines(printed.lines)
+    shown_lines = _clock_free_lines(shown)
+    printed_lines = _clock_free_lines(printed.lines)
     count = len(shown_lines)
     return shown_lines, printed_lines[:count]
 
 
-def clock_free_lines(lines) -> list:
+def _clock_free_lines(lines) -> list:
     """The lines of an output that no decoder's wall clock moves."""
     kept = []
     for line in lines:

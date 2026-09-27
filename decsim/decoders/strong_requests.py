@@ -407,6 +407,11 @@ class StrongRequests:
         return unsettled
 
 
+def is_merged_batch(job: decoding_records.DecodeJob) -> bool:
+    """A batch serves several strong requests and has no request itself."""
+    return job.kind is decoding_records.DecodeJobKind.STRONG_BATCH
+
+
 def _states_of(record: WindowRequests) -> list:
     """The names unsettled() reports one window's record under."""
     states = []
@@ -417,11 +422,6 @@ def _states_of(record: WindowRequests) -> list:
     if record.open_weak_requests:
         states.append("decoding with no outcome")
     return states
-
-
-def is_merged_batch(job: decoding_records.DecodeJob) -> bool:
-    """A batch serves several strong requests and has no request itself."""
-    return job.kind is decoding_records.DecodeJobKind.STRONG_BATCH
 
 
 def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:

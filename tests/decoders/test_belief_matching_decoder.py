@@ -10,9 +10,9 @@ observable; the posterior clamp is the one line that may differ (1e-15
 here, 1e-14 there).
 """
 
+import beliefmatching
 import numpy
 import pymatching
-from beliefmatching import BeliefMatching
 
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -23,7 +23,7 @@ SHOTS = 100
 CLAMP = 1e-14
 
 
-def _reference_prediction(referee: BeliefMatching, syndrome):
+def _reference_prediction(referee: beliefmatching.BeliefMatching, syndrome):
     """Beliefmatching's matching branch, verbatim but for the clamp."""
     matrices = referee._matrices
     referee._bpd.decode(syndrome)
@@ -49,7 +49,7 @@ def test_the_row_predicts_what_beliefmatchings_matching_branch_property():
     )
     detection_events, _ = windows.sampled_shots(circuit, SHOTS, 7)
     detector_error_model = circuit.detector_error_model(decompose_errors=True)
-    referee = BeliefMatching(
+    referee = beliefmatching.BeliefMatching(
         detector_error_model, max_bp_iters=30, bp_method="product_sum"
     )
     row = belief_matching.BeliefMatchingDecoder(

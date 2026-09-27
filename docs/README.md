@@ -92,7 +92,7 @@ cannot drift from the code.
 
 **The shape of the package.**
 
-- [The plug-in tables](reference/tables.md): the eighteen tables and
+- [The plug-in tables](reference/tables.md): every table and
   every row a yaml may name.
 - [The ports](reference/ports.md): every port, its methods and members,
   in the order a readout travels.

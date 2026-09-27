@@ -14,12 +14,12 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import pathlib
 import platform
 import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Optional
 
 import decsim.build.escalation as escalation_build
@@ -30,7 +30,7 @@ import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
 
-RESULTS_DIR = Path("results")
+RESULTS_DIR = pathlib.Path("results")
 RESOLVED_FOLDER = "resolved"
 INPUTS_FOLDER = "inputs"
 PRODUCER_FILE = "producer.json"
@@ -44,7 +44,7 @@ FINISHED_FILE = "finished"
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
 
 
-def run_dir_for(config, out_dir=None) -> Path:
+def run_dir_for(config, out_dir=None) -> pathlib.Path:
     """Where this run writes: the folder asked for, or a fresh stamped one.
 
     gem5's --outdir names the folder and makes it (src/python/m5/main.py:
@@ -54,24 +54,24 @@ def run_dir_for(config, out_dir=None) -> Path:
     """
     if out_dir is None:
         return new_run_dir(config)
-    run_dir = Path(out_dir)
+    run_dir = pathlib.Path(out_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
 
-def combined_run_dir(out_dir=None) -> Path:
+def combined_run_dir(out_dir=None) -> pathlib.Path:
     """Where `decsim combine` writes: the folder asked for, or a fresh one.
 
     Only the path: the report makes the folder once the fold is accepted,
     so a refused combine leaves nothing behind.
     """
     if out_dir is not None:
-        return Path(out_dir)
+        return pathlib.Path(out_dir)
     stamp = _utc_stamp()
     return RESULTS_DIR / f"{stamp}-combined"
 
 
-def new_run_dir(config) -> Path:
+def new_run_dir(config) -> pathlib.Path:
     """results/<UTC stamp>-<config name>/, never reused; sorted by time.
 
     The stamp is whole seconds, so a second run started within the same
@@ -92,7 +92,7 @@ def new_run_dir(config) -> Path:
 
 def start_run(
     config: Optional[experiment.ExperimentConfig],
-    run_dir: Path,
+    run_dir: pathlib.Path,
     *,
     shard: Optional[tuple] = None,
     shots_per_unit: Optional[int] = None,
@@ -110,7 +110,7 @@ def start_run(
 
 def finish_run(
     config: Optional[experiment.ExperimentConfig],
-    run_dir: Path,
+    run_dir: pathlib.Path,
     started_utc: str,
     *,
     shard: Optional[tuple] = None,
@@ -124,7 +124,7 @@ def finish_run(
 
 
 def snapshot_code_state(
-    config: Optional[experiment.ExperimentConfig], run_dir: Path
+    config: Optional[experiment.ExperimentConfig], run_dir: pathlib.Path
 ) -> None:
     """Copy the run's exact inputs next to its results.
 
@@ -170,7 +170,7 @@ def read_the_tree() -> None:
 
 def write_manifest(
     config: Optional[experiment.ExperimentConfig],
-    run_dir: Path,
+    run_dir: pathlib.Path,
     started_utc: str,
     finished_utc: Optional[str] = None,
     *,
@@ -212,7 +212,7 @@ def write_manifest(
 
 def write_combined_manifest(
     resolved_config: dict,
-    run_dir: Path,
+    run_dir: pathlib.Path,
     folded: list,
     started_utc: str,
     finished_utc: Optional[str] = None,
@@ -241,7 +241,7 @@ def write_combined_manifest(
 
 
 def record_point(
-    run_dir: Path, task: collect.Task, seeds: Optional[list] = None
+    run_dir: pathlib.Path, task: collect.Task, seeds: Optional[list] = None
 ) -> str:
     """One sweep point's values and workload, named by its strong id.
 
@@ -272,7 +272,7 @@ def record_point(
 
 
 def write_producer(
-    run_dir: Path, workload: workload_settings.WorkloadSettings
+    run_dir: pathlib.Path, workload: workload_settings.WorkloadSettings
 ) -> None:
     """producer.json: a producer row's maker, arguments and package version.
 
@@ -293,7 +293,7 @@ def write_producer(
     write_json(producer_path, producer)
 
 
-def mark_finished(run_dir: Path) -> None:
+def mark_finished(run_dir: pathlib.Path) -> None:
     """The finished flag, the last thing a run writes: the time it ended."""
     finished_utc = utc_now()
     finished_line = finished_utc + "\n"
@@ -301,9 +301,9 @@ def mark_finished(run_dir: Path) -> None:
     finished_path.write_text(finished_line)
 
 
-def is_finished(run_dir: Path) -> bool:
+def is_finished(run_dir: pathlib.Path) -> bool:
     """Whether a run into this folder ended, which a rerun then skips."""
-    finished_path = Path(run_dir) / FINISHED_FILE
+    finished_path = pathlib.Path(run_dir) / FINISHED_FILE
     return finished_path.exists()
 
 
@@ -316,10 +316,10 @@ def point_of(row: Mapping) -> tuple:
     return tuple(values)
 
 
-def resolved_by_point(run_dir: Path) -> dict:
+def resolved_by_point(run_dir: pathlib.Path) -> dict:
     """Each point's resolved/ record, keyed by its sweep point."""
     records = {}
-    resolved_dir = Path(run_dir) / RESOLVED_FOLDER
+    resolved_dir = pathlib.Path(run_dir) / RESOLVED_FOLDER
     paths = resolved_dir.glob("*.json")
     for path in sorted(paths):
         text = path.read_text()
@@ -363,7 +363,7 @@ def seed_ranges(ranges: list) -> list:
     return joined
 
 
-def copy_point_records(run_dirs: list, out_dir: Path) -> None:
+def copy_point_records(run_dirs: list, out_dir: pathlib.Path) -> None:
     """The folded folders' resolved/, inputs/ and producer.json, in one.
 
     A point's files are named by its content, so the same point in two
@@ -371,7 +371,7 @@ def copy_point_records(run_dirs: list, out_dir: Path) -> None:
     holds the seeds every folder ran of it.
     """
     for run_dir_name in run_dirs:
-        run_dir = Path(run_dir_name)
+        run_dir = pathlib.Path(run_dir_name)
         _fold_resolved(run_dir, out_dir)
         source = run_dir / INPUTS_FOLDER
         target = out_dir / INPUTS_FOLDER
@@ -382,7 +382,7 @@ def copy_point_records(run_dirs: list, out_dir: Path) -> None:
             shutil.copy2(producer_path, target)
 
 
-def write_json(path: Path, value) -> None:
+def write_json(path: pathlib.Path, value) -> None:
     """A json file of the run folder: indented, ending in a newline."""
     text = json.dumps(value, indent=2)
     lines = text + "\n"
@@ -395,13 +395,13 @@ def utc_now() -> str:
     return now.isoformat()
 
 
-def _copy_the_config_chain(config_files: tuple, run_dir: Path) -> None:
+def _copy_the_config_chain(config_files: tuple, run_dir: pathlib.Path) -> None:
     """Every yaml of the chain into config/, each at its place."""
     config_dir = run_dir / "config"
     config_dir.mkdir(exist_ok=True)
     chain_folder = _chain_folder(config_files)
     for config_file in config_files:
-        config_path = Path(config_file)
+        config_path = pathlib.Path(config_file)
         source = config_path.resolve()
         place = source.relative_to(chain_folder)
         target = config_dir / place
@@ -409,7 +409,7 @@ def _copy_the_config_chain(config_files: tuple, run_dir: Path) -> None:
         shutil.copy2(source, target)
 
 
-def _fold_resolved(run_dir: Path, out_dir: Path) -> None:
+def _fold_resolved(run_dir: pathlib.Path, out_dir: pathlib.Path) -> None:
     """One folder's point records into the fold's, their seeds joined."""
     target_dir = out_dir / RESOLVED_FOLDER
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -426,7 +426,7 @@ def _fold_resolved(run_dir: Path, out_dir: Path) -> None:
         write_json(target, record)
 
 
-def _chain_folder(config_files: tuple) -> Path:
+def _chain_folder(config_files: tuple) -> pathlib.Path:
     """The deepest folder that holds every file of the extends chain.
 
     Each copy keeps its place below it, so two files of one name in two
@@ -435,14 +435,14 @@ def _chain_folder(config_files: tuple) -> Path:
     """
     folders = []
     for config_file in config_files:
-        config_path = Path(config_file)
+        config_path = pathlib.Path(config_file)
         source = config_path.resolve()
         folders.append(str(source.parent))
     common_folder = os.path.commonpath(folders)
-    return Path(common_folder)
+    return pathlib.Path(common_folder)
 
 
-def _write_the_manifest(manifest: dict, run_dir: Path) -> None:
+def _write_the_manifest(manifest: dict, run_dir: pathlib.Path) -> None:
     """manifest.json, indented, in the folder it describes."""
     manifest_path = run_dir / "manifest.json"
     manifest_text = json.dumps(manifest, indent=2)
@@ -491,7 +491,7 @@ def _built_values(settings) -> dict:
     }
 
 
-def _write_inputs(inputs_dir: Path, record) -> None:
+def _write_inputs(inputs_dir: pathlib.Path, record) -> None:
     """The workload as files, and each file's sha256 in hashes.json.
 
     A folder recorded again holds its earlier hashes.json, which is the
@@ -519,7 +519,7 @@ def _package_version(module_name: str) -> Optional[str]:
         return None
 
 
-def _sha256_of(path: Path) -> str:
+def _sha256_of(path: pathlib.Path) -> str:
     contents = path.read_bytes()
     digest = hashlib.sha256(contents)
     return digest.hexdigest()
@@ -538,7 +538,7 @@ def _union_find_library_hash() -> Optional[str]:
     return _sha256_of(path)
 
 
-def _untracked_files(checkout: Path) -> Optional[list]:
+def _untracked_files(checkout: pathlib.Path) -> Optional[list]:
     """The tree's untracked files git does not ignore, which it runs too.
 
     None when git cannot answer (the container ships none), where
@@ -558,7 +558,7 @@ def _untracked_files(checkout: Path) -> Optional[list]:
     return listed.splitlines()
 
 
-def _untracked_patch(checkout: Path, relative: str) -> str:
+def _untracked_patch(checkout: pathlib.Path, relative: str) -> str:
     """A patch that creates one untracked file; git exits 1 on a difference."""
     arguments = [
         "git",
@@ -597,7 +597,7 @@ def _container() -> Optional[str]:
     return container
 
 
-def _checkout() -> Path:
+def _checkout() -> pathlib.Path:
     """The tree this code was imported from, which is the code that ran.
 
     Not the working directory: a cluster task starts in the folder its
@@ -606,7 +606,7 @@ def _checkout() -> Path:
     that named the working directory's commit would name code no part
     of the run read.
     """
-    this_file = Path(__file__)
+    this_file = pathlib.Path(__file__)
     here = this_file.resolve()
     return here.parents[2]
 
@@ -692,7 +692,7 @@ def _git_output(*arguments) -> Optional[str]:
     return completed.stdout.strip()
 
 
-def _commit_from_git_files(checkout: Path) -> Optional[str]:
+def _commit_from_git_files(checkout: pathlib.Path) -> Optional[str]:
     """The checkout's own HEAD, read without git."""
     git_dir = _git_dir(checkout)
     if git_dir is None:
@@ -709,7 +709,7 @@ def _commit_from_git_files(checkout: Path) -> Optional[str]:
     return None
 
 
-def _head_of(git_dir: Path) -> Optional[str]:
+def _head_of(git_dir: pathlib.Path) -> Optional[str]:
     """What HEAD holds: a commit, or "ref: " and a branch; None if absent."""
     head_path = git_dir / "HEAD"
     if not head_path.exists():
@@ -718,7 +718,7 @@ def _head_of(git_dir: Path) -> Optional[str]:
     return head_text.strip()
 
 
-def _reference_in(directory: Path, reference: str) -> Optional[str]:
+def _reference_in(directory: pathlib.Path, reference: str) -> Optional[str]:
     """One reference in one git directory, loose or packed."""
     reference_path = directory / reference
     if reference_path.exists():
@@ -730,7 +730,7 @@ def _reference_in(directory: Path, reference: str) -> Optional[str]:
     return _packed_reference(packed, reference)
 
 
-def _git_dir(checkout: Path) -> Optional[Path]:
+def _git_dir(checkout: pathlib.Path) -> Optional[pathlib.Path]:
     """The checkout's .git, or where it points when it is a worktree."""
     git_path = checkout / ".git"
     if git_path.is_dir():
@@ -742,10 +742,10 @@ def _git_dir(checkout: Path) -> Optional[Path]:
     prefix = "gitdir: "
     if not text.startswith(prefix):
         return None
-    return Path(text[len(prefix) :])
+    return pathlib.Path(text[len(prefix) :])
 
 
-def _common_git_dir(git_dir: Path) -> Path:
+def _common_git_dir(git_dir: pathlib.Path) -> pathlib.Path:
     """Where a worktree's git dir keeps the refs it shares with the repo."""
     commondir = git_dir / "commondir"
     if not commondir.exists():
@@ -756,7 +756,7 @@ def _common_git_dir(git_dir: Path) -> Path:
     return common.resolve()
 
 
-def _packed_reference(packed: Path, reference: str) -> Optional[str]:
+def _packed_reference(packed: pathlib.Path, reference: str) -> Optional[str]:
     packed_text = packed.read_text()
     for line in packed_text.splitlines():
         if line.endswith(reference):

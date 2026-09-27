@@ -19,7 +19,7 @@ them stays in decsim/decoders/union_find/window_decoder.py.
 
 import dataclasses
 import math
-from numbers import Real
+import numbers
 from typing import Union
 
 # one tick of an edge length is this many natural-log units of weight
@@ -129,7 +129,9 @@ def normalized_weight_step(
     the whole path (weak_decoder.weight_step), since both tiers take the
     union_find row; a Python caller keeps the row's name.
     """
-    if isinstance(weight_step, bool) or not isinstance(weight_step, Real):
+    if isinstance(weight_step, bool) or not isinstance(
+        weight_step, numbers.Real
+    ):
         raise ValueError(f"{key} must be a real number")
     normalized = float(weight_step)
     if not math.isfinite(normalized) or normalized <= 0.0:

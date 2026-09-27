@@ -29,7 +29,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
-from decsim.decoders.decoder_manager import DecoderManager
 
 # a 1 MHz unit clock; these units declare no stage, so the period only
 # has to be a real one
@@ -110,7 +109,7 @@ def _manager(engine, row, formation_by_pool=None, unit_count=1):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
@@ -320,7 +319,7 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    manager = DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
@@ -354,11 +353,11 @@ class _Model:
 
 
 def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
-    """C8 item 5: the line belongs to the component whose row reports it.
+    """The line belongs to the component whose row reports it.
 
-    observe wrote it, so the log the frozen gate hashes was not a pure
-    product of the components. The manager owns the rows that report
-    it, so it says it, and a run with no observer says it too.
+    The log the frozen gate hashes is a product of the components alone.
+    The manager owns the rows that report it, so it says it, and a run
+    with no observer says it too.
     """
     engine = engine_module.Engine()
     log = log_writers.LogWriter()
@@ -392,7 +391,7 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
@@ -571,7 +570,7 @@ def _staging_manager(engine, row, *, copies_input: bool):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,

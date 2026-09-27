@@ -14,10 +14,10 @@ detectors the correction leaves unexplained reported in the evidence.
 
 import random
 
+import ldpc.union_find_decoder as union_find_decoder
 import numpy
 import pytest
 import scipy.sparse
-from ldpc.union_find_decoder import UnionFindDecoder as LdpcUnionFind
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.decoder as union_find
@@ -102,7 +102,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
 
 def _referee():
     check = scipy.sparse.csr_matrix(CHECK)
-    return LdpcUnionFind(check, uf_method="peeling")
+    return union_find_decoder.UnionFindDecoder(check, uf_method="peeling")
 
 
 def _reproduces(correction, syndrome) -> bool:

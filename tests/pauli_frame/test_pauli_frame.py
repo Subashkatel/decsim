@@ -15,12 +15,11 @@ import enum
 import pytest
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import tests.experiments.yaml_configs as yaml_configs
-from decsim.engine import Engine
-from decsim.pauli_frame.pauli_frame import PauliFrame, PauliFrameConfig
 
 
 class Tier(enum.Enum):
@@ -44,9 +43,11 @@ def frame_with_commit_ticks(commit_ticks):
     Every tick is an edge on that clock, which keeps these tests about
     the fold and the refusals; the edge law has its own test below.
     """
-    engine = Engine()
+    engine = engine_module.Engine()
     clock = config.Clock(1)
-    frame = PauliFrame(engine, clock=clock, write_cycles=commit_ticks)
+    frame = pauli_frame_module.PauliFrame(
+        engine, clock=clock, write_cycles=commit_ticks
+    )
     return engine, frame
 
 
@@ -123,7 +124,7 @@ def test_a_correction_without_observables_makes_the_fold_unknown():
 
 def test_a_charged_write_keeps_its_cycle_count_and_its_clock():
     clock = config.Clock(4000)
-    settings = PauliFrameConfig(write_cycles=1, clock=clock)
+    settings = pauli_frame_module.PauliFrameConfig(write_cycles=1, clock=clock)
     assert settings.write_cycles == 1
     assert settings.clock.period_ticks == 4000
 
@@ -135,9 +136,9 @@ def test_a_write_arriving_mid_cycle_lands_on_the_frame_clocks_next_edge():
     250 MHz, so on a 4000-tick period a correction that arrives at tick
     10 is written over the cycle that starts at 4000 and lands at 8000.
     """
-    engine = Engine()
+    engine = engine_module.Engine()
     clock = config.Clock(4000)
-    frame = PauliFrame(engine, clock=clock, write_cycles=1)
+    frame = pauli_frame_module.PauliFrame(engine, clock=clock, write_cycles=1)
     continued_at = []
 
     def note_continuation():
@@ -208,7 +209,7 @@ def test_a_write_cost_refusal_names_its_yaml_path():
     section = {"clock": "fridge", "write_cycles": -1}
 
     with pytest.raises(ValueError) as refusal:
-        PauliFrameConfig.from_yaml(section, clocks)
+        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
     assert str(refusal.value) == (
         "pauli_frame.write_cycles must not be negative: cycles must be "
         "nonnegative"
@@ -217,7 +218,7 @@ def test_a_write_cost_refusal_names_its_yaml_path():
 
 def test_a_charged_write_without_a_clock_is_refused():
     with pytest.raises(ValueError, match="needs the clock"):
-        PauliFrameConfig(write_cycles=1)
+        pauli_frame_module.PauliFrameConfig(write_cycles=1)
 
 
 @pytest.mark.parametrize("key", ["clock", "write_cycles"])
@@ -229,7 +230,7 @@ def test_a_section_without_a_required_key_is_refused_by_name(key):
     del section[key]
 
     with pytest.raises(ValueError) as refusal:
-        PauliFrameConfig.from_yaml(section, clocks)
+        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
     assert str(refusal.value) == (
         f"pauli_frame needs the keys ['{key}']; configs/reference.yaml "
         "holds every key with its unit"
@@ -242,7 +243,7 @@ def test_a_key_the_section_does_not_have_is_refused_by_name():
     section = {"clock": "fridge", "write_cycles": 1, "write_cycle": 2}
 
     with pytest.raises(ValueError) as refusal:
-        PauliFrameConfig.from_yaml(section, clocks)
+        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
     assert str(refusal.value) == (
         "pauli_frame does not know ['write_cycle']; its keys are "
         "['kind', 'clock', 'write_cycles']"
@@ -250,7 +251,7 @@ def test_a_key_the_section_does_not_have_is_refused_by_name():
 
 
 def test_a_free_write_is_accepted_and_needs_no_clock():
-    settings = PauliFrameConfig(write_cycles=0)
+    settings = pauli_frame_module.PauliFrameConfig(write_cycles=0)
     assert settings.write_cycles == 0
     assert settings.clock is None
 

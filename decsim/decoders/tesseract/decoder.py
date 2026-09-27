@@ -99,9 +99,9 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
 
     def decode_window(self, backend, model, faults, syndrome):
         """One backend call; a produced correction is committed as it stands."""
-        del faults
         outcome = backend.decode(model, syndrome)
-        return backend_outcome.window_decode_of(outcome)
+        fault_count = faults.check.shape[1]
+        return backend_outcome.window_decode_of(outcome, fault_count)
 
 
 # the value a key the section leaves out takes

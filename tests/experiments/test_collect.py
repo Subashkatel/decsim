@@ -19,7 +19,8 @@ algorithm when a point came to be named by its id: the id hashes the
 tree's settings records, not a measured value, so it is left out of the
 comparison. Five zero columns came with the window decode statuses,
 one per status besides success, which no window of the recorded sweep
-carried. The weak
+carried, and two counts with the unscored shots, both its shots scored
+and none unscored. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park
@@ -29,13 +30,16 @@ out of the comparison, and the columns kept are exactly the ones two
 recorded runs agreed on. Referent two
 is sinter (sinter/_collection/_collection.py collect, sinter/_data/_task.py
 strong_id): a task named twice runs once, and a decoder off the table is
-refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder").
+refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder"),
+and a shot its decoder could not answer is a discard, counted apart and
+never an error (sinter/_decoding/_decoding.py:123-125).
 """
 
 import csv
 import dataclasses
 import decimal
 import fractions
+import math
 import pathlib
 import re
 import shutil
@@ -47,6 +51,7 @@ import yaml
 
 import decsim.collect as collect
 import decsim.controller.settings as controller_settings
+import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
@@ -763,3 +768,57 @@ def test_a_number_json_cannot_hold_reads_back_to_itself():
 
     assert fractions.Fraction(rate_text) == rate
     assert decimal.Decimal(amount_text) == amount
+
+
+class _CrashingRelayDecoder:
+    """A relay-bp decoder whose every decode raises, a crashed backend."""
+
+    def __init__(self, *arguments, **keywords) -> None:
+        del arguments, keywords
+
+    def decode_detailed(self, syndrome):
+        del syndrome
+        raise RuntimeError("the relay-bp backend crashed")
+
+
+def _crashing_relay_type():
+    return _CrashingRelayDecoder
+
+
+def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
+    tmp_path, monkeypatch
+):
+    """Every decode raises, and every shot is a row saying so.
+
+    The crash is relay-bp's own decode_detailed raising, which the row
+    turns into BACKEND_ERROR with no correction; each shot is unscored
+    with that reason, counts its windows under backend_error_windows,
+    and is not a failure, and the point has no failure fraction.
+    """
+    monkeypatch.setattr(
+        relay_window, "_load_relay_decoder_type", _crashing_relay_type
+    )
+    weak_decoder = dict(
+        yaml_configs.MINIMAL_CONFIG["weak_decoder"], kind="relay_bp"
+    )
+    sweep = [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0], shots=2)]
+    config_path = yaml_configs.write_config(
+        tmp_path, {"weak_decoder": weak_decoder, "sweep": sweep}
+    )
+    run_dir, rows = run.run_experiment(config_path)
+    lines = sweep_report.terminal_lines(rows, run_dir)
+    shots_path = run_dir / "shots.csv"
+    first, second = _csv_rows(shots_path)
+
+    assert [first["seed"], second["seed"]] == ["0", "1"]
+    assert first["is_scored"] == "False"
+    assert first["unscored_reason"] == "upstream_exception"
+    assert first["backend_error_windows"] == first["windows"]
+    assert first["logical_failure"] == "False"
+    assert second["is_scored"] == "False"
+    assert rows[0]["shots"] == 2
+    assert rows[0]["scored_shots"] == 0
+    assert rows[0]["unscored_shots"] == 2
+    assert rows[0]["logical_failures"] == 0
+    assert math.isnan(rows[0]["logical_error_rate"])
+    assert "unscored shots: 2" in lines

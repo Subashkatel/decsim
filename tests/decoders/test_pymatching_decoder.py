@@ -16,6 +16,7 @@ import pymatching
 import pytest
 import sinter
 
+import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
@@ -144,8 +145,9 @@ def test_an_unmatchable_syndrome_is_reported_and_not_raised():
     Matching.decode raises ValueError there rather than answering,
     because no perfect matching exists. No plan produces such a
     syndrome, so the row keeps the run going: an all-zero correction
-    marked INVALID_CORRECTION says the answer is not trustworthy
-    without stopping the machine (backend_outcome.py's policy).
+    marked INVALID_CORRECTION, with the reason that no matching exists,
+    says the backend produced no correction without stopping the
+    machine (backend_outcome.py's policy).
     """
     # two boundaryless edges, (0, 2) and (1, 3): one defect on each
     check = [[1, 0], [0, 1], [1, 0], [0, 1]]
@@ -156,7 +158,9 @@ def test_an_unmatchable_syndrome_is_reported_and_not_raised():
     row = adapter.PyMatchingDecoder()
     result = row.decode(job)
     invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
+    reasons = backend_outcome.BackendFailureReason
     assert result.decode_status is invalid
+    assert result.no_correction_reason is reasons.NO_PERFECT_MATCHING
     assert result.correction.tolist() == [0, 0]
 
 

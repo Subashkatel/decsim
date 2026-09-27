@@ -4,8 +4,10 @@ One backend call's correction, its disposition and its diagnostics,
 normalized once at construction; window_decode_of turns it into the
 correction the row commits and the status the result carries. A backend
 that produced a correction has it committed as it stands, best effort
-or not; only a backend that produced no correction at all is a
-structural failure and stops the run.
+or not. A backend that produced none commits an empty correction marked
+with its reason, and the shot it belongs to is unscored: sinter's
+discard, counted apart and never as an error
+(sinter/_decoding/_decoding.py:123-125).
 """
 
 import dataclasses
@@ -30,6 +32,9 @@ class BackendFailureReason(enum.Enum):
     CORRECTION_DOES_NOT_MATCH_SYNDROME = "correction_does_not_match_syndrome"
     NONZERO_SYNDROME_WITHOUT_FAULTS = "nonzero_syndrome_without_faults"
     UPSTREAM_EXCEPTION = "upstream_exception"
+    # PyMatching raises on a syndrome no matching explains; the matching
+    # rows report it with no correction under INVALID_CORRECTION
+    NO_PERFECT_MATCHING = "no_perfect_matching"
 
 
 _STATUS_REASONS = {
@@ -129,20 +134,21 @@ def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
 
 
 def window_decode_of(
-    outcome: BackendDecodeOutcome,
+    outcome: BackendDecodeOutcome, fault_count: int
 ) -> decoding_records.WindowDecode:
     """The window's answer from a backend outcome: one policy for every row.
 
     A decode that produced a correction is committed as it stands, best
     effort or not, with its status on the result (nonconverged, low
-    confidence, does not reproduce the syndrome); only a backend that
-    produced no correction at all (an upstream exception, a malformed
-    vector) is a structural failure and stops the run.
+    confidence, does not reproduce the syndrome). An outcome with no
+    correction, which the record allows only off success (an upstream
+    exception, a malformed vector, an unsatisfiable empty model), commits
+    an empty correction of the model's fault_count columns and carries
+    the backend's own reason, which makes its shot unscored.
     """
     if outcome.physical_correction is None:
-        raise RuntimeError(
-            "decoder backend produced no correction: "
-            f"{outcome.status.value}/{outcome.failure_reason.value}"
+        return no_correction_decode(
+            outcome.status, outcome.failure_reason, fault_count
         )
     decode_status = None
     if not outcome.succeeded:
@@ -151,6 +157,18 @@ def window_decode_of(
         outcome.physical_correction,
         decode_status,
         iterations=outcome.iterations,
+    )
+
+
+def no_correction_decode(
+    status: decoder_module.BackendDecodeStatus,
+    reason: BackendFailureReason,
+    fault_count: int,
+) -> decoding_records.WindowDecode:
+    """The answer of a backend that produced no correction: empty, marked."""
+    empty = numpy.zeros(fault_count, dtype=numpy.uint8)
+    return decoding_records.WindowDecode(
+        empty, status, no_correction_reason=reason
     )
 
 

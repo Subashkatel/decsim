@@ -107,6 +107,11 @@ These are not from the papers. The pages use them everywhere.
 - **work unit**, **shard**: a work unit is a run of consecutive seeds of
   one sweep point, sized by `--shots-per-unit`. A shard is the share of
   work units one array task runs, chosen by `--shard i/n`.
+- **scored shot**, **unscored shot**: a shot is scored when every
+  window it committed got a correction from its decoder's backend, and
+  unscored when a backend produced none; sinter calls an unscored shot
+  a discard. It is counted apart and never as a failure
+  (`is_scored` and `unscored_reason` in `shots.csv`).
 - **trace source**: one named event a component fires and listeners
   hear, which is how observation reaches a component without a port
   (`decsim/trace_source.py`).

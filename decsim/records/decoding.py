@@ -383,7 +383,10 @@ class WindowDecode:
     """What one backend call on one window answers.
 
     ``selected_faults`` is the correction and ``decode_status`` a
-    best-effort disposition (None when the decode succeeded). The two
+    best-effort disposition (None when the decode succeeded).
+    ``no_correction_reason`` is the backend's BackendFailureReason when
+    it produced no correction and ``selected_faults`` is the empty one
+    committed in its place; None when the backend produced one. The two
     evidence fields are what a confidence signal reads off the decode
     that produced the correction: the minimum weight inside the class a
     forced solve was pinned to, and the growth a cluster-based decode
@@ -398,6 +401,7 @@ class WindowDecode:
     forced_class_weight: Optional[float] = None
     cluster_evidence: Optional[Any] = None
     iterations: Optional[int] = None
+    no_correction_reason: Optional[Any] = None
 
 
 @dataclass(frozen=True)
@@ -448,6 +452,9 @@ class DecodeResult:
     # succeeded. The correction is committed either way and the status travels
     # with it, as cudaqx's per-window converged flag does.
     decode_status: Optional[Any] = None
+    # BackendFailureReason of a backend that produced no correction, whose
+    # empty stand-in is the correction above; None when it produced one
+    no_correction_reason: Optional[Any] = None
 
 
 @dataclass

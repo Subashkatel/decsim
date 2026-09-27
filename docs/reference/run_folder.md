@@ -89,7 +89,7 @@ and unit are its key's in `configs/reference.yaml`.
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
 | `windows` | how many windows this shot decoded |
-| `logical_failure` | 1 when any operation's decoded observable did not match its truth, else 0; a `memory_patches` shot fails when any patch does |
+| `logical_failure` | 1 when any operation's decoded observable did not match its truth, else 0; a `memory_patches` shot fails when any patch does. An unscored shot is never a failure, as sinter never counts an error on a discarded shot |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
 | `direct_failure`, `direct_mismatch` | the same shot decoded straight through PyMatching outside the machine, and whether the machine disagreed with it |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
@@ -109,6 +109,8 @@ and unit are its key's in `configs/reference.yaml`.
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `burst_first_flag_round` | the first round at or after the burst's onset that the burst detector fired on, counted from round 1 on a shot with no burst, and 0 when it fired on none; only when `burst_detector.kind` is not `none` |
 | `burst_caught_in_time` | whether that round came at most `burst_detector.catch_deadline_rounds` after the onset; only on a `burst_stim` shot whose burst probability is above 0, with a detector |
+| `is_scored` | whether every committed window's backend produced a correction. A backend that produced none (it raised, returned a vector that is not a correction, or found no correction at all) commits an empty correction in its place, and its shot is unscored |
+| `unscored_reason` | the backends' reasons for the windows committed with no correction, each once, sorted and joined by `;` (`BackendFailureReason` in `decsim/decoders/backend_outcome.py`: `upstream_exception`, `correction_not_binary`, `correction_wrong_arity`, `nonzero_syndrome_without_faults`, `no_perfect_matching`); empty on a scored shot |
 | `<status>_windows` | one count per status a window's decode may carry besides success, `low_confidence_windows`, `nonconverged_windows`, `invalid_correction_windows`, `empty_model_unsatisfiable_windows` and `backend_error_windows` (`BackendDecodeStatus` in `decsim/decoders/decoder.py`): how many of the shot's windows committed a decode with that status. A window counts the decode it committed last, so a weak answer the strong tier replaced counts as the strong one |
 | `<point>_mean_us`, `<point>_max_us` | one pair per latency point below |
 
@@ -259,9 +261,11 @@ point the run held:
 | `point_id`, the swept paths, `algorithm` | the point |
 | `shots` | how many shots the point ran |
 | `windows_per_shot` | the mean over those shots |
-| `logical_failures`, `logical_error_rate` | the count and the fraction |
-| `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96, from `wilson_interval` |
+| `logical_failures`, `logical_error_rate` | the count and the fraction of the scored shots, sinter's errors over shots less discards; the fraction is NaN when no shot was scored |
+| `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96 over the scored shots, from `wilson_interval` |
 | `direct_pymatching_failures`, `prediction_mismatches_vs_direct` | the same shots decoded outside the machine, and the disagreements |
+| `scored_shots`, `unscored_shots` | how many of the point's shots were scored, and how many were not (`is_scored`) |
+| `<status>_windows` | the sums over the point's shots |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | the means |
 | `max_queued_windows` | the deepest queue over the point |
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
@@ -273,7 +277,6 @@ point the run held:
 | `weak_syndrome_weight_max`, `strong_wait_max_us`, `strong_held_in_units_max`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |
 | `escalated_fraction` | the windows the strong tier committed over the windows decoded, beside the columns above |
 | `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's totals |
-| `<status>_windows` | the sums over the point's shots |
 | `flagged_share` | the share of the point's shots whose `burst_first_flag_round` is not 0. On shots with no burst it is the share holding a false alarm, and dividing it by one shot's time gives the false-alarm rate per second |
 | `caught_in_time_share` | the share of the point's shots with `burst_caught_in_time` true |
 | `load` | the mean load |

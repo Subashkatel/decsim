@@ -221,6 +221,12 @@ class ShotMeasurement:
     # WINDOW_STATUS_COLUMNS -> the committed windows whose decode carried
     # that status; shots.csv holds one column per entry
     window_statuses: dict
+    # whether every committed window's backend produced a correction; an
+    # unscored shot is sinter's discard, never a logical failure
+    # (sinter/_decoding/_decoding.py:123-125), and unscored_reason names
+    # its windows' backend reasons, empty on a scored shot
+    is_scored: bool
+    unscored_reason: str
 
 
 def measure_shot(
@@ -781,12 +787,15 @@ def _measurement(
     maxes = _maxes(samples)
     first_flag_round, is_caught = _burst_catch(settings, observation)
     window_statuses = _window_statuses(observation)
+    unscored_reason = _unscored_reason(observation)
+    is_scored = unscored_reason == ""
+    is_scored_failure = verdicts.logical_failure and is_scored
     return ShotMeasurement(
         point_id=point_id,
         algorithm=algorithm,
         seed=seed,
         windows=decoded_windows,
-        logical_failure=verdicts.logical_failure,
+        logical_failure=is_scored_failure,
         samples=samples,
         means=means,
         maxes=maxes,
@@ -822,6 +831,8 @@ def _measurement(
         burst_first_flag_round=first_flag_round,
         burst_caught_in_time=is_caught,
         window_statuses=window_statuses,
+        is_scored=is_scored,
+        unscored_reason=unscored_reason,
     )
 
 
@@ -866,6 +877,22 @@ def _window_statuses(observation: observation_module.Observation) -> dict:
         column = f"{window.decode_status}_windows"
         counts[column] += 1
     return counts
+
+
+def _unscored_reason(observation: observation_module.Observation) -> str:
+    """The backends' reasons for the windows committed with no correction.
+
+    Each distinct reason once, in sorted order and joined by ';', so the
+    text is the same however the windows were ordered; empty when every
+    committed window got a correction.
+    """
+    reasons = set()
+    for window in observation.windows.windows.values():
+        reason = window.no_correction_reason
+        if reason is not None:
+            reasons.add(reason.value)
+    ordered = sorted(reasons)
+    return ";".join(ordered)
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:

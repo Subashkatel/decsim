@@ -129,6 +129,9 @@ class Window:
     decode_status: Optional[str] = (
         None  # best-effort status of the committed decode, None = succeeded
     )
+    # the BackendFailureReason of a committed decode whose backend
+    # produced no correction; None when it produced one
+    no_correction_reason: Optional[Any] = None
     # what its committed decode owns of the faults crossing behind its
     # commit region; None until it commits, and empty for every window
     # an earlier owner's commit closes

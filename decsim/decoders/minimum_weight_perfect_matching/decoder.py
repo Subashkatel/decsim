@@ -19,6 +19,7 @@ import numpy
 import pymatching
 import scipy.sparse
 
+import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -88,8 +89,8 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
 
         PyMatching raises when a syndrome has odd parity in a boundaryless
         component; no valid plan produces one, so that case is reported as
-        an empty correction with INVALID_CORRECTION rather than ending the
-        run.
+        an empty correction with INVALID_CORRECTION and no correction's
+        reason, which leaves its shot unscored, rather than ending the run.
         """
         del model
         try:
@@ -98,9 +99,11 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
             if "perfect matching" not in str(error):
                 raise
             fault_count = faults.check.shape[1]
-            empty = numpy.zeros(fault_count, dtype=numpy.uint8)
-            invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
-            return decoding_records.WindowDecode(empty, invalid)
+            return backend_outcome.no_correction_decode(
+                decoder_module.BackendDecodeStatus.INVALID_CORRECTION,
+                backend_outcome.BackendFailureReason.NO_PERFECT_MATCHING,
+                fault_count,
+            )
         return decoding_records.WindowDecode(selected)
 
     def decode_forced_window(

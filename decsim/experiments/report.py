@@ -124,8 +124,12 @@ SHOT_SUMS = (
     "strong_decoded_rounds",
     *measure.WINDOW_STATUS_COLUMNS,
 )
-SHOT_TRUE_COUNTS = ("logical_failure", "direct_failure", "direct_mismatch")
-
+SHOT_TRUE_COUNTS = (
+    "logical_failure",
+    "direct_failure",
+    "direct_mismatch",
+    "is_scored",
+)
 # the burst detector's shot columns, counted true per point when a run
 # with a detector wrote them: a first flag round is true when the
 # detector flagged a round, since rounds count from 1 and 0 is none
@@ -242,18 +246,21 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     """One sweep point: means over seeds of per-shot means, max of maxes."""
     failures = totals.true_counts["logical_failure"]
     shot_count = totals.rows
-    ler_low, ler_high = wilson_interval(failures, shot_count)
+    scored_shots = totals.true_counts["is_scored"]
+    ler_low, ler_high = wilson_interval(failures, scored_shots)
     row = point_columns(point)
     row["shots"] = shot_count
     row["windows_per_shot"] = totals.mean("windows")
     row["logical_failures"] = failures
-    row["logical_error_rate"] = failures / shot_count
+    row["logical_error_rate"] = _failure_fraction(failures, scored_shots)
     row["ler_wilson_low"] = ler_low
     row["ler_wilson_high"] = ler_high
     row["direct_pymatching_failures"] = totals.true_counts["direct_failure"]
     row["prediction_mismatches_vs_direct"] = totals.true_counts[
         "direct_mismatch"
     ]
+    row["scored_shots"] = scored_shots
+    row["unscored_shots"] = shot_count - scored_shots
     _add_status_columns(row, totals)
     row["throughput_windows_per_us"] = totals.mean("throughput_windows_per_us")
     row["throughput_rounds_per_us"] = totals.mean("throughput_rounds_per_us")
@@ -772,6 +779,17 @@ def _folder_files(folders: list, name: str) -> list:
         path = Path(run_dir) / name
         paths.append(path)
     return paths
+
+
+def _failure_fraction(failures: int, scored_shots: int) -> float:
+    """Failures over scored shots, sinter's errors over shots less discards.
+
+    sinter fits its rate to shots - discards (sinter/_plotting.py:389);
+    a point with no scored shot has no fraction, which is NaN.
+    """
+    if scored_shots == 0:
+        return math.nan
+    return failures / scored_shots
 
 
 def _add_status_columns(row: dict, totals) -> None:
@@ -1418,10 +1436,11 @@ def _terminal_block(row: dict, values: dict) -> str:
     """One sweep point's terminal block, one labeled line per number.
 
     The block opens with the point's value at each swept path. The
-    lines above the latency ones are columns every row has. The latency
-    lines are the points the row holds (_points_held), because a row
-    folded from an older tree's folders holds only the points that tree
-    measured.
+    lines above the latency ones are columns every row has, and the
+    unscored shots when there are any, which the failures leave out. The
+    latency lines are the points the row holds (_points_held), because a
+    row folded from an older tree's folders holds only the points that
+    tree measured.
     """
     algorithm = row["algorithm"]
     algorithm_text = _algorithm_text(algorithm)
@@ -1436,6 +1455,8 @@ def _terminal_block(row: dict, values: dict) -> str:
         f"{row['prediction_mismatches_vs_direct']}",
         f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
     ]
+    if row["unscored_shots"] > 0:
+        lines.append(f"unscored shots: {row['unscored_shots']}")
     latency_lines = _terminal_latency_lines(row)
     lines.extend(latency_lines)
     return "\n".join(lines)

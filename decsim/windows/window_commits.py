@@ -149,6 +149,7 @@ class WindowCommitter:
         if status is not None:
             window.decode_status = status.value
             status_note = f" best effort: {status.value}"
+        window.no_correction_reason = result.no_correction_reason
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"DECODE DONE {operation.name} W{window.window_index} "

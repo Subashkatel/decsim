@@ -260,7 +260,8 @@ def joined_result(
 
     The observables and the detectors flipped are XORs of the parts',
     which never share a detector; the correction is the parts' columns
-    in basis order; the region is best effort when either part is.
+    in basis order; the region is best effort when either part is, and
+    uncorrected when either part's backend produced no correction.
     """
     model = job.detector_error_model
     parts = [results[basis] for basis in sorted(results)]
@@ -279,6 +280,7 @@ def joined_result(
     observables = _joined_observables(parts)
     residual = _joined_residual(model, residuals)
     status = _joined_status(parts)
+    no_correction_reason = _joined_no_correction_reason(parts)
     return decoding_records.DecodeResult(
         job.operation_id,
         job.window_id,
@@ -288,6 +290,7 @@ def joined_result(
         crossing_commit=crossing,
         decode_status=status,
         iterations=iteration_count,
+        no_correction_reason=no_correction_reason,
     )
 
 
@@ -439,4 +442,12 @@ def _joined_status(parts: list) -> Optional[Any]:
     for part in parts:
         if part.decode_status is not None:
             return part.decode_status
+    return None
+
+
+def _joined_no_correction_reason(parts: list) -> Optional[Any]:
+    """The first part's reason for no correction; None when both had one."""
+    for part in parts:
+        if part.no_correction_reason is not None:
+            return part.no_correction_reason
     return None

@@ -260,6 +260,7 @@ class WindowDecoderBase(DecoderBase):
         result.forced_class_weight = answer.forced_class_weight
         result.cluster_evidence = answer.cluster_evidence
         result.iterations = answer.iterations
+        result.no_correction_reason = answer.no_correction_reason
         return result, finished_ns - started_ns
 
     def window_answer(

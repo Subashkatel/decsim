@@ -141,12 +141,15 @@ class ShotConfidence:
     records (records/decoding.py) in window order; is_sampled says
     whether the shot is one of the first observation.confidence_shot_count
     shots, whose windows window_confidence.csv lists, while the histogram
-    counts every shot.
+    counts every shot. sampled_shot_count is that count, None for every
+    shot, which piece.json records so a fold can tell pieces that
+    sampled different shots apart.
     """
 
     signal: str
     windows: tuple
     is_sampled: bool
+    sampled_shot_count: Optional[int]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -848,7 +851,8 @@ def _shot_confidence(
     windows = ledger.windows()
     is_sampled = settings.observation.samples_confidence_of(seed)
     signal = settings.escalation.confidence
-    return ShotConfidence(signal, windows, is_sampled)
+    sampled_shot_count = settings.observation.confidence_shot_count
+    return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 
 
 def _burst_catch(

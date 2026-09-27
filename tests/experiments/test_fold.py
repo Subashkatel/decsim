@@ -814,6 +814,50 @@ def test_a_run_whose_escalation_reads_no_confidence_writes_neither_file(
     assert not histogram_path.exists()
 
 
+def test_a_piece_records_the_shots_its_confidence_rows_cover(tmp_path):
+    """piece.json says what confidence it wrote: a count, all, or none."""
+    switching = yaml_configs.fixed_threshold_switching()
+    every = yaml_configs.fixed_threshold_switching()
+    every["observation"] = {"confidence_shot_count": "all"}
+    _confidence_run(tmp_path, switching, 1, out="sampled")
+    _confidence_run(tmp_path, every, 1, out="every")
+    _confidence_run(tmp_path, {}, 1, out="plain")
+
+    sampled = _the_one_piece(tmp_path, "sampled")
+    every_shot = _the_one_piece(tmp_path, "every")
+    plain = _the_one_piece(tmp_path, "plain")
+
+    assert sampled["confidence_shot_count"] == 100
+    assert every_shot["confidence_shot_count"] == "all"
+    assert plain["confidence_shot_count"] is None
+
+
+def test_pieces_of_one_point_that_recorded_confidence_apart_are_refused(
+    tmp_path,
+):
+    """A piece from before the confidence files would leave them short.
+
+    Its shots are in shots.csv but in neither confidence file, so the
+    histogram would count fewer shots than the sweep row. The fold
+    refuses and names the pieces, before it writes anything.
+    """
+    overrides = yaml_configs.fixed_threshold_switching()
+    _confidence_run(tmp_path, overrides, 2, 1)
+    experiment_dir = tmp_path / "experiment"
+    folders = _piece_folders(experiment_dir)
+    older = folders[0]
+    _as_a_piece_from_before_the_confidence_files(older)
+    out_dir = tmp_path / "folded"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        _folded(experiment_dir, folders, out_dir)
+
+    said = str(refused.value)
+    assert "recorded confidence for different shots" in said
+    assert str(older) in said
+    assert not out_dir.exists()
+
+
 def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():
     ten_decibels_in_nats = 2.302585092994046
 
@@ -831,7 +875,7 @@ def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
         ),
         decoding_records.WindowConfidence((1, 1), None, True, None),
     )
-    confidence = measure.ShotConfidence("complementary_gap", windows, True)
+    confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
     shot = types.SimpleNamespace(
         point_id="p",
         algorithm="pymatching",
@@ -892,3 +936,23 @@ def _one_count(histogram, gap_low_decibels, escalated) -> dict:
         "shot_failed": False,
         "count": 1,
     }
+
+
+def _the_one_piece(tmp_path, out) -> dict:
+    """The piece.json of an experiment that saved one piece."""
+    experiment_dir = tmp_path / out
+    (piece_path,) = experiment_dir.glob("pieces/*/*/piece.json")
+    piece_text = piece_path.read_text()
+    return json.loads(piece_text)
+
+
+def _as_a_piece_from_before_the_confidence_files(folder) -> None:
+    """The piece as a tree without confidence output would have saved it."""
+    (folder / "window_confidence.csv").unlink()
+    (folder / "confidence_histogram.csv").unlink()
+    piece_path = folder / "piece.json"
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    del piece["confidence_shot_count"]
+    older_text = json.dumps(piece)
+    piece_path.write_text(older_text)

@@ -1537,4 +1537,7 @@ observation:                       # what a run records beyond its results
                                    # nats_to_decibels; Toshio et al. 2510.25222
                                    # histogram gaps in dB, main.tex:564).
                                    # 0 writes the histogram alone. It records the run
-                                   # and is no part of a point's id
+                                   # and is no part of a point's id, but each piece's
+                                   # piece.json says it, and a point's pieces that
+                                   # recorded confidence for different shots, or one
+                                   # saved before these files, are refused a fold

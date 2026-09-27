@@ -53,6 +53,7 @@ import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.data_movement as data_movement
+import decsim.observe.settings as observe_settings
 
 # the measurement's fields that are not columns of shots.csv: the
 # per-window collections, the counter tables of their own files, and the
@@ -565,6 +566,25 @@ def gap_bin_low_decibels(gap_nats: float) -> float:
     return tenths / CONFIDENCE_BINS_PER_DECIBEL
 
 
+def confidence_shot_count_of(measurements: list):
+    """The shots a piece's confidence rows cover, for its piece.json.
+
+    The first shots' count, the word all for every shot, or None when no
+    confidence signal ran and the piece wrote neither confidence file.
+    A piece saved before the confidence files has no such line, and the
+    fold refuses to join it to one that has
+    (_refuse_pieces_that_recorded_confidence_apart).
+    """
+    for measurement in measurements:
+        confidence = measurement.confidence
+        if confidence is None:
+            continue
+        if confidence.sampled_shot_count is None:
+            return observe_settings.EVERY_SHOT
+        return confidence.sampled_shot_count
+    return None
+
+
 def record_of(measurements: list) -> RunRecord:
     """The additive facts of the shots this process measured."""
     shots = shot_rows(measurements)
@@ -750,6 +770,7 @@ def _refused_or_ordered(folders: list, point_ids: list):
     order = functools.partial(_row_task_and_seed, positions)
     _refuse_folders_of_different_columns(folders)
     _refuse_a_point_this_tree_cannot_place(folders)
+    _refuse_pieces_that_recorded_confidence_apart(folders)
     _refuse_a_repeated_shot(folders, order)
     return order
 
@@ -1516,6 +1537,47 @@ def _refuse_a_repeated_shot(run_dirs: list, order) -> None:
         if seen.get(point) == seed:
             _refuse_the_folders(row, run_dirs)
         seen[point] = seed
+
+
+def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
+    """A point's pieces must have recorded confidence for the same shots.
+
+    A piece saved before the confidence files, or with another
+    observation.confidence_shot_count, holds its shots in shots.csv but
+    other or no rows in the confidence files, so their fold would count
+    fewer shots there than in the sweep row. A piece.json without the
+    line is such an older piece, and it reads as None.
+    """
+    coverage_by_point = {}
+    for run_dir in run_dirs:
+        piece = _piece_of(run_dir)
+        coverage = piece.get("confidence_shot_count")
+        by_coverage = coverage_by_point.setdefault(piece["point_id"], {})
+        by_coverage.setdefault(coverage, run_dir)
+    for point_id, by_coverage in coverage_by_point.items():
+        if len(by_coverage) > 1:
+            _refuse_the_confidence_coverage(point_id, by_coverage)
+
+
+def _piece_of(run_dir) -> dict:
+    """One piece folder's piece.json."""
+    piece_path = Path(run_dir) / "piece.json"
+    piece_text = piece_path.read_text()
+    return json.loads(piece_text)
+
+
+def _refuse_the_confidence_coverage(point_id: str, by_coverage: dict):
+    """Say which pieces of the point recorded confidence for which shots."""
+    pieces_named = []
+    for coverage, run_dir in by_coverage.items():
+        pieces_named.append(f"{run_dir} ({coverage})")
+    listed = ", ".join(pieces_named)
+    raise refusal.RefusalError(
+        f"the pieces of point {point_id} recorded confidence for different "
+        f"shots (confidence_shot_count): {listed}; folding them would "
+        "leave the confidence files short of the shots shots.csv counts, "
+        "so collect the point again into a new experiment folder"
+    )
 
 
 def _refuse_the_folders(row: dict, run_dirs: list) -> None:

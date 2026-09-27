@@ -65,9 +65,11 @@ def write(
     """One piece's files, whole or not at all, and where they went.
 
     facts are the piece's own lines of piece.json, beside the counts
-    read off its shots. state is an adaptive point's calibrator after
-    the piece's last shot, which the point's next piece starts from; it
-    is pickled beside the files and its sha256 goes in piece.json.
+    read off its shots and the confidence it recorded
+    (report.confidence_shot_count_of). state is an adaptive point's
+    calibrator after the piece's last shot, which the point's next piece
+    starts from; it is pickled beside the files and its sha256 goes in
+    piece.json.
     """
     count = len(measurements)
     folder = piece_dir(experiment_dir, point_id, first_seed, count)
@@ -78,10 +80,12 @@ def write(
     _write_residence(staging, measurements)
     counts = _counts_of(record.shots)
     identity = run_folder.piece_identity()
+    confidence_shot_count = report.confidence_shot_count_of(measurements)
     piece = {
         "point_id": point_id,
         "first_seed": first_seed,
         "count": count,
+        "confidence_shot_count": confidence_shot_count,
         **counts,
         **facts,
         **identity,

@@ -47,12 +47,12 @@ def test_a_terminal_policy_that_is_not_one_of_the_two_words_is_refused():
     assert "'drain'" in sentence
 
 
-def test_both_terminal_policies_of_the_record_are_accepted():
-    for policy in window_records.TERMINAL_POLICIES:
-        section = _section(terminal_policy=policy)
-        settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
+@pytest.mark.parametrize("policy", window_records.TERMINAL_POLICIES)
+def test_both_terminal_policies_of_the_record_are_accepted(policy):
+    section = _section(terminal_policy=policy)
+    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
-        assert settings.terminal_policy == policy
+    assert settings.terminal_policy == policy
 
 
 def test_a_boundaries_key_that_names_no_row_is_refused():
@@ -77,12 +77,12 @@ def test_a_boundary_payload_that_names_no_row_is_refused_at_load():
     assert "bitmap" in sentence
 
 
-def test_both_boundary_policy_rows_are_reachable_by_name():
-    for name in window_settings.BOUNDARY_POLICIES:
-        section = _section(boundaries=name)
-        settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
+@pytest.mark.parametrize("name", sorted(window_settings.BOUNDARY_POLICIES))
+def test_both_boundary_policy_rows_are_reachable_by_name(name):
+    section = _section(boundaries=name)
+    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
-        assert settings.boundaries == name
+    assert settings.boundaries == name
 
 
 def test_both_keys_default_to_null_so_the_plan_decides_them():
@@ -106,20 +106,25 @@ def test_a_section_without_its_sizes_is_refused_by_name():
     )
 
 
-def test_a_window_size_is_a_whole_count_of_rounds():
-    """F >= 1 and B >= 0, refused at load, never as a TypeError at build."""
-    refused = (
+@pytest.mark.parametrize(
+    "key, rounds",
+    [
         ("commit_rounds", 0),
         ("commit_rounds", True),
         ("commit_rounds", "3"),
         ("commit_rounds", 2.5),
         ("buffer_rounds", -1),
         ("buffer_rounds", False),
-    )
-    for key, rounds in refused:
-        section = _section(**{key: rounds})
-        with pytest.raises(ValueError, match=f"windows.{key} is a whole"):
-            window_settings.WindowSettings.from_yaml(section, CLOCKS)
+    ],
+)
+def test_a_window_size_that_is_not_a_whole_count_is_refused(key, rounds):
+    """F >= 1 and B >= 0, refused at load, never as a TypeError at build."""
+    section = _section(**{key: rounds})
+    with pytest.raises(ValueError, match=f"windows.{key} is a whole"):
+        window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+
+def test_the_smallest_whole_window_size_is_accepted():
     section = _section(commit_rounds=1, buffer_rounds=0)
     settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 

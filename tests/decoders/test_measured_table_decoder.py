@@ -40,6 +40,14 @@ def _bind_seed(component) -> None:
     seeding.bind_run_seed(7, [root])
 
 
+def _cells_on(partition: str) -> list:
+    cells = []
+    for cell in measurements.RELAY_BP_TIMES:
+        if cell.partition == partition:
+            cells.append(cell)
+    return cells
+
+
 def test_the_time_is_the_measured_line_at_relay_bps_own_iterations():
     """a100, whole, 360 detectors: 78.957 us plus 9.762 us an iteration."""
     pytest.importorskip("relay_bp")
@@ -144,8 +152,7 @@ def test_a_decode_is_never_priced_under_its_cells_fastest_decode(iterations):
     The fastest of the cell's 2,000 decodes took 1,405.683 us (the
     minimum of its time_ns column), so both price that.
     """
-    cells = measurements.RELAY_BP_TIMES
-    slice_cells = [cell for cell in cells if cell.partition == "1g.10gb"]
+    slice_cells = _cells_on("1g.10gb")
     largest_region = slice_cells[-1]
     microseconds = largest_region.decode_microseconds(iterations)
     assert largest_region.detectors == 6552

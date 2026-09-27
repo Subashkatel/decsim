@@ -127,13 +127,19 @@ def test_a_rounds_path_ends_where_its_bits_land_in_the_unit(traced):
     assert last.tick == 6_012_000
 
 
+def _what_happened_at(hops, where: str) -> list:
+    """What each hop at one place did, in hop order."""
+    happened = []
+    for hop in hops:
+        if hop.where == where:
+            happened.append(hop.what)
+    return happened
+
+
 def test_a_round_two_windows_read_shows_both_of_them(traced):
     followed = trace_follow.follow(traced, "round", "1:4")
 
-    moves = []
-    for hop in followed.hops:
-        if hop.where == "weak_buffer_to_weak_decoder":
-            moves.append(hop.what)
+    moves = _what_happened_at(followed.hops, "weak_buffer_to_weak_decoder")
 
     assert "with W0 rounds 1..6" in moves[0]
     assert "with W1 rounds 4..9" in moves[1]
@@ -179,9 +185,7 @@ def test_window_zeros_counts_name_its_one_job_and_its_three_moves(traced):
 def test_every_hop_is_ordered_by_its_tick(traced):
     followed = trace_follow.follow(traced, "round", "1:4")
 
-    ticks = []
-    for hop in followed.hops:
-        ticks.append(hop.tick)
+    ticks = [hop.tick for hop in followed.hops]
 
     assert ticks == sorted(ticks)
 
@@ -208,8 +212,8 @@ def test_the_page_carries_every_row_of_the_table(traced):
 
     written = trace_follow.page(followed)
 
-    for hop in followed.hops:
-        assert f"<td>{hop.what}</td>" in written
+    cells = [f"<td>{hop.what}</td>" for hop in followed.hops]
+    assert all(cell in written for cell in cells)
     assert written.count("<tr>") == len(followed.hops) + 1
 
 
@@ -229,11 +233,7 @@ def test_the_page_draws_one_lane_per_component(traced):
 
     written = trace_follow.page(followed)
 
-    lanes = []
-    for hop in followed.hops:
-        if hop.where in lanes:
-            continue
-        lanes.append(hop.where)
+    lanes = {hop.where for hop in followed.hops}
     assert written.count("<div class='lane'>") == len(lanes)
     assert "Decoder unit default#0" in written
 

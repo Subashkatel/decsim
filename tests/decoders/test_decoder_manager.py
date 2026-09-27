@@ -273,8 +273,8 @@ def test_the_round_before_is_held_by_the_tier_and_not_deposited():
         landed = job.decoder_input.fragments()
         deposited.extend(landed)
 
-    for copy_source in manager.copy_sources():
-        copy_source.connect(note_deposit)
+    copy_sources = manager.copy_sources()
+    _connect_each(copy_sources, note_deposit)
     job = _window_job()
     round_one = round_records.RetainedSyndromeFragment(
         operation_id=1,
@@ -367,10 +367,7 @@ def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
     model = _Model()
     reason = "one observable, no boundary"
     row.forced_solve_unavailable.fire(model, reason)
-    lines = []
-    for line in log.lines:
-        if "NO FORCED SOLVE" in line:
-            lines.append(line)
+    lines = _lines_containing(log.lines, "NO FORCED SOLVE")
     assert len(lines) == 1
     assert "5-detector window model" in lines[0]
     assert "one observable, no boundary" in lines[0]
@@ -541,6 +538,32 @@ def _count_movements(manager):
     return copies, references
 
 
+def _connect_each(sources, listener) -> None:
+    for source in sources:
+        source.connect(listener)
+
+
+def _lines_containing(lines: list, text: str) -> list:
+    matching = []
+    for line in lines:
+        if text in line:
+            matching.append(line)
+    return matching
+
+
+def _enqueue_timed_jobs(manager, decode_microseconds, send_input, on_decoded):
+    """Job J<n> decodes for decode_microseconds[n]; all ready at tick 0."""
+    for operation_id, microseconds in enumerate(decode_microseconds):
+        job = decoding_records.DecodeJob(
+            operation_id=operation_id,
+            window_id=0,
+            round_count=microseconds,
+            label=f"J{operation_id}",
+            ready_time=0,
+        )
+        manager.enqueue(job, send_input, on_decoded)
+
+
 def _staging_manager(engine, row, *, copies_input: bool):
     """A one-unit manager whose default pool copies its input, or does not."""
     router = decoders.CodeRouter(row)
@@ -596,15 +619,7 @@ def test_a_startable_job_with_input_starts_when_a_central_fifo_queue_would():
         del job, result
 
     decode_microseconds = (10, 1, 1, 1)
-    for operation_id, microseconds in enumerate(decode_microseconds):
-        job = decoding_records.DecodeJob(
-            operation_id=operation_id,
-            window_id=0,
-            round_count=microseconds,
-            label=f"J{operation_id}",
-            ready_time=0,
-        )
-        manager.enqueue(job, send_input, ignore)
+    _enqueue_timed_jobs(manager, decode_microseconds, send_input, ignore)
     engine.run()
 
     starts = [start_by_label[f"J{index}"] for index in range(4)]

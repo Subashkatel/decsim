@@ -100,7 +100,7 @@ def timeline_plot(trace_path, path: pathlib.Path) -> None:
     import matplotlib.pyplot as plt
 
     document = trace_file.load(trace_path)
-    shot = _timeline_shot(document)
+    shot = timeline_shot(document)
     lanes = _timeline_lanes(document)
     rows = _timeline_rows(lanes, shot)
     lane_count = max(len(shot.windows), 3)
@@ -114,6 +114,29 @@ def timeline_plot(trace_path, path: pathlib.Path) -> None:
     figure.tight_layout()
     figure.savefig(path, dpi=200)
     plt.close(figure)
+
+
+def timeline_shot(document) -> "_TimelineShot":
+    """Every span the timeline draws, indexed by round, window and stage.
+
+    What timeline_plot reads off one trace document before it draws.
+    """
+    moves_by_round = {}
+    moves_by_window = {}
+    for event in document.of_phase("X"):
+        _index_move(event, moves_by_round, moves_by_window)
+    windows = _timeline_windows(document)
+    stages = _timeline_stages(document)
+    frame = _frame_spans(document)
+    round_period_microseconds = _round_period_microseconds(moves_by_round)
+    return _TimelineShot(
+        round_period_microseconds=round_period_microseconds,
+        moves_by_round=moves_by_round,
+        moves_by_window=moves_by_window,
+        windows=windows,
+        stages=stages,
+        frame=frame,
+    )
 
 
 def first_trace_file(run_dir) -> Optional[pathlib.Path]:
@@ -634,26 +657,6 @@ def _timeline_lanes(document) -> _TimelineLanes:
         output_path=output_path,
         store_path=store_path,
         store_name=store_name,
-    )
-
-
-def _timeline_shot(document) -> _TimelineShot:
-    """Every span the figure draws, indexed by round, window and stage."""
-    moves_by_round = {}
-    moves_by_window = {}
-    for event in document.of_phase("X"):
-        _index_move(event, moves_by_round, moves_by_window)
-    windows = _timeline_windows(document)
-    stages = _timeline_stages(document)
-    frame = _frame_spans(document)
-    round_period_microseconds = _round_period_microseconds(moves_by_round)
-    return _TimelineShot(
-        round_period_microseconds=round_period_microseconds,
-        moves_by_round=moves_by_round,
-        moves_by_window=moves_by_window,
-        windows=windows,
-        stages=stages,
-        frame=frame,
     )
 
 

@@ -105,6 +105,28 @@ def _collect_one_shard(config_path, out_dir, shard, shots_per_unit):
     )
 
 
+def _rows_of_every_file(run_dir) -> dict:
+    """Each file's rows without the wall clock, by file name."""
+    return {
+        name: _rows_without_wall_clock(run_dir, name) for name in EVERY_FILE
+    }
+
+
+def _bytes_of_files(run_dir, names) -> dict:
+    contents = {}
+    for name in names:
+        path = run_dir / name
+        contents[name] = path.read_bytes()
+    return contents
+
+
+def _collect_every_shard(config_path, shard_dirs: list) -> None:
+    """Shard i of n into shard_dirs[i], one shot to a unit."""
+    shard_count = len(shard_dirs)
+    for index, shard_dir in enumerate(shard_dirs):
+        _collect_one_shard(config_path, shard_dir, f"{index}/{shard_count}", 1)
+
+
 def _combined(first_dir, second_dir, out_dir):
     command.main(
         ["combine", str(first_dir), str(second_dir), "--out", str(out_dir)]
@@ -159,21 +181,24 @@ def test_an_unknown_verb_prints_the_verbs_and_fails():
         command.main(["decode-everything"])
 
 
-def test_help_prints_the_verbs_without_failing():
+def test_help_prints_the_verbs_without_failing(capsys):
     command.main(["--help"])
 
+    printed = capsys.readouterr()
+    assert printed.err.strip() == command.usage()
 
-def test_show_lists_every_sections_kind_of_every_shipped_config():
-    for name in yaml_configs.SHIPPED_CONFIGS:
-        config_path = CONFIGS_DIR / name
-        config = experiment.load_experiment(config_path)
-        lines = experiment.resolved_description(config)
-        text = "\n".join(lines)
-        assert f"config: {config_path}" in lines[0]
-        assert "qpu: kind stim_device" in text
-        assert "sweep block 1:" in text
-        assert "log: " in text
-        assert "trace: " in text
+
+@pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
+def test_show_lists_every_sections_kind_of_every_shipped_config(name):
+    config_path = CONFIGS_DIR / name
+    config = experiment.load_experiment(config_path)
+    lines = experiment.resolved_description(config)
+    text = "\n".join(lines)
+    assert f"config: {config_path}" in lines[0]
+    assert "qpu: kind stim_device" in text
+    assert "sweep block 1:" in text
+    assert "log: " in text
+    assert "trace: " in text
 
 
 @pytest.mark.parametrize(
@@ -389,6 +414,22 @@ def _value_key(value_line: str) -> tuple:
     return key
 
 
+def _cited_lines(lines: list) -> list:
+    cited = []
+    for line in lines:
+        if "  [" in line:
+            cited.append(line)
+    return cited
+
+
+def _miscited_lines(cited: list) -> list:
+    miscited = []
+    for line in cited:
+        if not _cites_its_own_key(line):
+            miscited.append(line)
+    return miscited
+
+
 def _cites_its_own_key(value_line: str) -> bool:
     """Whether the line a value line cites writes that value's key."""
     file_text, first_line = _cited_line(value_line)
@@ -403,9 +444,9 @@ def test_every_line_show_cites_holds_the_key_of_its_value(name):
     config_path = CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
     lines = experiment.value_lines(config)
-    cited = [line for line in lines if "  [" in line]
+    cited = _cited_lines(lines)
 
-    miscited = [line for line in cited if not _cites_its_own_key(line)]
+    miscited = _miscited_lines(cited)
 
     assert cited
     assert miscited == []
@@ -810,10 +851,9 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
             "4",
         ]
     )
-    for name in EVERY_FILE:
-        serial = _rows_without_wall_clock(serial_dir, name)
-        pooled = _rows_without_wall_clock(pooled_dir, name)
-        assert serial == pooled
+    serial_rows = _rows_of_every_file(serial_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
+    assert pooled_rows == serial_rows
 
 
 def test_two_shards_combined_are_the_unsharded_collects_rows(tmp_path):
@@ -845,10 +885,9 @@ def test_two_shards_combined_are_the_unsharded_collects_rows(tmp_path):
             str(combined_dir),
         ]
     )
-    for name in EVERY_FILE:
-        whole = _rows_without_wall_clock(whole_dir, name)
-        combined = _rows_without_wall_clock(combined_dir, name)
-        assert whole == combined
+    whole_rows = _rows_of_every_file(whole_dir)
+    combined_rows = _rows_of_every_file(combined_dir)
+    assert combined_rows == whole_rows
 
 
 def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
@@ -912,14 +951,19 @@ def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
     )
 
     every_file = EVERY_FILE + ("latency_samples.csv",)
-    for name in every_file:
-        forwards_path = forwards_dir / name
-        backwards_path = backwards_dir / name
-        assert forwards_path.read_bytes() == backwards_path.read_bytes()
-    for name in ("shots.csv", "latency_samples.csv"):
-        serial = _point_and_seed_of_every_row(serial_dir, name)
-        combined = _point_and_seed_of_every_row(forwards_dir, name)
-        assert serial == combined
+    forwards_bytes = _bytes_of_files(forwards_dir, every_file)
+    backwards_bytes = _bytes_of_files(backwards_dir, every_file)
+    serial_shots = _point_and_seed_of_every_row(serial_dir, "shots.csv")
+    combined_shots = _point_and_seed_of_every_row(forwards_dir, "shots.csv")
+    serial_samples = _point_and_seed_of_every_row(
+        serial_dir, "latency_samples.csv"
+    )
+    combined_samples = _point_and_seed_of_every_row(
+        forwards_dir, "latency_samples.csv"
+    )
+    assert forwards_bytes == backwards_bytes
+    assert combined_shots == serial_shots
+    assert combined_samples == serial_samples
 
 
 def test_combining_folders_of_two_different_sweeps_is_refused(tmp_path, capsys):
@@ -993,10 +1037,11 @@ def test_a_unit_size_that_splits_a_point_writes_the_serial_runs_rows(
         ]
     )
 
-    for name in EVERY_FILE:
-        serial = _rows_without_wall_clock(serial_dir, name)
-        assert _rows_without_wall_clock(split_dir, name) == serial
-        assert _rows_without_wall_clock(pooled_dir, name) == serial
+    serial_rows = _rows_of_every_file(serial_dir)
+    split_rows = _rows_of_every_file(split_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
+    assert split_rows == serial_rows
+    assert pooled_rows == serial_rows
 
 
 def test_shards_that_split_every_points_seeds_fold_to_the_serial_rows(
@@ -1058,13 +1103,12 @@ def test_shards_that_split_every_points_seeds_fold_to_the_serial_rows(
         ]
     )
 
-    for name in EVERY_FILE:
-        serial = _rows_without_wall_clock(serial_dir, name)
-        assert _rows_without_wall_clock(forwards_dir, name) == serial
-    for name in EVERY_FILE:
-        forwards_path = forwards_dir / name
-        backwards_path = backwards_dir / name
-        assert forwards_path.read_bytes() == backwards_path.read_bytes()
+    serial_rows = _rows_of_every_file(serial_dir)
+    folded_rows = _rows_of_every_file(forwards_dir)
+    forwards_bytes = _bytes_of_files(forwards_dir, EVERY_FILE)
+    backwards_bytes = _bytes_of_files(backwards_dir, EVERY_FILE)
+    assert folded_rows == serial_rows
+    assert forwards_bytes == backwards_bytes
 
 
 def test_a_combined_folder_folds_again_with_a_later_shard(tmp_path):
@@ -1076,19 +1120,16 @@ def test_a_combined_folder_folds_again_with_a_later_shard(tmp_path):
     """
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     serial_dir = tmp_path / "serial"
-    shard_dirs = []
+    shard_dirs = [tmp_path / f"shard{index}" for index in (0, 1, 2)]
     command.main(["collect", str(config_path), "--out", str(serial_dir)])
-    for index in (0, 1, 2):
-        shard_dir = tmp_path / f"shard{index}"
-        shard_dirs.append(shard_dir)
-        _collect_one_shard(config_path, shard_dir, f"{index}/3", 1)
+    _collect_every_shard(config_path, shard_dirs)
     first_two_dir = tmp_path / "first_two"
     combined_dir = tmp_path / "combined"
     _combined(shard_dirs[0], shard_dirs[1], first_two_dir)
     _combined(first_two_dir, shard_dirs[2], combined_dir)
-    for name in EVERY_FILE:
-        serial = _rows_without_wall_clock(serial_dir, name)
-        assert _rows_without_wall_clock(combined_dir, name) == serial
+    serial_rows = _rows_of_every_file(serial_dir)
+    combined_rows = _rows_of_every_file(combined_dir)
+    assert combined_rows == serial_rows
 
 
 def test_a_manifest_records_the_shard_and_the_unit_size_it_ran(tmp_path):
@@ -1337,8 +1378,7 @@ def test_one_points_seeds_divide_across_two_shards(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, one_point)
     first_dir = tmp_path / "shard0"
     second_dir = tmp_path / "shard1"
-    for index, out_dir in ((0, first_dir), (1, second_dir)):
-        _collect_one_shard(config_path, out_dir, f"{index}/2", 1)
+    _collect_every_shard(config_path, [first_dir, second_dir])
     first_seeds = _seeds_of_every_shot(first_dir)
     second_seeds = _seeds_of_every_shot(second_dir)
     assert first_seeds == ["0", "2"]

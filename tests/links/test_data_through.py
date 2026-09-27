@@ -316,9 +316,9 @@ def test_every_path_carries_the_traffic_the_plan_derives(shape, distance):
     """The eleven-path table: what fired, how often, and for how many bits."""
     machine, result = run_case(shape, distance)
     grouped = transfers_by_path(result)
-    measured = {}
-    for path, transfers in grouped.items():
-        measured[path] = traffic_of(transfers)
+    measured = {
+        path: traffic_of(transfers) for path, transfers in grouped.items()
+    }
 
     assert commit_extents(machine) == EXPECTED_COMMITS[(shape, distance)]
     assert measured == EXPECTED[(shape, distance)]
@@ -329,6 +329,12 @@ def test_a_decoder_input_carries_its_windows_detectors(shape, distance):
     """DecodeJob.payload_bits() is the layer sum over the window's rounds."""
     _machine, result = run_case(shape, distance)
     grouped = transfers_by_path(result)
+    checked = _checked_decoder_inputs(grouped, distance)
+    assert checked > 0
+
+
+def _checked_decoder_inputs(grouped: dict, distance: int) -> int:
+    """Hold every decoder input to its window's detector count."""
     checked = 0
     for path in DECODER_INPUT_PATHS:
         for transfer in grouped.get(path, ()):
@@ -341,7 +347,33 @@ def test_a_decoder_input_carries_its_windows_detectors(shape, distance):
             )
             assert transfer["payload_bits"] == expected, attribution
             checked += 1
-    assert checked > 0
+    return checked
+
+
+def _checked_store_hops(grouped: dict, distance: int) -> int:
+    """Hold every round sent to either store to the layer it holds."""
+    checked = 0
+    for path in STORE_PATHS:
+        stored = grouped.get(path, ())
+        checked += _checked_round_hops(stored, layer_detectors, distance)
+    return checked
+
+
+def _wire_bits_by_round(transfers) -> dict:
+    """Each readout's wire bits, by the round it carried."""
+    wire_by_round = {}
+    for transfer in transfers:
+        attribution = transfer["attribution"]
+        wire_by_round[attribution["round_lo"]] = transfer["payload_bits"]
+    return wire_by_round
+
+
+def _log_lines_with(machine, text: str) -> list:
+    lines = []
+    for line in machine.observation.log.lines:
+        if text in line:
+            lines.append(line)
+    return lines
 
 
 def _checked_round_hops(transfers, width_of, distance) -> int:
@@ -370,11 +402,9 @@ def test_a_round_hop_carries_the_width_its_sender_let_go_of(shape, distance):
     _machine, result = run_case(shape, distance)
     grouped = transfers_by_path(result)
     readout = grouped.get(READOUT_PATH, ())
-    checked = _checked_round_hops(readout, raw_readout_bits, distance)
-    for path in STORE_PATHS:
-        stored = grouped.get(path, ())
-        checked += _checked_round_hops(stored, layer_detectors, distance)
-    assert checked > 0
+    checked_readouts = _checked_round_hops(readout, raw_readout_bits, distance)
+    checked_stores = _checked_store_hops(grouped, distance)
+    assert checked_readouts + checked_stores > 0
 
 
 @pytest.mark.parametrize("distance", (3, 5))
@@ -387,9 +417,8 @@ def test_the_boundary_hop_pays_one_bulk_layer_per_hand_off(distance):
     _machine, result = run_case("switching", distance)
     grouped = transfers_by_path(result)
     bulk_layer = distance * distance - 1
-    sizes = []
-    for transfer in grouped["decoder_to_decoder"]:
-        sizes.append(transfer["payload_bits"])
+    hand_offs = grouped["decoder_to_decoder"]
+    sizes = [transfer["payload_bits"] for transfer in hand_offs]
     assert set(sizes) == {bulk_layer}
 
 
@@ -529,10 +558,7 @@ def test_the_wire_prices_raw_bits_where_the_store_holds_formed_events(
     """
     _machine, result = run_case("weak", distance)
     grouped = transfers_by_path(result)
-    wire_by_round = {}
-    for transfer in grouped["qpu_to_controller"]:
-        attribution = transfer["attribution"]
-        wire_by_round[attribution["round_lo"]] = transfer["payload_bits"]
+    wire_by_round = _wire_bits_by_round(grouped["qpu_to_controller"])
     first_layer = layer_detectors(1, ROUNDS, distance)
     last_layer = layer_detectors(ROUNDS, ROUNDS, distance)
     wire_bits = wire_by_round.values()
@@ -590,11 +616,7 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
     grouped = transfers_by_path(result)
     decisions = traffic_of(grouped["frame_to_controller"])
     commands = traffic_of(grouped["controller_to_qpu"])
-    released = [
-        line
-        for line in machine.observation.log.lines
-        if "conditional release for op#2" in line
-    ]
+    released = _log_lines_with(machine, "conditional release for op#2")
 
     assert decisions == Traffic(1, link_profiles.BUS_WORD_BITS)
     assert commands == Traffic(1, link_profiles.INSTRUCTION_WORD_BITS)

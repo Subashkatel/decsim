@@ -175,9 +175,7 @@ def test_a_rows_mean_and_longest_are_the_samples_in_microseconds(tmp_path):
     measurement = _TracedShot(str(path))
 
     rows = residence.rows_of([measurement])
-    by_name = {}
-    for row in rows:
-        by_name[row["name"]] = row
+    by_name = {row["name"]: row for row in rows}
 
     store = by_name["weak syndrome buffer"]
     assert store["counting"] == "residence"
@@ -197,11 +195,14 @@ def test_a_row_names_the_sweep_point_its_shot_ran_at(tmp_path):
 
     rows = residence.rows_of([measurement])
 
-    for row in rows:
-        assert row["distance"] == 3
-        assert row["physical_error_probability"] == 0.001
-        assert row["round_period_microseconds"] == 1.0
-        assert row["seed"] == 0
+    distances = {row["distance"] for row in rows}
+    probabilities = {row["physical_error_probability"] for row in rows}
+    periods = {row["round_period_microseconds"] for row in rows}
+    seeds = {row["seed"] for row in rows}
+    assert distances == {3}
+    assert probabilities == {0.001}
+    assert periods == {1.0}
+    assert seeds == {0}
 
 
 def test_a_shot_that_was_not_traced_writes_no_row(tmp_path):
@@ -239,11 +240,8 @@ def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
     run_dir, _rows = collect_command.run_experiment(config_path)
     written = run_dir / "residence.csv"
     rows = report.read_rows(written)
-    seeds = set()
-    names = set()
-    for row in rows:
-        seeds.add(row["seed"])
-        names.add(row["name"])
+    seeds = {row["seed"] for row in rows}
+    names = {row["name"] for row in rows}
 
     assert written.exists()
     assert seeds == {0}

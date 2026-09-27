@@ -36,6 +36,16 @@ def _circuit(memory_basis: str, distance: int, rounds: int) -> stim.Circuit:
     )
 
 
+def _piece_types(circuit: stim.Circuit, types) -> set:
+    """The set of detector types each graphlike piece of Stim's spans."""
+    piece_types = set()
+    for _, pieces in _stims_pieces(circuit):
+        for detectors, _observables in pieces:
+            kinds = frozenset(types[detector] for detector in detectors)
+            piece_types.add(kinds)
+    return piece_types
+
+
 def _stims_pieces(circuit: stim.Circuit) -> list:
     """Every error's graphlike pieces: (probability, [(detectors, obs)])."""
     model = circuit.detector_error_model(decompose_errors=True)
@@ -112,11 +122,7 @@ def test_every_graphlike_piece_stim_decomposes_keeps_to_one_type(
 ):
     circuit = _circuit(memory_basis, distance, distance)
     types, _ = basis_split.circuit_bases(circuit)
-    piece_types = set()
-    for _, pieces in _stims_pieces(circuit):
-        for detectors, _observables in pieces:
-            kinds = frozenset(types[detector] for detector in detectors)
-            piece_types.add(kinds)
+    piece_types = _piece_types(circuit, types)
     assert piece_types == {frozenset("X"), frozenset("Z")}
 
 

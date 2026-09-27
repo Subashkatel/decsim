@@ -91,6 +91,12 @@ def root_at(name, component):
     return ((segment,), component)
 
 
+def recording_root(name, events):
+    """A root holding one recording leaf, both named name."""
+    leaf = RecordingLeaf(name, events)
+    return root_at(name, leaf)
+
+
 def actions_of(events):
     return [action for action, _name, _seed in events]
 
@@ -149,11 +155,7 @@ def test_two_components_of_one_run_draw_from_different_seeds():
 
 def test_every_leaf_reserves_before_any_leaf_commits():
     events = []
-    roots = []
-    for name in ("a", "b", "c"):
-        leaf = RecordingLeaf(name, events)
-        root = root_at(name, leaf)
-        roots.append(root)
+    roots = [recording_root(name, events) for name in ("a", "b", "c")]
 
     seeding.bind_run_seed(5, roots)
 

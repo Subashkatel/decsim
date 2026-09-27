@@ -848,9 +848,7 @@ def test_a_long_jump_between_events_skips_no_boundary():
     engine.schedule(10500, qpu.finish)
     engine.run()
 
-    idle_ticks = []
-    for tick, _patch, _round_index in log.idle_ticks:
-        idle_ticks.append(tick)
+    idle_ticks = [tick for tick, _patch, _round_index in log.idle_ticks]
     assert log.round_ticks == [(1000, 1), (2000, 2), (3000, 3)]
     assert idle_ticks == [4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000]
 
@@ -874,12 +872,11 @@ def test_a_silent_body_takes_the_patch_from_the_idle_rounds_and_gives_it_back():
     engine.schedule(85, qpu.finish)
     engine.run()
 
-    read_out = []
-    for tick, operation_id, _patch, _round_index in log.rounds:
-        read_out.append((tick, operation_id))
-    idle_ticks = []
-    for tick, _patch, _round_index in log.idle_ticks:
-        idle_ticks.append(tick)
+    read_out = [
+        (tick, operation_id)
+        for tick, operation_id, _patch, _round_index in log.rounds
+    ]
+    idle_ticks = [tick for tick, _patch, _round_index in log.idle_ticks]
     assert read_out == [(10, 1), (20, 1), (80, 3)]
     assert idle_ticks == [30, 70, 90]
     assert log.completion_ticks == [(20, 1), (60, 2), (80, 3)]

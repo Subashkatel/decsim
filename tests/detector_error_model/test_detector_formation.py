@@ -473,6 +473,25 @@ THIS_FILE = pathlib.Path(__file__)
 DATA_DIRECTORY = THIS_FILE.parents[1] / "data"
 
 
+def detector_counts(table, round_count: int) -> list:
+    """The number of detectors each round 1..round_count forms."""
+    counts = []
+    past_the_last_round = round_count + 1
+    for index in range(1, past_the_last_round):
+        detectors = table.detectors_of_round(index)
+        counts.append(len(detectors))
+    return counts
+
+
+def declared_rounds(measurement_count, checks_per_round, rounds) -> dict:
+    """Measurement index -> the round its block of checks belongs to."""
+    measurement_rounds = {}
+    for index in range(measurement_count):
+        announced_round = index // checks_per_round + 1
+        measurement_rounds[index] = min(announced_round, rounds)
+    return measurement_rounds
+
+
 def forms_like_stim(circuit, rounds, seed=3, shots=200):
     """The streaming formation beside Stim's converter, shot for shot."""
     table = detector_formation.build_formation_table(circuit, rounds)
@@ -498,27 +517,24 @@ def test_a_declared_map_folds_two_measurement_blocks_into_one_round():
     circuit = stim.Circuit.from_file(circuit_path)
     rounds = 8
     checks_per_round = 8
-    measurement_rounds = {}
-    for index in range(circuit.num_measurements):
-        announced_round = index // checks_per_round + 1
-        measurement_rounds[index] = min(announced_round, rounds)
+    measurement_rounds = declared_rounds(
+        circuit.num_measurements, checks_per_round, rounds
+    )
 
     table = detector_formation.build_formation_table(
         circuit, rounds, measurement_rounds=measurement_rounds
     )
 
     widths = [table.packet_width_by_round[index] for index in range(1, 9)]
-    detector_counts = []
-    for index in range(1, 9):
-        detectors = table.detectors_of_round(index)
-        detector_counts.append(len(detectors))
+    round_detector_counts = detector_counts(table, 8)
+    first_round_recipes = table.detectors_of_round(1)
+    first_round_records = {
+        record for recipe in first_round_recipes for record in recipe.records
+    }
     assert widths == [8] * 7 + [17]
     assert table.readout_slot_start is None
-    assert detector_counts == [4] + [8] * 6 + [12]
+    assert round_detector_counts == [4] + [8] * 6 + [12]
     assert len(table.observables) == 1
-    first_round_records = set()
-    for recipe in table.detectors_of_round(1):
-        first_round_records.update(recipe.records)
     assert first_round_records == {(1, 0), (1, 1), (1, 2), (1, 3)}
 
     sampler = circuit.compile_sampler(seed=3)
@@ -543,13 +559,23 @@ def test_a_lattice_surgery_cnot_forms_like_stim_round_for_round():
     table = forms_like_stim(circuit, 12, seed=5, shots=150)
 
     widths = [table.packet_width_by_round[index] for index in range(1, 13)]
-    detector_counts = []
-    for index in range(1, 13):
-        detectors = table.detectors_of_round(index)
-        detector_counts.append(len(detectors))
+    round_detector_counts = detector_counts(table, 12)
     assert table.readout_slot_start is None
     assert widths == [16, 16, 16, 28, 28, 31, 28, 28, 40, 16, 16, 34]
-    assert detector_counts == [8, 16, 16, 20, 28, 28, 24, 28, 32, 16, 16, 24]
+    assert round_detector_counts == [
+        8,
+        16,
+        16,
+        20,
+        28,
+        28,
+        24,
+        28,
+        32,
+        16,
+        16,
+        24,
+    ]
     assert len(table.observables) == 2
     rounds_of_the_table = table.detector_rounds()
     chronology_rounds = detector_chronology.resolve_detector_rounds(

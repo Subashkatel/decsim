@@ -227,6 +227,17 @@ def _predictions_of(rows) -> list:
     return decoded
 
 
+def _measured_alone(task, seed: int):
+    """One shot of the task, run and measured on its own."""
+    shot = collect.run_shot(task, seed)
+    return measure_shot.measure_shot(shot)
+
+
+def _run_every_shot(task, built_models) -> None:
+    for seed in range(task.shots):
+        collect.run_shot(task, seed, built_models=built_models)
+
+
 def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     """The task's own referent: sinter compiles once per task."""
     config = experiment.load_experiment(REFERENCE_YAML)
@@ -239,11 +250,7 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
 
     whole_task = collect.Unit(task, 0, task.shots)
     shared, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
-    alone = []
-    for seed in range(task.shots):
-        shot = collect.run_shot(task, seed)
-        row = measure_shot.measure_shot(shot)
-        alone.append(row)
+    alone = [_measured_alone(task, seed) for seed in range(task.shots)]
 
     assert _predictions_of(shared) == _predictions_of(alone)
 
@@ -258,8 +265,7 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
     )
     built = built_window_models.BuiltWindowModels()
 
-    for seed in range(task.shots):
-        collect.run_shot(task, seed, built_models=built)
+    _run_every_shot(task, built)
 
     assert built.builds == 1
     assert built.reuses == 2

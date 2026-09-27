@@ -160,13 +160,9 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
     result = decoding_records.DecodeResult(-1, 0)
     deliveries = requests.deliveries_for(batch, result, now=40)
-    request_jobs = []
-    for delivery in deliveries:
-        request_jobs.append(delivery.request_job)
+    request_jobs = [delivery.request_job for delivery in deliveries]
+    request_keys = [request_job.request_key for request_job in request_jobs]
     assert request_jobs == [first, second]
-    request_keys = []
-    for delivery in deliveries:
-        request_keys.append(delivery.request_job.request_key)
     assert request_keys == [first_key, second_key]
     assert deliveries[1].result.window_id == 1
     assert deliveries[1].result.logical_observables is None

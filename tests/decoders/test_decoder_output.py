@@ -144,14 +144,12 @@ def test_each_tier_publishes_over_its_own_output_link():
     window = _window()
     operation = _operation(1)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
-    tiers = window_records.DecoderTier
-    for tier in (tiers.WEAK, tiers.STRONG):
-        request_key = _request_key(tier)
-        output.publish(window, operation, result, request_key, _ignore)
+    weak_key = _request_key(window_records.DecoderTier.WEAK)
+    strong_key = _request_key(window_records.DecoderTier.STRONG)
+    output.publish(window, operation, result, weak_key, _ignore)
+    output.publish(window, operation, result, strong_key, _ignore)
     engine.run()
-    paths = []
-    for path, _key, _tier, _bits in transfers.sent:
-        paths.append(path)
+    paths = [path for path, _key, _tier, _bits in transfers.sent]
     assert paths == [
         transfer_records.LinkPath.WEAK_DECODER_TO_FRAME,
         transfer_records.LinkPath.STRONG_DECODER_TO_FRAME,

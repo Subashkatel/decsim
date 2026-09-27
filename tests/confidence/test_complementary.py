@@ -111,9 +111,8 @@ def _gaps_and_failures() -> tuple:
     return gap_decibels, failures
 
 
-def test_the_gap_is_calibrated_to_the_published_law_in_every_populated_bin():
-    """A referent test over 400 sampled shots and their decibel bins."""
-    gap_decibels, failures = _gaps_and_failures()
+def _populated_bins(gap_decibels, failures) -> dict:
+    """Each bin of enough shots, in decibels: (shots, failures)."""
     counts = {}
     failure_counts = {}
     for gap, failed in zip(gap_decibels, failures, strict=True):
@@ -122,24 +121,36 @@ def test_the_gap_is_calibrated_to_the_published_law_in_every_populated_bin():
         counts[bin_decibels] = counts.get(bin_decibels, 0) + 1
         failure_counts[bin_decibels] = failure_counts.get(bin_decibels, 0)
         failure_counts[bin_decibels] += int(failed)
-    populated_bins = 0
+    populated = {}
     for bin_decibels, count in counts.items():
-        if count < MINIMUM_BIN_SAMPLES:
-            continue
-        populated_bins += 1
-        low, high = _wilson_interval(failure_counts[bin_decibels], count)
+        if count >= MINIMUM_BIN_SAMPLES:
+            populated[bin_decibels] = (count, failure_counts[bin_decibels])
+    return populated
+
+
+def _without_observables(circuit: stim.Circuit) -> stim.Circuit:
+    stripped = stim.Circuit()
+    for instruction in circuit:
+        if instruction.name != "OBSERVABLE_INCLUDE":
+            stripped.append(instruction)
+    return stripped
+
+
+def test_the_gap_meets_the_published_law_in_every_populated_bin_property():
+    """A referent test over 400 sampled shots and their decibel bins."""
+    gap_decibels, failures = _gaps_and_failures()
+    populated = _populated_bins(gap_decibels, failures)
+    for bin_decibels, (count, failure_count) in populated.items():
+        low, high = _wilson_interval(failure_count, count)
         law = _fitted_failure_probability(bin_decibels)
         assert low <= law <= high, (bin_decibels, count, low, law, high)
-    assert populated_bins >= 3
+    assert len(populated) >= 3
 
 
 def test_a_window_without_an_observable_reports_no_weight_and_no_gap():
     """The fail-safe: no observable to pin, no forced solve, no gap."""
     circuit = windows.memory_circuit(3, 6, 0.001)
-    stripped = stim.Circuit()
-    for instruction in circuit:
-        if instruction.name != "OBSERVABLE_INCLUDE":
-            stripped.append(instruction)
+    stripped = _without_observables(circuit)
     requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     model = windows.whole_circuit_window(stripped, 6, requirement)
     row = adapter.PyMatchingDecoder()
@@ -198,12 +209,10 @@ def test_the_two_class_weights_are_the_pinned_graphs_own_edges():
     row = adapter.PyMatchingDecoder()
     graphs = row.compile(faults)
     syndrome = numpy.asarray([1, 0], dtype=numpy.uint8)
-    solves = []
-    for forced_class in complementary.FORCED_LOGICAL_CLASSES:
-        answer = row.decode_forced_window(
-            graphs, None, faults, syndrome, forced_class
-        )
-        solves.append(answer)
+    solves = [
+        row.decode_forced_window(graphs, None, faults, syndrome, forced_class)
+        for forced_class in complementary.FORCED_LOGICAL_CLASSES
+    ]
     weights = _class_weights(solves)
     # 2 ln(0.8 / 0.2) for the even class, ln((1 - 0.095) / 0.095) for the odd
     assert weights[0] == pytest.approx(2.772588722239781, abs=1e-6)

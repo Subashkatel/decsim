@@ -57,20 +57,33 @@ EXPECTED_SEATS = (
 )
 
 
+def _names_among(seats: dict, names: list) -> list:
+    """The seats' names that are among names, in the seats' own order."""
+    among = []
+    for name in seats:
+        if name in names:
+            among.append(name)
+    return among
+
+
+def _seats_of_another_kind(seats: dict) -> list:
+    """The expected seats whose built object is not the expected class."""
+    other_kinds = []
+    for name, class_built in EXPECTED_SEATS:
+        if not isinstance(seats[name], class_built):
+            other_kinds.append(name)
+    return other_kinds
+
+
 def test_the_root_builds_the_same_seats_in_the_same_order():
     settings = _switching_settings()
     parts = _parts_of(settings)
     seats = assembly.build_seats(parts)
-    expected_names = []
-    for name, _class_built in EXPECTED_SEATS:
-        expected_names.append(name)
-    built_names = []
-    for name in seats:
-        if name in expected_names:
-            built_names.append(name)
+    expected_names = [name for name, _class_built in EXPECTED_SEATS]
+    built_names = _names_among(seats, expected_names)
+    other_kinds = _seats_of_another_kind(seats)
     assert built_names == expected_names
-    for name, class_built in EXPECTED_SEATS:
-        assert isinstance(seats[name], class_built), name
+    assert other_kinds == []
 
 
 def test_a_run_that_never_escalates_has_no_room_side_rows():

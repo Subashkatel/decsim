@@ -210,16 +210,20 @@ def test_a_protected_stream_cannot_use_truth_from_a_later_final_readout() -> (
         machine.run()
 
 
+def _without_observables(instructions) -> list:
+    kept = []
+    for instruction in instructions:
+        if instruction.name != "OBSERVABLE_INCLUDE":
+            kept.append(instruction)
+    return kept
+
+
 def test_a_circuit_without_logical_outputs_is_refused_before_decoding() -> None:
     circuit, mapping = deltakit.memory_circuit(
         "rotated_surface", 3, 2, "Z", 0.001
     )
     instructions = circuit.flattened()
-    kept = [
-        instruction
-        for instruction in instructions
-        if instruction.name != "OBSERVABLE_INCLUDE"
-    ]
+    kept = _without_observables(instructions)
     text = "\n".join(str(instruction) for instruction in kept)
     without_output = stim.Circuit(text)
     with pytest.raises(ValueError, match="requires one logical observable"):

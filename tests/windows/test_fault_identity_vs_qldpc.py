@@ -67,6 +67,20 @@ def _graphlike_catalog(circuit):
     return catalogs.by_representation[GRAPHLIKE]
 
 
+def _detector_set(detectors) -> set:
+    return {int(detector) for detector in detectors}
+
+
+def _every_owned_signature(catalog, models) -> list:
+    """Each window's owned fault signatures, window after window."""
+    seen = []
+    for model in models:
+        signatures = _owned_signatures(catalog, model)
+        ordered = sorted(signatures)
+        seen.extend(ordered)
+    return seen
+
+
 def _signature(catalog, fault_id):
     """A fault's identity: which detectors it flips, which observables."""
     detectors = frozenset(catalog.detector_sets[fault_id])
@@ -232,14 +246,10 @@ def test_the_window_rows_are_qldpcs_detection_regions():
     entries = _plan_entries(12, 3, 3)
     models = _our_window_models(circuit, 12, entries)
     compiled = _compiled_reference(circuit, catalog, 12, 3, 3)
-    ours = []
-    for model in models:
-        rows = set(model.detector_ids)
-        ours.append(rows)
-    theirs = []
-    for detectors in compiled.window_detectors:
-        rows = {int(detector) for detector in detectors}
-        theirs.append(rows)
+    ours = [set(model.detector_ids) for model in models]
+    theirs = [
+        _detector_set(detectors) for detectors in compiled.window_detectors
+    ]
     assert ours == theirs
 
 
@@ -254,15 +264,11 @@ def test_the_projection_gives_every_catalogued_fault_exactly_one_owner():
     catalog = _graphlike_catalog(circuit)
     entries = _plan_entries(12, 3, 3)
     models = _our_window_models(circuit, 12, entries)
-    seen = []
-    for model in models:
-        signatures = _owned_signatures(catalog, model)
-        ordered = sorted(signatures)
-        seen.extend(ordered)
+    seen = _every_owned_signature(catalog, models)
     committed = set(seen)
+    fault_count = len(catalog.priors)
+    catalogued = {
+        _signature(catalog, fault_id) for fault_id in range(fault_count)
+    }
     assert len(seen) == len(committed)
-    catalogued = set()
-    for fault_id in range(len(catalog.priors)):
-        signature = _signature(catalog, fault_id)
-        catalogued.add(signature)
     assert committed == catalogued

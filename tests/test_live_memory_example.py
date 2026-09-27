@@ -109,6 +109,15 @@ def test_a_rerun_from_a_run_folders_fragments_runs_its_recorded_point(
     assert replay_points == original_points
 
 
+def _measurements_before(mapping: dict, round_index: int) -> list:
+    """The measurement indices the mapping places before round_index."""
+    indices = []
+    for index, measured_round in mapping.items():
+        if measured_round < round_index:
+            indices.append(int(index))
+    return indices
+
+
 def test_later_feedback_extends_the_live_history_and_actual_readout(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -135,11 +144,7 @@ def test_later_feedback_extends_the_live_history_and_actual_readout(
     first_bits = _read_json(faster, "measurements.json")
     second_bits = _read_json(slower, "measurements.json")
     final_round = max(first_rounds)
-    shared_indices = [
-        int(index)
-        for index, round_index in first_mapping.items()
-        if round_index < final_round
-    ]
+    shared_indices = _measurements_before(first_mapping, final_round)
     shared_count = len(shared_indices)
     assert first_bits[:shared_count] == second_bits[:shared_count]
 

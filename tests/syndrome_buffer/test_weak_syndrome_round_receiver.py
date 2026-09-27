@@ -298,12 +298,10 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     crossing = _packed(1)
     receiver.reserve_write(crossing)
 
-    try:
+    with pytest.raises(RuntimeError) as unsettled:
         receiver.check_settled()
-    except RuntimeError as error:
-        assert "1 controller_to_weak_buffer writes in flight" in str(error)
-    else:
-        raise AssertionError("an unfinished write settled")
+    sentence = str(unsettled.value)
+    assert "1 controller_to_weak_buffer writes in flight" in sentence
 
 
 def test_a_weak_store_too_small_for_a_window_stops_the_run_at_its_hold():

@@ -50,6 +50,10 @@ def test_every_exempt_class_exists_where_the_guide_says_it_does():
     # an empty list and not a parse that found nothing
     assert EXEMPTION_HEADING in guide
     exemptions = checker.wide_state_exemptions()
+    _check_every_exempt_class_exists(exemptions)
+
+
+def _check_every_exempt_class_exists(exemptions) -> None:
     for class_name, class_path in exemptions:
         path = PACKAGE_ROOT / class_path
         assert path.exists(), class_path
@@ -61,6 +65,10 @@ def test_every_exempt_class_would_otherwise_be_reported():
     """A class that is no longer wide leaves the list, so it stays honest."""
     checker = _checker()
     exemptions = checker.wide_state_exemptions()
+    _check_every_exempt_class_is_wide(checker, exemptions)
+
+
+def _check_every_exempt_class_is_wide(checker, exemptions) -> None:
     for class_name, class_path in exemptions:
         path = PACKAGE_ROOT / class_path
         node = _class_definition(path, class_name)
@@ -148,12 +156,16 @@ def test_no_caller_reaches_two_deep_past_the_windows_facade():
     """
     package = PACKAGE_ROOT / "decsim"
     reaches = _reaches_through("window_manager", package)
-    past_the_facade = {}
-    for reach, where in reaches.items():
-        if reach.endswith(".trace"):
-            continue
-        past_the_facade[reach] = where
+    past_the_facade = _without_trace_groups(reaches)
     assert past_the_facade == {}
+
+
+def _without_trace_groups(reaches: dict) -> dict:
+    kept = {}
+    for reach, where in reaches.items():
+        if not reach.endswith(".trace"):
+            kept[reach] = where
+    return kept
 
 
 def _exemption_entries(guide: str) -> dict:
@@ -199,7 +211,14 @@ def test_every_exemption_sentence_names_every_attribute_its_class_holds():
     guide = (PACKAGE_ROOT / "STYLE.md").read_text()
     entries = _exemption_entries(guide)
     exemptions = checker.wide_state_exemptions()
+    missing = _unnamed_attributes(checker, entries)
     assert set(entries) == exemptions
+    assert missing == {}
+
+
+def _unnamed_attributes(checker, entries: dict) -> dict:
+    """Each exempt class whose entry leaves attributes unnamed: those."""
+    missing_by_class = {}
     for (class_name, class_path), entry in entries.items():
         path = PACKAGE_ROOT / class_path
         node = _class_definition(path, class_name)
@@ -209,4 +228,6 @@ def test_every_exemption_sentence_names_every_attribute_its_class_holds():
         found = BACKTICKED_NAME.findall(entry)
         named = set(found)
         missing = attributes - named
-        assert missing == set(), (class_name, sorted(missing))
+        if missing:
+            missing_by_class[class_name] = sorted(missing)
+    return missing_by_class

@@ -8,6 +8,7 @@ without a shots.csv is refused rather than silently skipped.
 
 import csv
 
+import matplotlib.pyplot
 import pytest
 
 import decsim.experiments.plots as plots
@@ -39,7 +40,22 @@ def flat_stages(algorithm_us):
     return {"algorithm_mean_us": algorithm_us}
 
 
-def test_stage_widths_are_medians_over_shots(tmp_path):
+def stage_widths(axis, stage_label) -> list:
+    """One stage's segment width in ms, one per bar, in the bars' order."""
+    (segments,) = [
+        container
+        for container in axis.containers
+        if container.get_label() == stage_label
+    ]
+    return [segment.get_width() for segment in segments]
+
+
+def test_stage_widths_are_medians_over_shots(tmp_path, monkeypatch):
+    """The algorithm segment of each bar is that stage's median.
+
+    The bars are d = 3 and d = 5. The 1000 us outlier shot would move a
+    mean to 343 us; the median stays at 20 us, 0.020 ms.
+    """
     run_dir = tmp_path / "run"
     shot_rows = [
         (3, flat_stages(10.0)),
@@ -48,16 +64,16 @@ def test_stage_widths_are_medians_over_shots(tmp_path):
         (5, flat_stages(40.0)),
     ]
     write_shots_csv(run_dir, shot_rows)
-    shots_csv_path = run_dir / "shots.csv"
-    with open(shots_csv_path) as handle:
-        reader = csv.DictReader(handle)
-        shot_records = list(reader)
-    medians = plots._median_stage_us_by_distance(shot_records)
-    stage_columns = [column for column, _ in plots.STAGE_BREAKDOWN_STAGES]
-    algorithm_index = stage_columns.index("algorithm_mean_us")
-    # the 1000 us outlier shot moves a mean to 343 but the median to 20
-    assert medians[3][algorithm_index] == pytest.approx(20.0)
-    assert medians[5][algorithm_index] == pytest.approx(40.0)
+    figure_path = tmp_path / "stage_breakdown.png"
+    drawn = []
+    monkeypatch.setattr(matplotlib.pyplot, "close", drawn.append)
+
+    plots.stage_breakdown_plot(run_dir, figure_path)
+
+    (figure,) = drawn
+    (axis,) = figure.axes
+    algorithm_widths = stage_widths(axis, "algorithm")
+    assert algorithm_widths == pytest.approx([0.020, 0.040])
 
 
 def test_figure_is_written_per_distance(tmp_path):

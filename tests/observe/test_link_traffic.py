@@ -91,6 +91,15 @@ BOUNDARY_RELATION_KEYS = {
 }
 
 
+def _edges_on(report: dict, path_name: str) -> list:
+    """The report's semantic edges on one path, in report order."""
+    edges = []
+    for edge in report["semantic_edges"]:
+        if edge["path"] == path_name:
+            edges.append(edge)
+    return edges
+
+
 def bounded_path(
     name, bits_per_microsecond, latency_ticks, setup_ticks=0, header_bits=0
 ):
@@ -254,11 +263,7 @@ def test_readout_bindings_reconcile_once_per_shared_channel() -> None:
     run.engine.run()
 
     report = run.ledger.traffic_json_value()
-    readout_edges = [
-        edge
-        for edge in report["semantic_edges"]
-        if edge["path"] == "qpu_to_controller"
-    ]
+    readout_edges = _edges_on(report, "qpu_to_controller")
     transfer_counts = [
         edge["counters"]["transfer_count"] for edge in readout_edges
     ]

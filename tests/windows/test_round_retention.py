@@ -51,6 +51,13 @@ def _retention(store, round_counts: dict, successors: dict):
     return retention
 
 
+def _publish_rounds(store, operation_id: int, round_indices) -> None:
+    """Each round stored at the tick of its own index."""
+    for round_index in round_indices:
+        packet = _packet(operation_id, round_index)
+        store.accept_packed_round(packet, publication_tick=round_index)
+
+
 def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=operation_id,
@@ -174,9 +181,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
         round_count=5,
     )
     retention.register_window((1, 0), window)
-    for round_index in (1, 2, 3, 4, 5):
-        packet = _packet(1, round_index)
-        store.accept_packed_round(packet, publication_tick=round_index)
+    _publish_rounds(store, 1, (1, 2, 3, 4, 5))
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
     )
@@ -238,9 +243,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     claim = decoding_records.PotentialRestart((1, 1))
     claimed = [(1, index) for index in range(1, 10)]
     store.register_hold(claim, claimed)
-    for round_index in range(1, 10):
-        packet = _packet(1, round_index)
-        store.accept_packed_round(packet, publication_tick=round_index)
+    _publish_rounds(store, 1, range(1, 10))
     request_key = window_records.DecoderRequestKey(
         1, 1, window_records.DecoderTier.WEAK, 0
     )

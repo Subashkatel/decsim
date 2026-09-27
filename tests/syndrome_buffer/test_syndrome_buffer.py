@@ -190,7 +190,7 @@ def ciw_trace(arrivals, holds, capacity):
     return [record.arrival_date for record in node_two]
 
 
-def test_a_round_enters_at_its_arrival_or_when_a_slot_frees_over_random_holds():
+def test_a_round_enters_at_arrival_or_when_a_slot_frees_property():
     for seed in range(20):
         generator = random.Random(seed)
         capacity = generator.choice([1, 2, 3])
@@ -200,7 +200,7 @@ def test_a_round_enters_at_its_arrival_or_when_a_slot_frees_over_random_holds():
         assert run_trace(arrivals, holds, capacity) == expected, seed
 
 
-def test_ciw_blocks_at_the_same_ticks_over_random_holds():
+def test_ciw_blocks_at_the_same_ticks_over_random_holds_property():
     for seed in range(5):
         generator = random.Random(seed)
         capacity = generator.choice([1, 2, 3])
@@ -332,7 +332,7 @@ def write_if_room(the_store, reference, round_key, bits: int) -> None:
         reference.accept(round_key, bits)
 
 
-def test_occupancy_and_room_follow_the_packet_store_over_random_holds():
+def test_occupancy_and_room_follow_the_packet_store_property():
     """A property test: 300 random programs against the reference store."""
     for seed in range(300):
         generator = random.Random(seed)
@@ -357,10 +357,8 @@ def test_a_full_store_answers_no_room_and_is_unchanged():
     assert the_store.publication_tick((1, 2)) == 11
 
 
-def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
-    held = held_rounds()
-    the_store = store(bits=BITS_PER_ROUND, waiting_line=held)
-    entered = []
+def admitting_into(the_store, entered: list):
+    """A sender's admit: store the round if there is room, and note it."""
 
     def admit(round: round_records.PackedRound) -> bool:
         if not the_store.has_room(round.round_key, round.wire_bits, {}):
@@ -369,6 +367,14 @@ def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
         entered.append(round.packet.round_index)
         return True
 
+    return admit
+
+
+def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
+    held = held_rounds()
+    the_store = store(bits=BITS_PER_ROUND, waiting_line=held)
+    entered = []
+    admit = admitting_into(the_store, entered)
     first = packed(1)
     second = packed(2)
     third = packed(3)
@@ -608,6 +614,15 @@ def test_the_weak_primary_pipeline_runs_on_the_declared_ticks():
     assert record.committed_ticks == expected_committed
 
 
+def room_side_landing_lines(log_lines: list) -> list:
+    """The log's round landings on the strong syndrome buffer."""
+    landings = []
+    for line in log_lines:
+        if "received round" in line and "strong" in line:
+            landings.append(line)
+    return landings
+
+
 def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
     """Readiness listens to the store the weak decoder actually reads.
 
@@ -623,8 +638,7 @@ def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
     first_window = windows[(1, 0)]
     log_lines = machine.observation.log.lines
     published = declared_run.log_tick(log_lines, "round 6 of mem1 arrived")
-    landings = [line for line in log_lines if "received round" in line]
-    room_side_landings = [line for line in landings if "strong" in line]
+    room_side_landings = room_side_landing_lines(log_lines)
     expected_data_complete = config.microseconds_to_ticks(15.0)
 
     assert first_window.t_data_complete == expected_data_complete

@@ -39,10 +39,9 @@ def test_the_busy_integral_equals_the_services_own_spans():
 
     utilization = machine.observation.decoder_utilization.result()
     services = machine.observation.decode_records.services
-    spans = []
-    for service in services:
-        span = service.terminal_ticks - service.dispatch_ticks
-        spans.append(span)
+    spans = [
+        service.terminal_ticks - service.dispatch_ticks for service in services
+    ]
     busy_ticks = sum(spans)
 
     assert len(services) == 9
@@ -71,8 +70,9 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     machine.run()
 
     assert len(watcher.samples) == 18
-    disagreements = [pair for pair in watcher.samples if pair[0] != pair[1]]
-    assert disagreements == []
+    listener_bits = [listener for listener, _memory in watcher.samples]
+    memory_bits = [memory for _listener, memory in watcher.samples]
+    assert listener_bits == memory_bits
     rows = occupancy.rows()
     snapshot = unit.memory.snapshot()
     assert rows == [

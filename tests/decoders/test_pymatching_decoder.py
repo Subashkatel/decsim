@@ -85,7 +85,19 @@ def _direct_matching(faults):
     )
 
 
-def test_the_row_matches_pymatching_on_the_same_graph():
+def _disagreeing_shots(row, model, detection_events, predictions) -> list:
+    """The shots whose row answer is not sinter's predicted observable."""
+    disagreeing = []
+    for shot, predicted in zip(detection_events, predictions, strict=True):
+        job = windows.job_for(model, shot)
+        result = row.decode(job)
+        prediction = int(predicted[0])
+        if result.logical_observables != (prediction,):
+            disagreeing.append(shot)
+    return disagreeing
+
+
+def test_the_row_matches_pymatching_on_the_same_graph_property():
     _, model, detection_events, _ = _window_and_shots()
     faults = model.require_faults(GRAPHLIKE)
     row = adapter.PyMatchingDecoder()
@@ -98,7 +110,7 @@ def test_the_row_matches_pymatching_on_the_same_graph():
         assert result.correction.tolist() == expected.tolist()
 
 
-def test_the_row_predicts_what_sinters_pymatching_row_predicts():
+def test_the_row_predicts_what_sinters_pymatching_row_predicts_property():
     circuit, model, detection_events, _ = _window_and_shots()
     detector_error_model = circuit.detector_error_model(decompose_errors=True)
     sinter_row = sinter.BUILT_IN_DECODERS["pymatching"]
@@ -113,23 +125,17 @@ def test_the_row_predicts_what_sinters_pymatching_row_predicts():
     faults = model.require_faults(GRAPHLIKE)
     graphs = row.compiled_for(faults, model)
     matching = graphs.plain
-    ties = 0
-    for shot, predicted in zip(detection_events, predictions, strict=True):
-        job = windows.job_for(model, shot)
-        result = row.decode(job)
-        prediction = int(predicted[0])
-        if result.logical_observables == (prediction,):
-            continue
-        # the two graphs may pick different minimum-weight matchings of
-        # the same weight; that is a tie, not a disagreement
+    disagreeing = _disagreeing_shots(row, model, detection_events, predictions)
+    # the two graphs may pick different minimum-weight matchings of the
+    # same weight; that is a tie, not a disagreement
+    for shot in disagreeing:
         syndrome = windows.row_syndrome(model, shot)
         _, row_weight = matching.decode(syndrome, return_weight=True)
         _, whole_weight = whole.decode(shot, return_weight=True)
         difference = row_weight - whole_weight
         weight_gap = abs(difference)
         assert weight_gap < 1e-6
-        ties += 1
-    assert ties < SHOTS / 10
+    assert len(disagreeing) < SHOTS / 10
 
 
 def test_an_unmatchable_syndrome_is_reported_and_not_raised():
@@ -214,7 +220,7 @@ def test_two_placed_columns_with_the_same_endpoints_become_one_edge():
     assert weight == pytest.approx(2.2540580520993854, abs=1e-6)
 
 
-def test_the_lighter_forced_class_is_the_row_s_own_unforced_answer():
+def test_the_lighter_forced_class_is_the_unforced_answer_property():
     """A forced solve pins the observable; the lighter class is the decode.
 
     The complementary gap's two solves (Gidney et al. arXiv:2312.04522
@@ -235,11 +241,9 @@ def test_the_lighter_forced_class_is_the_row_s_own_unforced_answer():
             job.forced_logical_class = forced_class
             forced = row.decode(job)
             forced_results.append(forced)
-        weight_zero = forced_results[0].forced_class_weight
-        weight_one = forced_results[1].forced_class_weight
-        lighter = forced_results[0]
-        if weight_one < weight_zero:
-            lighter = forced_results[1]
+        lighter = min(
+            forced_results, key=lambda forced: forced.forced_class_weight
+        )
         assert lighter.correction.tolist() == plain.correction.tolist()
 
 

@@ -108,9 +108,10 @@ def test_materialization_orders_the_rounds_and_keeps_each_rounds_order():
 
     decoder_input = decoder_memory.materialize_decoder_input(job)
 
-    identities = []
-    for round_input in decoder_input.rounds:
-        identities.append((round_input.operation_id, round_input.round_index))
+    identities = [
+        (round_input.operation_id, round_input.round_index)
+        for round_input in decoder_input.rounds
+    ]
     assert identities == [(1, 2), (1, 4), (2, 1), (2, 3)]
     assert decoder_input.rounds[1].fragments == (
         first_in_round,

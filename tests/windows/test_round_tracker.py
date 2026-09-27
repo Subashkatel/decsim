@@ -9,6 +9,8 @@ into the next window, lines 275-278).
 
 import types
 
+import pytest
+
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.round_tracker as round_tracker
@@ -47,6 +49,11 @@ def _window(
         buffer_hi=buffer_hi,
         round_count=round_count,
     )
+
+
+def _close_boundaries(tracker, stream_id, boundaries) -> None:
+    for boundary in boundaries:
+        tracker.close_boundary(stream_id, boundary)
 
 
 def _tracker(
@@ -113,8 +120,7 @@ def test_a_stream_closed_boundary_in_the_buffer_is_the_earliest_one():
     tracker = _tracker({}, {"stream": []})
     operation_stream = _operation("stream")
     tracker.register_stream(operation_stream, None)
-    for boundary in (2, 3, 4, 6, 7):
-        tracker.close_boundary("stream", boundary)
+    _close_boundaries(tracker, "stream", (2, 3, 4, 6, 7))
     window = _window("stream", 1, 3, 7)
     assert tracker.closed_boundary_round_for_window(window) == 3
 
@@ -123,12 +129,8 @@ def test_a_finite_stream_refuses_a_boundary_inside_its_circuit():
     tracker = _tracker({}, {"stream": []})
     operation_stream = _operation("stream")
     tracker.register_stream(operation_stream, 5)
-    try:
+    with pytest.raises(RuntimeError, match="destructive boundary"):
         tracker.close_boundary("stream", 4)
-    except RuntimeError as error:
-        assert "destructive boundary" in str(error)
-    else:
-        raise AssertionError("an internal boundary was accepted")
     tracker.close_boundary("stream", 6)
 
 

@@ -36,6 +36,87 @@ def _microseconds(ticks):
     return ticks / TICKS_PER_MICROSECOND
 
 
+def _ledger_windows(ledger: dict) -> dict:
+    """Window id -> (commit lo, commit hi, read hi, dispatch us)."""
+    windows = {}
+    for (_operation_id, window_id), window in ledger.items():
+        dispatch = _microseconds(window.t_dispatch)
+        windows[window_id] = (
+            window.commit_lo,
+            window.commit_hi,
+            window.buffer_hi,
+            dispatch,
+        )
+    return windows
+
+
+def _drawn_windows(shot, expected: dict) -> dict:
+    """The same fields of the windows the figure drew, for those ids."""
+    windows = {}
+    for window_id in expected:
+        drawn = shot.windows[window_id]
+        windows[window_id] = (
+            drawn.commit_lo,
+            drawn.commit_hi,
+            drawn.read_hi,
+            drawn.dispatch_us,
+        )
+    return windows
+
+
+def _recorded_stages(machine) -> list:
+    """(window id, stage), start us, end us: one row per stage record."""
+    stages = machine.observation.stages
+    rows = []
+    for operation_id, window_id in machine.observation.windows.windows:
+        for record in stages.records_for(operation_id, window_id):
+            start = _microseconds(record.start_ticks)
+            end = _microseconds(record.end_ticks)
+            rows.append(((window_id, record.stage), start, end))
+    return rows
+
+
+def _committed_frame_spans(committed) -> list:
+    """Window id, accepted us, committed us: one row per frame record."""
+    rows = []
+    for record in committed:
+        window_id = record.window_key[1]
+        start = _microseconds(record.accepted_ticks)
+        end = _microseconds(record.committed_ticks)
+        rows.append((window_id, start, end))
+    return rows
+
+
+def _transfer_spans(transfers) -> tuple:
+    """(by round, by window): (path, key), sent us, delivered us per row."""
+    by_round = []
+    by_window = []
+    for transfer in transfers:
+        path = transfer["path"]
+        attribution = transfer["attribution"]
+        window_id = attribution["window_id"]
+        start = _microseconds(transfer["send_ticks"])
+        end = _microseconds(transfer["delivery_ticks"])
+        if window_id is None:
+            by_round.append(((path, attribution["round_lo"]), start, end))
+        else:
+            by_window.append(((path, window_id), start, end))
+    return by_round, by_window
+
+
+def _drawn_spans(drawn_by_key: dict, expected: list) -> list:
+    """The figure's start and end us under each expected row's key.
+
+    One row per expected row, duplicates kept, so every record is held
+    against the one span the figure draws for its key.
+    """
+    rows = []
+    for key, _start, _end in expected:
+        drawn = drawn_by_key[key]
+        rows.append((key, drawn.start_us, drawn.end_us))
+    return rows
+
+
 def _traced_switching_run(tmp_path, trace_path):
     """One switching shot of nine rounds at d 3, traced.
 
@@ -77,59 +158,46 @@ def test_the_timeline_windows_are_the_runs_own_windows(tmp_path):
     trace_path = tmp_path / "point1.trace.json"
     machine, _result = _traced_run(trace_path)
     document = trace_file.load(trace_path)
-    shot = plots._timeline_shot(document)
+    shot = plots.timeline_shot(document)
     ledger = machine.observation.windows.windows
-    for (_op_id, window_id), window in ledger.items():
-        drawn = shot.windows[window_id]
-        assert drawn.commit_lo == window.commit_lo
-        assert drawn.commit_hi == window.commit_hi
-        assert drawn.read_hi == window.buffer_hi
-        assert drawn.dispatch_us == _microseconds(window.t_dispatch)
+    expected = _ledger_windows(ledger)
+    drawn = _drawn_windows(shot, expected)
+    assert drawn == expected
 
 
 def test_the_timeline_stages_are_the_runs_own_stage_records(tmp_path):
     trace_path = tmp_path / "point1.trace.json"
     machine, _result = _traced_run(trace_path)
     document = trace_file.load(trace_path)
-    shot = plots._timeline_shot(document)
-    stages = machine.observation.stages
-    for operation_id, window_id in machine.observation.windows.windows:
-        for record in stages.records_for(operation_id, window_id):
-            drawn = shot.stages[(window_id, record.stage)]
-            assert drawn.start_us == _microseconds(record.start_ticks)
-            assert drawn.end_us == _microseconds(record.end_ticks)
+    shot = plots.timeline_shot(document)
+    expected = _recorded_stages(machine)
+    drawn = _drawn_spans(shot.stages, expected)
+    assert drawn == expected
 
 
 def test_the_timeline_frame_bars_are_the_frames_own_corrections(tmp_path):
     trace_path = tmp_path / "point1.trace.json"
     machine, _result = _traced_run(trace_path)
     document = trace_file.load(trace_path)
-    shot = plots._timeline_shot(document)
+    shot = plots.timeline_shot(document)
     committed = machine.observation.frame_corrections.committed
+    expected = _committed_frame_spans(committed)
+    drawn = _drawn_spans(shot.frame, expected)
     assert len(committed) == len(shot.frame)
-    for record in committed:
-        window_id = record.window_key[1]
-        drawn = shot.frame[window_id]
-        assert drawn.start_us == _microseconds(record.accepted_ticks)
-        assert drawn.end_us == _microseconds(record.committed_ticks)
+    assert drawn == expected
 
 
 def test_the_timeline_moves_are_the_results_own_transfers(tmp_path):
     trace_path = tmp_path / "point1.trace.json"
     _machine, result = _traced_run(trace_path)
     document = trace_file.load(trace_path)
-    shot = plots._timeline_shot(document)
-    for transfer in result.link_traffic["transfers"]:
-        path = transfer["path"]
-        window_id = transfer["attribution"]["window_id"]
-        key = (path, window_id)
-        if window_id is None:
-            key = (path, transfer["attribution"]["round_lo"])
-            drawn = shot.moves_by_round[key]
-        else:
-            drawn = shot.moves_by_window[key]
-        assert drawn.start_us == _microseconds(transfer["send_ticks"])
-        assert drawn.end_us == _microseconds(transfer["delivery_ticks"])
+    shot = plots.timeline_shot(document)
+    transfers = result.link_traffic["transfers"]
+    by_round, by_window = _transfer_spans(transfers)
+    drawn_by_round = _drawn_spans(shot.moves_by_round, by_round)
+    drawn_by_window = _drawn_spans(shot.moves_by_window, by_window)
+    assert drawn_by_round == by_round
+    assert drawn_by_window == by_window
 
 
 def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
@@ -137,7 +205,7 @@ def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
     _machine, _result = _traced_run(trace_path)
     document = trace_file.load(trace_path)
     lanes = plots._timeline_lanes(document)
-    shot = plots._timeline_shot(document)
+    shot = plots.timeline_shot(document)
     assert lanes.store_path == "controller_to_weak_buffer"
     assert lanes.store_name == "weak syndrome buffer"
     assert lanes.input_path == "weak_buffer_to_weak_decoder"
@@ -161,7 +229,7 @@ def test_a_last_window_reading_past_the_stream_is_drawn_to_the_last_round(
     trace_path = tmp_path / "switching.trace.json"
     _traced_switching_run(tmp_path, trace_path)
     document = trace_file.load(trace_path)
-    shot = plots._timeline_shot(document)
+    shot = plots.timeline_shot(document)
     lanes = plots._timeline_lanes(document)
     stored = plots._stored_rounds(lanes, shot)
     last_window = shot.windows[max(shot.windows)]

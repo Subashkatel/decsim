@@ -151,9 +151,8 @@ def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
     job = _region_job()
     ticket = backend.submit(job, 0)
     steps = backend.steps(ticket)
-    echo_ticks = 0
-    for step in (steps[0], steps[1], steps[2], steps[5]):
-        echo_ticks += step.ticks
+    echo_steps = (steps[0], steps[1], steps[2], steps[5])
+    echo_ticks = sum(step.ticks for step in echo_steps)
     round_trip = _escalation_round_trip(profile) + echo_ticks
     assert round_trip == config.microseconds_to_ticks(echo_microseconds)
 

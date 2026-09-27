@@ -14,7 +14,17 @@ import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
 
 
-def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
+def _algorithm_records(machine) -> list:
+    """The stage records of every decode's algorithm stage."""
+    records = []
+    for record in machine.observation.stages.records:
+        if record.stage == staged_decoder.ALGORITHM_STAGE:
+            records.append(record)
+    return records
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_weak_unit_loop_matches_direct_pymatching(tmp_path, seed):
     # The functional gate: the loop with the weak unit's real MWPM reaches
     # the same prediction as whole-circuit PyMatching on the same events.
     config_path = yaml_configs.write_config(
@@ -27,17 +37,16 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    for seed in range(3):
-        measurement = yaml_configs.measure_point_shot(
-            config,
-            physical_error_probability=0.005,
-            distance=3,
-            round_period_microseconds=1.0,
-            seed=seed,
-        )
-        assert measurement.algorithm == "pymatching"
-        assert measurement.windows > 0
-        assert not measurement.direct_mismatch
+    measurement = yaml_configs.measure_point_shot(
+        config,
+        physical_error_probability=0.005,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=seed,
+    )
+    assert measurement.algorithm == "pymatching"
+    assert measurement.windows > 0
+    assert not measurement.direct_mismatch
 
 
 def test_strong_unit_runs_belief_matching(tmp_path):
@@ -89,12 +98,7 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
     machine.run()
     cycle_count = settings.weak_decoder.row_settings.cycle_count
     period_ticks = cycle_count.clock.period_ticks
-    records = machine.observation.stages.records
-    algorithm = [
-        record
-        for record in records
-        if record.stage == staged_decoder.ALGORITHM_STAGE
-    ]
+    algorithm = _algorithm_records(machine)
     ticks_past_an_edge = {
         record.end_ticks % period_ticks for record in algorithm
     }
@@ -125,12 +129,7 @@ def test_a_measured_table_tier_is_held_by_the_measured_line(tmp_path):
     )
     machine = machine_module.Machine.build(settings)
     machine.run()
-    records = machine.observation.stages.records
-    algorithm = [
-        record
-        for record in records
-        if record.stage == staged_decoder.ALGORITHM_STAGE
-    ]
+    algorithm = _algorithm_records(machine)
     intercept_ticks = 78_957_000
     ticks_per_iteration = 9_762_000
     held_ticks = [record.end_ticks - record.start_ticks for record in algorithm]

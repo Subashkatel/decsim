@@ -63,6 +63,15 @@ def commit(frame, window_key, observables, tier=Tier.WEAK, on_committed=None):
     )
 
 
+def _strong_flips(snapshot) -> list:
+    """The observables each strong-tier correction in the frame flipped."""
+    flips = []
+    for record in snapshot.records:
+        if record.tier == "strong":
+            flips.append(record.logical_observables)
+    return flips
+
+
 def test_a_streams_frame_is_the_xor_of_its_corrections():
     engine, frame = frame_with_commit_ticks(0)
     commit(frame, ("stream", 0), (1, 0, 1))
@@ -368,11 +377,7 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     result = machine.run()
     (operation_result,) = result.operation_results
     snapshot = machine.pauli_frame.snapshot()
-    strong_flips = [
-        record.logical_observables
-        for record in snapshot.records
-        if record.tier == "strong"
-    ]
+    strong_flips = _strong_flips(snapshot)
     frame = machine.pauli_frame.frame_for_stream(operation_result.operation_id)
 
     assert (1,) in strong_flips

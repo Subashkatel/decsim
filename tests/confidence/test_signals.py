@@ -9,6 +9,8 @@ decoded in, so the window side asks the weak decoder for exactly those
 solves and never for the row's class.
 """
 
+import pytest
+
 import decsim.confidence.signals as confidence_signals
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
@@ -31,12 +33,13 @@ def test_the_shipped_rows_are_reachable_by_the_name_the_yaml_writes():
     ]
 
 
-def test_every_row_builds_from_the_two_settings_and_reads_the_card():
+@pytest.mark.parametrize("name", sorted(confidence_signals.CONFIDENCE_SIGNALS))
+def test_every_row_builds_from_the_two_settings_and_reads_the_card(name):
     """A row written outside decsim reaches the root through this call."""
-    for name, row in confidence_signals.CONFIDENCE_SIGNALS.items():
-        built = row.from_settings(ESCALATION, WEAK)
+    row = confidence_signals.CONFIDENCE_SIGNALS[name]
+    built = row.from_settings(ESCALATION, WEAK)
 
-        assert built.walk_microseconds == 0.5, name
+    assert built.walk_microseconds == 0.5
 
 
 def test_every_row_declares_the_classes_the_window_must_be_solved_in():
@@ -51,19 +54,18 @@ def test_every_row_declares_the_classes_the_window_must_be_solved_in():
     assert extra.forced_logical_classes == ()
 
 
-def test_every_row_declares_the_evidence_it_needs_from_the_decode():
-    for name, row in confidence_signals.CONFIDENCE_SIGNALS.items():
-        assert row.decoder_evidence_requirement is not None, name
-        assert row.evidence_refusal, name
+@pytest.mark.parametrize("name", sorted(confidence_signals.CONFIDENCE_SIGNALS))
+def test_every_row_declares_the_evidence_it_needs_from_the_decode(name):
+    row = confidence_signals.CONFIDENCE_SIGNALS[name]
+
+    assert row.decoder_evidence_requirement is not None
+    assert row.evidence_refusal
 
 
 def test_every_row_names_its_own_source():
     """The threshold is held in one unit, so a source says which signal."""
     rows = confidence_signals.CONFIDENCE_SIGNALS
-    methods = set()
-
-    for row in rows.values():
-        built = row.from_settings(ESCALATION, WEAK)
-        methods.add(built.source.method)
+    built_rows = [row.from_settings(ESCALATION, WEAK) for row in rows.values()]
+    methods = {built.source.method for built in built_rows}
 
     assert methods == {"complementary_gap", "cluster_gap", "extra_cluster_gap"}

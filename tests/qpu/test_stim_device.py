@@ -948,32 +948,55 @@ NAMED_CHANNELS = [("gate",), ("idle",), ("measurement",), ("reset",)]
 NAMED_CHANNELS.append(stim_device.BURST_CHANNELS)
 
 
-@pytest.mark.parametrize("noisy", NOISY_CHANNELS)
-@pytest.mark.parametrize("named", NAMED_CHANNELS)
-def test_a_burst_on_the_patch_raises_noise_or_is_refused(noisy, named):
-    """A burst copies the circuit's own noise, as qec-burst-scaling does.
+BURST_CASES = [
+    (noisy, named) for noisy in NOISY_CHANNELS for named in NAMED_CHANNELS
+]
+# a burst adds to a channel only where the circuit is noisy on it
+SHARED_CASES = [
+    (noisy, named) for noisy, named in BURST_CASES if set(noisy) & set(named)
+]
+UNSHARED_CASES = [
+    (noisy, named)
+    for noisy, named in BURST_CASES
+    if not set(noisy) & set(named)
+]
 
-    Where the circuit has a named channel's noise the burst adds to it;
-    where it has none the burst would add nothing and is refused, as
-    qecburst/geometry.py get_data_qubits refuses a circuit without
-    background noise ("Ensure p0 > 0").
-    """
+
+def _noisy_on(noisy: tuple) -> stim.Circuit:
+    """A d = 3 memory with 0.001 noise on each channel in noisy."""
     noise = {}
     for channel in noisy:
         parameter = GENERATOR_NOISE[channel]
         noise[parameter] = 0.001
-    circuit = stim.Circuit.generated(
+    return stim.Circuit.generated(
         "surface_code:rotated_memory_z", distance=3, rounds=3, **noise
     )
-    shared = set(noisy) & set(named)
+
+
+@pytest.mark.parametrize("noisy, named", SHARED_CASES)
+def test_a_burst_on_the_patch_raises_the_noise_it_names(noisy, named):
+    """A burst copies the circuit's own noise, as qec-burst-scaling does."""
+    circuit = _noisy_on(noisy)
     settings = {"burst_error_probability": 0.1, "burst_channels": named}
 
-    if not shared:
-        with pytest.raises(ValueError, match="no .* noise on them"):
-            burst_of(circuit, 3, **settings)
-        return
     burst = burst_of(circuit, 3, **settings)
+
     assert inserted_lines(circuit, burst)
+
+
+@pytest.mark.parametrize("noisy, named", UNSHARED_CASES)
+def test_a_burst_on_a_channel_with_no_noise_is_refused(noisy, named):
+    """Where the circuit has none of a named channel's noise, a refusal.
+
+    The burst would add nothing, and qecburst/geometry.py
+    get_data_qubits refuses a circuit without background noise
+    ("Ensure p0 > 0").
+    """
+    circuit = _noisy_on(noisy)
+    settings = {"burst_error_probability": 0.1, "burst_channels": named}
+
+    with pytest.raises(ValueError, match="no .* noise on them"):
+        burst_of(circuit, 3, **settings)
 
 
 def test_a_patch_the_burst_region_misses_is_not_refused_without_noise():

@@ -49,6 +49,14 @@ def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
     assert all(sample > 0 for sample in samples)
 
 
+def _decoded_windows_by_distance(measurements) -> dict:
+    windows = {}
+    for measurement in measurements:
+        distance = measurement.distance
+        windows[distance] = windows.get(distance, 0) + measurement.windows
+    return windows
+
+
 def test_latency_samples_pool_over_shots_per_distance(tmp_path):
     config_path = wall_clock_config(tmp_path, [3, 5])
     config = experiment.load_experiment(config_path)
@@ -64,14 +72,12 @@ def test_latency_samples_pool_over_shots_per_distance(tmp_path):
         for seed in range(2)
     ]
     pooled = plots.latency_samples_by_distance(measurements)
+    pooled_counts = {
+        distance: len(samples) for distance, samples in pooled.items()
+    }
+    decoded_windows = _decoded_windows_by_distance(measurements)
     assert list(pooled) == [3, 5]
-    for distance in (3, 5):
-        decoded_windows = sum(
-            measurement.windows
-            for measurement in measurements
-            if measurement.distance == distance
-        )
-        assert len(pooled[distance]) == decoded_windows
+    assert pooled_counts == decoded_windows
 
 
 def test_latency_figure_written_only_for_wall_clock_multi_distance(

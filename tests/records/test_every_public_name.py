@@ -120,5 +120,5 @@ def test_every_public_name_is_a_record_an_instance_or_a_function(module):
 @pytest.mark.parametrize("module", MODULES, ids=MODULE_IDS)
 def test_only_the_records_the_machine_mutates_are_unfrozen(module):
     """A record is frozen unless it is named as live state above."""
-    for name in unfrozen_records(module):
-        assert name in MUTABLE_RECORDS
+    unfrozen = unfrozen_records(module)
+    assert set(unfrozen) - MUTABLE_RECORDS == set()

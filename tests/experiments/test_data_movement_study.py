@@ -69,12 +69,12 @@ def test_the_switching_config_opens_the_last_two_hops():
     assert fabric.strong_buffer_to_strong_decoder is not None
 
 
-def test_every_study_config_counts_its_data_movement():
+@pytest.mark.parametrize("name", STUDY_CONFIGS)
+def test_every_study_config_counts_its_data_movement(name):
     """The counters are off by default, so each config asks for them."""
-    for name in STUDY_CONFIGS:
-        settings = study_settings(name)
-        assert settings.observation.data_movement, name
-        assert settings.observation.trace == "chrome", name
+    settings = study_settings(name)
+    assert settings.observation.data_movement
+    assert settings.observation.trace == "chrome"
 
 
 def swept_distances(name):
@@ -88,13 +88,13 @@ def swept_distances(name):
     return sorted(distances)
 
 
-def test_every_study_config_sweeps_the_same_points_on_priced_cards():
+@pytest.mark.parametrize("name", STUDY_CONFIGS)
+def test_every_study_config_sweeps_the_same_points_on_priced_cards(name):
     """A priced card decodes on no host clock, so the counts repeat."""
-    for name in STUDY_CONFIGS:
-        settings = study_settings(name)
-        distances = swept_distances(name)
-        assert settings.weak_decoder.kind == 1.0, name
-        assert distances == [3, 5, 7], name
+    settings = study_settings(name)
+    distances = swept_distances(name)
+    assert settings.weak_decoder.kind == 1.0
+    assert distances == [3, 5, 7]
 
 
 def test_reading_the_input_in_place_and_folding_in_place_is_refused(tmp_path):

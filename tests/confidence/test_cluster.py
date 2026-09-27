@@ -82,7 +82,7 @@ def test_the_gap_is_read_off_the_decode_that_produced_the_correction():
     assert soft_output.gap > 0.0
 
 
-def test_the_cluster_gap_and_the_complementary_gap_agree_on_one_window():
+def test_the_cluster_and_complementary_gaps_agree_on_one_window_property():
     """Meister's Theorem 10, on the same shots and the same window.
 
     The cluster gap walks Union-Find's own growth and the complementary
@@ -117,8 +117,8 @@ def test_the_cluster_gap_and_the_complementary_gap_agree_on_one_window():
     assert max(differences) <= 5 * weight_step
 
 
-def test_the_gap_walks_against_an_oracle_built_from_the_paper_alone():
-    """The per-node Dijkstra with a cutoff, against scipy.
+def test_the_gap_walks_against_an_oracle_built_from_the_paper_alone_property():
+    """The per-node Dijkstra with a cutoff decsim runs, against scipy.
 
     independent_cluster_gap.py is an independent reading of Meister et
     al. 2405.07433 Definitions 1 and 9 and Algorithm 1 line 6, written

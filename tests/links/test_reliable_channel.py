@@ -382,18 +382,21 @@ def test_a_window_of_one_waits_for_each_acknowledgement():
     assert delivered[0].delivery_ticks == 1678
 
 
-def test_one_seed_draws_the_same_losses_twice():
-    runs = []
-    for _run in range(2):
-        engine = decsim.engine.Engine()
-        settings = reliable_settings(0.0001)
-        channel = seeded_channel(engine, settings, 99)
-        delivered = []
-        send_at(engine, channel, 0, 4000, delivered)
-        engine.run()
-        runs.append(delivered)
+def _delivered_under_seed(seed: int) -> list:
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(0.0001)
+    channel = seeded_channel(engine, settings, seed)
+    delivered = []
+    send_at(engine, channel, 0, 4000, delivered)
+    engine.run()
+    return delivered
 
-    assert runs[0] == runs[1]
+
+def test_one_seed_draws_the_same_losses_twice():
+    first_run = _delivered_under_seed(99)
+    second_run = _delivered_under_seed(99)
+
+    assert first_run == second_run
 
 
 def _reliable_section(framing: dict, bit_error_rate: float) -> dict:

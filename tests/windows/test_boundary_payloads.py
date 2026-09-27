@@ -14,6 +14,8 @@ set of updated checks (2303.04846 lines 784-786), one index per flip.
 import dataclasses
 import pathlib
 
+import pytest
+
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.ports as ports
@@ -67,20 +69,19 @@ def reference_run(distance: int):
 def test_the_dense_row_charges_the_seam_layer_at_distance_three():
     result = reference_run(3)
     transfers = boundary_transfers(result.link_traffic)
+    widths = {transfer["payload_bits"] for transfer in transfers}
+    sources = {transfer["payload_source"] for transfer in transfers}
     assert transfers
-    for transfer in transfers:
-        assert transfer["payload_bits"] == 8
-        assert transfer["payload_source"] == (
-            "DependencyResidual seam-layer detectors"
-        )
+    assert widths == {8}
+    assert sources == {"DependencyResidual seam-layer detectors"}
 
 
 def test_the_dense_row_charges_the_seam_layer_at_distance_five():
     result = reference_run(5)
     transfers = boundary_transfers(result.link_traffic)
+    widths = {transfer["payload_bits"] for transfer in transfers}
     assert transfers
-    for transfer in transfers:
-        assert transfer["payload_bits"] == 24
+    assert widths == {24}
 
 
 def test_the_sparse_row_charges_one_index_per_flipped_detector():
@@ -136,7 +137,8 @@ def test_a_run_with_one_window_sends_no_boundary():
     assert boundary_transfers(report) == []
 
 
-def test_every_row_of_the_table_answers_a_width_for_a_seam():
+@pytest.mark.parametrize("name", sorted(window_settings.BOUNDARY_PAYLOADS))
+def test_every_row_of_the_table_answers_a_width_for_a_seam(name):
     """The table's contract, as ports.BoundaryPayload states it.
 
     A row's whole job is to turn one BoundarySeam into the bits the wire
@@ -146,12 +148,12 @@ def test_every_row_of_the_table_answers_a_width_for_a_seam():
     both are the destination's own layer (Tan 2209.09219 lines 936-946).
     """
     seam = window_records.BoundarySeam(detector_count=8, flip_count=2)
-    for name, row_class in window_settings.BOUNDARY_PAYLOADS.items():
-        row = row_class()
-        assert isinstance(row, ports.BoundaryPayload), name
-        bits = row.bits(seam)
-        assert isinstance(bits, int), name
-        assert bits >= 0, name
+    row_class = window_settings.BOUNDARY_PAYLOADS[name]
+    row = row_class()
+    bits = row.bits(seam)
+    assert isinstance(row, ports.BoundaryPayload)
+    assert isinstance(bits, int)
+    assert bits >= 0
 
 
 def _window_reading(round_count: int) -> window_records.WindowInfo:
@@ -260,14 +262,12 @@ def test_a_pinned_face_is_charged_the_dense_width_of_its_seam_layer():
     """
     result = _pinned_run("near_seam_pinned", 3)
     at_three = _pinned_faces(result)
-    assert at_three
-    for _window_id, payload_bits in at_three:
-        assert payload_bits == 8
     wider = _pinned_run("near_seam_pinned", 5)
     at_five = _pinned_faces(wider)
-    assert at_five
-    for _window_id, payload_bits in at_five:
-        assert payload_bits == 24
+    widths_at_three = {payload_bits for _window_id, payload_bits in at_three}
+    widths_at_five = {payload_bits for _window_id, payload_bits in at_five}
+    assert widths_at_three == {8}
+    assert widths_at_five == {24}
 
 
 def test_a_two_faced_window_costs_the_sum_of_its_two_one_sided_halves():
@@ -285,14 +285,12 @@ def test_a_two_faced_window_costs_the_sum_of_its_two_one_sided_halves():
     faces = _pinned_faces(result)
     charged = _charge_by_window(faces)
     counts = _face_counts(faces)
-    two_faced = [window_id for window_id, count in counts if count == 2]
-    one_faced = [window_id for window_id, count in counts if count == 1]
-    assert two_faced
-    assert one_faced
-    for window_id in two_faced:
-        assert charged[window_id] == 2 * 8
-    for window_id in one_faced:
-        assert charged[window_id] == 8
+    two_faced = _windows_with_faces(counts, 2)
+    one_faced = _windows_with_faces(counts, 1)
+    two_faced_charges = {charged[window_id] for window_id in two_faced}
+    one_faced_charges = {charged[window_id] for window_id in one_faced}
+    assert two_faced_charges == {2 * 8}
+    assert one_faced_charges == {8}
     near, far = _one_sided_halves()
     assert near == 2
     assert far == 1
@@ -436,6 +434,15 @@ def _charge_by_window(faces: list) -> dict:
         running = charged.get(window_id, 0)
         charged[window_id] = running + payload_bits
     return charged
+
+
+def _windows_with_faces(counts: list, face_count: int) -> list:
+    """The windows that pinned exactly face_count faces."""
+    windows = []
+    for window_id, count in counts:
+        if count == face_count:
+            windows.append(window_id)
+    return windows
 
 
 def _face_counts(faces: list) -> list:

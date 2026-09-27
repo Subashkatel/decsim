@@ -26,6 +26,7 @@ import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
@@ -106,6 +107,17 @@ POINTS = (
     "buffer0_first_round_to_frame",  # first round in the weak buffer -> frame
     "qpu_last_round_to_frame",  # last required round off QPU -> frame
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
+)
+
+# One count column per status a committed window's decode may carry
+# besides success (decoders/decoder.py BackendDecodeStatus), so a status
+# the enum gains is counted with no change here; sinter keeps its
+# custom counts the same way, one named counter per kind
+# (sinter/_data/_task_stats.py:71)
+WINDOW_STATUS_COLUMNS = tuple(
+    f"{status.value}_windows"
+    for status in decoder_module.BackendDecodeStatus
+    if status is not decoder_module.BackendDecodeStatus.SUCCEEDED
 )
 
 # which store's output link carries a tier's window in; the way home is
@@ -206,6 +218,9 @@ class ShotMeasurement:
     # is None on a shot with no burst
     burst_first_flag_round: Optional[int]
     burst_caught_in_time: Optional[bool]
+    # WINDOW_STATUS_COLUMNS -> the committed windows whose decode carried
+    # that status; shots.csv holds one column per entry
+    window_statuses: dict
 
 
 def measure_shot(
@@ -765,6 +780,7 @@ def _measurement(
     means = _means(samples)
     maxes = _maxes(samples)
     first_flag_round, is_caught = _burst_catch(settings, observation)
+    window_statuses = _window_statuses(observation)
     return ShotMeasurement(
         point_id=point_id,
         algorithm=algorithm,
@@ -805,6 +821,7 @@ def _measurement(
         trace_path=trace_path,
         burst_first_flag_round=first_flag_round,
         burst_caught_in_time=is_caught,
+        window_statuses=window_statuses,
     )
 
 
@@ -833,6 +850,22 @@ def _burst_catch(
     deadline = settings.burst_detector.catch_deadline_rounds
     is_caught = first_flag_round > 0 and delay <= deadline
     return first_flag_round, is_caught
+
+
+def _window_statuses(observation: observation_module.Observation) -> dict:
+    """How many committed windows carried each status besides success.
+
+    A window keeps the status of the decode it committed last
+    (windows/window_commits.py commit), so a provisional weak answer
+    the strong tier replaced is counted as the strong one.
+    """
+    counts = dict.fromkeys(WINDOW_STATUS_COLUMNS, 0)
+    for window in observation.windows.windows.values():
+        if window.decode_status is None:
+            continue
+        column = f"{window.decode_status}_windows"
+        counts[column] += 1
+    return counts
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:

@@ -27,6 +27,7 @@ Python through the circuit_list row, on a fabric whose only priced hop
 is the decoder-to-decoder seam.
 """
 
+import collections
 import dataclasses
 import math
 from typing import Optional
@@ -36,6 +37,7 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
@@ -59,6 +61,7 @@ from tests.experiments.yaml_configs import (
     MINIMAL_CONFIG,
     measure_point_shot,
     memory_workload,
+    write_config,
 )
 
 # the detection events of one round of the swept distance-three patch,
@@ -1556,3 +1559,62 @@ def test_a_run_without_a_detector_writes_no_burst_column(tmp_path):
     assert "burst_caught_in_time" not in record.shots[0]
     assert "flagged_share" not in rows[0]
     assert "caught_in_time_share" not in rows[0]
+
+
+def recorded_relay_statuses(monkeypatch) -> list:
+    """The statuses the Relay-BP row's decode_window returns, in order."""
+    row = relay_decoder.RelayBeliefPropagationDecoder
+    decode_window = row.decode_window
+    returned = []
+
+    def recording_decode_window(self, backend, model, faults, syndrome):
+        answer = decode_window(self, backend, model, faults, syndrome)
+        returned.append(answer.decode_status)
+        return answer
+
+    monkeypatch.setattr(row, "decode_window", recording_decode_window)
+    return returned
+
+
+def test_the_status_columns_count_the_statuses_the_decoder_returned(
+    tmp_path, monkeypatch
+):
+    """One Relay-BP iteration leaves windows unconverged, and each counts.
+
+    relay-bp's detailed API reports a decode that did not converge
+    (Maurer et al. 2510.21600), and the row commits it as NONCONVERGED.
+    The referent is the run itself: the statuses the row's decode_window
+    returned, one per window, since a weak_baseline run decodes each
+    window once.
+    """
+    pytest.importorskip("relay_bp")
+    returned = recorded_relay_statuses(monkeypatch)
+    weak_decoder = dict(
+        MINIMAL_CONFIG["weak_decoder"],
+        kind="relay_bp",
+        pre_iterations=1,
+        relay_set_count=0,
+        iterations_per_set=1,
+    )
+    config_path = write_config(tmp_path, {"weak_decoder": weak_decoder})
+    config = experiment.load_experiment(config_path)
+    measurement = measure_point_shot(
+        config,
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=0,
+    )
+    record = report.record_of([measurement])
+    rows = report.summarize(record.shots, record.window_samples)
+    expected = collections.Counter(
+        f"{status.value}_windows" for status in returned if status is not None
+    )
+    statuses = measurement.window_statuses
+    counted = {column: count for column, count in statuses.items() if count}
+    nonconverged = counted["nonconverged_windows"]
+
+    assert expected["nonconverged_windows"] > 0
+    assert counted == expected
+    assert record.shots[0]["nonconverged_windows"] == nonconverged
+    assert rows[0]["nonconverged_windows"] == nonconverged

@@ -17,7 +17,9 @@ the confidence step, which a weak-baseline sweep answers on its decode and
 never spends. Its first four columns became the point's metadata and
 algorithm when a point came to be named by its id: the id hashes the
 tree's settings records, not a measured value, so it is left out of the
-comparison. The weak
+comparison. Five zero columns came with the window decode statuses,
+one per status besides success, which no window of the recorded sweep
+carried. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park

@@ -62,6 +62,7 @@ NON_COLUMN_FIELDS = (
     "link_totals",
     "data_movement",
     "trace_path",
+    "window_statuses",
 )
 # the counters shot_data_movement.csv carries per path, as
 # observe/data_movement.py's json_value names them
@@ -121,6 +122,7 @@ SHOT_SUMS = (
     "windows",
     "escalated_windows",
     "strong_decoded_rounds",
+    *measure.WINDOW_STATUS_COLUMNS,
 )
 SHOT_TRUE_COUNTS = ("logical_failure", "direct_failure", "direct_mismatch")
 
@@ -252,6 +254,7 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     row["prediction_mismatches_vs_direct"] = totals.true_counts[
         "direct_mismatch"
     ]
+    _add_status_columns(row, totals)
     row["throughput_windows_per_us"] = totals.mean("throughput_windows_per_us")
     row["throughput_rounds_per_us"] = totals.mean("throughput_rounds_per_us")
     row["max_queued_windows"] = totals.maxes["max_queued_windows"]
@@ -401,7 +404,7 @@ def shot_data_movement_rows(measurements: list) -> list:
 
 
 def shot_rows(measurements: list) -> list:
-    """One row per shot: its scalars, then each point's mean and max.
+    """One row per shot: its scalars and window statuses, then each point.
 
     Any aggregate can then be re-cut without rerunning the sweep, and a
     point's mean and max columns fold over any set of shots.
@@ -409,6 +412,7 @@ def shot_rows(measurements: list) -> list:
     rows = []
     for measurement in measurements:
         row = _scalar_fields(measurement)
+        row.update(measurement.window_statuses)
         for name in measure.POINTS:
             row[f"{name}_mean_us"] = measurement.means[name]
         for name in measure.POINTS:
@@ -768,6 +772,12 @@ def _folder_files(folders: list, name: str) -> list:
         path = Path(run_dir) / name
         paths.append(path)
     return paths
+
+
+def _add_status_columns(row: dict, totals) -> None:
+    """The point's committed windows per status besides success."""
+    for name in measure.WINDOW_STATUS_COLUMNS:
+        row[name] = totals.sums[name]
 
 
 def _add_pool_columns(row: dict, totals) -> None:

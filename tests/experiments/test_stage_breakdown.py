@@ -36,7 +36,11 @@ def write_point_record(resolved_dir, point_id):
         "qpu.round_period_microseconds": 1.0,
         "workload.arguments.physical_error_probability": 0.001,
     }
-    record = {"id": point_id, "metadata": metadata}
+    sections = {
+        "qpu": {"distance": distance, "round_period_microseconds": 1.0},
+        "workload": {"arguments": {"physical_error_probability": 0.001}},
+    }
+    record = {"id": point_id, "metadata": metadata, "sections": sections}
     record_path = resolved_dir / f"{point_id}.json"
     record_text = json.dumps(record)
     record_path.write_text(record_text)
@@ -122,6 +126,29 @@ def test_a_bar_is_labelled_by_its_points_values_and_decoder(
         "workload.arguments.physical_error_probability=0.001\n"
         "pymatching"
     )
+
+
+def test_a_bar_is_labelled_by_the_value_its_point_ran_with(
+    tmp_path, monkeypatch
+):
+    """A swept reference reads as the value it resolved to, not its text."""
+    run_dir = tmp_path / "run"
+    one_shot = ("point3", flat_stages(12.0))
+    write_run(run_dir, [one_shot])
+    record = {
+        "id": "point3",
+        "metadata": {"qpu.distance": "${windows.commit_rounds}"},
+        "sections": {"qpu": {"distance": 3}},
+    }
+    record_path = run_dir / "resolved" / "point3.json"
+    record_text = json.dumps(record)
+    record_path.write_text(record_text)
+    figure_path = tmp_path / "stage_breakdown.png"
+
+    axis = drawn_axis(run_dir, figure_path, monkeypatch)
+
+    (tick_label,) = axis.get_yticklabels()
+    assert tick_label.get_text() == "qpu.distance=3\npymatching"
 
 
 def test_every_label_the_legend_and_the_title_fit_a_four_point_figure(

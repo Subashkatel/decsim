@@ -28,6 +28,7 @@ from typing import Optional
 
 import decsim.config as config_module
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.experiments.trace_file as trace_file
 
 WINDOW_COLORS = (
@@ -791,24 +792,19 @@ def _shot_rows(run_dir) -> list:
 def _point_labels(run_dir, rows: list) -> dict:
     """Each point's bar label: the values its sweep set, and its decoder.
 
-    The values are the point's metadata in its resolved/ record, each
-    written by its yaml path on a line of its own, since a path is too
-    long to share one.
+    The values are the point's cells in the csv files
+    (run_folder.swept_values), the value it ran with at each swept yaml
+    path, each on a line of its own, since a path is too long to share
+    one.
     """
+    algorithms = {row["point_id"]: row["algorithm"] for row in rows}
+    point_ids = list(algorithms)
+    swept = run_folder.swept_values(run_dir, point_ids)
     labels = {}
-    for row in rows:
-        point_id = row["point_id"]
-        if point_id in labels:
-            continue
-        record_path = pathlib.Path(run_dir) / "resolved" / f"{point_id}.json"
-        record_text = record_path.read_text()
-        record = json.loads(record_text)
-        pairs = []
-        for path, value in record["metadata"].items():
-            value_text = json.dumps(value)
-            pairs.append(f"{path}={value_text}")
-        pairs.append(row["algorithm"])
-        labels[point_id] = "\n".join(pairs)
+    for point_id, cells in swept.items():
+        lines = [f"{path}={cell}" for path, cell in cells.items()]
+        lines.append(algorithms[point_id])
+        labels[point_id] = "\n".join(lines)
     return labels
 
 

@@ -302,6 +302,16 @@ def test_the_difference_sequence_is_equation_24_on_the_shifted_differences():
     assert high == pytest.approx(expected_high, rel=1e-12)
 
 
+def test_the_difference_sequence_refuses_failures_that_do_not_pair():
+    with pytest.raises(ValueError) as refusal:
+        failure_statistics.difference_sequence([True, False], [True])
+
+    assert str(refusal.value) == (
+        "the two points' failures pair seed by seed, but the first has 2 "
+        "seeds and the second 1"
+    )
+
+
 def test_the_sequence_covers_a_learning_run_at_its_stop_property():
     """A learner whose failure chance falls with each failure.
 

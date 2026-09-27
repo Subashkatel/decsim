@@ -253,9 +253,17 @@ def difference_sequence(
     seeds of p_first(s | past) - p_second(s | past), the seeds being
     those both points scored, with no common mean assumed. Returns
     (low, high).
+
+    Raises:
+        ValueError: the two lists do not pair seed by seed.
     """
     first = numpy.asarray(first_failures, dtype=float)
     second = numpy.asarray(second_failures, dtype=float)
+    if len(first) != len(second):
+        raise ValueError(
+            "the two points' failures pair seed by seed, but the first "
+            f"has {len(first)} seeds and the second {len(second)}"
+        )
     differences = first - second
     shifted = differences + 1
     rescaled = shifted / 2

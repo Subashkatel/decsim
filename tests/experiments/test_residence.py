@@ -204,7 +204,7 @@ def test_a_shot_that_was_not_traced_writes_no_row(tmp_path):
     measurement = _TracedShot(None)
 
     rows = residence.rows_of([measurement])
-    residence.write_residence(rows, tmp_path)
+    residence.write_residence(rows, tmp_path, {})
     written = tmp_path / "residence.csv"
 
     assert rows == []

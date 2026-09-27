@@ -56,11 +56,12 @@ def fold_the_experiment(experiment_dir: pathlib.Path) -> list:
     swept = {}
     for configuration_id, report_dir in combined_folders.items():
         point_ids = point_ids_by_configuration.get(configuration_id, [])
-        started_utc = run_folder.start_run(None, report_dir, point_ids)
+        started_utc = run_folder.utc_now()
         folders = pieces.folders_of(experiment_dir, point_ids)
         sweep_rows = collect_command.write_the_run_folder(
             experiment_dir, folders, point_ids, report_dir
         )
+        run_folder.snapshot_code_state(None, report_dir)
         run_folder.finish_run(None, report_dir, point_ids, started_utc)
         sweep_by_point = {row["point_id"]: row for row in sweep_rows}
         for point_id in point_ids:

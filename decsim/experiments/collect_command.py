@@ -19,6 +19,7 @@ import functools
 import math
 import pathlib
 import sys
+import tempfile
 from typing import Optional
 
 import decsim.collect as collect
@@ -256,30 +257,24 @@ def write_the_run_folder(
     collection and rounds from its resolved/ record, the rest from its
     pieces, folders, as pieces.folders_of gave them. Every file reads
     that one list, so a piece saved while the fold runs is in none of
-    them. What an earlier fold wrote is removed first, so nothing of a
-    point the folder no longer holds stays. So a collect that found its
-    pieces saved, or a status after a yaml changed, writes the folder
-    whole: the online thresholds'
-    trajectories from their prefixes' last states, the residence table
-    from the pieces' traced shots, and the figures. Returns the summary
-    rows.
+    them. The fold is built whole in a staging folder beside report_dir
+    and moved in only then, in place of the last fold, so a fold that is
+    refused (two pieces of a point with different columns) leaves the
+    last one as it was, and nothing of a point the folder no longer
+    holds stays. So a collect that found its pieces saved, or a status
+    after a yaml changed, writes the folder whole: the online
+    thresholds' trajectories from their prefixes' last states, the
+    residence table from the pieces' traced shots, and the figures.
+    Returns the summary rows.
     """
-    run_folder.remove_the_fold(report_dir)
-    records = run_folder.resolved_by_point(experiment_dir)
-    swept = run_folder.swept_values(experiment_dir, point_ids)
-    rules = {}
-    for point_id in point_ids:
-        record = records[point_id]
-        rules[point_id] = _recorded_rule(record)
-        _write_the_recorded_trajectory(
-            experiment_dir, folders, record, report_dir, swept
+    combined_dir = report_dir.parent
+    combined_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=combined_dir, prefix=".") as staged:
+        staging = pathlib.Path(staged)
+        rows = _fold_into_the_staging(
+            experiment_dir, folders, point_ids, staging
         )
-    seeds_by_point = pieces.seed_ranges_of(folders)
-    rows = report.fold_pieces(
-        experiment_dir, folders, point_ids, seeds_by_point, report_dir, rules
-    )
-    residence_rows = residence.rows_in(folders)
-    residence.write_residence(residence_rows, report_dir)
+        run_folder.publish_the_fold(staging, report_dir)
     plots.plots(report_dir)
     return rows
 
@@ -359,6 +354,31 @@ def _recorded_rule(record: dict) -> collection_module.PointRule:
     return collection_module.PointRule(
         settings, facts["adaptive"], record["rounds_per_shot"]
     )
+
+
+def _fold_into_the_staging(
+    experiment_dir: pathlib.Path,
+    folders: list,
+    point_ids: list,
+    staging: pathlib.Path,
+) -> list:
+    """Every file of the fold written into staging; the summary rows."""
+    records = run_folder.resolved_by_point(experiment_dir)
+    swept = run_folder.swept_values(experiment_dir, point_ids)
+    rules = {}
+    for point_id in point_ids:
+        record = records[point_id]
+        rules[point_id] = _recorded_rule(record)
+        _write_the_recorded_trajectory(
+            experiment_dir, folders, record, staging, swept
+        )
+    seeds_by_point = pieces.seed_ranges_of(folders)
+    rows = report.fold_pieces(
+        experiment_dir, folders, point_ids, seeds_by_point, staging, rules
+    )
+    residence_rows = residence.rows_in(folders)
+    residence.write_residence(residence_rows, staging, swept)
+    return rows
 
 
 def _write_the_recorded_trajectory(

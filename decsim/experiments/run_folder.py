@@ -442,19 +442,23 @@ def write_json(path: pathlib.Path, value) -> None:
     path.write_text(lines)
 
 
-def remove_the_fold(run_dir: pathlib.Path) -> None:
-    """What a fold writes into a run folder, removed; the rest kept.
+def publish_the_fold(staging: pathlib.Path, run_dir: pathlib.Path) -> None:
+    """A fold built whole in staging moved into run_dir, the last one out.
 
     A fold writes the folder's csv files and its points' resolved/ and
-    inputs/ copies, all derived from the experiment folder, so a fold
-    run again writes them whole. The manifest, the code state and the
-    traced shots' files are not a fold's and stay.
+    inputs/ copies, all derived from the experiment folder, so the last
+    fold's are removed and the new ones moved in. The manifest, the
+    code state and the traced shots' files are not a fold's and stay.
     """
+    run_dir.mkdir(parents=True, exist_ok=True)
     for csv_path in run_dir.glob("*.csv"):
         csv_path.unlink()
     for folder_name in (RESOLVED_FOLDER, INPUTS_FOLDER):
         folder = run_dir / folder_name
         shutil.rmtree(folder, ignore_errors=True)
+    for path in staging.iterdir():
+        target = run_dir / path.name
+        path.rename(target)
 
 
 def staging_path(path: pathlib.Path) -> pathlib.Path:

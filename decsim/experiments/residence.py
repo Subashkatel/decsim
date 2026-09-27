@@ -66,12 +66,14 @@ def rows_in(folders: list) -> list:
     return rows
 
 
-def write_residence(rows: list, report_dir: pathlib.Path) -> None:
-    """residence.csv, left unwritten when no shot of the run was traced."""
+def write_residence(rows: list, report_dir: pathlib.Path, swept: dict) -> None:
+    """residence.csv, left unwritten when no shot of the run was traced.
+
+    swept maps each point id to its swept values (run_folder.swept_values).
+    """
     if not rows:
         return
     path = pathlib.Path(report_dir) / "residence.csv"
-    swept = report.swept_values_of(report_dir)
     report.write_csv(rows, path, swept)
 
 

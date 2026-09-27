@@ -2815,3 +2815,40 @@ def _write_csv_rows(path: pathlib.Path, rows: list) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(first_row))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def test_a_refused_status_leaves_the_last_run_folder_as_it_was(tmp_path):
+    """A fold that is refused publishes nothing, so the last one stands.
+
+    Ten shots in two pieces are folded by a status. The second piece
+    then loses a column of its shots.csv, as a piece measured by other
+    code would, and a second status is refused. Every file of the run
+    folder and status.csv are byte for byte what the first status wrote.
+    """
+    config_path = _capped_noisy_config(tmp_path, 10, 75)
+    out_dir = tmp_path / "out"
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["status", str(out_dir)])
+    before = _run_folder_bytes(out_dir)
+    piece_folders = out_dir.glob("pieces/*/*")
+    second_piece = max(piece_folders, key=lambda folder: folder.name)
+    shots_path = second_piece / "shots.csv"
+    shot_rows = _csv_rows(shots_path)
+    for row in shot_rows:
+        del row["queue_wait_mean_us"]
+    _write_csv_rows(shots_path, shot_rows)
+
+    with pytest.raises(SystemExit):
+        command.main(["status", str(out_dir)])
+
+    assert _run_folder_bytes(out_dir) == before
+
+
+def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:
+    """Each file of combined/ and status.csv, by its path, and its bytes."""
+    paths = [
+        path for path in experiment_dir.glob("combined/**/*") if path.is_file()
+    ]
+    status_path = experiment_dir / "status.csv"
+    paths.append(status_path)
+    return {str(path): path.read_bytes() for path in paths}

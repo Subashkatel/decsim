@@ -93,13 +93,15 @@ def whole_count(
     )
 
 
-def boolean(section: Mapping, section_name: str, key: str) -> bool:
-    """An on-or-off knob, off when the yaml is silent.
+def boolean(
+    section: Mapping, section_name: str, key: str, default: bool = False
+) -> bool:
+    """An on-or-off knob, the default when the yaml is silent.
 
     The test is the type, because 1 == True and 0 == False would let a
     count stand in for a knob (bool is a subtype of int).
     """
-    value = section.get(key, False)
+    value = section.get(key, default)
     if isinstance(value, bool):
         return value
     raise ValueError(

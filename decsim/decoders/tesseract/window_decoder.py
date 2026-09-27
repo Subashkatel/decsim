@@ -8,14 +8,13 @@ detector coordinates; one decode is one decode_to_errors call. Backend
 merging is off so the physical columns keep their one-to-one identity.
 """
 
-import dataclasses
 import math
 import numbers
 import os
 import secrets
 import threading
 import weakref
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import numpy
 import stim
@@ -25,58 +24,37 @@ import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.seeding as seeding
 
-_DETECTOR_ORDER_METHODS = frozenset({"index", "breadth_first", "coordinate"})
-_SEED_LIMIT = 1 << 64
+if TYPE_CHECKING:
+    import decsim.decoders.tesseract.decoder as tesseract_decoder
+
+# detector_order_method names one of these rows: the tesseract_decoder
+# DetOrder member that builds the detector orders (tesseract_decoder
+# utils.build_det_orders), by detector index, breadth first from a
+# detector, or by detector coordinate.
+DETECTOR_ORDER_METHODS = {
+    "index": "DetIndex",
+    "breadth_first": "DetBFS",
+    "coordinate": "DetCoordinate",
+}
+
 _Status = decoder_module.BackendDecodeStatus
 _Reason = backend_outcome.BackendFailureReason
 
 
-@dataclasses.dataclass(frozen=True)
-class TesseractDecoderConfig:
-    """Deterministic search profile for the official Tesseract backend.
+class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
+    """Decode one physical fault view with the official Tesseract backend.
 
-    The search limits and ensemble size default to the official
-    short-beam profile. This adapter disables backend merging to retain
-    one-to-one physical column identity. The run supplies the detector
-    order seed; direct offline callers should set one for reproducible
-    results.
+    The detector orders are drawn from the run seed, so a direct caller
+    binds one through reserve_run_seed and commit_run_seed for
+    reproducible results.
     """
 
-    detector_beam: int = 15
-    beam_climbing: bool = True
-    no_revisit_detectors: bool = True
-    priority_queue_limit: int = 200_000
-    detector_order_method: str = "index"
-    detector_order_count: int = 16
-    detector_order_seed: Optional[int] = None
-
-    def __post_init__(self) -> None:
-        integer_fields = (
-            "detector_beam",
-            "priority_queue_limit",
-            "detector_order_count",
-        )
-        _check_exact_type(self, integer_fields, int)
-        _check_search_limits(self)
-        boolean_fields = ("beam_climbing", "no_revisit_detectors")
-        _check_exact_type(self, boolean_fields, bool)
-        _check_detector_order_method(self.detector_order_method)
-        _check_detector_order_seed(self.detector_order_seed)
-
-
-class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
-    """Decode one physical fault view with the official Tesseract backend."""
-
     def __init__(
-        self, configuration: Optional[TesseractDecoderConfig] = None
+        self, settings: "tesseract_decoder.TesseractDecoder.Settings"
     ) -> None:
-        if configuration is None:
-            configuration = TesseractDecoderConfig()
-        if not isinstance(configuration, TesseractDecoderConfig):
-            raise TypeError("configuration must be a TesseractDecoderConfig")
-        self.configuration = configuration
-        self._initialize_run_seed_binding(configuration.detector_order_seed)
-        self._effective_seed = self._explicit_seed
+        self.settings = settings
+        self._initialize_run_seed_binding(None)
+        self._effective_seed = None
         self.compiled_by_model: dict = {}
         self._worker_process_id = os.getpid()
         self._worker_thread_id = None
@@ -158,12 +136,10 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         detector_error_model, coordinates = detector_error_model_of(
             model, physical_faults
         )
-        if self.configuration.detector_order_method == "coordinate":
+        if self.settings.detector_order_method == "coordinate":
             _validate_coordinate_order(coordinates)
         seed = self._resolved_detector_order_seed()
-        compiled = _compile_backend(
-            self.configuration, detector_error_model, seed
-        )
+        compiled = _compile_backend(self.settings, detector_error_model, seed)
 
         def discard_dead_model(reference) -> None:
             current = self.compiled_by_model.get(model_identity)
@@ -207,41 +183,7 @@ def detector_error_model_of(model, physical_faults) -> tuple:
 
 
 class _BackendConstructionError(RuntimeError):
-    """The optional backend rejected a locally validated configuration."""
-
-
-def _check_exact_type(configuration, names, exact_type) -> None:
-    """Each named field is exactly that built-in type, not a subclass."""
-    type_name = exact_type.__name__
-    for name in names:
-        value = getattr(configuration, name)
-        if type(value) is not exact_type:
-            raise TypeError(f"{name} must be an exact built-in {type_name}")
-
-
-def _check_search_limits(configuration) -> None:
-    if configuration.detector_beam < 0:
-        raise ValueError("detector_beam must be nonnegative")
-    if configuration.priority_queue_limit < 1:
-        raise ValueError("priority_queue_limit must be positive")
-    if configuration.detector_order_count < 1:
-        raise ValueError("detector_order_count must be positive")
-
-
-def _check_detector_order_method(method) -> None:
-    if type(method) is not str or method not in _DETECTOR_ORDER_METHODS:
-        methods = ", ".join(sorted(_DETECTOR_ORDER_METHODS))
-        raise ValueError(f"detector_order_method must be one of: {methods}")
-
-
-def _check_detector_order_seed(seed) -> None:
-    if seed is None:
-        return
-    if type(seed) is not int or not 0 <= seed < _SEED_LIMIT:
-        raise ValueError(
-            "detector_order_seed must be an unsigned 64-bit built-in "
-            "integer or None"
-        )
+    """The optional backend rejected the settings for this model."""
 
 
 def _load_tesseract_backend():
@@ -256,31 +198,29 @@ def _load_tesseract_backend():
 
 
 def _compile_backend(
-    configuration: TesseractDecoderConfig, detector_error_model, seed: int
+    settings: "tesseract_decoder.TesseractDecoder.Settings",
+    detector_error_model,
+    seed: int,
 ):
     """The backend decoder for one model; construction failures are typed."""
     backend = _load_tesseract_backend()
-    methods = {
-        "index": backend.utils.DetOrder.DetIndex,
-        "breadth_first": backend.utils.DetOrder.DetBFS,
-        "coordinate": backend.utils.DetOrder.DetCoordinate,
-    }
-    method = methods[configuration.detector_order_method]
+    member = DETECTOR_ORDER_METHODS[settings.detector_order_method]
+    method = getattr(backend.utils.DetOrder, member)
     try:
         detector_orders = backend.utils.build_det_orders(
             detector_error_model,
-            configuration.detector_order_count,
+            settings.detector_order_count,
             method,
             seed,
         )
         upstream_configuration = backend.tesseract.TesseractConfig(
             dem=detector_error_model,
-            det_beam=configuration.detector_beam,
-            beam_climbing=configuration.beam_climbing,
-            no_revisit_dets=configuration.no_revisit_detectors,
+            det_beam=settings.detector_beam,
+            beam_climbing=settings.beam_climbing,
+            no_revisit_dets=settings.no_revisit_detectors,
             verbose=False,
             merge_errors=False,
-            pqlimit=configuration.priority_queue_limit,
+            pqlimit=settings.priority_queue_limit,
             det_orders=detector_orders,
             det_penalty=0.0,
             create_visualization=False,

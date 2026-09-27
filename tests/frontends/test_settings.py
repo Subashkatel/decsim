@@ -9,6 +9,7 @@ tables, and pin the sentence every refusal reads as.
 """
 
 import json
+import pathlib
 import textwrap
 
 import pytest
@@ -269,19 +270,13 @@ def test_one_files_row_read_from_two_folders_names_its_point_alike(
     tmp_path,
 ):
     """The files' folder is where they were read; their content is the point."""
-    folders = [tmp_path / "first", tmp_path / "elsewhere"]
-    workload = {"kind": "files", "operations": "merge.json"}
-    point_ids = []
-    for folder in folders:
-        folder.mkdir()
-        _write_json(folder, "merge.json", MERGE_OPERATIONS)
-        config_path = _files_config(folder, workload)
-        config = experiment.load_experiment(config_path)
-        task = config.point_task(AT_DISTANCE_3)
-        point_id = task.strong_id()
-        point_ids.append(point_id)
+    first_folder = tmp_path / "first"
+    other_folder = tmp_path / "elsewhere"
 
-    assert point_ids[0] == point_ids[1]
+    first_point_id = _point_id_of_the_merge_files_in(first_folder)
+    other_point_id = _point_id_of_the_merge_files_in(other_folder)
+
+    assert first_point_id == other_point_id
 
 
 def test_one_circuit_under_two_operations_from_files_is_refused(tmp_path):
@@ -342,3 +337,14 @@ def test_an_operations_file_of_another_schema_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match="is not a decsim.ops/1 operation"):
         _point(config_path, AT_DISTANCE_3)
+
+
+def _point_id_of_the_merge_files_in(folder: pathlib.Path) -> str:
+    """The point a files yaml in folder names, its operations merge.json."""
+    folder.mkdir()
+    _write_json(folder, "merge.json", MERGE_OPERATIONS)
+    workload = {"kind": "files", "operations": "merge.json"}
+    config_path = _files_config(folder, workload)
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(AT_DISTANCE_3)
+    return task.strong_id()

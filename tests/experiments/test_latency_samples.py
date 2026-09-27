@@ -7,6 +7,7 @@ inter-arrival, the deadline a latency figure draws. decsim draws no
 latency figure; these rows are everything one needs.
 """
 
+import collections
 import csv
 
 import decsim.experiments.collect_command as collect_command
@@ -58,8 +59,9 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
 ):
     """A sample per decoded window, beside its point and its deadline.
 
-    The deadline is the window's inter-arrival, commit rounds (d when
-    null) times the round period: 3 us at d 3 and 5 us at d 5.
+    Each point holds as many samples as its shots decoded windows. The
+    deadline is the window's inter-arrival, commit rounds (d when null)
+    times the round period: 3 us at d 3 and 5 us at d 5.
     """
     monkeypatch.chdir(tmp_path)
     config_path = wall_clock_config(tmp_path, [3, 5])
@@ -73,13 +75,18 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
         reader = csv.DictReader(handle)
         shots = list(reader)
 
+    point_ids = [row["point_id"] for row in samples]
+    sample_counts = collections.Counter(point_ids)
     deadlines = {
-        (row["qpu.distance"], row["window_period_us"]) for row in samples
+        (row["point_id"], row["qpu.distance"], row["window_period_us"])
+        for row in samples
     }
-    windows_per_shot = [int(row["windows"]) for row in shots]
-    windows = sum(windows_per_shot)
-    assert len(samples) == windows
-    assert deadlines == {("3", "3.0"), ("5", "5.0")}
+    point_of = {row["qpu.distance"]: row["point_id"] for row in shots}
+    assert sample_counts == _windows_by_point(shots)
+    assert deadlines == {
+        (point_of["3"], "3", "3.0"),
+        (point_of["5"], "5", "5.0"),
+    }
 
 
 def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):
@@ -104,3 +111,11 @@ def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):
     )
     card_run_dir, rows = collect_command.run_experiment(card_path)
     assert not (card_run_dir / "latency_samples.csv").exists()
+
+
+def _windows_by_point(shots: list) -> collections.Counter:
+    """The windows every point's shots decoded, off shots.csv."""
+    windows = collections.Counter()
+    for row in shots:
+        windows[row["point_id"]] += int(row["windows"])
+    return windows

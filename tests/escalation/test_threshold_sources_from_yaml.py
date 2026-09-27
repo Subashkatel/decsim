@@ -216,6 +216,40 @@ def test_a_window_only_sweep_finds_its_table_row_by_path(tmp_path):
     assert two.metadata == {"windows.commit_rounds": 2}
 
 
+def test_an_integer_key_matches_its_row_exactly(tmp_path):
+    """Only a float key reads back within a relative 1e-9 of its text.
+
+    A whole number is written exactly, so 1000000001 finds no row keyed
+    1000000000 although the two lie within 1e-9 of each other.
+    """
+    table_path = tmp_path / "window_table.csv"
+    table_path.write_text(
+        "windows.commit_rounds,gth_eq4_wilson\n1000000000,12.0\n"
+    )
+    card = {"threshold_source": "table", "threshold_table": table_path.name}
+    config_path = source_config(tmp_path, card)
+    config_text = config_path.read_text()
+    raw = yaml.safe_load(config_text)
+    raw["qpu"]["distance"] = 3
+    raw["workload"]["arguments"]["physical_error_probability"] = (
+        NEAR_THRESHOLD_P
+    )
+    raw["sweep"] = [
+        {"axes": {"windows.commit_rounds": [1000000001]}, "shots": 1}
+    ]
+    edited_text = yaml.safe_dump(raw)
+    config_path.write_text(edited_text)
+    config = load_experiment(config_path)
+    sentence = (
+        "has no row for {'windows.commit_rounds': 1000000001}; its rows "
+        "are [{'windows.commit_rounds': '1000000000'}]"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        config.tasks()
+
+
 def test_table_source_key_guards(tmp_path):
     table = calibration_table(tmp_path)
     both_sources_card = {

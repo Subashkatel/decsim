@@ -14,6 +14,7 @@ STRONG_WINDOW_SHAPES is the geometry the strong tier re-decodes
 
 import csv
 import dataclasses
+import fractions
 import math
 import pathlib
 from collections.abc import Mapping
@@ -655,13 +656,16 @@ def _is_point(row: dict, point: dict) -> bool:
 
 
 def _cell_holds(cell: str, value) -> bool:
-    """Whether a cell holds a value: a number within a relative 1e-9.
+    """Whether a cell holds a value: a float within a relative 1e-9.
 
-    A float written out as text reads back within that; any other value
+    A float written out as text reads back within that. A whole number
+    is written exactly, so it is compared exactly, and any other value
     is compared as its text.
     """
     if not config.is_number(value):
         return cell == str(value)
+    if isinstance(value, int):
+        return fractions.Fraction(cell) == value
     number = float(cell)
     return math.isclose(number, value, rel_tol=1e-9)
 

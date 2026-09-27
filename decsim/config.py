@@ -93,6 +93,23 @@ def whole_count(
     )
 
 
+def whole_counts(
+    section: Mapping, section_name: str, count_keys: Mapping, defaults
+) -> dict:
+    """Each count key's value, read as whole_count reads one.
+
+    count_keys maps a key to its unit and least value; a key the section
+    leaves out takes its attribute on defaults.
+    """
+    counts = {}
+    for key, (unit, minimum) in count_keys.items():
+        default = getattr(defaults, key)
+        counts[key] = whole_count(
+            section, section_name, key, default, unit, minimum
+        )
+    return counts
+
+
 def boolean(
     section: Mapping, section_name: str, key: str, default: bool = False
 ) -> bool:

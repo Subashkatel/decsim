@@ -82,7 +82,9 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
             scaling = _real(section, section_name, scaling_key)
             gamma0 = _real(section, section_name, "gamma0")
             gamma_interval = _gamma_interval(section, section_name)
-            counts = _counts(section, section_name)
+            counts = config.whole_counts(
+                section, section_name, _COUNT_KEYS, _DEFAULTS
+            )
             bases = section.get("bases", cls.bases)
             bases_key = f"{section_name}.bases"
             tables.row(strong_backend.BASIS_DECODES, bases_key, bases)
@@ -195,17 +197,6 @@ def _real(section: Mapping, section_name: str, key: str) -> float:
     raise ValueError(
         f"{section_name}.{key} must be a finite real number (got {value!r})"
     )
-
-
-def _counts(section: Mapping, section_name: str) -> dict:
-    """The iteration limits, the later legs and the solutions sought."""
-    counts = {}
-    for key, (unit, minimum) in _COUNT_KEYS.items():
-        default = getattr(_DEFAULTS, key)
-        counts[key] = config.whole_count(
-            section, section_name, key, default, unit, minimum
-        )
-    return counts
 
 
 def _gamma_interval(section: Mapping, section_name: str) -> tuple:

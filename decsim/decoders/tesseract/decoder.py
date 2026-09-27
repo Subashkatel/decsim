@@ -61,7 +61,9 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
             refusal names.
             """
             del clocks
-            counts = _counts(section, section_name)
+            counts = config.whole_counts(
+                section, section_name, _COUNT_KEYS, _DEFAULTS
+            )
             switches = _switches(section, section_name)
             order_method = _detector_order_method(section, section_name)
             return cls(detector_order_method=order_method, **counts, **switches)
@@ -114,17 +116,6 @@ _COUNT_KEYS = {
 
 # the on-or-off keys
 _SWITCH_KEYS = ("beam_climbing", "no_revisit_detectors")
-
-
-def _counts(section: Mapping, section_name: str) -> dict:
-    """The beam, the queue limit and the order count."""
-    counts = {}
-    for key, (unit, minimum) in _COUNT_KEYS.items():
-        default = getattr(_DEFAULTS, key)
-        counts[key] = config.whole_count(
-            section, section_name, key, default, unit, minimum
-        )
-    return counts
 
 
 def _switches(section: Mapping, section_name: str) -> dict:

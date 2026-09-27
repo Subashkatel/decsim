@@ -467,7 +467,11 @@ def _planned_piece_saver(
 
 
 def _independent_and_online(units: list) -> tuple:
-    """The units split: those of independent shots, and online points'."""
+    """The units split, since only independent shots may run in any order.
+
+    An online piece starts from the calibrator its piece before saved, so
+    it runs after that piece, one at a time; the rest share the pool.
+    """
     independent = []
     online = []
     for unit in units:

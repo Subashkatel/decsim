@@ -165,7 +165,6 @@ inputs
 latency_samples.csv
 links.csv
 manifest.json
-producer.json
 residence.csv
 resolved
 shot_links.csv
@@ -184,8 +183,8 @@ the run started, so no two collects share one.
 The folder is written under `results/`, which is output and is not
 tracked by git. `config/` holds a verbatim copy of the yaml files that
 produced it, `manifest.json` the git commit and the command line,
-`resolved/` every value each point ran with, `inputs/` the workload each
-point ran, `producer.json` the function that made it, and the csv files
+`resolved/` every value each point ran with and the function that made
+its workload, `inputs/` the workload each point ran, and the csv files
 the facts.
 [The run folder](../reference/run_folder.md) has one row per file.
 

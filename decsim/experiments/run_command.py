@@ -47,7 +47,6 @@ def run_one_shot(
     run_dir = run_folder.run_dir_for(config, out_dir)
     point_id = task.strong_id()
     started_utc = run_folder.start_run(config, run_dir, [point_id])
-    run_folder.write_producer(run_dir, settings.workload)
     sections = config.resolved_sections(task.metadata)
     run_folder.record_point(run_dir, task, [(seed, 1)], sections)
     result = machine.run()

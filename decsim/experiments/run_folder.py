@@ -2,8 +2,8 @@
 
 results/<utc stamp>-<name>/, or the folder --out names, holds the config
 chain, the code state as a patch, a manifest of the commit, container,
-host and packages, each sweep point's values (resolved/) and workload
-(inputs/), the maker (producer.json), and the finished flag last. gem5
+host and packages, each sweep point's values and maker (resolved/) and
+workload (inputs/), and the finished flag last. gem5
 writes m5out/ the same way, out of the code tree and never overwritten
 (src/python/m5/main.py --outdir).
 """
@@ -33,7 +33,6 @@ import decsim.frontends.workload_files as workload_files
 RESULTS_DIR = pathlib.Path("results")
 RESOLVED_FOLDER = "resolved"
 INPUTS_FOLDER = "inputs"
-PRODUCER_FILE = "producer.json"
 HASHES_FILE = "hashes.json"
 # Written last, once a run's rows, report and manifest are all in place;
 # a folder without it is a run that stopped or is still running.
@@ -262,8 +261,9 @@ def record_point(
     resolved/<id>.json holds the metadata, the seed ranges run, the
     sections the point's yaml resolved to (its axes placed and its
     references resolved, as Hydra keeps each job's composed config in
-    .hydra/config.yaml), every setting and the values the build derives;
-    a point a Python caller built has no sections. inputs/<id>/ holds
+    .hydra/config.yaml), the maker a producer workload called with the
+    point's own arguments, every setting and the values the build
+    derives; a point a Python caller built has no sections. inputs/<id>/ holds
     the workload as the files row reads it, with each file's sha256 in
     hashes.json, so a rerun needs no maker installed. Returns the id.
     """
@@ -275,6 +275,7 @@ def record_point(
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
         "sections": collect.json_value(sections),
+        "producer": _producer(settings.workload),
         "settings": collect.json_value(settings),
         "built": _built_values(shot_settings),
     }
@@ -287,28 +288,6 @@ def record_point(
         inputs_dir = run_dir / INPUTS_FOLDER / point_id
         _write_inputs(inputs_dir, record)
     return point_id
-
-
-def write_producer(
-    run_dir: pathlib.Path, workload: workload_settings.WorkloadSettings
-) -> None:
-    """producer.json: a producer row's maker, arguments and package version.
-
-    The name's first dotted word is the package in both forms
-    pkgutil.resolve_name reads, module:function and module.function.
-    """
-    if workload.kind != "producer":
-        return
-    row_settings = workload.row_settings
-    function = row_settings.function
-    module_name, _, _ = function.partition(":")
-    producer = {
-        "function": function,
-        "arguments": collect.json_value(row_settings.arguments),
-        "version": _package_version(module_name),
-    }
-    producer_path = run_dir / PRODUCER_FILE
-    write_json(producer_path, producer)
 
 
 def mark_finished(run_dir: pathlib.Path) -> None:
@@ -372,7 +351,7 @@ def seed_ranges(ranges: list) -> list:
 
 
 def copy_point_records(run_dirs: list, out_dir: pathlib.Path) -> None:
-    """The folded folders' resolved/, inputs/ and producer.json, in one.
+    """The folded folders' resolved/ and inputs/, in one.
 
     A point's files are named by its content, so the same point in two
     shards is the same file, and the union is every point's. Its record
@@ -384,10 +363,6 @@ def copy_point_records(run_dirs: list, out_dir: pathlib.Path) -> None:
         source = run_dir / INPUTS_FOLDER
         target = out_dir / INPUTS_FOLDER
         shutil.copytree(source, target, dirs_exist_ok=True)
-        producer_path = run_dir / PRODUCER_FILE
-        if producer_path.exists():
-            target = out_dir / PRODUCER_FILE
-            shutil.copy2(producer_path, target)
 
 
 def write_json(path: pathlib.Path, value) -> None:
@@ -515,6 +490,25 @@ def _write_inputs(inputs_dir: pathlib.Path, record) -> None:
         relative = path.relative_to(inputs_dir)
         hashes[str(relative)] = _sha256_of(path)
     write_json(hashes_path, hashes)
+
+
+def _producer(workload: workload_settings.WorkloadSettings) -> Optional[dict]:
+    """A producer row's maker, its arguments and its package's version.
+
+    The name's first dotted word is the package in both forms
+    pkgutil.resolve_name reads, module:function and module.function. A
+    workload read from files has no maker, so None.
+    """
+    if workload.kind != "producer":
+        return None
+    row_settings = workload.row_settings
+    function = row_settings.function
+    module_name, _, _ = function.partition(":")
+    return {
+        "function": function,
+        "arguments": collect.json_value(row_settings.arguments),
+        "version": _package_version(module_name),
+    }
 
 
 def _package_version(module_name: str) -> Optional[str]:

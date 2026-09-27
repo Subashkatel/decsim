@@ -536,8 +536,7 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     inputs_dir = out_dir / "inputs" / resolved_path.stem
     hashes_text = (inputs_dir / "hashes.json").read_text()
     hashes = json.loads(hashes_text)
-    producer_text = (out_dir / "producer.json").read_text()
-    producer = json.loads(producer_text)
+    producer = resolved["producer"]
 
     assert "terminal status: complete" in lines[2]
     assert resolved["seeds"] == [[0, 1]]
@@ -618,7 +617,7 @@ def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
     "function",
     ["decsim.producers:memory_circuit", "decsim.producers.memory_circuit"],
 )
-def test_producer_json_names_the_maker_in_either_of_its_forms(
+def test_a_points_record_names_the_maker_in_either_of_its_forms(
     tmp_path, function
 ):
     """pkgutil.resolve_name reads both forms, so the run records both."""
@@ -629,9 +628,11 @@ def test_producer_json_names_the_maker_in_either_of_its_forms(
 
     run_command.run_one_shot(config_path, out_dir=out_dir)
 
-    producer_text = (out_dir / "producer.json").read_text()
-    producer = json.loads(producer_text)
-    assert producer["function"] == function
+    resolved_dir = out_dir / "resolved"
+    resolved_path = _one_file(resolved_dir, "*.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    assert resolved["producer"]["function"] == function
     assert (out_dir / "finished").exists()
 
 
@@ -686,8 +687,23 @@ def test_a_combined_folder_holds_every_shards_points(tmp_path):
     resolved = list(resolved_files)
 
     assert len(resolved) == 4
-    assert (combined_dir / "producer.json").exists()
     assert (combined_dir / "finished").exists()
+
+
+def test_every_point_records_its_own_makers_arguments(tmp_path):
+    """Each point's maker was called with its own arguments and version."""
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    records = run_folder.resolved_by_point(out_dir)
+    arguments = [record["producer"]["arguments"] for record in records.values()]
+    made_at = {
+        (made["physical_error_probability"], made["distance"])
+        for made in arguments
+    }
+    assert made_at == {(0.001, 3), (0.001, 5), (0.003, 3), (0.003, 5)}
 
 
 def _seeds_of_the_one_point(run_dir):

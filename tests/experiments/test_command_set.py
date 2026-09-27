@@ -1991,6 +1991,17 @@ def _run_the_round(round_dir: pathlib.Path, task_order=None) -> None:
         )
 
 
+def _plan_and_run_until_stopped(config_paths: list, experiment_dir) -> int:
+    """Rounds planned and run until every point has stopped; how many."""
+    rounds = 0
+    while True:
+        round_dir = _plan(config_paths, experiment_dir, 3)
+        if round_dir is None:
+            return rounds
+        _run_the_round(round_dir)
+        rounds += 1
+
+
 def _planned_ranges(round_dir: pathlib.Path) -> list:
     """A round's pieces as (point id, first seed, count)."""
     plan_path = round_dir / "plan.csv"
@@ -2008,17 +2019,21 @@ def _cut_four_point_sweep(tmp_path) -> pathlib.Path:
     return yaml_configs.write_config(cut_folder, cut_card)
 
 
-def test_a_lost_piece_is_planned_again_with_its_own_seeds(tmp_path):
-    """A planned piece with no folder is the next round's, and alone.
+def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
+    tmp_path,
+):
+    """The uncut collect is the oracle for rounds that lost a piece.
 
-    Round one cuts every point into pieces of one shot over three tasks,
-    and all run; one piece is then deleted, as a task killed before its
-    rename leaves it missing. Every point is at its cap but that one, so
-    round two is that piece with its own seeds, and after it runs the
-    plan has nothing left.
+    Round one cuts every point into pieces of one shot over three tasks;
+    one piece is then deleted, as a task killed before its rename leaves
+    it missing. Round two plans that piece alone, with its own seeds,
+    and the status fold of both rounds is the uncut run's, file by file.
     """
+    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     cut_path = _cut_four_point_sweep(tmp_path)
+    whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
+    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
     first_round = _plan([cut_path], cut_dir, 3)
     _run_the_round(first_round)
     second_pieces = cut_dir.glob("pieces/*/1-1")
@@ -2027,11 +2042,122 @@ def test_a_lost_piece_is_planned_again_with_its_own_seeds(tmp_path):
 
     second_round = _plan([cut_path], cut_dir, 3)
     _run_the_round(second_round)
+    command.main(["status", str(cut_dir)])
 
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    whole_rows = _rows_of_every_file(whole_run_dir)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    cut_rows = _rows_of_every_file(cut_run_dir)
     lost_point = lost_piece.parent.name
     assert _planned_ranges(second_round) == [(lost_point, 1, 1)]
-    assert (lost_piece / "piece.json").exists()
     assert _plan([cut_path], cut_dir, 3) is None
+    assert cut_rows == whole_rows
+
+
+def _one_distance_config(tmp_path, distance: int) -> pathlib.Path:
+    """The four-point sweep at one distance, in a folder of its own."""
+    folder = tmp_path / f"d{distance}"
+    folder.mkdir()
+    (block,) = FOUR_POINT_SWEEP["sweep"]
+    axes = {**block["axes"], "qpu.distance": [distance]}
+    card = {
+        "sweep": [{**block, "axes": axes}],
+        "collection": {"piece_rounds": 1},
+    }
+    return yaml_configs.write_config(folder, card)
+
+
+def _sorted_rows_of_every_file(run_dir) -> dict:
+    """Each file's rows without the wall clock, in one order for all."""
+    rows = _rows_of_every_file(run_dir)
+    return {name: sorted(rows[name], key=_row_key) for name in rows}
+
+
+def _row_key(row: dict) -> list:
+    cells = row.items()
+    return sorted(cells)
+
+
+def test_pieces_of_two_distances_fold_to_one_run(tmp_path):
+    """Two yamls, one a distance, of one configuration are one run.
+
+    The sweep and the collection are no part of a configuration's id, so
+    a grid split one file a distance is one configuration. Planned
+    together, run as two tasks in reverse order, and folded by status,
+    its rows are the uncut two-distance run's; the fold writes points in
+    its own order, so the rows are compared in one order.
+    """
+    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    split_paths = [
+        _one_distance_config(tmp_path, 3),
+        _one_distance_config(tmp_path, 5),
+    ]
+    whole_dir = tmp_path / "whole"
+    split_dir = tmp_path / "split"
+    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    round_dir = _plan(split_paths, split_dir, 2)
+
+    _run_the_round(round_dir, task_order=[1, 0])
+    command.main(["status", str(split_dir)])
+
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    whole_rows = _sorted_rows_of_every_file(whole_run_dir)
+    split_run_dir = yaml_configs.run_folder_of(split_dir)
+    split_rows = _sorted_rows_of_every_file(split_run_dir)
+    assert split_rows == whole_rows
+
+
+def _typed_status_rows(experiment_dir: pathlib.Path) -> list:
+    status_path = experiment_dir / "status.csv"
+    return report.read_rows(status_path)
+
+
+def _estimate_by_the_statistics(row: dict) -> tuple:
+    """failure_statistics on a status row's own prefix counts and stop."""
+    stop_kind = failure_statistics.StopKind(row["state"])
+    estimate = failure_statistics.estimate(
+        row["prefix_failures"], row["prefix_scored_shots"], stop_kind
+    )
+    return (estimate.rate, estimate.low, estimate.high)
+
+
+def _estimate_of(row: dict) -> tuple:
+    """A status row's estimate and limits, an empty cell as None."""
+    columns = (
+        "logical_error_rate_estimate",
+        "logical_error_rate_low",
+        "logical_error_rate_high",
+    )
+    values = []
+    for column in columns:
+        value = row[column]
+        if value == "":
+            value = None
+        values.append(value)
+    return tuple(values)
+
+
+def test_a_status_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
+    """The referent is failure_statistics on the row's own counts and stop.
+
+    One noisy point with a target of three failures runs round after
+    round until the plan has nothing left; status gives it the target
+    state, and its estimate and exact limits are the ones the
+    statistics module gives the same failures, scored shots and stop.
+    """
+    collection = {"max_shots": 60, "max_failures": 3, "piece_rounds": 45}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    rounds = _plan_and_run_until_stopped([config_path], out_dir)
+    command.main(["status", str(out_dir)])
+
+    (row,) = _typed_status_rows(out_dir)
+    assert rounds > 1
+    assert row["state"] == "target"
+    assert row["prefix_failures"] == 3
+    assert _estimate_of(row) == _estimate_by_the_statistics(row)
 
 
 def test_an_online_points_planned_pieces_run_in_one_task_as_the_uncut_point(

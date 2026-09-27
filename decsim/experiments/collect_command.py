@@ -236,12 +236,12 @@ def run_experiment(
     _collect_until_stopped(
         points, experiment_dir, configuration_id, measure_shot, processes
     )
-    rows = _write_the_run_folder(experiment_dir, points, point_ids, report_dir)
+    rows = write_the_run_folder(experiment_dir, points, point_ids, report_dir)
     run_folder.finish_run(config, report_dir, point_ids, started_utc)
     return report_dir, rows
 
 
-def _write_the_run_folder(
+def write_the_run_folder(
     experiment_dir: pathlib.Path,
     points: list,
     point_ids: list,
@@ -449,6 +449,21 @@ def recorded_points(configs: list, experiment_dir: pathlib.Path) -> list:
         point_tasks.extend(config_tasks)
     unique = _unique_tasks(point_tasks)
     return _point_collections(experiment_dir, point_tasks, unique)
+
+
+def saved_points(configs: list, experiment_dir: pathlib.Path) -> list:
+    """Every point of one configuration's yamls, as another run recorded them.
+
+    Each has its saved prefix counted, so an online point's last piece
+    is known. Nothing is written, so a status can fold while a round
+    runs.
+    """
+    point_tasks = _point_tasks_of(configs)
+    unique = _unique_tasks(point_tasks)
+    points = _point_collections(experiment_dir, point_tasks, unique)
+    for point in points:
+        point.count_the_saved(experiment_dir)
+    return points
 
 
 def _point_tasks_of(configs: list) -> list:

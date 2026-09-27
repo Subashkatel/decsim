@@ -60,6 +60,12 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | --- | --- | --- |
 | `config` | required | the experiment yaml to resolve |
 
+## `decsim status`
+
+| Argument | Default | What it is |
+| --- | --- | --- |
+| `experiment` | required | the experiment folder to fold |
+
 ## `decsim trace`
 
 | Argument | Default | What it is |

@@ -9,6 +9,7 @@ loads Stim. The console script and `python -m decsim` both land here.
     decsim collect <yaml> [--out DIR] [--processes N]
     decsim collect --plan <round>/plan.csv --task K [--processes N]
     decsim plan <yaml>... --out DIR --tasks N [--cores C] [--hours H]
+    decsim status <experiment dir>
     decsim show <yaml>
     decsim diff <run_dir> <run_dir>
     decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
@@ -130,6 +131,13 @@ def _plan(argv: list) -> None:
     plan_command.main(argv)
 
 
+def _status(argv: list) -> None:
+    """An experiment's pieces folded, and where each point stands."""
+    import decsim.experiments.status_command as status_command
+
+    status_command.main(argv)
+
+
 def _show(argv: list) -> None:
     """What one yaml resolves to, before anything runs.
 
@@ -214,6 +222,7 @@ _RUN_BY_VERB = {
     "run": _run,
     "collect": _collect,
     "plan": _plan,
+    "status": _status,
     "show": _show,
     "diff": _diff,
     "plot": _plot,

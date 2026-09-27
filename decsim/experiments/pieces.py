@@ -109,10 +109,19 @@ def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
     return folders
 
 
-def saved_counts(experiment_dir: pathlib.Path, point_id: str) -> dict:
-    """One point's whole pieces, each first seed mapped to its count."""
+def point_folders(folders: list, point_id: str) -> list:
+    """The pieces of one point among folders, in their order."""
+    return [folder for folder in folders if folder.parent.name == point_id]
+
+
+def saved_counts(folders: list) -> dict:
+    """One point's whole pieces, each first seed mapped to its count.
+
+    folders are the point's pieces as folders_of gave them, so a caller
+    that read them once counts what it folds.
+    """
     counts = {}
-    for folder in folders_of(experiment_dir, [point_id]):
+    for folder in folders:
         first_seed, count = _range_of(folder)
         counts[first_seed] = count
     return counts

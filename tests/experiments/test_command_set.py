@@ -1167,7 +1167,8 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     _write_a_saved_piece(tmp_path, point_id, 0, [True])
     _write_a_saved_piece(tmp_path, point_id, 2, [True])
     settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
-    saved = pieces.saved_counts(tmp_path, point_id)
+    point_folders = pieces.folders_of(tmp_path, [point_id])
+    saved = pieces.saved_counts(point_folders)
     point = collect_command.PointCollection(task, settings, 1, 15, saved)
 
     units = point.next_units(tmp_path, 1)
@@ -1197,7 +1198,8 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     settings = collection_module.CollectionSettings(
         max_shots=10, max_failures=1, min_shots=2
     )
-    saved = pieces.saved_counts(tmp_path, point_id)
+    point_folders = pieces.folders_of(tmp_path, [point_id])
+    saved = pieces.saved_counts(point_folders)
     point = collect_command.PointCollection(task, settings, 4, 15, saved)
 
     units = point.next_units(tmp_path, 1)
@@ -2713,3 +2715,38 @@ def _capped_noisy_config(tmp_path, max_shots: int, piece_rounds: int):
     collection = {"max_shots": max_shots, "piece_rounds": piece_rounds}
     card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
     return yaml_configs.write_config(tmp_path, card)
+
+
+def test_a_status_row_counts_and_costs_one_reading_of_the_pieces(
+    tmp_path, monkeypatch
+):
+    """A round that ends while status runs is in all of a row or in none.
+
+    Round one's piece of six shots is saved and round two's is planned;
+    round two ends right after status folds. The row's rounds are its
+    shots' rounds, fifteen a shot, not the rounds of pieces the fold
+    never read.
+    """
+    collection = {"max_shots": 60, "max_failures": 60, "piece_rounds": 90}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+    first_round = _plan([config_path], out_dir, 1)
+    _run_the_round(first_round)
+    second_round = _plan([config_path], out_dir, 1)
+    fold = collect_command.write_the_run_folder
+    fold_then_run = functools.partial(_fold_then_run, fold, second_round)
+    monkeypatch.setattr(collect_command, "write_the_run_folder", fold_then_run)
+
+    command.main(["status", str(out_dir)])
+
+    (row,) = _typed_status_rows(out_dir)
+    assert row["shots"] == 6
+    assert row["rounds"] == 6 * 15
+
+
+def _fold_then_run(fold, round_dir: pathlib.Path, *arguments) -> list:
+    """The fold, then a round's tasks, as a round that ends mid-status."""
+    rows = fold(*arguments)
+    _run_the_round(round_dir)
+    return rows

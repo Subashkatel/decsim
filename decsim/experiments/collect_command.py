@@ -236,13 +236,15 @@ def run_experiment(
     _collect_until_stopped(
         points, experiment_dir, configuration_id, measure_shot, processes
     )
-    rows = write_the_run_folder(experiment_dir, point_ids, report_dir)
+    folders = pieces.folders_of(experiment_dir, point_ids)
+    rows = write_the_run_folder(experiment_dir, folders, point_ids, report_dir)
     run_folder.finish_run(config, report_dir, point_ids, started_utc)
     return report_dir, rows
 
 
 def write_the_run_folder(
     experiment_dir: pathlib.Path,
+    folders: list,
     point_ids: list,
     report_dir: pathlib.Path,
 ) -> list:
@@ -251,7 +253,9 @@ def write_the_run_folder(
     Every file comes from what the experiment folder recorded, not from
     what this collect ran or what a yaml makes now: each point's
     collection and rounds from its resolved/ record, the rest from its
-    pieces. What an earlier fold wrote is removed first, so nothing of a
+    pieces, folders, as pieces.folders_of gave them. Every file reads
+    that one list, so a piece saved while the fold runs is in none of
+    them. What an earlier fold wrote is removed first, so nothing of a
     point the folder no longer holds stays. So a collect that found its
     pieces saved, or a status after a yaml changed, writes the folder
     whole: the online thresholds'
@@ -267,9 +271,8 @@ def write_the_run_folder(
         record = records[point_id]
         rules[point_id] = _recorded_rule(record)
         _write_the_recorded_trajectory(
-            experiment_dir, record, report_dir, swept
+            experiment_dir, folders, record, report_dir, swept
         )
-    folders = pieces.folders_of(experiment_dir, point_ids)
     seeds_by_point = pieces.seed_ranges_of(folders)
     rows = report.fold_pieces(
         experiment_dir, folders, point_ids, seeds_by_point, report_dir, rules
@@ -359,6 +362,7 @@ def _recorded_rule(record: dict) -> collection_module.PointRule:
 
 def _write_the_recorded_trajectory(
     experiment_dir: pathlib.Path,
+    folders: list,
     record: dict,
     report_dir: pathlib.Path,
     swept: dict,
@@ -368,7 +372,8 @@ def _write_the_recorded_trajectory(
     if not facts["adaptive"]:
         return
     point_id = record["id"]
-    saved = pieces.saved_counts(experiment_dir, point_id)
+    point_folders = pieces.point_folders(folders, point_id)
+    saved = pieces.saved_counts(point_folders)
     prefix = pieces.contiguous_ranges(saved, 0)
     if not prefix:
         return
@@ -490,7 +495,8 @@ def _planned_units(
         task = task_by_point.get(piece.point_id)
         if task is None:
             _refuse_a_point_gone_from_its_yamls(piece, configs)
-        saved = pieces.saved_counts(experiment_dir, piece.point_id)
+        point_folders = pieces.folders_of(experiment_dir, [piece.point_id])
+        saved = pieces.saved_counts(point_folders)
         unsaved = pieces.uncovered_ranges(saved, piece.first_seed, piece.count)
         for first_seed, count in unsaved:
             unit = collect.Unit(task, first_seed, count)
@@ -521,7 +527,8 @@ def _resumed_from_the_piece_before(
     if unit.first_seed == 0:
         return unit
     point_id = unit.task.strong_id()
-    saved = pieces.saved_counts(experiment_dir, point_id)
+    point_folders = pieces.folders_of(experiment_dir, [point_id])
+    saved = pieces.saved_counts(point_folders)
     for first_seed, count in saved.items():
         if first_seed + count != unit.first_seed:
             continue
@@ -658,7 +665,8 @@ def _point_collection(
     rounds_per_shot = resolved.record["rounds_per_shot"]
     settings = resolved.settings
     piece_shots = settings.piece_shots(rounds_per_shot)
-    saved = pieces.saved_counts(experiment_dir, point_id)
+    point_folders = pieces.folders_of(experiment_dir, [point_id])
+    saved = pieces.saved_counts(point_folders)
     point_planned = planned.get(point_id, [])
     return PointCollection(
         resolved.task,

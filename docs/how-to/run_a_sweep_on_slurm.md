@@ -151,7 +151,8 @@ point, with these columns:
   interval of its contiguous prefix, per shot and per round
 - the rounds and core seconds of all its pieces
 
-Status can run while a round runs. Plan the next round when the last
+Status can run while a round runs. Each row reads the pieces once, so
+a piece saved meanwhile is in all of a row or none of it. Plan the next round when the last
 one ends.
 
 The run folder's `sweep.csv` holds one row per point, its values and

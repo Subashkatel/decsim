@@ -57,16 +57,15 @@ def fold_the_experiment(experiment_dir: pathlib.Path) -> list:
     for configuration_id, report_dir in combined_folders.items():
         point_ids = point_ids_by_configuration.get(configuration_id, [])
         started_utc = run_folder.start_run(None, report_dir, point_ids)
+        folders = pieces.folders_of(experiment_dir, point_ids)
         sweep_rows = collect_command.write_the_run_folder(
-            experiment_dir, point_ids, report_dir
+            experiment_dir, folders, point_ids, report_dir
         )
         run_folder.finish_run(None, report_dir, point_ids, started_utc)
         sweep_by_point = {row["point_id"]: row for row in sweep_rows}
         for point_id in point_ids:
             sweep_row = sweep_by_point.get(point_id)
-            row = _status_row(
-                experiment_dir, configuration_id, point_id, sweep_row
-            )
+            row = _status_row(folders, configuration_id, point_id, sweep_row)
             rows.append(row)
         point_swept = run_folder.swept_values(experiment_dir, point_ids)
         swept.update(point_swept)
@@ -88,23 +87,22 @@ def _point_ids_by_configuration(records: dict) -> dict:
 
 
 def _status_row(
-    experiment_dir: pathlib.Path,
-    configuration_id: str,
-    point_id: str,
-    sweep_row,
+    folders: list, configuration_id: str, point_id: str, sweep_row
 ) -> dict:
     """One point's status row: its ids, its sweep row, its rounds and seconds.
 
-    The sweep row is whole, every column the fold gives the point.
+    The sweep row is whole, every column the fold gives the point. The
+    rounds and seconds are summed over the pieces the fold read, folders,
+    so they count the shots the row counts.
     """
     row = {"point_id": point_id, "configuration_id": configuration_id}
     if sweep_row is None:
         row["state"] = NO_DATA
     else:
         row.update(sweep_row)
-    folders = pieces.folders_of(experiment_dir, [point_id])
-    row["rounds"] = _summed(folders, "rounds")
-    row["core_seconds"] = _summed(folders, "core_seconds")
+    point_folders = pieces.point_folders(folders, point_id)
+    row["rounds"] = _summed(point_folders, "rounds")
+    row["core_seconds"] = _summed(point_folders, "core_seconds")
     return row
 
 

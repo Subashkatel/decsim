@@ -21,6 +21,8 @@ whole circuit.
 import hashlib
 import pathlib
 import time
+from collections.abc import Callable
+from typing import Any, Optional
 
 import numpy
 import stim
@@ -34,6 +36,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.results as result_records
 import decsim.records.rounds as round_records
@@ -86,7 +89,7 @@ class WholeCircuitWindow:
         self.detector_rows = numpy.asarray(model.detector_ids)
 
     def result_of(
-        self, row, detection_events: numpy.ndarray
+        self, row: ports.Decoder, detection_events: numpy.ndarray
     ) -> decoding_records.DecodeResult:
         """One shot's result from the row's own Decoder port.
 
@@ -199,7 +202,7 @@ def samples_of_seeds(
     return events, observables
 
 
-def bound_row(task: collect.Task, root_seed: int):
+def bound_row(task: collect.Task, root_seed: int) -> ports.Decoder:
     """The point's weak decoder row, bound to root_seed at the machine's path.
 
     The row is the machine's own algorithm, built by the machine's own
@@ -212,7 +215,9 @@ def bound_row(task: collect.Task, root_seed: int):
     return row
 
 
-def run_unit(unit: collect.Unit, measure) -> result_records.UnitOutcome:
+def run_unit(
+    unit: collect.Unit, measure: Callable[[collect.Shot], Any]
+) -> result_records.UnitOutcome:
     """The unit's seeds drawn and decoded block by block; its counts, one row.
 
     A row that draws from the run seed (the Relay-BP gamma table, a
@@ -449,14 +454,16 @@ def _block_spans(first_seed: int, count: int) -> list:
     return spans
 
 
-def _row_for_the_block(task: collect.Task, row, root_seed: int):
+def _row_for_the_block(
+    task: collect.Task, row: Optional[ports.Decoder], root_seed: int
+) -> ports.Decoder:
     """The unit's row for a block: kept, unless it draws from the run seed."""
     if row is not None and not _reads_the_run_seed(row):
         return row
     return bound_row(task, root_seed)
 
 
-def _reads_the_run_seed(component) -> bool:
+def _reads_the_run_seed(component: seeding.RunSeedComposite) -> bool:
     """Whether a seed owner sits under the component.
 
     A child that names no children of its own is a seed owner; a latency
@@ -475,7 +482,7 @@ def _reads_the_run_seed(component) -> bool:
 
 def _decode_the_block(
     window: WholeCircuitWindow,
-    row,
+    row: ports.Decoder,
     tally: _Tally,
     first_seed: int,
     block_events: numpy.ndarray,

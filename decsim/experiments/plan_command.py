@@ -215,8 +215,8 @@ def _next_pieces(
     if missing:
         return _pieces_of(configuration_id, point_id, missing)
     highest_seed = _highest_seed(planned_ranges, saved)
-    shots = _extension(point, point.tracker.counts, highest_seed)
-    ranges = _cut(highest_seed, shots, point.piece_shots)
+    shot_count = _extension(point, point.tracker.counts, highest_seed)
+    ranges = _cut(highest_seed, shot_count, point.piece_shots)
     return _pieces_of(configuration_id, point_id, ranges)
 
 

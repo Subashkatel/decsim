@@ -20,20 +20,6 @@ CAPPED = {"max_shots": 10}
 StopKind = failure_statistics.StopKind
 
 
-def _settings(**keys) -> collection.CollectionSettings:
-    return collection.CollectionSettings.from_yaml(keys, None, "block 1")
-
-
-def _counts(shots, scored_shots, failures, core_seconds=0.0):
-    return collection.PrefixCounts(shots, scored_shots, failures, core_seconds)
-
-
-def _kind_at(settings, shots, scored_shots, failures, core_seconds=0.0):
-    """The stop kind of a prefix with these counts."""
-    counts = _counts(shots, scored_shots, failures, core_seconds)
-    return settings.stop_kind(counts)
-
-
 def test_a_capped_section_gives_the_default_piece_rounds():
     settings = collection.CollectionSettings.from_yaml(CAPPED, None, "b")
 
@@ -210,38 +196,6 @@ def test_the_time_cap_stops_a_point_at_its_seconds():
     assert at_cap is StopKind.CAP
 
 
-def _sinter_stop_shot(outcomes, max_failures, max_shots) -> int:
-    """The shot after which sinter's own task state says it is complete.
-
-    sinter's manager starts errors_left at the smaller of max_errors and
-    max_shots and takes each shot and each error off
-    (sinter/_collection/_collection_manager.py:228-234, 330-342).
-    """
-    state = sinter_manager._ManagedTaskState(
-        partial_task=None,
-        strong_id="point",
-        shots_left=max_shots,
-        errors_left=min(max_failures, max_shots),
-    )
-    for shot, failed in enumerate(outcomes, start=1):
-        state.shots_left -= 1
-        state.errors_left -= failed
-        if state.is_completed():
-            return shot
-    return None
-
-
-def _decsim_stop_shot(outcomes, settings) -> int:
-    """The shot after which the collection's rule first gives a kind."""
-    counts = collection.PrefixCounts()
-    for failed in outcomes:
-        shot_counts = _counts(1, 1, failed)
-        counts.add(shot_counts)
-        if settings.stop_kind(counts) is not None:
-            return counts.shots
-    return None
-
-
 def test_the_rule_stops_where_sinters_stops_on_the_same_counts_property():
     """No minimum and no time cap: the rule is sinter's, shot for shot."""
     generator = random.Random(7)
@@ -261,23 +215,6 @@ def test_the_rule_stops_where_sinters_stops_on_the_same_counts_property():
         decsim_stop = _decsim_stop_shot(outcomes, settings)
 
         assert decsim_stop == sinter_stop
-
-
-def _shot_row(seed, is_scored=True, failed=False):
-    """A shot row as shots.csv holds it, the fields a prefix reads."""
-    return {
-        "seed": str(seed),
-        "is_scored": str(is_scored),
-        "logical_failure": str(failed),
-        "sim_wall_seconds": "0.5",
-    }
-
-
-def _tracked(rule, rows) -> collection.PrefixTracker:
-    tracker = collection.PrefixTracker(rule)
-    for row in rows:
-        tracker.add(row)
-    return tracker
 
 
 def test_a_prefix_ends_at_its_stop_and_later_rows_count_nowhere():
@@ -341,3 +278,66 @@ def test_an_unscored_shot_counts_toward_the_cap_and_not_the_failures():
 
     assert tracker.state() == "cap"
     assert tracker.counts.scored_shots == 0
+
+
+def _settings(**keys) -> collection.CollectionSettings:
+    return collection.CollectionSettings.from_yaml(keys, None, "block 1")
+
+
+def _counts(shots, scored_shots, failures, core_seconds=0.0):
+    return collection.PrefixCounts(shots, scored_shots, failures, core_seconds)
+
+
+def _kind_at(settings, shots, scored_shots, failures, core_seconds=0.0):
+    """The stop kind of a prefix with these counts."""
+    counts = _counts(shots, scored_shots, failures, core_seconds)
+    return settings.stop_kind(counts)
+
+
+def _sinter_stop_shot(outcomes, max_failures, max_shots) -> int:
+    """The shot after which sinter's own task state says it is complete.
+
+    sinter's manager starts errors_left at the smaller of max_errors and
+    max_shots and takes each shot and each error off
+    (sinter/_collection/_collection_manager.py:228-234, 330-342).
+    """
+    state = sinter_manager._ManagedTaskState(
+        partial_task=None,
+        strong_id="point",
+        shots_left=max_shots,
+        errors_left=min(max_failures, max_shots),
+    )
+    for shot, failed in enumerate(outcomes, start=1):
+        state.shots_left -= 1
+        state.errors_left -= failed
+        if state.is_completed():
+            return shot
+    return None
+
+
+def _decsim_stop_shot(outcomes, settings) -> int:
+    """The shot after which the collection's rule first gives a kind."""
+    counts = collection.PrefixCounts()
+    for failed in outcomes:
+        shot_counts = _counts(1, 1, failed)
+        counts.add(shot_counts)
+        if settings.stop_kind(counts) is not None:
+            return counts.shots
+    return None
+
+
+def _shot_row(seed, is_scored=True, failed=False):
+    """A shot row as shots.csv holds it, the fields a prefix reads."""
+    return {
+        "seed": str(seed),
+        "is_scored": str(is_scored),
+        "logical_failure": str(failed),
+        "sim_wall_seconds": "0.5",
+    }
+
+
+def _tracked(rule, rows) -> collection.PrefixTracker:
+    tracker = collection.PrefixTracker(rule)
+    for row in rows:
+        tracker.add(row)
+    return tracker

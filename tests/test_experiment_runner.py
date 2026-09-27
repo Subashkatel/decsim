@@ -324,6 +324,20 @@ def test_the_script_copy_and_commit_record_keep_the_umasks_permissions(
     assert commit_status.st_mode & 0o777 == ordinary_mode
 
 
+def test_a_publish_that_fails_leaves_no_staging_file(tmp_path, monkeypatch):
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    results_folder.mkdir()
+    monkeypatch.setattr(os, "link", refuse_the_link)
+    experiment = tiny_experiment()
+
+    with pytest.raises(PermissionError):
+        experiment.main(arguments=["0", "--out", str(results_folder)])
+
+    left_behind = os.listdir(results_folder)
+    assert left_behind == []
+
+
 @pytest.mark.parametrize("worker_count", ["0", "-2"])
 def test_fewer_than_one_worker_is_refused(tmp_path, monkeypatch, worker_count):
     write_script(tmp_path, monkeypatch)
@@ -429,6 +443,11 @@ def write_script(tmp_path, monkeypatch) -> pathlib.Path:
     script.write_text(SCRIPT_TEXT)
     monkeypatch.setattr(sys, "argv", [str(script)])
     return script
+
+
+def refuse_the_link(source, destination) -> None:
+    """A file system that will not publish the staged copy."""
+    raise PermissionError(f"cannot link {source} to {destination}")
 
 
 def set_the_tree(monkeypatch, commit: str, is_dirty) -> None:

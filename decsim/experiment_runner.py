@@ -245,20 +245,31 @@ def _write_once(path: pathlib.Path, text: str) -> None:
     into place, which fails when the file exists, so a task that starts
     beside another never reads a half-written file. The staging file is
     created with mode 0666 filtered by the umask, as open would create
-    the file itself, so a group sharing the folder can read it.
+    the file itself, so a group sharing the folder can read it, and it
+    is removed however the write or the link ends.
     """
-    if not path.exists():
-        random_suffix = secrets.token_hex(8)
-        staging = path.with_name(f".{path.name}.{random_suffix}")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        descriptor = os.open(staging, flags, ORDINARY_FILE_MODE)
-        with os.fdopen(descriptor, "w") as staging_file:
-            staging_file.write(text)
-        try:
-            os.link(staging, path)
-        except FileExistsError:
-            pass
+    if path.exists():
+        return
+    random_suffix = secrets.token_hex(8)
+    staging = path.with_name(f".{path.name}.{random_suffix}")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    descriptor = os.open(staging, flags, ORDINARY_FILE_MODE)
+    try:
+        _publish(descriptor, text, staging, path)
+    finally:
         staging.unlink()
+
+
+def _publish(
+    descriptor: int, text: str, staging: pathlib.Path, path: pathlib.Path
+) -> None:
+    """The text written to the staging file, then linked to path if free."""
+    with os.fdopen(descriptor, "w") as staging_file:
+        staging_file.write(text)
+    try:
+        os.link(staging, path)
+    except FileExistsError:
+        pass
 
 
 def _refuse_another_text(path: pathlib.Path, text: str) -> None:

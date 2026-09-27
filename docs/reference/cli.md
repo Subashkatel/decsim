@@ -12,9 +12,11 @@ Every argument below is read from the `argparse` definition that parses it. An a
 
 | Argument | Default | What it is |
 | --- | --- | --- |
-| `config` | required | the experiment yaml to sweep |
+| `config` | None | the experiment yaml to sweep |
 | `--out` | None | the experiment folder to write |
-| `--processes` | 1 | worker processes, one task each (shots stay serial) |
+| `--processes` | 1 | worker processes, one piece each (shots stay serial) |
+| `--plan` | None | a round's plan.csv, from decsim plan |
+| `--task` | None | the plan's task to run |
 
 ## `decsim diff`
 
@@ -22,6 +24,17 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | --- | --- | --- |
 | `first` | required | the first run folder |
 | `second` | required | the run folder to compare it with |
+
+## `decsim plan`
+
+| Argument | Default | What it is |
+| --- | --- | --- |
+| `configs` | required | the experiment's yamls |
+| `--out` | required | the experiment folder |
+| `--tasks` | required | the most tasks a round has |
+| `--cores` | 4 | pieces a task runs at once, one per core |
+| `--hours` | 24 | a task's walltime |
+| `--memory-mb` | 4096 | one piece's memory before its point has a measured peak |
 
 ## `decsim plot`
 

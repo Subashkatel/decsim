@@ -7,6 +7,8 @@ loads Stim. The console script and `python -m decsim` both land here.
 
     decsim run <yaml> [--seed N] [--out DIR] [--log ...] [--trace]
     decsim collect <yaml> [--out DIR] [--processes N]
+    decsim collect --plan <round>/plan.csv --task K [--processes N]
+    decsim plan <yaml>... --out DIR --tasks N [--cores C] [--hours H]
     decsim show <yaml>
     decsim diff <run_dir> <run_dir>
     decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
@@ -17,6 +19,7 @@ exit 1 (decsim/experiments/refusal.py); anything else keeps its
 traceback.
 """
 
+import pathlib
 import sys
 from typing import Optional
 
@@ -64,14 +67,16 @@ def _run(argv: list) -> None:
 
 
 def _collect(argv: list) -> None:
-    """The whole sweep of one yaml into a run folder."""
+    """The whole sweep of one yaml, or one task of a round's plan."""
     import argparse
 
     import decsim.experiments.collect_command as collect_command
     import decsim.experiments.report as report
 
     parser = argparse.ArgumentParser(prog="decsim collect")
-    parser.add_argument("config", help="the experiment yaml to sweep")
+    parser.add_argument(
+        "config", nargs="?", default=None, help="the experiment yaml to sweep"
+    )
     parser.add_argument(
         "--out", default=None, help="the experiment folder to write"
     )
@@ -79,9 +84,24 @@ def _collect(argv: list) -> None:
         "--processes",
         type=int,
         default=1,
-        help="worker processes, one task each (shots stay serial)",
+        help="worker processes, one piece each (shots stay serial)",
+    )
+    parser.add_argument(
+        "--plan", default=None, help="a round's plan.csv, from decsim plan"
+    )
+    parser.add_argument(
+        "--task", type=int, default=None, help="the plan's task to run"
     )
     parsed = parser.parse_args(argv)
+    if parsed.plan is not None:
+        _check_the_plan_arguments(parser, parsed)
+        plan_path = pathlib.Path(parsed.plan)
+        collect_command.run_planned(
+            plan_path, parsed.task, processes=parsed.processes
+        )
+        return
+    if parsed.config is None:
+        parser.error("name the yaml to sweep, or --plan and --task")
     run_dir, rows = collect_command.run_experiment(
         parsed.config, parsed.out, processes=parsed.processes
     )
@@ -91,6 +111,23 @@ def _collect(argv: list) -> None:
     text = "\n".join(lines)
     print(text)
     print(f"\nevery column: {run_dir}/sweep.csv")
+
+
+def _check_the_plan_arguments(parser, parsed) -> None:
+    """A planned task takes its yaml and folder from the plan, and a task."""
+    if parsed.task is None:
+        parser.error("--plan runs one task of the plan; name it with --task")
+    if parsed.config is not None or parsed.out is not None:
+        parser.error(
+            "--plan reads the yaml and the folder from the plan; name neither"
+        )
+
+
+def _plan(argv: list) -> None:
+    """The next round of an experiment's pieces, dealt to tasks."""
+    import decsim.experiments.plan_command as plan_command
+
+    plan_command.main(argv)
 
 
 def _show(argv: list) -> None:
@@ -176,6 +213,7 @@ def _report_no_verb(verb: Optional[str]) -> None:
 _RUN_BY_VERB = {
     "run": _run,
     "collect": _collect,
+    "plan": _plan,
     "show": _show,
     "diff": _diff,
     "plot": _plot,

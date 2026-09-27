@@ -107,6 +107,9 @@ These are not from the papers. The pages use them everywhere.
 - **piece**: a run of consecutive seeds of one sweep point, run by one
   process and saved whole as one folder of the experiment folder, sized
   by `collection.piece_rounds` (`decsim/experiments/pieces.py`).
+- **round**: one Slurm array running one written plan of pieces,
+  `round<k>/plan.csv`; `decsim plan` writes the next round from what
+  the pieces say (`decsim/experiments/plan_command.py`).
 - **scored shot**, **unscored shot**: a shot is scored when every
   decode it committed, provisional or final, got a correction from its
   decoder's backend, and unscored when a backend produced none; sinter

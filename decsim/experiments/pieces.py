@@ -11,8 +11,14 @@ the counts its save file already holds
 (sinter/_collection/_collection.py:387-397). A staging folder a killed
 writer left is no piece and is passed over; no writer can tell from
 another host whether its owner is still writing, so none removes it.
+
+A round's plan, round<k>/plan.csv, is a list of pieces, each with the
+task it was dealt to; `decsim plan` writes it and `decsim collect
+--plan` runs one task's share of it.
 """
 
+import csv
+import dataclasses
 import hashlib
 import json
 import os
@@ -32,6 +38,21 @@ PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
 # an adaptive point's calibrator as its piece left it (design 6.5)
 STATE_FILE = "state.pickle"
+
+# A round's folder, round<k>/, and its plan: a row per piece, its task first.
+ROUND_PREFIX = "round"
+PLAN_FILE = "plan.csv"
+PLAN_COLUMNS = ("task", "configuration_id", "point_id", "first_seed", "count")
+
+
+@dataclasses.dataclass(frozen=True)
+class PlannedPiece:
+    """One piece of the plan: seeds [first_seed, first_seed + count)."""
+
+    configuration_id: str
+    point_id: str
+    first_seed: int
+    count: int
 
 
 def piece_dir(
@@ -192,6 +213,48 @@ def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:
     state_path.write_bytes(state_bytes)
     digest = hashlib.sha256(state_bytes)
     return digest.hexdigest()
+
+
+def planned_pieces(experiment_dir: pathlib.Path) -> dict:
+    """Every round's planned pieces, by point id, as (first seed, count)."""
+    planned = {}
+    for round_dir in round_dirs(experiment_dir):
+        plan_path = round_dir / PLAN_FILE
+        for _task, piece in read_plan(plan_path):
+            point_pieces = planned.setdefault(piece.point_id, [])
+            point_pieces.append((piece.first_seed, piece.count))
+    return planned
+
+
+def read_plan(plan_path: pathlib.Path) -> list:
+    """A plan.csv's pieces as (task, PlannedPiece), in the file's order."""
+    with open(plan_path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+    planned = []
+    for row in rows:
+        piece = PlannedPiece(
+            row["configuration_id"],
+            row["point_id"],
+            int(row["first_seed"]),
+            int(row["count"]),
+        )
+        task = int(row["task"])
+        planned.append((task, piece))
+    return planned
+
+
+def round_dirs(experiment_dir: pathlib.Path) -> list:
+    """The experiment's round folders that hold a plan, in round order."""
+    found = experiment_dir.glob(f"{ROUND_PREFIX}*/{PLAN_FILE}")
+    folders = [path.parent for path in found]
+    return sorted(folders, key=round_number_of)
+
+
+def round_number_of(round_dir: pathlib.Path) -> int:
+    """The round number k of a round<k> folder."""
+    number_text = round_dir.name.removeprefix(ROUND_PREFIX)
+    return int(number_text)
 
 
 def _whole_pieces(point_dir: pathlib.Path) -> list:

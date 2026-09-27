@@ -10,6 +10,7 @@ import csv
 import functools
 import hashlib
 import json
+import math
 import pathlib
 import resource
 import shutil
@@ -1963,3 +1964,170 @@ def _named_library(path: pathlib.Path, digest) -> dict:
         return {}
     absolute = path.resolve()
     return {str(absolute): digest}
+
+
+def _plan(config_paths: list, experiment_dir: pathlib.Path, tasks: int):
+    """The yamls planned by `decsim plan`; the new round's folder or None."""
+    arguments = [str(path) for path in config_paths]
+    before = pieces.round_dirs(experiment_dir)
+    out = ["--out", str(experiment_dir), "--tasks", str(tasks)]
+    command.main(["plan", *arguments, *out])
+    after = pieces.round_dirs(experiment_dir)
+    if len(after) == len(before):
+        return None
+    return after[-1]
+
+
+def _run_the_round(round_dir: pathlib.Path, task_order=None) -> None:
+    """Every task of a round's plan, each as its own collect --plan."""
+    tasks_path = round_dir / "tasks.csv"
+    task_numbers = [row["task"] for row in _csv_rows(tasks_path)]
+    if task_order is not None:
+        task_numbers = task_order
+    plan_path = round_dir / "plan.csv"
+    for task_number in task_numbers:
+        command.main(
+            ["collect", "--plan", str(plan_path), "--task", str(task_number)]
+        )
+
+
+def _planned_ranges(round_dir: pathlib.Path) -> list:
+    """A round's pieces as (point id, first seed, count)."""
+    plan_path = round_dir / "plan.csv"
+    ranges = []
+    for _task, piece in pieces.read_plan(plan_path):
+        ranges.append((piece.point_id, piece.first_seed, piece.count))
+    return ranges
+
+
+def _cut_four_point_sweep(tmp_path) -> pathlib.Path:
+    """The four-point sweep, its pieces one shot each, in its own folder."""
+    cut_folder = tmp_path / "cut_config"
+    cut_folder.mkdir()
+    cut_card = {**FOUR_POINT_SWEEP, "collection": {"piece_rounds": 1}}
+    return yaml_configs.write_config(cut_folder, cut_card)
+
+
+def test_a_lost_piece_is_planned_again_with_its_own_seeds(tmp_path):
+    """A planned piece with no folder is the next round's, and alone.
+
+    Round one cuts every point into pieces of one shot over three tasks,
+    and all run; one piece is then deleted, as a task killed before its
+    rename leaves it missing. Every point is at its cap but that one, so
+    round two is that piece with its own seeds, and after it runs the
+    plan has nothing left.
+    """
+    cut_path = _cut_four_point_sweep(tmp_path)
+    cut_dir = tmp_path / "cut"
+    first_round = _plan([cut_path], cut_dir, 3)
+    _run_the_round(first_round)
+    second_pieces = cut_dir.glob("pieces/*/1-1")
+    lost_piece, *_kept = sorted(second_pieces)
+    shutil.rmtree(lost_piece)
+
+    second_round = _plan([cut_path], cut_dir, 3)
+    _run_the_round(second_round)
+
+    lost_point = lost_piece.parent.name
+    assert _planned_ranges(second_round) == [(lost_point, 1, 1)]
+    assert (lost_piece / "piece.json").exists()
+    assert _plan([cut_path], cut_dir, 3) is None
+
+
+def test_an_online_points_planned_pieces_run_in_one_task_as_the_uncut_point(
+    tmp_path,
+):
+    """The referent is the uncut collect: one piece of all four shots.
+
+    Planned over three tasks, the online point's four one-shot pieces go
+    to one task in seed order, each starting from the calibrator the one
+    before it saved; a collect then finds them all saved and folds them.
+    Its decisions and threshold trajectory are the uncut run's.
+    """
+    whole_dir = tmp_path / "whole"
+    cut_dir = tmp_path / "cut"
+    whole_config = _online_config(tmp_path, 60)
+    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
+    cut_config = _online_config(tmp_path, 15)
+
+    round_dir = _plan([cut_config], cut_dir, 3)
+    _run_the_round(round_dir)
+    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+
+    plan_path = round_dir / "plan.csv"
+    plan_rows = _csv_rows(plan_path)
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    whole_trajectory = _online_trajectory_rows(whole_run_dir)
+    cut_trajectory = _online_trajectory_rows(cut_run_dir)
+    assert _values_of_rows(plan_rows, ("task", "first_seed")) == [
+        ("0", "0"),
+        ("0", "1"),
+        ("0", "2"),
+        ("0", "3"),
+    ]
+    assert _shot_decisions(cut_run_dir) == _shot_decisions(whole_run_dir)
+    assert cut_trajectory == whole_trajectory
+
+
+def _values_of_rows(rows: list, columns: tuple) -> list:
+    values = []
+    for row in rows:
+        row_values = _values_of(row, columns)
+        values.append(row_values)
+    return values
+
+
+def test_a_rounds_extension_is_openmcs_ratio_of_the_target(tmp_path):
+    """Round two plans shots x (target / failures) in all, less round one's.
+
+    OpenMC extends a run by the ratio of the uncertainty it has to the
+    one it wants, squared (trigger.cpp); for a failure count the squared
+    ratio is the target over the failures seen. Round one plans one
+    piece, having nothing measured.
+    """
+    collection = {"max_shots": 1000, "max_failures": 50, "piece_rounds": 90}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+    first_round = _plan([config_path], out_dir, 3)
+    _run_the_round(first_round)
+    (first_piece,) = out_dir.glob("pieces/*/*")
+    counts = pieces.read_piece(first_piece)
+    needed = counts["count"] * 50 / counts["failures"]
+    wanted = math.ceil(needed)
+
+    second_round = _plan([config_path], out_dir, 3)
+
+    first_ranges = _planned_ranges(first_round)
+    second_ranges = _planned_ranges(second_round)
+    second_shots = sum(piece[2] for piece in second_ranges)
+    assert first_ranges[0][1:] == (0, 6)
+    assert counts["failures"] > 0
+    assert second_shots == wanted - counts["count"]
+
+
+def test_a_task_whose_point_its_yaml_no_longer_makes_is_refused(
+    tmp_path, capsys
+):
+    """A plan names points by id, so a yaml changed after it is refused.
+
+    The task's yaml now makes other points, so the plan's point is none
+    of them, and the task says so and asks for a new plan rather than
+    running something the plan did not name.
+    """
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+    round_dir = _plan([config_path], out_dir, 1)
+    changed_card = {
+        "sweep": [{"axes": NOISY_AXES, "collection": {"max_shots": 1}}]
+    }
+    yaml_configs.write_config(tmp_path, changed_card)
+    plan_path = round_dir / "plan.csv"
+
+    with pytest.raises(SystemExit):
+        command.main(["collect", "--plan", str(plan_path), "--task", "0"])
+
+    printed = capsys.readouterr()
+    assert "no point of" in printed.err
+    assert "plan again" in printed.err

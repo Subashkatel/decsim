@@ -350,6 +350,7 @@ docstring.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
 - `decsim/experiments/pieces.py`: A piece: seeds [first, first + count) of one sweep point, kept as one folder.
+- `decsim/experiments/plan_command.py`: `decsim plan`: the next round of an experiment's pieces, dealt to tasks.
 - `decsim/experiments/plots.py`: The figures that read decsim's own records, not a sweep's numbers.
 - `decsim/experiments/refusal.py`: The one refusal decsim.experiments raises when it will not do what was asked.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.

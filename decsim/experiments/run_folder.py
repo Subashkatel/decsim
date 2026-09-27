@@ -11,6 +11,7 @@ same way, out of the code tree and never overwritten
 (src/python/m5/main.py --outdir).
 """
 
+import csv
 import datetime
 import functools
 import hashlib
@@ -157,6 +158,31 @@ def record_configuration(
     text = "\n".join(lines)
     ended = text + "\n"
     _replace_file(path, ended)
+
+
+def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
+    """Each configuration id configurations.csv names, and its yamls, loaded.
+
+    A yaml is loaded from the nearest file of its chain. One id may have
+    several yamls, which split one configuration's sweep between them
+    (the sweep is no part of the id).
+    """
+    path = experiment_dir / CONFIGURATIONS_FILE
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        lines = list(reader)
+    files_by_id = {}
+    for line in lines:
+        chain = line["config_chain"].split(";")
+        files = files_by_id.setdefault(line["configuration_id"], [])
+        if chain[0] not in files:
+            files.append(chain[0])
+    configurations = {}
+    for identity, files in files_by_id.items():
+        configurations[identity] = [
+            experiment.load_experiment(file) for file in files
+        ]
+    return configurations
 
 
 def piece_identity() -> dict:

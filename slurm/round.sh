@@ -11,7 +11,10 @@
 # (sbatch(1), "INPUT ENVIRONMENT VARIABLES"), so a user sets them once:
 #   SBATCH_QOS=short slurm/round.sh results/weak_ler 1
 # The QOS enforces its own limits on running jobs and cores; tasks past
-# them wait in the queue.
+# them wait in the queue. Its limit on submitted jobs is different: it
+# counts each array task as a job and rejects a submission past it, so
+# a round whose tasks and the user's queued jobs pass $SUBMIT_LIMIT
+# (1000 unless set, Della's short QOS) is refused before any array.
 #
 # Inside the array, where SLURM_ARRAY_TASK_ID is set, this script is the
 # job: it runs `decsim collect --plan <plan.csv> --task <id>` with one
@@ -72,6 +75,25 @@ refuse_an_unnamed_tree() {
   fi
 }
 
+# Refuses a round that would pass the submit limit partway through: a
+# half-submitted round leaves tasks no array holds.
+refuse_a_round_past_the_submit_limit() {
+  local task_count queued limit
+  task_count=$(awk 'NR > 1' "$tasks_file" | wc -l)
+  queued=0
+  if command -v squeue > /dev/null; then
+    queued=$(squeue -h -r -u "$(id -un)" | wc -l)
+  fi
+  limit=${SUBMIT_LIMIT:-1000}
+  if [ $((task_count + queued)) -gt "$limit" ]; then
+    echo "refusing to submit: round $round has $task_count tasks and" \
+      "$queued of your jobs are queued, past the submit limit of $limit" \
+      "(SUBMIT_LIMIT); plan the round again with fewer --tasks, or wait" \
+      "for queued jobs to end" >&2
+    exit 1
+  fi
+}
+
 if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
   cd "$SLURM_SUBMIT_DIR"
   refuse_an_unnamed_tree
@@ -94,6 +116,7 @@ if [ ! -f "$tasks_file" ]; then
   exit 1
 fi
 refuse_an_unnamed_tree
+refuse_a_round_past_the_submit_limit
 script=$(realpath "$0")
 
 # Each shape of job, cores:memory:hours, and the tasks that share it.

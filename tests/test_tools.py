@@ -31,6 +31,7 @@ UNSET_FOR_THE_ROUND = (
     "DRY_RUN",
     "SLURM_ARRAY_TASK_ID",
     "SLURM_CPUS_PER_TASK",
+    "SUBMIT_LIMIT",
 )
 # A round's tasks.csv: two tasks share a shape of job, one has its own.
 TASKS_TEXT = (
@@ -351,6 +352,26 @@ def _stub_git(tmp_path, status):
     stub.chmod(0o755)
 
 
+def _stub_squeue(tmp_path):
+    """A squeue that lists $STUB_QUEUED_JOBS of the user's jobs, one a line."""
+    stub = tmp_path / "squeue"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "for ((job = 0; job < ${STUB_QUEUED_JOBS:-0}; job++)); do\n"
+        '  echo "$job"\n'
+        "done\n"
+    )
+    stub.chmod(0o755)
+
+
+def _stub_sbatch(tmp_path):
+    """An sbatch that records each submission, so no test reaches Slurm."""
+    stub = tmp_path / "sbatch"
+    submissions = tmp_path / "submissions.txt"
+    stub.write_text(f'#!/usr/bin/env bash\necho "$*" >> {submissions}\n')
+    stub.chmod(0o755)
+
+
 def _round_folder(tmp_path) -> pathlib.Path:
     """An experiment folder holding round 1's tasks.csv."""
     experiment_dir = tmp_path / "experiment"
@@ -370,6 +391,8 @@ def _run_the_round_script(tmp_path, status, extra_environment):
     checkout.mkdir()
     _stub_python(tmp_path, checkout)
     _stub_git(tmp_path, status)
+    _stub_squeue(tmp_path)
+    _stub_sbatch(tmp_path)
     experiment_dir = _round_folder(tmp_path)
     environment = {
         name: value
@@ -505,3 +528,28 @@ def test_a_round_refuses_a_tree_git_does_not_vouch_for(
     assert "ALLOW_DIRTY=1" in completed.stderr
     assert _sbatch_lines(completed.stdout) == []
     assert not recorded.exists()
+
+
+@pytest.mark.parametrize("where", [{"DRY_RUN": "1"}, {"DRY_RUN": ""}])
+def test_a_round_past_the_submit_limit_is_refused_before_any_array(
+    tmp_path, where
+):
+    """Its three tasks and two queued jobs pass a limit of four.
+
+    The limit counts each array task as a job, so a round past it would
+    be half submitted; it is refused before the first array, dry run or
+    not, with a sentence that says to plan with fewer tasks.
+    """
+    over_the_limit = {"SUBMIT_LIMIT": "4", "STUB_QUEUED_JOBS": "2", **where}
+
+    completed, experiment_dir = _run_the_round_script(
+        tmp_path, "clean", over_the_limit
+    )
+
+    task_folder = experiment_dir / "round1" / "0"
+    submissions = tmp_path / "submissions.txt"
+    assert completed.returncode != 0
+    assert "fewer --tasks" in completed.stderr
+    assert _sbatch_lines(completed.stdout) == []
+    assert not task_folder.exists()
+    assert not submissions.exists()

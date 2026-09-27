@@ -112,6 +112,12 @@ SBATCH_QOS.
 
 `DRY_RUN=1` prints the `sbatch` lines and submits nothing.
 
+Slurm counts each array task as a submitted job, and rejects a
+submission past the limit. So before it submits any array, the script
+adds the round's tasks to the jobs you have queued, and refuses the
+round if they pass `SUBMIT_LIMIT` (1,000 unless you set it). Plan the
+round again with fewer `--tasks`, or wait for queued jobs to end.
+
 ## 5. If a task dies
 
 Nothing is lost but the pieces it was running. A piece folder appears

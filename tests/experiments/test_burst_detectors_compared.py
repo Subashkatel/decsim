@@ -48,11 +48,16 @@ def test_the_grid_holds_a_quiet_and_a_burst_point_per_detector():
 
     conditions = _conditions(points)
 
-    expected = []
-    for detector in DETECTORS.values():
-        expected.append((detector, QUIET))
-        expected.append((detector, BURST))
-    assert conditions == expected
+    assert conditions == [
+        (DETECTORS["event_count"], QUIET),
+        (DETECTORS["event_count"], BURST),
+        (DETECTORS["whole_patch_cusum"], QUIET),
+        (DETECTORS["whole_patch_cusum"], BURST),
+        (DETECTORS["regional_cusum"], QUIET),
+        (DETECTORS["regional_cusum"], BURST),
+        (DETECTORS["masked_regional_cusum"], QUIET),
+        (DETECTORS["masked_regional_cusum"], BURST),
+    ]
 
 
 def test_every_point_differs_only_in_its_detector_and_its_burst():

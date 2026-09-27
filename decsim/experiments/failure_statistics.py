@@ -167,13 +167,13 @@ def mcnemar_p_value(
 
     McNemar (Psychometrika 12, 1947): with no difference, each discordant
     seed (one point failed, the other did not) is a fair coin, so the
-    smaller count is Binomial(discordant, 1/2); the two-sided value
+    smaller count is Binomial(discordant_count, 1/2); the two-sided value
     doubles its tail, at most one. Valid only when the paired count was
     fixed before the run; any other stop takes the mixture sequence.
     """
-    discordant = first_only_failures + second_only_failures
+    discordant_count = first_only_failures + second_only_failures
     smaller = min(first_only_failures, second_only_failures)
-    tail = scipy.stats.binom.cdf(smaller, discordant, 0.5)
+    tail = scipy.stats.binom.cdf(smaller, discordant_count, 0.5)
     doubled_tail = 2 * tail
     return float(min(doubled_tail, 1.0))
 
@@ -196,11 +196,11 @@ def is_mixture_difference(
     Loader's form: at a billion seeds the log-gamma terms of the beta
     function are near 1e10 and cancel to less than the decision needs.
     """
-    discordant = first_only_failures + second_only_failures
+    discordant_count = first_only_failures + second_only_failures
     log_fair_probability = _log_fair_binomial(
         first_only_failures, second_only_failures
     )
-    log_count_factor = math.log1p(discordant)
+    log_count_factor = math.log1p(discordant_count)
     log_evidence = -log_fair_probability - log_count_factor
     return log_evidence >= LOG_MIXTURE_EVIDENCE_LEVEL
 

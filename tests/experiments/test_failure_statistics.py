@@ -194,8 +194,8 @@ def test_the_per_round_rate_is_the_exact_root(shot_rate, rounds):
 def test_mcnemar_is_the_exact_binomial_test(first_only, second_only):
     p_value = failure_statistics.mcnemar_p_value(first_only, second_only)
 
-    discordant = first_only + second_only
-    binomial = scipy.stats.binomtest(first_only, discordant, 0.5)
+    discordant_count = first_only + second_only
+    binomial = scipy.stats.binomtest(first_only, discordant_count, 0.5)
     assert p_value == pytest.approx(binomial.pvalue, rel=1e-12, abs=0)
 
 
@@ -220,9 +220,9 @@ def test_the_mixture_is_the_beta_binomial_likelihood_ratio(
         first_only, second_only
     )
 
-    discordant = first_only + second_only
-    mixture = scipy.stats.betabinom.pmf(first_only, discordant, 1, 1)
-    fair = scipy.stats.binom.pmf(first_only, discordant, 0.5)
+    discordant_count = first_only + second_only
+    mixture = scipy.stats.betabinom.pmf(first_only, discordant_count, 1, 1)
+    fair = scipy.stats.binom.pmf(first_only, discordant_count, 0.5)
     evidence = mixture / fair
     assert is_difference == (evidence >= 20)
 
@@ -242,7 +242,7 @@ def test_the_mixture_decides_at_a_billion_seeds_as_exact_arithmetic_does(
         first_only, second_only
     )
 
-    discordant = first_only + second_only
+    discordant_count = first_only + second_only
     first_shape = first_only + 1
     second_shape = second_only + 1
     with mpmath.workdps(REFERENCE_DIGITS):
@@ -250,7 +250,7 @@ def test_the_mixture_decides_at_a_billion_seeds_as_exact_arithmetic_does(
         log_beta = mpmath.log(beta)
         log_two = mpmath.log(2)
         log_level = mpmath.log(20)
-        log_evidence = log_beta + discordant * log_two
+        log_evidence = log_beta + discordant_count * log_two
         is_exact_difference = log_evidence >= log_level
     assert is_difference == is_exact_difference
 

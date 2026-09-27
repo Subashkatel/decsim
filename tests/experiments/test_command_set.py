@@ -2777,3 +2777,39 @@ def _fold_then_run(fold, round_dir: pathlib.Path, *arguments) -> list:
     rows = fold(*arguments)
     _run_the_round(round_dir)
     return rows
+
+
+def test_an_online_piece_with_no_saved_piece_before_it_is_refused(
+    tmp_path, capsys
+):
+    """An online piece starts from the calibrator the piece before saved.
+
+    A plan edited to hold only the point's third piece, seed 2, runs
+    nothing: no piece ends at seed 2, so there is no calibrator to start
+    from, and the collect says so and asks for a new plan.
+    """
+    config_path = _online_config(tmp_path, 15)
+    out_dir = tmp_path / "out"
+    round_dir = _plan([config_path], out_dir, 1)
+    plan_path = round_dir / "plan.csv"
+    plan_rows = _csv_rows(plan_path)
+    third_rows = [row for row in plan_rows if row["first_seed"] == "2"]
+    _write_csv_rows(plan_path, third_rows)
+    point_id = third_rows[0]["point_id"]
+
+    with pytest.raises(SystemExit):
+        command.main(["collect", "--plan", str(plan_path), "--task", "0"])
+
+    printed = capsys.readouterr()
+    point_folders = pieces.folders_of(out_dir, [point_id])
+    assert "has no saved piece ending at seed 2" in printed.err
+    assert point_folders == []
+
+
+def _write_csv_rows(path: pathlib.Path, rows: list) -> None:
+    """Rows written over a csv file, their keys the header."""
+    first_row = rows[0]
+    with open(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(first_row))
+        writer.writeheader()
+        writer.writerows(rows)

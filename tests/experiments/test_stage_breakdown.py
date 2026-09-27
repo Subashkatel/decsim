@@ -10,6 +10,7 @@ rather than silently skipped.
 import csv
 import json
 
+import matplotlib.legend
 import matplotlib.pyplot
 import pytest
 
@@ -25,9 +26,17 @@ def shots_csv_row(point_id, stage_us, stage_columns):
 
 
 def write_point_record(resolved_dir, point_id):
-    """A resolved/ record whose metadata sets the distance its id ends in."""
+    """A resolved/ record whose metadata sets the distance its id ends in.
+
+    The other two paths are the long ones a real sweep sets.
+    """
     distance = int(point_id[-1])
-    record = {"id": point_id, "metadata": {"qpu.distance": distance}}
+    metadata = {
+        "qpu.distance": distance,
+        "qpu.round_period_microseconds": 1.0,
+        "workload.arguments.physical_error_probability": 0.001,
+    }
+    record = {"id": point_id, "metadata": metadata}
     record_path = resolved_dir / f"{point_id}.json"
     record_text = json.dumps(record)
     record_path.write_text(record_text)
@@ -107,7 +116,40 @@ def test_a_bar_is_labelled_by_its_points_values_and_decoder(
     axis = drawn_axis(run_dir, figure_path, monkeypatch)
 
     (tick_label,) = axis.get_yticklabels()
-    assert tick_label.get_text() == "qpu.distance=3, pymatching"
+    assert tick_label.get_text() == (
+        "qpu.distance=3\n"
+        "qpu.round_period_microseconds=1.0\n"
+        "workload.arguments.physical_error_probability=0.001\n"
+        "pymatching"
+    )
+
+
+def test_every_label_the_legend_and_the_title_fit_a_four_point_figure(
+    tmp_path, monkeypatch
+):
+    """Nothing is cut at the figure's edge, and the key covers no bar."""
+    run_dir = tmp_path / "run"
+    shot_rows = [
+        ("point3", flat_stages(12.0)),
+        ("point5", flat_stages(25.0)),
+        ("point7", flat_stages(40.0)),
+        ("point9", flat_stages(60.0)),
+    ]
+    write_run(run_dir, shot_rows)
+    figure_path = tmp_path / "stage_breakdown.png"
+
+    axis = drawn_axis(run_dir, figure_path, monkeypatch)
+
+    figure = axis.figure
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    (legend,) = figure.findobj(matplotlib.legend.Legend)
+    texts = [*axis.get_yticklabels(), axis.title, axis.xaxis.label, legend]
+    boxes = [text.get_window_extent(renderer) for text in texts]
+    axis_box = axis.get_window_extent(renderer)
+    legend_box = legend.get_window_extent(renderer)
+    assert all(_inside(box, figure.bbox) for box in boxes)
+    assert not legend_box.overlaps(axis_box)
 
 
 def test_figure_is_written_per_point(tmp_path):
@@ -131,3 +173,10 @@ def test_a_run_without_shots_csv_is_refused(tmp_path):
     figure_path = tmp_path / "figure.png"
     with pytest.raises(refusal.RefusalError, match="shots.csv"):
         plots.stage_breakdown_plot(empty_run, figure_path)
+
+
+def _inside(box, outer) -> bool:
+    """Whether a drawn box lies within an outer one, edges included."""
+    lower_left = outer.contains(box.x0, box.y0)
+    upper_right = outer.contains(box.x1, box.y1)
+    return lower_left and upper_right

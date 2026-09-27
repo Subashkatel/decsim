@@ -156,8 +156,10 @@ def stage_breakdown_plot(run_dir, path: pathlib.Path) -> None:
     medians_by_point = _median_stage_us_by_point(rows)
     point_ids = list(medians_by_point)
     labels = _point_labels(run_dir, rows)
-    height = 0.5 * len(point_ids) + 1.6
-    figure, axis = plt.subplots(figsize=(6.4, height))
+    height = _breakdown_height(labels)
+    # constrained layout keeps the axis clear of every label, and the
+    # key below it, rather than shrinking what does not fit off the edge
+    figure, axis = plt.subplots(figsize=(8.0, height), layout="constrained")
     bar_positions = range(len(point_ids))
     stacked_left = _draw_stage_bars(axis, medians_by_point, point_ids)
     _label_stage_totals(axis, bar_positions, stacked_left)
@@ -168,14 +170,13 @@ def stage_breakdown_plot(run_dir, path: pathlib.Path) -> None:
     axis.set_yticklabels(tick_labels, fontsize=7)
     axis.invert_yaxis()
     widest = max(stacked_left)
-    right_edge = widest * 1.12
+    right_edge = widest * 1.2
     axis.set_xlim(0, right_edge)
     # every breakdown is drawn in ms so two runs' figures share one
     # unit; the axis stays linear with plain tick numbers
     axis.set_xlabel("median time per window (ms)")
     axis.set_title("Time breakdown per window")
-    axis.legend(fontsize=7, ncol=3)
-    figure.tight_layout()
+    figure.legend(loc="outside lower center", fontsize=7, ncol=3)
     figure.savefig(path, dpi=150)
     plt.close(figure)
 
@@ -791,7 +792,8 @@ def _point_labels(run_dir, rows: list) -> dict:
     """Each point's bar label: the values its sweep set, and its decoder.
 
     The values are the point's metadata in its resolved/ record, each
-    written by its yaml path.
+    written by its yaml path on a line of its own, since a path is too
+    long to share one.
     """
     labels = {}
     for row in rows:
@@ -806,8 +808,22 @@ def _point_labels(run_dir, rows: list) -> dict:
             value_text = json.dumps(value)
             pairs.append(f"{path}={value_text}")
         pairs.append(row["algorithm"])
-        labels[point_id] = ", ".join(pairs)
+        labels[point_id] = "\n".join(pairs)
     return labels
+
+
+def _breakdown_height(labels: dict) -> float:
+    """The figure's inches: a bar as tall as its label, then the rest.
+
+    A line of 7 pt text takes 0.12 in; the title, the axis and a three
+    row key below it take 2 in.
+    """
+    newline_counts = [label.count("\n") for label in labels.values()]
+    most_newlines = max(newline_counts)
+    most_lines = most_newlines + 1
+    bar_inches = 0.12 * most_lines + 0.2
+    bars = len(labels)
+    return bar_inches * bars + 2.0
 
 
 def _median_stage_us_by_point(rows: list) -> dict:

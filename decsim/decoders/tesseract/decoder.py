@@ -37,8 +37,10 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         profile the Tesseract paper 2503.10988 runs); its
         tesseract-long-beam is beam 20, queue 1,000,000 and 21 orders.
         Backend merging stays off whatever the keys say, so the physical
-        columns keep their identity, and the orders are drawn from the
-        run seed (decsim/seeding.py), so no key sets it.
+        columns keep their identity. detector_order_seed is the seed
+        build_det_orders draws the orders from; None draws them from the
+        run seed (decsim/seeding.py), and the package's profiles fix it
+        at 2384753.
         """
 
         detector_beam: int = 15
@@ -47,6 +49,7 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         priority_queue_limit: int = 200_000
         detector_order_method: str = "index"
         detector_order_count: int = 16
+        detector_order_seed: Optional[int] = None
 
         @classmethod
         def from_yaml(
@@ -66,7 +69,13 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
             )
             switches = _switches(section, section_name)
             order_method = _detector_order_method(section, section_name)
-            return cls(detector_order_method=order_method, **counts, **switches)
+            order_seed = _detector_order_seed(section, section_name)
+            return cls(
+                detector_order_method=order_method,
+                detector_order_seed=order_seed,
+                **counts,
+                **switches,
+            )
 
     def __init__(
         self,
@@ -114,6 +123,10 @@ _COUNT_KEYS = {
     "detector_order_count": ("orders", 1),
 }
 
+# build_det_orders takes its seed as a uint64 (tesseract-decoder
+# src/utils.h:42-45)
+_LARGEST_SEED = 2**64 - 1
+
 # the on-or-off keys
 _SWITCH_KEYS = ("beam_climbing", "no_revisit_detectors")
 
@@ -133,3 +146,17 @@ def _detector_order_method(section: Mapping, section_name: str) -> str:
     key = f"{section_name}.detector_order_method"
     tables.row(window_decoder.DETECTOR_ORDER_METHODS, key, method)
     return method
+
+
+def _detector_order_seed(section: Mapping, section_name: str):
+    """None, or a whole number build_det_orders can take as its seed."""
+    seed = section.get("detector_order_seed")
+    if seed is None:
+        return None
+    is_whole = isinstance(seed, int) and not isinstance(seed, bool)
+    if is_whole and 0 <= seed <= _LARGEST_SEED:
+        return seed
+    raise ValueError(
+        f"{section_name}.detector_order_seed must be null or a whole number "
+        f"from 0 to {_LARGEST_SEED} (got {seed!r})"
+    )

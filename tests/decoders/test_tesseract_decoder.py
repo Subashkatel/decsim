@@ -10,6 +10,8 @@ reference tests skip until it is installed. The yaml refusals need no
 wheel.
 """
 
+import dataclasses
+
 import numpy
 import pytest
 
@@ -34,6 +36,8 @@ SETTINGS = tesseract.TesseractDecoder.Settings(
     detector_order_method="breadth_first",
     detector_order_count=3,
 )
+# the least seed build_det_orders cannot take as a uint64
+ONE_PAST_UINT64 = 2**64
 
 
 def _seeded_row():
@@ -121,6 +125,32 @@ def test_the_backend_the_row_built_reads_back_its_settings():
     assert built.config.det_orders == orders
 
 
+def test_a_fixed_detector_order_seed_replaces_the_run_seed():
+    """The orders come from the key's seed, whatever the run seed is."""
+    backend = pytest.importorskip("tesseract_decoder")
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    physical = model.require_faults(PHYSICAL)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 3)
+    settings = tesseract.TesseractDecoder.Settings(detector_order_seed=2384753)
+    row = tesseract.TesseractDecoder(settings=settings)
+    reservation = row.window_decoder.reserve_run_seed(SEED)
+    row.window_decoder.commit_run_seed(reservation)
+    job = windows.job_for(model, detection_events[0])
+    row.decode(job)
+    _reference, built = row.window_decoder.compiled_by_model[id(model)]
+    detector_error_model, _coordinates = (
+        tesseract_window.detector_error_model_of(model, physical)
+    )
+    order_method = backend.utils.DetOrder.DetIndex
+    orders = backend.utils.build_det_orders(
+        detector_error_model, 16, order_method, 2384753
+    )
+    assert built.config.det_orders == orders
+
+
 def test_the_tier_sections_keys_reach_the_rows_settings():
     section = {
         "kind": "tesseract",
@@ -139,12 +169,14 @@ def test_the_tier_sections_keys_reach_the_rows_settings():
         "priority_queue_limit": 50_000,
         "detector_order_method": "breadth_first",
         "detector_order_count": 3,
+        "detector_order_seed": 2384753,
     }
     clocks = config.ClockSettings({"decoder": 250.0})
     tier = decoder_settings.DecoderSettings.from_yaml(
         section, clocks, "strong_decoder"
     )
-    assert tier.row_settings == SETTINGS
+    expected = dataclasses.replace(SETTINGS, detector_order_seed=2384753)
+    assert tier.row_settings == expected
 
 
 def test_a_section_with_no_keys_keeps_the_short_beam_profile():
@@ -159,6 +191,7 @@ def test_a_section_with_no_keys_keeps_the_short_beam_profile():
         priority_queue_limit=200_000,
         detector_order_method="index",
         detector_order_count=16,
+        detector_order_seed=None,
     )
 
 
@@ -176,12 +209,20 @@ def test_a_section_with_no_keys_keeps_the_short_beam_profile():
         ("beam_climbing", 1, "must be true or false"),
         ("no_revisit_detectors", None, "must be true or false"),
         ("detector_order_method", "random", "is not a row of its table"),
+        ("detector_order_seed", -1, "must be null or a whole number from 0"),
+        ("detector_order_seed", 1.5, "must be null or a whole number from 0"),
+        ("detector_order_seed", True, "must be null or a whole number from 0"),
+        ("detector_order_seed", ONE_PAST_UINT64, "to 18446744073709551615"),
     ],
 )
 def test_a_search_key_of_the_wrong_type_or_range_is_refused(
     key: str, value, sentence: str
 ) -> None:
-    """A count is a whole number, a switch a boolean, a method a row."""
+    """A count is a whole number, a switch a boolean, a method a row.
+
+    A detector-order seed is the uint64 build_det_orders takes
+    (tesseract-decoder src/utils.h:42-45).
+    """
     section = {key: value}
     with pytest.raises(ValueError, match=f"weak_decoder.{key} .*{sentence}"):
         tesseract.TesseractDecoder.Settings.from_yaml(

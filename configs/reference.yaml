@@ -1260,13 +1260,13 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the two calls one after the other on
                                    # the unit, so its time is their sum. A
                                    # CSS circuit only
-  # The tesseract row's six, each an argument of tesseract_decoder's
+  # The tesseract row's seven, each an argument of tesseract_decoder's
   # TesseractConfig or build_det_orders (named after the colon), at the
   # package's tesseract-short-beam profile (tesseract-decoder
-  # src/tesseract_sinter_compat.pybind.h); its tesseract-long-beam is
-  # beam 20, queue 1000000 and 21 orders. Merging stays off, so the
-  # physical columns keep their identity; the orders come from the run
-  # seed.
+  # src/tesseract_sinter_compat.pybind.h:466-472) but for the order
+  # seed; its tesseract-long-beam is beam 20, queue 1000000 and 21
+  # orders. Merging stays off, so the physical columns keep their
+  # identity.
   # detector_beam: 15              # det_beam, the most detection events a
                                    # search state may hold; 0 or more
   # beam_climbing: true            # beam_climbing, the beam-climbing
@@ -1277,6 +1277,10 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
   # detector_order_method: index   # build_det_orders' DetOrder: index |
                                    # breadth_first | coordinate
   # detector_order_count: 16       # num_det_orders, the orders searched
+  # detector_order_seed: null      # build_det_orders' seed, a whole number
+                                   # from 0 to 2^64 - 1 (src/utils.h:42-45);
+                                   # null draws it from the run seed. The
+                                   # package's profiles fix it at 2384753
   engine:
     clock: fridge                  # cycle-priced stages on this clock domain
     fetch_cycles_per_round: 1      # read one round out of decoder memory per
@@ -1313,7 +1317,7 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # a union_find strong tier takes
                                    # weight_step and cycle_count here, a
                                    # relay_bp one its nine keys and a
-                                   # tesseract one its six, as above
+                                   # tesseract one its seven, as above
   # device: a100                   # the measured_table row's GPU: a100 |
                                    # gh200 (dispatch_steps names one too,
                                    # gh200 by default). Its time is intercept plus slope

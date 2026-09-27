@@ -45,9 +45,10 @@ _Reason = decoding_records.BackendFailureReason
 class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
     """Decode one physical fault view with the official Tesseract backend.
 
-    The detector orders are drawn from the run seed, so a direct caller
-    binds one through reserve_run_seed and commit_run_seed for
-    reproducible results.
+    The detector orders are drawn from the settings' detector_order_seed,
+    or from the run seed when it is None, so a direct caller then binds
+    one through reserve_run_seed and commit_run_seed for reproducible
+    results.
     """
 
     def __init__(
@@ -98,6 +99,9 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         self.compiled_by_model.clear()
 
     def _resolved_detector_order_seed(self) -> int:
+        fixed_seed = self.settings.detector_order_seed
+        if fixed_seed is not None:
+            return fixed_seed
         with self._run_seed_lock:
             if self._pending_run_seed is not None:
                 raise RuntimeError(

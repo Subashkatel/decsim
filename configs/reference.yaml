@@ -613,10 +613,13 @@ collection:
 # circuit, the window the machine builds, with no machine: the same
 # answers, counts only and no latency (decsim/experiments/stim_batch.py,
 # gem5's atomic mode beside its timing mode). It takes windows.kind
-# naive_online, escalation.kind weak_baseline, qpu.kind stim_device and
-# one operation a shot, and it enters every point's id and the
-# configuration's id, so a batch collect and a machine collect of one
-# file never fold into one row.
+# naive_online, escalation.kind weak_baseline, qpu.kind stim_device,
+# observation.check_windows_with none and one operation a shot, and no
+# Python-built weak_decoder.decoder, decoder_manager.router or
+# qpu.device; any weak_decoder.kind, a numbered one too, decodes as on
+# the machine. The key enters every point's id and the configuration's
+# id, so a batch collect and a machine collect of one file never fold
+# into one row.
 # sampling: stim_batch
 
 controller:                        # controller work per round, in cycles of its

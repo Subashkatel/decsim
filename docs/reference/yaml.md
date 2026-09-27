@@ -158,10 +158,14 @@ With no `sampling` key the machine runs every shot and times it. With
 each is decoded by the point's weak decoder row on the one window
 `naive_online` lays over the whole circuit, with no machine: the same
 answers as the machine, a piece keeping counts only and no latency.
-Every decoder of a point decodes the same samples. It takes
-`windows.kind naive_online`, `escalation.kind weak_baseline`,
-`qpu.kind stim_device` and one operation a shot, and refuses anything
-else. The key enters every point's id and the configuration's id, so a
+Every decoder of a point decodes the same samples, and any
+`weak_decoder.kind`, a numbered one too, decodes as on the machine.
+It takes `windows.kind naive_online`, `escalation.kind weak_baseline`,
+`qpu.kind stim_device`, `observation.check_windows_with none` and one
+operation a shot, and refuses anything else, as it refuses a
+`weak_decoder.decoder`, `decoder_manager.router` or `qpu.device` a
+Python caller built. A `sampling` that is not text is refused when the
+file loads. The key enters every point's id and the configuration's id, so a
 batch collect and a machine collect of one file are different points.
 
 ## Seeing what a file resolves to
@@ -179,7 +183,7 @@ of `decsim show configs/examples/my_first_sweep.yaml`'s:
 ```
 qpu.distance = [3, 5, 7]  [sweep, configs/examples/my_first_sweep.yaml:16-21]
 controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:51]
-controller.packing_overflow = "STALL"  [default, configs/reference.yaml:667]
+controller.packing_overflow = "STALL"  [default, configs/reference.yaml:670]
 ```
 
 The bracket names the layer that set the value, `your file`, `preset`

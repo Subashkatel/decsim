@@ -2511,3 +2511,30 @@ def _cells_missed(point_id: str, status_row: dict, sweep_row: dict) -> list:
         if status_row.get(column) != cell:
             missed.append((point_id, column))
     return missed
+
+
+def test_a_rounds_last_piece_is_cut_to_what_the_time_cap_allows(tmp_path):
+    """The time cap bounds a round's shots below one whole piece.
+
+    One piece of six shots is saved; the cap is then set to its core
+    seconds and one hundredth more, which at its seconds a shot allows
+    seven shots in all. The next round plans one shot, not a whole
+    piece past the cap.
+    """
+    collection = {"max_shots": 1000, "max_failures": 1000, "piece_rounds": 90}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+    first_round = _plan([config_path], out_dir, 1)
+    _run_the_round(first_round)
+    (first_piece,) = out_dir.glob("pieces/*/*")
+    saved = pieces.read_piece(first_piece)
+    capped = {**collection, "max_core_seconds": saved["core_seconds"] * 1.01}
+    capped_card = {"sweep": [{"axes": NOISY_AXES, "collection": capped}]}
+    yaml_configs.write_config(tmp_path, capped_card)
+
+    second_round = _plan([config_path], out_dir, 1)
+
+    point_id = first_piece.parent.name
+    assert saved["count"] == 6
+    assert _planned_ranges(second_round) == [(point_id, 6, 1)]

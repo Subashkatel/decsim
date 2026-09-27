@@ -76,7 +76,8 @@ How the plan decides a point's pieces:
 - **Later rounds, a point still running:** it is extended to the
   shots its failure rate so far says the target needs, which is OpenMC's
   trigger rule. With no failure yet, its shots double.
-- **Never past a cap.**
+- **Never past a cap.** The time cap is read at the point's measured
+  seconds a shot, so a round's last piece may be short.
 
 How the plan deals and sizes the tasks:
 

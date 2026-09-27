@@ -15,8 +15,9 @@ saved pieces, read shot by shot as a collect reads it:
    shots x (target / failures), the shots its failure rate so far needs
    for the target (the ratio squared, since the relative error goes as
    one over the square root of the failures); with no failure yet, to
-   twice its shots; with nothing saved yet, by one piece; never past a
-   cap, and at least one piece.
+   twice its shots; with nothing saved yet, by one piece; by at least
+   one piece, then cut to the shot cap and to the time cap at the
+   prefix's seconds a shot, so its last piece may be short.
 
 Every piece is sized by the collection's piece_rounds, so a piece takes
 about as long at any history length. The pieces are then dealt to tasks,
@@ -243,22 +244,34 @@ def _extension(
 ) -> int:
     """The shots to plan above highest_seed: to the wanted total, capped.
 
-    At least one piece, since the point has not stopped, and never past
-    the shot cap. The time cap bounds the total at the prefix's seconds
-    a shot.
+    At least one piece, since the point has not stopped, then cut to
+    the caps: the shot cap, and the time cap at the prefix's seconds a
+    shot, so a round's last piece may be short.
     """
     settings = point.settings
     wanted = _wanted_shots(settings, counts, point.piece_shots)
     wanted = max(wanted, settings.min_shots)
-    time_capped = _shots_in_the_time_cap(settings, counts)
-    if time_capped is not None:
-        wanted = min(wanted, time_capped)
     shots = wanted - highest_seed
     shots = max(shots, point.piece_shots)
-    if settings.max_shots is not None:
-        shots_to_the_cap = settings.max_shots - highest_seed
-        shots = min(shots, shots_to_the_cap)
+    end_seed = highest_seed + shots
+    capped_end_seed = _capped_end_seed(settings, counts, end_seed)
+    shots = capped_end_seed - highest_seed
     return max(shots, 0)
+
+
+def _capped_end_seed(
+    settings: collection.CollectionSettings,
+    counts: collection.PrefixCounts,
+    end_seed: int,
+) -> int:
+    """end_seed, or the lower end the shot cap or the time cap allows."""
+    ends = [end_seed]
+    if settings.max_shots is not None:
+        ends.append(settings.max_shots)
+    time_capped = _shots_in_the_time_cap(settings, counts)
+    if time_capped is not None:
+        ends.append(time_capped)
+    return min(ends)
 
 
 def _wanted_shots(

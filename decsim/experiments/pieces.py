@@ -174,52 +174,6 @@ def read_state(folder: pathlib.Path) -> ports.ThresholdSource:
     return pickle.loads(state_bytes)
 
 
-def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
-    """A hidden folder beside the piece that only this writer uses.
-
-    Two tasks handed the same piece may write it at once, so each
-    stages its own copy under a random name and neither touches the
-    other's files.
-    """
-    identifier = uuid.uuid4()
-    token = identifier.hex
-    return folder.with_name(f".{folder.name}.{token}.partial")
-
-
-def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
-    """The staged piece renamed into place, or dropped when one is there.
-
-    A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
-    so of two writers of one piece the first to rename wins. The other's
-    copy holds the same seeds of the same point, the same piece, and is
-    dropped.
-    """
-    try:
-        os.replace(staging, folder)
-    except OSError:
-        if not folder.is_dir():
-            raise
-        shutil.rmtree(staging)
-
-
-def _write_residence(staging: pathlib.Path, measurements: list) -> None:
-    """The residence rows of the piece's traced shots, when it traced any."""
-    residence_rows = residence.rows_of(measurements)
-    if not residence_rows:
-        return
-    residence_path = staging / residence.PIECE_FILE
-    report.write_csv(residence_rows, residence_path)
-
-
-def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:
-    """The state pickled into the staging folder; its sha256."""
-    state_bytes = pickle.dumps(state)
-    state_path = staging / STATE_FILE
-    state_path.write_bytes(state_bytes)
-    digest = hashlib.sha256(state_bytes)
-    return digest.hexdigest()
-
-
 def planned_pieces(experiment_dir: pathlib.Path) -> dict:
     """Every round's planned pieces, by point id, as (first seed, count).
 
@@ -266,6 +220,52 @@ def round_number_of(round_dir: pathlib.Path) -> int:
     """The round number k of a round<k> folder."""
     number_text = round_dir.name.removeprefix(ROUND_PREFIX)
     return int(number_text)
+
+
+def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
+    """A hidden folder beside the piece that only this writer uses.
+
+    Two tasks handed the same piece may write it at once, so each
+    stages its own copy under a random name and neither touches the
+    other's files.
+    """
+    identifier = uuid.uuid4()
+    token = identifier.hex
+    return folder.with_name(f".{folder.name}.{token}.partial")
+
+
+def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
+    """The staged piece renamed into place, or dropped when one is there.
+
+    A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
+    so of two writers of one piece the first to rename wins. The other's
+    copy holds the same seeds of the same point, the same piece, and is
+    dropped.
+    """
+    try:
+        os.replace(staging, folder)
+    except OSError:
+        if not folder.is_dir():
+            raise
+        shutil.rmtree(staging)
+
+
+def _write_residence(staging: pathlib.Path, measurements: list) -> None:
+    """The residence rows of the piece's traced shots, when it traced any."""
+    residence_rows = residence.rows_of(measurements)
+    if not residence_rows:
+        return
+    residence_path = staging / residence.PIECE_FILE
+    report.write_csv(residence_rows, residence_path)
+
+
+def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:
+    """The state pickled into the staging folder; its sha256."""
+    state_bytes = pickle.dumps(state)
+    state_path = staging / STATE_FILE
+    state_path.write_bytes(state_bytes)
+    digest = hashlib.sha256(state_bytes)
+    return digest.hexdigest()
 
 
 def _whole_pieces(point_dir: pathlib.Path) -> list:

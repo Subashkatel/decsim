@@ -100,6 +100,41 @@ def main(argv: list) -> None:
     print(f"submit it: slurm/round.sh {experiment_dir} {round_number}")
 
 
+def plan_round(
+    config_paths: list,
+    experiment_dir: pathlib.Path,
+    task_count: int,
+    job: JobShape,
+) -> Optional[pathlib.Path]:
+    """The next round's plan written in its folder; None when nothing is left.
+
+    Every configuration's points are recorded first, so the tasks that
+    run the round only read them. Yamls of one configuration id, which
+    split its sweep, are planned as one configuration.
+    """
+    experiment_dir.mkdir(parents=True, exist_ok=True)
+    planned = pieces.planned_pieces(experiment_dir)
+    bundles = []
+    costs = {}
+    configs_by_id = _configs_by_id(config_paths)
+    owned_points = _experiment_points(configs_by_id, experiment_dir)
+    for configuration_id, point in owned_points:
+        point_id = point.task.strong_id()
+        point_pieces = _next_pieces(
+            experiment_dir, configuration_id, point, planned
+        )
+        point_bundles = _bundles_of(point, point_pieces)
+        bundles.extend(point_bundles)
+        costs[point_id] = _cost_of(experiment_dir, point)
+    if not bundles:
+        return None
+    round_dir = _new_round_dir(experiment_dir)
+    tasks = _dealt(bundles, costs, task_count)
+    _write_plan(round_dir, tasks)
+    _write_tasks(round_dir, tasks, costs, job)
+    return round_dir
+
+
 def _parser() -> argparse.ArgumentParser:
     """The plan command's arguments."""
     parser = argparse.ArgumentParser(prog="decsim plan")
@@ -137,41 +172,6 @@ def _refuse_a_shape_below_one(parser, parsed) -> None:
     for flag, value in shape.items():
         if value < 1:
             parser.error(f"{flag} must be at least 1, got {value}")
-
-
-def plan_round(
-    config_paths: list,
-    experiment_dir: pathlib.Path,
-    task_count: int,
-    job: JobShape,
-) -> Optional[pathlib.Path]:
-    """The next round's plan written in its folder; None when nothing is left.
-
-    Every configuration's points are recorded first, so the tasks that
-    run the round only read them. Yamls of one configuration id, which
-    split its sweep, are planned as one configuration.
-    """
-    experiment_dir.mkdir(parents=True, exist_ok=True)
-    planned = pieces.planned_pieces(experiment_dir)
-    bundles = []
-    costs = {}
-    configs_by_id = _configs_by_id(config_paths)
-    owned_points = _experiment_points(configs_by_id, experiment_dir)
-    for configuration_id, point in owned_points:
-        point_id = point.task.strong_id()
-        point_pieces = _next_pieces(
-            experiment_dir, configuration_id, point, planned
-        )
-        point_bundles = _bundles_of(point, point_pieces)
-        bundles.extend(point_bundles)
-        costs[point_id] = _cost_of(experiment_dir, point)
-    if not bundles:
-        return None
-    round_dir = _new_round_dir(experiment_dir)
-    tasks = _dealt(bundles, costs, task_count)
-    _write_plan(round_dir, tasks)
-    _write_tasks(round_dir, tasks, costs, job)
-    return round_dir
 
 
 def _configs_by_id(config_paths: list) -> dict:

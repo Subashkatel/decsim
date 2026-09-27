@@ -181,14 +181,6 @@ class PointCollection:
         return min(self.piece_shots, remaining)
 
 
-def _task_as_the_piece_left_it(
-    task: collect.Task, folder: pathlib.Path
-) -> collect.Task:
-    """The task with the online calibrator the piece in folder saved."""
-    state = pieces.read_state(folder)
-    return dataclasses.replace(task, online_threshold=state)
-
-
 def run_sweep(tasks: list, shots: int, *, processes: int = 1) -> list:
     """Seeds 0 to shots - 1 of every task of a sweep, measured.
 
@@ -275,6 +267,60 @@ def write_the_run_folder(
     return rows
 
 
+def run_planned(
+    plan_path: pathlib.Path, task_number: int, *, processes: int = 1
+) -> None:
+    """One task of a round's plan, its pieces run and saved.
+
+    The experiment folder is the one the round's folder sits in, and its
+    points were recorded by the plan, so the task only reads them. A
+    piece already saved is skipped, so a task run again runs only what
+    it had not saved. Each piece records its round and task, and the
+    task's manifest goes in round<k>/<task>/.
+    """
+    round_dir = plan_path.parent
+    experiment_dir = round_dir.parent
+    task_pieces = _pieces_of_the_task(plan_path, task_number)
+    configurations = run_folder.recorded_configurations(experiment_dir)
+    point_ids = [piece.point_id for piece in task_pieces]
+    task_dir = round_dir / str(task_number)
+    started_utc = run_folder.start_run(None, task_dir, point_ids)
+    round_number = pieces.round_number_of(round_dir)
+    facts = {"round": round_number, "task": task_number}
+    for configuration_id, config_pieces in _by_configuration(task_pieces):
+        configs = configurations[configuration_id]
+        _run_the_planned_pieces(
+            configs, experiment_dir, config_pieces, facts, processes
+        )
+    run_folder.finish_run(None, task_dir, point_ids, started_utc)
+
+
+def recorded_points(configs: list, experiment_dir: pathlib.Path) -> list:
+    """Every point of one configuration's yamls, recorded, with its collection.
+
+    The yamls share one configuration id, and may split its sweep, one
+    file a distance; a point two of them name is one point. Recording
+    writes each point's resolved/ record and inputs and each yaml's
+    configuration line, and builds each point's plan, so a point the
+    build refuses stops the run before any shot.
+    """
+    point_tasks = []
+    for config in configs:
+        config_tasks = config.point_tasks()
+        _record_the_points(experiment_dir, config, config_tasks)
+        point_tasks.extend(config_tasks)
+    unique = _unique_tasks(point_tasks)
+    return _point_collections(experiment_dir, point_tasks, unique)
+
+
+def _task_as_the_piece_left_it(
+    task: collect.Task, folder: pathlib.Path
+) -> collect.Task:
+    """The task with the online calibrator the piece in folder saved."""
+    state = pieces.read_state(folder)
+    return dataclasses.replace(task, online_threshold=state)
+
+
 def _recorded_rule(record: dict) -> collection_module.PointRule:
     """What a point's summary reads its prefix by, as its record says."""
     facts = record["experiment"]
@@ -306,34 +352,6 @@ def _write_the_recorded_trajectory(
     _write_online_threshold_record(
         point_id, algorithm, calibrator, report_dir, swept
     )
-
-
-def run_planned(
-    plan_path: pathlib.Path, task_number: int, *, processes: int = 1
-) -> None:
-    """One task of a round's plan, its pieces run and saved.
-
-    The experiment folder is the one the round's folder sits in, and its
-    points were recorded by the plan, so the task only reads them. A
-    piece already saved is skipped, so a task run again runs only what
-    it had not saved. Each piece records its round and task, and the
-    task's manifest goes in round<k>/<task>/.
-    """
-    round_dir = plan_path.parent
-    experiment_dir = round_dir.parent
-    task_pieces = _pieces_of_the_task(plan_path, task_number)
-    configurations = run_folder.recorded_configurations(experiment_dir)
-    point_ids = [piece.point_id for piece in task_pieces]
-    task_dir = round_dir / str(task_number)
-    started_utc = run_folder.start_run(None, task_dir, point_ids)
-    round_number = pieces.round_number_of(round_dir)
-    facts = {"round": round_number, "task": task_number}
-    for configuration_id, config_pieces in _by_configuration(task_pieces):
-        configs = configurations[configuration_id]
-        _run_the_planned_pieces(
-            configs, experiment_dir, config_pieces, facts, processes
-        )
-    run_folder.finish_run(None, task_dir, point_ids, started_utc)
 
 
 def _pieces_of_the_task(plan_path: pathlib.Path, task_number: int) -> list:
@@ -471,24 +489,6 @@ def _resumed_from_the_piece_before(
         f"{unit.first_seed}, whose calibrator its piece starts from; plan "
         "again"
     )
-
-
-def recorded_points(configs: list, experiment_dir: pathlib.Path) -> list:
-    """Every point of one configuration's yamls, recorded, with its collection.
-
-    The yamls share one configuration id, and may split its sweep, one
-    file a distance; a point two of them name is one point. Recording
-    writes each point's resolved/ record and inputs and each yaml's
-    configuration line, and builds each point's plan, so a point the
-    build refuses stops the run before any shot.
-    """
-    point_tasks = []
-    for config in configs:
-        config_tasks = config.point_tasks()
-        _record_the_points(experiment_dir, config, config_tasks)
-        point_tasks.extend(config_tasks)
-    unique = _unique_tasks(point_tasks)
-    return _point_collections(experiment_dir, point_tasks, unique)
 
 
 def _point_tasks_of(configs: list) -> list:

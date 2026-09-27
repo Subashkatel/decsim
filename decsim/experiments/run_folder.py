@@ -149,13 +149,6 @@ def recorded_combined_folders(experiment_dir: pathlib.Path) -> dict:
     return folders
 
 
-def _combined_folder_named(
-    experiment_dir: pathlib.Path, name: str, identity: str
-) -> pathlib.Path:
-    folder_name = f"{name}-{identity[:8]}"
-    return experiment_dir / COMBINED_FOLDER / folder_name
-
-
 def record_configuration(
     experiment_dir: pathlib.Path, config: experiment.ExperimentConfig
 ) -> None:
@@ -204,14 +197,6 @@ def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
             experiment.load_experiment(file) for file in files
         ]
     return configurations
-
-
-def _configuration_lines(experiment_dir: pathlib.Path) -> list:
-    """configurations.csv's lines, each a dict of its columns."""
-    path = experiment_dir / CONFIGURATIONS_FILE
-    with open(path, newline="") as handle:
-        reader = csv.DictReader(handle)
-        return list(reader)
 
 
 def piece_identity() -> dict:
@@ -446,6 +431,21 @@ def utc_now() -> str:
     """This moment as an iso timestamp, for the manifest's times."""
     now = datetime.datetime.now(datetime.timezone.utc)
     return now.isoformat()
+
+
+def _combined_folder_named(
+    experiment_dir: pathlib.Path, name: str, identity: str
+) -> pathlib.Path:
+    folder_name = f"{name}-{identity[:8]}"
+    return experiment_dir / COMBINED_FOLDER / folder_name
+
+
+def _configuration_lines(experiment_dir: pathlib.Path) -> list:
+    """configurations.csv's lines, each a dict of its columns."""
+    path = experiment_dir / CONFIGURATIONS_FILE
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)
 
 
 def _copy_the_config_chain(config_files: tuple, run_dir: pathlib.Path) -> None:

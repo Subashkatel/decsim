@@ -14,6 +14,12 @@
 # first undefined operation.
 #
 # The compiler defaults to gcc and CC overrides it.
+#
+# The compiler writes a private file beside the library and mv renames it
+# over the library, one rename(2) within the folder, so a process loading
+# the library while another build runs (a test session per xdist worker,
+# the sanitize rebuilds) gets the old library or the new one, never part
+# of one; a failed build leaves the old library and removes its own file.
 set -eu
 cd "$(dirname "$0")/.."
 compiler=${CC:-gcc}
@@ -28,5 +34,9 @@ if [ "${1:-}" = "--sanitize" ]; then
 else
   flags+=(-O2)
 fi
-"$compiler" "${flags[@]}" "${sources[@]}" -o "$library"
+staged=$(mktemp "$library.XXXXXX")
+trap 'rm -f "$staged"' EXIT
+"$compiler" "${flags[@]}" "${sources[@]}" -o "$staged"
+chmod 755 "$staged"
+mv -f "$staged" "$library"
 echo "$library"

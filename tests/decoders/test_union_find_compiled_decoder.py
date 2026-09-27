@@ -417,6 +417,50 @@ def test_a_missing_compiled_library_is_refused_by_its_build_command(
     assert compiled_decoder.BUILD_COMMAND in str(refusal.value)
 
 
+# a compiler that writes half a library where -o points, then fails, as a
+# build a second build races, or a killed one, leaves its output
+HALF_WRITING_COMPILER = """#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then printf half > "$2"; fi
+  shift
+done
+exit 1
+"""
+
+
+def test_a_build_that_fails_leaves_the_library_a_reader_loads_whole(
+    tmp_path,
+):
+    """A reader loads the last whole library, never a build's half of one.
+
+    The build script runs from a copy of the tree whose compiler writes
+    part of its output and fails. The library in place stays the one
+    before it, byte for byte, and no half-written file is left beside it.
+    """
+    tools_folder = tmp_path / "tools"
+    library_folder = tmp_path / "decsim" / "decoders" / "union_find"
+    tools_folder.mkdir()
+    library_folder.mkdir(parents=True)
+    script = CHECKOUT / compiled_decoder.BUILD_COMMAND
+    copied_script = tools_folder / script.name
+    shutil.copy(script, copied_script)
+    library = library_folder / "union_find.so"
+    library.write_bytes(b"the whole library")
+    compiler = tmp_path / "half_writing_cc"
+    compiler.write_text(HALF_WRITING_COMPILER)
+    compiler.chmod(0o755)
+    environment = dict(os.environ, CC=str(compiler))
+
+    build = subprocess.run(
+        ["bash", str(copied_script)], env=environment, capture_output=True
+    )
+
+    left_beside = sorted(path.name for path in library_folder.iterdir())
+    assert build.returncode != 0
+    assert library.read_bytes() == b"the whole library"
+    assert left_beside == ["union_find.so"]
+
+
 @pytest.mark.skipif(
     SANITIZERS_MISSING,
     reason="no sanitizer runtime this interpreter can preload",

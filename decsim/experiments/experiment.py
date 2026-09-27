@@ -312,6 +312,7 @@ def _resolved(value, root: dict, chain: tuple):
     if isinstance(value, Mapping):
         resolved = {}
         for key, item in value.items():
+            _refuse_a_key_that_is_not_text(key, value)
             resolved[key] = _resolved(item, root, chain)
         return resolved
     if isinstance(value, list):
@@ -340,6 +341,24 @@ def _referenced(value, root: dict, chain: tuple):
         )
     target = config_module.setting_at(root, path, f"the reference {value}")
     return _resolved(target, root, followed)
+
+
+def _refuse_a_key_that_is_not_text(key, mapping: Mapping) -> None:
+    """A yaml key such as 1, which json would write as the text "1".
+
+    Python's json coerces every key to str ("Keys in key/value pairs of
+    JSON are always of the type str", docs.python.org, json), and a
+    point's resolved record and its strong id are json, so a key of 1
+    and a key of "1" would name one point.
+    """
+    if isinstance(key, str):
+        return
+    keys = list(mapping)
+    raise ValueError(
+        f"the yaml key {key!r} among {keys} is not text; a point's record "
+        "and its id are json, whose keys are text, so "
+        f"{key!r} and {str(key)!r} would name one point"
+    )
 
 
 @contextlib.contextmanager

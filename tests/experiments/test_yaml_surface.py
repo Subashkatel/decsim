@@ -424,6 +424,27 @@ def test_an_axis_path_that_is_not_text_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
+def test_a_yaml_key_that_is_not_text_is_refused(tmp_path):
+    """A point's record and id are json, and json's keys are text.
+
+    Python's json writes the key 1 as "1" (docs.python.org, json, "Keys in
+    key/value pairs of JSON are always of the type str"), so a key of 1
+    and a key of "1" would give two points one id.
+    """
+    clocks = {"fridge": 250.0, "room": 250.0, 1: 100.0}
+    config_path = yaml_configs.write_config(tmp_path, {"clocks": clocks})
+    sentence = (
+        "the yaml key 1 among ['fridge', 'room', 1] is not text; a "
+        "point's record "
+        "and its id are json, whose keys are text, so 1 and '1' would "
+        "name one point"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        experiment.load_experiment(config_path)
+
+
 # A decoder row with keys of its own, one value of a weak_decoder axis.
 PRICED_DECODER_ROW = {
     "kind": 0.05,

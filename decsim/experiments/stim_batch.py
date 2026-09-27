@@ -479,11 +479,7 @@ def _prefix_of(
     record: dict, point_folders: list
 ) -> collection_module.PrefixTracker:
     """The point's contiguous prefix, read by the collection it recorded."""
-    facts = record["experiment"]
-    settings = collection_module.CollectionSettings(**facts["collection"])
-    rule = collection_module.PointRule(
-        settings, facts["adaptive"], record["rounds_per_shot"]
-    )
+    rule = collection_module.PointRule.from_record(record)
     tracker = collection_module.PrefixTracker(rule)
     for folder in point_folders:
         for row in shot_rows(folder):

@@ -353,15 +353,6 @@ def _task_as_the_piece_left_it(
     return dataclasses.replace(task, online_threshold=state)
 
 
-def _recorded_rule(record: dict) -> collection_module.PointRule:
-    """What a point's summary reads its prefix by, as its record says."""
-    facts = record["experiment"]
-    settings = collection_module.CollectionSettings(**facts["collection"])
-    return collection_module.PointRule(
-        settings, facts["adaptive"], record["rounds_per_shot"]
-    )
-
-
 def _fold_into_the_staging(
     experiment_dir: pathlib.Path,
     folders: list,
@@ -379,7 +370,7 @@ def _fold_into_the_staging(
     rules = {}
     for point_id in point_ids:
         record = records[point_id]
-        rules[point_id] = _recorded_rule(record)
+        rules[point_id] = collection_module.PointRule.from_record(record)
         _write_the_recorded_trajectory(
             experiment_dir, folders, record, staging, swept
         )

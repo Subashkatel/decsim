@@ -177,6 +177,18 @@ class PointRule:
     is_adaptive: bool = False
     rounds_per_shot: Optional[int] = None
 
+    @classmethod
+    def from_record(cls, record: Mapping) -> "PointRule":
+        """The rule a point's resolved/ record says its prefix is read by.
+
+        The record's experiment facts are what collect_command wrote when
+        it recorded the point, so a fold reads a point by the collection
+        it was run under, whatever the yaml says now.
+        """
+        facts = record["experiment"]
+        settings = CollectionSettings(**facts["collection"])
+        return cls(settings, facts["adaptive"], record["rounds_per_shot"])
+
 
 class PrefixTracker:
     """One point's contiguous prefix of seeds as its shot rows arrive.

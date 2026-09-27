@@ -330,46 +330,19 @@ def _requests_the_window(args: dict, key: str) -> bool:
 def _rounds_cover(args: dict, key: str) -> bool:
     """Whether an event's round range holds the followed round.
 
-    A move, a hold and a decoder input name a range and not one round,
-    so a round's own path runs through the window that reads it.
+    A move, a hold, a window's readiness and a decoder input name a
+    range per operation and not one round, so a round's own path runs
+    through the window that reads it.
     """
     operation, index = _key_parts(key)
-    ranges = _ranges_by_operation(args)
+    ranges = args.get("rounds_by_operation", {})
     text = ranges.get(operation)
-    if not text:
+    if text is None:
         return False
     low, high = trace_file.range_of(text)
     if index < low:
         return False
     return index <= high
-
-
-def _ranges_by_operation(args: dict) -> dict:
-    """An event's round ranges by operation text.
-
-    An event built from round keys states a range per operation it
-    touches; a move or a window names one operation beside one range.
-    """
-    by_operation = args.get("rounds_by_operation")
-    if by_operation is not None:
-        return by_operation
-    text = args.get("rounds")
-    operation = _operation_of(args)
-    if operation is None:
-        return {}
-    return {operation: text}
-
-
-def _operation_of(args: dict) -> Optional[str]:
-    """The operation an event names: its own, or its window's."""
-    named = args.get("operation")
-    if named is not None:
-        return str(named)
-    window = args.get("window")
-    if window is None:
-        return None
-    operation, _ = _key_parts(window)
-    return operation
 
 
 def _key_parts(key: str) -> tuple:
@@ -450,15 +423,24 @@ def _move_phrase(args: dict) -> str:
     """One link hop, and the window whose rounds it carried."""
     words = ["move"]
     window = args.get("window")
-    rounds = args.get("rounds")
+    rounds = args.get("rounds_by_operation")
     if window is not None and rounds is not None:
         index = _window_index(window)
-        words.append(f"with W{index} rounds {rounds}")
+        rounds_text = _rounds_text(rounds)
+        words.append(f"with W{index} rounds {rounds_text}")
     waited = args.get("queue_wait_ticks")
     if waited:
         span = _microseconds(waited)
         words.append(f"after {span} on the wire")
     return ", ".join(words)
+
+
+def _rounds_text(rounds_by_operation: dict) -> str:
+    """Each operation's range as `operation:lo..hi`, the way keys read."""
+    ranges = []
+    for operation, text in rounds_by_operation.items():
+        ranges.append(f"{operation}:{text}")
+    return " and ".join(ranges)
 
 
 def _queue_phrase(args: dict) -> str:

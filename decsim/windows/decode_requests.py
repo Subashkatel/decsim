@@ -161,9 +161,9 @@ class DecodeRequestBuilder:
 
     It stamps the gate on every job it builds, so the decoder side has
     the window's input policy without knowing the window package. Trace
-    source: window_data_complete(window) when the last round the window
-    reads is readable in its store, which is the moment the window may
-    be requested.
+    source: window_data_complete(window, read_keys) when the last round
+    the window reads is readable in its store, which is the moment the
+    window may be requested.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -199,6 +199,7 @@ class DecodeRequestBuilder:
         self,
         window: window_records.Window,
         operation: program_records.Operation,
+        read_keys: list,
     ) -> None:
         """Stamp the window's data-complete tick the first time it is seen.
 
@@ -209,7 +210,7 @@ class DecodeRequestBuilder:
         if window.t_data_complete is not None:
             return
         window.t_data_complete = self.engine.now
-        self.trace.window_data_complete.fire(window)
+        self.trace.window_data_complete.fire(window, read_keys)
         if not self.tracker.is_buffer_filled_by_memory(window):
             return
         self.engine.log(
@@ -441,7 +442,10 @@ class DecodeRequester:
         if not self.tracker.is_data_complete(window):
             return
         operation = self.tracker.operation_by_id[window.operation_id]
-        self.builder.note_data_complete(window, operation)
+        read_keys = self.retention.read_keys_for_bounds(
+            window.operation_id, window.start_round, window.buffer_hi, window
+        )
+        self.builder.note_data_complete(window, operation, read_keys)
         # a window still owed a boundary ships its raw rounds now; the
         # boundary is XORed into the landed input at the decoder when it
         # arrives (qLDPC net_error / cudaq-x syndrome_mods / LILLIPUT's

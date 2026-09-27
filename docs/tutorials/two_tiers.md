@@ -244,7 +244,7 @@ tick (us)  where                        what                                    
 6.008      Window planner               W0 ready
 6.008      Window planner               queued, dispatched to default#0                               0.000
 6.008      Window planner               queued, dispatched to default#0                               0.000
-6.008      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                     0.004     move      44
+6.008      weak_buffer_to_weak_decoder  move, with W0 rounds 1:1..6                                   0.004     move      44
 6.012      Decoder unit default#0       unit default#0 memory copy                                              copy      44
 6.012      Decoder unit default#0       stage fetch                                                   0.024
 6.012      Decoder unit default#0       decode service                                                1.064
@@ -257,8 +257,8 @@ tick (us)  where                        what                                    
 7.100      Decoder unit default#0       stage algorithm                                               1.000
 8.100      Decoder unit default#0       stage release                                                 0.040
 8.140      Window planner               verdict
-8.140      decoder_to_decoder           move, with W0 rounds 1..6                                     0.004     move      8
-8.140      weak_decoder_to_frame        move, with W0 rounds 1..6                                     0.004     move      1
+8.140      decoder_to_decoder           move, with W0 rounds 1:1..6                                   0.004     move      8
+8.140      weak_decoder_to_frame        move, with W0 rounds 1:1..6                                   0.004     move      1
 8.144      Frame                        residence, unbounded, committed 8.148, freed at end of run    72.172    copy
 8.148      Window planner               W0 committed
 8.148      Frame                        1:0 committed
@@ -300,7 +300,7 @@ tick (us)  where                            what                                
 15.008     Window planner                   W3 ready
 15.008     Window planner                   queued, dispatched to default#0                                0.000
 15.008     Window planner                   queued, dispatched to default#0                                0.000
-15.008     weak_buffer_to_weak_decoder      move, with W3 rounds 10..15                                    0.004     move      48
+15.008     weak_buffer_to_weak_decoder      move, with W3 rounds 1:10..15                                  0.004     move      48
 15.012     Window planner                   masked view copy                                                         copy      48
 15.012     Decoder unit default#0           unit default#0 memory copy                                               copy      48
 15.012     Decoder unit default#0           stage fetch                                                    0.024
@@ -317,11 +317,11 @@ tick (us)  where                            what                                
 17.140     Window planner                   verdict
 17.140     Window planner                   W3 committed
 17.140     Strong tier                      W3 strong window held                                          0.004
-17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move      64
-17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 10..15                                    0.004     move      112
+17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  0.004     move      64
+17.140     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  0.004     move      112
 17.144     Window planner                   queued, dispatched to strong#0                                 0.000
-17.144     strong_buffer_to_strong_decoder  move, with W3 rounds 10..15                                    0.004     move      48
-17.144     decoder_to_decoder               move, with W3 rounds 10..15                                    0.004     move      8
+17.144     strong_buffer_to_strong_decoder  move, with W3 rounds 1:10..15                                  0.004     move      48
+17.144     decoder_to_decoder               move, with W3 rounds 1:10..15                                  0.004     move      8
 17.148     Window planner                   masked view copy                                                         copy      48
 17.148     Decoder unit strong#0            unit strong#0 memory copy                                                copy      48
 17.148     Decoder unit strong#0            stage fetch                                                    0.024
@@ -329,9 +329,9 @@ tick (us)  where                            what                                
 17.148     Decoder unit strong#0            decode service                                                 10.064
 17.172     Decoder unit strong#0            stage algorithm                                                10.000
 27.172     Decoder unit strong#0            stage release                                                  0.040
-27.212     strong_decoder_to_frame          move, with W3 rounds 10..15                                    0.004     move      65
+27.212     strong_decoder_to_frame          move, with W3 rounds 1:10..15                                  0.004     move      65
 27.216     Frame                            residence, unbounded, committed 27.220, freed at end of run    53.100    copy
-27.220     decoder_to_decoder               move, with W3 rounds 10..15                                    0.004     move      8
+27.220     decoder_to_decoder               move, with W3 rounds 1:10..15                                  0.004     move      8
 27.220     Frame                            1:3 committed
 
 copies 5, references 3 jobs and 0 holds, moves 7
@@ -402,7 +402,7 @@ tick (us)  where                            what                                
 18.008     Window planner                   W4 ready
 18.008     Window planner                   queued, dispatched to default#0                                0.000
 18.008     Window planner                   queued, dispatched to default#0                                0.000
-18.008     weak_buffer_to_weak_decoder      move, with W4 rounds 13..18                                    0.004     move      48
+18.008     weak_buffer_to_weak_decoder      move, with W4 rounds 1:13..18                                  0.004     move      48
 18.012     Decoder unit default#0           unit default#0 memory copy                                               copy      48
 18.012     Decoder unit default#0           residence, unbounded, data ready 18.012, freed at decode done  11.340    copy      48
 27.224     Window planner                   masked view copy                                                         copy      48

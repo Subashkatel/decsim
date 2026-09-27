@@ -1,7 +1,8 @@
 """The window transfers' laws on the reference link card.
 
-A send carries the window's round range and the request it serves; a
-result reaches the frame as one bit per logical observable.
+A send carries the window's round range, the rounds the retention says
+the window reads, and the request it serves; a result reaches the frame
+as one bit per logical observable.
 """
 
 import decsim.engine as engine_module
@@ -10,6 +11,18 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+
+
+class _Reads:
+    """The retention's answer for every window: the keys it was given."""
+
+    def __init__(self, read_keys: list) -> None:
+        self.read_keys = read_keys
+
+    def read_keys_for_bounds(
+        self, _operation_id, _start_round, _buffer_hi, _window
+    ) -> list:
+        return self.read_keys
 
 
 class _RecordingLink:
@@ -29,6 +42,8 @@ def test_a_window_send_carries_its_round_range_and_request_key():
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = link
+    # a lookahead window whose buffer runs into the next operation
+    transfers.retention = _Reads([(1, 12), (1, 13), (2, 1)])
     operation = program_records.Operation(1, "memory", (0,), patches=(3, 2))
     window = window_records.Window(
         operation_id=1,
@@ -57,6 +72,7 @@ def test_a_window_send_carries_its_round_range_and_request_key():
     assert now_ticks == 0
     assert attribution.window_id == 4
     assert (attribution.first_round, attribution.last_round) == (7, 13)
+    assert attribution.round_keys == ((1, 12), (1, 13), (2, 1))
     assert attribution.patch_ids == (2, 3)
     assert attribution.relation.request_key is request_key
     assert delivered == [0]
@@ -67,6 +83,7 @@ def test_a_job_send_returns_the_delay_the_link_expects():
     link = _RecordingLink()
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = link
+    transfers.retention = _Reads([(1, 1), (1, 2), (1, 3), (1, 4), (1, 5)])
     window = window_records.Window(
         operation_id=1,
         window_index=0,

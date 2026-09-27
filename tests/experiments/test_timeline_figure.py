@@ -233,8 +233,7 @@ def test_a_last_window_reading_past_the_stream_is_drawn_to_the_last_round(
     lanes = plots._timeline_lanes(document)
     stored = plots._stored_rounds(lanes, shot)
     last_window = shot.windows[max(shot.windows)]
-    assert last_window.read_hi > max(stored)
-    assert plots._stored_read_end(last_window, stored) == max(stored)
+    assert last_window.read_hi == max(stored)
     figure_path = tmp_path / "timeline.png"
     plots.timeline_plot(trace_path, figure_path)
     status = figure_path.stat()

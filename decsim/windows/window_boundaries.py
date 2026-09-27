@@ -48,6 +48,8 @@ class BoundaryCourier:
     planner = ports.Port(window_planner.WindowPlanner)
     # the boundary is this component's record, so it sends it itself
     transfers = ports.Port(ports.WindowTransfers)
+    # which rounds a window reads, the next operation's among them
+    retention = ports.Port(ports.WindowRetention)
     interaction = ports.Port(window_interactions.WindowInteraction)
     boundary_policy = ports.Port(ports.BoundaryPolicy)
     # the facade hears every delivery that landed in a window, and
@@ -366,7 +368,7 @@ class BoundaryCourier:
         delivery_revision = record.delivery_version_by_dependent.get(
             destination.key, 0
         )
-        window_attribution = transfer_records.TransferAttribution.for_window(
+        window_attribution = self._window_attribution(
             destination, operation, request_key
         )
         relation = transfer_records.BoundaryTransferRelation(
@@ -377,6 +379,20 @@ class BoundaryCourier:
             delivery_revision,
         )
         return dataclasses.replace(window_attribution, relation=relation)
+
+    def _window_attribution(
+        self,
+        window: window_records.Window,
+        operation: program_records.Operation,
+        request_key: window_records.DecoderRequestKey,
+    ) -> transfer_records.TransferAttribution:
+        """The window's attribution, naming every round the window reads."""
+        round_keys = self.retention.read_keys_for_bounds(
+            window.operation_id, window.start_round, window.buffer_hi, window
+        )
+        return transfer_records.TransferAttribution.for_window(
+            window, operation, request_key, tuple(round_keys)
+        )
 
     def _pin_delivered(
         self, destination: window_records.Window, _transfer
@@ -430,7 +446,7 @@ class BoundaryCourier:
         delivery_version: int,
     ) -> None:
         """One delivery over decoder_to_decoder, received at its landing."""
-        window_attribution = transfer_records.TransferAttribution.for_window(
+        window_attribution = self._window_attribution(
             window, operation, source_request_key
         )
         relation = transfer_records.BoundaryTransferRelation(

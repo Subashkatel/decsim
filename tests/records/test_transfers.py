@@ -63,10 +63,32 @@ def test_a_windows_attribution_covers_the_rounds_it_reads():
     request_key = window_records.DecoderRequestKey(
         4, 2, window_records.DecoderTier.WEAK, 1
     )
+    round_keys = ((4, 1), (4, 2), (4, 3), (4, 4), (4, 5), (4, 6))
     attribution = transfer_records.TransferAttribution.for_window(
-        window, operation, request_key
+        window, operation, request_key, round_keys
     )
     assert attribution.first_round == 1
     assert attribution.last_round == 6
     assert attribution.window_id == 2
     assert attribution.relation.request_key is request_key
+    assert attribution.round_keys == round_keys
+
+
+def test_a_regions_rounds_are_named_under_each_packets_own_operation():
+    """A strong window past its operation's end reads the next one's rounds."""
+    patch_a = make_fragment("patch-a")
+    patch_b = make_fragment("patch-b")
+    last_of_the_first = round_records.SyndromeRoundPacket(
+        operation_id=1, round_index=6, fragments=(patch_a,)
+    )
+    first_of_the_next = round_records.SyndromeRoundPacket(
+        operation_id=2, round_index=1, fragments=(patch_b,)
+    )
+    request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 0
+    )
+    region = round_records.EscalatedRegion(
+        request_key, (last_of_the_first, first_of_the_next), wire_bits=4
+    )
+    attribution = transfer_records.TransferAttribution.for_region(region)
+    assert attribution.round_keys == ((1, 6), (2, 1))

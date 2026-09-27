@@ -228,10 +228,9 @@ class TraceWriter:
         if attribution.window_id is not None:
             window_key = (attribution.operation_id, attribution.window_id)
             args["window"] = window_text(window_key)
-        if attribution.first_round is not None:
-            first = attribution.first_round
-            last = attribution.last_round
-            args["rounds"] = f"{first}..{last}"
+        if attribution.round_keys:
+            round_keys = attribution.round_keys
+            args["rounds_by_operation"] = _rounds_by_operation(round_keys)
         name = _move_name(attribution)
         if attribution.window_id is None:
             category = "round,link"
@@ -368,11 +367,13 @@ class TraceWriter:
         name = f"W{window.window_index} planned"
         self._instant("Window planner", name, "window", args)
 
-    def window_ready(self, window: window_records.Window) -> None:
+    def window_ready(
+        self, window: window_records.Window, read_keys: list
+    ) -> None:
         """Every round the window reads is readable in its store."""
         args = {
             "window": window_text(window.key),
-            "rounds": f"{window.start_round}..{window.buffer_hi}",
+            "rounds_by_operation": _rounds_by_operation(read_keys),
             "commit": f"{window.commit_lo}..{window.commit_hi}",
         }
         name = f"W{window.window_index} ready"
@@ -817,7 +818,7 @@ class TraceWriter:
         and ends when its bits land in a unit's memory.
         """
         carries_window = attribution.window_id is not None
-        for round_key in _rounds_of(attribution):
+        for round_key in attribution.round_keys:
             is_flowing = round_key in self._open.flowing_rounds
             if not is_flowing and carries_window:
                 continue
@@ -1064,9 +1065,9 @@ def _holder_text(holder) -> str:
 def _rounds_by_operation(round_keys) -> dict:
     """Each operation's rounds among the keys as `lo..hi`, by operation.
 
-    A lookahead window reads its predecessor's last rounds and its own
-    first ones, so one range over every key would name rounds of one
-    operation that the other owns.
+    A lookahead window reads its operation's last rounds and the next
+    operation's first ones, so one range over every key would name
+    rounds of one operation that the other owns.
     """
     indices_by_operation = {}
     for operation_id, round_index in round_keys:
@@ -1085,17 +1086,6 @@ def _move_name(attribution) -> str:
     if attribution.first_round is not None:
         return f"move round {attribution.first_round}"
     return "move"
-
-
-def _rounds_of(attribution) -> tuple:
-    """The round keys one move carries, from its attribution."""
-    if attribution.first_round is None:
-        return ()
-    keys = []
-    last_round = attribution.last_round + 1
-    for index in range(attribution.first_round, last_round):
-        keys.append((attribution.operation_id, index))
-    return tuple(keys)
 
 
 def _packet_bits(packet) -> Optional[int]:

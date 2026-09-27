@@ -19,9 +19,7 @@ whole circuit.
 """
 
 import hashlib
-import os
 import pathlib
-import shutil
 import time
 
 import numpy
@@ -273,7 +271,7 @@ def write_piece(
     staging.mkdir(parents=True)
     piece_path = staging / pieces.PIECE_FILE
     run_folder.write_json(piece_path, piece)
-    _publish(staging, folder)
+    pieces.publish(staging, folder)
     return folder
 
 
@@ -457,20 +455,6 @@ def _decode_the_block(
         result = window.result_of(row, shot_events)
         seed = first_seed + offset
         tally.add_shot(seed, result, block_observables[offset])
-
-
-def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
-    """The staged piece renamed into place, or dropped when one is there.
-
-    A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
-    so of two writers of one piece the first wins, as in pieces.write.
-    """
-    try:
-        os.replace(staging, folder)
-    except OSError:
-        if not folder.is_dir():
-            raise
-        shutil.rmtree(staging)
 
 
 def _point_row(record: dict, point_folders: list) -> dict:

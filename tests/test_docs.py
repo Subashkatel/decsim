@@ -46,6 +46,8 @@ import re
 import subprocess
 import sys
 
+import pytest
+
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 CHECKOUT = TESTS_PATH.parent.parent
@@ -716,3 +718,27 @@ def _check_every_yaml_fence(pages) -> None:
             assert named.startswith(" configs/"), (
                 f"{page.name} has a yaml block naming no config"
             )
+
+
+@pytest.mark.parametrize(
+    ("call_text", "default"),
+    [
+        ('parser.add_argument("--out", required=True)', "required"),
+        ('parser.add_argument("--out")', "None"),
+        ('parser.add_argument("config")', "required"),
+        ('parser.add_argument("--cores", default=4)', "4"),
+    ],
+)
+def test_the_command_reference_says_what_an_argument_left_out_is_worth(
+    call_text, default
+):
+    """The referent is argparse's own rule for a left-out argument.
+
+    An option is None unless it is declared required, and a positional
+    argument is always required.
+    """
+    tool = _docs_map()
+    tree = ast.parse(call_text)
+    call = tree.body[0].value
+    name = call.args[0].value
+    assert tool.argument_default(call, name) == default

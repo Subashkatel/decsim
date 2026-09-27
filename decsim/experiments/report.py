@@ -548,7 +548,7 @@ def confidence_histogram_rows(measurements: list) -> list:
     return _confidence_histogram_rows_of(counts, points)
 
 
-def gap_bin_low_db(gap_nats: float) -> float:
+def gap_bin_low_decibels(gap_nats: float) -> float:
     """The lower edge, in decibels, of the 0.1 dB bin holding the gap.
 
     A gap in nats is ln of the likelihood ratio and a decibel is
@@ -1874,7 +1874,7 @@ def _histogram_key(point: tuple, signal: str, kind: str, gap_nats) -> tuple:
     """
     low = None
     if gap_nats is not None:
-        low = gap_bin_low_db(gap_nats)
+        low = gap_bin_low_decibels(gap_nats)
     return (point, signal, kind, low)
 
 
@@ -1902,7 +1902,7 @@ def _confidence_histogram_rows_of(counts: dict, points: list) -> list:
         row = point_columns(point)
         row["signal"] = signal
         row["histogram"] = kind
-        row["gap_db_low"] = low
+        row["gap_low_decibels"] = low
         row["escalated"] = escalated
         row["shot_failed"] = failed
         row["count"] = counts[key]
@@ -1942,7 +1942,7 @@ def _folded_confidence_histogram(folders: list) -> dict:
 def _add_a_histogram_row(counts: dict, row: dict) -> None:
     """One histogram row read back, added to its cell."""
     point = sweep_point_of(row)
-    low = _empty_as_none(row["gap_db_low"])
+    low = _empty_as_none(row["gap_low_decibels"])
     escalated = _empty_as_none(row["escalated"])
     key = (
         point,

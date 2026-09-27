@@ -817,9 +817,9 @@ def test_a_run_whose_escalation_reads_no_confidence_writes_neither_file(
 def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():
     ten_decibels_in_nats = 2.302585092994046
 
-    assert report.gap_bin_low_db(ten_decibels_in_nats) == 10.0
-    assert report.gap_bin_low_db(0.0) == 0.0
-    assert report.gap_bin_low_db(math.inf) == math.inf
+    assert report.gap_bin_low_decibels(ten_decibels_in_nats) == 10.0
+    assert report.gap_bin_low_decibels(0.0) == 0.0
+    assert report.gap_bin_low_decibels(math.inf) == math.inf
 
 
 def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
@@ -880,14 +880,14 @@ def _counts_of(rows, histogram) -> int:
     return sum(counts)
 
 
-def _one_count(histogram, gap_db_low, escalated) -> dict:
+def _one_count(histogram, gap_low_decibels, escalated) -> dict:
     """A histogram row of one window or shot of that no-failure shot."""
     return {
         "point_id": "p",
         "algorithm": "pymatching",
         "signal": "complementary_gap",
         "histogram": histogram,
-        "gap_db_low": gap_db_low,
+        "gap_low_decibels": gap_low_decibels,
         "escalated": escalated,
         "shot_failed": False,
         "count": 1,

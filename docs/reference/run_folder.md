@@ -300,7 +300,7 @@ infinite gap has its own bin.
 | `point_id`, the swept paths, `algorithm` | the sweep point |
 | `signal` | the confidence the verdict read |
 | `histogram` | `window`, every window's gap, or `shot_minimum`, each shot's smallest window gap |
-| `gap_db_low` | the bin's lower edge in decibels; empty for a window with no gap, and for a shot one of whose windows had none |
+| `gap_low_decibels` | the bin's lower edge in decibels; empty for a window with no gap, and for a shot one of whose windows had none |
 | `escalated` | for a `window` row, whether the window escalated; empty for a `shot_minimum` row |
 | `shot_failed` | whether the shot ended in a logical failure |
 | `count` | how many windows, or shots, fell in that cell |

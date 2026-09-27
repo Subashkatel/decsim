@@ -21,12 +21,16 @@ import decsim.records.decoder_evidence as evidence_records
 
 
 class UnionFindDecoder(sinter.Decoder):
-    """The factory sinter pickles to each worker and compiles per task."""
+    """The factory sinter pickles to each worker and compiles per task.
+
+    weight_step is checked where it enters, as the union_find row
+    checks its own (decoders/union_find/decoder.py).
+    """
 
     def __init__(
         self, weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
     ) -> None:
-        self.weight_step = weight_step
+        self.weight_step = evidence_records.normalized_weight_step(weight_step)
 
     def compile_decoder_for_dem(
         self, *, dem: stim.DetectorErrorModel

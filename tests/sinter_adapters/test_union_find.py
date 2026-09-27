@@ -8,6 +8,8 @@ port. The adapter decodes the model sinter hands a decoder
 shot for shot only if the adapter builds the row's graph.
 """
 
+import math
+
 import numpy
 import pytest
 import sinter
@@ -76,6 +78,18 @@ def test_the_adapter_is_a_sinter_decoder():
     decoder = union_find_adapter.UnionFindDecoder()
 
     assert isinstance(decoder, sinter.Decoder)
+
+
+@pytest.mark.parametrize("weight_step", [-1.0, 0.0, math.inf])
+def test_a_weight_step_that_is_not_finite_and_positive_is_refused(
+    weight_step,
+):
+    with pytest.raises(ValueError) as refused:
+        union_find_adapter.UnionFindDecoder(weight_step=weight_step)
+
+    assert str(refused.value) == (
+        "Union-Find weight_step must be finite and positive"
+    )
 
 
 def test_sinter_collects_through_the_adapter():

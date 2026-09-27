@@ -34,6 +34,9 @@ and its variants.
 A real sweep is millions of shots, and what it writes is meant to be
 read back.
 
+- [How to run an experiment](run_an_experiment.md): an experiment
+  script's points listed, run one at a time or as a Slurm array,
+  resumed and combined.
 - [How to run a sweep on Slurm](run_a_sweep_on_slurm.md): rounds of
   pieces planned from what the last round measured, submitted as job
   arrays, and folded by status.

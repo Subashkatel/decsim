@@ -49,7 +49,10 @@ On a node whose python has no git, as in the container, export
 DECSIM_TREE_DIRTY (1 for uncommitted changes, 0 for none) before
 running; without it `commit.txt` says `dirty None`. A folder compares
 the commit always and the dirty flag only where both sides could read
-it, so a gitless task and a git host agree on the same commit.
+it, so a gitless task and a git host agree on the same commit. With no
+git program, the commit is read from the checkout's `.git` folder; a
+tree with no readable commit at all, such as a copy without `.git`, is
+refused.
 
 A folder belongs to one script and one commit. Running a different
 script or commit into it is refused; give `--out` a new folder.

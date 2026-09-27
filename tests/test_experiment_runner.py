@@ -223,6 +223,46 @@ def test_the_folder_records_the_commit_that_ran(tmp_path, monkeypatch):
     assert commit_text == "commit abc123\ndirty False\n"
 
 
+def test_a_tree_whose_commit_cannot_be_read_is_refused(tmp_path, monkeypatch):
+    write_script(tmp_path, monkeypatch)
+    set_the_tree(monkeypatch, None, None)
+    results_folder = tmp_path / "out"
+    experiment = tiny_experiment()
+
+    with pytest.raises(ValueError) as refused:
+        experiment.main(arguments=["0", "--out", str(results_folder)])
+
+    assert str(refused.value) == (
+        "the commit of the decsim tree running this script cannot be read, "
+        "so commit.txt could not say what ran; run from a git checkout, "
+        "whose .git folder holds its HEAD"
+    )
+    assert not results_folder.exists()
+
+
+def test_a_node_with_no_git_program_reads_the_commit_from_git_files(
+    tmp_path, monkeypatch
+):
+    """run_folder reads .git itself, as on a container with no git."""
+    write_script(tmp_path, monkeypatch)
+    no_programs = tmp_path / "no_programs"
+    no_programs.mkdir()
+    monkeypatch.setenv("PATH", str(no_programs))
+    run_folder._tree_reading.cache_clear()
+    results_folder = tmp_path / "out"
+    experiment = tiny_experiment()
+
+    experiment.main(arguments=["0", "--out", str(results_folder)])
+
+    run_folder._tree_reading.cache_clear()
+    commit_path = results_folder / "commit.txt"
+    commit_text = commit_path.read_text()
+    commit_line, _dirty_line = commit_text.splitlines()
+    commit = commit_line.removeprefix("commit ")
+    assert len(commit) == 40
+    assert int(commit, 16) >= 0
+
+
 @pytest.mark.parametrize(
     ("held_dirty", "is_dirty"), [("None", False), ("False", None)]
 )

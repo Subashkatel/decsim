@@ -222,19 +222,33 @@ def _record_the_run(folder: pathlib.Path) -> None:
     commit and dirty flag are run_folder's reading of the tree, the one
     every run folder records: the dirty flag is DECSIM_TREE_DIRTY when
     the job exports it, else git's, else None on a node with no git.
+    The commit is read from .git itself when there is no git program; a
+    tree with no readable commit is refused, since its results could not
+    say what ran.
     """
+    identity = run_folder.piece_identity()
+    _refuse_an_unread_commit(identity["commit"])
     folder.mkdir(parents=True, exist_ok=True)
     script = pathlib.Path(sys.argv[0])
     script_text = script.read_text()
     script_copy = folder / script.name
     _write_once(script_copy, script_text)
     _refuse_another_text(script_copy, script_text)
-    identity = run_folder.piece_identity()
     commit = str(identity["commit"])
     dirty = str(identity["dirty"])
     commit_path = folder / COMMIT_FILE
     _write_once(commit_path, f"commit {commit}\ndirty {dirty}\n")
     _refuse_another_tree(commit_path, commit, dirty)
+
+
+def _refuse_an_unread_commit(commit: Optional[str]) -> None:
+    if commit is None:
+        message = (
+            "the commit of the decsim tree running this script cannot be "
+            "read, so commit.txt could not say what ran; run from a git "
+            "checkout, whose .git folder holds its HEAD"
+        )
+        raise ValueError(message)
 
 
 def _write_once(path: pathlib.Path, text: str) -> None:

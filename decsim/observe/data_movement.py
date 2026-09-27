@@ -127,21 +127,6 @@ def memory_class_of_link_path(path: str) -> MemoryClass:
     return MEMORY_CLASS_BY_LINK_PATH.get(path, MemoryClass.UNCLASSIFIED)
 
 
-@dataclasses.dataclass
-class _Counts:
-    """One structure's tally: the events, the rounds they carried, bits.
-
-    data_path.md's hop table counts per round, so one job's input copy
-    of six rounds is one event and six rounds; a study that prices the
-    hop reads the events, one that counts the table's hops reads the
-    rounds.
-    """
-
-    events: int = 0
-    rounds: int = 0
-    bits: int = 0
-
-
 class DataMovement:
     """Copies, references and moves, in total and per named path."""
 
@@ -258,6 +243,21 @@ class DataMovement:
             counts.rounds += rounds
             if bits is not None:
                 counts.bits += bits
+
+
+@dataclasses.dataclass
+class _Counts:
+    """One structure's tally: the events, the rounds they carried, bits.
+
+    data_path.md's hop table counts per round, so one job's input copy
+    of six rounds is one event and six rounds; a study that prices the
+    hop reads the events, one that counts the table's hops reads the
+    rounds.
+    """
+
+    events: int = 0
+    rounds: int = 0
+    bits: int = 0
 
 
 def _rounds(key) -> int:

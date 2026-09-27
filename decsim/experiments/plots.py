@@ -94,13 +94,6 @@ def ticks_to_microseconds(ticks) -> float:
     return ticks / config_module.TICKS_PER_MICROSECOND
 
 
-def card_label(algorithm) -> str:
-    """A named algorithm capitalized, a latency card as its microseconds."""
-    if isinstance(algorithm, str):
-        return algorithm.capitalize()
-    return f"{algorithm:g} µs"
-
-
 def timeline_plot(trace_path, path: Path) -> None:
     """One traced shot's hops and stages, in the time they happened.
 
@@ -483,6 +476,13 @@ def figure(name: str, run_dirs: list, out_path=None, probability=None):
     out_path = Path(out_path)
     _draw_named_figure(name, run_dirs, out_path, probability)
     return out_path
+
+
+def _card_label(algorithm) -> str:
+    """A named algorithm capitalized, a latency card as its microseconds."""
+    if isinstance(algorithm, str):
+        return algorithm.capitalize()
+    return f"{algorithm:g} µs"
 
 
 def _draw_named_figure(
@@ -1459,7 +1459,7 @@ def _breakdown_title(algorithm) -> str:
     """The breakdown figure's title for the tier that ran."""
     if algorithm in BREAKDOWN_TITLES:
         return BREAKDOWN_TITLES[algorithm]
-    label = card_label(algorithm)
+    label = _card_label(algorithm)
     return f"Time breakdown: {label}"
 
 

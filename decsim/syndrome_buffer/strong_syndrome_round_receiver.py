@@ -45,6 +45,8 @@ import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
 
 
+# _Hop comes before the public class because the two hops below are
+# built when the module loads.
 @dataclasses.dataclass(frozen=True)
 class _Hop:
     """One of the two hops that land here: its row, and where its bits sat."""

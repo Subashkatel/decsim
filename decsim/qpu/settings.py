@@ -184,17 +184,6 @@ class QpuSettings:
             raise ValueError(f"multiple code sources supplied: {listed}")
 
 
-def _the_layouts_one_code(layout: layouts.LayoutModel):
-    """The one code a layout declares; a layout of several is refused."""
-    declared_codes = layout.codes()
-    codes = list(declared_codes)
-    if len(codes) != 1:
-        raise ValueError(
-            f"layout must declare exactly one code (got {len(codes)})"
-        )
-    return codes[0]
-
-
 @dataclasses.dataclass(frozen=True)
 class FactorySettings:
     """The magic state factory: where non-Clifford operations get states.
@@ -224,3 +213,14 @@ class FactorySettings:
             row, "magic_state_factory", section, FACTORY_KEYS
         )
         return cls(kind=kind, row_settings=row_settings)
+
+
+def _the_layouts_one_code(layout: layouts.LayoutModel):
+    """The one code a layout declares; a layout of several is refused."""
+    declared_codes = layout.codes()
+    codes = list(declared_codes)
+    if len(codes) != 1:
+        raise ValueError(
+            f"layout must declare exactly one code (got {len(codes)})"
+        )
+    return codes[0]

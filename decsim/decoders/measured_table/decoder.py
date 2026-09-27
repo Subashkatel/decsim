@@ -159,6 +159,20 @@ class MeasuredTableDecoder(strong_backend.StrongBackendDecoder):
         )
 
 
+def nearest_in_size(rows: tuple, detectors: int):
+    """The row whose region is nearest in detectors; the first on a tie.
+
+    Rows are in region order, so the first is the smaller region.
+    """
+    nearest = rows[0]
+    for row in rows:
+        size_difference = row.detectors - detectors
+        nearest_difference = nearest.detectors - detectors
+        if abs(size_difference) < abs(nearest_difference):
+            nearest = row
+    return nearest
+
+
 @dataclasses.dataclass(frozen=True)
 class _Ticket:
     result: decoding_records.DecodeResult
@@ -209,17 +223,3 @@ def _cells_running(cells: tuple, decodes_running: int) -> tuple:
             running.append(cell)
     assert running, f"no measured cell runs {decodes_running} decodes at once"
     return tuple(running)
-
-
-def nearest_in_size(rows: tuple, detectors: int):
-    """The row whose region is nearest in detectors; the first on a tie.
-
-    Rows are in region order, so the first is the smaller region.
-    """
-    nearest = rows[0]
-    for row in rows:
-        size_difference = row.detectors - detectors
-        nearest_difference = nearest.detectors - detectors
-        if abs(size_difference) < abs(nearest_difference):
-            nearest = row
-    return nearest

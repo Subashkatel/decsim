@@ -175,6 +175,37 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         return compiled
 
 
+def detector_error_model_of(model, physical_faults) -> tuple:
+    """(Stim detector error model, coordinates) of one physical view."""
+    check = physical_faults.check
+    # observables are few rows; dense per-fault columns are cheap to read
+    observables = physical_faults.observables.toarray()
+    observables = observables.astype(numpy.uint8, copy=False)
+    detector_count, fault_count = check.shape
+    if observables.shape[1] != fault_count:
+        raise ValueError(
+            "physical check and observable matrices have different fault counts"
+        )
+    if len(model.detector_ids) != detector_count:
+        raise ValueError(
+            "window detector identities do not match physical detector rows"
+        )
+    priors = _validated_priors(physical_faults.priors, fault_count)
+    coordinates = _normalized_coordinates(model, detector_count)
+    detector_error_model = stim.DetectorErrorModel()
+    _append_errors(detector_error_model, check, observables, priors)
+    _append_detectors(detector_error_model, coordinates)
+    _append_observables(detector_error_model, observables.shape[0])
+    _check_round_trip(
+        detector_error_model,
+        fault_count,
+        detector_count,
+        observables.shape[0],
+        coordinates,
+    )
+    return detector_error_model, coordinates
+
+
 class _BackendConstructionError(RuntimeError):
     """The optional backend rejected a locally validated configuration."""
 
@@ -362,37 +393,6 @@ def _validated_prior(fault_index: int, value) -> float:
             f"satisfy 0 < p <= 0.5; got {probability!r}"
         )
     return probability
-
-
-def detector_error_model_of(model, physical_faults) -> tuple:
-    """(Stim detector error model, coordinates) of one physical view."""
-    check = physical_faults.check
-    # observables are few rows; dense per-fault columns are cheap to read
-    observables = physical_faults.observables.toarray()
-    observables = observables.astype(numpy.uint8, copy=False)
-    detector_count, fault_count = check.shape
-    if observables.shape[1] != fault_count:
-        raise ValueError(
-            "physical check and observable matrices have different fault counts"
-        )
-    if len(model.detector_ids) != detector_count:
-        raise ValueError(
-            "window detector identities do not match physical detector rows"
-        )
-    priors = _validated_priors(physical_faults.priors, fault_count)
-    coordinates = _normalized_coordinates(model, detector_count)
-    detector_error_model = stim.DetectorErrorModel()
-    _append_errors(detector_error_model, check, observables, priors)
-    _append_detectors(detector_error_model, coordinates)
-    _append_observables(detector_error_model, observables.shape[0])
-    _check_round_trip(
-        detector_error_model,
-        fault_count,
-        detector_count,
-        observables.shape[0],
-        coordinates,
-    )
-    return detector_error_model, coordinates
 
 
 def _append_errors(detector_error_model, check, observables, priors) -> None:

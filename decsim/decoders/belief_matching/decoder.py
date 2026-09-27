@@ -18,6 +18,7 @@ import pymatching
 import scipy.sparse
 import scipy.special
 
+import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
@@ -93,7 +94,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
 
         PyMatching raises on odd parity in a boundaryless component (see
         the PyMatching adapter); that case is an empty correction marked
-        invalid.
+        invalid, with no correction's reason.
         """
         del model
         belief_propagation, edge_from_hyperedge = backend
@@ -111,9 +112,11 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             if "perfect matching" not in str(error):
                 raise
             fault_count = faults.check.shape[1]
-            empty = numpy.zeros(fault_count, dtype=numpy.uint8)
-            invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
-            return decoding_records.WindowDecode(empty, invalid)
+            return backend_outcome.no_correction_decode(
+                decoding_records.BackendDecodeStatus.INVALID_CORRECTION,
+                decoding_records.BackendFailureReason.NO_PERFECT_MATCHING,
+                fault_count,
+            )
         correction = numpy.asarray(selected, dtype=numpy.uint8)
         return decoding_records.WindowDecode(correction)
 

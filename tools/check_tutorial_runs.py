@@ -1,8 +1,8 @@
 """The tutorials print what a fresh run of their own commands prints.
 
 Each tutorial page shows commands and, under them, what they print.
-This check runs the page's commands (every `decsim`, `cut` and `ls` line
-of its bash blocks, in page order) in a scratch folder, and holds each
+This check runs the page's commands (every `decsim`, `cut`, `ls` and `rm`
+line of its bash blocks, in page order) in a scratch folder, and holds each
 plain block of the page to the output it was copied from, found by the
 block's first line.
 
@@ -11,7 +11,8 @@ of the config and the seed, so each block is compared whole: the
 timings, the trace and the counts alike. On a page that names a decoder,
 a decode is charged the wall clock it took (decsim/decoders/decoder.py,
 decode_timed), so only the lines no clock moves are compared there: the
-logical failure counts, the correctness check, the QPU's finishing
+logical failure counts, their rate and the unscored shots, the
+correctness check, the QPU's finishing
 tick, the decoded observable, and everything `cut` and `ls` print.
 
 Run it from the repo root in an environment with the run extra:
@@ -32,10 +33,10 @@ TOOL_PATH = TOOL_FILE.resolve()
 CHECKOUT = TOOL_PATH.parent.parent
 CONFIGS = CHECKOUT / "configs"
 FENCE = "```"
-COMMAND_WORDS = ("decsim", "cut", "ls")
+COMMAND_WORDS = ("decsim", "cut", "ls", "rm")
 CLOCK_FREE_LINE = re.compile(
     r"^(?:terminal status|execution done|operation 1|logical failures"
-    r"|mismatches vs direct PyMatching): "
+    r"|logical error rate among scored shots|unscored shots): "
 )
 
 

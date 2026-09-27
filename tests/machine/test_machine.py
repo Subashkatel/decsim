@@ -81,6 +81,7 @@ import decsim.windows.built_window_models as built_window_models
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
+import tests.machine.decoder_arrangements as decoder_arrangements
 import tests.qpu.memory_programs as memory_programs
 import tools.deltakit_example as finite_example
 import tools.live_memory_example as live_example
@@ -189,13 +190,16 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
 
 def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a decoder added as a row."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
     monkeypatch.setitem(decoder_settings.DECODERS, "fake", FakeWeakDecoder)
@@ -211,13 +215,16 @@ def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
 
 def test_a_second_table_row_runs_gate_point_one():
     """Gate point 1's settings run to completion on the union_find row."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
@@ -239,13 +246,16 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     tick, because no component has queued anything while the rest of the
     machine is still being built.
     """
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
 
@@ -1295,13 +1305,16 @@ class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
 
 def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a store added as a row."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     counting = dataclasses.replace(
         settings.weak_syndrome_buffer, kind="counting"
     )
@@ -1337,13 +1350,16 @@ class AlwaysStrongEscalation(escalation_policies.EscalationPolicyBase):
 
 def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
     """The row declares its tier, so no second table names the kind."""
-    config_path = CONFIGS / "strong_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/strong_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     escalation = dataclasses.replace(settings.escalation, kind="always_strong")
     settings = dataclasses.replace(settings, escalation=escalation)
     monkeypatch.setitem(
@@ -1397,13 +1413,16 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
     monkeypatch,
 ):
     """One constructor call, so a row that reads only the engine builds."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     factory_settings = qpu_settings.FactorySettings(kind="always_ready")
     settings = dataclasses.replace(
         settings, magic_state_factory=factory_settings
@@ -2079,11 +2098,14 @@ def reference_run(escalation_kind):
     """One shot of reference.yaml at d=3, p=0.001, on one escalation kind."""
     config_path = CONFIGS / "reference.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     escalation = dataclasses.replace(settings.escalation, kind=escalation_kind)
     settings = dataclasses.replace(settings, escalation=escalation)
     machine = machine_module.Machine.build(settings, 0)
@@ -2233,10 +2255,11 @@ def late_landing_shot(directory, links):
     config_path = yaml_configs.write_config(directory, card)
     experiment_config = experiment.load_experiment(config_path)
     task = experiment_config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
     return collect.run_shot(task, 0)
 
@@ -2282,29 +2305,28 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
     assert priced_result.logical_observables == free_result.logical_observables
 
 
-# IBM's verification rule on the experiments_2026_09 families: the priced,
+# IBM's verification rule on the sixteen decoder arrangements: the priced,
 # windowed, timed run's correction beside an untimed software model's,
 # window by window.
 
-CAMPAIGN_DIRECTORY = yaml_configs.CONFIGS_DIR / "experiments_2026_09"
-CAMPAIGN_DISTANCE = 3
-CAMPAIGN_ROUND_COUNT = 30  # the shared base's rounds_per_shot, 10d at d 3
-CAMPAIGN_PHYSICAL_ERROR = 0.001  # the smallest p of every family's sweep
-CAMPAIGN_ROUND_PERIOD_US = 1.0
-CAMPAIGN_SHOT_COUNT = 8
-# seeds 9 to 16: the eight shots include windows the switching families
-# escalate, which the kept-window rule needs beside it
-CAMPAIGN_FIRST_SEED = 9
-CAMPAIGN_SEED_END = CAMPAIGN_FIRST_SEED + CAMPAIGN_SHOT_COUNT
-CAMPAIGN_SEEDS = range(CAMPAIGN_FIRST_SEED, CAMPAIGN_SEED_END)
-CAMPAIGN_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
+ARRANGEMENT_DISTANCE = 3
+ARRANGEMENT_ROUND_COUNT = 30  # the machine's rounds_per_shot, 10d at d 3
+ARRANGEMENT_PHYSICAL_ERROR = 0.001
+ARRANGEMENT_ROUND_PERIOD_US = 1.0
+ARRANGEMENT_SHOT_COUNT = 8
+# seeds 9 to 16: the eight shots include windows the switching
+# arrangements escalate, which the kept-window rule needs beside it
+ARRANGEMENT_FIRST_SEED = 9
+ARRANGEMENT_SEED_END = ARRANGEMENT_FIRST_SEED + ARRANGEMENT_SHOT_COUNT
+ARRANGEMENT_SEEDS = range(ARRANGEMENT_FIRST_SEED, ARRANGEMENT_SEED_END)
+ARRANGEMENT_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
 RELAY_BP_SPECIFICATION = importlib.util.find_spec("relay_bp")
 LACKS_RELAY_BP = RELAY_BP_SPECIFICATION is None
 # relay_bp is the bb-decoders extra, which a test install leaves out
 NEEDS_RELAY_BP = pytest.mark.skipif(
     LACKS_RELAY_BP, reason="could not import 'relay_bp'"
 )
-SINGLE_TIER_FAMILIES = (
+SINGLE_TIER_ARRANGEMENTS = (
     "pymatching_weak",
     "pymatching_strong",
     "union_find_weak",
@@ -2315,7 +2337,7 @@ SINGLE_TIER_FAMILIES = (
     pytest.param("relay_bp_weak", marks=NEEDS_RELAY_BP),
     pytest.param("relay_bp_strong", marks=NEEDS_RELAY_BP),
 )
-SWITCHING_FAMILIES = (
+SWITCHING_ARRANGEMENTS = (
     "pymatching_bposd_switching",
     "pymatching_belief_matching_switching",
     pytest.param("pymatching_relay_bp_switching", marks=NEEDS_RELAY_BP),
@@ -2324,7 +2346,7 @@ SWITCHING_FAMILIES = (
     "union_find_pymatching_switching",
     pytest.param("union_find_relay_bp_switching", marks=NEEDS_RELAY_BP),
 )
-MATCHING_FAMILIES = ("pymatching_weak", "pymatching_strong")
+MATCHING_ARRANGEMENTS = ("pymatching_weak", "pymatching_strong")
 KEPT_WEAK_REQUEST = (
     decoding_records.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
 )
@@ -2333,15 +2355,16 @@ ESCALATED_WEAK_REQUEST = (
 )
 
 
-def campaign_point_task(family):
-    """The distance-3 point of one shipped family, at its smallest p."""
-    config_path = CAMPAIGN_DIRECTORY / f"{family}_d3.yaml"
+def arrangement_point_task(folder, arrangement):
+    """One decoder arrangement's point, read from its yaml."""
+    config_path = decoder_arrangements.write_arrangement(folder, arrangement)
     config = experiment.load_experiment(config_path)
     return config.point_task(
-        physical_error_probability=CAMPAIGN_PHYSICAL_ERROR,
-        distance=CAMPAIGN_DISTANCE,
-        round_period_microseconds=CAMPAIGN_ROUND_PERIOD_US,
-        shots=CAMPAIGN_SHOT_COUNT,
+        {
+            yaml_configs.ERROR_RATE_PATH: ARRANGEMENT_PHYSICAL_ERROR,
+            "qpu.distance": ARRANGEMENT_DISTANCE,
+            "qpu.round_period_microseconds": ARRANGEMENT_ROUND_PERIOD_US,
+        },
     )
 
 
@@ -2354,8 +2377,8 @@ def record_one_decode(decodes, reference, job, result, outcome, ended_ticks):
     decodes.append((outcome, job.window_id, run_correction, model_correction))
 
 
-def timed_and_untimed_decodes(family):
-    """Every request of the family's shots, beside the untimed model's answer.
+def timed_and_untimed_decodes(folder, arrangement):
+    """Every request of the arrangement's shots, beside the untimed model's.
 
     The software model is a second Machine built from the same settings
     and the same seed and never run: its decoder is the same table row
@@ -2363,10 +2386,10 @@ def timed_and_untimed_decodes(family):
     run seed (relay_bp's gamma table, window_decoder.py `_gamma_seed`)
     reads the table the priced run read.
     """
-    task = campaign_point_task(family)
+    task = arrangement_point_task(folder, arrangement)
     models = built_window_models.BuiltWindowModels()
     decodes = []
-    for seed in CAMPAIGN_SEEDS:
+    for seed in ARRANGEMENT_SEEDS:
         settings = task.shot_settings(models)
         machine = machine_module.Machine.build(settings, seed)
         untimed = machine_module.Machine.build(settings, seed)
@@ -2397,8 +2420,10 @@ def decodes_with_outcome(decodes, outcome):
     return selected
 
 
-@pytest.mark.parametrize("family", SINGLE_TIER_FAMILIES)
-def test_a_single_tier_family_commits_what_the_untimed_model_decodes(family):
+@pytest.mark.parametrize("arrangement", SINGLE_TIER_ARRANGEMENTS)
+def test_a_single_tier_arrangement_commits_what_the_model_decodes(
+    tmp_path, arrangement
+):
     """IBM's rule for their gross-code FPGA decoder, on every window.
 
     "The approach to validate the Relay-BP and the surrounding sliding
@@ -2416,20 +2441,22 @@ def test_a_single_tier_family_commits_what_the_untimed_model_decodes(family):
     agrees bit for bit, so no change to timing, buffers, links or pools
     can move a correction without this failing.
     """
-    decodes = timed_and_untimed_decodes(family)
+    decodes = timed_and_untimed_decodes(tmp_path, arrangement)
 
     differing = corrections_that_differ(decodes)
 
-    expected_count = CAMPAIGN_SHOT_COUNT * CAMPAIGN_WINDOW_COUNT
+    expected_count = ARRANGEMENT_SHOT_COUNT * ARRANGEMENT_WINDOW_COUNT
     assert len(decodes) == expected_count
     assert differing == []
 
 
-@pytest.mark.parametrize("family", SWITCHING_FAMILIES)
-def test_a_switching_familys_kept_windows_match_the_untimed_weak_model(family):
+@pytest.mark.parametrize("arrangement", SWITCHING_ARRANGEMENTS)
+def test_a_switching_arrangements_kept_windows_match_the_weak_model(
+    tmp_path, arrangement
+):
     """The same rule where the weak tier's answer stands.
 
-    A switching family escalates a low-confidence window to the strong
+    A switching arrangement escalates a low-confidence window to the strong
     tier (Toshio et al. 2510.25222 Sec. III A), so only the windows the
     weak verdict kept are the weak model's to answer; the escalated ones
     are counted and left to the strong tier. Eight shots at p = 0.001
@@ -2438,7 +2465,7 @@ def test_a_switching_familys_kept_windows_match_the_untimed_weak_model(family):
     decodes from the same window error model and the same syndrome
     (IBM arXiv 2510.21600 lines 488-495).
     """
-    decodes = timed_and_untimed_decodes(family)
+    decodes = timed_and_untimed_decodes(tmp_path, arrangement)
     kept = decodes_with_outcome(decodes, KEPT_WEAK_REQUEST)
     escalated = decodes_with_outcome(decodes, ESCALATED_WEAK_REQUEST)
 
@@ -2448,20 +2475,20 @@ def test_a_switching_familys_kept_windows_match_the_untimed_weak_model(family):
     assert len(escalated) > 0
 
 
-def qldpc_campaign_predictions(circuit, shot_events):
+def qldpc_arrangement_predictions(circuit, shot_events):
     """What qLDPC's sliding-window decoder predicts for the same shots."""
     qldpc_decoders = pytest.importorskip("qldpc.decoders")
     round_of_detector = detector_chronology.resolve_detector_rounds(
-        circuit, None, CAMPAIGN_ROUND_COUNT
+        circuit, None, ARRANGEMENT_ROUND_COUNT
     )
 
     def time_of_detector(detector):
         return int(round_of_detector[detector])
 
-    window_size = 2 * CAMPAIGN_DISTANCE
+    window_size = 2 * ARRANGEMENT_DISTANCE
     reference = qldpc_decoders.SlidingWindowDecoder(
         window_size=window_size,
-        stride=CAMPAIGN_DISTANCE,
+        stride=ARRANGEMENT_DISTANCE,
         detector_to_time=time_of_detector,
         decompose_errors=True,
         with_MWPM=True,
@@ -2478,14 +2505,14 @@ def qldpc_campaign_predictions(circuit, shot_events):
     return predictions
 
 
-def campaign_predictions_and_events(family):
-    """The family's own prediction per shot, the circuit, and the events."""
-    task = campaign_point_task(family)
+def arrangement_predictions_and_events(folder, arrangement):
+    """The arrangement's prediction per shot, the circuit, and the events."""
+    task = arrangement_point_task(folder, arrangement)
     models = built_window_models.BuiltWindowModels()
     predictions = []
     shot_events = []
     sampled = None
-    for seed in CAMPAIGN_SEEDS:
+    for seed in ARRANGEMENT_SEEDS:
         settings = task.shot_settings(models)
         machine = machine_module.Machine.build(settings, seed)
         result = machine.run()
@@ -2496,11 +2523,11 @@ def campaign_predictions_and_events(family):
     return predictions, sampled.circuit, shot_events
 
 
-@pytest.mark.parametrize("family", MATCHING_FAMILIES)
-def test_a_matching_family_predicts_what_qldpcs_sliding_windows_predict(
-    family,
+@pytest.mark.parametrize("arrangement", MATCHING_ARRANGEMENTS)
+def test_a_matching_arrangement_predicts_what_qldpcs_sliding_windows_predict(
+    tmp_path, arrangement
 ):
-    """The priced campaign run beside an outside sliding-window decoder.
+    """The priced arrangement run beside an outside sliding-window decoder.
 
     qLDPC's SlidingWindowDecoder (qldpc/decoders/sinter.py, class
     SlidingWindowDecoder) decodes the same sampled shots untimed, with
@@ -2508,7 +2535,7 @@ def test_a_matching_family_predicts_what_qldpcs_sliding_windows_predict(
     merged as independent errors, as
     test_the_sliding_windows_predict_what_qldpcs_decoder_predicts above
     reads it. The two window plans are not the same at the tail: the
-    campaign's `terminal_policy: lookahead` lays ten windows over thirty
+    arrangements' `terminal_policy: lookahead` lays ten windows over thirty
     rounds where qLDPC's stride lays nine, so the comparison is at the
     run's final observable rather than per window. The eight shots at
     p = 0.001 agree exactly; a difference would have to be a
@@ -2516,11 +2543,13 @@ def test_a_matching_family_predicts_what_qldpcs_sliding_windows_predict(
     seen against this reference, and this test refuses one rather than
     allowing it.
     """
-    predictions, circuit, shot_events = campaign_predictions_and_events(family)
+    predictions, circuit, shot_events = arrangement_predictions_and_events(
+        tmp_path, arrangement
+    )
 
-    reference_predictions = qldpc_campaign_predictions(circuit, shot_events)
+    reference_predictions = qldpc_arrangement_predictions(circuit, shot_events)
 
-    assert len(predictions) == CAMPAIGN_SHOT_COUNT
+    assert len(predictions) == ARRANGEMENT_SHOT_COUNT
     assert predictions == reference_predictions
 
 

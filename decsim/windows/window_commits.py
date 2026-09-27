@@ -20,6 +20,7 @@ the verdict declares it as a port and a port carries the class it names.
 """
 
 import dataclasses
+import enum
 import functools
 from collections.abc import Callable
 from typing import Optional
@@ -143,12 +144,10 @@ class WindowCommitter:
         window.crossing_commit = result.crossing_commit
         if window.t_done is None:
             self.note_decode_finished(window)
-        status = result.decode_status
-        window.decode_status = None
+        _record_the_decode(window, result)
         status_note = ""
-        if status is not None:
-            window.decode_status = status.value
-            status_note = f" best effort: {status.value}"
+        if window.decode_status is not None:
+            status_note = f" best effort: {window.decode_status}"
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"DECODE DONE {operation.name} W{window.window_index} "
@@ -162,7 +161,11 @@ class WindowCommitter:
         self.trace.window_committed.fire(window, contribution)
         self.results.note_window_committed(window, is_final)
         if not is_final:
-            # provisional: the boundary leaves with the commit
+            # provisional: the boundary leaves with the commit, and what
+            # it fed forward outlives the strong answer
+            window.provisional_no_correction_reason = (
+                window.no_correction_reason
+            )
             self.courier.hand_on(window, operation, result, request_key, False)
         if self.strong_redecode is not None:
             self.strong_redecode.submit_if_commit_releases(window.key)
@@ -177,9 +180,11 @@ class WindowCommitter:
     ) -> None:
         """The strong result is the window's final one.
 
-        Its prediction replaces the provisional one, the held boundary
-        ships now that it is final, and the operation may complete.
+        Its prediction, its status and its no-correction reason replace
+        the provisional ones, the held boundary ships now that it is
+        final, and the operation may complete.
         """
+        _record_the_decode(window, result)
         if result.logical_observables is not None:
             self.results.replace_prediction(
                 window.key, result.logical_observables
@@ -301,6 +306,21 @@ class WindowVerdict:
         self.committer.commit_or_publish(
             window, operation, result, job.request_key, is_final, read_result
         )
+
+
+def _record_the_decode(
+    window: window_records.Window, result: decoding_records.DecodeResult
+) -> None:
+    """The committed decode's status and no-correction reason, as values."""
+    window.decode_status = _value_of(result.decode_status)
+    window.no_correction_reason = _value_of(result.no_correction_reason)
+
+
+def _value_of(member: Optional[enum.Enum]) -> Optional[str]:
+    """An enum member's value, None for no member."""
+    if member is None:
+        return None
+    return member.value
 
 
 def _with_the_crossing_commit(

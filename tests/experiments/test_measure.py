@@ -27,7 +27,13 @@ Python through the circuit_list row, on a fabric whose only priced hop
 is the decoder-to-decoder seam.
 """
 
+import ast
+import collections
+import dataclasses
+import functools
 import math
+import pathlib
+import sys
 from typing import Optional
 
 import pytest
@@ -35,29 +41,38 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.decoders.backend_outcome as backend_outcome
+import decsim.decoders.decoder as decoder_module
+import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
+import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
+import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
+import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
+import tests.experiments.yaml_configs as yaml_configs
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
     measure_point_shot,
     memory_workload,
+    write_config,
 )
 
 # the detection events of one round of the swept distance-three patch,
@@ -239,10 +254,11 @@ def switching_run(
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
     return collect.run_shot(task, seed)
 
@@ -480,7 +496,7 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     in the strong columns and the weak columns read zero, the mirror of
     test_the_pool_columns_read_each_tiers_own_queue_and_units.
     """
-    shot = shipped_shot("strong_decoder_baseline.yaml")
+    shot = shipped_shot("bases/strong_decoder_baseline.yaml")
     measurement = measure.measure_shot(shot)
 
     assert measurement.weak_queue_max == 0
@@ -571,7 +587,7 @@ def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(
     rows = report.summarize(record.shots, record.window_samples)
 
     assert record.shots[0]["commit_rounds"] == 2
-    assert measurement.windows == 15
+    assert measurement.decoded_windows == 15
     assert measurement.escalated_windows == 15
     assert rows[0]["strong_service_bound_us"] == 2.0
 
@@ -671,10 +687,11 @@ def shipped_shot(config_name: str):
     config_path = CONFIGS_DIR / config_name
     config = experiment.load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
     return collect.run_shot(task, 0)
 
@@ -727,13 +744,13 @@ def later_solve_ticks(shot, window_id: int) -> int:
 def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
     """The identity on a config the repository ships, not a test's own.
 
-    configs/weak_decoder_baseline.yaml decodes each of its nine windows
-    once and answers on that decode, so its confidence step is zero and
-    every window's points are its whole path from its data being
+    configs/bases/weak_decoder_baseline.yaml decodes each of its nine
+    windows once and answers on that decode, so its confidence step is zero
+    and every window's points are its whole path from its data being
     complete in the weak syndrome buffer to its correction committed in the
     frame.
     """
-    shot = shipped_shot("weak_decoder_baseline.yaml")
+    shot = shipped_shot("bases/weak_decoder_baseline.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -745,7 +762,7 @@ def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
 
 
 def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
-    """The identity on every window of configs/two_tiers.yaml.
+    """The identity on every window of configs/examples/two_tiers.yaml.
 
     Windows 0, 1, 8 and 9 escalated: their weak attempt, the strong
     decode that committed and the hops around it are the whole path, and
@@ -756,7 +773,7 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
     III A steps 2 to 4 for the order of the escalated ones). Both sum
     to the tick.
     """
-    shot = shipped_shot("two_tiers.yaml")
+    shot = shipped_shot("examples/two_tiers.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -775,13 +792,13 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
 def test_the_shipped_pinned_config_sums_to_its_reaction_time():
     """The same law where the strong tier's time is measured, not declared.
 
-    configs/seam_pinned_switching.yaml names a belief-matching strong
-    tier, whose decode time is read off the host clock, so the values
-    move from host to host and the identity does not: every window's
-    points still add up to its reaction time to the tick, the solve it
-    ran after the committing one being its confidence step.
+    configs/experiments/switching/seam_pinned_switching.yaml names a
+    belief-matching strong tier, whose decode time is read off the host
+    clock, so the values move from host to host and the identity does not:
+    every window's points still add up to its reaction time to the tick, the
+    solve it ran after the committing one being its confidence step.
     """
-    shot = shipped_shot("seam_pinned_switching.yaml")
+    shot = shipped_shot("experiments/switching/seam_pinned_switching.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -798,16 +815,16 @@ def test_the_shipped_pinned_config_sums_to_its_reaction_time():
 def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
     """The identity where the confidence step is a card of its own.
 
-    configs/cluster_gap_switching.yaml walks a union find decode for its
-    signal and prices that walk at 12.0 us on the weak unit (decision
-    D8), so a window the weak tier answered carries the walk between its
-    decode's end and its verdict. A window that escalated carries none:
-    its weak attempt already runs to the verdict and the strong decode
-    it commits answers after it. The union find decode itself is read
-    off the host clock, so the assertions are in ticks and about the
+    configs/experiments/switching/cluster_gap_switching.yaml walks a union
+    find decode for its signal and prices that walk at 12.0 us on the weak
+    unit (decision D8), so a window the weak tier answered carries the walk
+    between its decode's end and its verdict. A window that escalated
+    carries none: its weak attempt already runs to the verdict and the
+    strong decode it commits answers after it. The union find decode itself
+    is read off the host clock, so the assertions are in ticks and about the
     identity, never about a magnitude.
     """
-    shot = shipped_shot("cluster_gap_switching.yaml")
+    shot = shipped_shot("experiments/switching/cluster_gap_switching.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -1062,7 +1079,6 @@ def seam_streams_shot(stream_count: int):
     workload = workload_settings.WorkloadSettings(
         operations=operations,
         rounds_policy=rounds_policy,
-        physical_error_probability=0.001,
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(
@@ -1095,7 +1111,7 @@ def seam_streams_shot(stream_count: int):
         pauli_frame=frame,
         links=links,
     )
-    task = collect.Task.at_point(settings, 1, {})
+    task = collect.Task(settings, {})
     return collect.run_shot(task, 0)
 
 
@@ -1219,6 +1235,33 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     patches' shared plane, misses patch 0 entirely; at seed 1 patch 1's
     observable comes out wrong.
     """
+    shot = _two_patch_burst_shot(tmp_path, seed=1)
+    measurement = measure.measure_shot(shot)
+    first, second = shot.result.operation_results
+
+    assert first.logical_observables == first.observable_truth
+    assert second.logical_observables != second.observable_truth
+    assert measurement.logical_failure is True
+
+
+def test_a_shot_records_each_operations_prediction(tmp_path):
+    """The two patches' observables, each its own, not one failure flag.
+
+    At seed 4 both truths are 0 and the loop predicts 1 on patch 1,
+    under the burst, and 0 on patch 0, so operation 2's cell is 1 and
+    operation 1's is 0. A csv reader that types a number would read the
+    bits 01 as 1; the json cell reads back as the text it was written.
+    """
+    shot = _two_patch_burst_shot(tmp_path, seed=4)
+
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.predictions == '{"1":"0","2":"1"}'
+    assert fold.typed_value(measurement.predictions) == measurement.predictions
+
+
+def _two_patch_burst_shot(tmp_path, *, seed: int) -> collect.Shot:
+    """One seed of two memory patches under a burst on the second."""
     raw = dict(MINIMAL_CONFIG)
     raw["workload"] = {
         "kind": "producer",
@@ -1227,6 +1270,7 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
             "code_task": "surface_code:rotated_memory_z",
             "rounds_per_shot": 6,
             "patch_count": 2,
+            "distance": "${qpu.distance}",
         },
     }
     raw["qpu"] = {
@@ -1240,18 +1284,13 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=2,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
-    shot = collect.run_shot(task, 1)
-    measurement = measure.measure_shot(shot)
-    first, second = shot.result.operation_results
-
-    assert first.logical_observables == first.observable_truth
-    assert second.logical_observables != second.observable_truth
-    assert measurement.logical_failure is True
+    return collect.run_shot(task, seed)
 
 
 LOAD_FLAGS = ("record_switching_windows", "backlog_trace")
@@ -1519,8 +1558,14 @@ def test_a_shot_with_no_burst_records_no_flag_and_no_catch(tmp_path, qpu):
 
 
 def test_the_point_holds_the_shares_flagged_and_caught_in_time(tmp_path):
+    """Two shots, one caught in time, folded as one point's shots.
+
+    The two deadlines are two settings, so two points; the late shot
+    takes the caught shot's point id to be summed with it.
+    """
     caught = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
-    late = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
+    late_alone = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
+    late = dataclasses.replace(late_alone, point_id=caught.point_id)
     quiet = burst_detector_shot(tmp_path, 0.0)
     burst_record = report.record_of([caught, late])
     quiet_record = report.record_of([quiet])
@@ -1543,3 +1588,474 @@ def test_a_run_without_a_detector_writes_no_burst_column(tmp_path):
     assert "burst_caught_in_time" not in record.shots[0]
     assert "flagged_share" not in rows[0]
     assert "caught_in_time_share" not in rows[0]
+
+
+def recorded_relay_statuses(monkeypatch) -> list:
+    """The statuses the Relay-BP row's decode_window returns, in order."""
+    row = relay_decoder.RelayBeliefPropagationDecoder
+    decode_window = row.decode_window
+    returned = []
+
+    def recording_decode_window(self, backend, model, faults, syndrome):
+        answer = decode_window(self, backend, model, faults, syndrome)
+        returned.append(answer.decode_status)
+        return answer
+
+    monkeypatch.setattr(row, "decode_window", recording_decode_window)
+    return returned
+
+
+def test_the_status_columns_count_the_statuses_the_decoder_returned(
+    tmp_path, monkeypatch
+):
+    """One Relay-BP iteration leaves windows unconverged, and each counts.
+
+    relay-bp's detailed API reports a decode that did not converge
+    (Maurer et al. 2510.21600), and the row commits it as NONCONVERGED.
+    The referent is the run itself: the statuses the row's decode_window
+    returned, one per window, since a weak_baseline run decodes each
+    window once.
+    """
+    pytest.importorskip("relay_bp")
+    returned = recorded_relay_statuses(monkeypatch)
+    weak_decoder = dict(
+        MINIMAL_CONFIG["weak_decoder"],
+        kind="relay_bp",
+        pre_iterations=1,
+        relay_set_count=0,
+        iterations_per_set=1,
+    )
+    config_path = write_config(tmp_path, {"weak_decoder": weak_decoder})
+    config = experiment.load_experiment(config_path)
+    measurement = measure_point_shot(
+        config,
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=0,
+    )
+    record = report.record_of([measurement])
+    rows = report.summarize(record.shots, record.window_samples)
+    expected = collections.Counter(
+        f"{status.value}_windows" for status in returned if status is not None
+    )
+    statuses = measurement.window_statuses
+    counted = {column: count for column, count in statuses.items() if count}
+    nonconverged = counted["nonconverged_windows"]
+
+    assert expected["nonconverged_windows"] > 0
+    assert counted == expected
+    assert record.shots[0]["nonconverged_windows"] == nonconverged
+    assert rows[0]["nonconverged_windows"] == nonconverged
+
+
+def decoder_row_shot(tmp_path, kind: str, seed: int):
+    """One seeded shot of the minimal machine with its weak row named."""
+    weak_decoder = dict(MINIMAL_CONFIG["weak_decoder"], kind=kind)
+    config_path = write_config(tmp_path, {"weak_decoder": weak_decoder})
+    config = experiment.load_experiment(config_path)
+    return measure_point_shot(
+        config,
+        physical_error_probability=0.01,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=seed,
+    )
+
+
+def test_the_sample_digest_names_the_draw_and_not_the_decoder(tmp_path):
+    """Two decoder rows at one seed share a digest; two seeds do not.
+
+    The device draws a shot from the run's seed alone, so PyMatching and
+    Union-Find see the same detection events and truth at seed 0, and
+    seed 1 is another draw.
+    """
+    matching = decoder_row_shot(tmp_path, "pymatching", 0)
+    union_find = decoder_row_shot(tmp_path, "union_find", 0)
+    next_seed = decoder_row_shot(tmp_path, "pymatching", 1)
+
+    assert matching.algorithm != union_find.algorithm
+    assert matching.sample_digest == union_find.sample_digest
+    assert matching.sample_digest != next_seed.sample_digest
+
+
+WEAK = window_records.DecoderTier.WEAK
+STRONG = window_records.DecoderTier.STRONG
+# more windows than any escalation shot here plans, so a set of every
+# index names every window of a tier
+EVERY_WINDOW = range(64)
+
+
+def no_correction_answer(self, job, backend, model, faults, syndrome):
+    """A backend that raised: no correction, the row's empty stand-in."""
+    del self, job, backend, model, syndrome
+    fault_count = faults.check.shape[1]
+    return backend_outcome.no_correction_decode(
+        decoding_records.BackendDecodeStatus.BACKEND_ERROR,
+        decoding_records.BackendFailureReason.UPSTREAM_EXCEPTION,
+        fault_count,
+    )
+
+
+def crashing_decodes(monkeypatch, crashing: set) -> dict:
+    """Each decode named in crashing, (tier, window), answers no correction.
+
+    Returns the syndrome every decode read, by (tier, window), the last
+    solve's when a window is solved more than once; crashing may change
+    between runs of one test.
+    """
+    decoder = decoder_module.WindowDecoderBase
+    real_answer = decoder.window_answer
+    syndromes = {}
+
+    def answer(self, job, backend, model, faults, syndrome):
+        key = (job.request_key.tier, job.request_key.window_id)
+        syndromes[key] = syndrome.tolist()
+        answers = dict.fromkeys(crashing, no_correction_answer)
+        chosen = answers.get(key, real_answer)
+        return chosen(self, job, backend, model, faults, syndrome)
+
+    monkeypatch.setattr(decoder, "window_answer", answer)
+    return syndromes
+
+
+def test_a_strong_decode_with_no_correction_unscores_its_shot(
+    tmp_path, monkeypatch
+):
+    """The strong answer is the window's final one, and so is its status.
+
+    Every window escalates and every strong decode produces nothing, so
+    each window's final decode is the strong one with no correction.
+    """
+    strong_windows = {(STRONG, index) for index in EVERY_WINDOW}
+    crashing_decodes(monkeypatch, strong_windows)
+    shot = switching_run(tmp_path, 1000000.0)
+    measurement = measure.measure_shot(shot)
+    statuses = measurement.window_statuses
+
+    assert measurement.escalated_windows == measurement.decoded_windows
+    assert measurement.is_scored is False
+    assert measurement.unscored_reason == "upstream_exception"
+    assert statuses["backend_error_windows"] == measurement.decoded_windows
+    assert measurement.provisional_no_correction_windows == 0
+
+
+def test_a_weak_decode_with_no_correction_unscores_its_shot_after_strong(
+    tmp_path, monkeypatch
+):
+    """The replaced weak answer counts apart and still unscores the shot.
+
+    The strong decodes all succeed, so no window's final status is an
+    error; each weak answer was committed provisionally first, and what
+    a provisional commit fed forward survives the strong answer.
+    """
+    weak_windows = {(WEAK, index) for index in EVERY_WINDOW}
+    crashing_decodes(monkeypatch, weak_windows)
+    shot = switching_run(tmp_path, 1000000.0)
+    measurement = measure.measure_shot(shot)
+    statuses = measurement.window_statuses
+
+    assert measurement.escalated_windows == measurement.decoded_windows
+    assert measurement.is_scored is False
+    assert measurement.unscored_reason == "upstream_exception"
+    assert statuses["backend_error_windows"] == 0
+    assert measurement.provisional_no_correction_windows == (
+        measurement.decoded_windows
+    )
+
+
+def test_a_strong_window_with_no_correction_moves_the_next_ones_input(
+    tmp_path, monkeypatch
+):
+    """Window 0's empty strong answer reaches window 1, whose decode is fine.
+
+    The held boundary ships from the strong result (window_boundaries.py
+    ship_held), so window 1 reads a different syndrome than it does when
+    window 0's strong decode answers, and the shot is unscored by window
+    0 alone.
+    """
+    crashing = set()
+    syndromes = crashing_decodes(monkeypatch, crashing)
+    switching_run(tmp_path, 1000000.0)
+    answered_input = syndromes[(WEAK, 1)]
+    crashing.add((STRONG, 0))
+    shot = switching_run(tmp_path, 1000000.0)
+    measurement = measure.measure_shot(shot)
+    crashed_input = syndromes[(WEAK, 1)]
+
+    assert crashed_input != answered_input
+    assert measurement.is_scored is False
+    assert measurement.window_statuses["backend_error_windows"] == 1
+
+
+def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
+    """The columns are the referee audit's own counts, whatever referees.
+
+    The referee re-decodes every window the loop decoded
+    (decsim/decoders/verify_windows.py), so its checks are the decoded
+    windows, and the summary adds them up over the point's shots.
+    """
+    pytest.importorskip("tesseract_decoder")
+    card = {
+        "weak_decoder": {
+            **MINIMAL_CONFIG["weak_decoder"],
+            "kind": "pymatching",
+        },
+        "observation": {"check_windows_with": "tesseract"},
+    }
+    config_path = write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    shot = yaml_configs.point_shot(
+        config,
+        physical_error_probability=0.01,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=0,
+    )
+
+    measurement = measure.measure_shot(shot)
+
+    audit = shot.machine.observation.referee_audit
+    record = report.record_of([measurement])
+    (row,) = report.summarize(record.shots, record.window_samples)
+    assert audit.windows_checked == measurement.decoded_windows
+    assert measurement.referee_windows_checked == audit.windows_checked
+    assert (
+        measurement.referee_window_disagreements == audit.window_disagreements
+    )
+    assert row["referee_windows_checked"] == audit.windows_checked
+    assert row["referee_window_disagreements"] == audit.window_disagreements
+
+
+def test_no_runner_module_names_a_row_of_the_decoder_table():
+    """A new decoder is one table row and one axis value, no runner edit.
+
+    The referent is the decoder table itself (decoders/settings.py
+    DECODERS). The runner is every module below the experiments package,
+    with collect.py and results.py. None imports a row's package, or a
+    package only the rows import (a decoder backend), under any alias,
+    and no string constant in it is a row's key (NOTE section 9 item
+    10), so what it measures holds for every row.
+    """
+    runner_paths = _runner_paths()
+
+    named = _rows_named_in(runner_paths)
+
+    assert named == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "import decsim.decoders.minimum_weight_perfect_matching.decoder"
+            " as plain\n",
+            ["decsim.decoders.minimum_weight_perfect_matching.decoder"],
+        ),
+        (
+            "from decsim.decoders import union_find as plain\n",
+            ["decsim.decoders.union_find"],
+        ),
+        ("import pymatching as harmless\n", ["pymatching"]),
+        ("from relay_bp import RelayDecoder\n", ["relay_bp.RelayDecoder"]),
+        ('KIND = "tesseract"\n', ["tesseract"]),
+        ('"""A tesseract has eight cells."""\n', []),
+        ('SENTENCE = "a tesseract has eight cells"\n', []),
+        ("import decsim.decoders.settings as decoder_settings\n", []),
+    ],
+)
+def test_the_row_check_reads_imports_and_keys_and_not_prose(source, expected):
+    """An aliased import is caught and a word in a sentence is not.
+
+    A docstring is prose and is not read. A key joined from two
+    literals is out of scope: the check catches coupling a reader
+    writes, not every way to hide it.
+    """
+    assert _row_names_of(source) == expected
+
+
+def _runner_paths() -> list:
+    """Every module below the experiments package, collect.py, results.py."""
+    measure_file = pathlib.Path(measure.__file__)
+    experiments_dir = measure_file.parent
+    experiment_files = experiments_dir.rglob("*.py")
+    collect_file = pathlib.Path(collect.__file__)
+    results_file = pathlib.Path(results.__file__)
+    return sorted([*experiment_files, collect_file, results_file])
+
+
+def _rows_named_in(paths: list) -> list:
+    """Each (file, name) where a module couples to a decoder row."""
+    named = []
+    for path in paths:
+        source = path.read_text()
+        names = _row_names_of(source)
+        named.extend((path.name, name) for name in names)
+    return named
+
+
+def _row_names_of(source: str) -> list:
+    """The row modules a source imports and the row keys it spells.
+
+    A docstring, or any string standing alone as a statement, is prose.
+    """
+    keys, row_modules = _decoder_rows()
+    tree = ast.parse(source)
+    prose = _prose_strings(tree)
+    names = []
+    for node in ast.walk(tree):
+        imported = _imported_names(node)
+        coupled = _within(imported, row_modules)
+        names.extend(coupled)
+        is_string = isinstance(node, ast.Constant) and id(node) not in prose
+        if is_string and node.value in keys:
+            names.append(node.value)
+    return names
+
+
+@functools.cache
+def _decoder_rows() -> tuple:
+    """The row keys, and the modules only a row may import.
+
+    Those are each row class's package, and every package the rows'
+    modules import that no other decsim module does: the backends
+    (pymatching, tesseract_decoder, relay_bp, ldpc). A package the rest
+    of decsim shares, such as stim or numpy, is no row's.
+    """
+    rows = decoder_settings.DECODERS
+    row_packages = set()
+    for row in rows.values():
+        package, _, _ = row.__module__.rpartition(".")
+        row_packages.add(package)
+    row_imports = _packages_imported(row_packages, inside=True)
+    other_imports = _packages_imported(row_packages, inside=False)
+    shared = other_imports | sys.stdlib_module_names | {"decsim"}
+    backends = row_imports - shared
+    row_modules = row_packages | backends
+    keys = frozenset(rows)
+    return keys, frozenset(row_modules)
+
+
+def _packages_imported(row_packages: set, *, inside: bool) -> set:
+    """The top-level packages decsim's modules import, in or out of rows."""
+    collect_file = pathlib.Path(collect.__file__)
+    package_dir = collect_file.parent
+    packages = set()
+    for path in package_dir.rglob("*.py"):
+        module = _module_name(path, package_dir.parent)
+        if _is_within(module, row_packages) != inside:
+            continue
+        source = path.read_text()
+        tree = ast.parse(source)
+        for name in _all_imports(tree):
+            package, _, _ = name.partition(".")
+            packages.add(package)
+    return packages
+
+
+def _module_name(path: pathlib.Path, root: pathlib.Path) -> str:
+    """The dotted module name of a source file below a root."""
+    relative = path.relative_to(root)
+    stem = relative.with_suffix("")
+    return ".".join(stem.parts)
+
+
+def _prose_strings(tree: ast.AST) -> set:
+    """The ids of the strings that stand alone as statements."""
+    prose = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr):
+            statement_id = id(node.value)
+            prose.add(statement_id)
+    return prose
+
+
+def _imported_names(node: ast.AST) -> list:
+    """The modules one import names, a from-import's names joined on."""
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        return [f"{node.module}.{alias.name}" for alias in node.names]
+    return []
+
+
+def _all_imports(tree: ast.AST) -> list:
+    """Every module a module's imports name, at any depth."""
+    names = []
+    for node in ast.walk(tree):
+        imported = _imported_names(node)
+        names.extend(imported)
+    return names
+
+
+def _within(names: list, modules: frozenset) -> list:
+    """The names that are one of the modules or below one."""
+    return [name for name in names if _is_within(name, modules)]
+
+
+def _is_within(name: str, modules) -> bool:
+    """Whether a dotted name is one of the modules or below one."""
+    for module in modules:
+        if name == module or name.startswith(f"{module}."):
+            return True
+    return False
+
+
+def test_a_windows_confidence_is_the_gap_the_decode_record_ledger_holds(
+    tmp_path,
+):
+    """Each verdict's gap and escalation, as the request records end them.
+
+    The decode-record ledger keeps every request's soft output and
+    terminal outcome; the kept and the escalated weak requests are the
+    windows whose confidence the verdict read (Toshio et al. 2510.25222
+    Sec. III A step 3).
+    """
+    overrides = yaml_configs.fixed_threshold_switching()
+    overrides["observation"] = {"record_switching_windows": True}
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    shot = yaml_configs.point_shot(
+        config,
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=0,
+    )
+
+    measurement = measure.measure_shot(shot)
+    ledger = shot.machine.observation.decode_records
+    rows = report.window_confidence_rows([measurement])
+
+    assert _verdicts_of_rows(rows) == _verdicts_of_ledger(ledger)
+    assert {row["seed"] for row in rows} == {0}
+    assert any(row["escalated"] for row in rows)
+
+
+def _verdicts_of_rows(rows) -> dict:
+    """Each row's window: its gap, and whether it escalated."""
+    verdicts = {}
+    for row in rows:
+        key = (row["operation_id"], row["window_index"])
+        verdicts[key] = (row["gap_nats"], row["escalated"])
+    return verdicts
+
+
+def _verdicts_of_ledger(ledger) -> dict:
+    """Each verdict request's window: its gap, and whether it escalated."""
+    escalated = decoding_records.RequestProcessingOutcome.WEAK_AWAITED_STRONG
+    verdicts = {}
+    for record in ledger.requests:
+        outcome = record.terminal_processing_outcome
+        if outcome not in decode_records.VERDICT_OUTCOMES:
+            continue
+        key = (record.request_key.operation_id, record.request_key.window_id)
+        verdicts[key] = (_gap_of(record.soft_output), outcome is escalated)
+    return verdicts
+
+
+def _gap_of(soft_output):
+    """A request's gap, None when the signal gave none."""
+    if soft_output is None:
+        return None
+    return soft_output.gap

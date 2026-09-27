@@ -528,8 +528,8 @@ occupancy in `load`.
 **Where to see it.** `POINTS`, `window_points_us` and `chain_load` in
 `decsim/experiments/measure.py`, the row in
 [The run folder](../reference/run_folder.md),
-`configs/cluster_gap_switching.yaml`, and the four shipped-config
-identity tests in `tests/experiments/test_measure.py`.
+`configs/experiments/switching/cluster_gap_switching.yaml`, and the four
+shipped-config identity tests in `tests/experiments/test_measure.py`.
 
 ## D17. The Union-Find growth, forest and peeling run in C
 
@@ -547,10 +547,9 @@ detectors.
 
 **Why.** decsim's timing comes from the latency card and never from how
 long a decoder runs, so a faster decoder must move the bill and no
-result. The bill is the reason: the experiments in
-`configs/experiments_2026_09` run union find at distances up to 15,
-where
-the Python row cost 48 seconds a shot. Identity is held by a property
+result. The bill is the reason: the September 2026 decoder experiments
+ran union find at distances up to 15, where the Python row cost 48
+seconds a shot. Identity is held by a property
 test rather than by review: the Python growth, forest and peeling live
 on as the oracle at `tests/decoders/union_find_oracle.py`, and
 `tests/decoders/test_union_find_compiled_decoder.py` puts the two side
@@ -641,25 +640,24 @@ the identity claim.
 
 **Decided.** The package that holds the yaml experiment, the sweep, the
 collected rows, the figures, the trace viewer and the `decsim` command
-is `decsim/experiments`, its tests are `tests/experiments`, the sixteen
-decoder runs are `configs/experiments_2026_09`, and the
-Slurm array script is `slurm/experiment_run.sh`. Nothing inside any of
-them moved: every module, class and function keeps its name, every yaml
-key and every number is what it was, and a run charges exactly what it
-charged before.
+is `decsim/experiments`, its tests are `tests/experiments`, and the
+sixteen decoder runs were the folder configs/experiments_2026_09 until
+their experiment was cancelled and the folder left the tree. Nothing
+inside any of them moved: every module, class and function keeps its
+name, every yaml key and every number is what it was, and a run
+charges exactly what it charged before.
 
 **Why.** A name should say what the thing is for. `front` said only
 where the package sat in the uses order, and it collided with
 `decsim/frontends`, the program readers and the planner, which is a
-different thing at a different level. The runs' folder and its Slurm
-script carried a second word for what the tree already calls an
-experiment, one yaml and the shards it is cut into, and two words for
+different thing at a different level. The runs' folder carried a
+second word for what the tree already calls an experiment, one yaml
+and the pieces it is cut into, and two words for
 one thing make a reader ask what the difference is when there is none.
 
 **Where to see it.** `decsim/experiments/`, `tests/experiments/`, level
-9 of the uses order in `decsim/machine.py`, the generated
-[The module map](../reference/map.md),
-`configs/experiments_2026_09/PLAN.md` and `slurm/experiment_run.sh`.
+9 of the uses order in `decsim/machine.py`, and the generated
+[The module map](../reference/map.md).
 
 ## D20. The weak decoder chip can form the detection events, once
 
@@ -1214,6 +1212,30 @@ row.
 `decsim/windows/window_manager.py` (`bind_stream_operation`),
 `decsim/windows/window_planner.py` (`cut_stream_after`);
 `tests/machine/test_live_stream_finalization.py`.
+
+## D33. A workload row says what made its workload
+
+**Decided.** A point's record names what made its workload by asking
+the workload's row (`maker`), and the run folder writes whatever the row
+answers under `maker` in `resolved/<id>.json`. The producer row answers
+its function, the point's own arguments and the package's version; the
+files row answers null, since its files are a workload another run made.
+
+**Why.** The run folder read the maker off the settings when the kind
+was `producer`, so a second row that makes its workload would have
+recorded nothing, silently. A fact a caller needs about a row is
+declared on the port and answered by every row (`STYLE.md` rule 10).
+
+**Sources.** gem5's port API hides a component's class behind the port
+(arXiv 2007.03152 lines 489-491); sinter records a task's own metadata
+as the task hands it over (sinter/_data/_task.py:163).
+
+**What it cost the port file.** `WorkloadRow` gained `maker`.
+
+**Where to see it.** `decsim/frontends/settings.py` (`maker` on each row
+and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
+(`record_point`);
+`tests/experiments/test_command_set.py`.
 
 ## What is not modelled yet
 

@@ -276,21 +276,18 @@ def _gate_forward_window_machine(
     sections["escalation"]["restart_reread_buffer_regions"] = (
         reread_buffer_regions
     )
+    sections["qpu"]["distance"] = 3
+    sections["qpu"]["round_period_microseconds"] = 1.0
+    arguments = sections["workload"]["arguments"]
+    arguments["distance"] = 3
+    arguments["physical_error_probability"] = 0.008
     base_directory = pathlib.Path(".")
     section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
         sections, name="switching_validation", section_folders=section_folders
     )
-    qpu = dataclasses.replace(
-        settings.qpu, distance=3, round_period_microseconds=1.0
-    )
-    sweep_values = {
-        "physical_error_probability": 0.008,
-        "distance": 3,
-        "round_period_microseconds": 1.0,
-    }
-    workload = settings.workload.at_point(sweep_values)
-    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    workload = settings.workload.made()
+    settings = dataclasses.replace(settings, workload=workload)
     return machine_module.Machine.build(settings, 1)
 
 
@@ -674,21 +671,18 @@ def _slow_boundary_machine(strong_window: str) -> machine_module.Machine:
         "clock": "fridge",
         "bits_per_cycle": None,
     }
+    sections["qpu"]["distance"] = 3
+    sections["qpu"]["round_period_microseconds"] = 1.0
+    arguments = sections["workload"]["arguments"]
+    arguments["distance"] = 3
+    arguments["physical_error_probability"] = 0.008
     base_directory = pathlib.Path(".")
     section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
         sections, name="pinned_delivery", section_folders=section_folders
     )
-    qpu = dataclasses.replace(
-        settings.qpu, distance=3, round_period_microseconds=1.0
-    )
-    sweep_values = {
-        "physical_error_probability": 0.008,
-        "distance": 3,
-        "round_period_microseconds": 1.0,
-    }
-    workload = settings.workload.at_point(sweep_values)
-    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    workload = settings.workload.made()
+    settings = dataclasses.replace(settings, workload=workload)
     return machine_module.Machine.build(settings, 0)
 
 
@@ -702,21 +696,18 @@ def _gate_machine(strong_window: str) -> machine_module.Machine:
     """
     sections = copy.deepcopy(GATE_SWITCHING_CARD)
     sections["escalation"]["strong_window"] = strong_window
+    sections["qpu"]["distance"] = 3
+    sections["qpu"]["round_period_microseconds"] = 1.0
+    arguments = sections["workload"]["arguments"]
+    arguments["distance"] = 3
+    arguments["physical_error_probability"] = 0.008
     base_directory = pathlib.Path(".")
     section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
         sections, name="switching_validation", section_folders=section_folders
     )
-    qpu = dataclasses.replace(
-        settings.qpu, distance=3, round_period_microseconds=1.0
-    )
-    sweep_values = {
-        "physical_error_probability": 0.008,
-        "distance": 3,
-        "round_period_microseconds": 1.0,
-    }
-    workload = settings.workload.at_point(sweep_values)
-    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    workload = settings.workload.made()
+    settings = dataclasses.replace(settings, workload=workload)
     return machine_module.Machine.build(settings, 0)
 
 

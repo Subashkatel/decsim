@@ -1,13 +1,12 @@
-"""The data-movement study's four configs: one setting apart, each.
+"""The data-movement study's four blocks: one setting apart, each.
 
 The study varies the two keys configs/reference.yaml gives for how a
 tier's unit gets its rounds, weak_decoder.input and
-weak_decoder.boundary_fold, both copy by default, and the switching
-config adds the strong tier and its two priced links. So the configs
-must differ in exactly those settings and in nothing else, and the pair
-the load refuses, both in place, must not be among them. The sweep grammar
-carries no setting axis, so each combination is its own yaml through
-`extends`, and these tests pin what each one changed.
+weak_decoder.boundary_fold, both copy by default, and its switching
+block adds the strong tier and its priced links. So the blocks of
+configs/experiments/data_movement/data_movement.yaml must differ in
+exactly those settings and in nothing else, and the pair the load
+refuses, both in place, must not be among them.
 """
 
 import pytest
@@ -15,31 +14,40 @@ import pytest
 import decsim.experiments.experiment as experiment
 import tests.experiments.yaml_configs as yaml_configs
 
-BASE = "data_movement.yaml"
-INPUT_IN_PLACE = "data_movement_input_in_place.yaml"
-FOLD_IN_PLACE = "data_movement_fold_in_place.yaml"
-SWITCHING = "data_movement_switching.yaml"
-STUDY_CONFIGS = (BASE, INPUT_IN_PLACE, FOLD_IN_PLACE, SWITCHING)
+GRID = (
+    yaml_configs.CONFIGS_DIR
+    / "experiments"
+    / "data_movement"
+    / "data_movement.yaml"
+)
+# the grid's sweep blocks, in the order it writes them
+CONTROL = 0
+INPUT_IN_PLACE = 1
+FOLD_IN_PLACE = 2
+SWITCHING = 3
+STUDY_BLOCKS = (CONTROL, INPUT_IN_PLACE, FOLD_IN_PLACE, SWITCHING)
 
 
-def study_settings(name):
-    """One study config's resolved settings."""
-    config_path = yaml_configs.CONFIGS_DIR / name
-    config = experiment.load_experiment(config_path)
-    return config.settings
+def block_settings(block_index):
+    """One block's resolved settings, at its first point."""
+    config = experiment.load_experiment(GRID)
+    block = config.sweep[block_index]
+    points = block.points()
+    task = config.point_task(points[0])
+    return task.settings
 
 
-def test_the_base_config_copies_at_both_settings():
+def test_the_control_block_copies_at_both_settings():
     """The reference defaults: input copy, boundary_fold copy."""
-    settings = study_settings(BASE)
+    settings = block_settings(CONTROL)
 
     assert settings.weak_decoder.input == "copy"
     assert settings.weak_decoder.boundary_fold == "copy"
 
 
-def test_the_input_config_changes_the_input_and_nothing_else():
-    base = study_settings(BASE)
-    variant = study_settings(INPUT_IN_PLACE)
+def test_the_input_block_changes_the_input_and_nothing_else():
+    base = block_settings(CONTROL)
+    variant = block_settings(INPUT_IN_PLACE)
 
     assert variant.weak_decoder.input == "in_place"
     assert variant.weak_decoder.boundary_fold == base.weak_decoder.boundary_fold
@@ -47,9 +55,9 @@ def test_the_input_config_changes_the_input_and_nothing_else():
     assert variant.escalation.kind == base.escalation.kind
 
 
-def test_the_fold_config_changes_the_fold_and_nothing_else():
-    base = study_settings(BASE)
-    variant = study_settings(FOLD_IN_PLACE)
+def test_the_fold_block_changes_the_fold_and_nothing_else():
+    base = block_settings(CONTROL)
+    variant = block_settings(FOLD_IN_PLACE)
 
     assert variant.weak_decoder.boundary_fold == "in_place"
     assert variant.weak_decoder.input == base.weak_decoder.input
@@ -57,9 +65,9 @@ def test_the_fold_config_changes_the_fold_and_nothing_else():
     assert variant.escalation.kind == base.escalation.kind
 
 
-def test_the_switching_config_opens_the_last_two_hops():
+def test_the_switching_block_opens_the_last_two_hops():
     """Hops 8 and 9 need a strong tier and its two links priced."""
-    variant = study_settings(SWITCHING)
+    variant = block_settings(SWITCHING)
     fabric = variant.links
 
     assert variant.escalation.kind == "switching"
@@ -69,32 +77,43 @@ def test_the_switching_config_opens_the_last_two_hops():
     assert fabric.strong_buffer_to_strong_decoder is not None
 
 
-@pytest.mark.parametrize("name", STUDY_CONFIGS)
-def test_every_study_config_counts_its_data_movement(name):
-    """The counters are off by default, so each config asks for them."""
-    settings = study_settings(name)
+@pytest.mark.parametrize("block_index", STUDY_BLOCKS)
+def test_every_study_block_counts_its_data_movement(block_index):
+    """The counters are off by default, so the grid asks for them."""
+    settings = block_settings(block_index)
     assert settings.observation.data_movement
     assert settings.observation.trace == "chrome"
 
 
-def swept_distances(name):
-    """Every code distance one config's sweep blocks name."""
-    config_path = yaml_configs.CONFIGS_DIR / name
-    config = experiment.load_experiment(config_path)
+def swept_distances(block_index):
+    """Every code distance one block names."""
+    config = experiment.load_experiment(GRID)
+    block = config.sweep[block_index]
     distances = set()
-    for block in config.sweep:
-        for point in block.points():
-            distances.add(point[1])
+    for point in block.points():
+        distances.add(point["qpu.distance"])
     return sorted(distances)
 
 
-@pytest.mark.parametrize("name", STUDY_CONFIGS)
-def test_every_study_config_sweeps_the_same_points_on_priced_cards(name):
+@pytest.mark.parametrize("block_index", STUDY_BLOCKS)
+def test_every_study_block_sweeps_the_same_points_on_priced_cards(
+    block_index,
+):
     """A priced card decodes on no host clock, so the counts repeat."""
-    settings = study_settings(name)
-    distances = swept_distances(name)
+    settings = block_settings(block_index)
+    distances = swept_distances(block_index)
     assert settings.weak_decoder.kind == 1.0
     assert distances == [3, 5, 7]
+
+
+def test_the_grid_holds_the_four_blocks_and_every_point_loads():
+    """No point names both in place, since the load would refuse it."""
+    config = experiment.load_experiment(GRID)
+
+    tasks = config.tasks()
+
+    assert len(config.sweep) == len(STUDY_BLOCKS)
+    assert len(tasks) == len(STUDY_BLOCKS) * 3
 
 
 def test_reading_the_input_in_place_and_folding_in_place_is_refused(tmp_path):
@@ -102,7 +121,7 @@ def test_reading_the_input_in_place_and_folding_in_place_is_refused(tmp_path):
 
     Folding into the unit's memory needs the unit's own copy of the
     rounds, and a tier that reads its input in place has none, so no
-    study config names that pair and the load says why.
+    block of the study names that pair and the load says why.
     """
     both_path = _both_in_place_config(tmp_path)
 
@@ -123,10 +142,12 @@ def _both_in_place_config(tmp_path):
     raw["weak_decoder"] = weak
     raw["sweep"] = [
         {
-            "physical_error_probability": [0.01],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
-            "shots": 1,
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.01],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": 1},
         }
     ]
     config_path = tmp_path / "both_in_place.yaml"

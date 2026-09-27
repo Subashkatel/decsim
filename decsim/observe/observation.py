@@ -8,7 +8,8 @@ window ledger, the flight recorder, the runtime stamps, the queue
 depth, the controller counters, the command events, the frame's
 corrections, the referee's audit and the sampled shots are always
 there; the ones a study asks for are None when the section did not ask,
-and the burst flags are None when the run has no burst detector.
+the burst flags are None when the run has no burst detector, and the
+confidence ledger when no confidence signal decides the escalation.
 """
 
 import dataclasses
@@ -63,3 +64,4 @@ class Observation:
     referee_audit: referee_audit_module.RefereeAudit
     sampled_shots: sampled_shots_module.SampledShots
     burst_flags: Optional[burst_flags_module.BurstFlags]
+    confidence: Optional[decode_records_module.ConfidenceLedger]

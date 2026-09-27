@@ -85,8 +85,8 @@ give each of your modules its own test file, and add your row to
 
 ## 5. Compare it
 
-Add one file to `configs/burst_detectors_compared/` that changes only
-`burst_detector`, then follow
+Add your row's `burst_detector` value to the `burst_detector` axis of
+`configs/experiments/burst_detection/burst_detection.yaml`, then follow
 [How to compare burst detectors](compare_burst_detectors.md).
 
 ## Read next

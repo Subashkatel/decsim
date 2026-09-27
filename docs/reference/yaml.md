@@ -56,10 +56,11 @@ Three conventions are worth knowing before you read:
   `pre_iterations`, `relay_set_count`, `iterations_per_set`,
   `gamma_interval`, `converged_solution_count` and `bases` there too
   (relay-bp's own arguments, with the Relay-BP paper's surface code
-  values shown beside them, and whether X and Z are decoded apart), `tesseract`'s `detector_beam`, `beam_climbing`,
+  values shown beside them, and whether X and Z are decoded apart),
+  `tesseract`'s `detector_beam`, `beam_climbing`,
   `no_revisit_detectors`, `priority_queue_limit`,
-  `detector_order_method` and `detector_order_count` there too,
-  `measured_table`'s
+  `detector_order_method`, `detector_order_count`,
+  `detector_order_seed` and `merge_errors` there too, `measured_table`'s
   `device`, `partition` and `bases` in a decoder tier, `dispatch_steps`'s
   `device`, `path` and `workers` there too, and the
   `bivariate_bicycle` code card's `qubit_count` and
@@ -79,15 +80,71 @@ Three conventions are worth knowing before you read:
 ## Starting from another file
 
 ```yaml
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 ```
 
-`extends` reads the named file from the same folder first, then applies
-this file's keys over it (`decsim/experiments/experiment.py`). A
+`extends` reads the named file first, its path taken from this file's
+folder, then applies this file's keys over it (`decsim/experiments/experiment.py`). A
 section this file names replaces the base's section whole, so a `sweep`
 written here replaces the base's sweep rather than adding to it.
 `manifest.json` records the whole chain, nearest first, and `config/`
 in the run folder holds a verbatim copy of every file in it.
+
+## The sweep
+
+```yaml
+sweep:
+  - axes:
+      workload.arguments.physical_error_probability: [0.001, 0.003]
+      qpu.distance: [3, 5]
+      windows.commit_rounds: [1, 3]
+    collection: {max_shots: 400}
+```
+
+A block's `axes` map a yaml path to the values the sweep sets there, and
+the block is every combination of them in the order written, each
+collected as its `collection` says (below): Hydra's multi-run makes one
+job per combination of `key=v1,v2` overrides the same way. The blocks are a union, and a point
+named twice runs once. Any key can be an axis. Its section must exist,
+and a value that is a mapping replaces the node at its path whole, so a
+decoder row with keys of its own is one value of a `weak_decoder` axis.
+
+Each point is then read the way a written file is: the axes placed,
+every whole-value reference such as `distance: ${qpu.distance}` replaced
+by the value at that path (OmegaConf's interpolation, kept to whole
+values; inside a flow mapping `{...}` it is quoted, `'${qpu.distance}'`,
+since a brace opens a mapping there), and the sections read by the
+packages that own them
+(`decsim/experiments/experiment.py`, `ExperimentConfig.point_task`). A
+path that does not resolve and a reference that leads back to itself
+are refused with the path named. A point's metadata is its
+`{path: value}`, and its id is a hash of that and every setting it
+resolves to (`decsim/collect.py`, `Task.strong_id`); the run folder
+names its files by the id, and each csv row carries the id and then one
+column per swept path ([The run folder](run_folder.md)).
+
+## The collection
+
+```yaml
+collection:
+  max_failures: 100
+  max_shots: 1000000
+  max_core_seconds: null
+  min_shots: 0
+  piece_rounds: 20000
+```
+
+How a point's shots are cut and when they stop, sinter's
+`CollectionOptions` as yaml (`decsim/experiments/collection.py`). A
+point runs seeds 0, 1, 2 and on, in pieces of `piece_rounds` QEC rounds
+each saved whole the moment it ends, so a killed collect run again runs
+only the pieces it lacks. It stops at the first shot where its scored
+failures reach `max_failures` with at least `min_shots` scored shots
+behind them, or where its shots reach `max_shots` or its shots' own
+seconds reach `max_core_seconds`, whichever comes first; a point needs
+one of the two caps. No piece past the stop is started. The section
+goes at the top of a file or in a sweep block, whose keys override the
+top's one by one, and no key of it enters a point's id.
 
 ## Seeing what a file resolves to
 
@@ -99,12 +156,12 @@ prints the resolved sections, one line per component, and the sweep
 blocks, without running anything. Then, under `values:`, it prints
 every value the machine is built with, one per line, gem5's
 `config.ini` in one list (`src/python/m5/simulate.py:122-127`). Three
-of `decsim show configs/weak_ler.yaml`'s:
+of `decsim show configs/examples/my_first_sweep.yaml`'s:
 
 ```
-qpu.distance = [3, 5, 7, 9, 11]  [sweep, configs/weak_ler.yaml:17-33]
-controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:45]
-controller.packing_overflow = "STALL"  [default, configs/reference.yaml:513]
+qpu.distance = [3, 5, 7]  [sweep, configs/examples/my_first_sweep.yaml:16-21]
+controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:51]
+controller.packing_overflow = "STALL"  [default, configs/reference.yaml:653]
 ```
 
 The bracket names the layer that set the value, `your file`, `preset`
@@ -119,29 +176,30 @@ chain says what you meant.
 
 ## The shipped configs
 
+`configs/` holds three kinds of file, and `configs/reference.yaml`
+beside them. A base under `bases/` is the defaults a study starts from
+and is read through `extends`; an example under `examples/` teaches one
+feature at small cost; an experiment under `experiments/` answers one
+question, one folder per question, its file named for the study, since
+the run folder is named for the file. An experiment extends a base or
+writes every section itself, never extending an example or another
+experiment, and it holds its grid whole: no copy per distance and no
+preview copy. A run too long for one job is cut into pieces by
+`collect`, not by more files.
+
 | File | What it is for |
 | --- | --- |
 | `configs/reference.yaml` | every key, commented, with a two-shot sweep so it runs in seconds |
-| `configs/weak_decoder_baseline.yaml` | the defaults a weak-tier study starts from |
-| `configs/strong_decoder_baseline.yaml` | the same for a strong-tier study |
-| `configs/weak_ler.yaml` | the weak tier's logical error rate sweep, 35 points and 10,425,000 shots |
-| `configs/strong_ler.yaml` | the strong tier's logical error rate sweep |
-| `configs/weak_latency.yaml` | the weak tier's latency sweep |
-| `configs/strong_latency.yaml` | the strong tier's latency sweep |
-| `configs/strong_latency_preview.yaml` | a short version of it |
-| `configs/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
-| `configs/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
-| `configs/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
-| `configs/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
-| `configs/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
-| `configs/data_movement.yaml` | the data-movement study: every copy, reference and move counted per hop |
-| `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
-| `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |
-| `configs/data_movement_switching.yaml` | the same under the switching escalation |
-| `configs/experiments_2026_09/` | the sixteen decoder experiments: sixteen experiment files that differ only in their decoder rows, one file per experiment and distance for the Slurm arrays, and `configs/experiments_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
-| `configs/common/experiments_2026_09_base.yaml` | the shared base those sixteen extend; it names no decoder, so it is not run by itself |
-| `configs/burst_detectors_compared/` | four burst detectors on one burst at d = 5 and on quiet shots, a file each, each changing only its detector or its burst ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
-| `configs/common/burst_detectors_compared_base.yaml` | the shared base of that folder; it names no detector, so it is not a comparison by itself |
+| `configs/bases/weak_decoder_baseline.yaml` | the defaults a weak-tier study starts from |
+| `configs/bases/strong_decoder_baseline.yaml` | the same for a strong-tier study |
+| `configs/examples/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
+| `configs/examples/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
+| `configs/examples/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
+| `configs/experiments/switching/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
+| `configs/experiments/switching/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
+| `configs/experiments/burst_detection/burst_detection.yaml` | four burst detectors on one burst at d = 5 and on quiet shots, the detector and the burst its only axes ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
+| `configs/experiments/data_movement/data_movement.yaml` | every copy, reference and move of the data path counted per hop, in four blocks: every hop copying, the weak input read in place, the boundary folded in place, and the switching escalation |
+| `configs/experiments/decoder_baseline/decoder_baseline.yaml` | the paper's decoder baseline: Union-Find, MWPM, Relay-BP-1 and Tesseract on the same samples of the rotated surface code memory, d = 5 to 15, six error rates, both bases, 100 rounds, each point stopped at 100 failures or 24 core-hours |
 
 ## Read next
 

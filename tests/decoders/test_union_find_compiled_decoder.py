@@ -51,16 +51,15 @@ GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 REQUIREMENT = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 WEIGHT_STEP = 0.1
 
-# the four distances the experiments_2026_09 grid runs below eleven, each
-# with as many rounds as its distance, at three of the grid's error rates
+# the four distances below eleven, each with as many rounds as its
+# distance, at the low, middle and high error rates of a memory sweep
 CORPUS_DISTANCES = (3, 5, 7, 9)
 CORPUS_PROBABILITIES = (0.001, 0.005, 0.01)
 CORPUS_SHOTS = 300
 CIRCUIT_SEED = 5
 
-# the two distances above that, at the rate the experiment's largest
-# points run, with fewer shots because the oracle costs a second a
-# decode there
+# the two distances above that, at the middle rate, with fewer shots
+# because the oracle costs a second a decode there
 LARGE_DISTANCES = (11, 13)
 LARGE_PROBABILITY = 0.005
 LARGE_SHOTS = 30
@@ -415,6 +414,50 @@ def test_a_missing_compiled_library_is_refused_by_its_build_command(
     with pytest.raises(RuntimeError) as refusal:
         compiled_decoder.entry_point()
     assert compiled_decoder.BUILD_COMMAND in str(refusal.value)
+
+
+# a compiler that writes half a library where -o points, then fails, as a
+# build a second build races, or a killed one, leaves its output
+HALF_WRITING_COMPILER = """#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then printf half > "$2"; fi
+  shift
+done
+exit 1
+"""
+
+
+def test_a_build_that_fails_leaves_the_library_a_reader_loads_whole(
+    tmp_path,
+):
+    """A reader loads the last whole library, never a build's half of one.
+
+    The build script runs from a copy of the tree whose compiler writes
+    part of its output and fails. The library in place stays the one
+    before it, byte for byte, and no half-written file is left beside it.
+    """
+    tools_folder = tmp_path / "tools"
+    library_folder = tmp_path / "decsim" / "decoders" / "union_find"
+    tools_folder.mkdir()
+    library_folder.mkdir(parents=True)
+    script = CHECKOUT / compiled_decoder.BUILD_COMMAND
+    copied_script = tools_folder / script.name
+    shutil.copy(script, copied_script)
+    library = library_folder / "union_find.so"
+    library.write_bytes(b"the whole library")
+    compiler = tmp_path / "half_writing_cc"
+    compiler.write_text(HALF_WRITING_COMPILER)
+    compiler.chmod(0o755)
+    environment = dict(os.environ, CC=str(compiler))
+
+    build = subprocess.run(
+        ["bash", str(copied_script)], env=environment, capture_output=True
+    )
+
+    left_beside = sorted(path.name for path in library_folder.iterdir())
+    assert build.returncode != 0
+    assert library.read_bytes() == b"the whole library"
+    assert left_beside == ["union_find.so"]
 
 
 @pytest.mark.skipif(

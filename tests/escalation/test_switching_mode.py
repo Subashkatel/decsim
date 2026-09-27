@@ -30,6 +30,7 @@ import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 from decsim.experiments.experiment import load_experiment
 from tests.experiments.yaml_configs import (
+    ERROR_RATE_PATH,
     measure_point_shot,
     memory_workload,
     strong_unit,
@@ -59,10 +60,12 @@ def switching_config(
     }
     workload = memory_workload(rounds)
     sweep_point = {
-        "physical_error_probability": [NEAR_THRESHOLD_P],
-        "distance": [3],
-        "round_period_microseconds": [1.0],
-        "shots": 1,
+        "axes": {
+            "workload.arguments.physical_error_probability": [NEAR_THRESHOLD_P],
+            "qpu.distance": [3],
+            "qpu.round_period_microseconds": [1.0],
+        },
+        "collection": {"max_shots": 1},
     }
     strong_decoder = strong_unit("belief_matching")
     card = {
@@ -96,11 +99,14 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
     weak_only_path = write_config(tmp_path, weak_only_card)
     weak_only = load_experiment(weak_only_path)
     with pytest.raises(ValueError, match="escalates to the strong_decoder"):
-        weak_only_settings = weak_only.point_settings(
-            physical_error_probability=NEAR_THRESHOLD_P,
-            distance=3,
-            round_period_microseconds=1.0,
+        point = weak_only.point_task(
+            {
+                ERROR_RATE_PATH: NEAR_THRESHOLD_P,
+                "qpu.distance": 3,
+                "qpu.round_period_microseconds": 1.0,
+            },
         )
+        weak_only_settings = point.settings
         Machine.build(weak_only_settings)
     strong_decoder = strong_unit("belief_matching")
     no_threshold_card = {"escalation": {"kind": "switching"}}
@@ -144,8 +150,13 @@ def test_both_restart_re_read_widths_load_from_the_escalation_section(
     one_region_path = write_config(tmp_path, one_region_card)
     one_region = load_experiment(one_region_path)
 
-    assert no_reread.settings.escalation.restart_reread_buffer_regions == 0
-    assert one_region.settings.escalation.restart_reread_buffer_regions == 1
+    no_reread_point = no_reread.first_point_task()
+    one_region_point = one_region.first_point_task()
+
+    no_reread_escalation = no_reread_point.settings.escalation
+    one_region_escalation = one_region_point.settings.escalation
+    assert no_reread_escalation.restart_reread_buffer_regions == 0
+    assert one_region_escalation.restart_reread_buffer_regions == 1
 
 
 def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
@@ -215,11 +226,14 @@ def _strong_request_counts(tmp_path, card: dict):
     tmp_path.mkdir()
     config_path = write_config(tmp_path, card)
     config = load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=NEAR_THRESHOLD_P,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": NEAR_THRESHOLD_P,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     machine = Machine.build(settings, 0)
     machine.run()
     return machine.decoder_manager.strong_requests.counts
@@ -285,9 +299,10 @@ def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config = load_experiment(config_path)
     log_of_ten = math.log(10.0)
     expected_nats = 2.0 * log_of_ten
-    assert config.settings.escalation.gap_threshold_db == 20.0
+    first_point = config.first_point_task()
+    assert first_point.settings.escalation.gap_threshold_db == 20.0
     assert math.isclose(
-        config.settings.escalation.gap_threshold_nats, expected_nats
+        first_point.settings.escalation.gap_threshold_nats, expected_nats
     )
 
 
@@ -310,7 +325,7 @@ def test_every_window_commits_once_across_both_output_links(tmp_path):
         assert links["strong_decoder_to_frame"]["transfers"] == escalations
         assert (
             links["weak_decoder_to_frame"]["transfers"] + escalations
-            == measurement.windows
+            == measurement.decoded_windows
         )
         found_escalation = found_escalation or escalations > 0
     assert found_escalation, (
@@ -326,7 +341,10 @@ def test_zero_threshold_never_escalates(tmp_path):
     links = measurement.link_totals
     assert links["weak_decoder_to_strong_decoder"]["transfers"] == 0
     assert links["strong_decoder_to_frame"]["transfers"] == 0
-    assert links["weak_decoder_to_frame"]["transfers"] == measurement.windows
+    assert (
+        links["weak_decoder_to_frame"]["transfers"]
+        == measurement.decoded_windows
+    )
 
 
 def test_unreachable_threshold_escalates_every_window(tmp_path):
@@ -334,7 +352,7 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
     config = load_experiment(config_path)
     measurement = measured_shot(config, seed=0)
     links = measurement.link_totals
-    windows = measurement.windows
+    windows = measurement.decoded_windows
     escalation_hops = links["weak_decoder_to_strong_decoder"]["transfers"]
     assert windows <= escalation_hops <= 2 * windows
     assert links["strong_buffer_to_strong_decoder"]["transfers"] == windows
@@ -387,15 +405,19 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
 
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)
-    threshold_nats = config.settings.escalation.gap_threshold_nats
+    first_point = config.first_point_task()
+    threshold_nats = first_point.settings.escalation.gap_threshold_nats
     weak_tier = window_records.DecoderTier.WEAK
     strong_tier = window_records.DecoderTier.STRONG
     for seed in range(4):
-        settings = config.point_settings(
-            physical_error_probability=NEAR_THRESHOLD_P,
-            distance=3,
-            round_period_microseconds=1.0,
+        point = config.point_task(
+            {
+                ERROR_RATE_PATH: NEAR_THRESHOLD_P,
+                "qpu.distance": 3,
+                "qpu.round_period_microseconds": 1.0,
+            },
         )
+        settings = point.settings
         observation = replace(
             settings.observation, record_switching_windows=True
         )
@@ -805,11 +827,14 @@ def _walk_card_machine(tmp_path, microseconds):
     card = _walk_card(microseconds, "union_find", "cluster_gap")
     config_path = write_config(tmp_path, card)
     config = load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=NEAR_THRESHOLD_P,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": NEAR_THRESHOLD_P,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     machine = Machine.build(settings, 0)
     machine.run()
     return machine
@@ -899,10 +924,11 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
     config_path = switching_config(tmp_path, 0.0, 9, observation)
     config = load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=NEAR_THRESHOLD_P,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": NEAR_THRESHOLD_P,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
     shot = collect.run_shot(task, 0)
     shot.machine.observation.trace_writer.write(str(trace_path))

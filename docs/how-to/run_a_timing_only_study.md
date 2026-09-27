@@ -11,12 +11,12 @@ For a timing study, price the decoder with a **card** instead.
 
 A tier's `kind` may be a number instead of a name. The number is the
 decode's core latency in microseconds, charged on the
-minimum-weight-perfect-matching path. `configs/priced_cards_example.yaml`
-is a worked one:
+minimum-weight-perfect-matching path.
+`configs/examples/priced_cards_example.yaml` is a worked one:
 
-```yaml configs/priced_cards_example.yaml
+```yaml configs/examples/priced_cards_example.yaml
 # Priced cards: the decoder costs a stated number, not a measured one.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 weak_decoder:
   kind: 1.0
@@ -31,10 +31,11 @@ weak_decoder:
     release_cycles_per_round: 0
 
 sweep:
-  - physical_error_probability: [0.001]
-    distance: [3, 5, 7]
-    round_period_microseconds: [1.0]
-    shots: 20
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [3, 5, 7]
+      qpu.round_period_microseconds: [1.0]
+    collection: {max_shots: 20}
 ```
 
 Two things to know before you copy it.
@@ -56,18 +57,19 @@ device you build in Python.
 ## 2. Run it
 
 ```bash
-decsim collect configs/priced_cards_example.yaml
+decsim collect configs/examples/priced_cards_example.yaml
 ```
 
 ```
-p 0.001, d 3, round period 1.0 us: 20 shots done
-distance: 3
-physical error rate: 0.001
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 20 shots done (cap)
+qpu.distance: 3
+qpu.round_period_microseconds: 1.0
+workload.arguments.physical_error_probability: 0.001
 algorithm: 1 us
-round period: 1 us
 load (service per window / window inter-arrival): 0.36
-logical failures: 0 of 20 shots
-mismatches vs direct PyMatching: 0
+logical failures: 0 of 20 scored shots
+logical error rate among scored shots: below 0.168 at 95% (cap)
+unscored shots: 0 of 20 (0)
 throughput: 0.997 rounds per us
 queue wait, mean: 0.000 us
 service time per window, mean: 1.064 us
@@ -85,9 +87,9 @@ load is whatever the host's wall clock gives.
 Run it a second time and compare:
 
 ```bash
-decsim collect configs/priced_cards_example.yaml
-diff <(cut -d, -f1-20 results/<first>/sweep.csv) \
-     <(cut -d, -f1-20 results/<second>/sweep.csv)
+decsim collect configs/examples/priced_cards_example.yaml
+diff <(cut -d, -f1-29 results/<first>/sweep.csv) \
+     <(cut -d, -f1-29 results/<second>/sweep.csv)
 ```
 
 Every column matches except `sim_wall_seconds_per_shot`, which is how
@@ -99,18 +101,16 @@ configuration and the seed.
 
 The decode does. A priced tier still decodes the window through
 PyMatching and still returns a correction, so the logical error rate is
-still measured; only the time it is charged comes from the card. That is
-why `mismatches vs direct PyMatching: 0` is still meaningful above.
+still measured; only the time it is charged comes from the card, so the
+logical failures above are real decodes.
 
 If you want a run with no syndrome data at all, `qpu.kind: timing_only`
 emits payloads that state the code's size per round and carry no values,
 so links and memories are still charged in bits. It builds and runs as a
 machine, but
-`decsim collect` currently raises `KeyError` on it, because the
-experiments layer's per-shot measurement always compares the loop's
-prediction against PyMatching on the device's sampled shot, and a
-timing-only device samples none. Use a priced card on a real device
-instead.
+`decsim collect` refuses it with a sentence, because every shot is
+scored against the observables its source sampled, and a timing-only
+device samples none. Use a priced card on a real device instead.
 
 ## Read next
 

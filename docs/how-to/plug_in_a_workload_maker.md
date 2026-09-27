@@ -31,10 +31,12 @@ def two_patch_memory(patch_rounds, distance):
     return workload_records.Workload((first, second), rounds)
 ```
 
-A parameter named `physical_error_probability`, `distance` or
-`round_period_microseconds` receives the sweep point's value; every
-other parameter is an argument the yaml writes. The function runs once
-per sweep point, and every shot of the point runs what it returned.
+Every parameter is an argument the yaml writes, as each sweep point
+resolves it: a sweep axis may set one
+(`workload.arguments.patch_rounds: [4, 8]`), and a whole-value reference
+reads a setting the machine reads too (`distance: ${qpu.distance}`).
+The function runs once per sweep point, and every shot of the point
+runs what it returned.
 
 ## 2. Name it in the yaml
 
@@ -44,6 +46,7 @@ workload:
   function: my_package.makers:two_patch_memory
   arguments:
     patch_rounds: 4
+    distance: ${qpu.distance}
 ```
 
 The module is imported by name, so it needs to be importable where
@@ -51,8 +54,8 @@ decsim runs (installed, or on `PYTHONPATH`). `decsim show` builds the
 first point, so it stops where a run would: a module that does not
 import or a function that is not there is refused with one sentence,
 and an argument the function does not take, one it needs and is not
-given, or a sweep value written as an argument stops the call with
-Python's own error, which names the argument.
+given stops the call with Python's own error, which names the
+argument.
 
 The makers decsim ships are named the same way, from
 `decsim/producers.py`: `decsim.producers:memory_circuit` (Stim's
@@ -122,7 +125,10 @@ qpu: {kind: streaming_stim}
 workload:
   kind: producer
   function: decsim.producers:deltakit_live_memory
-  arguments: {decode_after_rounds: 3}
+  arguments:
+    decode_after_rounds: 3
+    distance: ${qpu.distance}
+    round_period_microseconds: ${qpu.round_period_microseconds}
 ```
 
 or with fragments on disk, the four operations written out:

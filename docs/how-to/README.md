@@ -34,9 +34,9 @@ and its variants.
 A real sweep is millions of shots, and what it writes is meant to be
 read back.
 
-- [How to run a sweep on Slurm](run_a_sweep_on_slurm.md): the array
-  job, the two knobs that size a task, and the fold back into one
-  report.
+- [How to run a sweep on Slurm](run_a_sweep_on_slurm.md): rounds of
+  pieces planned from what the last round measured, submitted as job
+  arrays, and folded by status.
 - [How to read a trace and follow one round or one window](read_a_trace.md):
   a viewer for the whole shot, or one path printed by `decsim trace
   follow`.

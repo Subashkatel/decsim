@@ -54,6 +54,27 @@ class SoftOutputComputation:
     ticks: int = 0
 
 
+@dataclass(frozen=True)
+class WindowConfidence:
+    """One window's confidence gap as the verdict read it.
+
+    gap_nats is None when the signal gave no gap, a window whose model
+    pins no observable or whose decode grew no cluster, and the policy
+    escalates such a window (decsim/escalation/policies.py).
+    is_strong_revised says whether the strong decode predicted other
+    observables than the weak one it replaced, None for a window that
+    did not escalate or whose strong answer never came: a window has no
+    truth of its own, so this is the one per-window answer to whether
+    the weak decode was wrong (Toshio et al. 2510.25222 lines 807-841
+    sign the gap by exactly that).
+    """
+
+    window_key: tuple
+    gap_nats: Optional[float]
+    is_escalated: bool
+    is_strong_revised: Optional[bool]
+
+
 # ---- consumer hold tokens: who keeps rounds in a syndrome buffer and why
 #
 # Every token answers referenced_operation_ids: the operations it keeps
@@ -378,12 +399,41 @@ FORCED_CLASS_SOLVES = frozenset({DecoderEvidence.FORCED_CLASS_WEIGHT})
 CLUSTER_GROWTH_EVIDENCE = frozenset({DecoderEvidence.CLUSTER_GROWTH})
 
 
+class BackendDecodeStatus(Enum):
+    """Backend-neutral disposition of one window decode attempt."""
+
+    SUCCEEDED = "succeeded"
+    LOW_CONFIDENCE = "low_confidence"
+    NONCONVERGED = "nonconverged"
+    INVALID_CORRECTION = "invalid_correction"
+    EMPTY_MODEL_UNSATISFIABLE = "empty_model_unsatisfiable"
+    BACKEND_ERROR = "backend_error"
+
+
+class BackendFailureReason(Enum):
+    """Typed reason a backend attempt could not be committed."""
+
+    SEARCH_LIMIT_EXHAUSTED = "search_limit_exhausted"
+    NO_CONVERGED_RELAY_SOLUTION = "no_converged_relay_solution"
+    CORRECTION_NOT_BINARY = "correction_not_binary"
+    CORRECTION_WRONG_ARITY = "correction_wrong_arity"
+    CORRECTION_DOES_NOT_MATCH_SYNDROME = "correction_does_not_match_syndrome"
+    NONZERO_SYNDROME_WITHOUT_FAULTS = "nonzero_syndrome_without_faults"
+    UPSTREAM_EXCEPTION = "upstream_exception"
+    # PyMatching raises on a syndrome no matching explains; the matching
+    # rows report it with no correction under INVALID_CORRECTION
+    NO_PERFECT_MATCHING = "no_perfect_matching"
+
+
 @dataclass(frozen=True)
 class WindowDecode:
     """What one backend call on one window answers.
 
     ``selected_faults`` is the correction and ``decode_status`` a
-    best-effort disposition (None when the decode succeeded). The two
+    best-effort disposition (None when the decode succeeded).
+    ``no_correction_reason`` is the backend's BackendFailureReason when
+    it produced no correction and ``selected_faults`` is the empty one
+    committed in its place; None when the backend produced one. The two
     evidence fields are what a confidence signal reads off the decode
     that produced the correction: the minimum weight inside the class a
     forced solve was pinned to, and the growth a cluster-based decode
@@ -394,10 +444,11 @@ class WindowDecode:
     """
 
     selected_faults: Any
-    decode_status: Optional[Any] = None
+    decode_status: Optional[BackendDecodeStatus] = None
     forced_class_weight: Optional[float] = None
     cluster_evidence: Optional[Any] = None
     iterations: Optional[int] = None
+    no_correction_reason: Optional[BackendFailureReason] = None
 
 
 @dataclass(frozen=True)
@@ -447,7 +498,10 @@ class DecodeResult:
     # confidence, does not reproduce the syndrome); None when the decode
     # succeeded. The correction is committed either way and the status travels
     # with it, as cudaqx's per-window converged flag does.
-    decode_status: Optional[Any] = None
+    decode_status: Optional[BackendDecodeStatus] = None
+    # BackendFailureReason of a backend that produced no correction, whose
+    # empty stand-in is the correction above; None when it produced one
+    no_correction_reason: Optional[BackendFailureReason] = None
 
 
 @dataclass

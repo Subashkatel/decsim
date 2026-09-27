@@ -136,10 +136,8 @@ class _TracedShot:
     def __init__(self, trace_path):
         self.trace_path = trace_path
         self.seed = 0
-        self.distance = 3
-        self.physical_error_probability = 0.001
+        self.point_id = "0123abcd"
         self.algorithm = 1.0
-        self.round_period_microseconds = 1.0
 
 
 def test_a_structures_residences_are_its_lanes_complete_events(tmp_path):
@@ -195,13 +193,9 @@ def test_a_row_names_the_sweep_point_its_shot_ran_at(tmp_path):
 
     rows = residence.rows_of([measurement])
 
-    distances = {row["distance"] for row in rows}
-    probabilities = {row["physical_error_probability"] for row in rows}
-    periods = {row["round_period_microseconds"] for row in rows}
+    point_ids = {row["point_id"] for row in rows}
     seeds = {row["seed"] for row in rows}
-    assert distances == {3}
-    assert probabilities == {0.001}
-    assert periods == {1.0}
+    assert point_ids == {"0123abcd"}
     assert seeds == {0}
 
 
@@ -210,7 +204,7 @@ def test_a_shot_that_was_not_traced_writes_no_row(tmp_path):
     measurement = _TracedShot(None)
 
     rows = residence.rows_of([measurement])
-    residence.write_residence(rows, tmp_path)
+    residence.write_residence(rows, tmp_path, {})
     written = tmp_path / "residence.csv"
 
     assert rows == []
@@ -229,10 +223,14 @@ def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
             "observation": {"trace": "chrome", "trace_shots": [0]},
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3],
-                    "round_period_microseconds": [1.0],
-                    "shots": 2,
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
+                    "collection": {"max_shots": 2},
                 }
             ],
         },

@@ -15,7 +15,6 @@ faults, and the status a best-effort result carries.
 """
 
 import abc
-import enum
 import time
 import weakref
 from collections.abc import Callable
@@ -31,17 +30,6 @@ import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
 OnResult = Callable[[Optional[decoding_records.DecodeResult]], None]
-
-
-class BackendDecodeStatus(enum.Enum):
-    """Backend-neutral disposition of one window decode attempt."""
-
-    SUCCEEDED = "succeeded"
-    LOW_CONFIDENCE = "low_confidence"
-    NONCONVERGED = "nonconverged"
-    INVALID_CORRECTION = "invalid_correction"
-    EMPTY_MODEL_UNSATISFIABLE = "empty_model_unsatisfiable"
-    BACKEND_ERROR = "backend_error"
 
 
 class DecoderBase(abc.ABC):
@@ -260,6 +248,7 @@ class WindowDecoderBase(DecoderBase):
         result.forced_class_weight = answer.forced_class_weight
         result.cluster_evidence = answer.cluster_evidence
         result.iterations = answer.iterations
+        result.no_correction_reason = answer.no_correction_reason
         return result, finished_ns - started_ns
 
     def window_answer(

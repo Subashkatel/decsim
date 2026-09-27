@@ -442,10 +442,12 @@ FOLD_COUNTING_SWEEP = {
     "observation": {"data_movement": True},
     "sweep": [
         {
-            "physical_error_probability": [0.001, 0.01],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
-            "shots": 1,
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001, 0.01],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": 1},
         }
     ],
 }
@@ -469,20 +471,22 @@ def test_every_window_with_a_predecessor_folds_its_boundary(
     """
     config_path = yaml_configs.write_config(tmp_path, FOLD_COUNTING_SWEEP)
     config = experiment.load_experiment(config_path)
-    measurement = yaml_configs.measure_point_shot(
+    shot = yaml_configs.point_shot(
         config,
         physical_error_probability=probability,
         distance=3,
         round_period_microseconds=1.0,
         seed=seed,
     )
+    measurement = measure.measure_shot(shot)
     by_path = measurement.data_movement["copies_by_path"]
     folds = by_path["unit default#0 memory -> masked view"]
+    loop = yaml_configs.loop_predictions(shot)
 
-    assert measurement.windows == 4
-    assert folds["events"] == measurement.windows - 1
+    assert measurement.decoded_windows == 4
+    assert folds["events"] == measurement.decoded_windows - 1
     assert folds["rounds"] == 18
-    assert measurement.direct_mismatch is False
+    assert loop == yaml_configs.whole_circuit_predictions(shot)
 
 
 # switching, so every window's request runs the two forced-class solves
@@ -508,10 +512,15 @@ SWITCHING_FOLD_SWEEP = {
     },
     "sweep": [
         {
-            "physical_error_probability": [0.0001, 0.008],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
-            "shots": len(FOLD_SEEDS),
+            "axes": {
+                "workload.arguments.physical_error_probability": [
+                    0.0001,
+                    0.008,
+                ],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": len(FOLD_SEEDS)},
         }
     ],
 }
@@ -559,20 +568,23 @@ def _fold_run(tmp_path, boundary_fold: str, probability: float) -> list:
 def _fold_outcome(config, probability: float, seed: int) -> tuple:
     """One shot's committed corrections, its outcome and its agreement."""
     task = config.point_task(
-        physical_error_probability=probability,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=len(FOLD_SEEDS),
+        {
+            "workload.arguments.physical_error_probability": probability,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
     shot = collect.run_shot(task, seed)
     measurement = measure.measure_shot(shot)
     corrections = []
     for record in shot.machine.observation.frame_corrections.committed:
         corrections.append((record.window_key, record.logical_observables))
+    loop = yaml_configs.loop_predictions(shot)
+    whole_circuit = yaml_configs.whole_circuit_predictions(shot)
     return (
         sorted(corrections),
         measurement.logical_failure,
-        measurement.direct_mismatch,
+        loop == whole_circuit,
     )
 
 

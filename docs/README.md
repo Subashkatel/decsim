@@ -131,11 +131,11 @@ sources, and the ideas behind the tree.
 | --- | --- |
 | `decsim/` | the simulator, in packages layered so that a lower one never imports a higher one; mapped in [The map of the package](reference/map.md) |
 | `decsim/ports.py` | the ports, the only way two packages talk; listed in [The ports](reference/ports.md) |
-| `configs/` | the yaml experiments. `configs/reference.yaml` documents every key. |
+| `configs/` | the yaml experiments: `bases/`, `examples/` and `experiments/`. `configs/reference.yaml` documents every key. |
 | `results/` | what a run writes, one folder per run. Not tracked by git. |
 | `tests/` | the test suite, one folder per package |
+| `slurm/` | `round.sh`, which submits a round of an experiment's plan as job arrays |
 | `tools/` | the checks `tools/check.sh` runs, the tutorials' check `tools/check_tutorial_runs.py`, and the documentation generator |
-| `slurm/` | the array scripts for running a sweep on a cluster |
 | `STYLE.md` | the rules every line of the package is written to |
 
 ## How to cite decsim

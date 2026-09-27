@@ -42,13 +42,16 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     here = pathlib.Path(__file__)
     repository = here.resolve()
     repository = repository.parents[2]
-    config_path = repository / "configs/weak_decoder_baseline.yaml"
+    config_path = repository / "configs/bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     bare = machine_module.Machine.build(settings, 0)
     bare.run()
     every_listener = dataclasses.replace(

@@ -2,14 +2,14 @@
 
 A yaml names what makes its workload (WORKLOADS, below): a maker
 function with its arguments (producer), or the maker's two outputs read
-from disk (files). A maker runs once per sweep point (at_point) and its
+from disk (files). A maker runs once per sweep point (made) and its
 records.workload.Workload is lowered into the operations the machine
 issues (circuit_frontend.lowered); a Python caller hands the same
 fields in directly.
 """
 
 import dataclasses
-import inspect
+import importlib.metadata
 import pathlib
 import pkgutil
 from collections.abc import Mapping
@@ -83,7 +83,6 @@ class WorkloadSettings:
     """
 
     kind: Optional[str] = None
-    physical_error_probability: Optional[float] = None
     operations: tuple = ()
     decode_operations: Optional[tuple] = None
     dynamic_streams: tuple = ()
@@ -118,15 +117,18 @@ class WorkloadSettings:
         )
         return cls(kind=kind, row_settings=row_settings)
 
-    def at_point(self, sweep_values: Mapping) -> "WorkloadSettings":
-        """The section at one sweep point, its row's workload made there."""
-        probability = sweep_values["physical_error_probability"]
-        placed = dataclasses.replace(
-            self, physical_error_probability=probability
-        )
+    def made(self) -> "WorkloadSettings":
+        """The section running the workload its row makes, once per point."""
         row = tables.row(WORKLOADS, "workload.kind", self.kind)
-        workload = row.workload(self.row_settings, sweep_values)
-        return placed.running(workload)
+        workload = row.workload(self.row_settings)
+        return self.running(workload)
+
+    def maker(self) -> Optional[dict]:
+        """What the row says made the workload; None for a Python-built one."""
+        if self.kind is None:
+            return None
+        row = tables.row(WORKLOADS, "workload.kind", self.kind)
+        return row.maker(self.row_settings)
 
     def running(
         self, workload: workload_records.Workload
@@ -151,8 +153,9 @@ class ProducerWorkload:
     Python's entry points are; Hydra's instantiate calls a named target
     with its keyword arguments the same way
     (hydra/_internal/instantiate/_instantiate2.py:76-82). The maker is
-    called once per sweep point with its arguments and the sweep values
-    its parameters name.
+    called once per sweep point with its arguments as that point
+    resolves them: an axis may set one, and a reference such as
+    `distance: ${qpu.distance}` shares a value the machine reads too.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -173,16 +176,11 @@ class ProducerWorkload:
 
     @staticmethod
     def workload(
-        settings: "ProducerWorkload.Settings", sweep_values: Mapping
+        settings: "ProducerWorkload.Settings",
     ) -> workload_records.Workload:
         """The maker's workload at one sweep point."""
         maker = _maker(settings.function)
-        signature = inspect.signature(maker)
-        named = {}
-        for name, value in sweep_values.items():
-            if name in signature.parameters:
-                named[name] = value
-        made = maker(**settings.arguments, **named)
+        made = maker(**settings.arguments)
         if isinstance(made, workload_records.Workload):
             return made
         made_type = type(made)
@@ -191,6 +189,20 @@ class ProducerWorkload:
             f"{made_type.__name__}; a maker returns a "
             "decsim.records.workload.Workload"
         )
+
+    @staticmethod
+    def maker(settings: "ProducerWorkload.Settings") -> dict:
+        """The maker's name, its arguments and its package's version.
+
+        The name's first dotted word is the package in both forms
+        pkgutil.resolve_name reads, module:function and module.function.
+        """
+        module_name, _, _ = settings.function.partition(":")
+        return {
+            "function": settings.function,
+            "arguments": settings.arguments,
+            "version": _package_version(module_name),
+        }
 
 
 class FilesWorkload:
@@ -204,12 +216,24 @@ class FilesWorkload:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The workload's files, their paths resolved."""
+        """The workload's files, their paths resolved.
 
-        operations: pathlib.Path
-        circuit: Optional[pathlib.Path] = None
-        measurement_rounds: Optional[pathlib.Path] = None
-        fragments: Optional[pathlib.Path] = None
+        The paths are labels, no part of a point's id: the workload
+        they are read into is on the point's settings
+        (WorkloadSettings.running), so its content names the point and
+        the folder the files sit in does not.
+        """
+
+        operations: pathlib.Path = dataclasses.field(compare=False)
+        circuit: Optional[pathlib.Path] = dataclasses.field(
+            compare=False, default=None
+        )
+        measurement_rounds: Optional[pathlib.Path] = dataclasses.field(
+            compare=False, default=None
+        )
+        fragments: Optional[pathlib.Path] = dataclasses.field(
+            compare=False, default=None
+        )
 
         @classmethod
         def from_yaml(
@@ -225,16 +249,20 @@ class FilesWorkload:
 
     @staticmethod
     def workload(
-        settings: "FilesWorkload.Settings", sweep_values: Mapping
+        settings: "FilesWorkload.Settings",
     ) -> workload_records.Workload:
-        """The workload the files hold, the same at every sweep point."""
-        del sweep_values
+        """The workload the files hold."""
         return workload_files.read_workload(
             settings.operations,
             settings.circuit,
             settings.measurement_rounds,
             settings.fragments,
         )
+
+    @staticmethod
+    def maker(settings: "FilesWorkload.Settings") -> None:
+        """No maker: the files are a workload another run made."""
+        del settings
 
 
 def memory_circuit(
@@ -263,6 +291,16 @@ def _maker(function: str) -> Any:
         raise ValueError(
             f"workload.function {function} names no maker: {missing}"
         ) from missing
+
+
+def _package_version(module_name: str) -> Optional[str]:
+    """The installed version of the package a module belongs to, or None."""
+    names = module_name.split(".")
+    package = names[0]
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def _check_one_physical_circuit(settings: "FilesWorkload.Settings") -> None:

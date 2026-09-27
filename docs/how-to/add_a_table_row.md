@@ -82,7 +82,7 @@ study most often extends:
 | `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
 | `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
-| `WORKLOADS` | not built (the `WorkloadRow` port): the workload section calls `row.workload(settings.row_settings, sweep_values)` once per sweep point for the records.workload `Workload` it lowers | `decsim/frontends/settings.py`, `WorkloadSettings.at_point` |
+| `WORKLOADS` | not built (the `WorkloadRow` port): the workload section calls `row.workload(settings.row_settings)` once per sweep point for the records.workload `Workload` it lowers | `decsim/frontends/settings.py`, `WorkloadSettings.made` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/stores.py` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
 | `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |

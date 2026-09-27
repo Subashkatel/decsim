@@ -1,7 +1,0 @@
-# regional_cusum_burst.yaml on quiet shots, the burst off: its flagged_share is
-# the share of shots holding a false alarm.
-
-extends: regional_cusum_burst.yaml
-
-qpu:
-  kind: stim_device

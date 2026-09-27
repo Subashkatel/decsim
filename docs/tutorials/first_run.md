@@ -56,7 +56,7 @@ The output:
 
 ```
 config: reference
-point: p0.001 d3 round period 1 us seed 0
+point: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001} seed 0
 terminal status: complete
 execution done: 15000000 ticks
 fully done: 37356000 ticks
@@ -66,12 +66,15 @@ run dir: results/first_shot
 
 Line by line:
 
-- `point: p0.001 d3 round period 1 us seed 0`. One point of a sweep is
-  one machine. `p0.001` is the physical error probability: each physical
-  operation on the QPU fails with probability one in a thousand. `d3` is
-  the code distance, the size of the error correcting code: distance 3
-  corrects one error. `round period 1 us` is how long one round of
-  measurement takes on the QPU, one microsecond here.
+- `point: {...} seed 0`. One point of a sweep is one machine, and the
+  braces hold the settings its sweep block set, each by its path in the
+  yaml. `qpu.distance` is the code distance, the size of the error
+  correcting code: distance 3 corrects one error.
+  `qpu.round_period_microseconds` is how long one round of measurement
+  takes on the QPU, one microsecond here.
+  `workload.arguments.physical_error_probability` 0.001 says each
+  physical operation on the QPU fails with probability one in a
+  thousand.
 - `execution done: 15000000 ticks`. A **tick** is the engine's integer
   unit of time, and one microsecond is a million ticks
   (`decsim/config.py`). So the QPU finished its quantum work after 15
@@ -108,14 +111,15 @@ It first prints what the yaml resolved to, one line per component, then
 the summary of each point:
 
 ```
-p 0.001, d 3, round period 1.0 us: 2 shots done
-distance: 3
-physical error rate: 0.001
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 2 shots done (cap)
+qpu.distance: 3
+qpu.round_period_microseconds: 1.0
+workload.arguments.physical_error_probability: 0.001
 algorithm: pymatching
-round period: 1 us
 load (service per window / window inter-arrival): 2.39
-logical failures: 0 of 2 shots
-mismatches vs direct PyMatching: 0
+logical failures: 0 of 2 scored shots
+logical error rate among scored shots: below 0.842 at 95% (cap)
+unscored shots: 0 of 2 (0)
 throughput: 0.449 rounds per us
 queue wait, mean: 2.603 us
 service time per window, mean: 7.158 us
@@ -123,7 +127,7 @@ ready to frame commit: median 15.772 us, p99 22.726 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/reference/sweep.csv
+every column: results/reference/combined/reference-6b21cb73/sweep.csv
 ```
 
 Two new words:
@@ -156,13 +160,31 @@ ls results/reference
 ```
 
 ```
+combined
+configurations.csv
+inputs
+pieces
+resolved
+```
+
+`--out` names the experiment folder. `pieces/` holds each point's shots
+in pieces, each saved whole the moment it ends, and running the command
+again into the same folder runs only the pieces it has not saved.
+`combined/` holds one run folder per configuration, named by the yaml
+and the first eight characters of a hash of its settings, folded from
+the pieces. Without `--out`, `collect` writes a new folder named with
+the UTC time the run started, so no two collects share one.
+
+```bash
+ls results/reference/combined/*
+```
+
+```
 config
-finished
 inputs
 latency_samples.csv
 links.csv
 manifest.json
-producer.json
 residence.csv
 resolved
 shot_links.csv
@@ -173,57 +195,64 @@ trace
 window_samples.csv
 ```
 
-`--out` names the folder. A run writes `finished` into it last, and
-running the command again into a finished folder leaves it as it is.
-Without `--out`, `collect` writes a new folder named with the UTC time
-the run started, so no two collects share one.
-
 The folder is written under `results/`, which is output and is not
 tracked by git. `config/` holds a verbatim copy of the yaml files that
 produced it, `manifest.json` the git commit and the command line,
-`resolved/` every value each point ran with, `inputs/` the workload each
-point ran, `producer.json` the function that made it, and the csv files
+`resolved/` every value each point ran with and the function that made
+its workload, `inputs/` the workload each point ran, and the csv files
 the facts.
 [The run folder](../reference/run_folder.md) has one row per file.
 
 ## Step 5. Read one row and one figure
 
 `sweep.csv` has one row per sweep point and more than a hundred
-columns. The first few:
+columns. The distance and the first counts:
 
 ```bash
-cut -d, -f1-10 results/reference/sweep.csv
+cut -d, -f3,6,8,11-14 results/reference/combined/*/sweep.csv
 ```
 
 ```
-distance,physical_error_probability,algorithm,round_period_microseconds,shots,windows_per_shot,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-3,0.001,pymatching,1.0,2,4.0,0,0.0,0.0,0.6576280471103807
+qpu.distance,shots,logical_failures,state,logical_error_rate_estimate,logical_error_rate_low,logical_error_rate_high
+3,2,0,cap,,,0.841886116991581
 ```
 
-`logical_error_rate` is the fraction of shots whose decoded observable
-did not match the truth: zero out of two here. `ler_wilson_low` and
-`ler_wilson_high` bracket it. Two shots say almost nothing, which is why
-the interval runs from 0 to 0.66. The next tutorial,
-[Your first sweep](first_sweep.md), explains that interval and runs enough
-shots to make it narrow.
+`state` says why the point stopped: `cap`, at the two shots its
+`collection` allows. `logical_error_rate_estimate` is the fraction of
+scored shots whose decoded observable did not match the truth, and the
+two limits bracket the true rate with 95 percent confidence. With no
+failure in two shots there is no fraction to quote, only an upper
+limit: the true rate is below 0.84. Two shots say almost nothing. The
+next tutorial, [Your first sweep](first_sweep.md), explains the limits
+and runs enough shots to make them narrow.
+
+The row's first columns name its point. `point_id`, left out here, is a
+hash of every setting the point ran with, so two points that differ in
+any setting have two ids. After it comes one column per yaml path the
+sweep sets, named by that path, holding the point's value there: the
+lines the terminal printed at the top of the point's block. Every other
+csv file of the folder names its rows the same way, so a table of any
+of them groups by a setting with no parsing.
 
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/reference --figure stage_breakdown
+decsim plot results/reference/combined/* --figure stage_breakdown
 ```
 
 ```
-results/reference/stage_breakdown.png
+results/reference/combined/reference-6b21cb73/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
 the buffer filling, the queue, the link into the decoder unit, the
 fetch, the algorithm, the release, the boundary handed to the next
-window, the link out and the frame commit. `collect` draws a figure only when its input is there,
-which is why this run has the `timeline.png` it drew for you and no
-others: it traced a shot, but its sweep has one physical error rate and
-one distance.
+window, the link out and the frame commit, one bar per sweep point.
+These two figures read decsim's own records, a trace and the stage
+columns in pipeline order. A figure of the sweep's numbers against a
+setting is yours to draw from the csv files, since only you know
+which setting belongs on the axis and what the figure should look
+like.
 
 ## Step 6. Follow one round
 
@@ -238,12 +267,12 @@ For one round, decsim prints the path itself:
 
 ```bash
 decsim trace follow \
-  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/combined/*/trace/*_seed0.trace.json \
   --round 1:1
 ```
 
 ```
-round 1:1 of decsim weak_baseline d3 p0.001 seed0
+round 1:1 of decsim weak_baseline d3 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
 0.000      weak syndrome buffer         hold registered                                                                reference
@@ -293,7 +322,7 @@ The same command follows a window instead of a round:
 
 ```bash
 decsim trace follow \
-  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/combined/*/trace/*_seed0.trace.json \
   --window 1:0
 ```
 

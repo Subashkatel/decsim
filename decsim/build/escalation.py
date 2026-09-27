@@ -166,7 +166,7 @@ def _threshold_source(settings: escalation_settings.EscalationSettings):
     the point's shots) arrives already built; every other row is built
     here from the point's threshold in nats, its one constructor
     argument. The table source is resolved to a number per sweep point
-    by the experiments layer (ExperimentConfig.point_settings), so a
+    by the experiments layer (ExperimentConfig.point_task), so a
     table run reaches the root with its threshold in nats or not at all.
     """
     row = tables.row(
@@ -180,7 +180,7 @@ def _threshold_source(settings: escalation_settings.EscalationSettings):
         raise ValueError(
             "escalation.threshold_source table resolves the threshold "
             "per sweep point in the experiments layer "
-            "(ExperimentConfig.point_settings); build the machine "
+            "(ExperimentConfig.point_task); build the machine "
             "through it, or give gap_threshold_db"
         )
     return row(settings.gap_threshold_nats)
@@ -192,7 +192,7 @@ def _sweep_point_source(settings: escalation_settings.EscalationSettings):
         raise ValueError(
             "escalation.threshold_source online is built once per sweep "
             "point by the experiments layer "
-            "(ExperimentConfig.point_settings), which seeds it and "
+            "(ExperimentConfig.point_task), which seeds it and "
             "shares it across the point's shots; build the machine "
             "through it"
         )

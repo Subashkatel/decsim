@@ -42,7 +42,7 @@ wrong number.
 A cost can be written two ways.
 
 In microseconds, when a paper states it in seconds:
-`round_period_microseconds` on the sweep, `confidence_walk_microseconds`
+`round_period_microseconds` on the qpu section, `confidence_walk_microseconds`
 on the escalation section.
 
 In cycles of a **clock domain**, when a paper states it as a cycle
@@ -84,8 +84,8 @@ weak_decoder:
   kind: 0.028                       # LILLIPUT card
 ```
 
-`configs/weak_decoder_baseline.yaml` does exactly this, and its comment
-says where the number came from.
+`configs/bases/weak_decoder_baseline.yaml` does exactly this, and its
+comment says where the number came from.
 
 ## The wall-clock decoder, and what it costs you
 

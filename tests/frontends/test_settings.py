@@ -9,6 +9,7 @@ tables, and pin the sentence every refusal reads as.
 """
 
 import json
+import pathlib
 import textwrap
 
 import pytest
@@ -42,41 +43,39 @@ def rounds_from_keywords(distance, physical_error_probability, **options):
     return workload_records.Workload((operation,), {1: rounds})
 '''
 
+# A point that sets the distance only, for a maker that takes no error
+# rate, and one that sets both, for Stim's memory circuit.
+AT_DISTANCE_3 = {"qpu.distance": 3}
 
-def _outside_package(tmp_path, monkeypatch) -> None:
-    """A package outside decsim that holds two makers."""
-    package = tmp_path / "outside_makers"
-    package.mkdir()
-    init_path = package / "__init__.py"
-    init_path.write_text("")
-    module_path = package / "makers.py"
-    maker_text = textwrap.dedent(OUTSIDE_MAKER)
-    module_path.write_text(maker_text)
-    monkeypatch.syspath_prepend(str(tmp_path))
+AT_DISTANCE_3_AND_P = {
+    "qpu.distance": 3,
+    "workload.arguments.physical_error_probability": 0.001,
+}
 
-
-def _point(config_path):
-    config = experiment.load_experiment(config_path)
-    return config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-    )
-
-
-def _producer(function: str, arguments: dict) -> dict:
-    return {"kind": "producer", "function": function, "arguments": arguments}
+# The audit's merge probe: two memories, their merge, a measurement, as
+# an operation list with kinds and no circuit, run on the code card's
+# timing alone. The merge's predecessors come from patch order.
+MERGE_OPERATIONS = {
+    "schema": "decsim.ops/1",
+    "operations": [
+        {"id": 1, "name": "mem0", "patches": [0], "kind": "MEMORY"},
+        {"id": 2, "name": "mem1", "patches": [1], "kind": "MEMORY"},
+        {"id": 3, "name": "merge01", "patches": [0, 1], "kind": "MERGE"},
+        {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"},
+    ],
+}
 
 
 def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
     """Its module:function and its arguments are the whole edit."""
     _outside_package(tmp_path, monkeypatch)
     workload = _producer(
-        "outside_makers.makers:two_patch_memory", {"patch_rounds": 4}
+        "outside_makers.makers:two_patch_memory",
+        {"patch_rounds": 4, "distance": "${qpu.distance}"},
     )
     card = {"workload": workload, "qpu": {"kind": "timing_only"}}
     config_path = yaml_configs.write_config(tmp_path, card)
-    settings = _point(config_path)
+    settings = _point(config_path, AT_DISTANCE_3)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     rounds = settings.workload.rounds_policy.rounds_by_operation
@@ -92,13 +91,14 @@ def test_a_maker_with_keyword_arguments_takes_what_the_yaml_writes(
 ):
     """Python's own call rules: **options takes any argument the yaml has."""
     _outside_package(tmp_path, monkeypatch)
+    arguments = {"distance": "${qpu.distance}", **arguments}
     workload = _producer(
         "outside_makers.makers:rounds_from_keywords", arguments
     )
     card = {"workload": workload, "qpu": {"kind": "timing_only"}}
     config_path = yaml_configs.write_config(tmp_path, card)
 
-    settings = _point(config_path)
+    settings = _point(config_path, AT_DISTANCE_3_AND_P)
 
     policy = settings.workload.rounds_policy
     assert policy.rounds_by_operation == {1: rounds}
@@ -108,7 +108,8 @@ def test_a_maker_that_returns_no_workload_is_refused_at_the_point(
     monkeypatch, tmp_path
 ):
     _outside_package(tmp_path, monkeypatch)
-    workload = _producer("outside_makers.makers:not_a_workload", {})
+    arguments = {"distance": "${qpu.distance}"}
+    workload = _producer("outside_makers.makers:not_a_workload", arguments)
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
     sentence = (
         "outside_makers.makers:not_a_workload returned a list; a maker "
@@ -116,7 +117,7 @@ def test_a_maker_that_returns_no_workload_is_refused_at_the_point(
     )
 
     with pytest.raises(ValueError, match=sentence):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 @pytest.mark.parametrize(
@@ -133,7 +134,7 @@ def test_a_maker_that_is_not_there_is_refused_at_the_point(
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
 
     with pytest.raises(ValueError, match=sentence):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 @pytest.mark.parametrize(
@@ -143,10 +144,9 @@ def test_a_maker_that_is_not_there_is_refused_at_the_point(
             {"code_task": "x", "rounds_per_shot": 3, "colour": 1},
             "got an unexpected keyword argument 'colour'",
         ),
-        ({"code_task": "x"}, "missing 1 required positional argument"),
         (
-            {"code_task": "x", "rounds_per_shot": 3, "distance": 5},
-            "got multiple values for keyword argument 'distance'",
+            {"code_task": "x", "distance": "${qpu.distance}"},
+            "missing 1 required positional argument",
         ),
     ],
 )
@@ -156,13 +156,14 @@ def test_a_bad_argument_stops_the_makers_call(tmp_path, arguments, sentence):
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
 
     with pytest.raises(TypeError, match=sentence):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3_AND_P)
 
 
 def test_a_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
     """The table's own refusal, at the yaml boundary."""
     workload = {"kind": "memory_circuit", "rounds_per_shot": 6}
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    card = {"workload": workload, "sweep": yaml_configs.QPU_ONLY_SWEEP}
+    config_path = yaml_configs.write_config(tmp_path, card)
 
     with pytest.raises(ValueError, match="workload.kind 'memory_circuit' is"):
         experiment.load_experiment(config_path)
@@ -184,32 +185,7 @@ def test_a_shot_of_fewer_than_one_round_is_refused_at_the_point(
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
 
     with pytest.raises(ValueError, match="a round count of at least 1"):
-        _point(config_path)
-
-
-# The audit's merge probe: two memories, their merge, a measurement, as
-# an operation list with kinds and no circuit, run on the code card's
-# timing alone. The merge's predecessors come from patch order.
-MERGE_OPERATIONS = {
-    "schema": "decsim.ops/1",
-    "operations": [
-        {"id": 1, "name": "mem0", "patches": [0], "kind": "MEMORY"},
-        {"id": 2, "name": "mem1", "patches": [1], "kind": "MEMORY"},
-        {"id": 3, "name": "merge01", "patches": [0, 1], "kind": "MERGE"},
-        {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"},
-    ],
-}
-
-
-def _write_json(folder, name: str, value) -> None:
-    text = json.dumps(value)
-    path = folder / name
-    path.write_text(text)
-
-
-def _files_config(tmp_path, workload: dict, qpu_kind="timing_only"):
-    card = {"workload": workload, "qpu": {"kind": qpu_kind}}
-    return yaml_configs.write_config(tmp_path, card)
+        _point(config_path, AT_DISTANCE_3_AND_P)
 
 
 def test_the_merge_probe_runs_from_an_operations_file(tmp_path):
@@ -217,7 +193,7 @@ def test_the_merge_probe_runs_from_an_operations_file(tmp_path):
     _write_json(tmp_path, "merge.json", MERGE_OPERATIONS)
     workload = {"kind": "files", "operations": "merge.json"}
     config_path = _files_config(tmp_path, workload)
-    settings = _point(config_path)
+    settings = _point(config_path, AT_DISTANCE_3)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     merge = machine.operations[2]
@@ -246,10 +222,23 @@ def test_an_inherited_files_row_reads_beside_the_yaml_that_wrote_it(
     child_path.write_text(f"extends: base/{base_path.name}\n")
     expected_path = base_folder / "merge.json"
 
-    config = experiment.load_experiment(child_path)
+    settings = _point(child_path, AT_DISTANCE_3)
 
-    files = config.settings.workload.row_settings
+    files = settings.workload.row_settings
     assert files.operations == expected_path
+
+
+def test_one_files_row_read_from_two_folders_names_its_point_alike(
+    tmp_path,
+):
+    """The files' folder is where they were read; their content is the point."""
+    first_folder = tmp_path / "first"
+    other_folder = tmp_path / "elsewhere"
+
+    first_point_id = _point_id_of_the_merge_files_in(first_folder)
+    other_point_id = _point_id_of_the_merge_files_in(other_folder)
+
+    assert first_point_id == other_point_id
 
 
 def test_one_circuit_under_two_operations_from_files_is_refused(tmp_path):
@@ -274,7 +263,7 @@ def test_one_circuit_under_two_operations_from_files_is_refused(tmp_path):
     config_path = _files_config(tmp_path, workload, "stim_device")
 
     with pytest.raises(ValueError, match="none names its round range"):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 def test_a_files_section_naming_two_physical_circuits_is_refused(tmp_path):
@@ -298,7 +287,7 @@ def test_a_files_section_naming_a_missing_file_stops_at_the_point(tmp_path):
     config_path = _files_config(tmp_path, workload)
 
     with pytest.raises(FileNotFoundError, match="absent.json"):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 def test_an_operations_file_of_another_schema_is_refused(tmp_path):
@@ -309,4 +298,52 @@ def test_an_operations_file_of_another_schema_is_refused(tmp_path):
     config_path = _files_config(tmp_path, workload)
 
     with pytest.raises(ValueError, match="is not a decsim.ops/1 operation"):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
+
+
+def _outside_package(tmp_path, monkeypatch) -> None:
+    """A package outside decsim that holds two makers."""
+    package = tmp_path / "outside_makers"
+    package.mkdir()
+    init_path = package / "__init__.py"
+    init_path.write_text("")
+    module_path = package / "makers.py"
+    maker_text = textwrap.dedent(OUTSIDE_MAKER)
+    module_path.write_text(maker_text)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+
+def _point(config_path, values):
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(values)
+    return task.settings
+
+
+def _producer(function: str, arguments: dict) -> dict:
+    return {"kind": "producer", "function": function, "arguments": arguments}
+
+
+def _write_json(folder, name: str, value) -> None:
+    text = json.dumps(value)
+    path = folder / name
+    path.write_text(text)
+
+
+def _files_config(tmp_path, workload: dict, qpu_kind="timing_only"):
+    card = {
+        "workload": workload,
+        "qpu": {"kind": qpu_kind},
+        "sweep": yaml_configs.QPU_ONLY_SWEEP,
+    }
+    return yaml_configs.write_config(tmp_path, card)
+
+
+def _point_id_of_the_merge_files_in(folder: pathlib.Path) -> str:
+    """The point a files yaml in folder names, its operations merge.json."""
+    folder.mkdir()
+    _write_json(folder, "merge.json", MERGE_OPERATIONS)
+    workload = {"kind": "files", "operations": "merge.json"}
+    config_path = _files_config(folder, workload)
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(AT_DISTANCE_3)
+    return task.strong_id()

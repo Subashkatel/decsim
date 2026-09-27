@@ -2,143 +2,170 @@
 
 # How to run a sweep on Slurm
 
-A real sweep is millions of shots and does not fit in one job.
-`slurm/slurm_run.sh` runs it as an array: each task takes a share of the
-work units and writes its own folder, and one command folds the folders
-back into one report.
+A real sweep is millions of shots. On a cluster it runs in rounds. Each
+round is one written plan of pieces, and one Slurm array runs it. The
+steps are:
 
-## 1. Understand the two knobs
+1. `decsim plan` reads what the saved pieces say and writes the next round.
+2. `slurm/round.sh` submits the round.
+3. `decsim status` folds every saved piece into the numbers.
 
-`--shard i/n` gives one array task the work units whose index modulo `n`
-is `i`. `--shots-per-unit N` sets how many shots one work unit is: a
-smaller unit makes shards that fit a time limit, at the cost of building
-the window models more often, since they are cached per task.
+Plan again after each round, until the plan says every point has stopped.
 
-Size them from the wall time. `configs/weak_ler.yaml`'s own header does
-the arithmetic for its 35 points and 10,425,000 shots: at 0.22 seconds
-per shot at distance 7, a 16 hour limit is about 262,000 shots, so a
-task must stay under that. With `--shots-per-unit 50000` the sweep cuts
-into 225 work units, and an array of 200 tasks gives twenty five tasks
-two units and the other 175 one.
+## 1. Size the pieces and say when a point stops
 
-## 2. Pin the code the array will run
+A piece is one point's block of shots that one process runs from start
+to finish. The yaml's `collection` section sets its size in QEC rounds
+with `piece_rounds`, 20,000 unless it says otherwise
+(`configs/reference.yaml`). So a piece takes about as long at any
+history length.
 
-Every task imports the tree as it stands when that task starts, and a
-500 task array takes minutes to launch. A commit landing in the middle
-gives different tasks different code, and no folder can say which. So
+The same section says when a point stops:
+
+- `max_failures` is the target.
+- `max_shots` and `max_core_seconds` are the caps.
+- `min_shots` is the minimum.
+
+A piece must finish inside one task's walltime, so size `piece_rounds`
+from a point's seconds a shot.
+
+## 2. Pin the code the rounds will run
+
+A task imports the tree as it stands when it starts. A commit landing
+between submitting and starting gives the task code nobody chose. So
 submit from a worktree pinned at a commit, and leave the tree you work
 in free:
 
 ```bash
-git worktree add ../decsim-weak_ler <commit>
-cd ../decsim-weak_ler
+git worktree add ../decsim-pinned <commit>
+cd ../decsim-pinned
 ```
 
-Submit from that directory. `slurm/slurm_run.sh` prints the tree it
-imports from and that tree's commit, and refuses to start unless git
-vouches for that tree: a tree with uncommitted changes is refused, and
-so is a tree git cannot read at all, which prints `dirty: unknown` and
-is the case where nothing can say what the task ran. `ALLOW_DIRTY=1`
-starts either one anyway.
+`slurm/round.sh` refuses a tree with uncommitted changes, or one git
+cannot read. It checks once when you submit and again in every task.
+`ALLOW_DIRTY=1` overrides both refusals.
 
-```
-decsim tree: /path/to/decsim
-decsim commit: 264853ada3..., dirty: 0
-```
+Every piece's `piece.json` records the commit and the dirty flag, so a
+result names its code. The interpreter decides which tree is imported,
+not the directory you submit from. An environment installed with
+`pip install -e` from another checkout imports that checkout, so a
+worktree needs `PYTHONPATH` naming it.
 
-The commit and the dirty flag go into every folder's `manifest.json`, so
-a result names its code. Two things to get right:
-
-- **The interpreter decides which tree is imported, not the directory
-  you submit from.** An environment installed with `pip install -e`
-  from another checkout imports that checkout, so a worktree needs
-  `DECSIM_PYTHON` pointing at an environment installed from it, or
-  `PYTHONPATH` naming the worktree. The line the runner prints is the
-  check: it is the tree the interpreter actually imported.
-- **`RUN` must be an absolute path.** The tasks `cd` to the directory
-  the job was submitted from, which is the worktree, and a relative
-  `RUN` would write the shards inside it.
-
-## 3. Submit the array
+## 3. Plan a round
 
 ```bash
-RUN=results/weak_ler sbatch -a 0-199 slurm/slurm_run.sh \
-  configs/weak_ler.yaml --shots-per-unit 50000
+decsim plan configs/experiments/switching/seam_pinned_switching.yaml \
+  --out $PWD/results/seam_pinned_switching --tasks 300
 ```
 
-`RUN` is the folder the shards write into; an array task needs it, and
-the script refuses without it. The script adds `--shard
-$SLURM_ARRAY_TASK_ID/$SHARDS` and `--out $RUN/$SLURM_ARRAY_TASK_ID`
-itself, and prints the shard it computed:
+This writes `results/seam_pinned_switching/round1/plan.csv`, with its
+pieces dealt to at most 300 tasks, and `tasks.csv`, with each task's
+cores, memory and hours.
 
-```
-shard: 0 of 200
-```
+Several yamls may share one experiment folder. Yamls of one
+configuration, such as a grid split into one file per distance, are
+planned as one. A point two configurations both reach is planned once,
+and refused if they give it two collections.
 
-Everything after the config reaches `decsim collect` as written, so
-`--processes` and `--out` pass through like anything else.
+How the plan decides a point's pieces:
 
-Without an array the same script runs the whole sweep in one job.
+- **Round one** gives each point one piece, since nothing is measured
+  yet. A point with no target but a shot cap gets every piece up to the
+  cap.
+- **Later rounds, a lost piece:** a piece a task never finished is
+  planned again first, with its own seeds.
+- **Later rounds, a point still running:** it is extended to the
+  shots its failure rate so far says the target needs, which is OpenMC's
+  trigger rule. With no failure yet, its shots double.
+- **Never past a cap.** The time cap is read at the point's measured
+  seconds a shot, so a round's last piece may be short.
 
-`slurm/experiment_run.sh` is the same script shaped for a sweep too
-large for one array: it takes `SHARDS` and `OFFSET` from the
-environment, so
-several arrays of whatever size the cluster allows can carry one sweep
-between them. `configs/experiments_2026_09/PLAN.md` has the submit lines
-of a sweep run that way, in slices of at most 150 tasks.
+How the plan deals and sizes the tasks:
 
-The script's own `#SBATCH` lines are the defaults: one node, one task,
-two cpus, 16 gigabytes, 16 hours, on the `cpu` partition. Override them
-on the `sbatch` command line, or edit the script for your cluster.
+- Pieces go to tasks longest first, costed by each point's measured
+  seconds a shot.
+- A task asks for `--cores` cores (default 4) and runs that many pieces
+  at once.
+- A task asks for `--hours` hours of walltime (default 24).
+- A task's memory is its cores times its points' largest measured peak,
+  with a margin of one half. Where nothing was measured, it uses
+  `--memory-mb` per piece.
 
-The interpreter is the `python` of the environment the job starts in,
-which `sbatch` copies from the shell that submits it; `DECSIM_PYTHON`
-names another one.
+On Della's `short` QOS, a user may submit 1,000 jobs, run 400 at once
+and use 1,400 cores. So `--tasks` stays at or under 1,000, and 350
+four-core tasks fill the cores.
 
-## 4. Fold the shards
+## 4. Submit it
 
 ```bash
-decsim combine results/weak_ler/*
+SBATCH_QOS=short slurm/round.sh results/seam_pinned_switching 1
 ```
 
-`combine` reads every folder's additive files, adds them, recomputes
-`sweep.csv` and `links.csv` from the sum, and writes one folder. Nothing
-is double counted, because no summary is ever stored: a summary is
-computed when it is read. That is why the shards can be added at all.
+The script submits one job array per shape of job in `tasks.csv`,
+since an array has one memory request. Each array task runs `decsim
+collect --plan results/seam_pinned_switching/round1/plan.csv --task
+<id>`, one process per core. Its log goes to `round1/<id>/log.txt`,
+beside its manifest.
 
-## 5. Plot
+The script writes no account, partition or QOS. `sbatch` reads them from
+the environment variables SBATCH_ACCOUNT, SBATCH_PARTITION and
+SBATCH_QOS.
+
+`DRY_RUN=1` prints the `sbatch` lines and submits nothing.
+
+Slurm counts each array task as a submitted job, and rejects a
+submission past the limit. So before it submits any array, the script
+adds the round's tasks to the jobs you have queued, and refuses the
+round if they pass `SUBMIT_LIMIT` (1,000 unless you set it). Plan the
+round again with fewer `--tasks`, or wait for queued jobs to end.
+A `SUBMIT_LIMIT` that is not a positive whole number refuses the round
+too.
+
+## 5. If a task dies
+
+Nothing is lost but the pieces it was running. A piece folder appears
+only once the piece is whole, so nothing is counted twice. The next
+`decsim plan` finds each planned piece whose seeds no piece holds and
+plans it again. Running the same task again (`decsim collect --plan ...
+--task <id>`) runs only the seeds no saved piece holds.
+
+A plain `decsim collect` of the same yaml in the same folder cuts its
+pieces where planned pieces begin and end, so a round's task run after
+it finds those seeds saved and runs nothing. Each seed is saved once,
+whichever runs first.
+
+## 6. Read the numbers
 
 ```bash
-decsim plot results/<combined> --figure ler_vs_d --probability 0.001
+decsim status results/seam_pinned_switching
 ```
 
-`ler_vs_d` reads one physical error rate out of the sweep, so it asks
-which one.
+This folds every saved piece into its configuration's run folder,
+`results/seam_pinned_switching/combined/<name>-<id8>/`. It reads what
+the plans and collects recorded of each point, not the yamls, so a
+point a yaml no longer sweeps is still counted, and a point two
+configurations reach is counted once. It writes
+`results/seam_pinned_switching/status.csv`, one row per point, with
+these columns:
 
-## If a task dies
+- its configuration id
+- its row of the run folder's `sweep.csv`, whole: its values, its state
+  (`running`, `target`, `minimum`, `cap`, `time cap`, or `no data`), its
+  shots, failures and unscored shots, and every estimate and exact
+  interval of its contiguous prefix, per shot and per round
+- the rounds and core seconds of all its pieces
 
-A shard that ends writes `finished` into its folder last, and a
-`decsim collect` into a folder that holds it leaves the folder as it is.
-So the whole array can simply be submitted again: the finished shards
-return at once and only the others run. Or rerun just those array
-indices, naming the count the sweep was cut into:
+Status can run while a round runs. Each row reads the pieces once, so
+a piece saved meanwhile is in all of a row or none of it. Plan the next round when the last
+one ends.
 
-```bash
-RUN=results/weak_ler SHARDS=500 sbatch -a 447-499 \
-  slurm/slurm_run.sh configs/weak_ler.yaml --shots-per-unit 50000
-```
-
-`SHARDS` is what makes that one line. Without it the count is the
-array's own, `SLURM_ARRAY_TASK_COUNT`, which is 53 for `-a 447-499`, and
-task 447 would compute shard 447 of 53: a share of the sweep no folder
-of the first run holds. With it the printed line reads `shard: 447 of
-500`, the same shard the first run gave that index. A shard that did
-not finish is written again in its folder, and `combine` reads whatever
-folders you hand it.
+The run folder's `sweep.csv` holds one row per point, its values and
+its counts, and `decsim.results.load` reads it beside every setting
+([How to compare two runs](compare_two_runs.md)).
 
 ## Read next
 
 - [Your first sweep](../tutorials/first_sweep.md): a small sweep end to end, with the
   error bars explained.
-- [The run folder](../reference/run_folder.md): what each shard writes.
-- [The commands](../reference/cli.md): every flag of `collect` and `combine`.
+- [The run folder](../reference/run_folder.md): what a piece, a plan and a run folder hold.
+- [The commands](../reference/cli.md): every flag of `plan`, `collect` and `status`.

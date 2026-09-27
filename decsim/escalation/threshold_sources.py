@@ -18,8 +18,14 @@ decibels.
 import dataclasses
 import math
 import random
+from collections.abc import Mapping
 
+import decsim.config as config
 import decsim.records.decoding as decoding_records
+
+# The resolved paths the online source's seed reads its two numbers from.
+SEED_DISTANCE_PATH = "qpu.distance"
+SEED_PROBABILITY_PATH = "workload.arguments.physical_error_probability"
 
 
 class FixedThreshold:
@@ -290,11 +296,7 @@ class OnlineThreshold:
 
     @classmethod
     def for_sweep_point(
-        cls,
-        online,
-        threshold_nats: float,
-        physical_error_probability: float,
-        distance: int,
+        cls, online, threshold_nats: float, resolved: Mapping
     ) -> "OnlineThreshold":
         """The one instance a sweep point's shots share, seeded by the point.
 
@@ -303,8 +305,9 @@ class OnlineThreshold:
         table names and nothing else. Both loops are assembled here,
         where they are read: the rate tracker starting at the point's
         threshold in nats, the audit lane, and the target adjustment.
-        The random stream is seeded from the point's identity alone, so
-        a rerun of the point draws the same audits.
+        The random stream is seeded from the point's distance and error
+        rate alone, read by path from its resolved sections, so a rerun
+        of the point draws the same audits.
 
         online is the escalation section's card, typed where it is
         declared (escalation/settings.py OnlineThresholdSettings); that
@@ -325,8 +328,11 @@ class OnlineThreshold:
             max_escalation_rate=online.max_escalation_rate,
         )
         controller = OnlineThresholdController(tracker, audit, adjustment)
+        reader = "the online threshold's seed"
+        distance = config.setting_at(resolved, SEED_DISTANCE_PATH, reader)
+        probability = config.setting_at(resolved, SEED_PROBABILITY_PATH, reader)
         generator = random.Random(
-            f"online-threshold d={distance} p={physical_error_probability}"
+            f"online-threshold d={distance} p={probability}"
         )
         return cls(controller, generator)
 

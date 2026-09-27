@@ -8,8 +8,11 @@ carry the figure.
 """
 
 import dataclasses
+import json
 
 import matplotlib
+import matplotlib.pyplot
+import pytest
 
 import decsim.experiments.experiment as experiment
 import decsim.experiments.plots as plots
@@ -127,10 +130,12 @@ def _traced_switching_run(tmp_path, trace_path):
     """
     workload = yaml_configs.memory_workload(9)
     sweep_point = {
-        "physical_error_probability": [0.008],
-        "distance": [3],
-        "round_period_microseconds": [1.0],
-        "shots": 1,
+        "axes": {
+            "workload.arguments.physical_error_probability": [0.008],
+            "qpu.distance": [3],
+            "qpu.round_period_microseconds": [1.0],
+        },
+        "collection": {"max_shots": 1},
     }
     card = {
         "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
@@ -140,11 +145,14 @@ def _traced_switching_run(tmp_path, trace_path):
     }
     config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
-    shipped = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    shipped = point.settings
     observation = dataclasses.replace(
         shipped.observation, trace=str(trace_path)
     )
@@ -223,6 +231,31 @@ def test_the_timeline_figure_is_written_from_the_file(tmp_path):
     assert status.st_size > 0
 
 
+@pytest.mark.parametrize(
+    ("escalation_kind", "title"),
+    [
+        ("weak_baseline", "Weak baseline path timeline"),
+        ("a_row_no_table_names", "A row no table names path timeline"),
+    ],
+)
+def test_the_timeline_is_titled_by_the_escalation_kind_it_recorded(
+    tmp_path, monkeypatch, escalation_kind, title
+):
+    """The title reads the trace's recorded kind, so any row has one."""
+    trace_path = tmp_path / "point1.trace.json"
+    _traced_run(trace_path)
+    _rename_the_escalation(trace_path, escalation_kind)
+    figure_path = tmp_path / "timeline.png"
+    drawn = []
+    monkeypatch.setattr(matplotlib.pyplot, "close", drawn.append)
+
+    plots.timeline_plot(trace_path, figure_path)
+
+    (figure,) = drawn
+    (axis,) = figure.axes
+    assert axis.get_title() == title
+
+
 def test_a_last_window_reading_past_the_stream_is_drawn_to_the_last_round(
     tmp_path,
 ):
@@ -245,11 +278,38 @@ def test_a_run_folder_without_a_trace_has_no_file_to_draw_from(tmp_path):
     assert plots.first_trace_file(tmp_path) is None
 
 
-def test_the_first_traced_shot_of_a_run_folder_is_the_figures_shot(tmp_path):
+def test_the_figures_shot_is_the_first_points_lowest_traced_seed(tmp_path):
+    """The sweep's order, from the manifest, not the ids' name order.
+
+    Point ids are hashes, so the first point's file can sort last.
+    """
+    manifest = {"points": ["ffff", "0000"]}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_text = json.dumps(manifest)
+    manifest_path.write_text(manifest_text)
     trace_dir = tmp_path / "trace"
     trace_dir.mkdir()
-    second = trace_dir / "p0.005_d5_seed0.trace.json"
-    second.write_text("[]")
-    first = trace_dir / "p0.003_d3_seed0.trace.json"
+    second_point = trace_dir / "0000_seed0.trace.json"
+    second_point.write_text("[]")
+    later_seed = trace_dir / "ffff_seed10.trace.json"
+    later_seed.write_text("[]")
+    first = trace_dir / "ffff_seed2.trace.json"
     first.write_text("[]")
+
     assert plots.first_trace_file(tmp_path) == first
+
+
+def _rename_the_escalation(trace_path, escalation_kind: str) -> None:
+    """The trace's process name with its escalation kind replaced.
+
+    The file is one JSON array of events (observe/trace_writer.py).
+    """
+    trace_text = trace_path.read_text()
+    events = json.loads(trace_text)
+    for event in events:
+        if event["name"] == "process_name":
+            words = event["args"]["name"].split()
+            words[1] = escalation_kind
+            event["args"]["name"] = " ".join(words)
+    renamed_text = json.dumps(events)
+    trace_path.write_text(renamed_text)

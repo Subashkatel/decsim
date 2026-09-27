@@ -17,10 +17,13 @@ CARD_YAML = (
     "escalation: {kind: weak_baseline}\n"
     "workload: {kind: producer, function: decsim.producers:memory_circuit,\n"
     "           arguments: {code_task: surface_code:rotated_memory_z,\n"
-    "                       rounds_per_shot: 15}}\n"
+    "                       rounds_per_shot: 15,\n"
+    "                       distance: '${qpu.distance}'}}\n"
     "windows: {kind: sliding, commit_rounds: null, buffer_rounds: null}\n"
-    "sweep: [{physical_error_probability: [0.001], distance: [3],\n"
-    "         round_period_microseconds: [1.0], shots: 1}]\n"
+    "sweep: [{axes: {workload.arguments.physical_error_probability: [0.001],\n"
+    "                qpu.distance: [3],\n"
+    "                qpu.round_period_microseconds: [1.0]},\n"
+    "         collection: {max_shots: 1}}]\n"
     "controller: {clock: fridge, "
     "readout_to_bits_cycles: 0, "
     "packing_cycles_per_round: 0, "
@@ -64,7 +67,8 @@ def test_the_setup_cost_key_reaches_the_path(tmp_path):
     card_path = tmp_path / "overhead_card.yaml"
     card_path.write_text(CARD_YAML)
     config = experiment.load_experiment(card_path)
-    card = config.settings.links
+    first_point = config.first_point_task()
+    card = first_point.settings.links
     assert (
         card.weak_buffer_to_weak_decoder.setup_ticks
         == config_module.microseconds_to_ticks(0.4)
@@ -76,7 +80,8 @@ def test_the_header_key_reaches_the_path(tmp_path):
     card_path = tmp_path / "header_card.yaml"
     card_path.write_text(CARD_YAML)
     config = experiment.load_experiment(card_path)
-    card = config.settings.links
+    first_point = config.first_point_task()
+    card = first_point.settings.links
     assert card.decoder_to_decoder.header_bits_per_transfer == 448
     assert card.weak_decoder_to_frame.header_bits_per_transfer == 0
 
@@ -85,7 +90,8 @@ def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):
     card_path = tmp_path / "card.yaml"
     card_path.write_text(CARD_YAML)
     config = experiment.load_experiment(card_path)
-    card = config.settings.links
+    first_point = config.first_point_task()
+    card = first_point.settings.links
     assert (
         card.weak_buffer_to_weak_decoder.channel.name
         == "weak_buffer_to_weak_decoder"
@@ -126,7 +132,8 @@ def test_a_readout_hop_the_yaml_never_wrote_keeps_its_own_cost_inside(
     card_path = tmp_path / "no_readout_hop.yaml"
     card_path.write_text(text)
     config = experiment.load_experiment(card_path)
-    card = config.settings.links
+    first_point = config.first_point_task()
+    card = first_point.settings.links
     assert card.qpu_to_controller.excludes_receiver_processing is False
     assert card.controller_to_weak_buffer.excludes_receiver_processing
 
@@ -142,11 +149,14 @@ def test_a_separate_readout_cost_is_refused_on_an_uncarded_readout_hop(
     card_path = tmp_path / "double_charged.yaml"
     card_path.write_text(text)
     config = experiment.load_experiment(card_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     with pytest.raises(ValueError) as refusal:
         machine_module.Machine.build(settings, 0)
     assert "qpu_to_controller card" in str(refusal.value)
@@ -345,11 +355,14 @@ def test_a_credit_protocol_without_its_buffer_is_refused():
 def _built_from(tmp_path, overrides: dict):
     config_path = yaml_configs.write_config(tmp_path, overrides)
     experiment_config = experiment.load_experiment(config_path)
-    settings = experiment_config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = experiment_config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     return machine_module.Machine.build(settings, 0)
 
 
@@ -395,7 +408,7 @@ def test_a_reliable_card_at_no_errors_runs_as_its_credit_card(tmp_path):
         retry_count=7,
         bit_error_rate=0.0,
     )
-    base_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"
+    base_path = yaml_configs.CONFIGS_DIR / "examples/two_tiers.yaml"
     base = str(base_path)
     links = {"weak_decoder_to_strong_decoder": _off_board_card(credit)}
     by_credit = _built_from(tmp_path, {"extends": base, "links": links})

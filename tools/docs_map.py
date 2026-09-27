@@ -234,6 +234,20 @@ def main(arguments) -> int:
     return 0
 
 
+def argument_default(call: ast.Call, name: str) -> str:
+    """What one argument is worth when the command line leaves it out."""
+    default = _keyword_text(call, "default")
+    if default is not None:
+        return default
+    action = _keyword_text(call, "action")
+    if action is not None:
+        return "off unless the flag is given"
+    required = _keyword_text(call, "required")
+    if name.startswith("-") and required != "True":
+        return "None"
+    return "required"
+
+
 def _first_paragraph(text: str) -> str:
     """The opening paragraph of a docstring, on one line."""
     stripped = text.strip()
@@ -795,21 +809,8 @@ def _argument_row(call: ast.Call) -> str:
     if helped is None:
         helped = ""
     trimmed = helped.strip("'\"")
-    default = _argument_default(call, name)
+    default = argument_default(call, name)
     return f"| `{name}` | {default} | {trimmed} |"
-
-
-def _argument_default(call: ast.Call, name: str) -> str:
-    """What one argument is worth when the command line leaves it out."""
-    default = _keyword_text(call, "default")
-    if default is not None:
-        return default
-    action = _keyword_text(call, "action")
-    if action is not None:
-        return "off unless the flag is given"
-    if name.startswith("-"):
-        return "None"
-    return "required"
 
 
 def _argument_rows(function: ast.FunctionDef, parser: str) -> list:

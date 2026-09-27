@@ -49,9 +49,7 @@ qpu:
                                    # as qec-burst-scaling's qecburst/
                                    # circuit.py does). A source row with keys
                                    # of its own reads them here (its
-                                   # Settings); the sweep sets the distance
-                                   # and the round period, so neither is a
-                                   # key here. burst_stim's, with their
+                                   # Settings); burst_stim's, with their
                                    # defaults (a probability of 0 is no
                                    # burst, and the shot is stim_device's):
   # burst_onset_round: 1           # the first one-based round with extra noise
@@ -78,8 +76,14 @@ qpu:
                                    # so one whose region covers the patch
                                    # and finds none of its channels there
                                    # (a sweep point at p = 0) is refused
+  distance: 3                      # the code distance d, which the code card
+                                   # prices and a maker reads through
+                                   # ${qpu.distance}; one LER curve per d
+  round_period_microseconds: 1.0   # the QPU's physical round period: a
+                                   # quantum-device cadence, deliberately
+                                   # not a classical clock's cycles
   code_card: rotated_surface       # rotated_surface | bivariate_bicycle: the
-                                   # code card the run prices, at the sweep's
+                                   # code card the run prices, at the qpu's
                                    # distance, with windows.commit_rounds and
                                    # buffer_rounds as its window sizes.
                                    # rotated_surface, the default, is Stim's
@@ -306,8 +310,9 @@ burst_detector:
 #                                  # column burst_caught_in_time and the
 #                                  # sweep.csv caught_in_time_share. 300 is
 #                                  # half the 600-round decay of the
-#                                  # burst the comparison folder draws
-#                                  # (configs/burst_detectors_compared)
+#                                  # burst the comparison grid draws
+#                                  # (configs/experiments/burst_detection/
+#                                  # burst_detection.yaml)
 #
 # burst_detector:
 #   kind: event_count              # the simple count baseline: the patch's
@@ -432,11 +437,9 @@ workload:
                                    # workload, an operation list and its
                                    # physical circuit (records/workload.py).
                                    # producer calls a maker function once
-                                   # per sweep point with its arguments and
-                                   # the sweep values its parameters name
-                                   # (physical_error_probability, distance,
-                                   # round_period_microseconds); files reads
-                                   # a maker's two outputs from disk
+                                   # per sweep point with its arguments;
+                                   # files reads a maker's two outputs from
+                                   # disk
                                    # (docs/how-to/plug_in_a_workload_maker.md)
   function: decsim.producers:memory_circuit   # module:function. The
                                    # makers decsim ships (decsim/producers.py):
@@ -455,13 +458,20 @@ workload:
                                    # after decode_after_rounds rounds, its
                                    # stream owner, protected region and
                                    # rounds derived (the deltakit extra)
-  arguments:                       # the maker's own arguments; a sweep value
-                                   # written here stops the maker's call
+  arguments:                       # the maker's own arguments, as each sweep
+                                   # point resolves them
     code_task: surface_code:rotated_memory_z   # stim generator task
     rounds_per_shot: 15            # QEC rounds per shot: a fixed count, or
-                                   # "<n>d" to scale with the swept distance
+                                   # "<n>d" to scale with the distance
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
+    distance: ${qpu.distance}      # a whole-value reference: the value at
+                                   # that yaml path, resolved per point, so
+                                   # the circuit and the code card share one
+                                   # distance (OmegaConf's ${path}); a
+                                   # reference names a whole value, never
+                                   # part of a text
+    physical_error_probability: 0.001   # p on all four Stim noise channels
     # patch_count: 4               # memory_patches only, and required there:
                                    # the patches, at least 1
   # The files row's keys, instead of function and arguments; paths are
@@ -539,22 +549,62 @@ windows:
                                    # check generators" (2303.04846 lines
                                    # 784-786)
 
-# The sweep: a list of blocks; each block is the cross product of its three
-# axes, `shots` seeds per point (0..shots-1); a point named twice runs
-# once. The algorithm is NOT a sweep axis: it is structure, fixed per unit
-# on the decoder sections below; comparing algorithms is comparing configs.
-# The baselines put shots where they matter: a timing block sweeps many
-# round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
-# the load = 1 knee of its 0.028 card), and an LER block sweeps several
-# probabilities with many shots at one timing point, since timing knobs
-# never change the decoded answer.
+# The sweep: a list of blocks. A block's axes map a yaml path to the values
+# the sweep sets there, and the block is their cartesian product in the
+# order written, as Hydra's multi-run makes one job per combination; the
+# blocks are a union, and a point named twice runs once. A path's section
+# must exist. A mapping value replaces the node at its path whole, so a
+# decoder row with keys of its own is one value: weak_decoder: [{kind:
+# pymatching}, {kind: ...}]. A point's metadata is its {path: value}; each
+# csv row carries its id, then one column per swept path. A block may carry
+# a collection section of its own, whose keys override the file's one by
+# one. The baselines put shots where they matter: a timing block sweeps
+# many round periods with few shots (the weak baseline's 0.9/0.85/0.8
+# bracket the load = 1 knee of its 0.028 card), and an LER block sweeps
+# several probabilities with many shots at one timing point, since timing
+# knobs never change the decoded answer.
 sweep:
-  - physical_error_probability: [0.001]    # p on all four Stim noise channels
-    distance: [3]                          # code distance d; one LER curve per d
-    round_period_microseconds: [1.0]       # the QPU's physical round period:
-                                           # a quantum-device cadence, deliberately
-                                           # not a classical clock's cycles
-    shots: 2
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [3]
+      qpu.round_period_microseconds: [1.0]
+
+# How a point's shots are cut and when they stop, sinter's
+# CollectionOptions as yaml (sinter/_data/_collection_options.py). A point
+# runs seeds 0, 1, 2 and on and stops on its contiguous prefix: at the
+# first shot where its scored failures reach max_failures with min_shots
+# scored shots behind them, or where its shots reach max_shots or its
+# shots' own seconds reach max_core_seconds. No key enters a point's id:
+# collecting longer is the same point run longer.
+collection:
+  max_failures: null               # the target: the scored failures a point
+                                   # stops at; null for none. 100 puts the
+                                   # 95 percent interval within about 20
+                                   # percent of the rate, 1.96 / sqrt(100)
+  max_shots: 2                     # the shot cap, counting unscored shots
+                                   # too, since each costs its time; a point
+                                   # needs this or max_core_seconds, as sinter
+                                   # needs max_shots
+  max_core_seconds: null           # the time cap, finite: the seconds a
+                                   # point's shots took, summed over
+                                   # processes; exact only when a shot's
+                                   # time does not depend on whether it
+                                   # failed
+  min_shots: 0                     # the scored shots a point runs whatever
+                                   # its failures, so a point that fails
+                                   # early still says something at its rate
+  piece_rounds: 20000              # QEC rounds per piece: a piece holds
+                                   # max(piece_rounds // a shot's rounds, 1)
+                                   # shots and is saved whole when it ends,
+                                   # so a killed collect loses at most the
+                                   # pieces it was running. Sized in rounds,
+                                   # a piece takes about as long at any
+                                   # history length. A point whose threshold
+                                   # is calibrated online runs its pieces
+                                   # one after another, each from the
+                                   # calibrator state the last one saved,
+                                   # and stops at max_shots alone: it takes
+                                   # no max_failures and no max_core_seconds.
 
 controller:                        # controller work per round, in cycles of its
                                    # named clock domain
@@ -1210,13 +1260,13 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the two calls one after the other on
                                    # the unit, so its time is their sum. A
                                    # CSS circuit only
-  # The tesseract row's six, each an argument of tesseract_decoder's
+  # The tesseract row's eight, each an argument of tesseract_decoder's
   # TesseractConfig or build_det_orders (named after the colon), at the
   # package's tesseract-short-beam profile (tesseract-decoder
-  # src/tesseract_sinter_compat.pybind.h); its tesseract-long-beam is
-  # beam 20, queue 1000000 and 21 orders. Merging stays off, so the
-  # physical columns keep their identity; the orders come from the run
-  # seed.
+  # src/tesseract_sinter_compat.pybind.h:466-472) but for merging and
+  # the order seed; its tesseract-long-beam is beam 20, queue 1000000
+  # and 21 orders. merge_errors true and detector_order_seed 2384753
+  # are the profile itself.
   # detector_beam: 15              # det_beam, the most detection events a
                                    # search state may hold; 0 or more
   # beam_climbing: true            # beam_climbing, the beam-climbing
@@ -1227,6 +1277,17 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
   # detector_order_method: index   # build_det_orders' DetOrder: index |
                                    # breadth_first | coordinate
   # detector_order_count: 16       # num_det_orders, the orders searched
+  # detector_order_seed: null      # build_det_orders' seed, a whole number
+                                   # from 0 to 2^64 - 1 (src/utils.h:42-45);
+                                   # null draws it from the run seed. The
+                                   # package's profiles fix it at 2384753
+  # merge_errors: false            # merge_errors: false searches every
+                                   # physical column on its own; true
+                                   # searches one error per set of columns
+                                   # with the same detectors and
+                                   # observables and answers with the set's
+                                   # first column (src/tesseract.cc:153-168,
+                                   # 461-465), the profiles' setting
   engine:
     clock: fridge                  # cycle-priced stages on this clock domain
     fetch_cycles_per_round: 1      # read one round out of decoder memory per
@@ -1263,7 +1324,7 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # a union_find strong tier takes
                                    # weight_step and cycle_count here, a
                                    # relay_bp one its nine keys and a
-                                   # tesseract one its six, as above
+                                   # tesseract one its eight, as above
   # device: a100                   # the measured_table row's GPU: a100 |
                                    # gh200 (dispatch_steps names one too,
                                    # gh200 by default). Its time is intercept plus slope
@@ -1419,14 +1480,17 @@ observation:                       # what a run records beyond its results
                                    # print shows it live on screen; file writes each
                                    # shot's full line record to the run folder,
                                    # results/<stamp>-<name>/log/, one file per shot
-                                   # named p<p>_d<d>_algo<card>_round<T>us_seed<n>.log;
+                                   # named <id>_seed<n>.log, <id> the point's id;
                                    # both does both. results/ is not tracked
   trace: chrome                    # off | chrome | <path>. The Chrome trace of the
                                    # data path: where every round and window sat, for
                                    # how long, and whether each hop copied the bits or
                                    # referenced them. chrome writes one file per traced
-                                   # shot next to the results; a path writes there
-                                   # instead (.gz compresses). Opens in Perfetto or
+                                   # shot next to the results, <id>_seed<n>.trace.json;
+                                   # a path writes there instead, with _<id>_seed<n>
+                                   # before its suffix under collect unless the
+                                   # run is one point tracing one shot (.gz
+                                   # compresses). Opens in Perfetto or
                                    # chrome://tracing. It costs one file per traced
                                    # shot, holding every hop of every round and window
                                    # of that shot: 69 kB for this file's d3, 15-round
@@ -1461,3 +1525,19 @@ observation:                       # what a run records beyond its results
                                    # neither file, because a run that counted nothing
                                    # has no counts and a row of zeros would say
                                    # otherwise
+  confidence_shot_count: 100       # a count of shots from seed 0, or all. When a
+                                   # confidence signal decides the escalation
+                                   # (switching), those shots write each committed
+                                   # window's gap, escalation and strong revision to
+                                   # window_confidence.csv, and every shot's gaps are
+                                   # counted into confidence_histogram.csv. A gap is
+                                   # written in nats, ln of the likelihood ratio, and
+                                   # binned in decibels, 10 log10 of it, so dB = nats
+                                   # x 10 / ln 10 (decsim/escalation/settings.py
+                                   # nats_to_decibels; Toshio et al. 2510.25222
+                                   # histogram gaps in dB, main.tex:564).
+                                   # 0 writes the histogram alone. It records the run
+                                   # and is no part of a point's id, but each piece's
+                                   # piece.json says it, and a point's pieces that
+                                   # recorded confidence for different shots, or one
+                                   # saved before these files, are refused a fold

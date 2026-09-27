@@ -5,37 +5,36 @@
 Two run folders can be compared several ways, and which one you want
 depends on what the two runs are.
 
-## If they are shards of one sweep, add them
+## If they are pieces of one sweep, they are already added
 
-```bash
-decsim combine results/weak_ler/*
-```
-
-`combine` reads every folder's additive files, adds them, and recomputes
-`sweep.csv` and `links.csv` from the sum. Use this only when the runs
-are the same sweep cut into pieces. Two runs of different configurations
-must not be added: the result would be a single row that is neither.
+`decsim collect` folds every piece of a configuration into its run
+folder, `combined/<name>-<id8>/` under the experiment folder: it reads
+the pieces' additive files, adds them, and recomputes `sweep.csv` and
+`links.csv` from the sum. Two runs of different configurations are
+never added: the result would be a single row that is neither.
 
 ## If they are different configurations, read the rows
 
 Every folder's `sweep.csv` has one row per sweep point. Pick the point
 the two runs share and the columns the question is about.
 
-For example, the reference config at distance 3, decoded by PyMatching
-and charged its measured wall clock. Every column after `shots` is that
-host's, so yours will differ:
+For example, the reference config's point at distance 3, decoded by
+PyMatching and charged its measured wall clock. A row names its point
+in its first columns, `point_id` and then one column per swept path,
+left out here. Every column after `shots` is that host's, so yours will
+differ:
 
 ```
-distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
-3,pymatching,2,2.387,2.6029999999999998,7.12875,15.772
+algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
+pymatching,2,2.387,2.6029999999999998,7.12875,15.772
 ```
 
 and the same point with the decoder priced at one microsecond by a
 card, which is the same on every host:
 
 ```
-distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
-3,1.0,20,0.35585185185185186,0.0,1.0,1.076
+algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
+1.0,20,0.35585185185185186,0.0,1.0,1.076
 ```
 
 Read across. The card's algorithm time is smaller, so the load falls
@@ -51,17 +50,19 @@ so when you report it. [Time](../explanation/time.md) says why.
 ## Let decsim say what differs
 
 ```bash
-decsim diff results/<first> results/<second>
+decsim diff results/<first>/combined/<name>-<id8> results/<second>/combined/<name>-<id8>
 ```
 
-`diff` matches the two folders' points by their sweep values and prints
+`diff` matches the two folders' points by their metadata, the values
+their sweep set, and prints
 three sections. `settings` lists every value that differs at a point,
 the ones the build derived included (`resolved/`). `inputs` lists each
 workload file whose sha256 differs (`inputs/<id>/hashes.json`).
 `results` lists each `sweep.csv` column that differs, and says whether
 the two values agree within their error bars: a logical error rate by
-its Wilson interval, a mean over shots by the standard error of its
-shots in `shots.csv`. A column with no error bar (a median, a p99, a
+its exact interval (with no interval on either side, no statistical
+comparison is possible, and `diff` says that), a mean over shots by the
+standard error of its shots in `shots.csv`. A column with no error bar (a median, a p99, a
 maximum, a count) is compared exactly. `sim_wall_seconds_per_shot` is
 the host's own time and is never compared. A section with nothing to
 list says `the same`.
@@ -74,49 +75,41 @@ whether the move is within its error bars.
 ## Read the folders from Python
 
 `decsim.results` reads run folders into one table, a row per point with
-a column per result and one per setting (`settings.` and the setting's
-dotted path), and draws the logical error rate the way sinter's
-`plot_error_rate` does:
+a column per result, one per swept path, and one per setting
+(`settings.` and the setting's dotted path). The figure is yours to draw, in whatever form the
+question needs; `save_figure` keeps what made it beside it:
 
 ```python
-from matplotlib.figure import Figure
+import glob
+
+import matplotlib.pyplot as plt
 
 import decsim.results as results
 
-folders = ["results/first", "results/second"]
+first_folders = glob.glob("results/first/combined/*")
+second_folders = glob.glob("results/second/combined/*")
+folders = first_folders + second_folders
 rows = results.load(*folders)
-figure = Figure()
-ax = figure.subplots()
-results.plot_error_rate(
-    ax=ax,
-    rows=rows,
-    x="physical_error_probability",
-    group="distance",
-    where={"round_period_microseconds": 1.0},
-)
+distance = "qpu.distance"
+figure, ax = plt.subplots()
+for folder in folders:
+    kept = [row for row in rows if row["run_dir"] == folder]
+    kept.sort(key=lambda row: row[distance])
+    distances = [row[distance] for row in kept]
+    rates = [row["logical_error_rate_estimate"] for row in kept]
+    lows = [row["logical_error_rate_low"] for row in kept]
+    highs = [row["logical_error_rate_high"] for row in kept]
+    below = [rate - low for rate, low in zip(rates, lows)]
+    above = [high - rate for rate, high in zip(rates, highs)]
+    ax.errorbar(distances, rates, yerr=[below, above], fmt="o-", label=folder)
+ax.set_yscale("log")
+ax.legend()
 results.save_figure(figure, "ler.png", rows, folders)
 ```
 
 `save_figure` writes `ler.png` and, beside it, `ler.py` (a copy of the
 script that drew it), `ler.csv` (the rows drawn) and `ler.json` (the
 folders they came from).
-
-## If you want a picture, hand `plot` both folders
-
-```bash
-decsim plot results/<first> results/<second> \
-  --figure ler_vs_d --probability 0.001
-```
-
-```
-results/<first>/ler_vs_distance.png
-```
-
-`ler_vs_d`, `latency` and `data_movement` read every folder given;
-`timeline` and `stage_breakdown` read only the first. The file is
-written next to the first folder unless `--out` says otherwise.
-`ler_vs_d` reads one physical error rate out of the sweep, so it asks
-which one; the other four do not.
 
 ## If a burst made things worse: harder windows or an overloaded strong side
 
@@ -136,7 +129,7 @@ burst between patches 0 and 1 (each patch is 2d + 2 = 12 units wide on
 the shared plane, so their centres are at x = 5 and 17):
 
 ```yaml
-extends: two_tiers.yaml
+extends: examples/two_tiers.yaml
 workload:
   kind: producer
   function: decsim.producers:memory_patches
@@ -144,6 +137,7 @@ workload:
     code_task: surface_code:rotated_memory_z
     rounds_per_shot: 40
     patch_count: 4
+    distance: ${qpu.distance}
 qpu:
   kind: burst_stim
   burst_onset_round: 15
@@ -155,10 +149,11 @@ observation:
   record_switching_windows: true
   backlog_trace: true
 sweep:
-  - physical_error_probability: [0.001]
-    distance: [5]
-    round_period_microseconds: [1.0]
-    shots: 100
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [5]
+      qpu.round_period_microseconds: [1.0]
+    collection: {max_shots: 100}
 ```
 
 and the same file with `strong_decoder`'s `units` raised, in a copy of
@@ -177,16 +172,18 @@ so check first that `escalated_windows` is equal in the two rows. Then:
   The difference between the two rows is the overload alone.
 
 A burst that leaves the weak decoder confident and wrong shows in
-neither: it raises `logical_error_rate` with no rise in
+neither: it raises `logical_error_rate_estimate` with no rise in
 `escalated_fraction`. `observation.check_windows_with: tesseract`
-counts those windows in `tesseract_window_disagreements`.
+counts those windows in `referee_window_disagreements`.
 
 ## What to check before you believe a difference
 
 - **The shots.** Two shots say almost nothing about a logical error
-  rate. Compare `ler_wilson_low` and `ler_wilson_high`, not just
-  `logical_error_rate`; if the two intervals overlap, the runs have not
-  been shown to differ.
+  rate. Compare `logical_error_rate_low` and `logical_error_rate_high`,
+  not just `logical_error_rate_estimate`; if the two intervals overlap,
+  the runs have not been shown to differ. A point with no interval, no
+  scored shot or a cap with no failure, has no comparison to make, and
+  `diff` says so.
 - **The manifest.** `manifest.json` in each folder carries the git
   commit, whether the checkout was dirty, the library versions and the
   command line. Two runs on different commits are two experiments.
@@ -200,5 +197,5 @@ counts those windows in `tesseract_window_disagreements`.
 ## Read next
 
 - [The run folder](../reference/run_folder.md): every file and column.
-- [Your first sweep](../tutorials/first_sweep.md): what a Wilson interval is.
+- [Your first sweep](../tutorials/first_sweep.md): what the exact interval is.
 - [How to run a timing study whose numbers do not depend on your computer](run_a_timing_only_study.md): making the ticks comparable.

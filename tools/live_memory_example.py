@@ -26,6 +26,16 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.circuits as circuit_records
 import decsim.settings as machine_settings
 
+# The yaml path each physical value of a point sits at: the run's
+# metadata names its values by it, as a yaml sweep's does.
+METADATA_PATHS = {
+    "physical_error_probability": (
+        "workload.arguments.physical_error_probability"
+    ),
+    "distance": "qpu.distance",
+    "round_period_microseconds": "qpu.round_period_microseconds",
+}
+
 
 def main() -> None:
     """Save canonical inputs and the physical history selected by feedback.
@@ -51,14 +61,13 @@ def main() -> None:
         decoder_microseconds=arguments.decoder_microseconds,
     )
     machine = machine_module.Machine.build(settings, arguments.seed)
-    started_utc = run_folder.start_run(None, arguments.output)
-    metadata = {
-        "physical_error_probability": parameters["physical_error_probability"],
-        "distance": parameters["distance"],
-        "round_period_microseconds": parameters["round_period_microseconds"],
-    }
+    metadata = {}
+    for name, path in METADATA_PATHS.items():
+        metadata[path] = parameters[name]
+    task = collect.Task(settings, metadata)
+    point_ids = [task.strong_id()]
+    started_utc = run_folder.start_run(None, arguments.output, point_ids)
     seeds = [(arguments.seed, 1)]
-    task = collect.Task(settings, 1, metadata)
     run_folder.record_point(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
@@ -70,7 +79,7 @@ def main() -> None:
     argument_path = arguments.output / "arguments.json"
     argument_json = collect.json_value(argument_values)
     run_folder.write_json(argument_path, argument_json)
-    run_folder.finish_run(None, arguments.output, started_utc)
+    run_folder.finish_run(None, arguments.output, point_ids, started_utc)
     print(f"complete: {arguments.output}")
 
 
@@ -170,8 +179,18 @@ def _recorded_values(fragments) -> dict:
     )
     if resolved_path.exists():
         record = _read_json(resolved_path)
-        recorded.update(record["metadata"])
+        metadata_values = _metadata_values(record["metadata"])
+        recorded.update(metadata_values)
     return recorded
+
+
+def _metadata_values(metadata: dict) -> dict:
+    """The physical values a recorded point's metadata holds, by name."""
+    values = {}
+    for name, path in METADATA_PATHS.items():
+        if path in metadata:
+            values[name] = metadata[path]
+    return values
 
 
 def _physical_parameters(arguments: argparse.Namespace, recorded: dict) -> dict:

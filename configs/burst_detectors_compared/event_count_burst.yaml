@@ -1,7 +1,0 @@
-# The flipped-bit count on the shared burst: the patch's detection
-# events over a window and each position's (event_count).
-
-extends: ../common/burst_detectors_compared_base.yaml
-
-burst_detector:
-  kind: event_count

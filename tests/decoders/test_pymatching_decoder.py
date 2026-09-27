@@ -11,6 +11,8 @@ at odd parity, and parallel fault columns, which Stim's detector error
 models and PyMatching's model loader merge as independent errors.
 """
 
+import math
+
 import numpy
 import pymatching
 import pytest
@@ -144,8 +146,9 @@ def test_an_unmatchable_syndrome_is_reported_and_not_raised():
     Matching.decode raises ValueError there rather than answering,
     because no perfect matching exists. No plan produces such a
     syndrome, so the row keeps the run going: an all-zero correction
-    marked INVALID_CORRECTION says the answer is not trustworthy
-    without stopping the machine (backend_outcome.py's policy).
+    marked INVALID_CORRECTION, with the reason that no matching exists,
+    says the backend produced no correction without stopping the
+    machine (backend_outcome.py's policy).
     """
     # two boundaryless edges, (0, 2) and (1, 3): one defect on each
     check = [[1, 0], [0, 1], [1, 0], [0, 1]]
@@ -155,9 +158,43 @@ def test_an_unmatchable_syndrome_is_reported_and_not_raised():
     job = windows.job_for(model, syndrome)
     row = adapter.PyMatchingDecoder()
     result = row.decode(job)
-    invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
+    invalid = decoding_records.BackendDecodeStatus.INVALID_CORRECTION
+    reasons = decoding_records.BackendFailureReason
     assert result.decode_status is invalid
+    assert result.no_correction_reason is reasons.NO_PERFECT_MATCHING
     assert result.correction.tolist() == [0, 0]
+
+
+def test_a_class_no_correction_reaches_is_reported_with_infinite_weight():
+    """The forced solve refuses a class no matching reaches, and says so.
+
+    One fault flips detector 0 and the observable; with no defect, class
+    0 is the empty matching and class 1 would need that fault, which
+    lights detector 0, so PyMatching finds no perfect matching on the
+    pinned graph. The complementary gap is the log-likelihood ratio of
+    the two classes' best hypotheses (Gidney et al. 2312.04522 Sec. 4),
+    so a class with no hypothesis has probability zero: weight +inf,
+    and no correction.
+    """
+    faults = placed_faults([[1], [0]], [0.1], [[1]])
+    model = window_of(faults, 2)
+    syndrome = numpy.asarray([0, 0], dtype=numpy.uint8)
+    reachable_job = windows.job_for(model, syndrome)
+    reachable_job.forced_logical_class = 0
+    unreachable_job = windows.job_for(model, syndrome)
+    unreachable_job.forced_logical_class = 1
+    row = adapter.PyMatchingDecoder()
+    reachable = row.decode(reachable_job)
+    unreachable = row.decode(unreachable_job)
+    invalid = decoding_records.BackendDecodeStatus.INVALID_CORRECTION
+    reasons = decoding_records.BackendFailureReason
+
+    assert reachable.forced_class_weight == 0.0
+    assert reachable.no_correction_reason is None
+    assert unreachable.forced_class_weight == math.inf
+    assert unreachable.decode_status is invalid
+    assert unreachable.no_correction_reason is reasons.NO_PERFECT_MATCHING
+    assert unreachable.correction.tolist() == [0]
 
 
 def test_a_satisfiable_syndrome_on_the_same_graph_has_no_status():

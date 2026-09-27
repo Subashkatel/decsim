@@ -21,8 +21,9 @@ or on the command line for a single shot:
 decsim run configs/reference.yaml --seed 0 --trace
 ```
 
-A traced shot writes one file, `results/<run>/trace/<shot>.trace.json`,
-and only the shots `observation.trace_shots` names are traced.
+A traced shot writes one file, `results/<run>/trace/<id>_seed<seed>.trace.json`,
+named by its point's id and its seed, and only the shots
+`observation.trace_shots` names are traced.
 
 Turning the trace on changes nothing about the run. The writer schedules
 nothing and calls no component, so the ticks, the log and the results
@@ -50,11 +51,11 @@ command prints it:
 
 ```bash
 decsim trace follow \
-  results/<run>/trace/<shot>.trace.json --round 1:1
+  results/<run>/trace/<id>_seed<seed>.trace.json --round 1:1
 ```
 
 ```
-round 1:1 of decsim weak_baseline d3 p0.001 seed0
+round 1:1 of decsim weak_baseline d3 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
 0.000      weak syndrome buffer         hold registered                                                                reference
@@ -88,11 +89,11 @@ path's totals.
 
 ```bash
 decsim trace follow \
-  results/<run>/trace/<shot>.trace.json --window 1:0
+  results/<run>/trace/<id>_seed<seed>.trace.json --window 1:0
 ```
 
 ```
-window 1:0 of decsim weak_baseline d3 p0.001 seed0
+window 1:0 of decsim weak_baseline d3 seed0
 
 tick (us)  where                        what                                                          dur (us)  transfer  bits
 6.012      Window planner               W0 ready
@@ -127,7 +128,7 @@ A key the trace does not carry is refused with the keys it does carry.
 
 ```bash
 decsim trace follow \
-  results/<run>/trace/<shot>.trace.json --round 1:1 --html path.html
+  results/<run>/trace/<id>_seed<seed>.trace.json --round 1:1 --html path.html
 ```
 
 `--html` writes the same path as one self-contained page, one lane per

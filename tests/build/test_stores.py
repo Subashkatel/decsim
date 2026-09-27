@@ -31,6 +31,8 @@ import tests.declared_run as declared_run
 
 THIS_FILE = pathlib.Path(__file__)
 CONFIGS = THIS_FILE.parents[2] / "configs"
+# the data-movement grid's fourth block, the one with the strong tier
+DATA_MOVEMENT_SWITCHING_BLOCK = 3
 
 
 class _Policy:
@@ -122,14 +124,15 @@ def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
     """Both routes ask the one check, so they refuse in one sentence."""
     configs = tmp_path / "configs"
     shutil.copytree(CONFIGS, configs)
-    path = configs / "data_movement_switching.yaml"
+    path = configs / "experiments" / "data_movement" / "data_movement.yaml"
     text = path.read_text()
     config = experiment.load_experiment(path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-    )
+    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
+    points = switching_block.points()
+    values = dict(points[0])
+    values["workload.arguments.physical_error_probability"] = 0.001
+    point = config.point_task(values)
+    settings = point.settings
     ported_strong = dataclasses.replace(
         settings.strong_syndrome_buffer, kind="ported_syndrome_buffer"
     )

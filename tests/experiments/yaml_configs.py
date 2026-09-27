@@ -1,18 +1,19 @@
-"""A complete runnable yaml, small enough for a functional test.
+"""The runnable yamls this repository ships, and a small one for tests.
 
-The shape is a design rule: the algorithm is structure
-on a per-tier unit card (weak_decoder / strong_decoder), never a sweep
-axis, mirroring the tiered architecture itself (Toshio arXiv 2510.25222:
-lightweight decoders decode constantly, a separate accurate decoder is
-invoked on demand) and gem5's config split (structure on the component,
-parameters swept around it).
+SHIPPED_CONFIGS names the runnable files under configs/; the files
+under configs/bases/ are starting points other files extend, so they
+are left out.
+MINIMAL_CONFIG is a complete machine small enough for a functional test.
 """
 
 import pathlib
 
+import numpy
+import pymatching
 import yaml
 
 import decsim.collect as collect
+import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
 
 _THIS_FILE = pathlib.Path(__file__)
@@ -23,44 +24,82 @@ CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 # shipped config walk this tuple and not the folder, so a config a user
 # writes into configs/ of their own checkout fails none of them.
 SHIPPED_CONFIGS = (
-    "cluster_gap_switching.yaml",
-    "data_movement.yaml",
-    "data_movement_fold_in_place.yaml",
-    "data_movement_input_in_place.yaml",
-    "data_movement_switching.yaml",
-    "my_first_sweep.yaml",
-    "priced_cards_example.yaml",
     "reference.yaml",
-    "seam_pinned_switching.yaml",
-    "strong_decoder_baseline.yaml",
-    "strong_latency.yaml",
-    "strong_latency_preview.yaml",
-    "strong_ler.yaml",
-    "two_tiers.yaml",
-    "weak_decoder_baseline.yaml",
-    "weak_latency.yaml",
-    "weak_ler.yaml",
+    "examples/my_first_sweep.yaml",
+    "examples/priced_cards_example.yaml",
+    "examples/two_tiers.yaml",
+    "experiments/burst_detection/burst_detection.yaml",
+    "experiments/data_movement/data_movement.yaml",
+    "experiments/decoder_baseline/decoder_baseline.yaml",
+    "experiments/switching/cluster_gap_switching.yaml",
+    "experiments/switching/seam_pinned_switching.yaml",
 )
+# Where a memory maker's physical error rate sits in a point's sections.
+ERROR_RATE_PATH = "workload.arguments.physical_error_probability"
+# The minimal config's sweep without the error rate, for a files row or a
+# maker that takes none.
+QPU_ONLY_SWEEP = [
+    {
+        "axes": {"qpu.distance": [3], "qpu.round_period_microseconds": [1.0]},
+        "collection": {"max_shots": 1},
+    }
+]
+
+
+def point_shot(
+    config: experiment.ExperimentConfig,
+    *,
+    physical_error_probability: float,
+    distance: int,
+    round_period_microseconds: float,
+    seed: int,
+) -> collect.Shot:
+    """One seeded shot at one sweep point, run."""
+    task = config.point_task(
+        {
+            ERROR_RATE_PATH: physical_error_probability,
+            "qpu.distance": distance,
+            "qpu.round_period_microseconds": round_period_microseconds,
+        },
+    )
+    return collect.run_shot(task, seed)
 
 
 def measure_point_shot(
-    config,
-    *,
-    physical_error_probability,
-    distance,
-    round_period_microseconds,
-    seed,
-):
+    config: experiment.ExperimentConfig, **point
+) -> measure.ShotMeasurement:
     """One seeded shot at one sweep point, collected and measured."""
-    shots = seed + 1
-    task = config.point_task(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_microseconds=round_period_microseconds,
-        shots=shots,
-    )
-    shot = collect.run_shot(task, seed)
+    shot = point_shot(config, **point)
     return measure.measure_shot(shot)
+
+
+def whole_circuit_predictions(shot: collect.Shot) -> list:
+    """Each operation's observables, PyMatching on its whole circuit.
+
+    The reference a windowed loop is checked against: the decomposed
+    detector error model of the circuit the source sampled, decoded in
+    one piece on the events it drew, operation by operation in the
+    result's order.
+    """
+    sampled = shot.machine.observation.sampled_shots.shots_by_operation
+    predictions = []
+    for operation_result in shot.result.operation_results:
+        sampled_shot = sampled[operation_result.operation_id]
+        model = sampled_shot.circuit.detector_error_model(decompose_errors=True)
+        matching = pymatching.Matching.from_detector_error_model(model)
+        events = numpy.asarray(sampled_shot.detection_events, dtype=bool)
+        predicted = matching.decode(events)
+        prediction = tuple(int(bit) for bit in predicted)
+        predictions.append(prediction)
+    return predictions
+
+
+def loop_predictions(shot: collect.Shot) -> list:
+    """Each operation's observables as the machine's loop decoded them."""
+    return [
+        tuple(operation_result.logical_observables)
+        for operation_result in shot.result.operation_results
+    ]
 
 
 # A complete runnable config, small enough for a functional test. Tests
@@ -75,6 +114,7 @@ MINIMAL_CONFIG = {
         "arguments": {
             "code_task": "surface_code:rotated_memory_z",
             "rounds_per_shot": 15,
+            "distance": "${qpu.distance}",
         },
     },
     "windows": {
@@ -84,10 +124,12 @@ MINIMAL_CONFIG = {
     },
     "sweep": [
         {
-            "physical_error_probability": [0.001],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
-            "shots": 1,
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": 1},
         }
     ],
     "controller": {
@@ -131,6 +173,7 @@ def memory_workload(rounds_per_shot) -> dict:
         "arguments": {
             "code_task": "surface_code:rotated_memory_z",
             "rounds_per_shot": rounds_per_shot,
+            "distance": "${qpu.distance}",
         },
     }
 
@@ -142,6 +185,13 @@ def write_config(tmp_path, overrides: dict) -> pathlib.Path:
     config_text = yaml.safe_dump(raw)
     config_path.write_text(config_text)
     return config_path
+
+
+def run_folder_of(experiment_dir) -> pathlib.Path:
+    """The run folder a collect of one yaml wrote: combined/<name>-<id8>/."""
+    combined = pathlib.Path(experiment_dir) / "combined"
+    (folder,) = combined.iterdir()
+    return folder
 
 
 def strong_unit(algorithm) -> dict:
@@ -172,6 +222,17 @@ def online_threshold() -> dict:
     overrides = {"escalation": escalation, "weak_decoder": weak_decoder}
     strong_decoder = strong_unit("pymatching")
     overrides.update(strong_decoder)
+    return overrides
+
+
+def fixed_threshold_switching() -> dict:
+    """The overrides of a switching machine that escalates below 20 dB."""
+    overrides = online_threshold()
+    overrides["escalation"] = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "near_seam_pinned",
+    }
     return overrides
 
 
@@ -233,10 +294,11 @@ def example_tool_config(
         "workload": workload,
         "sweep": [
             {
-                "physical_error_probability": [0.001],
-                "distance": [3],
-                "round_period_microseconds": [1.1],
-                "shots": 1,
+                "axes": {
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.1],
+                },
+                "collection": {"max_shots": 1},
             }
         ],
     }

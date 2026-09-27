@@ -363,6 +363,7 @@ def _bare_observation(
         referee_audit=audit,
         sampled_shots=shots,
         burst_flags=None,
+        confidence=None,
     )
 
 

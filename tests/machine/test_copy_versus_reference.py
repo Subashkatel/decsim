@@ -42,57 +42,67 @@ CHIP_THEN_HOST_DECODER = ("weak_decoder", "strong_syndrome_buffer")
 # strong side's regions of both shapes)
 STIM_GRID = (
     (
-        "weak_decoder_baseline.yaml",
+        "bases/weak_decoder_baseline.yaml",
         "sliding",
         "near_seam_pinned",
         ("controller",),
     ),
     (
-        "weak_decoder_baseline.yaml",
-        "sliding",
-        "near_seam_pinned",
-        ("weak_syndrome_buffer",),
-    ),
-    ("weak_decoder_baseline.yaml", "sliding", "near_seam_pinned", WEAK_SEATS),
-    ("weak_decoder_baseline.yaml", "parallel", "near_seam_pinned", WEAK_SEATS),
-    (
-        "seam_pinned_switching.yaml",
+        "bases/weak_decoder_baseline.yaml",
         "sliding",
         "near_seam_pinned",
         ("weak_syndrome_buffer",),
     ),
     (
-        "seam_pinned_switching.yaml",
+        "bases/weak_decoder_baseline.yaml",
+        "sliding",
+        "near_seam_pinned",
+        WEAK_SEATS,
+    ),
+    (
+        "bases/weak_decoder_baseline.yaml",
+        "parallel",
+        "near_seam_pinned",
+        WEAK_SEATS,
+    ),
+    (
+        "experiments/switching/seam_pinned_switching.yaml",
+        "sliding",
+        "near_seam_pinned",
+        ("weak_syndrome_buffer",),
+    ),
+    (
+        "experiments/switching/seam_pinned_switching.yaml",
         "sliding",
         "near_seam_pinned",
         BOTH_DECODERS,
     ),
     (
-        "seam_pinned_switching.yaml",
+        "experiments/switching/seam_pinned_switching.yaml",
         "sliding",
         "near_seam_pinned",
         CHIP_THEN_HOST_DECODER,
     ),
     (
-        "seam_pinned_switching.yaml",
+        "experiments/switching/seam_pinned_switching.yaml",
         "sliding",
         "forward_seam_pinned",
         BOTH_DECODERS,
     ),
     (
-        "seam_pinned_switching.yaml",
+        "experiments/switching/seam_pinned_switching.yaml",
         "sliding",
         "forward_seam_pinned",
         CHIP_THEN_HOST_DECODER,
     ),
     (
-        "strong_decoder_baseline.yaml",
+        "bases/strong_decoder_baseline.yaml",
         "sliding",
         "near_seam_pinned",
         ("strong_syndrome_buffer",),
     ),
     (
-        "strong_decoder_baseline.yaml",
+        "bases/strong_decoder_baseline.yaml",
         "sliding",
         "near_seam_pinned",
         ("strong_decoder",),
@@ -105,13 +115,16 @@ YANG_CYCLES = {"decoder": (5, 1)}
 
 def _machine_formed_at(where: str, distance: int = 3):
     """The weak baseline, forming its detection events there."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=distance,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": distance,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     detection_events = _formed_at(settings, where)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
@@ -139,11 +152,14 @@ def _seated_machine(
     """
     config_path = CONFIGS / config_name
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     detection_events = dataclasses.replace(
         settings.detection_events,
         formed_at=formed_at,
@@ -265,13 +281,16 @@ def _decode_spans(machine) -> list:
 
 def _switching_machine_formed_at(where: str):
     """A switching run at d=3, where both tiers decode the same rounds."""
-    config_path = CONFIGS / "seam_pinned_switching.yaml"
+    config_path = CONFIGS / "experiments/switching/seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     detection_events = _formed_at(settings, where)
     settings = dataclasses.replace(settings, detection_events=detection_events)
     return machine_module.Machine.build(settings, 0)
@@ -284,13 +303,16 @@ def _forward_switching_at_the_decoder():
     windows ahead of the seam, so the run withdraws weak decodes that
     were already submitted.
     """
-    config_path = CONFIGS / "seam_pinned_switching.yaml"
+    config_path = CONFIGS / "experiments/switching/seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     detection_events = _formed_at(settings, "decoder")
     escalation = dataclasses.replace(
         settings.escalation, strong_window="forward_seam_pinned"
@@ -408,13 +430,16 @@ def _store_copy_bits(machine) -> int:
 
 def _machine(**weak_changes):
     """The weak baseline at d=3, counting its data movement."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
@@ -749,7 +774,7 @@ def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
     again; each unit still consumes Stim's events, and the run ends.
     """
     machine = _seated_machine(
-        "seam_pinned_switching.yaml",
+        "experiments/switching/seam_pinned_switching.yaml",
         "sliding",
         "near_seam_pinned",
         CHIP_THEN_HOST_DECODER,

@@ -15,6 +15,7 @@ import sys
 
 import matplotlib.figure as figure_module
 import pytest
+import scipy.stats
 
 import decsim.experiments.command as command
 import decsim.results as results
@@ -22,14 +23,30 @@ import tests.experiments.yaml_configs as yaml_configs
 
 TWO_POINT_SWEEP = [
     {
-        "physical_error_probability": [0.003, 0.01],
-        "distance": [3],
-        "round_period_microseconds": [1.0],
-        "shots": 20,
+        "axes": {
+            "workload.arguments.physical_error_probability": [0.003, 0.01],
+            "qpu.distance": [3],
+            "qpu.round_period_microseconds": [1.0],
+        },
+        "collection": {"max_shots": 20},
     }
 ]
 
 ROUNDS_COLUMN = "settings.workload.row_settings.arguments.rounds_per_shot"
+PROBABILITY_COLUMN = (
+    "settings.workload.row_settings.arguments.physical_error_probability"
+)
+
+
+def _point_text(probability: float) -> str:
+    """How diff names a point: its metadata's json text."""
+    metadata = {
+        "qpu.distance": 3,
+        "workload.arguments.physical_error_probability": probability,
+        "qpu.round_period_microseconds": 1.0,
+    }
+    text = json.dumps(metadata, sort_keys=True)
+    return f"{text}:"
 
 
 def _collected(folder, overrides: dict):
@@ -40,7 +57,7 @@ def _collected(folder, overrides: dict):
     config_path = yaml_configs.write_config(folder, sweep)
     run_dir = folder / "run"
     command.main(["collect", str(config_path), "--out", str(run_dir)])
-    return run_dir
+    return yaml_configs.run_folder_of(run_dir)
 
 
 @pytest.fixture(scope="module")
@@ -104,7 +121,7 @@ def test_two_runs_of_one_yaml_are_the_same(runs, capsys):
 def test_diff_names_the_setting_and_the_input_that_changed(runs, capsys):
     lines = _diff_printed(capsys, runs["first"], runs["shorter"])
 
-    point = "p 0.003 d 3 round period 1.0 us:"
+    point = _point_text(0.003)
     assert (
         f"  {point} settings.workload.row_settings.arguments."
         "rounds_per_shot: 15 -> 12"
@@ -113,32 +130,63 @@ def test_diff_names_the_setting_and_the_input_that_changed(runs, capsys):
     assert f"  {point} operations.json: sha256 differs" in lines
 
 
-def test_diff_judges_a_logical_error_rate_by_its_wilson_interval(
+def test_diff_judges_a_logical_error_rate_by_its_exact_interval(
     runs, tmp_path, capsys
 ):
-    first_rows = results.load(runs["first"])
-    rate = first_rows[0]["logical_error_rate"]
-    nudged_rate = rate + 1e-9
+    """Overlapping limits agree; limits that do not overlap do not."""
+    near = {
+        "logical_error_rate_estimate": 0.1,
+        "logical_error_rate_low": 0.05,
+        "logical_error_rate_high": 0.2,
+    }
+    known = _rewritten(runs["first"], tmp_path, "known", near)
     inside = _rewritten(
-        runs["first"], tmp_path, "inside", {"logical_error_rate": nudged_rate}
+        runs["first"],
+        tmp_path,
+        "inside",
+        {**near, "logical_error_rate_estimate": 0.12},
     )
     apart = _rewritten(
         runs["first"],
         tmp_path,
         "apart",
         {
-            "logical_error_rate": 0.9,
-            "ler_wilson_low": 0.85,
-            "ler_wilson_high": 0.95,
+            "logical_error_rate_estimate": 0.9,
+            "logical_error_rate_low": 0.85,
+            "logical_error_rate_high": 0.95,
         },
     )
 
-    inside_lines = _diff_printed(capsys, runs["first"], inside)
-    apart_lines = _diff_printed(capsys, runs["first"], apart)
+    inside_lines = _diff_printed(capsys, known, inside)
+    apart_lines = _diff_printed(capsys, known, apart)
 
     assert inside_lines[-1].endswith(", within error bars")
     assert apart_lines[-1].endswith(", beyond error bars")
     assert len(apart_lines) == 6
+
+
+def test_diff_makes_no_comparison_of_a_rate_with_no_interval(
+    runs, tmp_path, capsys
+):
+    """No scored shot gives no interval, and so nothing to compare by.
+
+    A point whose every shot went unscored has no rate and no limits; a
+    verdict read off them would say the two runs agree on nothing.
+    """
+    unscored = _rewritten(
+        runs["first"],
+        tmp_path,
+        "unscored",
+        {
+            "logical_error_rate_estimate": 0.5,
+            "logical_error_rate_low": "",
+            "logical_error_rate_high": "",
+        },
+    )
+
+    lines = _diff_printed(capsys, runs["first"], unscored)
+
+    assert lines[-1].endswith(", no statistical comparison possible")
 
 
 def _spread_shots(run_dir, column: str, half_width: float) -> None:
@@ -150,10 +198,10 @@ def _spread_shots(run_dir, column: str, half_width: float) -> None:
     """
     shots_path = run_dir / "shots.csv"
     rows = _csv_rows(shots_path)
-    first_point = rows[0]["physical_error_probability"]
+    first_point = rows[0]["point_id"]
     sign = 1
     for row in rows:
-        if row["physical_error_probability"] != first_point:
+        if row["point_id"] != first_point:
             continue
         value = float(row[column])
         row[column] = value + sign * half_width
@@ -163,7 +211,7 @@ def _spread_shots(run_dir, column: str, half_width: float) -> None:
 
 @pytest.mark.parametrize(
     "column, shot_column",
-    [("load", "load"), ("windows_per_shot", "windows")],
+    [("load", "load"), ("windows_per_shot", "decoded_windows")],
 )
 def test_diff_judges_a_mean_by_the_standard_error_of_its_shots(
     runs, tmp_path, capsys, column, shot_column
@@ -218,11 +266,11 @@ def _first_shot_only(runs, tmp_path, name: str, values: dict):
     """A copy whose first point kept one shot and whose row holds values."""
     changed = _rewritten(runs["first"], tmp_path, name, values)
     first_rows = results.load(runs["first"])
-    first_point = str(first_rows[0]["physical_error_probability"])
+    first_point = first_rows[0]["point_id"]
     seen = []
 
     def keep(row) -> bool:
-        if row["physical_error_probability"] != first_point:
+        if row["point_id"] != first_point:
             return True
         seen.append(row)
         return len(seen) == 1
@@ -273,7 +321,7 @@ def test_diff_names_a_column_only_the_second_folder_holds(
 
     lines = _diff_printed(capsys, runs["first"], changed)
 
-    point = "p 0.003 d 3 round period 1.0 us:"
+    point = _point_text(0.003)
     assert (
         f"  {point} extra: None -> 5, no error bar: compared exactly" in lines
     )
@@ -291,7 +339,7 @@ def test_diff_names_a_point_only_one_folder_holds(runs, tmp_path, capsys):
     first_lines = _diff_printed(capsys, runs["first"], fewer)
     second_lines = _diff_printed(capsys, fewer, runs["first"])
 
-    point = "p 0.01 d 3 round period 1.0 us:"
+    point = _point_text(0.01)
     assert f"  {point} only in the first folder" in first_lines
     assert f"  {point} only in the second folder" in second_lines
 
@@ -324,32 +372,31 @@ def test_load_gives_a_row_per_point_with_its_results_and_settings(runs):
     assert rows[0]["shots"] == 20
 
 
-def _point_count(line) -> int:
-    positions = line.get_xdata()
-    return len(positions)
+def test_a_loaded_row_holds_what_an_error_rate_figure_is_drawn_from(runs):
+    """The estimate, its exact limits and counts, and the point's values.
 
+    decsim draws no error rate figure; a reader draws one from these
+    rows, the numbers sinter's plot_error_rate reads off its csv. The
+    point stopped at its shot cap, so its limits are Clopper and
+    Pearson's, which scipy's exact binomial interval is.
+    """
+    rows = results.load(runs["first"])
 
-def test_the_plot_draws_a_labelled_curve_per_group_of_the_kept_rows(runs):
-    """One probability is kept; each shot length is its own curve."""
-    rows = results.load(runs["first"], runs["shorter"])
-    figure = figure_module.Figure()
-    ax = figure.subplots()
-
-    results.plot_error_rate(
-        ax=ax,
-        rows=rows,
-        x="physical_error_probability",
-        group=ROUNDS_COLUMN,
-        where={"physical_error_probability": 0.003},
+    noisier = rows[1]
+    failures = noisier["prefix_failures"]
+    scored_shots = noisier["prefix_scored_shots"]
+    test = scipy.stats.binomtest(failures, scored_shots)
+    interval = test.proportion_ci(method="exact")
+    assert noisier["state"] == "cap"
+    assert failures > 0
+    assert noisier["logical_error_rate_estimate"] == failures / scored_shots
+    assert noisier["logical_error_rate_low"] == pytest.approx(
+        interval.low, rel=1e-12
     )
-
-    labels = [line.get_label() for line in ax.lines]
-    point_counts = [_point_count(line) for line in ax.lines]
-    legend = ax.get_legend()
-    legend_title = legend.get_title()
-    assert labels == [f"{ROUNDS_COLUMN}=15", f"{ROUNDS_COLUMN}=12"]
-    assert point_counts == [1, 1]
-    assert legend_title.get_text() == ROUNDS_COLUMN
+    assert noisier["logical_error_rate_high"] == pytest.approx(
+        interval.high, rel=1e-12
+    )
+    assert noisier[PROBABILITY_COLUMN] == 0.01
 
 
 def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
@@ -357,13 +404,9 @@ def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
     rows = results.load(*folders)
     figure = figure_module.Figure()
     ax = figure.subplots()
-
-    results.plot_error_rate(
-        ax=ax,
-        rows=rows,
-        x="physical_error_probability",
-        group=ROUNDS_COLUMN,
-    )
+    positions = [row[PROBABILITY_COLUMN] for row in rows]
+    rates = [row["logical_error_rate_estimate"] for row in rows]
+    ax.plot(positions, rates, marker="o")
     picture_path = tmp_path / "ler.png"
     results.save_figure(figure, picture_path, rows, folders)
 
@@ -377,7 +420,6 @@ def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
     record = json.loads(record_text)
     this_file = pathlib.Path(__file__)
     this_text = this_file.read_text()
-    assert len(ax.lines) == 2
     assert picture_path.is_file()
     assert script_copy.read_text() == this_text
     assert len(drawn_rows) == 4

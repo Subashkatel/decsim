@@ -22,10 +22,12 @@ COUNTING_SWEEP = {
     "observation": {"data_movement": True},
     "sweep": [
         {
-            "physical_error_probability": [0.001],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
-            "shots": 2,
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": 2},
         }
     ],
 }
@@ -53,10 +55,12 @@ ESCALATING_SWEEP = {
     },
     "sweep": [
         {
-            "physical_error_probability": [0.005],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
-            "shots": 8,
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.005],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": 8},
         }
     ],
 }
@@ -177,6 +181,45 @@ def test_the_class_rows_are_listed_cheapest_first(tmp_path):
     assert listed == ["on_chip", "on_board", "off_board"]
 
 
+def test_the_class_rows_hold_every_points_copied_and_moved_bits(tmp_path):
+    """What a data movement figure is drawn from, at each swept distance.
+
+    decsim draws no such figure; data_movement.csv holds one row per
+    point per memory class, so the reader draws it from the file. An
+    off-board hop of this machine moves and never copies.
+    """
+    sweep = {
+        "observation": {"data_movement": True},
+        "sweep": [
+            {
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3, 5],
+                },
+                "collection": {"max_shots": 1},
+            }
+        ],
+    }
+    config_path = yaml_configs.write_config(tmp_path, sweep)
+    out_dir = tmp_path / "run"
+    run_dir, _rows = collect_command.run_experiment(config_path, out_dir)
+    movement_path = run_dir / "data_movement.csv"
+
+    rows = sweep_report.read_rows(movement_path)
+
+    class_rows = [row for row in rows if row["grouping"] == "memory_class"]
+    points = {row["point_id"] for row in class_rows}
+    on_chip = [row for row in class_rows if row["name"] == "on_chip"]
+    off_board = [row for row in class_rows if row["name"] == "off_board"]
+    on_chip_copied = [row["copy_bits_per_shot"] > 0 for row in on_chip]
+    off_board_copied = [row["copy_bits_per_shot"] for row in off_board]
+    off_board_moved = [row["move_bits_per_shot"] > 0 for row in off_board]
+    assert len(points) == 2
+    assert on_chip_copied == [True, True]
+    assert off_board_copied == [0, 0]
+    assert off_board_moved == [True, True]
+
+
 def test_a_references_column_counts_one_shots_holds_once(tmp_path):
     """A reference is a token on a store's slot, not a hop of a path.
 
@@ -236,10 +279,14 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
         {
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3],
-                    "round_period_microseconds": [1.0],
-                    "shots": 1,
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
+                    "collection": {"max_shots": 1},
                 }
             ]
         },
@@ -274,48 +321,24 @@ def test_a_counting_run_writes_both_files_and_the_terminal_lines(
     assert "off_board" in moved[0]
 
 
-def test_combining_two_shards_gives_the_whole_runs_movement_rows(tmp_path):
-    """The fold's precondition: the file adds, so shards equal one run."""
-    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
+def test_pieces_of_one_shot_fold_to_the_whole_runs_movement_rows(tmp_path):
+    """The fold's precondition: the file adds, so pieces equal one run."""
+    whole_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
+    cut_folder = tmp_path / "cut_config"
+    cut_folder.mkdir()
+    cut_card = {**COUNTING_SWEEP, "collection": {"piece_rounds": 1}}
+    cut_path = yaml_configs.write_config(cut_folder, cut_card)
     whole_dir = tmp_path / "whole"
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    combined_dir = tmp_path / "combined"
-    whole = ["collect", str(config_path), "--out", str(whole_dir)]
-    command.main(whole)
-    first = [
-        "collect",
-        str(config_path),
-        "--out",
-        str(first_dir),
-        "--shard",
-        "0/2",
-        "--shots-per-unit",
-        "1",
-    ]
-    command.main(first)
-    second = [
-        "collect",
-        str(config_path),
-        "--out",
-        str(second_dir),
-        "--shard",
-        "1/2",
-        "--shots-per-unit",
-        "1",
-    ]
-    command.main(second)
-    folding = [
-        "combine",
-        str(first_dir),
-        str(second_dir),
-        "--out",
-        str(combined_dir),
-    ]
-    command.main(folding)
-    whole_path = whole_dir / "data_movement.csv"
-    folded_path = combined_dir / "data_movement.csv"
-    whole_rows = sweep_report.read_rows(whole_path)
-    folded_rows = sweep_report.read_rows(folded_path)
+    cut_dir = tmp_path / "cut"
+    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    whole_movement_path = whole_run_dir / "data_movement.csv"
+    folded_movement_path = cut_run_dir / "data_movement.csv"
+    whole_rows = sweep_report.read_rows(whole_movement_path)
+    folded_rows = sweep_report.read_rows(folded_movement_path)
+    cut_pieces = cut_dir.glob("pieces/*/*")
 
+    assert len(list(cut_pieces)) == 2
     assert folded_rows == whole_rows

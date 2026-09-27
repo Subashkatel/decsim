@@ -12,18 +12,11 @@ Every argument below is read from the `argparse` definition that parses it. An a
 
 | Argument | Default | What it is |
 | --- | --- | --- |
-| `config` | required | the experiment yaml to sweep |
-| `--out` | None | the run folder to write |
-| `--processes` | 1 | worker processes, one task each (shots stay serial) |
-| `--shard` | None | i/n: run the work units whose index modulo n is i |
-| `--shots-per-unit` | None | split a point's seeds into work units of this many |
-
-## `decsim combine`
-
-| Argument | Default | What it is |
-| --- | --- | --- |
-| `run_dirs` | required | the folders to fold |
-| `--out` | None | the folder the combined rows go in |
+| `config` | None | the experiment yaml to sweep |
+| `--out` | None | the experiment folder to write |
+| `--processes` | 1 | worker processes, one piece each (shots stay serial) |
+| `--plan` | None | a round's plan.csv, from decsim plan |
+| `--task` | None | the plan's task to run |
 
 ## `decsim diff`
 
@@ -32,14 +25,24 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | `first` | required | the first run folder |
 | `second` | required | the run folder to compare it with |
 
+## `decsim plan`
+
+| Argument | Default | What it is |
+| --- | --- | --- |
+| `configs` | required | the experiment's yamls |
+| `--out` | required | the experiment folder |
+| `--tasks` | required | the most tasks a round has |
+| `--cores` | 4 | pieces a task runs at once, one per core |
+| `--hours` | 24 | a task's walltime |
+| `--memory-mb` | 4096 | one piece's memory before its point has a measured peak |
+
 ## `decsim plot`
 
 | Argument | Default | What it is |
 | --- | --- | --- |
-| `run_dirs` | required | the folders to read |
+| `run_dir` | required | the folder to read, or a trace file to draw |
 | `--figure` | 'timeline' | which figure to draw |
 | `--out` | None | where the figure goes |
-| `--probability` | None | the physical error rate the ler_vs_d figure is drawn at |
 
 ## `decsim run`
 
@@ -56,6 +59,12 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | Argument | Default | What it is |
 | --- | --- | --- |
 | `config` | required | the experiment yaml to resolve |
+
+## `decsim status`
+
+| Argument | Default | What it is |
+| --- | --- | --- |
+| `experiment` | required | the experiment folder to fold |
 
 ## `decsim trace`
 

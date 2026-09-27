@@ -21,6 +21,7 @@ from typing import Optional, Union
 
 import numpy
 
+import decsim.compiled_libraries as compiled_libraries
 import decsim.records.decoder_evidence as evidence_records
 
 LIBRARY_FILE = "union_find.so"
@@ -327,6 +328,9 @@ def library_path() -> pathlib.Path:
     here = pathlib.Path(__file__)
     folder = here.parent
     return folder / LIBRARY_FILE
+
+
+compiled_libraries.register(library_path)
 
 
 def _bound(symbol: str, argument_types: list):

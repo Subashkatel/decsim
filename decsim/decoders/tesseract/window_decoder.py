@@ -4,8 +4,8 @@ The official tesseract_decoder package (Google Quantum AI's Tesseract, a
 search-based most-likely-error decoder; its paper is not on disk) is
 compiled once per live window model from a Stim detector error model
 rebuilt out of the window's physical check, observables, priors and
-detector coordinates; one decode is one decode_to_errors call. Backend
-merging is off so the physical columns keep their one-to-one identity.
+detector coordinates; one decode is one decode_to_errors call, whose
+indices are physical columns whether the backend merges or not.
 """
 
 import math
@@ -22,6 +22,7 @@ import stim
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
 
 if TYPE_CHECKING:
@@ -37,16 +38,17 @@ DETECTOR_ORDER_METHODS = {
     "coordinate": "DetCoordinate",
 }
 
-_Status = decoder_module.BackendDecodeStatus
-_Reason = backend_outcome.BackendFailureReason
+_Status = decoding_records.BackendDecodeStatus
+_Reason = decoding_records.BackendFailureReason
 
 
 class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
     """Decode one physical fault view with the official Tesseract backend.
 
-    The detector orders are drawn from the run seed, so a direct caller
-    binds one through reserve_run_seed and commit_run_seed for
-    reproducible results.
+    The detector orders are drawn from the settings' detector_order_seed,
+    or from the run seed when it is None, so a direct caller then binds
+    one through reserve_run_seed and commit_run_seed for reproducible
+    results.
     """
 
     def __init__(
@@ -97,6 +99,9 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         self.compiled_by_model.clear()
 
     def _resolved_detector_order_seed(self) -> int:
+        fixed_seed = self.settings.detector_order_seed
+        if fixed_seed is not None:
+            return fixed_seed
         with self._run_seed_lock:
             if self._pending_run_seed is not None:
                 raise RuntimeError(
@@ -219,7 +224,7 @@ def _compile_backend(
             beam_climbing=settings.beam_climbing,
             no_revisit_dets=settings.no_revisit_detectors,
             verbose=False,
-            merge_errors=False,
+            merge_errors=settings.merge_errors,
             pqlimit=settings.priority_queue_limit,
             det_orders=detector_orders,
             det_penalty=0.0,
@@ -477,8 +482,8 @@ def _outcome_of(
 
 def _failed_outcome(
     *,
-    status: decoder_module.BackendDecodeStatus,
-    reason: backend_outcome.BackendFailureReason,
+    status: decoding_records.BackendDecodeStatus,
+    reason: decoding_records.BackendFailureReason,
     physical_correction=None,
     reconstructed_syndrome=None,
 ) -> backend_outcome.BackendDecodeOutcome:

@@ -1,19 +1,24 @@
-"""The burst detector comparison folder: one base, one change per file.
+"""The burst detector comparison: four detectors, each burst and quiet.
 
-configs/burst_detectors_compared/ compares four detectors on one burst
-and on quiet shots, so a difference between two files' rows is the
-detector's or the burst's only when each file changes nothing else.
+configs/experiments/burst_detection/burst_detection.yaml compares four
+detectors on one burst and on quiet shots, so a difference between two
+of its rows is the detector's or the burst's only when its points
+differ in nothing else.
 """
 
 import pytest
-import yaml
 
+import decsim.collect as collect
 import decsim.experiments.experiment as experiment
 import tests.experiments.yaml_configs as yaml_configs
 
-FOLDER = yaml_configs.CONFIGS_DIR / "burst_detectors_compared"
-BASE = "../common/burst_detectors_compared_base.yaml"
-# each detector's burst_detector section, as its burst file writes it
+GRID = (
+    yaml_configs.CONFIGS_DIR
+    / "experiments"
+    / "burst_detection"
+    / "burst_detection.yaml"
+)
+# each detector's burst_detector mapping, as the grid writes it
 DETECTORS = {
     "event_count": {"kind": "event_count"},
     "whole_patch_cusum": {
@@ -24,57 +29,94 @@ DETECTORS = {
     "regional_cusum": {"kind": "masked_regional_cusum", "mask_count": None},
     "masked_regional_cusum": {"kind": "masked_regional_cusum"},
 }
+QUIET = {"kind": "stim_device"}
+BURST = {
+    "kind": "burst_stim",
+    "burst_onset_round": 50,
+    "burst_decay_rounds": 600.0,
+    "burst_radius": 3.1,
+    "burst_error_probability": 0.01,
+}
+# the settings a detector and a burst own, the two the grid sweeps
+SWEPT_SETTINGS = ("burst_detector", "qpu")
 
 
-def test_the_folder_holds_a_burst_and_a_quiet_file_per_detector():
-    paths = FOLDER.glob("*.yaml")
-    names = sorted(path.stem for path in paths)
+def test_the_grid_holds_a_quiet_and_a_burst_point_per_detector():
+    config = experiment.load_experiment(GRID)
+    (block,) = config.sweep
+    points = block.points()
 
-    assert names == [
-        "event_count_burst",
-        "event_count_quiet",
-        "masked_regional_cusum_burst",
-        "masked_regional_cusum_quiet",
-        "regional_cusum_burst",
-        "regional_cusum_quiet",
-        "whole_patch_cusum_burst",
-        "whole_patch_cusum_quiet",
+    conditions = _conditions(points)
+
+    assert conditions == [
+        (DETECTORS["event_count"], QUIET),
+        (DETECTORS["event_count"], BURST),
+        (DETECTORS["whole_patch_cusum"], QUIET),
+        (DETECTORS["whole_patch_cusum"], BURST),
+        (DETECTORS["regional_cusum"], QUIET),
+        (DETECTORS["regional_cusum"], BURST),
+        (DETECTORS["masked_regional_cusum"], QUIET),
+        (DETECTORS["masked_regional_cusum"], BURST),
     ]
 
 
-@pytest.mark.parametrize("detector", DETECTORS)
-def test_a_burst_file_changes_only_its_detector(detector):
-    burst_path = FOLDER / f"{detector}_burst.yaml"
-    written = _written(burst_path)
+def test_every_point_differs_only_in_its_detector_and_its_burst():
+    config = experiment.load_experiment(GRID)
+    (block,) = config.sweep
+    points = block.points()
 
-    assert written == {"extends": BASE, "burst_detector": DETECTORS[detector]}
+    unswept = _unswept_settings(config, points)
 
-
-@pytest.mark.parametrize("detector", DETECTORS)
-def test_a_quiet_file_changes_only_its_burst(detector):
-    quiet_path = FOLDER / f"{detector}_quiet.yaml"
-    written = _written(quiet_path)
-    burst_name = f"{detector}_burst.yaml"
-
-    assert written == {"extends": burst_name, "qpu": {"kind": "stim_device"}}
+    first = unswept[0]
+    assert unswept == [first] * len(DETECTORS) * 2
 
 
 @pytest.mark.parametrize("detector", DETECTORS)
-def test_every_file_loads_with_its_detector_and_the_catch_deadline(detector):
-    burst_path = FOLDER / f"{detector}_burst.yaml"
-    quiet_path = FOLDER / f"{detector}_quiet.yaml"
+def test_every_point_loads_with_its_detector_and_the_catch_deadline(detector):
+    config = experiment.load_experiment(GRID)
+    burst_values = _point_values(detector, BURST)
+    quiet_values = _point_values(detector, QUIET)
 
-    burst = experiment.load_experiment(burst_path)
-    quiet = experiment.load_experiment(quiet_path)
+    burst_point = config.point_task(burst_values)
+    quiet_point = config.point_task(quiet_values)
 
+    burst = burst_point.settings
+    quiet = quiet_point.settings
     kind = DETECTORS[detector]["kind"]
-    assert burst.settings.burst_detector.kind == kind
-    assert quiet.settings.burst_detector == burst.settings.burst_detector
-    assert burst.settings.burst_detector.catch_deadline_rounds == 300
-    assert burst.settings.qpu.kind == "burst_stim"
-    assert quiet.settings.qpu.kind == "stim_device"
+    assert burst.burst_detector.kind == kind
+    assert quiet.burst_detector == burst.burst_detector
+    assert burst.burst_detector.catch_deadline_rounds == 300
+    assert burst.qpu.kind == "burst_stim"
+    assert quiet.qpu.kind == "stim_device"
 
 
-def _written(path) -> dict:
-    text = path.read_text()
-    return yaml.safe_load(text)
+def _conditions(points: list) -> list:
+    """Each point's detector and QPU mappings, in the grid's order."""
+    conditions = []
+    for point in points:
+        condition = (point["burst_detector"], point["qpu"])
+        conditions.append(condition)
+    return conditions
+
+
+def _unswept_settings(config, points: list) -> list:
+    """Each point's settings as json, the detector and the QPU left out."""
+    unswept = []
+    for point in points:
+        task = config.point_task(point)
+        settings = collect.json_value(task.settings)
+        for name in SWEPT_SETTINGS:
+            del settings[name]
+        unswept.append(settings)
+    return unswept
+
+
+def _point_values(detector: str, qpu: dict) -> dict:
+    """One point of the grid, its axes in the order the grid writes them."""
+    return {
+        "burst_detector": DETECTORS[detector],
+        "qpu": qpu,
+        yaml_configs.ERROR_RATE_PATH: 0.003,
+        "qpu.distance": 5,
+        "qpu.round_period_microseconds": 1.0,
+    }

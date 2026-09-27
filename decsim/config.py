@@ -1,4 +1,4 @@
-"""The tick, and the clock domains a yaml prices its cycles on.
+"""The tick, the clock domains a yaml prices its cycles on, and yaml paths.
 
 One microsecond is TICKS_PER_MICROSECOND ticks; every duration in the
 machine is an integer count of them. A yaml states its costs in cycles
@@ -131,6 +131,24 @@ def is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def setting_at(sections: Mapping, path: str, reader: str) -> object:
+    """The value at a dotted yaml path, a step that is not there refused.
+
+    One lookup serves every reader of a point's resolved sections: a
+    sweep axis's section, a whole-value reference, a calibration table's
+    key columns and the online threshold's seed. reader names who asked.
+    """
+    value = sections
+    walked = ()
+    for name in path.split("."):
+        if not isinstance(value, Mapping) or name not in value:
+            sentence = _missing_setting_sentence(reader, path, walked, value)
+            raise ValueError(sentence)
+        value = value[name]
+        walked += (name,)
+    return value
+
+
 @dataclasses.dataclass(frozen=True)
 class Clock:
     """One clock domain's period, and the edges its component charges on.
@@ -227,6 +245,22 @@ class ClockSettings(Mapping):
                 f"below one tick"
             )
         return Clock(period_ticks)
+
+
+def _missing_setting_sentence(
+    reader: str, path: str, walked: tuple, value
+) -> str:
+    """Why a path stops where it does: a key that is not there, or a leaf."""
+    where = ".".join(walked) or "the yaml"
+    if not isinstance(value, Mapping):
+        return f"{reader} names {path}, but {where} is {value!r}, not a section"
+    names = path.split(".")
+    missing = names[len(walked)]
+    keys = list(value)
+    return (
+        f"{reader} names {path}, but {where} has no key {missing}; its keys "
+        f"are {keys}"
+    )
 
 
 def _is_whole_bit_count(value) -> bool:

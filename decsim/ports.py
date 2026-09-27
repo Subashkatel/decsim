@@ -2289,7 +2289,11 @@ class WorkloadRow(Protocol):
     (gem5 src/sim/Workload.py:46-52, src/sim/workload.hh:103-105).
     """
 
-    def workload(
-        self, settings, sweep_values: Mapping
-    ) -> workload_records.Workload:
+    def workload(self, settings) -> workload_records.Workload:
         """The row's workload at one sweep point."""
+
+    def maker(self, settings) -> Optional[dict]:
+        """What made the workload: its function, arguments and version.
+
+        None for a row that reads a workload already made.
+        """

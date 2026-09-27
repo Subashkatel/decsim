@@ -12,6 +12,7 @@ overlap, and the committed corrections are the same either way.
 import copy
 import dataclasses
 import json
+import math
 import pathlib
 
 import pytest
@@ -39,20 +40,17 @@ def _switching_machine(
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = 20.0
+    sections["qpu"]["distance"] = 3
+    sections["qpu"]["round_period_microseconds"] = 1.0
+    arguments = sections["workload"]["arguments"]
+    arguments["distance"] = 3
+    arguments["physical_error_probability"] = 0.008
     base_directory = pathlib.Path(".")
     section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
         sections, name="switching_validation", section_folders=section_folders
     )
-    qpu = dataclasses.replace(
-        settings.qpu, distance=3, round_period_microseconds=1.0
-    )
-    sweep_values = {
-        "physical_error_probability": 0.008,
-        "distance": 3,
-        "round_period_microseconds": 1.0,
-    }
-    workload = settings.workload.at_point(sweep_values)
+    workload = settings.workload.made()
     trace = "off"
     if trace_path is not None:
         trace = str(trace_path)
@@ -60,7 +58,7 @@ def _switching_machine(
         settings.observation, record_switching_windows=True, trace=trace
     )
     settings = dataclasses.replace(
-        settings, qpu=qpu, workload=workload, observation=observation
+        settings, workload=workload, observation=observation
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -440,3 +438,18 @@ def test_only_the_answering_solve_carries_the_windows_soft_output():
 
     assert light_result.soft_output.gap == 1.0
     assert heavy_result.soft_output is None
+
+
+def test_a_class_no_correction_reaches_never_answers_the_window():
+    """The reachable class answers, whichever order the two arrived in."""
+    engine, join, verdict, queue = _two_solve_join(0)
+    unreachable_job, unreachable_result = _forced_solve(
+        "unreachable", 0, math.inf
+    )
+    reachable_job, reachable_result = _forced_solve("reachable", 1, 4.0)
+
+    join.accept_result(unreachable_job, unreachable_result)
+    join.accept_result(reachable_job, reachable_result)
+    (answered_job, _answered_result, _tick) = verdict.answers[0]
+
+    assert answered_job is reachable_job

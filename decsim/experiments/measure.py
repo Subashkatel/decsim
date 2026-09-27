@@ -13,14 +13,12 @@ other.
 
 import collections
 import dataclasses
+import hashlib
+import json
 import math
 import pathlib
 import statistics
 from typing import Optional
-
-import numpy
-import pymatching
-import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
@@ -29,6 +27,8 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
+import decsim.observe.sampled_shots as sampled_shots_module
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.transfers as transfer_records
@@ -108,6 +108,17 @@ POINTS = (
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
 )
 
+# One count column per status a committed window's decode may carry
+# besides success (records/decoding.py BackendDecodeStatus), so a status
+# the enum gains is counted with no change here; sinter keeps its
+# custom counts the same way, one named counter per kind
+# (sinter/_data/_task_stats.py:71)
+WINDOW_STATUS_COLUMNS = tuple(
+    f"{status.value}_windows"
+    for status in decoding_records.BackendDecodeStatus
+    if status is not decoding_records.BackendDecodeStatus.SUCCEEDED
+)
+
 # which store's output link carries a tier's window in; the way home is
 # the decoders' own FRAME_PATH_BY_TIER, and both are keyed by the tier
 # whose decode the frame committed rather than by the row's name
@@ -122,22 +133,40 @@ INPUT_LINK_BY_TIER = {
 
 
 @dataclasses.dataclass(frozen=True)
+class ShotConfidence:
+    """A shot's windows' confidence gaps, when a signal decided escalation.
+
+    signal names the confidence the escalation read
+    (escalation.confidence); windows are the ledger's WindowConfidence
+    records (records/decoding.py) in window order; is_sampled says
+    whether the shot is one of the first observation.confidence_shot_count
+    shots, whose windows window_confidence.csv lists, while the histogram
+    counts every shot. sampled_shot_count is that count, None for every
+    shot, which piece.json records so a fold can tell pieces that
+    sampled different shots apart.
+    """
+
+    signal: str
+    windows: tuple
+    is_sampled: bool
+    sampled_shot_count: Optional[int]
+
+
+@dataclasses.dataclass(frozen=True)
 class ShotMeasurement:
     """One shot's numbers; the field names are the csv columns."""
 
-    physical_error_probability: float
-    distance: int
-    round_period_microseconds: float
+    # the point's strong id, sinter's strong_id column
+    # (sinter/_data/_csv_out.py:69-77); the report adds its swept values
+    point_id: str
     algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
-    windows: int
+    decoded_windows: int
     logical_failure: bool
     samples: dict  # point -> us list, one per window (per round for cwb)
     means: dict  # point -> mean us over this shot's windows
     maxes: dict  # point -> max us
     load: float  # service per window / window inter-arrival
-    direct_failure: bool  # whole-circuit PyMatching on the same events failed
-    direct_mismatch: bool  # loop prediction differs from direct PyMatching
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     max_queued_windows: int
@@ -158,6 +187,9 @@ class ShotMeasurement:
     strong_decoded_rounds: int
     strong_service_mean_us: float
     commit_rounds: int
+    # tau_gen r_com: a window's inter-arrival, commit rounds times the
+    # round period, which the chain's load divides by
+    window_period_us: float
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
@@ -182,9 +214,9 @@ class ShotMeasurement:
     strong_wait_max_us: Optional[float]
     strong_held_in_units_max: Optional[int]
     backlog_peak_rounds: Optional[int]
-    tesseract_windows_checked: int  # referee re-decodes (0 = referee off)
+    referee_windows_checked: int  # referee re-decodes (0 = referee off)
     # referee reached a different owned observable contribution
-    tesseract_window_disagreements: int
+    referee_window_disagreements: int
     # path -> the run's own ledger counters plus rounds/windows context,
     # for links.csv; the totals come straight off the ledger's counters
     link_totals: dict
@@ -203,33 +235,55 @@ class ShotMeasurement:
     # is None on a shot with no burst
     burst_first_flag_round: Optional[int]
     burst_caught_in_time: Optional[bool]
+    # WINDOW_STATUS_COLUMNS -> the committed windows whose decode carried
+    # that status; shots.csv holds one column per entry
+    window_statuses: dict
+    # whether every decode a window committed, provisional or final, got
+    # a correction from its backend; an unscored shot is sinter's
+    # discard, never a logical failure (sinter/_decoding/_decoding.py:
+    # 123-125), and unscored_reason names the backends' reasons, empty on
+    # a scored shot. provisional_no_correction_windows counts the windows
+    # whose replaced provisional decode had none, which the status
+    # columns, counting final decodes, do not show
+    is_scored: bool
+    unscored_reason: str
+    provisional_no_correction_windows: int
+    # sha256 of every operation's sampled detection events and observable
+    # truth, so two points' shots of one seed are checked to be one draw
+    sample_digest: str
+    # the windows' confidence gaps, None when no confidence signal
+    # decided the escalation; its own files hold it, not shots.csv
+    confidence: Optional[ShotConfidence]
+    # every operation's predicted observables, so two decoders' shots of
+    # one seed compare answer by answer and not only failure by failure
+    predictions: str
 
 
-def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
+def measure_shot(
+    shot: collect.Shot, run_dir=None, *, only_traced_shot: bool = False
+) -> ShotMeasurement:
     """Read one collected shot's numbers off its machine and result.
 
     run_dir receives the log file when log: file|both is on and the
     Chrome trace when trace names one and the shot is in trace_shots;
     None writes nothing beyond the returned measurement.
+    only_traced_shot says the run traces this shot alone, so a trace
+    path the yaml names is written as it stands.
     """
     settings = shot.task.settings
-    physical_error_probability = settings.workload.physical_error_probability
-    distance = settings.qpu.distance
-    round_period_microseconds = settings.qpu.round_period_microseconds
-    label = shot_label(settings, shot.seed)
+    point_id = shot.task.strong_id()
+    label = shot_label(point_id, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
         _write_log(observation, run_dir, label)
     trace_path = None
     if run_dir is not None:
-        trace_path = _write_trace(shot, run_dir, label)
+        trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
     return _measurement(
         settings,
         observation,
         shot.result,
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_microseconds=round_period_microseconds,
+        point_id=point_id,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
         trace_path=trace_path,
@@ -618,45 +672,7 @@ def collect_samples(
     return samples
 
 
-def direct_prediction(
-    observation: observation_module.Observation, operation_id
-) -> tuple:
-    """Whole-circuit PyMatching on the detection events the device sampled.
-
-    The reference the loop must agree with. The shot is the one the
-    source drew for this operation, heard at sampling time. A source that
-    draws no shot (qpu.kind timing_only and syndrome_bits) leaves the loop
-    nothing to be judged against, so the shot is refused rather than
-    counted as right or wrong.
-    """
-    shots_by_operation = observation.sampled_shots.shots_by_operation
-    if operation_id not in shots_by_operation:
-        raise refusal.RefusalError(
-            "decsim collect judges every shot against the logical "
-            "observables its syndrome source sampled, and the source "
-            f"sampled none for operation {operation_id}; name a qpu.kind "
-            "that samples the circuit, such as stim_device"
-        )
-    shot = shots_by_operation[operation_id]
-    circuit: stim.Circuit = shot.circuit
-    detector_error_model = circuit.detector_error_model(decompose_errors=True)
-    matching = pymatching.Matching.from_detector_error_model(
-        detector_error_model
-    )
-    events = numpy.asarray(shot.detection_events, dtype=bool)
-    predicted = matching.decode(events)
-    bits = []
-    for bit in predicted:
-        bits.append(int(bit))
-    return tuple(bits)
-
-
-def chain_load(
-    samples: dict,
-    settings: machine_settings.MachineSettings,
-    distance: int,
-    round_period_microseconds: float,
-) -> float:
+def chain_load(samples: dict, window_period_us: float) -> float:
     """rho: the serial chain's service per window over the window period.
 
     Service is the unit's occupancy per window plus the DD boundary
@@ -676,10 +692,8 @@ def chain_load(
     service_us = _mean_or_zero(samples["service"])
     confidence_us = _mean_or_zero(samples["confidence"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
-    commit_rounds = commit_round_count(settings, distance)
-    inter_arrival_us = commit_rounds * round_period_microseconds
     chain_us = service_us + confidence_us + handoff_us
-    return chain_us / inter_arrival_us
+    return chain_us / window_period_us
 
 
 def commit_round_count(
@@ -699,39 +713,34 @@ def active_decoder_kind(settings: machine_settings.MachineSettings):
     return tier_settings.kind
 
 
-def trace_path_for_shot(path: str, seed: int, trace_shots) -> str:
-    """The path one shot writes to; the seed joins it when several trace.
+def trace_path_for_shot(path: str, label: str) -> str:
+    """The path a swept shot writes to: the label joins the yaml's path.
 
-    One traced shot keeps the path the yaml gave. Several would all
-    write the same file, so each takes the seed before its suffixes:
-    run.trace.json becomes run_seed3.trace.json, and run.trace.json.gz
-    becomes run_seed3.trace.json.gz.
+    A sweep traces the shots trace_shots names at every point, so each
+    file takes the shot's label, its point id and seed, before its
+    suffixes: run.trace.json becomes run_<label>.trace.json, and
+    run.trace.json.gz becomes run_<label>.trace.json.gz. Two points
+    that differ only in a setting no file name spells, a basis or a
+    window size, then never write one file (gem5's multisim names each
+    simulation's output folder by its id,
+    src/python/gem5/utils/multisim/multisim.py).
     """
-    if len(trace_shots) < 2:
-        return path
     name = pathlib.Path(path)
     directory = name.parent
     stem = name.name
     first_dot = stem.find(".")
     if first_dot < 0:
-        seeded = directory / f"{stem}_seed{seed}"
-        return str(seeded)
+        labelled = directory / f"{stem}_{label}"
+        return str(labelled)
     head = stem[:first_dot]
     suffixes = stem[first_dot:]
-    seeded = directory / f"{head}_seed{seed}{suffixes}"
-    return str(seeded)
+    labelled = directory / f"{head}_{label}{suffixes}"
+    return str(labelled)
 
 
-def shot_label(settings: machine_settings.MachineSettings, seed: int) -> str:
-    """The name a shot's log and trace files carry: its point and seed."""
-    physical_error_probability = settings.workload.physical_error_probability
-    distance = settings.qpu.distance
-    round_period_microseconds = settings.qpu.round_period_microseconds
-    algorithm = active_decoder_kind(settings)
-    return (
-        f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
-        f"_round{round_period_microseconds:g}us_seed{seed}"
-    )
+def shot_label(point_id: str, seed: int) -> str:
+    """The name a shot's log and trace files carry: its point id and seed."""
+    return f"{point_id}_seed{seed}"
 
 
 def _measurement(
@@ -739,9 +748,7 @@ def _measurement(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
-    physical_error_probability: float,
-    distance: int,
-    round_period_microseconds: float,
+    point_id: str,
     seed: int,
     wall_seconds: float,
     trace_path: Optional[str],
@@ -752,13 +759,18 @@ def _measurement(
     and placed in the record, top to bottom, and a split would put the
     reading and the placing of one number in two places.
     """
+    sample_digest = _sample_digest(observation, result)
     samples = collect_samples(observation, result)
-    verdicts = _logical_verdicts(observation, result)
+    logical_failure = _logical_failure(result)
+    predictions = _predictions(result)
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
-    load = chain_load(samples, settings, distance, round_period_microseconds)
+    distance = settings.qpu.distance
+    round_period_microseconds = settings.qpu.round_period_microseconds
     commit_rounds = commit_round_count(settings, distance)
+    window_period_us = commit_rounds * round_period_microseconds
+    load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
     primary_tier = escalation_build.primary_tier(settings.escalation)
@@ -773,20 +785,22 @@ def _measurement(
     means = _means(samples)
     maxes = _maxes(samples)
     first_flag_round, is_caught = _burst_catch(settings, observation)
+    window_statuses = _window_statuses(observation)
+    unscored_reason = _unscored_reason(observation)
+    is_scored = unscored_reason == ""
+    provisional_windows = _provisional_no_correction_windows(observation)
+    is_scored_failure = logical_failure and is_scored
+    confidence = _shot_confidence(settings, observation, seed)
     return ShotMeasurement(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_microseconds=round_period_microseconds,
+        point_id=point_id,
         algorithm=algorithm,
         seed=seed,
-        windows=decoded_windows,
-        logical_failure=verdicts.logical_failure,
+        decoded_windows=decoded_windows,
+        logical_failure=is_scored_failure,
         samples=samples,
         means=means,
         maxes=maxes,
         load=load,
-        direct_failure=verdicts.direct_failure,
-        direct_mismatch=verdicts.direct_mismatch,
         throughput_windows_per_us=throughput.windows_per_microsecond,
         throughput_rounds_per_us=throughput.rounds_per_microsecond,
         max_queued_windows=queued,
@@ -798,6 +812,7 @@ def _measurement(
         strong_decoded_rounds=strong.rounds,
         strong_service_mean_us=strong.service_mean_us,
         commit_rounds=commit_rounds,
+        window_period_us=window_period_us,
         parallel_processes_needed=processes,
         weak_syndrome_weight_mean=tiers.weak_syndrome_weight_mean,
         weak_syndrome_weight_max=tiers.weak_syndrome_weight_max,
@@ -806,15 +821,38 @@ def _measurement(
         strong_wait_max_us=tiers.strong_wait_max_us,
         strong_held_in_units_max=tiers.strong_held_in_units_max,
         backlog_peak_rounds=backlog_peak,
-        tesseract_windows_checked=referee.windows_checked,
-        tesseract_window_disagreements=referee.window_disagreements,
+        referee_windows_checked=referee.windows_checked,
+        referee_window_disagreements=referee.window_disagreements,
         link_totals=totals,
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,
         trace_path=trace_path,
         burst_first_flag_round=first_flag_round,
         burst_caught_in_time=is_caught,
+        window_statuses=window_statuses,
+        is_scored=is_scored,
+        unscored_reason=unscored_reason,
+        provisional_no_correction_windows=provisional_windows,
+        sample_digest=sample_digest,
+        confidence=confidence,
+        predictions=predictions,
     )
+
+
+def _shot_confidence(
+    settings: machine_settings.MachineSettings,
+    observation: observation_module.Observation,
+    seed: int,
+) -> Optional[ShotConfidence]:
+    """The confidence ledger's windows, None when no signal ran."""
+    ledger = observation.confidence
+    if ledger is None:
+        return None
+    windows = ledger.windows()
+    is_sampled = settings.observation.samples_confidence_of(seed)
+    signal = settings.escalation.confidence
+    sampled_shot_count = settings.observation.confidence_shot_count
+    return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 
 
 def _burst_catch(
@@ -842,6 +880,101 @@ def _burst_catch(
     deadline = settings.burst_detector.catch_deadline_rounds
     is_caught = first_flag_round > 0 and delay <= deadline
     return first_flag_round, is_caught
+
+
+def _window_statuses(observation: observation_module.Observation) -> dict:
+    """How many committed windows carried each status besides success.
+
+    A window keeps the status of its final decode (windows/
+    window_commits.py, commit and finish_strong), so an escalated window
+    counts the strong answer's status and not the weak one it replaced.
+    """
+    counts = dict.fromkeys(WINDOW_STATUS_COLUMNS, 0)
+    for window in observation.windows.windows.values():
+        if window.decode_status is None:
+            continue
+        column = f"{window.decode_status}_windows"
+        counts[column] += 1
+    return counts
+
+
+def _unscored_reason(observation: observation_module.Observation) -> str:
+    """The backends' reasons for every decode committed with no correction.
+
+    A final decode's and a replaced provisional one's alike: the strong
+    answer replaces the window's own correction, its prediction and its
+    held boundary, but not what the provisional commit already fed
+    forward, its boundary under eager shipping (ports.py BoundaryPolicy:
+    a shipped provisional boundary is never revised) and its crossing
+    commit, which the strong result keeps (window_commits.py
+    _with_the_crossing_commit). decsim does not trace which of those a
+    given window's commit reached, so any of them unscores the shot. A
+    provisional result never reaches the Pauli frame (commit_or_publish
+    publishes only a final one). Each distinct reason once, sorted and
+    joined by ';'; empty when every commit got a correction.
+    """
+    reasons = set()
+    for window in observation.windows.windows.values():
+        reasons.add(window.no_correction_reason)
+        reasons.add(window.provisional_no_correction_reason)
+    reasons.discard(None)
+    ordered = sorted(reasons)
+    return ";".join(ordered)
+
+
+def _provisional_no_correction_windows(
+    observation: observation_module.Observation,
+) -> int:
+    """The windows whose replaced provisional decode had no correction."""
+    count = 0
+    for window in observation.windows.windows.values():
+        if window.provisional_no_correction_reason is not None:
+            count += 1
+    return count
+
+
+def _sample_digest(
+    observation: observation_module.Observation,
+    result: result_records.RunResult,
+) -> str:
+    """sha256 of each operation's sampled detection events and truth.
+
+    The events are the ones the source fired on shot_sampled
+    (qpu/stim_device.py) and the truth is the observable flips it drew
+    with them, one byte a bit, operation by operation in the result's
+    order. Two points that differ only in their decoder draw the same
+    shot at the same seed, so pairing their shots can be checked rather
+    than assumed.
+    """
+    digest = hashlib.sha256()
+    for operation_result in result.operation_results:
+        operation_id = operation_result.operation_id
+        shot = _sampled_shot(observation, operation_id)
+        event_bytes = bytes(shot.detection_events)
+        truth_bytes = bytes(operation_result.observable_truth)
+        digest.update(event_bytes)
+        digest.update(truth_bytes)
+    return digest.hexdigest()
+
+
+def _sampled_shot(
+    observation: observation_module.Observation, operation_id
+) -> sampled_shots_module.SampledShot:
+    """The shot the source drew for an operation, heard at sampling time.
+
+    A source that draws no shot (qpu.kind timing_only and syndrome_bits)
+    leaves the loop no truth to be scored against, so the shot is
+    refused rather than counted as right or wrong.
+    """
+    shots_by_operation = observation.sampled_shots.shots_by_operation
+    if operation_id not in shots_by_operation:
+        raise refusal.RefusalError(
+            "decsim collect scores every shot against the logical "
+            "observables its syndrome source sampled, and the source "
+            f"sampled none for operation {operation_id}; name a qpu.kind "
+            "that samples the circuit, such as stim_device"
+        )
+    return shots_by_operation[operation_id]
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:
@@ -876,15 +1009,6 @@ class _CommittedDecode:
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
     round_count: int  # the rounds it read, its job's own count
-
-
-@dataclasses.dataclass(frozen=True)
-class _LogicalVerdicts:
-    """Whether the loop, and whole-circuit PyMatching, reached the truth."""
-
-    logical_failure: bool
-    direct_failure: bool
-    direct_mismatch: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -944,32 +1068,44 @@ class _TierRecords:
     strong_held_in_units_max: Optional[int] = None
 
 
-def _logical_verdicts(
-    observation: observation_module.Observation,
-    result: result_records.RunResult,
-) -> _LogicalVerdicts:
-    """The loop's observables beside the truth and beside the reference.
+def _logical_failure(result: result_records.RunResult) -> bool:
+    """Whether the loop's observables missed the truth.
 
     A shot fails when any of its operations reads a wrong observable, as
     a computation fails when any of its logical qubits does; a workload
     of several patches is judged over all of them.
     """
     is_logical_failure = False
-    is_direct_failure = False
-    is_direct_mismatch = False
     for operation_result in result.operation_results:
-        operation_id = operation_result.operation_id
-        reference_prediction = direct_prediction(observation, operation_id)
         truth = tuple(operation_result.observable_truth)
         loop_prediction = tuple(operation_result.logical_observables)
         is_logical_failure |= loop_prediction != truth
-        is_direct_failure |= reference_prediction != truth
-        is_direct_mismatch |= loop_prediction != reference_prediction
-    return _LogicalVerdicts(
-        logical_failure=is_logical_failure,
-        direct_failure=is_direct_failure,
-        direct_mismatch=is_direct_mismatch,
-    )
+    return is_logical_failure
+
+
+def _predictions(result: result_records.RunResult) -> str:
+    """Each operation's predicted observables, keyed by operation id.
+
+    Each value is one character a bit in observable order, Stim's 01
+    format (sample_detectors obs_out_format), and null for an operation
+    the loop left unanswered. The cell is compact sorted json, the form
+    sinter writes a json cell in (sinter/_data/_csv_out.py:35-37), and a
+    csv reader that types a number would read the bits 01 as 1.
+    """
+    predicted = {}
+    for operation_result in result.operation_results:
+        key = str(operation_result.operation_id)
+        observables = operation_result.logical_observables
+        predicted[key] = _bit_text(observables)
+    return json.dumps(predicted, sort_keys=True, separators=(",", ":"))
+
+
+def _bit_text(bits: Optional[tuple]) -> Optional[str]:
+    """Bits as the characters 0 and 1, or None for no bits."""
+    if bits is None:
+        return None
+    characters = [str(int(bit)) for bit in bits]
+    return "".join(characters)
 
 
 def _throughput_per_microsecond(
@@ -1523,14 +1659,17 @@ def _maxes(samples: dict) -> dict:
     return maxes
 
 
-def _write_trace(shot, run_dir, label: str) -> Optional[str]:
+def _write_trace(
+    shot, run_dir, label: str, only_traced_shot: bool
+) -> Optional[str]:
     """The shot's Chrome trace, when the section asked and named it.
 
-    trace: chrome names the file after the point, under trace/; a path
-    of its own is written where it says, with the shot's seed in the
-    name when trace_shots asks for more than one, so no shot overwrites
-    another's file. Only the shots trace_shots names are written, so a
-    sweep point of two thousand shots writes one file. The file it wrote
+    trace: chrome names the file by the shot's label, its point id and
+    seed, under trace/; a path of its own is written where it says with
+    that label in the name, so no shot overwrites another's file, unless
+    the run traces this shot alone and no other can take the path. Only
+    the shots trace_shots names are written, so a sweep point of two
+    thousand shots writes one file. The file it wrote
     comes back, so the shot's measurement can say where its trace is; a
     shot that was not traced returns None.
     """
@@ -1545,8 +1684,8 @@ def _write_trace(shot, run_dir, label: str) -> Optional[str]:
         trace_dir = run_dir / "trace"
         trace_dir.mkdir(parents=True, exist_ok=True)
         path = trace_dir / f"{label}.trace.json"
-    else:
-        path = trace_path_for_shot(path, shot.seed, observation.trace_shots)
+    elif not only_traced_shot:
+        path = trace_path_for_shot(path, label)
     written = str(path)
     writer.write(written)
     return written

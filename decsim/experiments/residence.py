@@ -22,9 +22,12 @@ import pathlib
 import statistics
 
 import decsim.config as config
+import decsim.experiments.fold as fold
 import decsim.experiments.report as report
 import decsim.experiments.trace_file as trace_file
 
+# a piece's own rows of its traced shots, which a fold gathers
+PIECE_FILE = "residence.csv"
 # what a row counts: a structure's residences, or a link path's moves
 RESIDENCE = "residence"
 LINK_PATH = "link_path"
@@ -47,12 +50,31 @@ def rows_of(measurements: list) -> list:
     return rows
 
 
-def write_residence(rows: list, report_dir: pathlib.Path) -> None:
-    """residence.csv, left unwritten when no shot of the run was traced."""
+def rows_in(folders: list) -> list:
+    """The rows the pieces saved of their traced shots, piece by piece.
+
+    A piece keeps its own, so a collect that ran some pieces and found
+    the rest saved still tables every traced shot. The values stay the
+    text they were written as.
+    """
+    rows = []
+    for folder in folders:
+        path = pathlib.Path(folder) / PIECE_FILE
+        if path.is_file():
+            piece_rows = fold.row_stream(path)
+            rows.extend(piece_rows)
+    return rows
+
+
+def write_residence(rows: list, report_dir: pathlib.Path, swept: dict) -> None:
+    """residence.csv, left unwritten when no shot of the run was traced.
+
+    swept maps each point id to its swept values (run_folder.swept_values).
+    """
     if not rows:
         return
     path = pathlib.Path(report_dir) / "residence.csv"
-    report.write_csv(rows, path)
+    report.write_csv(rows, path, swept)
 
 
 def residence_ticks_by_structure(document) -> dict:

@@ -26,12 +26,14 @@ def _algorithm_spans(folder, card: dict, check_windows_with: str) -> list:
     checked_card = {**card, "observation": observation}
     config_path = yaml_configs.write_config(folder, checked_card)
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=5,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 5,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
-    machine = machine_module.Machine.build(settings)
+    machine = machine_module.Machine.build(point.settings)
     machine.run()
     records = machine.observation.stages.records
     return [

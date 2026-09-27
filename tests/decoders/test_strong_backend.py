@@ -16,6 +16,7 @@ import pytest
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay
+import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -330,6 +331,38 @@ def test_a_split_regions_answer_joins_its_two_parts_decoded_alone():
     expected_observables = decoder_module.bit_tuple(observables)
     assert joined.logical_observables == expected_observables
     assert joined.boundary_data.detector_ids == tuple(sorted(flipped))
+
+
+class _CrashingRelayDecoder:
+    """A relay-bp decoder whose every decode raises, a crashed backend."""
+
+    def __init__(self, *arguments, **keywords) -> None:
+        del arguments, keywords
+
+    def decode_detailed(self, syndrome):
+        del syndrome
+        raise RuntimeError("the relay-bp backend crashed")
+
+
+def _crashing_relay_type():
+    return _CrashingRelayDecoder
+
+
+def test_a_split_region_with_no_correction_in_a_part_carries_its_reason(
+    monkeypatch,
+):
+    """A part whose backend raised leaves the joined region uncorrected."""
+    monkeypatch.setattr(
+        relay_window, "_load_relay_decoder_type", _crashing_relay_type
+    )
+    job = _region_job("0", 0)
+    device = _RelayDevice()
+    decoder = strong_backend.StrongBackendDecoder(device, "apart")
+    joined = decoder.decode(job)
+    backend_error = decoding_records.BackendDecodeStatus.BACKEND_ERROR
+    reasons = decoding_records.BackendFailureReason
+    assert joined.decode_status is backend_error
+    assert joined.no_correction_reason is reasons.UPSTREAM_EXCEPTION
 
 
 def test_decoding_apart_asks_the_window_model_for_detector_types():

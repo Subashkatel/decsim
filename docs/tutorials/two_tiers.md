@@ -28,11 +28,12 @@ the signals and the shapes behind the knobs.
 
 ## Step 1. Read the config
 
-This lesson's config ships with decsim, as `configs/two_tiers.yaml`.
-Both tiers are priced by cards rather than measured, so every tick
-below is the same on your machine as on this page's.
+This lesson's config ships with decsim, as
+`configs/examples/two_tiers.yaml`. Both tiers are priced by cards rather
+than measured, so every tick below is the same on your machine as on
+this page's.
 
-```yaml configs/two_tiers.yaml
+```yaml configs/examples/two_tiers.yaml
 # Two tiers on priced cards, so the whole switching loop is
 # deterministic and the same on every host. The weak card is one
 # syndrome generation time at this sweep's round period and the strong
@@ -40,7 +41,7 @@ below is the same on your machine as on this page's.
 # simulations (arXiv:2510.25222, tau_strong_dec = 10 tau_gen).
 # docs/tutorials/two_tiers.md runs this config. Every key is documented
 # in reference.yaml.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 escalation:
   kind: switching
@@ -84,10 +85,11 @@ strong_decoder:
     release_cycles_per_round: 0
 
 sweep:
-  - physical_error_probability: [0.008]
-    distance: [3, 5]
-    round_period_microseconds: [1.0]
-    shots: 50
+  - axes:
+      workload.arguments.physical_error_probability: [0.008]
+      qpu.distance: [3, 5]
+      qpu.round_period_microseconds: [1.0]
+    collection: {max_shots: 50}
 ```
 
 The `escalation` section is the new part.
@@ -118,11 +120,11 @@ logical failures below are measured and only the time is stated
 One row is chosen for you and matters below. `decsim show` prints it:
 
 ```bash
-decsim show configs/two_tiers.yaml
+decsim show configs/examples/two_tiers.yaml
 ```
 
 ```
-config: configs/two_tiers.yaml <- configs/weak_decoder_baseline.yaml
+config: configs/examples/two_tiers.yaml <- configs/bases/weak_decoder_baseline.yaml
 qpu: kind stim_device
 idle_policy: kind separate_decode_jobs
 links: kind logical_reference
@@ -137,16 +139,16 @@ pauli_frame: kind logical_register
 workload: kind producer
 magic_state_factory: kind infinite
 links: card two_tiers.yaml
-sweep block 1: p [0.008], d [3, 5], round period [1.0] us, 50 shots
+sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distance [3, 5], qpu.round_period_microseconds [1.0]; max_shots 50, min_shots 0, piece_rounds 20000
 log: off
 trace: off
 values:
-clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:50]
-clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
-qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:4]
-qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:81]
-qpu.round_period_microseconds = [1.0]  [sweep, configs/two_tiers.yaml:51-55]
-qpu.distance = [3, 5]  [sweep, configs/two_tiers.yaml:51-55]
+clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:56]
+clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:57]
+qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:4]
+qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:85]
+qpu.round_period_microseconds = [1.0]  [sweep, configs/examples/two_tiers.yaml:51-56]
+qpu.distance = [3, 5]  [sweep, configs/examples/two_tiers.yaml:51-56]
 ```
 
 Below `values:` the list goes on to every value the machine is built
@@ -161,32 +163,34 @@ the strong decoder, and nothing else in this run.
 ## Step 2. Run the sweep
 
 ```bash
-decsim collect configs/two_tiers.yaml --out results/two_tiers
+decsim collect configs/examples/two_tiers.yaml --out results/two_tiers
 ```
 
 The command prints the same resolved config, then one line per point as
 it finishes, then the summary. This is the summary:
 
 ```
-distance: 3
-physical error rate: 0.008
+workload.arguments.physical_error_probability: 0.008
+qpu.distance: 3
+qpu.round_period_microseconds: 1.0
 algorithm: 1 us
-round period: 1 us
 load (service per window / window inter-arrival): 3.67
-logical failures: 15 of 50 shots
-mismatches vs direct PyMatching: 0
+logical failures: 15 of 50 scored shots
+logical error rate among scored shots: 0.3, 95% 0.179 to 0.446 (cap)
+unscored shots: 0 of 50 (0)
 throughput: 0.390 rounds per us
 queue wait, mean: 16.643 us
 service time per window, mean: 5.941 us
 ready to frame commit: median 28.900 us, p99 79.656 us
 
-distance: 5
-physical error rate: 0.008
+workload.arguments.physical_error_probability: 0.008
+qpu.distance: 5
+qpu.round_period_microseconds: 1.0
 algorithm: 1 us
-round period: 1 us
 load (service per window / window inter-arrival): 2.54
-logical failures: 16 of 50 shots
-mismatches vs direct PyMatching: 0
+logical failures: 16 of 50 scored shots
+logical error rate among scored shots: 0.32, 95% 0.195 to 0.467 (cap)
+unscored shots: 0 of 50 (0)
 throughput: 0.525 rounds per us
 queue wait, mean: 14.916 us
 service time per window, mean: 6.964 us
@@ -194,7 +198,7 @@ ready to frame commit: median 28.368 us, p99 70.340 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/two_tiers/sweep.csv
+every column: results/two_tiers/combined/two_tiers-ab2ef497/sweep.csv
 ```
 
 Read `service time per window, mean` against the weak card of one
@@ -216,12 +220,12 @@ A sweep gives averages. To see one window escalate you need the trace,
 so run a single shot with `--trace`.
 
 ```bash
-decsim run configs/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
+decsim run configs/examples/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
 ```
 
 ```
 config: two_tiers
-point: p0.008 d3 round period 1 us seed 1
+point: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.008} seed 1
 terminal status: complete
 execution done: 30000000 ticks
 fully done: 80316000 ticks
@@ -233,12 +237,12 @@ run dir: results/two_tiers_shot
 
 ```bash
 decsim trace follow \
-  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/*_seed1.trace.json \
   --window 1:0
 ```
 
 ```
-window 1:0 of decsim switching d3 p0.008 seed1
+window 1:0 of decsim switching d3 seed1
 
 tick (us)  where                        what                                                          dur (us)  transfer  bits
 6.008      Window planner               W0 ready
@@ -289,12 +293,12 @@ costs.
 
 ```bash
 decsim trace follow \
-  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/*_seed1.trace.json \
   --window 1:3
 ```
 
 ```
-window 1:3 of decsim switching d3 p0.008 seed1
+window 1:3 of decsim switching d3 seed1
 
 tick (us)  where                            what                                                           dur (us)  transfer  bits
 15.008     Window planner                   W3 ready
@@ -391,12 +395,12 @@ The window behind it waits for that boundary. Follow window 4:
 
 ```bash
 decsim trace follow \
-  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/*_seed1.trace.json \
   --window 1:4
 ```
 
 ```
-window 1:4 of decsim switching d3 p0.008 seed1
+window 1:4 of decsim switching d3 seed1
 
 tick (us)  where                            what                                                           dur (us)  transfer  bits
 18.008     Window planner                   W4 ready

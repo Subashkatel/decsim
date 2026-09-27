@@ -731,3 +731,4 @@ A workload row: what makes the operations the machine runs.
 | Method | What it does |
 | --- | --- |
 | `workload` | The row's workload at one sweep point. |
+| `maker` | What made the workload: its function, arguments and version. |

@@ -11,6 +11,7 @@ subtraction.
 """
 
 import dataclasses
+import math
 from typing import Optional
 
 import decsim.config as config
@@ -87,13 +88,20 @@ class ComplementaryGap:
         return config.microseconds_to_ticks(self.walk_microseconds)
 
     def _gap_of(self, solves: tuple) -> Optional[decoding_records.SoftOutput]:
-        """|w(class 1) - w(class 0)|, or None when a weight is missing."""
+        """|w(class 1) - w(class 0)|, or None when a weight is missing.
+
+        A class no correction reaches weighs +inf, so the gap to it is
+        +inf and the decoder is certain of the other class; with no
+        class reachable there is no ratio and no gap.
+        """
         weights = []
         for solve in solves:
             if solve.forced_class_weight is None:
                 return None
             weights.append(solve.forced_class_weight)
         decoded_class_weight = min(weights)
+        if decoded_class_weight == math.inf:
+            return None
         complementary_class_weight = max(weights)
         gap = complementary_class_weight - decoded_class_weight
         return decoding_records.SoftOutput(

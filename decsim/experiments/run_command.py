@@ -36,7 +36,7 @@ def run_one_shot(
     Returns the lines the command prints. The shot writes a run folder as
     a collect does (run_folder.py): the manifest, the config, the point's
     every value and its workload, the result, the QPU's commands, and the
-    log and the trace when this run asked for them, the finished flag last.
+    log and the trace when this run asked for them.
     """
     config = experiment.load_experiment(config_path)
     task = config.first_point_task()
@@ -45,14 +45,15 @@ def run_one_shot(
     shot_settings = task.shot_settings()
     machine = config.built_machine(shot_settings, seed)
     run_dir = run_folder.run_dir_for(config, out_dir)
-    started_utc = run_folder.start_run(config, run_dir)
-    run_folder.write_producer(run_dir, settings.workload)
-    run_folder.record_point(run_dir, task, [(seed, 1)])
+    point_id = task.strong_id()
+    started_utc = run_folder.start_run(config, run_dir, [point_id])
+    sections = config.resolved_sections(task.metadata)
+    run_folder.record_point(run_dir, task, [(seed, 1)], sections)
     result = machine.run()
-    label = measure.shot_label(settings, seed)
+    label = measure.shot_label(point_id, seed)
     write_shot(machine, settings, run_dir, label, result)
-    run_folder.finish_run(config, run_dir, started_utc)
-    return _result_lines(config, settings, seed, result, run_dir)
+    run_folder.finish_run(config, run_dir, [point_id], started_utc)
+    return _result_lines(config, task, seed, result, run_dir)
 
 
 def main(argv: list) -> None:
@@ -204,18 +205,16 @@ def _trace_path(observation, run_dir: pathlib.Path, label: str) -> pathlib.Path:
 
 def _result_lines(
     config,
-    settings: machine_settings.MachineSettings,
+    task: collect.Task,
     seed: int,
     result: result_records.RunResult,
     run_dir: pathlib.Path,
 ) -> list:
     """The point, the terminal status, the ticks and every result."""
+    metadata = collect.metadata_text(task.metadata)
     lines = [
         f"config: {config.name}",
-        f"point: p{settings.workload.physical_error_probability:g} "
-        f"d{settings.qpu.distance} "
-        f"round period {settings.qpu.round_period_microseconds:g} us "
-        f"seed {seed}",
+        f"point: {metadata} seed {seed}",
         f"terminal status: {result.terminal_status}",
         f"execution done: {result.execution_done_ticks} ticks",
         f"fully done: {result.fully_done_ticks} ticks",

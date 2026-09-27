@@ -1,0 +1,21 @@
+# Priced cards: the decoder costs a stated number, not a measured one.
+extends: ../bases/weak_decoder_baseline.yaml
+
+weak_decoder:
+  kind: 1.0
+  units: 1
+  unit_memory:
+    bits: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    fetch_cycles_per_job: 0
+    release_cycles_per_job: 10
+    release_cycles_per_round: 0
+
+sweep:
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [3, 5, 7]
+      qpu.round_period_microseconds: [1.0]
+    collection: {max_shots: 20}

@@ -2,7 +2,7 @@
 
 A run folder records only facts that add up, so folding folders is
 reading their rows and adding them. The rows are what an experiment
-has most of: the 500 shard folders of one weak_ler sweep hold
+has most of: the 500 folders of one weak_ler sweep hold
 115 million link rows and 10.5 million shot rows, and one row as a dict
 of typed Python values costs about a kilobyte, so reading them into
 lists costs a hundred gigabytes. This module holds what the fold needs
@@ -120,7 +120,7 @@ def merged_rows(paths: list, key):
 
     `key` gives a row its place in that order. A path with no file is a
     folder that wrote no row of this kind and is skipped, which is what
-    a shard whose index selected no work unit leaves behind.
+    a folder that ran no sweep leaves behind.
     """
     streams = []
     for path in paths:
@@ -162,10 +162,10 @@ class ExactSum:
 
     `total` rounds that list once, so it is the sum math.fsum returns
     for the same values in any order, and a mean folded over an
-    experiment's shards is the mean one process would have computed, to
+    experiment's folders is the mean one process would have computed, to
     the last bit.
     A plain running float sum would not be: it would move the last bits
-    of every mean column with the order the shards came in.
+    of every mean column with the order the folders came in.
     """
 
     def __init__(self) -> None:
@@ -281,21 +281,23 @@ class RowTotals:
 class RowFile:
     """One csv file written as its rows arrive, never held and then written.
 
-    The header is the first row's keys, which is where `write_csv` takes
-    it from, and a file whose first row never came is not created, which
-    is the rule a run folder's files keep for a run that had nothing to
-    put in them.
+    The header is every column the file's rows hold, known before the
+    first row comes, and a row's cell for a column it does not hold is
+    empty: `write_csv`'s rule. A file whose first row never came is not
+    created, which is the rule a run folder's files keep for a run that
+    had nothing to put in them.
     """
 
-    def __init__(self, path: pathlib.Path) -> None:
+    def __init__(self, path: pathlib.Path, field_names: list) -> None:
         self.path = path
+        self.field_names = field_names
         self.handle = None
         self.writer = None
 
     def write(self, row: dict) -> None:
         """One row; the first one opens the file and writes the header."""
         if self.writer is None:
-            self._open(row)
+            self._open()
         self.writer.writerow(row)
 
     def close(self) -> None:
@@ -310,11 +312,10 @@ class RowFile:
     def __exit__(self, *_exception) -> None:
         self.close()
 
-    def _open(self, row: dict) -> None:
-        """The file and its header, the first row naming the columns."""
-        field_names = list(row)
+    def _open(self) -> None:
+        """The file and its header."""
         self.handle = open(self.path, "w", newline="")
-        self.writer = csv.DictWriter(self.handle, fieldnames=field_names)
+        self.writer = csv.DictWriter(self.handle, fieldnames=self.field_names)
         self.writer.writeheader()
 
 
@@ -340,7 +341,7 @@ def _refuse_a_row_out_of_order(path: pathlib.Path, place, previous) -> None:
     if place >= previous:
         return
     raise refusal.RefusalError(
-        f"{path} holds a row at {place} after a row at {previous}; combine "
-        "merges the folders' rows, and a run folder holds its rows in the "
-        "order the sweep ran them, its task position and then its seed"
+        f"{path} holds a row at {place} after a row at {previous}; a fold "
+        "merges the pieces' rows, and a piece holds its rows in the order "
+        "the sweep ran them, its task position and then its seed"
     )

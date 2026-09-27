@@ -14,6 +14,7 @@ STRONG_WINDOW_SHAPES is the geometry the strong tier re-decodes
 
 import csv
 import dataclasses
+import fractions
 import math
 import pathlib
 from collections.abc import Mapping
@@ -237,7 +238,10 @@ class EscalationSettings:
     they overlap. A Python-built policy is used as it is. The
     threshold in nats and the online threshold source are set per sweep
     point by the experiments layer; base_directory resolves a relative
-    threshold_table.
+    threshold_table. base_directory is a label, no part of a point's
+    id: the threshold the table gives a point is set on its settings
+    (experiments/experiment.py _point_task_of), so the value names the
+    point and the folder the table sits in does not.
     """
 
     clock: Optional[config.Clock] = None
@@ -257,7 +261,9 @@ class EscalationSettings:
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
     online_threshold: Optional[ports.ThresholdSource] = None
-    base_directory: Optional[pathlib.Path] = None
+    base_directory: Optional[pathlib.Path] = dataclasses.field(
+        compare=False, default=None
+    )
 
     def __post_init__(self) -> None:
         config.check_cycles(
@@ -316,18 +322,20 @@ class EscalationSettings:
             )
         return _switching_settings(kind, section, base_directory, clock)
 
-    def threshold_nats_for(
-        self, physical_error_probability: float, distance: int
-    ) -> Optional[float]:
+    def threshold_nats_for(self, resolved: Mapping) -> Optional[float]:
         """The sweep point's threshold in nats, per threshold_source.
 
         fixed and online read the card (online starts there and adapts);
-        table looks the point up in the calibration csv (columns
-        distance and p, then one threshold column per method, in dB;
-        Toshio et al. 2510.25222 Sec. III B sets g_th by brute force
+        table looks the point up in the calibration csv and refuses a
+        point the table does not certify, instead of guessing. The
+        table's key columns are headed by yaml paths
+        (qpu.distance, workload.arguments.physical_error_probability),
+        each matched against the value at that path in the point's
+        resolved sections, so a point that sweeps neither still finds
+        its row; every other column is one method's threshold in dB
+        (Toshio et al. 2510.25222 Sec. III B sets g_th by brute force
         over P_L(g_th), lines 855-863, or as the smallest g_th with
-        P_L,th(g_th) <= epsilon P_L,strong, Eq. (4) at line 890) and
-        refuses a point the table does not certify, instead of guessing.
+        P_L,th(g_th) <= epsilon P_L,strong, Eq. (4) at line 890).
         """
         if not self._decides_on_a_confidence():
             return None
@@ -337,27 +345,16 @@ class EscalationSettings:
         table_path = self._table_path()
         rows = _table_rows(table_path, self.threshold_column)
         for row in rows:
-            if _is_point(row, physical_error_probability, distance):
+            point = _point_at(row, resolved, table_path)
+            if _is_point(row, point):
                 cell = row[self.threshold_column]
                 return _certified_nats(
-                    cell,
-                    table_path,
-                    self.threshold_column,
-                    physical_error_probability,
-                    distance,
+                    cell, table_path, self.threshold_column, point
                 )
-        calibrated_points = []
-        for row in rows:
-            calibrated_points.append((int(row["distance"]), float(row["p"])))
-        calibrated_points.sort()
-        raise ValueError(
-            f"threshold_table {table_path} has no row for d={distance} "
-            f"p={physical_error_probability}; calibrated points: "
-            f"{calibrated_points}"
-        )
+        _refuse_a_point_off_the_table(rows, resolved, table_path)
 
     def online_threshold_for(
-        self, physical_error_probability: float, distance: int
+        self, resolved: Mapping
     ) -> Optional[ports.ThresholdSource]:
         """The row's own source for this sweep point, when it builds one.
 
@@ -375,10 +372,7 @@ class EscalationSettings:
         if not row.built_per_sweep_point:
             return None
         return row.for_sweep_point(
-            self.online,
-            self.gap_threshold_nats,
-            physical_error_probability,
-            distance,
+            self.online, self.gap_threshold_nats, resolved
         )
 
     def _threshold_row(self):
@@ -614,45 +608,100 @@ def _listed(keys: tuple) -> str:
 
 
 def _table_rows(table_path: pathlib.Path, column: str) -> list:
+    """The table's rows, which name the threshold column and a key column.
+
+    A table with no key column would match every point to its first row,
+    a wrong threshold with no sign of it, so it is refused.
+    """
     with open(table_path, newline="") as table_file:
         reader = csv.DictReader(table_file)
         rows = list(reader)
-    if rows and column not in rows[0]:
-        columns = sorted(rows[0])
+    if not rows:
+        return rows
+    columns = list(rows[0])
+    if column not in columns:
         raise ValueError(
             f"threshold_table {table_path} has no column {column!r}; its "
-            f"columns are {columns}"
+            f"columns are {sorted(columns)}"
+        )
+    key_columns = _key_columns(columns)
+    if not key_columns:
+        raise ValueError(
+            f"threshold_table {table_path} has no key column; a key column "
+            "is headed by the yaml path of the setting it matches, as "
+            "qpu.distance"
         )
     return rows
 
 
-def _is_point(row: dict, physical_error_probability: float, distance) -> bool:
-    row_distance = int(row["distance"])
-    if row_distance != distance:
-        return False
-    row_probability = float(row["p"])
-    return math.isclose(
-        row_probability, physical_error_probability, rel_tol=1e-9
+def _key_columns(columns: list) -> list:
+    """The columns headed by a yaml path, which name a table's points."""
+    keys = []
+    for column in columns:
+        if "." in column:
+            keys.append(column)
+    return keys
+
+
+def _point_at(row: dict, resolved: Mapping, table_path) -> dict:
+    """The point's value at each of the table's key columns."""
+    point = {}
+    reader = f"threshold_table {table_path}"
+    for column in _key_columns(list(row)):
+        point[column] = config.setting_at(resolved, column, reader)
+    return point
+
+
+def _is_point(row: dict, point: dict) -> bool:
+    """Whether every key cell of the row holds the point's value."""
+    for column, value in point.items():
+        if not _cell_holds(row[column], value):
+            return False
+    return True
+
+
+def _cell_holds(cell: str, value) -> bool:
+    """Whether a cell holds a value: a float within a relative 1e-9.
+
+    A float written out as text reads back within that. A whole number
+    is written exactly, so it is compared exactly, and any other value
+    is compared as its text.
+    """
+    if not config.is_number(value):
+        return cell == str(value)
+    if isinstance(value, int):
+        return fractions.Fraction(cell) == value
+    number = float(cell)
+    return math.isclose(number, value, rel_tol=1e-9)
+
+
+def _refuse_a_point_off_the_table(
+    rows: list, resolved: Mapping, table_path
+) -> None:
+    """The point, and the points the table does certify."""
+    point = {}
+    calibrated = []
+    for row in rows:
+        point = _point_at(row, resolved, table_path)
+        keys = {}
+        for column in point:
+            keys[column] = row[column]
+        calibrated.append(keys)
+    raise ValueError(
+        f"threshold_table {table_path} has no row for {point}; its rows "
+        f"are {calibrated}"
     )
 
 
 def _certified_nats(
-    cell: str,
-    table_path: pathlib.Path,
-    column: str,
-    physical_error_probability: float,
-    distance: int,
+    cell: str, table_path: pathlib.Path, column: str, point: dict
 ) -> float:
     if cell == "":
         raise ValueError(
-            f"threshold_table {table_path} refuses d={distance} "
-            f"p={physical_error_probability}: the {column} entry is empty "
-            "(not enough evidence at calibration time)"
+            f"threshold_table {table_path} refuses {point}: the {column} "
+            "entry is empty (not enough evidence at calibration time)"
         )
-    entry = (
-        f"threshold_table {table_path} entry {column} at d={distance} "
-        f"p={physical_error_probability}"
-    )
+    entry = f"threshold_table {table_path} entry {column} at {point}"
     try:
         gap_threshold_db = float(cell)
     except ValueError:

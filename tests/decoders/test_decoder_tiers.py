@@ -10,6 +10,7 @@ import pytest
 
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.experiments.experiment as experiment
+import decsim.experiments.measure as measure
 import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
 
@@ -37,16 +38,18 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path, seed):
         },
     )
     config = experiment.load_experiment(config_path)
-    measurement = yaml_configs.measure_point_shot(
+    shot = yaml_configs.point_shot(
         config,
         physical_error_probability=0.005,
         distance=3,
         round_period_microseconds=1.0,
         seed=seed,
     )
+    measurement = measure.measure_shot(shot)
+    loop = yaml_configs.loop_predictions(shot)
     assert measurement.algorithm == "pymatching"
-    assert measurement.windows > 0
-    assert not measurement.direct_mismatch
+    assert measurement.decoded_windows > 0
+    assert loop == yaml_configs.whole_circuit_predictions(shot)
 
 
 def test_strong_unit_runs_belief_matching(tmp_path):
@@ -63,7 +66,7 @@ def test_strong_unit_runs_belief_matching(tmp_path):
         seed=0,
     )
     assert measurement.algorithm == "belief_matching"
-    assert measurement.windows > 0
+    assert measurement.decoded_windows > 0
     assert not measurement.logical_failure
 
 
@@ -89,11 +92,14 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings)
     machine.run()
     cycle_count = settings.weak_decoder.row_settings.cycle_count
@@ -122,11 +128,14 @@ def test_a_measured_table_tier_is_held_by_the_measured_line(tmp_path):
     card.update(strong_decoder)
     config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=5,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 5,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings)
     machine.run()
     algorithm = _algorithm_records(machine)

@@ -54,6 +54,27 @@ class SoftOutputComputation:
     ticks: int = 0
 
 
+@dataclass(frozen=True)
+class WindowConfidence:
+    """One window's confidence gap as the verdict read it.
+
+    gap_nats is None when the signal gave no gap, a window whose model
+    pins no observable or whose decode grew no cluster, and the policy
+    escalates such a window (decsim/escalation/policies.py).
+    is_strong_revised says whether the strong decode predicted other
+    observables than the weak one it replaced, None for a window that
+    did not escalate or whose strong answer never came: a window has no
+    truth of its own, so this is the one per-window answer to whether
+    the weak decode was wrong (Toshio et al. 2510.25222 lines 807-841
+    sign the gap by exactly that).
+    """
+
+    window_key: tuple
+    gap_nats: Optional[float]
+    is_escalated: bool
+    is_strong_revised: Optional[bool]
+
+
 # ---- consumer hold tokens: who keeps rounds in a syndrome buffer and why
 #
 # Every token answers referenced_operation_ids: the operations it keeps

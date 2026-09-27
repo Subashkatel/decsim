@@ -34,7 +34,7 @@ import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
-import decsim.observe.decode_records as decode_records
+import decsim.records.decoding as decoding_records
 import tests.experiments.yaml_configs as yaml_configs
 
 CANCELLING = (1e100, 1.0, -1e100, 1.0)
@@ -826,10 +826,10 @@ def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
     """A gapless window escalates as the least confident: its shot's too."""
     ten_decibels_in_nats = 2.302585092994046
     windows = (
-        decode_records.WindowConfidence(
+        decoding_records.WindowConfidence(
             (1, 0), ten_decibels_in_nats, False, None
         ),
-        decode_records.WindowConfidence((1, 1), None, True, None),
+        decoding_records.WindowConfidence((1, 1), None, True, None),
     )
     confidence = measure.ShotConfidence("complementary_gap", windows, True)
     shot = types.SimpleNamespace(

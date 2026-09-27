@@ -132,27 +132,6 @@ class DecodeRecordLedger:
         self.services.append(record)
 
 
-@dataclasses.dataclass(frozen=True)
-class WindowConfidence:
-    """One window's confidence gap as the verdict read it.
-
-    gap_nats is None when the signal gave no gap, a window whose model
-    pins no observable or whose decode grew no cluster, and the policy
-    escalates such a window (escalation/policies.py). is_strong_revised
-    says whether the strong decode predicted other observables than the
-    weak one it replaced, None for a window that did not escalate or
-    whose strong answer never came: a window has no truth of its own, so
-    this is the one per-window answer to whether the weak decode was
-    wrong (Toshio et al. 2510.25222 lines 807-841 sign the gap by
-    exactly that).
-    """
-
-    window_key: tuple
-    gap_nats: Optional[float]
-    is_escalated: bool
-    is_strong_revised: Optional[bool]
-
-
 class ConfidenceLedger:
     """Each window's confidence gap, verdict and strong answer, as they end."""
 
@@ -183,7 +162,7 @@ class ConfidenceLedger:
             self.escalated_keys.add(key)
 
     def windows(self) -> tuple:
-        """One WindowConfidence per window the verdict read, in window order."""
+        """One WindowConfidence per window the verdict read, in order."""
         confidences = []
         keys = sorted(self.verdict_results, key=_window_order)
         for key in keys:
@@ -191,7 +170,7 @@ class ConfidenceLedger:
             confidences.append(confidence)
         return tuple(confidences)
 
-    def _confidence_of(self, key: tuple) -> WindowConfidence:
+    def _confidence_of(self, key: tuple) -> decoding_records.WindowConfidence:
         result = self.verdict_results[key]
         is_escalated = key in self.escalated_keys
         is_strong_revised = None
@@ -201,7 +180,9 @@ class ConfidenceLedger:
         gap = None
         if result.soft_output is not None:
             gap = result.soft_output.gap
-        return WindowConfidence(key, gap, is_escalated, is_strong_revised)
+        return decoding_records.WindowConfidence(
+            key, gap, is_escalated, is_strong_revised
+        )
 
 
 def _window_order(key: tuple) -> tuple:

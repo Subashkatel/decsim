@@ -79,7 +79,7 @@ def test_a_kept_window_has_its_gap_and_no_strong_answer():
     ledger.request_ended(job, kept, WEAK_KEPT, 40)
 
     (window,) = ledger.windows()
-    assert window == decode_records.WindowConfidence((1, 0), 5.0, False, None)
+    assert window == decoding_records.WindowConfidence((1, 0), 5.0, False, None)
 
 
 def test_an_escalated_window_the_strong_tier_answered_otherwise_is_revised():
@@ -95,7 +95,7 @@ def test_an_escalated_window_the_strong_tier_answered_otherwise_is_revised():
     ledger.request_ended(job, strong, STRONG_ANSWER, 90)
 
     (window,) = ledger.windows()
-    assert window == decode_records.WindowConfidence((1, 0), 0.5, True, True)
+    assert window == decoding_records.WindowConfidence((1, 0), 0.5, True, True)
 
 
 def test_a_window_the_signal_gave_no_gap_is_listed_with_none():

@@ -16,6 +16,7 @@ src/mem/cache/mshr.hh, the TargetList targets).
 import functools
 
 import decsim.config as config
+import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
@@ -24,7 +25,6 @@ import decsim.escalation.policies as escalation_policies
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-from decsim.decoders.decoder_manager import DecoderManager
 
 DECODE_MICROSECONDS = 4.0
 
@@ -124,7 +124,7 @@ def _manager(engine, unit_count):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,

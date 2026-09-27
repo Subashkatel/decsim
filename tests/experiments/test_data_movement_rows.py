@@ -12,11 +12,11 @@ and an accelerator's access costs what the memory it reads costs (Dally,
 CACM 2020 lines 231-234), so the classes are not summed into one count.
 """
 
+import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
+import decsim.experiments.experiment as experiment
 import decsim.experiments.report as sweep_report
-from decsim.experiments.collect_command import run_experiment
-from decsim.experiments.experiment import load_experiment
-from tests.experiments.yaml_configs import measure_point_shot, write_config
+import tests.experiments.yaml_configs as yaml_configs
 
 COUNTING_SWEEP = {
     "observation": {"data_movement": True},
@@ -64,10 +64,10 @@ ESCALATING_SWEEP = {
 
 def measured_shots(config_path, count, probability=0.001):
     """That config's first point, one measured shot per seed."""
-    config = load_experiment(config_path)
+    config = experiment.load_experiment(config_path)
     measurements = []
     for seed in range(count):
-        measurement = measure_point_shot(
+        measurement = yaml_configs.measure_point_shot(
             config,
             physical_error_probability=probability,
             distance=3,
@@ -88,7 +88,7 @@ def lines_starting_with(lines, opening):
 
 
 def test_a_shots_rows_add_up_to_that_shots_own_counters(tmp_path):
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 1)
     rows = sweep_report.shot_data_movement_rows(measurements)
     counted = measurements[0].data_movement
@@ -118,7 +118,7 @@ def test_a_shots_rows_add_up_to_that_shots_own_counters(tmp_path):
 
 
 def test_each_rows_memory_class_is_the_one_the_counters_placed(tmp_path):
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 1)
     rows = sweep_report.shot_data_movement_rows(measurements)
     class_by_path = {}
@@ -133,7 +133,7 @@ def test_each_rows_memory_class_is_the_one_the_counters_placed(tmp_path):
 
 
 def test_a_memory_class_row_is_that_classs_paths_over_the_shots(tmp_path):
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 2)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
     point_rows = sweep_report.data_movement_rows(shot_rows)
@@ -152,7 +152,7 @@ def test_a_memory_class_row_is_that_classs_paths_over_the_shots(tmp_path):
 
 
 def test_the_class_rows_are_listed_cheapest_first(tmp_path):
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 1)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
     point_rows = sweep_report.data_movement_rows(shot_rows)
@@ -170,7 +170,7 @@ def test_a_references_column_counts_one_shots_holds_once(tmp_path):
     It repeats on every row of one shot, so the point row divides by the
     shots and not by the rows.
     """
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 2)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
     point_rows = sweep_report.data_movement_rows(shot_rows)
@@ -193,7 +193,7 @@ def test_a_path_only_some_shots_took_still_carries_the_points_holds(
     alone would divide a whole-shot counter by the wrong number of
     shots.
     """
-    config_path = write_config(tmp_path, ESCALATING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, ESCALATING_SWEEP)
     measurements = measured_shots(config_path, 8, probability=0.005)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
     point_rows = sweep_report.data_movement_rows(shot_rows)
@@ -220,7 +220,7 @@ def _shots_with_a_path(shot_rows: list, ending: str) -> int:
 def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
     """observation.data_movement off means no counts, which is not zero."""
     monkeypatch.chdir(tmp_path)
-    silent_path = write_config(
+    silent_path = yaml_configs.write_config(
         tmp_path,
         {
             "sweep": [
@@ -233,7 +233,7 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
             ]
         },
     )
-    run_dir, rows = run_experiment(silent_path)
+    run_dir, rows = collect_command.run_experiment(silent_path)
     lines = sweep_report.terminal_lines(rows, run_dir)
     movement_path = run_dir / "shot_data_movement.csv"
     point_path = run_dir / "data_movement.csv"
@@ -247,8 +247,8 @@ def test_a_counting_run_writes_both_files_and_the_terminal_lines(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
-    run_dir, rows = run_experiment(config_path)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
+    run_dir, rows = collect_command.run_experiment(config_path)
     lines = sweep_report.terminal_lines(rows, run_dir)
     copied = lines_starting_with(lines, "bits copied per shot")
     moved = lines_starting_with(lines, "bits moved per shot")
@@ -265,7 +265,7 @@ def test_a_counting_run_writes_both_files_and_the_terminal_lines(
 
 def test_combining_two_shards_gives_the_whole_runs_movement_rows(tmp_path):
     """The fold's precondition: the file adds, so shards equal one run."""
-    config_path = write_config(tmp_path, COUNTING_SWEEP)
+    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     whole_dir = tmp_path / "whole"
     first_dir = tmp_path / "shard0"
     second_dir = tmp_path / "shard1"

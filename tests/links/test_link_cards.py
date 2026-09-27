@@ -7,11 +7,10 @@ cycles of a named clock), and decsim/links/link_profiles.from_yaml.
 import pytest
 
 import decsim.config as config_module
+import decsim.experiments.experiment as experiment
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
-from decsim.config import microseconds_to_ticks
-from decsim.experiments.experiment import load_experiment
 
 CARD_YAML = (
     "qpu: {kind: stim_device}\n"
@@ -64,11 +63,11 @@ def _load_readout_card(card):
 def test_the_setup_cost_key_reaches_the_path(tmp_path):
     card_path = tmp_path / "overhead_card.yaml"
     card_path.write_text(CARD_YAML)
-    config = load_experiment(card_path)
+    config = experiment.load_experiment(card_path)
     card = config.settings.links
     assert (
         card.weak_buffer_to_weak_decoder.setup_ticks
-        == microseconds_to_ticks(0.4)
+        == config_module.microseconds_to_ticks(0.4)
     )
     assert card.decoder_to_decoder.setup_ticks == 0
 
@@ -76,7 +75,7 @@ def test_the_setup_cost_key_reaches_the_path(tmp_path):
 def test_the_header_key_reaches_the_path(tmp_path):
     card_path = tmp_path / "header_card.yaml"
     card_path.write_text(CARD_YAML)
-    config = load_experiment(card_path)
+    config = experiment.load_experiment(card_path)
     card = config.settings.links
     assert card.decoder_to_decoder.header_bits_per_transfer == 448
     assert card.weak_decoder_to_frame.header_bits_per_transfer == 0
@@ -85,7 +84,7 @@ def test_the_header_key_reaches_the_path(tmp_path):
 def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):
     card_path = tmp_path / "card.yaml"
     card_path.write_text(CARD_YAML)
-    config = load_experiment(card_path)
+    config = experiment.load_experiment(card_path)
     card = config.settings.links
     assert (
         card.weak_buffer_to_weak_decoder.channel.name
@@ -93,7 +92,7 @@ def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):
     )
     assert (
         card.weak_buffer_to_weak_decoder.channel.propagation_latency_ticks
-        == microseconds_to_ticks(1.0)
+        == config_module.microseconds_to_ticks(1.0)
     )
     store_capacity = card.controller_to_weak_buffer.channel.capacity
     store_rate = store_capacity.exact_aggregate_bits_per_microsecond()
@@ -126,7 +125,7 @@ def test_a_readout_hop_the_yaml_never_wrote_keeps_its_own_cost_inside(
     text = _card_yaml_without_the_readout_hop()
     card_path = tmp_path / "no_readout_hop.yaml"
     card_path.write_text(text)
-    config = load_experiment(card_path)
+    config = experiment.load_experiment(card_path)
     card = config.settings.links
     assert card.qpu_to_controller.excludes_receiver_processing is False
     assert card.controller_to_weak_buffer.excludes_receiver_processing
@@ -142,7 +141,7 @@ def test_a_separate_readout_cost_is_refused_on_an_uncarded_readout_hop(
     )
     card_path = tmp_path / "double_charged.yaml"
     card_path.write_text(text)
-    config = load_experiment(card_path)
+    config = experiment.load_experiment(card_path)
     settings = config.point_settings(
         physical_error_probability=0.001,
         distance=3,
@@ -307,7 +306,9 @@ def test_a_protocol_card_reaches_the_channel_counted_on_its_clock():
     assert protocol.kind == "credit"
     assert protocol.row_settings.receive_buffer_frames == 1
     assert protocol.row_settings.framing.row_settings.flit_bits == 8
-    assert protocol.clock.period_ticks == microseconds_to_ticks(0.004)
+    assert protocol.clock.period_ticks == config_module.microseconds_to_ticks(
+        0.004
+    )
 
 
 def test_a_protocol_off_the_table_is_refused_naming_the_rows():
@@ -343,7 +344,7 @@ def test_a_credit_protocol_without_its_buffer_is_refused():
 
 def _built_from(tmp_path, overrides: dict):
     config_path = yaml_configs.write_config(tmp_path, overrides)
-    experiment_config = load_experiment(config_path)
+    experiment_config = experiment.load_experiment(config_path)
     settings = experiment_config.point_settings(
         physical_error_probability=0.008,
         distance=3,

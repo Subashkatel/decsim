@@ -36,9 +36,9 @@ noiseless model leaves behind. Thresholds are calibrated per weight
 step.
 """
 
+import fractions
 import math
 import time
-from fractions import Fraction
 from typing import Optional, Union
 
 import decsim.config as config
@@ -181,8 +181,8 @@ def gap_half_ticks_to_natural_log_weight(
     """
     if gap_half_ticks == math.inf:
         return math.inf
-    half_ticks = Fraction(gap_half_ticks, 2)
-    step = Fraction.from_float(weight_step)
+    half_ticks = fractions.Fraction(gap_half_ticks, 2)
+    step = fractions.Fraction.from_float(weight_step)
     exact_gap_nats = half_ticks * step
     try:
         return float(exact_gap_nats)

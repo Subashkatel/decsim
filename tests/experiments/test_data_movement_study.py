@@ -13,7 +13,7 @@ carries no setting axis, so each combination is its own yaml through
 import pytest
 
 import decsim.experiments.experiment as experiment
-from tests.experiments.yaml_configs import CONFIGS_DIR
+import tests.experiments.yaml_configs as yaml_configs
 
 BASE = "data_movement.yaml"
 INPUT_IN_PLACE = "data_movement_input_in_place.yaml"
@@ -24,7 +24,7 @@ STUDY_CONFIGS = (BASE, INPUT_IN_PLACE, FOLD_IN_PLACE, SWITCHING)
 
 def study_settings(name):
     """One study config's resolved settings."""
-    config_path = CONFIGS_DIR / name
+    config_path = yaml_configs.CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
     return config.settings
 
@@ -79,7 +79,7 @@ def test_every_study_config_counts_its_data_movement():
 
 def swept_distances(name):
     """Every code distance one config's sweep blocks name."""
-    config_path = CONFIGS_DIR / name
+    config_path = yaml_configs.CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
     distances = set()
     for block in config.sweep:
@@ -116,12 +116,10 @@ def _both_in_place_config(tmp_path):
     """The study's base yaml with both in-place settings named at once."""
     import yaml
 
-    from tests.experiments.yaml_configs import MINIMAL_CONFIG
-
-    weak = dict(MINIMAL_CONFIG["weak_decoder"])
+    weak = dict(yaml_configs.MINIMAL_CONFIG["weak_decoder"])
     weak["input"] = "in_place"
     weak["boundary_fold"] = "in_place"
-    raw = dict(MINIMAL_CONFIG)
+    raw = dict(yaml_configs.MINIMAL_CONFIG)
     raw["weak_decoder"] = weak
     raw["sweep"] = [
         {

@@ -47,7 +47,7 @@ import csv
 import heapq
 import math
 import operator
-from pathlib import Path
+import pathlib
 
 import decsim.experiments.refusal as refusal
 
@@ -97,14 +97,14 @@ def number_of(value):
     return value
 
 
-def header_of(path: Path) -> list:
+def header_of(path: pathlib.Path) -> list:
     """One csv file's column names, read without its rows."""
     with open(path, newline="") as handle:
         reader = csv.reader(handle)
         return next(reader, [])
 
 
-def row_stream(path: Path):
+def row_stream(path: pathlib.Path):
     """One csv file's rows, one alive at a time, values as their text.
 
     The values stay text because a fold writes most of them straight
@@ -287,7 +287,7 @@ class RowFile:
     put in them.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: pathlib.Path) -> None:
         self.path = path
         self.handle = None
         self.writer = None
@@ -318,7 +318,7 @@ class RowFile:
         self.writer.writeheader()
 
 
-def _keyed_rows(path: Path, key):
+def _keyed_rows(path: pathlib.Path, key):
     """One file's rows with their places, refusing a file out of order.
 
     A merge assumes its inputs are sorted, so a file whose rows go
@@ -335,7 +335,7 @@ def _keyed_rows(path: Path, key):
         yield (place, row)
 
 
-def _refuse_a_row_out_of_order(path: Path, place, previous) -> None:
+def _refuse_a_row_out_of_order(path: pathlib.Path, place, previous) -> None:
     """A run folder holds its rows in the order the run wrote them."""
     if place >= previous:
         return

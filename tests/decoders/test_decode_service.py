@@ -15,6 +15,7 @@ request whose tier the pipelined model must accept.
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
@@ -28,7 +29,6 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import tests.declared_run as declared_run
-from decsim.decoders.decoder_manager import DecoderManager
 
 # a 1 MHz unit clock; these units declare no stage, so the period only
 # has to be a real one
@@ -103,7 +103,7 @@ def _manager(engine, decoder, dispatch_cycles=0):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     strong_requests = strong_requests_module.StrongRequests()
-    return DecoderManager(
+    return decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,

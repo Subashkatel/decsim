@@ -11,29 +11,24 @@ import pytest
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
-from tests.experiments.yaml_configs import (
-    MINIMAL_CONFIG,
-    measure_point_shot,
-    strong_unit,
-    write_config,
-)
+import tests.experiments.yaml_configs as yaml_configs
 
 
 def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
     # The functional gate: the loop with the weak unit's real MWPM reaches
     # the same prediction as whole-circuit PyMatching on the same events.
-    config_path = write_config(
+    config_path = yaml_configs.write_config(
         tmp_path,
         {
             "weak_decoder": {
-                **MINIMAL_CONFIG["weak_decoder"],
+                **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
                 "kind": "pymatching",
             }
         },
     )
     config = experiment.load_experiment(config_path)
     for seed in range(3):
-        measurement = measure_point_shot(
+        measurement = yaml_configs.measure_point_shot(
             config,
             physical_error_probability=0.005,
             distance=3,
@@ -46,12 +41,12 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
 
 
 def test_strong_unit_runs_belief_matching(tmp_path):
-    strong_decoder = strong_unit("belief_matching")
+    strong_decoder = yaml_configs.strong_unit("belief_matching")
     card = {"escalation": {"kind": "strong_only"}}
     card.update(strong_decoder)
-    config_path = write_config(tmp_path, card)
+    config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
-    measurement = measure_point_shot(
+    measurement = yaml_configs.measure_point_shot(
         config,
         physical_error_probability=0.001,
         distance=3,
@@ -70,12 +65,15 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
     cycle_count block holds its unit for whole cycles of the named
     clock and never fewer than the eleven the quiet machine costs.
     """
-    config_path = write_config(
+    config_path = yaml_configs.write_config(
         tmp_path,
         {
-            "clocks": {**MINIMAL_CONFIG["clocks"], "helios": 100.0},
+            "clocks": {
+                **yaml_configs.MINIMAL_CONFIG["clocks"],
+                "helios": 100.0,
+            },
             "weak_decoder": {
-                **MINIMAL_CONFIG["weak_decoder"],
+                **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
                 "kind": "union_find",
                 "cycle_count": {"clock": "helios", "delay_cycles": 3},
             },
@@ -114,11 +112,11 @@ def test_a_measured_table_tier_is_held_by_the_measured_line(tmp_path):
     region nearest a d = 5 window (decoders/measured_table).
     """
     pytest.importorskip("relay_bp")
-    strong_decoder = strong_unit("measured_table")
+    strong_decoder = yaml_configs.strong_unit("measured_table")
     strong_decoder["strong_decoder"]["device"] = "a100"
     card = {"escalation": {"kind": "strong_only"}}
     card.update(strong_decoder)
-    config_path = write_config(tmp_path, card)
+    config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
     settings = config.point_settings(
         physical_error_probability=0.001,

@@ -10,12 +10,8 @@ import csv
 
 import pytest
 
+import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
-from decsim.experiments.plots import (
-    STAGE_BREAKDOWN_STAGES,
-    _median_stage_us_by_distance,
-    stage_breakdown_plot,
-)
 
 
 def shots_csv_row(distance, stage_us, stage_columns):
@@ -28,7 +24,7 @@ def shots_csv_row(distance, stage_us, stage_columns):
 def write_shots_csv(run_dir, rows):
     """rows: (distance, {stage column: us}) pairs; other columns filled."""
     run_dir.mkdir()
-    stage_columns = [column for column, _ in STAGE_BREAKDOWN_STAGES]
+    stage_columns = [column for column, _ in plots.STAGE_BREAKDOWN_STAGES]
     field_names = ["distance", "algorithm"] + stage_columns
     shots_csv_path = run_dir / "shots.csv"
     with open(shots_csv_path, "w", newline="") as handle:
@@ -56,8 +52,8 @@ def test_stage_widths_are_medians_over_shots(tmp_path):
     with open(shots_csv_path) as handle:
         reader = csv.DictReader(handle)
         shot_records = list(reader)
-    medians = _median_stage_us_by_distance(shot_records)
-    stage_columns = [column for column, _ in STAGE_BREAKDOWN_STAGES]
+    medians = plots._median_stage_us_by_distance(shot_records)
+    stage_columns = [column for column, _ in plots.STAGE_BREAKDOWN_STAGES]
     algorithm_index = stage_columns.index("algorithm_mean_us")
     # the 1000 us outlier shot moves a mean to 343 but the median to 20
     assert medians[3][algorithm_index] == pytest.approx(20.0)
@@ -72,7 +68,7 @@ def test_figure_is_written_per_distance(tmp_path):
     ]
     write_shots_csv(run_dir, shot_rows)
     figure_path = tmp_path / "stage_breakdown.png"
-    stage_breakdown_plot(run_dir, figure_path)
+    plots.stage_breakdown_plot(run_dir, figure_path)
     assert figure_path.exists()
     figure_status = figure_path.stat()
     assert figure_status.st_size > 0
@@ -83,4 +79,4 @@ def test_a_run_without_shots_csv_is_refused(tmp_path):
     empty_run.mkdir()
     figure_path = tmp_path / "figure.png"
     with pytest.raises(refusal.RefusalError, match="shots.csv"):
-        stage_breakdown_plot(empty_run, figure_path)
+        plots.stage_breakdown_plot(empty_run, figure_path)

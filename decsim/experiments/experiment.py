@@ -11,8 +11,8 @@ import contextlib
 import dataclasses
 import itertools
 import json
+import pathlib
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Optional
 
 import yaml
@@ -24,7 +24,7 @@ import decsim.experiments.refusal as refusal
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
 
-_THIS_FILE = Path(__file__)
+_THIS_FILE = pathlib.Path(__file__)
 _RESOLVED_FILE = _THIS_FILE.resolve()
 _REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 # configs/ sits beside the decsim package, gem5's configs/ beside its
@@ -280,7 +280,7 @@ def task_positions(recorded_sweep: list) -> dict:
 
 def load_experiment(path) -> ExperimentConfig:
     """Read one yaml file, its extends chain applied, into settings."""
-    path = Path(path)
+    path = pathlib.Path(path)
     _refuse_a_path_that_is_not_a_file(path)
     sections, section_folders, config_files = _yaml_sections(path)
     if "sweep" not in sections:
@@ -299,7 +299,7 @@ def load_experiment(path) -> ExperimentConfig:
     )
 
 
-def _refuse_a_path_that_is_not_a_file(path: Path) -> None:
+def _refuse_a_path_that_is_not_a_file(path: pathlib.Path) -> None:
     """A yaml that is not there, with the shipped experiments to pick from."""
     if path.is_file():
         return
@@ -314,7 +314,7 @@ def _refuse_a_path_that_is_not_a_file(path: Path) -> None:
 
 
 def _settings_of(
-    sections: dict, path: Path, section_folders: dict
+    sections: dict, path: pathlib.Path, section_folders: dict
 ) -> machine_settings.MachineSettings:
     """The machine's settings records, one per section of the file.
 
@@ -330,7 +330,7 @@ def _settings_of(
 
 
 @contextlib.contextmanager
-def _refused_in(path: Path):
+def _refused_in(path: pathlib.Path):
     """A ValueError raised inside, as one sentence naming the yaml file."""
     try:
         yield
@@ -405,7 +405,7 @@ def _observation_lines(observation) -> list:
     return [log_line, f"trace: {observation.trace}"]
 
 
-def _yaml_sections(path: Path) -> tuple:
+def _yaml_sections(path: pathlib.Path) -> tuple:
     """The file's sections with `extends` applied, their folders, its files.
 
     The files come this file first, then the base it extends, and so on.
@@ -549,7 +549,9 @@ def _documented_keys() -> dict:
     return _key_lines(REFERENCE_FILE, shown_path, "default")
 
 
-def _key_lines(path: Path, shown_path: Path, layer: str) -> dict:
+def _key_lines(
+    path: pathlib.Path, shown_path: pathlib.Path, layer: str
+) -> dict:
     """Every mapping key of a yaml file, with the lines that write it.
 
     A key whose value is a block over several lines (the sweep's list)

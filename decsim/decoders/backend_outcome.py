@@ -11,7 +11,7 @@ structural failure and stops the run.
 import dataclasses
 import enum
 import math
-from numbers import Integral, Real
+import numbers
 from typing import Optional
 
 import numpy
@@ -188,7 +188,7 @@ def _binary_tuple(value, *, name: str, allow_none: bool = True):
 
 
 def _is_bit(bit) -> bool:
-    if not isinstance(bit, Integral):
+    if not isinstance(bit, numbers.Integral):
         return False
     return int(bit) in (0, 1)
 
@@ -211,7 +211,7 @@ def _float_tuple(value, *, name: str):
 def _is_real(item) -> bool:
     if isinstance(item, bool):
         return False
-    return isinstance(item, Real)
+    return isinstance(item, numbers.Real)
 
 
 def _one_dimensional(value, name: str) -> tuple:
@@ -224,7 +224,7 @@ def _one_dimensional(value, name: str) -> tuple:
 def _nonnegative_integer(value, *, name: str):
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, Integral):
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
         raise TypeError(f"{name} must be an integer or None")
     normalized = int(value)
     if normalized < 0:

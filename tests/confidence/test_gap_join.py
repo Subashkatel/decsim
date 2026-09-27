@@ -24,7 +24,7 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import tests.escalation.declared_fabric as fabric
-from tests.escalation.test_strong_window_shapes import GATE_SWITCHING_CARD
+import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
 
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 # a window identity the run never requests, so its solve is never joined
@@ -35,7 +35,7 @@ def _switching_machine(
     weak_units: int, weak_microseconds: float = 4.0, trace_path=None
 ):
     """The gate's switching card at d=3, priced so its ticks are declared."""
-    sections = copy.deepcopy(GATE_SWITCHING_CARD)
+    sections = copy.deepcopy(test_strong_window_shapes.GATE_SWITCHING_CARD)
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = 20.0

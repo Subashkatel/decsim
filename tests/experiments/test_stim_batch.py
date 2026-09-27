@@ -29,7 +29,9 @@ import scipy.sparse
 import yaml
 
 import decsim.collect as collect
+import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.window_decoder as union_find_window
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -41,6 +43,7 @@ import decsim.experiments.run_folder as run_folder
 import decsim.experiments.status_command as status_command
 import decsim.experiments.stim_batch as stim_batch
 import decsim.qpu.stim_device as stim_device
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 import tests.decoders.union_find_oracle as union_find_oracle
@@ -65,6 +68,30 @@ PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 WINDOW_DECODER_SEGMENT = seed_records.RunSeedPathSegment(
     "field", "window_decoder"
 )
+
+
+class QuietMatching(minimum_weight_perfect_matching.PyMatchingDecoder):
+    """PyMatching that commits no correction to a window with any event.
+
+    A backend with no answer is how a shot goes unscored (window_decode_of);
+    this row gives that answer on every shot that fires, so the unscored
+    seeds are known in advance.
+    """
+
+    def decode_window(self, backend, model, faults, syndrome):
+        if not syndrome.any():
+            matching = minimum_weight_perfect_matching.PyMatchingDecoder
+            return matching.decode_window(
+                self, backend, model, faults, syndrome
+            )
+        fault_count = faults.check.shape[1]
+        return backend_outcome.no_correction_decode(
+            decoding_records.BackendDecodeStatus.INVALID_CORRECTION,
+            decoding_records.BackendFailureReason.NO_PERFECT_MATCHING,
+            fault_count,
+        )
+
+
 # A part a Python caller builds in place of the yaml's.
 PYTHON_BUILT_DECODER = minimum_weight_perfect_matching.PyMatchingDecoder()
 PYTHON_BUILT_ROUTER = decoders.CodeRouter(default=PYTHON_BUILT_DECODER)
@@ -264,6 +291,70 @@ def test_a_seeds_sample_is_the_same_whatever_piece_holds_it(tmp_path):
 
     numpy.testing.assert_array_equal(events, whole_events[1000:1100])
     numpy.testing.assert_array_equal(observables, whole_observables[1000:1100])
+
+
+@pytest.mark.parametrize(
+    "kind, package",
+    [("relay_bp", "relay_bp"), ("tesseract", "tesseract_decoder")],
+)
+def test_a_shots_answer_is_the_same_in_every_piece_cut(tmp_path, kind, package):
+    """Cuts inside a block and across the block edge at seed 1024."""
+    pytest.importorskip(package)
+    config_path = write_batch_config(
+        tmp_path, [kind], {"max_shots": 1}, error_rate=0.03
+    )
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+
+    whole_inside = cut_answers(task, [(0, 40)])
+    cut_inside = cut_answers(task, [(0, 15), (15, 25)])
+    whole_across = cut_answers(task, [(1000, 48)])
+    cut_across = cut_answers(task, [(1000, 10), (1010, 30), (1040, 8)])
+
+    assert cut_inside == whole_inside
+    assert cut_across == whole_across
+    assert whole_inside[0] != []
+    assert whole_across[0] != []
+
+
+def test_a_shot_its_decode_leaves_uncorrected_is_unscored(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setitem(
+        decoder_settings.DECODERS, "matching_on_quiet_windows", QuietMatching
+    )
+    rows = batch_rows()
+    quiet_row = dict(rows["pymatching"], kind="matching_on_quiet_windows")
+    task = task_of_row(tmp_path, quiet_row)
+    circuit = stim_batch.circuit_of(task)
+    events, _observables = stim_batch.samples_of_seeds(circuit, 0, 30)
+    fired = events.any(axis=1)
+    fired_seeds = numpy.flatnonzero(fired)
+    unit = collect.Unit(task, 0, 30)
+
+    outcome = stim_batch.run_unit(unit, None)
+
+    (counts,) = outcome.rows
+    assert counts["unscored_seeds"] == fired_seeds.tolist()
+    assert counts["scored_shots"] == 30 - len(fired_seeds)
+    assert counts["failure_seeds"] == []
+
+
+def test_a_time_cap_stops_a_point_at_its_first_pieces_end(tmp_path):
+    collection = {
+        "max_core_seconds": 1e-9,
+        "max_shots": 1000,
+        "piece_rounds": 100,
+    }
+    config_path = write_batch_config(tmp_path, ["pymatching"], collection)
+    experiment_dir = tmp_path / "run"
+
+    _run_dir, rows = collect_command.run_experiment(config_path, experiment_dir)
+
+    (row,) = rows
+    assert row["state"] == "time cap"
+    assert row["prefix_shots"] == 100 // ROUNDS
+    assert row["shots"] == 100 // ROUNDS
 
 
 def test_a_point_stops_on_the_shot_of_its_last_wanted_failure(tmp_path):
@@ -620,6 +711,35 @@ def machine_task(tmp_path, kind: str, distance: int):
     )
     config = experiment.load_experiment(config_path)
     return config.first_point_task()
+
+
+def task_of_row(tmp_path, row: dict):
+    """The one batch point of one decoder row given whole."""
+    raw = {
+        "extends": str(BASELINE),
+        "sampling": "stim_batch",
+        "workload": short_memory_workload(ERROR_RATE),
+        "sweep": [{"axes": {"qpu.distance": [3], "weak_decoder": [row]}}],
+        "collection": {"max_shots": 1},
+    }
+    config_path = tmp_path / "row.yaml"
+    text = yaml.safe_dump(raw, sort_keys=False)
+    config_path.write_text(text)
+    config = experiment.load_experiment(config_path)
+    return config.first_point_task()
+
+
+def cut_answers(task, cuts: list) -> tuple:
+    """The failed and the unscored seeds of units run cut by cut."""
+    failure_seeds = []
+    unscored_seeds = []
+    for first_seed, count in cuts:
+        unit = collect.Unit(task, first_seed, count)
+        outcome = stim_batch.run_unit(unit, None)
+        (counts,) = outcome.rows
+        failure_seeds.extend(counts["failure_seeds"])
+        unscored_seeds.extend(counts["unscored_seeds"])
+    return failure_seeds, unscored_seeds
 
 
 def batch_overrides() -> dict:

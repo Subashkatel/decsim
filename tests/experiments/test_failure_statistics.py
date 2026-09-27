@@ -55,8 +55,8 @@ def test_a_target_stop_takes_the_inverse_sampling_limits():
     low = scipy.stats.beta.ppf(0.025, 100, 99_901)
     high = scipy.stats.beta.ppf(0.975, 100, 99_900)
     assert result.rate == 100 / 100_000
-    assert result.low == pytest.approx(low, rel=1e-12)
-    assert result.high == pytest.approx(high, rel=1e-12)
+    assert result.low == pytest.approx(low, rel=1e-12, abs=0)
+    assert result.high == pytest.approx(high, rel=1e-12, abs=0)
 
 
 @pytest.mark.parametrize("stop_kind", [StopKind.MINIMUM, StopKind.CAP])
@@ -66,8 +66,8 @@ def test_a_minimum_or_cap_stop_takes_the_clopper_pearson_limits(stop_kind):
     low = scipy.stats.beta.ppf(0.025, 3, 199_998)
     high = scipy.stats.beta.ppf(0.975, 4, 199_997)
     assert result.rate == 3 / 200_000
-    assert result.low == pytest.approx(low, rel=1e-12)
-    assert result.high == pytest.approx(high, rel=1e-12)
+    assert result.low == pytest.approx(low, rel=1e-12, abs=0)
+    assert result.high == pytest.approx(high, rel=1e-12, abs=0)
 
 
 @pytest.mark.parametrize("stop_kind", [StopKind.TARGET, StopKind.MINIMUM])
@@ -76,7 +76,7 @@ def test_every_shot_failing_has_upper_limit_one(stop_kind):
 
     low = scipy.stats.beta.ppf(0.025, 7, 1)
     assert result.rate == 1.0
-    assert result.low == pytest.approx(low, rel=1e-12)
+    assert result.low == pytest.approx(low, rel=1e-12, abs=0)
     assert result.high == 1.0
 
 
@@ -87,8 +87,8 @@ def test_a_cap_with_no_failure_gives_the_upper_limit_alone():
     beta_high = scipy.stats.beta.ppf(0.975, 1, 300_000)
     assert result.rate is None
     assert result.low is None
-    assert result.high == pytest.approx(nist_high, rel=1e-9)
-    assert result.high == pytest.approx(beta_high, rel=1e-12)
+    assert result.high == pytest.approx(nist_high, rel=1e-9, abs=0)
+    assert result.high == pytest.approx(beta_high, rel=1e-12, abs=0)
 
 
 def test_no_scored_shot_gives_no_estimate():
@@ -131,7 +131,7 @@ def test_the_plan_unbiased_estimate_is_unbiased_over_the_plan_property(
         )
         expectation += weight * value
 
-    assert expectation == pytest.approx(probability, rel=SUM_ROUNDING)
+    assert expectation == pytest.approx(probability, rel=SUM_ROUNDING, abs=0)
 
 
 def test_unscored_shots_count_as_failures():
@@ -196,7 +196,7 @@ def test_mcnemar_is_the_exact_binomial_test(first_only, second_only):
 
     discordant = first_only + second_only
     binomial = scipy.stats.binomtest(first_only, discordant, 0.5)
-    assert p_value == pytest.approx(binomial.pvalue, rel=1e-12)
+    assert p_value == pytest.approx(binomial.pvalue, rel=1e-12, abs=0)
 
 
 @pytest.mark.parametrize(
@@ -285,8 +285,8 @@ def test_the_sequence_is_equation_24():
     low, high = failure_statistics.empirical_bernstein_sequence(failures)
 
     reference_low, reference_high = _equation_24(failures)
-    assert low == pytest.approx(reference_low[-1], rel=1e-12)
-    assert high == pytest.approx(reference_high[-1], rel=1e-12)
+    assert low == pytest.approx(reference_low[-1], rel=1e-12, abs=0)
+    assert high == pytest.approx(reference_high[-1], rel=1e-12, abs=0)
 
 
 def test_the_difference_sequence_is_equation_24_on_the_shifted_differences():
@@ -304,8 +304,8 @@ def test_the_difference_sequence_is_equation_24_on_the_shifted_differences():
     reference_low, reference_high = _equation_24(rescaled)
     expected_low = 2 * reference_low[-1] - 1
     expected_high = 2 * reference_high[-1] - 1
-    assert low == pytest.approx(expected_low, rel=1e-12)
-    assert high == pytest.approx(expected_high, rel=1e-12)
+    assert low == pytest.approx(expected_low, rel=1e-12, abs=0)
+    assert high == pytest.approx(expected_high, rel=1e-12, abs=0)
 
 
 @pytest.mark.parametrize(

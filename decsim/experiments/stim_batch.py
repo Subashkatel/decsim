@@ -124,22 +124,32 @@ def check_task(task: collect.Task) -> None:
 
     A whole-circuit decode is the machine's decode only for one window
     per operation (windows/schemes/naive_online.py) on the weak tier
-    alone, and the shots are the circuit's own only from stim_device,
-    whose sampled circuit is the operation's (a burst device raises the
-    noise, a recorded one replays), and for one operation a shot.
+    alone, with no window check, whose referee wraps the row and moves
+    its seed path (decoders/verify_windows.py run_seed_children). The
+    shots are the circuit's own only from stim_device, whose sampled
+    circuit is the operation's (a burst device raises the noise, a
+    recorded one replays), and for one operation a shot. The row is
+    built from the yaml at the machine's seed path, so a decoder, a
+    router or a device a Python caller built in its place is refused.
     """
     settings = task.settings
     required_kinds = (
         ("windows.kind", settings.windows.kind, "naive_online"),
         ("escalation.kind", settings.escalation.kind, "weak_baseline"),
         ("qpu.kind", settings.qpu.kind, "stim_device"),
+        (
+            "observation.check_windows_with",
+            settings.observation.check_windows_with,
+            "none",
+        ),
     )
-    for key, kind, wanted in required_kinds:
-        if kind != wanted:
-            raise refusal.RefusalError(
-                f"{REFUSAL_OPENING} {key} {wanted}; this point sets {key} "
-                f"{kind!r}"
-            )
+    _refuse_a_kind_other_than_the_machines(required_kinds)
+    python_built_parts = (
+        ("weak_decoder.decoder", settings.weak_decoder.decoder),
+        ("decoder_manager.router", settings.decoder_manager.router),
+        ("qpu.device", settings.qpu.device),
+    )
+    _refuse_a_python_built_part(python_built_parts)
     operations = settings.workload.operations
     if len(operations) != 1:
         raise refusal.RefusalError(
@@ -399,6 +409,27 @@ class _Tally:
             "stim_version": stim.__version__,
             "sample_sha256": self.samples_hash.hexdigest(),
         }
+
+
+def _refuse_a_kind_other_than_the_machines(required_kinds: tuple) -> None:
+    """Each (key, kind, wanted) with the wanted kind, or the first refused."""
+    for key, kind, wanted in required_kinds:
+        if kind != wanted:
+            raise refusal.RefusalError(
+                f"{REFUSAL_OPENING} {key} {wanted}; this point sets {key} "
+                f"{kind!r}"
+            )
+
+
+def _refuse_a_python_built_part(python_built_parts: tuple) -> None:
+    """Each (key, part) left to the yaml, or the first one set refused."""
+    for key, part in python_built_parts:
+        if part is not None:
+            raise refusal.RefusalError(
+                "sampling stim_batch builds the decoder from the yaml at the "
+                f"machine's seed path, so it takes no Python-built {key}; "
+                "this point sets one"
+            )
 
 
 def _block_spans(first_seed: int, count: int) -> list:

@@ -17,6 +17,7 @@ cuts, a stop on the exact failure, resume, and ids that do not move
 without the key.
 """
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -28,6 +29,7 @@ import scipy.sparse
 import yaml
 
 import decsim.collect as collect
+import decsim.decoders.decoders as decoders
 import decsim.decoders.union_find.window_decoder as union_find_window
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -38,10 +40,14 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.experiments.status_command as status_command
 import decsim.experiments.stim_batch as stim_batch
+import decsim.qpu.stim_device as stim_device
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 import tests.decoders.union_find_oracle as union_find_oracle
 import tests.experiments.yaml_configs as yaml_configs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 BASELINE = (
     yaml_configs.CONFIGS_DIR
@@ -59,6 +65,10 @@ PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 WINDOW_DECODER_SEGMENT = seed_records.RunSeedPathSegment(
     "field", "window_decoder"
 )
+# A part a Python caller builds in place of the yaml's.
+PYTHON_BUILT_DECODER = minimum_weight_perfect_matching.PyMatchingDecoder()
+PYTHON_BUILT_ROUTER = decoders.CodeRouter(default=PYTHON_BUILT_DECODER)
+PYTHON_BUILT_DEVICE = stim_device.StimDevice()
 # Each shipped config's configuration id and point ids, one sha256 over
 # them in task order, recorded on main at 257d700e before the key existed.
 SHIPPED_IDENTITIES = {
@@ -419,6 +429,48 @@ def test_a_qpu_other_than_the_stim_device_is_refused(tmp_path):
         "the weak tier alone, from the circuit's own samples, which is the "
         "machine's decode only under qpu.kind stim_device; this point sets "
         "qpu.kind 'recorded_stim'"
+    )
+
+
+def test_a_window_check_is_refused(tmp_path):
+    overrides = batch_overrides()
+    overrides["observation"] = {"check_windows_with": "tesseract"}
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    experiment_dir = tmp_path / "run"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(config_path, experiment_dir)
+
+    assert str(refused.value) == (
+        "sampling stim_batch decodes one window over the whole circuit on "
+        "the weak tier alone, from the circuit's own samples, which is the "
+        "machine's decode only under observation.check_windows_with none; "
+        "this point sets observation.check_windows_with 'tesseract'"
+    )
+
+
+@pytest.mark.parametrize(
+    "section, key, built",
+    [
+        ("weak_decoder", "decoder", PYTHON_BUILT_DECODER),
+        ("decoder_manager", "router", PYTHON_BUILT_ROUTER),
+        ("qpu", "device", PYTHON_BUILT_DEVICE),
+    ],
+)
+def test_a_python_built_part_is_refused(tmp_path, section, key, built):
+    task = batch_task(tmp_path, "pymatching", 3, CODE_TASKS[1])
+    part = getattr(task.settings, section)
+    built_part = dataclasses.replace(part, **{key: built})
+    settings = dataclasses.replace(task.settings, **{section: built_part})
+    built_task = dataclasses.replace(task, settings=settings)
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        stim_batch.check_task(built_task)
+
+    assert str(refused.value) == (
+        "sampling stim_batch builds the decoder from the yaml at the "
+        f"machine's seed path, so it takes no Python-built {section}.{key}; "
+        "this point sets one"
     )
 
 

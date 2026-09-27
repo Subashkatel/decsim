@@ -1215,6 +1215,30 @@ row.
 `decsim/windows/window_planner.py` (`cut_stream_after`);
 `tests/machine/test_live_stream_finalization.py`.
 
+## D33. A workload row says what made its workload
+
+**Decided.** A point's record names what made its workload by asking
+the workload's row (`maker`), and the run folder writes whatever the row
+answers under `maker` in `resolved/<id>.json`. The producer row answers
+its function, the point's own arguments and the package's version; the
+files row answers null, since its files are a workload another run made.
+
+**Why.** The run folder read the maker off the settings when the kind
+was `producer`, so a second row that makes its workload would have
+recorded nothing, silently. A fact a caller needs about a row is
+declared on the port and answered by every row (`STYLE.md` rule 10).
+
+**Sources.** gem5's port API hides a component's class behind the port
+(arXiv 2007.03152 lines 489-491); sinter records a task's own metadata
+as the task hands it over (sinter/_data/_task.py:163).
+
+**What it cost the port file.** `WorkloadRow` gained `maker`.
+
+**Where to see it.** `decsim/frontends/settings.py` (`maker` on each row
+and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
+(`record_point`);
+`tests/experiments/test_command_set.py`.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not

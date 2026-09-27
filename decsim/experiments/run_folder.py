@@ -27,7 +27,6 @@ import decsim.build.plan as plan_build
 import decsim.collect as collect
 import decsim.compiled_libraries as compiled_libraries
 import decsim.experiments.experiment as experiment
-import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
 
 RESULTS_DIR = pathlib.Path("results")
@@ -261,7 +260,7 @@ def record_point(
     resolved/<id>.json holds the metadata, the seed ranges run, the
     sections the point's yaml resolved to (its axes placed and its
     references resolved, as Hydra keeps each job's composed config in
-    .hydra/config.yaml), the maker a producer workload called with the
+    .hydra/config.yaml), the maker the workload's row says it called with the
     point's own arguments, every setting and the values the build
     derives; a point a Python caller built has no sections. inputs/<id>/ holds
     the workload as the files row reads it, with each file's sha256 in
@@ -270,12 +269,13 @@ def record_point(
     point_id = task.strong_id()
     settings = task.settings
     shot_settings = task.shot_settings()
+    maker = settings.workload.maker()
     resolved = {
         "id": point_id,
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
         "sections": collect.json_value(sections),
-        "producer": _producer(settings.workload),
+        "maker": collect.json_value(maker),
         "settings": collect.json_value(settings),
         "built": _built_values(shot_settings),
     }
@@ -519,25 +519,6 @@ def _write_inputs(inputs_dir: pathlib.Path, record) -> None:
     write_json(hashes_path, hashes)
 
 
-def _producer(workload: workload_settings.WorkloadSettings) -> Optional[dict]:
-    """A producer row's maker, its arguments and its package's version.
-
-    The name's first dotted word is the package in both forms
-    pkgutil.resolve_name reads, module:function and module.function. A
-    workload read from files has no maker, so None.
-    """
-    if workload.kind != "producer":
-        return None
-    row_settings = workload.row_settings
-    function = row_settings.function
-    module_name, _, _ = function.partition(":")
-    return {
-        "function": function,
-        "arguments": collect.json_value(row_settings.arguments),
-        "version": _package_version(module_name),
-    }
-
-
 def _cells_of(record: dict, paths: list) -> dict:
     """One point's cell at each swept path, the value it ran with.
 
@@ -569,16 +550,6 @@ def _cell_of(value):
     if is_number:
         return value
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
-def _package_version(module_name: str) -> Optional[str]:
-    """The installed version of the package a module belongs to, or None."""
-    names = module_name.split(".")
-    package = names[0]
-    try:
-        return importlib.metadata.version(package)
-    except importlib.metadata.PackageNotFoundError:
-        return None
 
 
 def _sha256_of(path: pathlib.Path) -> str:

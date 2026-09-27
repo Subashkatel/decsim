@@ -9,6 +9,7 @@ fields in directly.
 """
 
 import dataclasses
+import importlib.metadata
 import pathlib
 import pkgutil
 from collections.abc import Mapping
@@ -122,6 +123,13 @@ class WorkloadSettings:
         workload = row.workload(self.row_settings)
         return self.running(workload)
 
+    def maker(self) -> Optional[dict]:
+        """What the row says made the workload; None for a Python-built one."""
+        if self.kind is None:
+            return None
+        row = tables.row(WORKLOADS, "workload.kind", self.kind)
+        return row.maker(self.row_settings)
+
     def running(
         self, workload: workload_records.Workload
     ) -> "WorkloadSettings":
@@ -182,6 +190,20 @@ class ProducerWorkload:
             "decsim.records.workload.Workload"
         )
 
+    @staticmethod
+    def maker(settings: "ProducerWorkload.Settings") -> dict:
+        """The maker's name, its arguments and its package's version.
+
+        The name's first dotted word is the package in both forms
+        pkgutil.resolve_name reads, module:function and module.function.
+        """
+        module_name, _, _ = settings.function.partition(":")
+        return {
+            "function": settings.function,
+            "arguments": settings.arguments,
+            "version": _package_version(module_name),
+        }
+
 
 class FilesWorkload:
     """The files row: a maker's two outputs read from disk.
@@ -225,6 +247,11 @@ class FilesWorkload:
             settings.fragments,
         )
 
+    @staticmethod
+    def maker(settings: "FilesWorkload.Settings") -> None:
+        """No maker: the files are a workload another run made."""
+        del settings
+
 
 def memory_circuit(
     code_task: str, rounds: int, distance: int, probability: float
@@ -252,6 +279,16 @@ def _maker(function: str) -> Any:
         raise ValueError(
             f"workload.function {function} names no maker: {missing}"
         ) from missing
+
+
+def _package_version(module_name: str) -> Optional[str]:
+    """The installed version of the package a module belongs to, or None."""
+    names = module_name.split(".")
+    package = names[0]
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def _check_one_physical_circuit(settings: "FilesWorkload.Settings") -> None:

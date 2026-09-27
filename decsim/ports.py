@@ -2291,3 +2291,9 @@ class WorkloadRow(Protocol):
 
     def workload(self, settings) -> workload_records.Workload:
         """The row's workload at one sweep point."""
+
+    def maker(self, settings) -> Optional[dict]:
+        """What made the workload: its function, arguments and version.
+
+        None for a row that reads a workload already made.
+        """

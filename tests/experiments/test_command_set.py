@@ -25,6 +25,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
 import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
@@ -543,7 +544,7 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     inputs_dir = out_dir / "inputs" / resolved_path.stem
     hashes_text = (inputs_dir / "hashes.json").read_text()
     hashes = json.loads(hashes_text)
-    producer = resolved["producer"]
+    maker = resolved["maker"]
 
     assert "terminal status: complete" in lines[2]
     assert resolved["seeds"] == [[0, 1]]
@@ -552,8 +553,8 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     assert hashes == _hashes_of(
         inputs_dir, "operation_1.stim", "operations.json"
     )
-    assert producer["function"] == "decsim.producers:memory_circuit"
-    assert producer["arguments"]["rounds_per_shot"] == 15
+    assert maker["function"] == "decsim.producers:memory_circuit"
+    assert maker["arguments"]["rounds_per_shot"] == 15
     assert (out_dir / "result.json").exists()
     assert (out_dir / "finished").exists()
 
@@ -639,8 +640,35 @@ def test_a_points_record_names_the_maker_in_either_of_its_forms(
     resolved_path = _one_file(resolved_dir, "*.json")
     resolved_text = resolved_path.read_text()
     resolved = json.loads(resolved_text)
-    assert resolved["producer"]["function"] == function
+    assert resolved["maker"]["function"] == function
     assert (out_dir / "finished").exists()
+
+
+def test_a_points_record_names_the_maker_its_row_answers(tmp_path, monkeypatch):
+    """The row says what made its workload; the runner names no row.
+
+    The producer row under a second name answers the same maker, so the
+    record holds it whatever the row is called.
+    """
+    monkeypatch.setitem(
+        workload_settings.WORKLOADS,
+        "made_elsewhere",
+        workload_settings.ProducerWorkload,
+    )
+    workload = yaml_configs.memory_workload(15)
+    workload["kind"] = "made_elsewhere"
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    out_dir = tmp_path / "out"
+
+    run_command.run_one_shot(config_path, out_dir=out_dir)
+
+    resolved_dir = out_dir / "resolved"
+    resolved_path = _one_file(resolved_dir, "*.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    maker = resolved["maker"]
+    assert maker["function"] == "decsim.producers:memory_circuit"
+    assert maker["arguments"]["rounds_per_shot"] == 15
 
 
 def test_a_point_recorded_again_hashes_only_its_inputs(tmp_path):
@@ -837,7 +865,7 @@ def test_every_point_records_its_own_makers_arguments(tmp_path):
     command.main(["collect", str(config_path), "--out", str(out_dir)])
 
     records = run_folder.resolved_by_point(out_dir)
-    arguments = [record["producer"]["arguments"] for record in records.values()]
+    arguments = [record["maker"]["arguments"] for record in records.values()]
     made_at = {
         (made["physical_error_probability"], made["distance"])
         for made in arguments

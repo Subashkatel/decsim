@@ -2538,3 +2538,29 @@ def test_a_rounds_last_piece_is_cut_to_what_the_time_cap_allows(tmp_path):
     point_id = first_piece.parent.name
     assert saved["count"] == 6
     assert _planned_ranges(second_round) == [(point_id, 6, 1)]
+
+
+@pytest.mark.parametrize(
+    "flag, shape_arguments",
+    [
+        ("--tasks", ["--tasks", "0"]),
+        ("--cores", ["--tasks", "1", "--cores", "0"]),
+        ("--hours", ["--tasks", "1", "--hours", "-1"]),
+        ("--memory-mb", ["--tasks", "1", "--memory-mb", "-1"]),
+    ],
+)
+def test_a_plan_asking_for_no_task_core_hour_or_memory_is_refused(
+    tmp_path, capsys, flag, shape_arguments
+):
+    """A round has a task, and a task a core, an hour and some memory."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    experiment_dir = tmp_path / "experiment"
+    arguments = [str(config_path), "--out", str(experiment_dir)]
+
+    with pytest.raises(SystemExit):
+        command.main(["plan", *arguments, *shape_arguments])
+
+    printed = capsys.readouterr()
+    round_dirs = pieces.round_dirs(experiment_dir)
+    assert f"{flag} must be at least 1" in printed.err
+    assert round_dirs == []

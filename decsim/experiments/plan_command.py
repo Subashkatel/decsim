@@ -81,6 +81,26 @@ class PointCost:
 
 def main(argv: list) -> None:
     """Plan the next round and print where it went and how to submit it."""
+    parser = _parser()
+    parsed = parser.parse_args(argv)
+    _refuse_a_shape_below_one(parser, parsed)
+    job = JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
+    experiment_dir = pathlib.Path(parsed.out)
+    round_dir = plan_round(parsed.configs, experiment_dir, parsed.tasks, job)
+    if round_dir is None:
+        print(
+            f"every point has stopped; decsim status {experiment_dir}",
+            file=sys.stderr,
+        )
+        return
+    plan_path = round_dir / pieces.PLAN_FILE
+    print(plan_path)
+    round_number = pieces.round_number_of(round_dir)
+    print(f"submit it: slurm/round.sh {experiment_dir} {round_number}")
+
+
+def _parser() -> argparse.ArgumentParser:
+    """The plan command's arguments."""
     parser = argparse.ArgumentParser(prog="decsim plan")
     parser.add_argument("configs", nargs="+", help="the experiment's yamls")
     parser.add_argument("--out", required=True, help="the experiment folder")
@@ -102,20 +122,20 @@ def main(argv: list) -> None:
         default=4096,
         help="one piece's memory before its point has a measured peak",
     )
-    parsed = parser.parse_args(argv)
-    job = JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
-    experiment_dir = pathlib.Path(parsed.out)
-    round_dir = plan_round(parsed.configs, experiment_dir, parsed.tasks, job)
-    if round_dir is None:
-        print(
-            f"every point has stopped; decsim status {experiment_dir}",
-            file=sys.stderr,
-        )
-        return
-    plan_path = round_dir / pieces.PLAN_FILE
-    print(plan_path)
-    round_number = pieces.round_number_of(round_dir)
-    print(f"submit it: slurm/round.sh {experiment_dir} {round_number}")
+    return parser
+
+
+def _refuse_a_shape_below_one(parser, parsed) -> None:
+    """A round has a task, and a task a core, an hour and some memory."""
+    shape = {
+        "--tasks": parsed.tasks,
+        "--cores": parsed.cores,
+        "--hours": parsed.hours,
+        "--memory-mb": parsed.memory_mb,
+    }
+    for flag, value in shape.items():
+        if value < 1:
+            parser.error(f"{flag} must be at least 1, got {value}")
 
 
 def plan_round(

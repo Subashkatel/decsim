@@ -125,9 +125,12 @@ also skips every piece it saved.
 decsim status results/weak_ler
 ```
 
-This folds every piece of every configuration into its run folder,
-`results/weak_ler/combined/<name>-<id8>/`. It writes
-`results/weak_ler/status.csv`, one row per point, with these columns:
+This folds every saved piece into its configuration's run folder,
+`results/weak_ler/combined/<name>-<id8>/`. It reads what the plans and
+collects recorded of each point, not the yamls, so a point a yaml no
+longer sweeps is still counted, and a point two configurations reach is
+counted once. It writes `results/weak_ler/status.csv`, one row per
+point, with these columns:
 
 - the point's state: `running`, `target`, `minimum`, `cap`, or `no data`
 - its shots, failures and unscored shots

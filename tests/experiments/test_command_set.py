@@ -2047,7 +2047,9 @@ def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
     Round one cuts every point into pieces of one shot over three tasks;
     one piece is then deleted, as a task killed before its rename leaves
     it missing. Round two plans that piece alone, with its own seeds,
-    and the status fold of both rounds is the uncut run's, file by file.
+    and the status fold of both rounds is the uncut run's, file by file;
+    status writes points in its own order, so the rows are compared in
+    one order.
     """
     whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     cut_path = _cut_four_point_sweep(tmp_path)
@@ -2065,9 +2067,9 @@ def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
     command.main(["status", str(cut_dir)])
 
     whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_rows = _rows_of_every_file(whole_run_dir)
+    whole_rows = _sorted_rows_of_every_file(whole_run_dir)
     cut_run_dir = yaml_configs.run_folder_of(cut_dir)
-    cut_rows = _rows_of_every_file(cut_run_dir)
+    cut_rows = _sorted_rows_of_every_file(cut_run_dir)
     lost_point = lost_piece.parent.name
     assert _planned_ranges(second_round) == [(lost_point, 1, 1)]
     assert _plan([cut_path], cut_dir, 3) is None
@@ -2405,3 +2407,63 @@ def _base_distance_config(tmp_path, distance: int, card: dict):
     folder.mkdir()
     qpu = {"kind": "stim_device", "distance": distance}
     return yaml_configs.write_config(folder, {**card, "qpu": qpu})
+
+
+def test_status_keeps_a_point_its_yaml_no_longer_sweeps(tmp_path):
+    """Status folds what was recorded, not what the yamls make now.
+
+    Four points are collected; the yaml then drops one error rate. The
+    two points it no longer makes keep their pieces, and status still
+    counts them, every saved shot once.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    experiment_dir = tmp_path / "experiment"
+    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    (block,) = FOUR_POINT_SWEEP["sweep"]
+    narrower_axes = {**block["axes"], ERROR_RATE_AXIS: [0.001]}
+    narrower_card = {"sweep": [{**block, "axes": narrower_axes}]}
+    yaml_configs.write_config(tmp_path, narrower_card)
+
+    command.main(["status", str(experiment_dir)])
+
+    rows = _typed_status_rows(experiment_dir)
+    assert len(rows) == 4
+    assert _total_shots(rows) == 8
+
+
+def test_status_counts_a_point_two_configurations_recorded_once(tmp_path):
+    """A base setting changed between collects makes a second configuration.
+
+    Its sweep sets the changed setting, so its points are the first
+    configuration's, already saved: status counts each once, under the
+    configuration that recorded it last.
+    """
+    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
+    experiment_dir = tmp_path / "experiment"
+    command.main(["collect", str(first_path), "--out", str(experiment_dir)])
+    qpu = {"kind": "stim_device", "distance": 7}
+    changed_card = {**FOUR_POINT_SWEEP, "qpu": qpu}
+    first_folder = first_path.parent
+    second_path = yaml_configs.write_config(first_folder, changed_card)
+    command.main(["collect", str(second_path), "--out", str(experiment_dir)])
+
+    command.main(["status", str(experiment_dir)])
+
+    rows = _typed_status_rows(experiment_dir)
+    second_config = experiment.load_experiment(second_path)
+    second_id = run_folder.configuration_id(second_config)
+    configuration_ids = {row["configuration_id"] for row in rows}
+    assert len(rows) == 4
+    assert _total_shots(rows) == 8
+    assert configuration_ids == {second_id}
+
+
+# the sweep axis of a memory maker's physical error rate
+ERROR_RATE_AXIS = "workload.arguments.physical_error_probability"
+
+
+def _total_shots(rows: list) -> int:
+    total = 0
+    for row in rows:
+        total += row["shots"]
+    return total

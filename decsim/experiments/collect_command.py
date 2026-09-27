@@ -112,9 +112,9 @@ class PointCollection:
         A plan and a status read a point's prefix this way, shot by
         shot, as a collect reads it before it runs a piece.
         """
-        while self.next_seed in self.saved:
-            count = self.saved[self.next_seed]
-            self._make_pending(self.next_seed, count)
+        prefix = pieces.contiguous_ranges(self.saved, self.next_seed)
+        for first_seed, count in prefix:
+            self._make_pending(first_seed, count)
         self.count_the_pending(experiment_dir)
 
     def rule(self) -> collection_module.PointRule:
@@ -196,14 +196,11 @@ def run_sweep(tasks: list, shots: int, *, processes: int = 1) -> list:
     module-level function, so a worker process can unpickle it.
     """
     measure_shot = _shot_measure(tasks, None)
-    on_task_done = functools.partial(
-        _write_online_threshold_record, run_dir=None, swept=None
-    )
     return collect.collect(
         tasks,
         shots,
         measure_shot,
-        on_task_done,
+        _say_the_online_threshold,
         processes=processes,
     )
 
@@ -236,35 +233,78 @@ def run_experiment(
     _collect_until_stopped(
         points, experiment_dir, configuration_id, measure_shot, processes
     )
-    rows = write_the_run_folder(experiment_dir, points, point_ids, report_dir)
+    rows = write_the_run_folder(experiment_dir, point_ids, report_dir)
     run_folder.finish_run(config, report_dir, point_ids, started_utc)
     return report_dir, rows
 
 
 def write_the_run_folder(
     experiment_dir: pathlib.Path,
-    points: list,
     point_ids: list,
     report_dir: pathlib.Path,
 ) -> list:
-    """The saved pieces folded into the run folder, beside what they give.
+    """The points' saved pieces folded into the run folder, and what they give.
 
-    Every file comes from the pieces, not from what this collect ran,
-    so a collect that found its pieces saved writes the folder whole:
-    the online thresholds' trajectories from their last pieces' states,
-    the residence table from the pieces' traced shots, and the figures.
-    Returns the summary rows.
+    Every file comes from what the experiment folder recorded, not from
+    what this collect ran or what a yaml makes now: each point's
+    collection and rounds from its resolved/ record, the rest from its
+    pieces. So a collect that found its pieces saved, or a status after
+    a yaml changed, writes the folder whole: the online thresholds'
+    trajectories from their prefixes' last states, the residence table
+    from the pieces' traced shots, and the figures. Returns the summary
+    rows.
     """
+    records = run_folder.resolved_by_point(experiment_dir)
     swept = run_folder.swept_values(experiment_dir, point_ids)
-    for point in points:
-        task = point.task_as_its_last_piece_left_it(experiment_dir)
-        _write_online_threshold_record(task, report_dir, swept)
+    rules = {}
+    for point_id in point_ids:
+        record = records[point_id]
+        rules[point_id] = _recorded_rule(record)
+        _write_the_recorded_trajectory(
+            experiment_dir, record, report_dir, swept
+        )
     folders = pieces.folders_of(experiment_dir, point_ids)
-    rows = _fold_the_pieces(experiment_dir, folders, points, report_dir)
+    seeds_by_point = pieces.seed_ranges_of(folders)
+    rows = report.fold_pieces(
+        experiment_dir, folders, point_ids, seeds_by_point, report_dir, rules
+    )
     residence_rows = residence.rows_in(folders)
     residence.write_residence(residence_rows, report_dir)
     plots.plots(report_dir)
     return rows
+
+
+def _recorded_rule(record: dict) -> collection_module.PointRule:
+    """What a point's summary reads its prefix by, as its record says."""
+    facts = record["experiment"]
+    settings = collection_module.CollectionSettings(**facts["collection"])
+    return collection_module.PointRule(
+        settings, facts["adaptive"], record["rounds_per_shot"]
+    )
+
+
+def _write_the_recorded_trajectory(
+    experiment_dir: pathlib.Path,
+    record: dict,
+    report_dir: pathlib.Path,
+    swept: dict,
+) -> None:
+    """An online point's trajectory, from the state its prefix ended on."""
+    facts = record["experiment"]
+    if not facts["adaptive"]:
+        return
+    point_id = record["id"]
+    saved = pieces.saved_counts(experiment_dir, point_id)
+    prefix = pieces.contiguous_ranges(saved, 0)
+    if not prefix:
+        return
+    first_seed, count = prefix[-1]
+    folder = pieces.piece_dir(experiment_dir, point_id, first_seed, count)
+    calibrator = pieces.read_state(folder)
+    algorithm = facts["algorithm"]
+    _write_online_threshold_record(
+        point_id, algorithm, calibrator, report_dir, swept
+    )
 
 
 def run_planned(
@@ -444,26 +484,10 @@ def recorded_points(configs: list, experiment_dir: pathlib.Path) -> list:
     point_tasks = []
     for config in configs:
         config_tasks = config.point_tasks()
-        config_unique = _unique_tasks(config_tasks)
-        _record_the_points(experiment_dir, config, config_unique)
+        _record_the_points(experiment_dir, config, config_tasks)
         point_tasks.extend(config_tasks)
     unique = _unique_tasks(point_tasks)
     return _point_collections(experiment_dir, point_tasks, unique)
-
-
-def saved_points(configs: list, experiment_dir: pathlib.Path) -> list:
-    """Every point of one configuration's yamls, as another run recorded them.
-
-    Each has its saved prefix counted, so an online point's last piece
-    is known. Nothing is written, so a status can fold while a round
-    runs.
-    """
-    point_tasks = _point_tasks_of(configs)
-    unique = _unique_tasks(point_tasks)
-    points = _point_collections(experiment_dir, point_tasks, unique)
-    for point in points:
-        point.count_the_saved(experiment_dir)
-    return points
 
 
 def _point_tasks_of(configs: list) -> list:
@@ -517,18 +541,45 @@ def _point_ids(unique: list) -> list:
 def _record_the_points(
     experiment_dir: pathlib.Path,
     config: experiment.ExperimentConfig,
-    unique: list,
+    point_tasks: list,
 ) -> None:
-    """Every point's values, maker and workload, and the configuration.
+    """Every point's values, maker, workload and fold, and the configuration.
 
     Recording builds each point's plan, so a point the build refuses
     stops the run before any shot. The seeds a point ran are its
-    pieces', which its run folder's record gathers when it folds.
+    pieces', which its run folder's record gathers when it folds. What
+    a fold needs beside the pieces is recorded too, so a status folds
+    the point whatever its yaml says later.
     """
+    configuration_id = run_folder.configuration_id(config)
+    collections = _collection_by_point(point_tasks)
+    unique = _unique_tasks(point_tasks)
     for task in unique:
         sections = config.resolved_sections(task.metadata)
-        run_folder.record_point(experiment_dir, task, None, sections)
+        point_id = task.strong_id()
+        facts = _experiment_facts(task, configuration_id, collections[point_id])
+        run_folder.record_point(experiment_dir, task, None, sections, facts)
     run_folder.record_configuration(experiment_dir, config)
+
+
+def _experiment_facts(
+    task: collect.Task,
+    configuration_id: str,
+    settings: collection_module.CollectionSettings,
+) -> dict:
+    """What folding the point needs besides its pieces.
+
+    Its configuration, which the last yaml to record it belongs to; its
+    collection, which reads its prefix; whether its threshold learns
+    online; and the kind of the tier that decodes its windows, which
+    names its trajectory's rows.
+    """
+    return {
+        "configuration_id": configuration_id,
+        "collection": dataclasses.asdict(settings),
+        "adaptive": task.online_threshold is not None,
+        "algorithm": measure.active_decoder_kind(task.settings),
+    }
 
 
 def _unique_tasks(point_tasks: list) -> list:
@@ -714,25 +765,6 @@ def _save_the_piece(
     )
 
 
-def _fold_the_pieces(
-    experiment_dir: pathlib.Path,
-    folders: list,
-    points: list,
-    report_dir: pathlib.Path,
-) -> list:
-    """The configuration's pieces folded into its run folder; its rows."""
-    seeds_by_point = pieces.seed_ranges_of(folders)
-    point_ids = []
-    rules = {}
-    for point in points:
-        point_id = point.task.strong_id()
-        point_ids.append(point_id)
-        rules[point_id] = point.rule()
-    return report.fold_pieces(
-        experiment_dir, folders, point_ids, seeds_by_point, report_dir, rules
-    )
-
-
 def _echo_description(config, settings, run_dir: pathlib.Path) -> None:
     """The resolved experiment, before the first shot, as gem5 dumps it.
 
@@ -744,14 +776,36 @@ def _echo_description(config, settings, run_dir: pathlib.Path) -> None:
     print(description_text, file=sys.stderr)
 
 
-def _write_online_threshold_record(
-    task: collect.Task,
-    run_dir: Optional[pathlib.Path],
-    swept: Optional[dict],
-) -> None:
-    """One csv per online sweep point with its threshold's trajectory.
+def _say_the_online_threshold(task: collect.Task) -> None:
+    """A finished point's online threshold summary, when it learns one."""
+    calibrator = task.online_threshold
+    if calibrator is None:
+        return
+    _say_the_threshold(calibrator)
 
-    Nothing for a point whose threshold is not calibrated online.
+
+def _say_the_threshold(calibrator) -> None:
+    """The online threshold's one-line summary on stderr."""
+    summary = calibrator.summary()
+    threshold_db = _final_threshold_db(summary)
+    summary_line = _threshold_summary_line(summary, threshold_db)
+    print(summary_line, file=sys.stderr)
+
+
+def _final_threshold_db(summary: dict) -> float:
+    """The calibrator's final threshold, in the paper's decibels."""
+    final_threshold_nats = summary["threshold"]
+    return escalation_settings.nats_to_decibels(final_threshold_nats)
+
+
+def _write_online_threshold_record(
+    point_id: str,
+    algorithm,
+    calibrator,
+    run_dir: pathlib.Path,
+    swept: dict,
+) -> None:
+    """One online point's csv of its threshold's trajectory.
 
     Every audit and target move, plus every 100th window, and a summary
     line on stderr. The gap unit inside the calibrator is nats; the csv
@@ -759,31 +813,21 @@ def _write_online_threshold_record(
     id, as its resolved/ record is, and its rows carry the point's id,
     swept values and algorithm, as every other csv's rows do.
     """
-    calibrator = task.online_threshold
-    if calibrator is None:
-        return
+    _say_the_threshold(calibrator)
     summary = calibrator.summary()
-    final_threshold_nats = summary["threshold"]
-    threshold_db = escalation_settings.nats_to_decibels(final_threshold_nats)
-    summary_line = _threshold_summary_line(summary, threshold_db)
-    print(summary_line, file=sys.stderr)
-    if run_dir is None:
-        return
-    point_id = task.strong_id()
-    rows = _trajectory_rows(task, summary, threshold_db)
+    threshold_db = _final_threshold_db(summary)
+    point = report.point_columns((point_id, algorithm))
+    rows = _trajectory_rows(point, calibrator, summary, threshold_db)
     record_path = pathlib.Path(run_dir) / f"online_threshold_{point_id}.csv"
     report.write_csv(rows, record_path, swept)
 
 
 def _trajectory_rows(
-    task: collect.Task, summary: dict, threshold_db: float
+    point: dict, calibrator, summary: dict, threshold_db: float
 ) -> list:
     """The trajectory's rows, then the end row at the final threshold."""
-    point_id = task.strong_id()
-    algorithm = measure.active_decoder_kind(task.settings)
-    point = report.point_columns((point_id, algorithm))
     rows = []
-    for window_count, threshold_nats, event in task.online_threshold.trajectory:
+    for window_count, threshold_nats, event in calibrator.trajectory:
         row_db = escalation_settings.nats_to_decibels(threshold_nats)
         row = {**point, "window_count": window_count}
         row["threshold_db"] = row_db

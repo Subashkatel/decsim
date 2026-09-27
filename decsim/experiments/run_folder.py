@@ -128,8 +128,32 @@ def combined_folder(
 ) -> pathlib.Path:
     """The run folder of one configuration: combined/<name>-<id8>/."""
     identity = configuration_id(config)
-    name = f"{config.name}-{identity[:8]}"
-    return experiment_dir / COMBINED_FOLDER / name
+    return _combined_folder_named(experiment_dir, config.name, identity)
+
+
+def recorded_combined_folders(experiment_dir: pathlib.Path) -> dict:
+    """Each configuration id configurations.csv names, and its run folder.
+
+    The folder takes the name of the id's first line, as a collect of
+    that line's yaml names it.
+    """
+    folders = {}
+    for line in _configuration_lines(experiment_dir):
+        identity = line["configuration_id"]
+        if identity in folders:
+            continue
+        name = line["name"]
+        folders[identity] = _combined_folder_named(
+            experiment_dir, name, identity
+        )
+    return folders
+
+
+def _combined_folder_named(
+    experiment_dir: pathlib.Path, name: str, identity: str
+) -> pathlib.Path:
+    folder_name = f"{name}-{identity[:8]}"
+    return experiment_dir / COMBINED_FOLDER / folder_name
 
 
 def record_configuration(
@@ -168,12 +192,8 @@ def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
     several yamls, which split one configuration's sweep between them
     (the sweep is no part of the id).
     """
-    path = experiment_dir / CONFIGURATIONS_FILE
-    with open(path, newline="") as handle:
-        reader = csv.DictReader(handle)
-        lines = list(reader)
     files_by_id = {}
-    for line in lines:
+    for line in _configuration_lines(experiment_dir):
         chain = line["config_chain"].split(";")
         files = files_by_id.setdefault(line["configuration_id"], [])
         if chain[0] not in files:
@@ -184,6 +204,14 @@ def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
             experiment.load_experiment(file) for file in files
         ]
     return configurations
+
+
+def _configuration_lines(experiment_dir: pathlib.Path) -> list:
+    """configurations.csv's lines, each a dict of its columns."""
+    path = experiment_dir / CONFIGURATIONS_FILE
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)
 
 
 def piece_identity() -> dict:
@@ -266,6 +294,7 @@ def record_point(
     task: collect.Task,
     seeds: Optional[list] = None,
     sections: Optional[Mapping] = None,
+    experiment_facts: Optional[Mapping] = None,
 ) -> str:
     """One sweep point's values and workload, named by its strong id.
 
@@ -274,8 +303,10 @@ def record_point(
     references resolved, as Hydra keeps each job's composed config in
     .hydra/config.yaml), the maker the workload's row says it called with the
     point's own arguments, every setting and the values the build
-    derives; a point a Python caller built has no sections. inputs/<id>/ holds
-    the workload as the files row reads it, with each file's sha256 in
+    derives; a point a Python caller built has no sections. An
+    experiment's point also holds experiment_facts, what its fold needs
+    besides its pieces (collect_command). inputs/<id>/ holds the
+    workload as the files row reads it, with each file's sha256 in
     hashes.json, so a rerun needs no maker installed. Returns the id.
     """
     point_id = task.strong_id()
@@ -292,6 +323,8 @@ def record_point(
         "built": _built_values(shot_settings),
     }
     resolved["rounds_per_shot"] = _rounds_per_shot(resolved["built"])
+    if experiment_facts is not None:
+        resolved["experiment"] = collect.json_value(experiment_facts)
     resolved_dir = run_dir / RESOLVED_FOLDER
     resolved_dir.mkdir(parents=True, exist_ok=True)
     resolved_path = resolved_dir / f"{point_id}.json"

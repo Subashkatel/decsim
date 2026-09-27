@@ -128,6 +128,21 @@ def saved_counts(experiment_dir: pathlib.Path, point_id: str) -> dict:
     return counts
 
 
+def contiguous_ranges(saved: dict, first_seed: int) -> list:
+    """The saved (first seed, count) pieces from first_seed on, up to a gap.
+
+    saved maps each saved piece's first seed to its count, as
+    saved_counts gives it.
+    """
+    ranges = []
+    next_seed = first_seed
+    while next_seed in saved:
+        count = saved[next_seed]
+        ranges.append((next_seed, count))
+        next_seed += count
+    return ranges
+
+
 def seed_ranges_of(folders: list) -> dict:
     """Each point's seed ranges, [first, count], from its pieces' names."""
     ranges = {}

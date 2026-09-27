@@ -1,14 +1,17 @@
 """`decsim status`: an experiment's pieces folded, and where each point stands.
 
-Every configuration configurations.csv names is folded from its saved
-pieces into its run folder, combined/<name>-<id8>/, as a collect of it
-folds them, and status.csv gets one row per point: its configuration and
-point ids, its swept values, the state of its contiguous prefix, its
-counts, the estimate and exact limits the fold computed for that prefix
-(failure_statistics), and the core seconds of all its pieces. A point
-with no piece yet is a row in state "no data". Status reads and writes
-nothing a running task writes, so it can run while a round runs; its
-files are replaced whole.
+Every point the experiment recorded is folded from its saved pieces
+into its configuration's run folder, combined/<name>-<id8>/, as a
+collect of it folds them. What a fold reads is the points' resolved/
+records and the pieces, never the yamls, so a point a yaml no longer
+sweeps is still counted, and a point two configurations recorded is
+counted once, under the one that recorded it last. status.csv gets one
+row per point: its configuration and point ids, its swept values, the
+state of its contiguous prefix, its counts, the estimate and exact
+limits the fold computed for that prefix (failure_statistics), and the
+core seconds of all its pieces. A point with no piece yet is a row in
+state "no data". Status reads and writes nothing a running task writes,
+so it can run while a round runs; its files are replaced whole.
 """
 
 import argparse
@@ -57,19 +60,18 @@ def main(argv: list) -> None:
 
 def fold_the_experiment(experiment_dir: pathlib.Path) -> list:
     """Every configuration folded into its run folder; status.csv's rows."""
-    configurations = run_folder.recorded_configurations(experiment_dir)
+    records = run_folder.resolved_by_point(experiment_dir)
+    point_ids_by_configuration = _point_ids_by_configuration(records)
+    combined_folders = run_folder.recorded_combined_folders(experiment_dir)
     rows = []
     swept = {}
-    for configuration_id, configs in configurations.items():
-        config = configs[0]
-        points = collect_command.saved_points(configs, experiment_dir)
-        point_ids = [point.task.strong_id() for point in points]
-        report_dir = run_folder.combined_folder(experiment_dir, config)
-        started_utc = run_folder.start_run(config, report_dir, point_ids)
+    for configuration_id, point_ids in point_ids_by_configuration.items():
+        report_dir = combined_folders[configuration_id]
+        started_utc = run_folder.start_run(None, report_dir, point_ids)
         sweep_rows = collect_command.write_the_run_folder(
-            experiment_dir, points, point_ids, report_dir
+            experiment_dir, point_ids, report_dir
         )
-        run_folder.finish_run(config, report_dir, point_ids, started_utc)
+        run_folder.finish_run(None, report_dir, point_ids, started_utc)
         sweep_by_point = {row["point_id"]: row for row in sweep_rows}
         for point_id in point_ids:
             sweep_row = sweep_by_point.get(point_id)
@@ -84,6 +86,16 @@ def fold_the_experiment(experiment_dir: pathlib.Path) -> list:
     report.write_csv(rows, staging, swept)
     staging.replace(status_path)
     return rows
+
+
+def _point_ids_by_configuration(records: dict) -> dict:
+    """The recorded points of each configuration, as their records say."""
+    point_ids_by_configuration = {}
+    for point_id, record in records.items():
+        configuration_id = record["experiment"]["configuration_id"]
+        point_ids = point_ids_by_configuration.setdefault(configuration_id, [])
+        point_ids.append(point_id)
+    return point_ids_by_configuration
 
 
 def _status_row(

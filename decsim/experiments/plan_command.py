@@ -448,9 +448,9 @@ def _write_rows_atomically(
     path: pathlib.Path, columns: tuple, rows: list
 ) -> None:
     """A csv written under a temporary name and renamed into place."""
-    partial = path.with_name(f".{path.name}.partial")
-    with open(partial, "w", newline="") as handle:
+    staging = run_folder.staging_path(path)
+    with open(staging, "w", newline="") as handle:
         writer = csv.DictWriter(handle, columns)
         writer.writeheader()
         writer.writerows(rows)
-    partial.replace(path)
+    staging.replace(path)

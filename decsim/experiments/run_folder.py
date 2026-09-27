@@ -23,6 +23,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import uuid
 from collections.abc import Mapping
 from typing import Optional
 
@@ -395,6 +396,17 @@ def write_json(path: pathlib.Path, value) -> None:
     text = json.dumps(value, indent=2)
     lines = text + "\n"
     path.write_text(lines)
+
+
+def staging_path(path: pathlib.Path) -> pathlib.Path:
+    """A hidden name beside path that only this writer uses.
+
+    Two tasks of one experiment may replace one file at once, so each
+    stages its copy under a random name, and neither moves the other's.
+    """
+    identifier = uuid.uuid4()
+    token = identifier.hex
+    return path.with_name(f".{path.name}.{token}.partial")
 
 
 def utc_now() -> str:
@@ -810,6 +822,6 @@ def _versions() -> dict:
 
 def _replace_file(path: pathlib.Path, text: str) -> None:
     """The file's new text, whole: written beside it and renamed over it."""
-    partial = path.with_name(f".{path.name}.partial")
-    partial.write_text(text)
-    os.replace(partial, path)
+    staging = staging_path(path)
+    staging.write_text(text)
+    os.replace(staging, path)

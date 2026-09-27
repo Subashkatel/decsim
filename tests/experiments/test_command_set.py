@@ -840,6 +840,26 @@ def _piece_facts_and_references(experiment_dir: pathlib.Path) -> list:
     return pairs
 
 
+def test_a_configuration_line_is_staged_under_its_writers_own_name(tmp_path):
+    """Two collects of one experiment may record their lines at once.
+
+    Each stages configurations.csv under a name no other writer uses,
+    so a copy another writer is staging beside it is left as it was.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    config = experiment.load_experiment(config_path)
+    experiment_dir = tmp_path / "experiment"
+    experiment_dir.mkdir()
+    others_copy = experiment_dir / ".configurations.csv.partial"
+    others_copy.write_text("another writer's copy\n")
+
+    run_folder.record_configuration(experiment_dir, config)
+
+    configurations = run_folder.recorded_configurations(experiment_dir)
+    assert others_copy.read_text() == "another writer's copy\n"
+    assert list(configurations) == [run_folder.configuration_id(config)]
+
+
 def test_a_piece_records_its_counts_rounds_and_configuration(tmp_path):
     """piece.json's lines against the piece's own shots.csv, summed by csv.
 

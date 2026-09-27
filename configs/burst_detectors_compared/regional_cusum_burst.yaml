@@ -1,8 +1,0 @@
-# CUSUMs on discs around each check and the whole patch, no mask, on
-# the shared burst: the masked regional CUSUM with no mask.
-
-extends: ../common/burst_detectors_compared_base.yaml
-
-burst_detector:
-  kind: masked_regional_cusum
-  mask_count: null

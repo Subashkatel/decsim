@@ -185,12 +185,11 @@ chain says what you meant.
 | `configs/examples/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
 | `configs/examples/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
 | `configs/experiments/switching/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
+| `configs/experiments/burst_detection/burst_detection.yaml` | four burst detectors on one burst at d = 5 and on quiet shots, the detector and the burst its only axes ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
 | `configs/data_movement.yaml` | the data-movement study: every copy, reference and move counted per hop |
 | `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
 | `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |
 | `configs/data_movement_switching.yaml` | the same under the switching escalation |
-| `configs/burst_detectors_compared/` | four burst detectors on one burst at d = 5 and on quiet shots, a file each, each changing only its detector or its burst ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
-| `configs/common/burst_detectors_compared_base.yaml` | the shared base of that folder; it names no detector, so it is not a comparison by itself |
 
 ## Read next
 

@@ -1,6 +1,0 @@
-# The masked regional CUSUM at its defaults on the shared burst.
-
-extends: ../common/burst_detectors_compared_base.yaml
-
-burst_detector:
-  kind: masked_regional_cusum

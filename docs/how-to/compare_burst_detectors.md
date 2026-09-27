@@ -4,76 +4,75 @@
 
 A burst detector is judged on two numbers: how often it flags a shot
 that has no burst (its false alarms), and how often it flags a burst
-soon enough after it starts (its catches). The folder
-`configs/burst_detectors_compared/` measures both for four detectors:
+soon enough after it starts (its catches). The grid
+`configs/experiments/burst_detection/burst_detection.yaml` measures both
+for four detectors:
 
-| File stem | Detector |
+| Detector | Its `burst_detector` value in the grid |
 | --- | --- |
-| `event_count` | the flipped-bit count: the patch's detection events over a window, and each position's |
-| `whole_patch_cusum` | one CUSUM bank on the whole patch, no mask (`mask_count: null`, `region_radii: []`) |
-| `regional_cusum` | CUSUMs on discs around each check and on the whole patch, no mask (`mask_count: null`) |
-| `masked_regional_cusum` | the same, with checks that act like defects masked out |
+| event count | `kind: event_count`, the patch's detection events over a window, and each position's |
+| whole-patch CUSUM | `kind: masked_regional_cusum` with `mask_count: null` and `region_radii: []`, one CUSUM bank on the whole patch, no mask |
+| regional CUSUM | `kind: masked_regional_cusum` with `mask_count: null`, CUSUMs on discs around each check and on the whole patch, no mask |
+| masked regional CUSUM | `kind: masked_regional_cusum` at its defaults, the same with checks that act like defects masked out |
 
-Each detector has two files. `<stem>_burst.yaml` runs it on a burst
-at d = 5; `<stem>_quiet.yaml` runs it on the same shots with the burst
-off. Every burst file extends
-`configs/common/burst_detectors_compared_base.yaml` and changes only
-its `burst_detector` section, and every quiet file extends its burst
-file and changes only `qpu`, so two rows differ only by the detector
-or the burst.
+The grid's sweep has two axes beyond the point itself: `burst_detector`
+takes those four values, and `qpu` takes two, quiet shots
+(`kind: stim_device`) and a burst at d = 5 (`kind: burst_stim`). Every
+other section is the same at every point, so two rows differ only by
+the detector or the burst.
 
-## Run the folder
+## Run the grid
 
-Each file is one sweep point of 20 shots, 400 rounds each:
+Each of the eight points is 20 shots, 400 rounds each:
 
 ```bash
-for config in configs/burst_detectors_compared/*.yaml; do
-  decsim collect "$config" --out "results/$(basename "$config" .yaml)"
-done
+decsim collect configs/experiments/burst_detection/burst_detection.yaml --processes 8 --out results/burst_detection
 ```
 
 A quiet shot takes about four minutes on one core. A burst shot takes
 ten to twenty-five, most of it strong decodes: every window a flag
-meets is decoded again by belief matching. So one burst file is several
+meets is decoded again by belief matching. So a burst point is several
 hours on one core. [How to run a sweep on Slurm](run_a_sweep_on_slurm.md)
-runs the files side by side, each a job that picks up where it stopped
-when submitted again.
+runs the grid as a job that picks up where it stopped when submitted
+again.
 
 ## Read the results
 
-Each run folder's `sweep.csv`, under `results/<file>/combined/`, has two
-columns for this ([the run folder](../reference/run_folder.md)):
+The run folder's `sweep.csv`, under `results/burst_detection/combined/`,
+has two columns for this ([the run folder](../reference/run_folder.md)):
 
 - `flagged_share`: the share of shots on which the detector flagged a
-  round at or after the burst's onset. On a quiet file every flag is a
+  round at or after the burst's onset. On a quiet point every flag is a
   false alarm.
 - `caught_in_time_share`: the share of shots flagged no later than
   `burst_detector.catch_deadline_rounds` (300 by default) after the
-  onset. Quiet files have no burst, so they have no such column.
+  onset. A quiet point has no burst, so it has no value there.
 
 `shots.csv` holds the per-shot column behind both,
 `burst_first_flag_round` (0 when the detector flagged nothing).
 
-Read the folders into one table with `decsim.results`. The false-alarm
-rate per second is the quiet file's flagged share over one shot's
-time, the shot's rounds times its round period:
+Read the rows with `decsim.results`. Each row's `burst_detector` column
+is the detector's value in the grid, and its `settings.qpu.kind` says
+whether the burst was on. The false-alarm rate per second is the quiet
+point's flagged share over one shot's time, the shot's rounds times its
+round period:
 
 ```python
 import glob
 
 import decsim.results as results
 
-detectors = [
-    "event_count",
-    "whole_patch_cusum",
-    "regional_cusum",
-    "masked_regional_cusum",
-]
-for detector in detectors:
-    burst_folders = glob.glob(f"results/{detector}_burst/combined/*")
-    quiet_folders = glob.glob(f"results/{detector}_quiet/combined/*")
-    burst, = results.load(*burst_folders)
-    quiet, = results.load(*quiet_folders)
+folders = glob.glob("results/burst_detection/combined/*")
+quiet_rows = {}
+burst_rows = {}
+for row in results.load(*folders):
+    detector = row["burst_detector"]
+    if row["settings.qpu.kind"] == "stim_device":
+        quiet_rows[detector] = row
+    else:
+        burst_rows[detector] = row
+for detector, quiet in quiet_rows.items():
+    burst = burst_rows[detector]
     rounds = quiet["settings.workload.row_settings.arguments.rounds_per_shot"]
     period = quiet["settings.qpu.round_period_microseconds"]
     shot_seconds = rounds * period * 1e-6
@@ -93,8 +92,9 @@ for `false_alarms_per_round`.
 ## Know what the numbers can say
 
 Twenty shots place a caught share within about 0.2 either way (its
-exact 95 percent interval). The quiet files check that false alarms are not far
-above budget, and no more: at 0.03 per second a 400 us shot alarms
-about once in 80,000 shots, so a quiet run sees none unless the
-detector is badly off. To measure the rate itself, raise the quiet
-files' `collection.max_shots` by that much, or raise the budget.
+exact 95 percent interval). The quiet points check that false alarms
+are not far above budget, and no more: at 0.03 per second a 400 us
+shot alarms about once in 80,000 shots, so a quiet point sees none
+unless the detector is badly off. To measure the rate itself, give the
+quiet points a sweep block of their own whose `collection.max_shots`
+is that much larger, or raise the budget.

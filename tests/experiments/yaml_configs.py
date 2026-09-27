@@ -28,6 +28,7 @@ SHIPPED_CONFIGS = (
     "examples/my_first_sweep.yaml",
     "examples/priced_cards_example.yaml",
     "examples/two_tiers.yaml",
+    "experiments/burst_detection/burst_detection.yaml",
     "experiments/switching/cluster_gap_switching.yaml",
     "experiments/switching/seam_pinned_switching.yaml",
     "data_movement.yaml",

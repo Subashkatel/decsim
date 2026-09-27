@@ -1,9 +1,0 @@
-# One CUSUM bank on the whole patch's events, no mask, on the shared
-# burst: the masked regional CUSUM with no discs and no mask.
-
-extends: ../common/burst_detectors_compared_base.yaml
-
-burst_detector:
-  kind: masked_regional_cusum
-  mask_count: null
-  region_radii: []

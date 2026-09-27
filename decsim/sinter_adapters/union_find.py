@@ -55,7 +55,7 @@ class UnionFindDecoder(sinter.Decoder):
 class CompiledUnionFindDecoder(sinter.CompiledDecoder):
     """One task's graph, decoding bit-packed shots one at a time."""
 
-    def __init__(self, graph) -> None:
+    def __init__(self, graph: evidence_records.UnionFindGraph) -> None:
         self.graph = graph
 
     def decode_shots_bit_packed(

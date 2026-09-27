@@ -108,9 +108,9 @@ class Experiment:
             path = _point_path(folder, point_id)
             if path.exists():
                 paths.append(path)
-        stats = sinter.read_stats_from_csv_files(*paths)
+        saved_stats = sinter.read_stats_from_csv_files(*paths)
         lines = [sinter.CSV_HEADER]
-        for point_stats in stats:
+        for point_stats in saved_stats:
             line = point_stats.to_csv_line()
             lines.append(line)
         lines.append("")
@@ -158,15 +158,16 @@ class Experiment:
         task = self.tasks[point_id]
         path = _point_path(folder, point_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        (stats,) = sinter.collect(
+        (point_stats,) = sinter.collect(
             num_workers=worker_count,
             tasks=[task],
             custom_decoders=decoders,
             save_resume_filepath=path,
         )
         print(
-            f"point {point_id}: {stats.shots} shots, {stats.errors} errors, "
-            f"{stats.seconds:.0f} core seconds"
+            f"point {point_id}: {point_stats.shots} shots, "
+            f"{point_stats.errors} errors, "
+            f"{point_stats.seconds:.0f} core seconds"
         )
 
 
@@ -201,10 +202,10 @@ def _refuse_no_workers(worker_count: int) -> None:
         raise ValueError(message)
 
 
-def _results_folder(name: str, out: Optional[str]) -> pathlib.Path:
+def _results_folder(name: str, requested_folder: Optional[str]) -> pathlib.Path:
     """--out, or <root>/<today>_<name> under DECSIM_RESULTS or ./results."""
-    if out is not None:
-        return pathlib.Path(out)
+    if requested_folder is not None:
+        return pathlib.Path(requested_folder)
     root = os.environ.get(RESULTS_ROOT_VARIABLE, DEFAULT_RESULTS_ROOT)
     today = datetime.date.today()
     date_text = today.isoformat()

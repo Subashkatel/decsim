@@ -66,49 +66,49 @@ def test_list_prints_each_points_id_decoder_and_labels(tmp_path, capsys):
 
 def test_a_point_run_by_id_writes_only_its_own_csv(tmp_path, monkeypatch):
     script = write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = tiny_experiment()
 
-    experiment.main(arguments=["1", "--out", str(out)])
+    experiment.main(arguments=["1", "--out", str(results_folder)])
 
-    points = out / "points"
+    points = results_folder / "points"
     point_path = points / "1.csv"
-    (stats,) = sinter.read_stats_from_csv_files(point_path)
+    (point_stats,) = sinter.read_stats_from_csv_files(point_path)
     written = os.listdir(points)
-    script_copy = out / "run.py"
+    script_copy = results_folder / "run.py"
     copy_text = script_copy.read_text()
     script_text = script.read_text()
     assert written == ["1.csv"]
-    assert stats.json_metadata == {"d": 5}
-    assert stats.errors >= 10
+    assert point_stats.json_metadata == {"d": 5}
+    assert point_stats.errors >= 10
     assert copy_text == script_text
 
 
 def test_a_finished_point_run_again_takes_no_new_shots(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = tiny_experiment()
-    experiment.main(arguments=["0", "--out", str(out)])
-    first_text = (out / "points" / "0.csv").read_text()
+    experiment.main(arguments=["0", "--out", str(results_folder)])
+    first_text = (results_folder / "points" / "0.csv").read_text()
 
-    experiment.main(arguments=["0", "--out", str(out)])
+    experiment.main(arguments=["0", "--out", str(results_folder)])
 
-    assert (out / "points" / "0.csv").read_text() == first_text
+    assert (results_folder / "points" / "0.csv").read_text() == first_text
 
 
 def test_a_point_its_shot_cap_stopped_takes_no_new_shots(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = shot_capped_experiment(300)
-    experiment.main(arguments=["0", "--out", str(out)])
-    point_path = out / "points" / "0.csv"
+    experiment.main(arguments=["0", "--out", str(results_folder)])
+    point_path = results_folder / "points" / "0.csv"
     first_text = point_path.read_text()
 
-    experiment.main(arguments=["0", "--out", str(out)])
+    experiment.main(arguments=["0", "--out", str(results_folder)])
 
-    (stats,) = sinter.read_stats_from_csv_files(point_path)
+    (point_stats,) = sinter.read_stats_from_csv_files(point_path)
     assert point_path.read_text() == first_text
-    assert stats.shots == 300
+    assert point_stats.shots == 300
 
 
 def test_an_unfinished_point_goes_on_from_its_saved_shots(
@@ -116,19 +116,19 @@ def test_an_unfinished_point_goes_on_from_its_saved_shots(
 ):
     """A raised shot cap leaves the saved rows and adds only the rest."""
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     first = shot_capped_experiment(300)
-    first.main(arguments=["0", "--out", str(out)])
-    point_path = out / "points" / "0.csv"
+    first.main(arguments=["0", "--out", str(results_folder)])
+    point_path = results_folder / "points" / "0.csv"
     first_text = point_path.read_text()
     raised = shot_capped_experiment(700)
 
-    raised.main(arguments=["0", "--out", str(out)])
+    raised.main(arguments=["0", "--out", str(results_folder)])
 
-    (stats,) = sinter.read_stats_from_csv_files(point_path)
+    (point_stats,) = sinter.read_stats_from_csv_files(point_path)
     raised_text = point_path.read_text()
     assert raised_text.startswith(first_text)
-    assert stats.shots == 700
+    assert point_stats.shots == 700
 
 
 def test_each_point_decodes_with_the_decoder_its_name_maps_to(
@@ -136,7 +136,7 @@ def test_each_point_decodes_with_the_decoder_its_name_maps_to(
 ):
     """A named decoder is handed to sinter; None names a sinter built-in."""
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = experiment_runner.Experiment("tiny")
     circuit = tiny_circuit(3)
     experiment.add_offline(
@@ -150,9 +150,9 @@ def test_each_point_decodes_with_the_decoder_its_name_maps_to(
         "pymatching": None,
     }
 
-    experiment.main(decoders, arguments=["--out", str(out)])
+    experiment.main(decoders, arguments=["--out", str(results_folder)])
 
-    stats_path = out / "stats.csv"
+    stats_path = results_folder / "stats.csv"
     combined = sinter.read_stats_from_csv_files(stats_path)
     decoder_names = {point_stats.decoder for point_stats in combined}
     assert decoder_names == {"union-find", "pymatching"}
@@ -161,19 +161,19 @@ def test_each_point_decodes_with_the_decoder_its_name_maps_to(
 def test_two_points_run_at_once_write_different_files(tmp_path):
     script = tmp_path / "run.py"
     script.write_text(SCRIPT_TEXT)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     environment = dict(os.environ, PYTHONPATH=str(REPOSITORY_ROOT))
 
-    first = run_in_background(script, "0", out, environment)
-    second = run_in_background(script, "1", out, environment)
+    first = run_in_background(script, "0", results_folder, environment)
+    second = run_in_background(script, "1", results_folder, environment)
 
     assert first.wait() == 0
     assert second.wait() == 0
-    first_path = out / "points" / "0.csv"
-    second_path = out / "points" / "1.csv"
+    first_path = results_folder / "points" / "0.csv"
+    second_path = results_folder / "points" / "1.csv"
     (first_stats,) = sinter.read_stats_from_csv_files(first_path)
     (second_stats,) = sinter.read_stats_from_csv_files(second_path)
-    written = os.listdir(out)
+    written = os.listdir(results_folder)
     assert first_stats.json_metadata == {"d": 3}
     assert second_stats.json_metadata == {"d": 5}
     assert sorted(written) == ["commit.txt", "points", "run.py"]
@@ -181,16 +181,16 @@ def test_two_points_run_at_once_write_different_files(tmp_path):
 
 def test_combine_writes_every_points_stats_into_one_csv(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = tiny_experiment()
-    experiment.main(arguments=["0", "--out", str(out)])
-    experiment.main(arguments=["1", "--out", str(out)])
+    experiment.main(arguments=["0", "--out", str(results_folder)])
+    experiment.main(arguments=["1", "--out", str(results_folder)])
 
-    experiment.main(arguments=["combine", "--out", str(out)])
+    experiment.main(arguments=["combine", "--out", str(results_folder)])
 
-    stats_path = out / "stats.csv"
-    first_path = out / "points" / "0.csv"
-    second_path = out / "points" / "1.csv"
+    stats_path = results_folder / "stats.csv"
+    first_path = results_folder / "points" / "0.csv"
+    second_path = results_folder / "points" / "1.csv"
     combined = sinter.read_stats_from_csv_files(stats_path)
     points = sinter.read_stats_from_csv_files(first_path, second_path)
     stats_text = stats_path.read_text()
@@ -200,12 +200,12 @@ def test_combine_writes_every_points_stats_into_one_csv(tmp_path, monkeypatch):
 
 def test_a_run_of_every_point_ends_with_stats_csv(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = tiny_experiment()
 
-    experiment.main(arguments=["--out", str(out), "--workers", "2"])
+    experiment.main(arguments=["--out", str(results_folder), "--workers", "2"])
 
-    stats_path = out / "stats.csv"
+    stats_path = results_folder / "stats.csv"
     combined = sinter.read_stats_from_csv_files(stats_path)
     assert len(combined) == 2
 
@@ -213,12 +213,12 @@ def test_a_run_of_every_point_ends_with_stats_csv(tmp_path, monkeypatch):
 def test_the_folder_records_the_commit_that_ran(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
     set_the_tree(monkeypatch, "abc123", False)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = tiny_experiment()
 
-    experiment.main(arguments=["0", "--out", str(out)])
+    experiment.main(arguments=["0", "--out", str(results_folder)])
 
-    commit_path = out / "commit.txt"
+    commit_path = results_folder / "commit.txt"
     commit_text = commit_path.read_text()
     assert commit_text == "commit abc123\ndirty False\n"
 
@@ -231,13 +231,13 @@ def test_a_side_that_could_not_read_git_is_not_refused(
 ):
     """A gitless node records dirty None; the commit still decides."""
     script = write_script(tmp_path, monkeypatch)
-    out = folder_of_the_run(tmp_path, script, "abc123", held_dirty)
+    results_folder = folder_of_the_run(tmp_path, script, "abc123", held_dirty)
     set_the_tree(monkeypatch, "abc123", is_dirty)
     experiment = tiny_experiment()
 
-    experiment.main(arguments=["0", "--out", str(out)])
+    experiment.main(arguments=["0", "--out", str(results_folder)])
 
-    point_path = out / "points" / "0.csv"
+    point_path = results_folder / "points" / "0.csv"
     assert point_path.exists()
 
 
@@ -249,15 +249,17 @@ def test_another_commit_or_a_known_dirty_difference_is_refused(
     tmp_path, monkeypatch, held_commit, held_dirty, is_dirty
 ):
     script = write_script(tmp_path, monkeypatch)
-    out = folder_of_the_run(tmp_path, script, held_commit, held_dirty)
+    results_folder = folder_of_the_run(
+        tmp_path, script, held_commit, held_dirty
+    )
     set_the_tree(monkeypatch, "abc123", is_dirty)
     experiment = tiny_experiment()
 
     with pytest.raises(ValueError) as refused:
-        experiment.main(arguments=["0", "--out", str(out)])
+        experiment.main(arguments=["0", "--out", str(results_folder)])
 
     assert str(refused.value) == (
-        f"{out / 'commit.txt'} records commit {held_commit} dirty "
+        f"{results_folder / 'commit.txt'} records commit {held_commit} dirty "
         f"{held_dirty}, and this is commit abc123 dirty {is_dirty}; a "
         "results folder belongs to one script and one commit, so give "
         "--out a new folder"
@@ -268,17 +270,18 @@ def test_a_folder_holding_another_scripts_copy_is_refused(
     tmp_path, monkeypatch
 ):
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
-    out.mkdir()
-    (out / "run.py").write_text("another script\n")
+    results_folder = tmp_path / "out"
+    results_folder.mkdir()
+    (results_folder / "run.py").write_text("another script\n")
     experiment = tiny_experiment()
 
     with pytest.raises(ValueError) as refused:
-        experiment.main(arguments=["0", "--out", str(out)])
+        experiment.main(arguments=["0", "--out", str(results_folder)])
 
     assert str(refused.value) == (
-        f"{out / 'run.py'} already holds another run.py; a results folder "
-        "belongs to one script and one commit, so give --out a new folder"
+        f"{results_folder / 'run.py'} already holds another run.py; a "
+        "results folder belongs to one script and one commit, so give "
+        "--out a new folder"
     )
 
 
@@ -287,14 +290,14 @@ def test_a_task_on_another_node_with_the_same_process_id_keeps_its_file(
 ):
     """Process ids repeat across nodes; a staged copy is named at random."""
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
-    out.mkdir()
-    other_staging = out / ".run.py.4242"
+    results_folder = tmp_path / "out"
+    results_folder.mkdir()
+    other_staging = results_folder / ".run.py.4242"
     other_staging.write_text("the other node's staged copy\n")
     monkeypatch.setattr(os, "getpid", lambda: 4242)
     experiment = tiny_experiment()
 
-    experiment.main(arguments=["0", "--out", str(out)])
+    experiment.main(arguments=["0", "--out", str(results_folder)])
 
     other_text = other_staging.read_text()
     assert other_text == "the other node's staged copy\n"
@@ -303,9 +306,9 @@ def test_a_task_on_another_node_with_the_same_process_id_keeps_its_file(
 @pytest.mark.parametrize("worker_count", ["0", "-2"])
 def test_fewer_than_one_worker_is_refused(tmp_path, monkeypatch, worker_count):
     write_script(tmp_path, monkeypatch)
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
     experiment = tiny_experiment()
-    arguments = ["0", "--workers", worker_count, "--out", str(out)]
+    arguments = ["0", "--workers", worker_count, "--out", str(results_folder)]
 
     with pytest.raises(ValueError) as refused:
         experiment.main(arguments=arguments)
@@ -313,17 +316,17 @@ def test_fewer_than_one_worker_is_refused(tmp_path, monkeypatch, worker_count):
     assert str(refused.value) == (
         f"--workers is {worker_count}; sinter needs at least one worker process"
     )
-    assert not out.exists()
+    assert not results_folder.exists()
 
 
 def test_an_id_past_the_last_point_is_refused(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
     experiment = tiny_experiment()
 
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
 
     with pytest.raises(ValueError) as refused:
-        experiment.main(arguments=["2", "--out", str(out)])
+        experiment.main(arguments=["2", "--out", str(results_folder)])
 
     assert str(refused.value) == (
         "point 2 is not in this experiment; --list shows its 2 points, 0 to 1"
@@ -334,10 +337,10 @@ def test_a_target_that_is_no_id_is_refused(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
     experiment = tiny_experiment()
 
-    out = tmp_path / "out"
+    results_folder = tmp_path / "out"
 
     with pytest.raises(ValueError) as refused:
-        experiment.main(arguments=["seven", "--out", str(out)])
+        experiment.main(arguments=["seven", "--out", str(results_folder)])
 
     assert str(refused.value) == (
         "'seven' is no point id; give a number --list shows, or combine"
@@ -420,17 +423,23 @@ def set_the_tree(monkeypatch, commit: str, is_dirty) -> None:
 
 def folder_of_the_run(tmp_path, script, commit: str, dirty: str):
     """A results folder an earlier task of the same script recorded."""
-    out = tmp_path / "out"
-    out.mkdir()
+    results_folder = tmp_path / "out"
+    results_folder.mkdir()
     script_text = script.read_text()
-    script_copy = out / "run.py"
+    script_copy = results_folder / "run.py"
     script_copy.write_text(script_text)
-    commit_path = out / "commit.txt"
+    commit_path = results_folder / "commit.txt"
     commit_path.write_text(f"commit {commit}\ndirty {dirty}\n")
-    return out
+    return results_folder
 
 
-def run_in_background(script, point_id: str, out, environment):
+def run_in_background(script, point_id: str, results_folder, environment):
     """The script run on one point in its own process, not waited for."""
-    command = [sys.executable, str(script), point_id, "--out", str(out)]
+    command = [
+        sys.executable,
+        str(script),
+        point_id,
+        "--out",
+        str(results_folder),
+    ]
     return subprocess.Popen(command, env=environment)

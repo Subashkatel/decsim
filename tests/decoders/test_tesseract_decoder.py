@@ -307,3 +307,19 @@ def test_a_search_key_of_the_wrong_type_or_range_is_refused(
         tesseract.TesseractDecoder.Settings.from_yaml(
             section, None, "weak_decoder"
         )
+
+
+def test_a_row_with_a_fixed_order_seed_names_no_run_seed_owner_but_timing():
+    row = tesseract.TesseractDecoder(settings=SHORT_BEAM)
+
+    (timing,) = row.run_seed_children()
+
+    assert timing.child is row.latency_model
+
+
+def test_a_row_that_draws_its_orders_names_its_window_decoder():
+    row = tesseract.TesseractDecoder(settings=SETTINGS)
+
+    (_timing, orders) = row.run_seed_children()
+
+    assert orders.child is row.window_decoder

@@ -49,8 +49,9 @@ import decsim.records.round_plans as round_plans
 
 TASKS_FILE = "tasks.csv"
 TASK_COLUMNS = ("task", "cores", "memory_mb", "hours", "estimated_core_hours")
-# The margin on a measured peak memory, configs/experiments_2026_09/PLAN.md's
-# "margin of one half": a later piece of the point may hold more.
+# The margin on a measured peak memory, the "margin of one half" of the
+# September 2026 plan (configs/experiments_2026_09/PLAN.md at d759e38f):
+# a later piece of the point may hold more.
 MEMORY_MARGIN = 1.5
 SECONDS_PER_HOUR = 3600
 

@@ -440,28 +440,6 @@ def test_a_task_is_one_unit_of_all_its_seeds():
     assert units == [collect.Unit(task, 0, 5)]
 
 
-def test_a_point_with_an_online_threshold_is_one_piece(tmp_path):
-    """The calibrator learns over the point's shots in order.
-
-    Pieces of one round would cut any other point into one piece a shot.
-    """
-    raw = _reference_yaml()
-    raw["escalation"] = {
-        "kind": "switching",
-        "gap_threshold_db": 15.0,
-        "threshold_source": "online",
-    }
-    raw["collection"] = {"piece_rounds": 1, "max_shots": 2}
-    online_path = tmp_path / "online.yaml"
-    online = _written_yaml(raw, online_path)
-    out_dir = tmp_path / "out"
-
-    run.run_experiment(online, out_dir)
-
-    (piece_folder,) = out_dir.glob("pieces/*/*")
-    assert piece_folder.name == "0-1"
-
-
 def test_two_points_under_one_cache_do_not_share_models():
     """The key carries the circuit text, which is where d and p are.
 

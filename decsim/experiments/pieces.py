@@ -13,18 +13,23 @@ writer left is no piece and is passed over; no writer can tell from
 another host whether its owner is still writing, so none removes it.
 """
 
+import hashlib
 import json
 import os
 import pathlib
+import pickle
 import shutil
 import uuid
 
+import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
+# an adaptive point's calibrator as its piece left it (design 6.5)
+STATE_FILE = "state.pickle"
 
 
 def piece_dir(
@@ -42,11 +47,14 @@ def write(
     first_seed: int,
     measurements: list,
     facts: dict,
+    state=None,
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
     facts are the piece's own lines of piece.json, beside the counts
-    read off its shots.
+    read off its shots. state is an adaptive point's calibrator after
+    the piece's last shot, which the point's next piece starts from; it
+    is pickled beside the files and its sha256 goes in piece.json.
     """
     count = len(measurements)
     folder = piece_dir(experiment_dir, point_id, first_seed, count)
@@ -54,10 +62,7 @@ def write(
     staging.mkdir(parents=True)
     record = report.record_of(measurements)
     report.write_record(record, staging, None)
-    residence_rows = residence.rows_of(measurements)
-    if residence_rows:
-        residence_path = staging / residence.PIECE_FILE
-        report.write_csv(residence_rows, residence_path)
+    _write_residence(staging, measurements)
     counts = _counts_of(record.shots)
     identity = run_folder.piece_identity()
     piece = {
@@ -68,6 +73,8 @@ def write(
         **facts,
         **identity,
     }
+    if state is not None:
+        piece["state_sha256"] = _write_state(staging, state)
     piece_path = staging / PIECE_FILE
     run_folder.write_json(piece_path, piece)
     _publish(staging, folder)
@@ -145,6 +152,44 @@ def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
         if not folder.is_dir():
             raise
         shutil.rmtree(staging)
+
+
+def read_state(folder: pathlib.Path):
+    """The calibrator a piece saved, once its bytes match their sha256.
+
+    The file comes off a shared disk and may have been written on
+    another host, so bytes that do not hash to what piece.json records
+    are refused rather than unpickled.
+    """
+    piece = read_piece(folder)
+    state_path = folder / STATE_FILE
+    state_bytes = state_path.read_bytes()
+    digest = hashlib.sha256(state_bytes)
+    if digest.hexdigest() != piece["state_sha256"]:
+        raise refusal.RefusalError(
+            f"{state_path} does not hash to the state_sha256 its "
+            "piece.json records; the piece is damaged, so delete its "
+            "folder and collect it again"
+        )
+    return pickle.loads(state_bytes)
+
+
+def _write_residence(staging: pathlib.Path, measurements: list) -> None:
+    """The residence rows of the piece's traced shots, when it traced any."""
+    residence_rows = residence.rows_of(measurements)
+    if not residence_rows:
+        return
+    residence_path = staging / residence.PIECE_FILE
+    report.write_csv(residence_rows, residence_path)
+
+
+def _write_state(staging: pathlib.Path, state) -> str:
+    """The state pickled into the staging folder; its sha256."""
+    state_bytes = pickle.dumps(state)
+    state_path = staging / STATE_FILE
+    state_path.write_bytes(state_bytes)
+    digest = hashlib.sha256(state_bytes)
+    return digest.hexdigest()
 
 
 def _whole_pieces(point_dir: pathlib.Path) -> list:

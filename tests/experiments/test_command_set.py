@@ -1213,7 +1213,7 @@ def test_a_point_two_blocks_collect_two_ways_is_refused(tmp_path, capsys):
 
 
 def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
-    """An online point is one piece, so no target can stop it partway."""
+    """An online point's shots are not independent, so no target stops it."""
     overrides = yaml_configs.online_threshold()
     overrides["collection"] = {"max_failures": 5}
     config_path = yaml_configs.write_config(tmp_path, overrides)
@@ -1227,6 +1227,84 @@ def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
     assert "calibrates its threshold online" in lines[-1]
     saved_pieces = out_dir.glob("pieces/*/*")
     assert not list(saved_pieces)
+
+
+def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
+    """The referent is the uncut collect: one piece of all four shots.
+
+    Cut into pieces of one shot, each piece starts from the calibrator
+    state the last one saved. Two pieces are lost, as a killed job
+    leaves them, and the collect run again starts from the state of
+    the last saved piece: the threshold's trajectory and every shot's
+    decisions and outcome are the uncut run's. The pymatching units
+    price their latency from measured wall clock, so the timing columns
+    vary between any two runs and are not compared.
+    """
+    whole_dir = tmp_path / "whole"
+    cut_dir = tmp_path / "cut"
+    whole_config = _online_config(tmp_path, 60)
+    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
+    cut_config = _online_config(tmp_path, 15)
+    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+    for lost_name in ("2-2", "3-3"):
+        (lost_piece,) = cut_dir.glob(f"pieces/*/{lost_name}")
+        shutil.rmtree(lost_piece)
+
+    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    whole_decisions = _shot_decisions(whole_run_dir)
+    cut_decisions = _shot_decisions(cut_run_dir)
+    whole_trajectory = _online_trajectory_rows(whole_run_dir)
+    cut_trajectory = _online_trajectory_rows(cut_run_dir)
+    assert _piece_names(cut_dir) == ["0-0", "1-1", "2-2", "3-3"]
+    assert cut_decisions == whole_decisions
+    assert whole_trajectory[-1]["window_count"] == "20"
+    assert cut_trajectory == whole_trajectory
+
+
+def _online_config(tmp_path, piece_rounds: int):
+    """The noisy point with an online threshold that audits often.
+
+    Written over the same file each time: the strong unit's card is read
+    relative to the config's folder, which so enters the point's id.
+    """
+    overrides = yaml_configs.online_threshold()
+    overrides["escalation"]["online"] = {
+        "audit_rate": 0.3,
+        "target_escalation_rate": 0.2,
+        "max_escalation_rate": 0.5,
+    }
+    collection = {"max_shots": 4, "piece_rounds": piece_rounds}
+    overrides["sweep"] = [{"axes": NOISY_AXES, "collection": collection}]
+    return yaml_configs.write_config(tmp_path, overrides)
+
+
+# the shot columns no wall clock prices
+DECISION_COLUMNS = (
+    "seed",
+    "sample_digest",
+    "decoded_windows",
+    "escalated_windows",
+    "strong_decoded_rounds",
+    "is_scored",
+    "logical_failure",
+)
+
+
+def _shot_decisions(run_dir) -> list:
+    shots_path = run_dir / "shots.csv"
+    decisions = []
+    for row in _csv_rows(shots_path):
+        values = _values_of(row, DECISION_COLUMNS)
+        decisions.append(values)
+    return decisions
+
+
+def _online_trajectory_rows(run_dir) -> list:
+    (trajectory_path,) = run_dir.glob("online_threshold_*.csv")
+    return _csv_rows(trajectory_path)
 
 
 def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):

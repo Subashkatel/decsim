@@ -46,7 +46,13 @@ class PointCollection:
     count, whatever collection cut it. pending holds the (first seed,
     count) of the pieces handed out past the counted prefix, in seed
     order; they are counted once they are all saved, so the prefix
-    stays contiguous whatever order the pool ends them in.
+    stays contiguous whatever order the pool ends them in. last_piece
+    is the (first seed, count) of the piece handed out last.
+
+    An adaptive point's calibrator learns over its shots in order, so
+    its pieces run one at a time, each from the calibrator state the
+    piece before it saved (design 6.5), whether that one ran in this
+    collect or in one that was killed.
     """
 
     task: collect.Task
@@ -56,6 +62,7 @@ class PointCollection:
     saved: dict
     next_seed: int = 0
     pending: list = dataclasses.field(default_factory=list)
+    last_piece: Optional[tuple] = None
     tracker: collection_module.PrefixTracker = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
@@ -66,14 +73,17 @@ class PointCollection:
         """Up to `wanted` unsaved pieces past the prefix, as work units.
 
         A saved piece met before any unsaved one is counted at once, so
-        a point whose saved pieces reach its stop starts nothing.
+        a point whose saved pieces reach its stop starts nothing. An
+        adaptive point hands out one piece at a time.
         """
+        if self.task.online_threshold is not None:
+            wanted = 1
         units = []
         while self.tracker.stop_kind is None and len(units) < wanted:
             count = self._next_piece_count()
             if count == 0:
                 break
-            unit = self._hand_out(count)
+            unit = self._hand_out(experiment_dir, count)
             if unit is None and not units:
                 self.count_the_pending(experiment_dir)
             if unit is not None:
@@ -103,7 +113,21 @@ class PointCollection:
             self.settings, is_adaptive, self.rounds_per_shot
         )
 
-    def _hand_out(self, count: int) -> Optional[collect.Unit]:
+    def task_as_its_last_piece_left_it(
+        self, experiment_dir: pathlib.Path
+    ) -> collect.Task:
+        """The task, an adaptive point's calibrator the last piece's state."""
+        if self.task.online_threshold is None or self.last_piece is None:
+            return self.task
+        point_id = self.task.strong_id()
+        first_seed, count = self.last_piece
+        folder = pieces.piece_dir(experiment_dir, point_id, first_seed, count)
+        state = pieces.read_state(folder)
+        return dataclasses.replace(self.task, online_threshold=state)
+
+    def _hand_out(
+        self, experiment_dir: pathlib.Path, count: int
+    ) -> Optional[collect.Unit]:
         """The next piece made pending; its unit, or None when it is saved.
 
         A saved piece that starts at the next seed is taken whole, and a
@@ -117,12 +141,14 @@ class PointCollection:
             return None
         seeds_free = self._seeds_before_a_saved_piece(first_seed)
         new_count = min(count, seeds_free)
+        task = self.task_as_its_last_piece_left_it(experiment_dir)
         self._make_pending(first_seed, new_count)
-        return collect.Unit(self.task, first_seed, new_count)
+        return collect.Unit(task, first_seed, new_count)
 
     def _make_pending(self, first_seed: int, count: int) -> None:
         self.next_seed = first_seed + count
         self.pending.append((first_seed, count))
+        self.last_piece = (first_seed, count)
 
     def _seeds_before_a_saved_piece(self, first_seed: int) -> float:
         """The seeds from first_seed to the next saved piece, or infinity."""
@@ -193,13 +219,11 @@ def run_experiment(
     swept = run_folder.swept_values(experiment_dir, point_ids)
     configuration_id = run_folder.configuration_id(config)
     _collect_until_stopped(
-        points,
-        experiment_dir,
-        configuration_id,
-        measure_shot,
-        swept,
-        processes,
+        points, experiment_dir, configuration_id, measure_shot, processes
     )
+    for point in points:
+        task = point.task_as_its_last_piece_left_it(experiment_dir)
+        _write_online_threshold_record(task, report_dir, swept)
     folders = pieces.folders_of(experiment_dir, point_ids)
     rows = _fold_the_pieces(experiment_dir, folders, points, report_dir)
     residence_rows = residence.rows_in(folders)
@@ -303,7 +327,8 @@ def _point_collections(
         point_id = task.strong_id()
         settings = collections[point_id]
         rounds_per_shot = records[point_id]["rounds_per_shot"]
-        piece_shots = _piece_shots_of(task, settings, rounds_per_shot)
+        _check_the_stop_of_an_online_point(task, settings)
+        piece_shots = settings.piece_shots(rounds_per_shot)
         saved = pieces.saved_counts(experiment_dir, point_id)
         point = PointCollection(
             task, settings, piece_shots, rounds_per_shot, saved
@@ -312,35 +337,33 @@ def _point_collections(
     return points
 
 
-def _piece_shots_of(
-    task: collect.Task,
-    settings: collection_module.CollectionSettings,
-    rounds_per_shot: int,
-) -> int:
-    """How many shots one of the point's pieces holds.
+def _check_the_stop_of_an_online_point(
+    task: collect.Task, settings: collection_module.CollectionSettings
+) -> None:
+    """An online point stops at max_shots alone; any other stop is refused.
 
-    A point whose escalation calibrates its threshold online is one
-    piece of max_shots: its calibrator learns over the point's shots in
-    order and its state is not saved between pieces, so neither a
-    target nor a time cap can stop it partway.
+    Its shots are not independent draws, since each one's threshold
+    learned from those before it, so a failure count has no interval a
+    target stop could rest on, and a time cap would end its learning
+    wherever the machine was fast.
     """
     if task.online_threshold is None:
-        return settings.piece_shots(rounds_per_shot)
+        return
     has_other_stops = settings.max_failures is not None
     if settings.max_core_seconds is not None:
         has_other_stops = True
     if settings.max_shots is None or has_other_stops:
         _refuse_an_online_stop(task)
-    return settings.max_shots
 
 
 def _refuse_an_online_stop(task: collect.Task) -> None:
     """The sentence for an online point given a stop it cannot keep."""
     metadata = collect.metadata_text(task.metadata)
     raise refusal.RefusalError(
-        f"the point {metadata} calibrates its threshold online, so it runs "
-        "as one piece of max_shots shots; its collection sets max_shots "
-        "and neither max_failures nor max_core_seconds"
+        f"the point {metadata} calibrates its threshold online, so its "
+        "shots are not independent draws and it stops at max_shots alone; "
+        "its collection sets max_shots and neither max_failures nor "
+        "max_core_seconds"
     )
 
 
@@ -349,7 +372,6 @@ def _collect_until_stopped(
     experiment_dir: pathlib.Path,
     configuration_id: str,
     measure_shot,
-    swept: dict,
     processes: int,
 ) -> None:
     """Every point's pieces, a round at a time, until each has stopped.
@@ -372,7 +394,9 @@ def _collect_until_stopped(
         units = _next_round(points, experiment_dir, processes)
         if not units:
             return
-        _run_the_pieces(units, measure_shot, swept, processes, save)
+        collect.run_units(
+            units, measure_shot, on_unit_done=save, processes=processes
+        )
         for point in points:
             point.count_the_pending(experiment_dir)
 
@@ -413,32 +437,6 @@ def _say_the_point_stopped(point: PointCollection) -> None:
     print(line, file=sys.stderr)
 
 
-def _run_the_pieces(
-    units: list,
-    measure_shot,
-    swept: dict,
-    processes: int,
-    save,
-) -> None:
-    """Each unit run, then handed to save, which writes it as a piece.
-
-    A unit's measurements are its piece's files and are not held. swept
-    is each point's swept values, which an online threshold record's
-    rows carry.
-    """
-    report_dir = measure_shot.keywords["run_dir"]
-    on_task_done = functools.partial(
-        _write_online_threshold_record, run_dir=report_dir, swept=swept
-    )
-    collect.run_units(
-        units,
-        measure_shot,
-        on_task_done,
-        on_unit_done=save,
-        processes=processes,
-    )
-
-
 def _save_the_piece(
     experiment_dir: pathlib.Path,
     configuration_id: str,
@@ -449,7 +447,8 @@ def _save_the_piece(
     """One unit's measurements saved as its piece.
 
     The piece names its configuration and counts its rounds, since a
-    shot's cost grows with its rounds.
+    shot's cost grows with its rounds. An adaptive point's piece keeps
+    its calibrator as the unit's shots left it.
     """
     point_id = unit.task.strong_id()
     rounds_per_shot = rounds_by_point[point_id]
@@ -457,7 +456,8 @@ def _save_the_piece(
         "configuration_id": configuration_id,
         "rounds": rounds_per_shot * len(rows),
     }
-    pieces.write(experiment_dir, point_id, unit.first_seed, rows, facts)
+    state = unit.task.online_threshold
+    pieces.write(experiment_dir, point_id, unit.first_seed, rows, facts, state)
 
 
 def _fold_the_pieces(

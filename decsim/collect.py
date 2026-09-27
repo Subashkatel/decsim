@@ -153,14 +153,18 @@ def run_units(
 
     on_unit_done takes each unit with its measured rows, the moment the
     unit's turn comes, so a caller saves a unit before the next one
-    finishes; on_task_done runs after the last unit of a task in the
-    list. With processes above one, whole units run in a worker pool.
+    finishes. The unit it takes holds the task as it ran, whose online
+    calibrator learned over the unit's shots, in a worker process when
+    there is a pool. on_task_done runs after the last unit of a task in
+    the list. With processes above one, whole units run in a worker
+    pool.
     """
     outcomes = _unit_outcomes(units, measure, processes)
     for position, outcome in enumerate(outcomes):
         unit_rows, ran = outcome
         unit = units[position]
-        on_unit_done(unit, unit_rows)
+        ran_unit = dataclasses.replace(unit, task=ran)
+        on_unit_done(ran_unit, unit_rows)
         _report_a_finished_task(on_task_done, units, position, ran)
 
 

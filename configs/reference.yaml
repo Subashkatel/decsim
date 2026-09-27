@@ -599,10 +599,11 @@ collection:
                                    # pieces it was running. Sized in rounds,
                                    # a piece takes about as long at any
                                    # history length. A point whose threshold
-                                   # is calibrated online is one piece of
-                                   # max_shots, since its calibrator learns
-                                   # over its shots in order; it takes no
-                                   # max_failures and no max_core_seconds.
+                                   # is calibrated online runs its pieces
+                                   # one after another, each from the
+                                   # calibrator state the last one saved,
+                                   # and stops at max_shots alone: it takes
+                                   # no max_failures and no max_core_seconds.
 
 controller:                        # controller work per round, in cycles of its
                                    # named clock domain

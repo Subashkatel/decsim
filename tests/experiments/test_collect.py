@@ -846,6 +846,65 @@ def test_settings_that_differ_only_in_labels_are_one_point():
     assert slower_task.strong_id() != task.strong_id()
 
 
+# the observation keys that record a run without changing a shot's row
+RECORDING_ONLY_OBSERVATION = {
+    "trace": "chrome",
+    "trace_shots": [0, 1],
+    "log": "print",
+    "log_component_io": True,
+    "syndrome_buffer_occupancy": True,
+    "decoder_memory_occupancy": True,
+}
+
+
+def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
+    """Recording is no part of a point: one id, one row, either way.
+
+    sinter keeps its output options out of a task's strong id
+    (sinter/_data/_task.py:167-204). The point with every recording-only
+    observation key on has the plain point's id and, shot for shot, its
+    rows but for the wall clock, and its resolved record says what it
+    recorded.
+    """
+    plain_path = yaml_configs.write_config(tmp_path, {})
+    plain_config = experiment.load_experiment(plain_path)
+    plain = plain_config.first_point_task()
+    recorded_folder = tmp_path / "recorded"
+    recorded_folder.mkdir()
+    recorded_path = yaml_configs.write_config(
+        recorded_folder, {"observation": RECORDING_ONLY_OBSERVATION}
+    )
+    recorded_config = experiment.load_experiment(recorded_path)
+    recorded = recorded_config.first_point_task()
+
+    plain_rows = _shot_rows_without_wall_clock(plain)
+    recorded_rows = _shot_rows_without_wall_clock(recorded)
+    printed = capsys.readouterr()
+    point_id = run_folder.record_point(tmp_path, recorded)
+
+    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_text = record_path.read_text()
+    record = json.loads(record_text)
+    recorded_observation = record["settings"]["observation"]
+    assert recorded.strong_id() == plain.strong_id()
+    assert recorded_rows == plain_rows
+    assert recorded_observation["trace"] == "chrome"
+    assert recorded_observation["log_component_io"] is True
+    assert "PauliFrame: committed window" in printed.out
+
+
+def _shot_rows_without_wall_clock(task: collect.Task) -> list:
+    """Two shots' rows, the host's time to simulate each left out."""
+    measurements = run.run_sweep([task], 2)
+    record = sweep_report.record_of(measurements)
+    rows = []
+    for row in record.shots:
+        stable = _stable_columns(row)
+        del stable["sim_wall_seconds"]
+        rows.append(stable)
+    return rows
+
+
 def _point_ids_of(config_path: pathlib.Path) -> list:
     config = experiment.load_experiment(config_path)
     point_ids = []

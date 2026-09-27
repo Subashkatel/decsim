@@ -53,17 +53,32 @@ class ObservationSettings:
     decoder utilization is always integrated, every run's pool columns
     read it); data_movement builds the copy, reference and move counters
     the RunResult carries.
+
+    The keys that only record the run, the log, the trace and the two
+    occupancy listeners, are labels (compare=False) and no part of a
+    point's id, as sinter keeps its output options out of a task's
+    strong id (sinter/_data/_task.py:167-204): each writer and listener
+    schedules nothing and calls no component (observe/trace_writer.py),
+    so the shots' rows are the same with them or without. The others
+    stay in the id because they change a shot's row: the referee fills
+    the referee columns, record_switching_windows and backlog_trace add
+    the wait and backlog columns (experiments/measure.py), and
+    data_movement adds the shot_data_movement rows.
     """
 
-    log: str = "off"
-    log_component_io: bool = False
+    log: str = dataclasses.field(compare=False, default="off")
+    log_component_io: bool = dataclasses.field(compare=False, default=False)
     check_windows_with: str = "none"
     record_switching_windows: bool = False
-    syndrome_buffer_occupancy: bool = False
+    syndrome_buffer_occupancy: bool = dataclasses.field(
+        compare=False, default=False
+    )
     backlog_trace: bool = False
-    decoder_memory_occupancy: bool = False
-    trace: str = "off"
-    trace_shots: tuple = (0,)
+    decoder_memory_occupancy: bool = dataclasses.field(
+        compare=False, default=False
+    )
+    trace: str = dataclasses.field(compare=False, default="off")
+    trace_shots: tuple = dataclasses.field(compare=False, default=(0,))
     data_movement: bool = False
 
     @classmethod

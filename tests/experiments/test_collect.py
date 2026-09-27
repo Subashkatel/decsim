@@ -160,7 +160,7 @@ def _without_point_id(rows: list) -> list:
 def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     config = experiment.load_experiment(REFERENCE_YAML)
     tasks = config.tasks()
-    measurements = run.run_sweep(tasks)
+    measurements = run.run_sweep(tasks, 2)
     record = sweep_report.record_of(measurements)
     summary_rows = sweep_report.summarize(record.shots, record.window_samples)
     link_rows = sweep_report.link_rows(record.shot_links)
@@ -195,7 +195,7 @@ FULL_HISTORY_PAIR = {
                 "qpu.round_period_microseconds": [1.0],
                 "windows.commit_rounds": [None, 16],
             },
-            "shots": 240,
+            "collection": {"max_shots": 240},
         }
     ],
 }
@@ -284,7 +284,7 @@ def test_a_task_named_by_two_blocks_runs_once(tmp_path):
         seeds.append(shot.seed)
         return shot.seed
 
-    collect.collect(tasks, record_seed)
+    collect.collect(tasks, 2, record_seed)
     assert seeds == [0, 1]
 
 
@@ -296,7 +296,6 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = dataclasses.replace(task.settings, weak_decoder=weak_decoder)
@@ -307,7 +306,7 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         "the rows are " + re.escape(repr(rows))
     )
     with pytest.raises(ValueError, match=sentence):
-        collect.collect([unknown], measure_shot.measure_shot)
+        collect.collect([unknown], 1, measure_shot.measure_shot)
 
 
 def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
@@ -327,7 +326,6 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        2,
     )
     assert task.online_threshold is not None
     shot_settings = task.shot_settings()
@@ -369,8 +367,8 @@ def _decoded_alone(task, seed: int) -> tuple:
     return _decoded(shot)
 
 
-def _run_every_shot(task, built_models) -> None:
-    for seed in range(task.shots):
+def _run_every_shot(task, shots: int, built_models) -> None:
+    for seed in range(shots):
         collect.run_shot(task, seed, built_models=built_models)
 
 
@@ -383,12 +381,11 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        4,
     )
 
-    whole_task = collect.Unit(task, 0, task.shots)
+    whole_task = collect.Unit(task, 0, 4)
     shared, _ran = collect.run_unit(whole_task, _decoded)
-    alone = [_decoded_alone(task, seed) for seed in range(task.shots)]
+    alone = [_decoded_alone(task, seed) for seed in range(4)]
 
     assert shared == alone
 
@@ -401,11 +398,10 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        3,
     )
     built = built_window_models.BuiltWindowModels()
 
-    _run_every_shot(task, built)
+    _run_every_shot(task, 3, built)
 
     assert built.builds == 1
     assert built.reuses == 2
@@ -419,7 +415,6 @@ def test_a_machine_built_alone_builds_its_own_models():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = task.shot_settings()
 
@@ -434,10 +429,9 @@ def test_a_task_is_one_unit_of_all_its_seeds():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        5,
     )
 
-    units = collect.work_units([task])
+    units = collect.work_units([task], 5)
 
     assert units == [collect.Unit(task, 0, 5)]
 
@@ -453,7 +447,7 @@ def test_a_point_with_an_online_threshold_is_one_piece(tmp_path):
         "gap_threshold_db": 15.0,
         "threshold_source": "online",
     }
-    raw["collection"] = {"piece_rounds": 1}
+    raw["collection"] = {"piece_rounds": 1, "max_shots": 2}
     online_path = tmp_path / "online.yaml"
     online = _written_yaml(raw, online_path)
     out_dir = tmp_path / "out"
@@ -479,7 +473,6 @@ def test_two_points_under_one_cache_do_not_share_models():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     at_five = config.point_task(
         {
@@ -487,7 +480,6 @@ def test_two_points_under_one_cache_do_not_share_models():
             "qpu.distance": 5,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     noisier_at_three = config.point_task(
         {
@@ -495,7 +487,6 @@ def test_two_points_under_one_cache_do_not_share_models():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
 
     collect.run_shot(at_three, 0, built_models=built)
@@ -523,9 +514,8 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        3,
     )
-    whole_task = collect.Unit(task, 0, task.shots)
+    whole_task = collect.Unit(task, 0, 3)
     measurements, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
     record = sweep_report.record_of(measurements)
     swept = {task.strong_id(): task.metadata}
@@ -630,7 +620,7 @@ def _memory_task(rounds: int) -> collect.Task:
     )
     workload = workload_settings.WorkloadSettings(operations=(operation,))
     settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task(settings, 1, {"point": 1})
+    return collect.Task(settings, {"point": 1})
 
 
 def test_two_tasks_that_run_different_circuits_are_two_tasks():
@@ -651,8 +641,8 @@ def test_two_tasks_whose_controllers_stall_or_drop_are_two_tasks():
         settings.controller, packing_overflow=drop_round
     )
     dropping = dataclasses.replace(settings, controller=dropping_controller)
-    stalling_task = collect.Task(settings, 1, {"point": 1})
-    dropping_task = collect.Task(dropping, 1, {"point": 1})
+    stalling_task = collect.Task(settings, {"point": 1})
+    dropping_task = collect.Task(dropping, {"point": 1})
 
     unique = collect.unique_tasks([stalling_task, dropping_task])
 
@@ -671,8 +661,8 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     )
     three_settings = machine_settings.MachineSettings(workload=three_workload)
     five_settings = machine_settings.MachineSettings(workload=five_workload)
-    three_task = collect.Task(three_settings, 1, {"point": 1})
-    five_task = collect.Task(five_settings, 1, {"point": 1})
+    three_task = collect.Task(three_settings, {"point": 1})
+    five_task = collect.Task(five_settings, {"point": 1})
 
     unique = collect.unique_tasks([three_task, five_task])
 
@@ -696,7 +686,7 @@ def _slotted_rounds_task(round_count: int) -> collect.Task:
     rounds_policy = _SlottedRounds(round_count)
     workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
     settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task(settings, 1, {"point": 1})
+    return collect.Task(settings, {"point": 1})
 
 
 def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
@@ -714,7 +704,7 @@ def _device_task(round_count: int) -> collect.Task:
     device = stim_device.StimDevice(measurement_rounds={1: {0: round_count}})
     qpu = qpu_settings.QpuSettings(device=device)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task(settings, 1, {"point": 1})
+    return collect.Task(settings, {"point": 1})
 
 
 def test_two_python_built_sources_that_hold_different_values_are_two_tasks():
@@ -733,7 +723,7 @@ def _recorded_device_task(flip: int) -> collect.Task:
     device = stim_device.RecordedStimDevice(measurements, 0)
     qpu = qpu_settings.QpuSettings(device=device)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task(settings, 1, {"point": 1})
+    return collect.Task(settings, {"point": 1})
 
 
 def test_two_recorded_sources_that_replay_different_shots_are_two_tasks():
@@ -781,7 +771,6 @@ def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
                 "qpu.distance": 3,
                 "qpu.round_period_microseconds": 1.0,
             },
-            1,
         )
         tasks.append(task)
     return tasks
@@ -802,7 +791,7 @@ def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
     narrow, wide = _bandwidth_tasks(tmp_path, (8, 64))
 
     unique = collect.unique_tasks([narrow, wide])
-    rows = collect.collect([narrow, wide], _readout_rate)
+    rows = collect.collect([narrow, wide], 1, _readout_rate)
 
     assert narrow.strong_id() != wide.strong_id()
     assert len(unique) == 2
@@ -833,7 +822,7 @@ def test_a_metadata_key_that_is_not_text_is_refused_at_any_depth(
     pattern = re.escape(sentence)
 
     with pytest.raises(ValueError, match=pattern):
-        collect.Task(first_point.settings, 1, metadata)
+        collect.Task(first_point.settings, metadata)
 
 
 # Each number beside the json value it enters the strong id as.
@@ -903,7 +892,11 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     weak_decoder = dict(
         yaml_configs.MINIMAL_CONFIG["weak_decoder"], kind="relay_bp"
     )
-    sweep = [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0], shots=2)]
+    sweep = [
+        dict(
+            yaml_configs.MINIMAL_CONFIG["sweep"][0], collection={"max_shots": 2}
+        )
+    ]
     config_path = yaml_configs.write_config(
         tmp_path, {"weak_decoder": weak_decoder, "sweep": sweep}
     )

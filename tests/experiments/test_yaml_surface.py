@@ -97,7 +97,6 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     completed = machine_module.Machine.build(settings, 0)
@@ -310,7 +309,6 @@ def test_a_factory_row_named_in_the_yaml_is_built_with_its_own_keys(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
 
@@ -404,7 +402,7 @@ def test_a_yaml_without_a_sweep_is_refused(tmp_path):
 
 
 def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
-    block = {"axes": {"qpu.distance": 3}, "shots": 1}
+    block = {"axes": {"qpu.distance": 3}, "collection": {"max_shots": 1}}
     config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
     sentence = "sweep block 1 axis qpu.distance must be a list"
     with pytest.raises(ValueError, match=sentence):
@@ -412,7 +410,7 @@ def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
 
 
 def test_an_axis_path_that_is_not_text_is_refused(tmp_path):
-    block = {"axes": {3: [1]}, "shots": 1}
+    block = {"axes": {3: [1]}, "collection": {"max_shots": 1}}
     config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
     sentence = (
         "sweep block 1 axis 3 is not a yaml path; an axis names the "
@@ -480,7 +478,7 @@ def test_every_axis_kind_resolves_to_the_settings_a_written_file_gives(
             "windows.commit_rounds": [2],
             "weak_decoder": [PRICED_DECODER_ROW],
         },
-        "shots": 1,
+        "collection": {"max_shots": 1},
     }
     swept_folder = tmp_path / "swept"
     swept_folder.mkdir()
@@ -503,7 +501,7 @@ def test_every_axis_kind_resolves_to_the_settings_a_written_file_gives(
             "buffer_rounds": None,
         },
         "weak_decoder": PRICED_DECODER_ROW,
-        "sweep": [{"axes": {}, "shots": 1}],
+        "sweep": [{"axes": {}, "collection": {"max_shots": 1}}],
     }
     written_folder = tmp_path / "written"
     written_folder.mkdir()
@@ -534,7 +532,7 @@ def test_a_sweep_block_is_every_combination_of_its_axes_in_written_order(
             "weak_decoder.kind": [0.028, "pymatching"],
             "workload.arguments.code_task": [MEMORY_X, MEMORY_Z],
         },
-        "shots": 1,
+        "collection": {"max_shots": 1},
     }
     workload = yaml_configs.memory_workload(15)
     workload["arguments"]["physical_error_probability"] = 0.001
@@ -565,7 +563,10 @@ def test_a_sweep_block_is_every_combination_of_its_axes_in_written_order(
 
 
 def test_an_axis_under_a_section_that_is_not_there_is_refused(tmp_path):
-    block = {"axes": {"windows.commit.rounds": [2]}, "shots": 1}
+    block = {
+        "axes": {"windows.commit.rounds": [2]},
+        "collection": {"max_shots": 1},
+    }
     config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
     sentence = (
         "the sweep axis windows.commit.rounds names windows.commit, but "
@@ -642,7 +643,10 @@ def test_a_later_point_leaves_an_earlier_points_values_as_they_were(
     qpu mapping and then set its distance; the first point keeps 3.
     """
     qpu = {"kind": "stim_device", "distance": 3}
-    block = {"axes": {"qpu": [qpu], "qpu.distance": [3, 5]}, "shots": 1}
+    block = {
+        "axes": {"qpu": [qpu], "qpu.distance": [3, 5]},
+        "collection": {"max_shots": 1},
+    }
     workload = yaml_configs.memory_workload(15)
     workload["arguments"]["physical_error_probability"] = 0.001
     card = {"workload": workload, "sweep": [block]}
@@ -704,7 +708,6 @@ def test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys(
             "qpu.distance": 2,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
 
@@ -745,7 +748,6 @@ def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
 
@@ -774,7 +776,6 @@ def test_the_burst_rows_keys_reach_the_source_that_runs(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
 
@@ -805,7 +806,6 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     with pytest.raises(ValueError, match="strong tier, which names no decoder"):
@@ -859,7 +859,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
                         "qpu.round_period_microseconds": [1.0],
                     },
                     "algorithm_latency_us": [0.028],
-                    "shots": 1,
+                    "collection": {"max_shots": 1},
                 }
             ]
         },
@@ -875,7 +875,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
                     "physical_error_probability": [0.001],
                     "distance": [3],
                     "round_period_microseconds": [1.0],
-                    "shots": 1,
+                    "collection": {"max_shots": 1},
                 }
             ]
         },
@@ -975,7 +975,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
                         "qpu.distance": [3, 5],
                         "qpu.round_period_microseconds": [1.0],
                     },
-                    "shots": 1,
+                    "collection": {"max_shots": 1},
                 }
             ],
         },
@@ -987,7 +987,6 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     at_three = point.settings
     point = config.point_task(
@@ -996,7 +995,6 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
             "qpu.distance": 5,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     at_five = point.settings
     assert at_three.workload.rounds_policy.rounds_by_operation[1] == 30

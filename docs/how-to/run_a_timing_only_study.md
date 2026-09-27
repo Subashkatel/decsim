@@ -35,7 +35,7 @@ sweep:
       workload.arguments.physical_error_probability: [0.001]
       qpu.distance: [3, 5, 7]
       qpu.round_period_microseconds: [1.0]
-    shots: 20
+    collection: {max_shots: 20}
 ```
 
 Two things to know before you copy it.
@@ -61,7 +61,7 @@ decsim collect configs/priced_cards_example.yaml
 ```
 
 ```
-{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 20 shots done
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 20 shots done (cap)
 qpu.distance: 3
 qpu.round_period_microseconds: 1.0
 workload.arguments.physical_error_probability: 0.001

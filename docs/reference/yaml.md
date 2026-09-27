@@ -97,13 +97,13 @@ sweep:
       workload.arguments.physical_error_probability: [0.001, 0.003]
       qpu.distance: [3, 5]
       windows.commit_rounds: [1, 3]
-    shots: 400
+    collection: {max_shots: 400}
 ```
 
 A block's `axes` map a yaml path to the values the sweep sets there, and
-the block is every combination of them in the order written, `shots`
-seeds each: Hydra's multi-run makes one job per combination of
-`key=v1,v2` overrides the same way. The blocks are a union, and a point
+the block is every combination of them in the order written, each
+collected as its `collection` says (below): Hydra's multi-run makes one
+job per combination of `key=v1,v2` overrides the same way. The blocks are a union, and a point
 named twice runs once. Any key can be an axis. Its section must exist,
 and a value that is a mapping replaces the node at its path whole, so a
 decoder row with keys of its own is one value of a `weak_decoder` axis.
@@ -126,15 +126,24 @@ column per swept path ([The run folder](run_folder.md)).
 
 ```yaml
 collection:
+  max_failures: 100
+  max_shots: 1000000
+  max_core_seconds: null
+  min_shots: 0
   piece_rounds: 20000
 ```
 
-How a point's shots are cut, sinter's `CollectionOptions` as yaml. A
-point's seeds run in pieces of `piece_rounds` QEC rounds, each saved
-whole the moment it ends, so a killed collect run again runs only the
-pieces it lacks (`decsim/experiments/collection.py`). The section goes
-at the top of a file or in a sweep block, whose keys override the top's
-one by one, and no key of it enters a point's id.
+How a point's shots are cut and when they stop, sinter's
+`CollectionOptions` as yaml (`decsim/experiments/collection.py`). A
+point runs seeds 0, 1, 2 and on, in pieces of `piece_rounds` QEC rounds
+each saved whole the moment it ends, so a killed collect run again runs
+only the pieces it lacks. It stops at the first shot where its scored
+failures reach `max_failures` with at least `min_shots` scored shots
+behind them, or where its shots reach `max_shots` or its shots' own
+seconds reach `max_core_seconds`, whichever comes first; a point needs
+one of the two caps. No piece past the stop is started. The section
+goes at the top of a file or in a sweep block, whose keys override the
+top's one by one, and no key of it enters a point's id.
 
 ## Seeing what a file resolves to
 

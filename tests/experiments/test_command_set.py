@@ -19,10 +19,14 @@ import pytest
 import stim
 import yaml
 
+import decsim.collect as collect
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim.experiments.collect_command as collect_command
+import decsim.experiments.collection as collection_module
 import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
+import decsim.experiments.pieces as pieces
 import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
@@ -39,7 +43,7 @@ FOUR_POINT_SWEEP = {
                 "qpu.distance": [3, 5],
                 "qpu.round_period_microseconds": [1.0],
             },
-            "shots": 2,
+            "collection": {"max_shots": 2},
         }
     ]
 }
@@ -262,7 +266,9 @@ def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
     lines = experiment.value_lines(config, first_point.settings)
 
     sweep_line = _line_number_of(reference_path, "sweep:")
-    last_shots_line = _line_number_of(reference_path, "    shots: 2")
+    last_sweep_line = _line_number_of(
+        reference_path, "      qpu.round_period_microseconds: [1.0]"
+    )
     overflow_line = _line_number_of(
         reference_path,
         "  packing_overflow: stall          # stall | drop_round: what the "
@@ -277,7 +283,7 @@ def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
     )
     assert (
         f"qpu.distance = [3]  [sweep, {reference_path}:{sweep_line}-"
-        f"{last_shots_line}]"
+        f"{last_sweep_line}]"
     ) in lines
     assert (
         f'controller.packing_overflow = "STALL"  '
@@ -722,6 +728,169 @@ def test_a_partial_piece_a_killed_run_left_is_written_again(tmp_path):
     assert out_rows == whole_rows
 
 
+NOISY_AXES = {
+    "workload.arguments.physical_error_probability": [0.02],
+    "qpu.distance": [3],
+    "qpu.round_period_microseconds": [1.0],
+}
+
+
+def _shots_to_the_target(shots_path, target: int) -> int:
+    """The shots of a prefix up to the one whose failure reaches the target."""
+    failures = 0
+    for row in fold.row_stream(shots_path):
+        failures += row["logical_failure"] == "True"
+        if failures == target:
+            return int(row["seed"]) + 1
+    raise AssertionError("the uncut run never reached the target")
+
+
+def _shot_count_of(run_dir) -> int:
+    sweep_path = run_dir / "sweep.csv"
+    (row,) = fold.row_stream(sweep_path)
+    return int(row["shots"])
+
+
+def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
+    """The rule's referent is the uncut run's own failures, seed by seed.
+
+    One collect runs thirty shots with no target. Another cuts the same
+    point into pieces of one shot with a target of three failures: it
+    starts no piece past the shot of the third failure, so it holds the
+    uncut run's shots up to that one and no more.
+    """
+    whole_card = {
+        "sweep": [{"axes": NOISY_AXES, "collection": {"max_shots": 30}}]
+    }
+    whole_path = yaml_configs.write_config(tmp_path, whole_card)
+    target_folder = tmp_path / "target_config"
+    target_folder.mkdir()
+    collection = {"max_shots": 30, "max_failures": 3, "piece_rounds": 1}
+    target_card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    target_path = yaml_configs.write_config(target_folder, target_card)
+    whole_dir = tmp_path / "whole"
+    target_dir = tmp_path / "target"
+    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    whole_shots_path = whole_run_dir / "shots.csv"
+    expected_shots = _shots_to_the_target(whole_shots_path, 3)
+
+    command.main(["collect", str(target_path), "--out", str(target_dir)])
+
+    target_run_dir = yaml_configs.run_folder_of(target_dir)
+    target_pieces = target_dir.glob("pieces/*/*")
+    assert expected_shots < 30
+    assert len(list(target_pieces)) == expected_shots
+    assert _shot_count_of(target_run_dir) == expected_shots
+
+
+def test_a_point_that_saved_its_stop_starts_no_piece_when_run_again(
+    tmp_path, capsys
+):
+    """A rerun counts the saved pieces, finds the stop, and runs nothing."""
+    collection = {"max_shots": 30, "max_failures": 2, "piece_rounds": 1}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    first_pieces = out_dir.glob("pieces/*/*")
+    first_names = sorted(first_pieces)
+    capsys.readouterr()
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    second_pieces = out_dir.glob("pieces/*/*")
+    second_names = sorted(second_pieces)
+    stop_line = f": {len(first_names)} shots done (target)"
+    assert second_names == first_names
+    assert stop_line in printed.err
+
+
+def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
+    """The rule reads the contiguous prefix: a piece past a gap waits.
+
+    Seeds 0 and 2 are saved with a failure each and seed 1 is missing.
+    Their failures would reach a target of two, but the prefix is seed 0
+    alone, so the point runs seed 1 and does not stop.
+    """
+    config_path = yaml_configs.write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    point_id = task.strong_id()
+    _write_a_failing_piece(tmp_path, point_id, 0)
+    _write_a_failing_piece(tmp_path, point_id, 2)
+    settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
+    point = collect_command.PointCollection(task, settings, 1)
+
+    units = point.next_units(tmp_path, 1)
+
+    assert units == [collect.Unit(task, 1, 1)]
+    assert point.stop_kind is None
+    assert point.counts.failures == 1
+
+
+def _write_a_failing_piece(experiment_dir, point_id: str, first_seed: int):
+    """A saved piece of one scored shot that failed, as pieces.write writes."""
+    folder = pieces.piece_dir(experiment_dir, point_id, first_seed, 1)
+    folder.mkdir(parents=True)
+    piece = {
+        "scored_shots": 1,
+        "unscored_shots": 0,
+        "failures": 1,
+        "core_seconds": 0.5,
+    }
+    piece_path = folder / pieces.PIECE_FILE
+    run_folder.write_json(piece_path, piece)
+
+
+def test_a_sweep_block_that_says_shots_is_refused(tmp_path, capsys):
+    """A block's shots are its collection's max_shots, and nothing else."""
+    card = {"sweep": [{"axes": NOISY_AXES, "shots": 2}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+
+    with pytest.raises(SystemExit):
+        command.main(["collect", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert "sweep block 1 is" in printed.err
+    assert "a collection of its own, where max_shots is" in printed.err
+
+
+def test_a_point_two_blocks_collect_two_ways_is_refused(tmp_path, capsys):
+    first = {"axes": NOISY_AXES, "collection": {"max_shots": 2}}
+    second = {"axes": NOISY_AXES, "collection": {"max_shots": 3}}
+    card = {"sweep": [first, second]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(SystemExit):
+        command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    lines = printed.err.splitlines()
+    assert "is in two sweep blocks that collect it two ways" in lines[-1]
+    assert "max_shots 2" in lines[-1]
+    assert "max_shots 3" in lines[-1]
+
+
+def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
+    """An online point is one piece, so no target can stop it partway."""
+    overrides = yaml_configs.online_threshold()
+    overrides["collection"] = {"max_failures": 5}
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(SystemExit):
+        command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    lines = printed.err.splitlines()
+    assert "calibrates its threshold online" in lines[-1]
+    saved_pieces = out_dir.glob("pieces/*/*")
+    assert not list(saved_pieces)
+
+
 def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
     """The values the design fixed first, then what was measured.
 
@@ -775,10 +944,10 @@ def test_a_point_holds_its_own_value_at_a_path_another_block_sets(tmp_path):
         "qpu": {"kind": "stim_device", "distance": 3},
         "workload": yaml_configs.memory_workload(15),
         "sweep": [
-            {"axes": {"qpu.distance": [5]}, "shots": 1},
+            {"axes": {"qpu.distance": [5]}, "collection": {"max_shots": 1}},
             {
                 "axes": {"windows.commit_rounds": [2], "pauli_frame": [frame]},
-                "shots": 1,
+                "collection": {"max_shots": 1},
             },
         ],
     }
@@ -809,7 +978,7 @@ def test_a_swept_reference_is_written_as_the_value_it_resolved_to(tmp_path):
                     "qpu.distance": ["${windows.commit_rounds}"],
                     "windows.commit_rounds": [3, 5],
                 },
-                "shots": 1,
+                "collection": {"max_shots": 1},
             }
         ],
     }
@@ -839,7 +1008,7 @@ def test_a_child_axis_under_a_swept_mapping_shows_in_the_mappings_cell(
                     "pauli_frame": [frame],
                     "pauli_frame.write_cycles": [2],
                 },
-                "shots": 1,
+                "collection": {"max_shots": 1},
             }
         ],
     }
@@ -1193,7 +1362,7 @@ def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
                     "qpu.round_period_microseconds": [1.0],
                 },
                 "algorithm": ["pymatching"],
-                "shots": 1,
+                "collection": {"max_shots": 1},
             }
         ]
     }
@@ -1209,7 +1378,7 @@ def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
 
 
 @pytest.mark.parametrize("shots", [0, -1, 1.5, "many", True])
-def test_show_refuses_a_shot_count_that_is_not_a_whole_number_of_one_or_more(
+def test_show_refuses_a_shot_cap_that_is_not_a_whole_number_of_one_or_more(
     tmp_path, capsys, shots
 ):
     bad_count = {
@@ -1220,7 +1389,7 @@ def test_show_refuses_a_shot_count_that_is_not_a_whole_number_of_one_or_more(
                     "qpu.distance": [3],
                     "qpu.round_period_microseconds": [1.0],
                 },
-                "shots": shots,
+                "collection": {"max_shots": shots},
             }
         ]
     }
@@ -1230,9 +1399,8 @@ def test_show_refuses_a_shot_count_that_is_not_a_whole_number_of_one_or_more(
 
     printed = capsys.readouterr()
     assert stopped.value.code == 1
-    assert "sweep block 1 shots must be a whole number of at least 1" in (
-        printed.err
-    )
+    refusal_text = "sweep block 1 collection max_shots must be a whole number"
+    assert refusal_text in printed.err
 
 
 def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
@@ -1246,7 +1414,7 @@ def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
                     "qpu.distance": 3,
                     "qpu.round_period_microseconds": [1.0],
                 },
-                "shots": 1,
+                "collection": {"max_shots": 1},
             }
         ]
     }

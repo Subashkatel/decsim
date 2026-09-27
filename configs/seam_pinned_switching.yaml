@@ -54,9 +54,9 @@ sweep:
       workload.arguments.physical_error_probability: [0.008] # the paired accuracy study, d=3
       qpu.distance: [3]
       qpu.round_period_microseconds: [1.0]
-    shots: 2000
+    collection: {max_shots: 2000}
   - axes:
       workload.arguments.physical_error_probability: [0.008] # the same study at d=5
       qpu.distance: [5]
       qpu.round_period_microseconds: [1.0]
-    shots: 2000
+    collection: {max_shots: 2000}

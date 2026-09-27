@@ -33,7 +33,7 @@ _REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 # binary; the shipped experiments are what a refused path is listed with.
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 REFERENCE_FILE = CONFIGS_DIR / "reference.yaml"
-SWEEP_BLOCK_KEYS = ("axes", "shots")
+SWEEP_BLOCK_KEYS = ("axes",)
 # A block may also carry its own collection keys, over the file's.
 OPTIONAL_SWEEP_BLOCK_KEYS = ("collection",)
 # A value that is one whole reference to another setting, `${a.b}`:
@@ -45,7 +45,7 @@ WHOLE_VALUE_REFERENCE = re.compile(r"\$\{([^${}]+)\}")
 
 @dataclasses.dataclass(frozen=True)
 class SweepBlock:
-    """One cartesian product of axes, `shots` seeds per point.
+    """One cartesian product of axes, and how its points are collected.
 
     An axis is a yaml path and the values the sweep sets there. A block
     is every combination of its axes, in the order they are written, as
@@ -57,7 +57,6 @@ class SweepBlock:
     """
 
     axes: Mapping  # yaml path -> tuple of values
-    shots: int
     collection: collection_module.CollectionSettings
 
     def points(self) -> list:
@@ -99,12 +98,12 @@ class ExperimentConfig:
         pairs = []
         for block in self.sweep:
             for values in block.points():
-                task = self.point_task(values, block.shots)
+                task = self.point_task(values)
                 pairs.append((task, block.collection))
         return pairs
 
-    def point_task(self, values: Mapping, shots: int) -> collect.Task:
-        """The task of one sweep point: its settings, shots and metadata.
+    def point_task(self, values: Mapping) -> collect.Task:
+        """The task of one sweep point: its settings and metadata.
 
         values maps a yaml path to what the point sets there, and they
         are the point's metadata, sinter's json_metadata
@@ -119,13 +118,13 @@ class ExperimentConfig:
         path = self.config_files[0]
         with _refused_in(path):
             resolved, settings = self._read_point(values)
-            return _point_task_of(settings, resolved, values, shots)
+            return _point_task_of(settings, resolved, values)
 
     def first_point_task(self) -> collect.Task:
-        """The task of the first point of the first sweep block, one shot."""
+        """The task of the first point of the first sweep block."""
         block = self.sweep[0]
         points = block.points()
-        return self.point_task(points[0], 1)
+        return self.point_task(points[0])
 
     def resolved_sections(self, values: Mapping) -> dict:
         """The sections at one point: its axes placed, references resolved.
@@ -277,7 +276,6 @@ def _point_task_of(
     settings: machine_settings.MachineSettings,
     resolved: dict,
     values: Mapping,
-    shots: int,
 ) -> collect.Task:
     """A point's task: its workload made, its escalation's threshold set.
 
@@ -295,7 +293,7 @@ def _point_task_of(
         settings, workload=workload, escalation=escalation
     )
     metadata = copy.deepcopy(dict(values))
-    return collect.Task(point_settings, shots, metadata, online_threshold)
+    return collect.Task(point_settings, metadata, online_threshold)
 
 
 def _place(sections: dict, path: str, value) -> None:
@@ -411,13 +409,14 @@ def _links_line(links) -> str:
 
 
 def _sweep_block_line(index: int, block: SweepBlock) -> str:
-    """One sweep block's axes and its shot count, as one line."""
+    """One sweep block's axes and its collection, as one line."""
     axes = []
     for path, values in block.axes.items():
         values_text = json.dumps(list(values))
         axes.append(f"{path} {values_text}")
     axes_text = ", ".join(axes)
-    return f"sweep block {index}: {axes_text}, {block.shots} shots"
+    collection_text = block.collection.text()
+    return f"sweep block {index}: {axes_text}; {collection_text}"
 
 
 def _observation_lines(observation) -> list:
@@ -461,15 +460,13 @@ def _sweep_blocks(sweep_section: list, top_collection) -> tuple:
 
 
 def _sweep_block(block: dict, index: int, top_collection) -> SweepBlock:
-    """One block: its axes, each a yaml path and a list of values, and shots.
+    """One block: its axes, each a yaml path and a list of values.
 
     A block's own collection keys are read over the file's section.
     """
     _check_block_keys(block, index)
     axes = block["axes"]
     _check_axes(axes, index)
-    shots = block["shots"]
-    _check_shots(shots, index)
     values = {}
     for path, axis_values in axes.items():
         values[path] = tuple(axis_values)
@@ -478,11 +475,11 @@ def _sweep_block(block: dict, index: int, top_collection) -> SweepBlock:
     collection = collection_module.CollectionSettings.from_yaml(
         top_collection, block_collection, where
     )
-    return SweepBlock(axes=values, shots=shots, collection=collection)
+    return SweepBlock(axes=values, collection=collection)
 
 
 def _check_block_keys(block, index: int) -> None:
-    """A block is axes and shots, and may carry its own collection keys."""
+    """A block is axes, and may carry its own collection keys."""
     if not isinstance(block, Mapping):
         _refuse_the_block(block, index)
     keys = set(block)
@@ -496,8 +493,8 @@ def _refuse_the_block(block, index: int) -> None:
     """What a sweep block is, in the sentence the user reads."""
     raise refusal.RefusalError(
         f"sweep block {index} is {block!r}; a block is axes, a mapping "
-        "of yaml paths to the values the sweep sets there, and shots, "
-        "and may carry collection keys of its own"
+        "of yaml paths to the values the sweep sets there, and may carry "
+        "a collection of its own, where max_shots is"
     )
 
 
@@ -520,17 +517,6 @@ def _check_axes(axes, index: int) -> None:
                 f"sweep block {index} axis {path} must be a list of at least "
                 f"one value, got {values!r}"
             )
-
-
-def _check_shots(shots, index: int) -> None:
-    """A point runs seeds 0 to shots - 1 (decsim/collect.py), so a count."""
-    is_whole_number = isinstance(shots, int) and not isinstance(shots, bool)
-    if is_whole_number and shots >= 1:
-        return
-    raise refusal.RefusalError(
-        f"sweep block {index} shots must be a whole number of at least 1, "
-        f"got {shots!r}"
-    )
 
 
 @dataclasses.dataclass(frozen=True)

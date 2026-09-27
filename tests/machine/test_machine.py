@@ -197,7 +197,6 @@ def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
@@ -223,7 +222,6 @@ def test_a_second_table_row_runs_gate_point_one():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
@@ -255,7 +253,6 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
@@ -1315,7 +1312,6 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     counting = dataclasses.replace(
@@ -1361,7 +1357,6 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     escalation = dataclasses.replace(settings.escalation, kind="always_strong")
@@ -1425,7 +1420,6 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     factory_settings = qpu_settings.FactorySettings(kind="always_ready")
@@ -2109,7 +2103,6 @@ def reference_run(escalation_kind):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     escalation = dataclasses.replace(settings.escalation, kind=escalation_kind)
@@ -2266,7 +2259,6 @@ def late_landing_shot(directory, links):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     return collect.run_shot(task, 0)
 
@@ -2373,7 +2365,6 @@ def campaign_point_task(family):
             "qpu.distance": CAMPAIGN_DISTANCE,
             "qpu.round_period_microseconds": CAMPAIGN_ROUND_PERIOD_US,
         },
-        CAMPAIGN_SHOT_COUNT,
     )
 
 

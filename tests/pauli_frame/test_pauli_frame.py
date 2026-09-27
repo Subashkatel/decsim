@@ -298,7 +298,6 @@ def test_a_frame_row_written_outside_decsim_runs_from_a_yaml(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
@@ -378,7 +377,6 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)

@@ -32,7 +32,6 @@ def _algorithm_spans(folder, card: dict, check_windows_with: str) -> list:
             "qpu.distance": 5,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     machine = machine_module.Machine.build(point.settings)
     machine.run()

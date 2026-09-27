@@ -27,7 +27,7 @@ COUNTING_SWEEP = {
                 "qpu.distance": [3],
                 "qpu.round_period_microseconds": [1.0],
             },
-            "shots": 2,
+            "collection": {"max_shots": 2},
         }
     ],
 }
@@ -60,7 +60,7 @@ ESCALATING_SWEEP = {
                 "qpu.distance": [3],
                 "qpu.round_period_microseconds": [1.0],
             },
-            "shots": 8,
+            "collection": {"max_shots": 8},
         }
     ],
 }
@@ -196,7 +196,7 @@ def test_the_class_rows_hold_every_points_copied_and_moved_bits(tmp_path):
                     "workload.arguments.physical_error_probability": [0.001],
                     "qpu.distance": [3, 5],
                 },
-                "shots": 1,
+                "collection": {"max_shots": 1},
             }
         ],
     }
@@ -286,7 +286,7 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
                         "qpu.distance": [3],
                         "qpu.round_period_microseconds": [1.0],
                     },
-                    "shots": 1,
+                    "collection": {"max_shots": 1},
                 }
             ]
         },

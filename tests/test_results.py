@@ -27,7 +27,7 @@ TWO_POINT_SWEEP = [
             "qpu.distance": [3],
             "qpu.round_period_microseconds": [1.0],
         },
-        "shots": 20,
+        "collection": {"max_shots": 20},
     }
 ]
 

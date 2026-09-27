@@ -513,7 +513,6 @@ def test_a_fabric_row_written_outside_decsim_runs_from_a_yaml(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     built = machine.Machine.build(settings, 0)
@@ -804,7 +803,6 @@ def test_the_measured_cpu_row_runs_from_a_yaml(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     built = machine.Machine.build(settings, 0)
@@ -827,7 +825,6 @@ def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     built = machine.Machine.build(settings, 0)

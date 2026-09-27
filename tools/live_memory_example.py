@@ -64,7 +64,7 @@ def main() -> None:
     metadata = {}
     for name, path in METADATA_PATHS.items():
         metadata[path] = parameters[name]
-    task = collect.Task(settings, 1, metadata)
+    task = collect.Task(settings, metadata)
     point_ids = [task.strong_id()]
     started_utc = run_folder.start_run(None, arguments.output, point_ids)
     seeds = [(arguments.seed, 1)]

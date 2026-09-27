@@ -129,7 +129,7 @@ def _both_in_place_config(tmp_path):
                 "qpu.distance": [3],
                 "qpu.round_period_microseconds": [1.0],
             },
-            "shots": 1,
+            "collection": {"max_shots": 1},
         }
     ]
     config_path = tmp_path / "both_in_place.yaml"

@@ -98,7 +98,6 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings)
@@ -135,7 +134,6 @@ def test_a_measured_table_tier_is_held_by_the_measured_line(tmp_path):
             "qpu.distance": 5,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings)

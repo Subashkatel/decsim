@@ -51,7 +51,7 @@ ERROR_RATE_PATH = "workload.arguments.physical_error_probability"
 QPU_ONLY_SWEEP = [
     {
         "axes": {"qpu.distance": [3], "qpu.round_period_microseconds": [1.0]},
-        "shots": 1,
+        "collection": {"max_shots": 1},
     }
 ]
 
@@ -65,14 +65,12 @@ def point_shot(
     seed: int,
 ) -> collect.Shot:
     """One seeded shot at one sweep point, run."""
-    shots = seed + 1
     task = config.point_task(
         {
             ERROR_RATE_PATH: physical_error_probability,
             "qpu.distance": distance,
             "qpu.round_period_microseconds": round_period_microseconds,
         },
-        shots,
     )
     return collect.run_shot(task, seed)
 
@@ -141,7 +139,7 @@ MINIMAL_CONFIG = {
                 "qpu.distance": [3],
                 "qpu.round_period_microseconds": [1.0],
             },
-            "shots": 1,
+            "collection": {"max_shots": 1},
         }
     ],
     "controller": {
@@ -299,7 +297,7 @@ def example_tool_config(
                     "qpu.distance": [3],
                     "qpu.round_period_microseconds": [1.1],
                 },
-                "shots": 1,
+                "collection": {"max_shots": 1},
             }
         ],
     }

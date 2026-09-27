@@ -131,7 +131,6 @@ def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     ported_strong = dataclasses.replace(

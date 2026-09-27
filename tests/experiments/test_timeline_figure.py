@@ -135,7 +135,7 @@ def _traced_switching_run(tmp_path, trace_path):
             "qpu.distance": [3],
             "qpu.round_period_microseconds": [1.0],
         },
-        "shots": 1,
+        "collection": {"max_shots": 1},
     }
     card = {
         "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
@@ -151,7 +151,6 @@ def _traced_switching_run(tmp_path, trace_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     shipped = point.settings
     observation = dataclasses.replace(

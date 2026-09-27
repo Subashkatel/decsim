@@ -525,7 +525,7 @@ def _switching_config(
             "qpu.distance": [3],
             "qpu.round_period_microseconds": [1.0],
         },
-        "shots": 1,
+        "collection": {"max_shots": 1},
     }
     strong_decoder = yaml_configs.strong_unit("belief_matching")
     card = {
@@ -591,7 +591,6 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
@@ -662,7 +661,6 @@ def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     policy = escalation_build.build_escalation_policy(
@@ -839,7 +837,6 @@ def test_a_windowing_scheme_named_in_a_yaml_runs_under_switching(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
@@ -868,7 +865,6 @@ def test_eager_boundaries_named_in_a_yaml_are_refused_under_switching(
                 "qpu.distance": 3,
                 "qpu.round_period_microseconds": 1.0,
             },
-            1,
         )
         settings = point.settings
         machine_module.Machine.build(settings, 0)
@@ -884,7 +880,6 @@ def test_held_boundaries_named_in_a_yaml_are_the_rows_the_run_gets(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
@@ -905,7 +900,6 @@ def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):
                 "qpu.distance": 3,
                 "qpu.round_period_microseconds": 1.0,
             },
-            1,
         )
         settings = point.settings
         machine_module.Machine.build(settings, 0)

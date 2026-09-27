@@ -3,8 +3,8 @@
 sinter's shape (sinter/_data/_task.py Task, sinter/_collection/
 _collection.py collect, sinter/_data/_task_stats.py the rows) adapted
 to a work unit of one seeded run. A Task is one settings record at one
-sweep point with a shot count and json metadata; collect runs seeds 0 to
-shots - 1 serially per task, builds and runs a Machine per seed, and
+sweep point with json metadata; collect runs seeds 0 to shots - 1
+serially per task, builds and runs a Machine per seed, and
 hands each Shot to the caller's measure, which returns the caller's row.
 Two tasks with the same strong id (sinter's content hash, _task.py
 strong_id_value: the json text of the values, sha256) are one task. The
@@ -44,7 +44,7 @@ import decsim.windows.built_window_models as built_window_models
 
 @dataclasses.dataclass(frozen=True)
 class Task:
-    """One machine settings record to run `shots` seeds of.
+    """One machine settings record, a sweep point, to run seeds of.
 
     metadata is the json the caller wants to see beside every row (the
     sweep point). online_threshold is the point's online threshold
@@ -53,7 +53,6 @@ class Task:
     """
 
     settings: machine_settings.MachineSettings
-    shots: int
     metadata: Mapping[str, Any]
     online_threshold: Optional[Any] = None
 
@@ -115,22 +114,21 @@ class Shot:
 
 def collect(
     tasks: Iterable[Task],
+    shots: int,
     measure: Callable[[Shot], Any],
     on_task_done: Optional[Callable[[Task], None]] = None,
     *,
     processes: int = 1,
 ) -> list:
-    """Every shot of every task, measured; one row per shot, in order.
+    """Seeds 0 to shots - 1 of every task, measured; a row per shot, in order.
 
-    A task named twice runs once, with the larger shot count (seeds are
-    0 to shots - 1, so the larger count covers the smaller). Each task
-    is one work unit. on_task_done runs after a task's unit, sinter's
-    progress_callback; `processes` above one runs whole units in a
-    worker pool, so `measure` must be a module-level callable or a
-    partial of one.
+    A task named twice runs once. Each task is one work unit.
+    on_task_done runs after a task's unit, sinter's progress_callback;
+    `processes` above one runs whole units in a worker pool, so
+    `measure` must be a module-level callable or a partial of one.
     """
     unique = unique_tasks(tasks)
-    units = work_units(unique)
+    units = work_units(unique, shots)
     rows = []
     keep_rows = functools.partial(_keep_rows, rows)
     run_units(
@@ -166,11 +164,11 @@ def run_units(
         _report_a_finished_task(on_task_done, units, position, ran)
 
 
-def work_units(tasks: list) -> list:
-    """Every task's seeds as one work unit each, in task order."""
+def work_units(tasks: list, shots: int) -> list:
+    """Every task's seeds 0 to shots - 1 as one work unit, in task order."""
     units = []
     for task in tasks:
-        unit = Unit(task, 0, task.shots)
+        unit = Unit(task, 0, shots)
         units.append(unit)
     return units
 
@@ -198,20 +196,12 @@ def unique_tasks(tasks: Iterable[Task]) -> list:
 
     The merged task keeps the first block's calibrator, so an online
     switching point named in two blocks calibrates once over all its
-    shots. No shipped or
-    frozen yaml names an online point twice.
+    shots.
     """
     task_by_id = {}
     for task in tasks:
         strong_id = task.strong_id()
-        if strong_id not in task_by_id:
-            task_by_id[strong_id] = task
-            continue
-        earlier = task_by_id[strong_id]
-        if task.shots > earlier.shots:
-            task_by_id[strong_id] = dataclasses.replace(
-                earlier, shots=task.shots
-            )
+        task_by_id.setdefault(strong_id, task)
     unique = task_by_id.values()
     return list(unique)
 

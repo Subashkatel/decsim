@@ -97,4 +97,4 @@ Wilson interval). The quiet files check that false alarms are not far
 above budget, and no more: at 0.03 per second a 400 us shot alarms
 about once in 80,000 shots, so a quiet run sees none unless the
 detector is badly off. To measure the rate itself, raise the quiet
-files' `shots` by that much, or raise the budget.
+files' `collection.max_shots` by that much, or raise the budget.

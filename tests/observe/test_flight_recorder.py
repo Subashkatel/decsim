@@ -716,7 +716,6 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 10.0,
         },
-        1,
     )
     shot = collect.run_shot(task, 0)
     ledger = shot.machine.observation.flight_recorder.ledger

@@ -53,4 +53,4 @@ sweep:
       workload.arguments.physical_error_probability: [0.008]
       qpu.distance: [3, 5]
       qpu.round_period_microseconds: [1.0]
-    shots: 50
+    collection: {max_shots: 50}

@@ -65,7 +65,7 @@ def switching_config(
             "qpu.distance": [3],
             "qpu.round_period_microseconds": [1.0],
         },
-        "shots": 1,
+        "collection": {"max_shots": 1},
     }
     strong_decoder = strong_unit("belief_matching")
     card = {
@@ -105,7 +105,6 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
                 "qpu.distance": 3,
                 "qpu.round_period_microseconds": 1.0,
             },
-            1,
         )
         weak_only_settings = point.settings
         Machine.build(weak_only_settings)
@@ -233,7 +232,6 @@ def _strong_request_counts(tmp_path, card: dict):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = Machine.build(settings, 0)
@@ -418,7 +416,6 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
                 "qpu.distance": 3,
                 "qpu.round_period_microseconds": 1.0,
             },
-            1,
         )
         settings = point.settings
         observation = replace(
@@ -836,7 +833,6 @@ def _walk_card_machine(tmp_path, microseconds):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = Machine.build(settings, 0)
@@ -933,7 +929,6 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     shot = collect.run_shot(task, 0)
     shot.machine.observation.trace_writer.write(str(trace_path))

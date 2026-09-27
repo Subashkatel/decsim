@@ -63,7 +63,6 @@ def reference_run(distance: int):
             "qpu.distance": distance,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
@@ -249,7 +248,6 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
             "qpu.distance": distance,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     escalation = dataclasses.replace(
@@ -407,7 +405,6 @@ def _parallel_run(distance: int, seed: int):
             "qpu.distance": distance,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     windows = dataclasses.replace(

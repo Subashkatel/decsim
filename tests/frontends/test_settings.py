@@ -66,7 +66,7 @@ AT_DISTANCE_3_AND_P = {
 
 def _point(config_path, values):
     config = experiment.load_experiment(config_path)
-    task = config.point_task(values, 1)
+    task = config.point_task(values)
     return task.settings
 
 

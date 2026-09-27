@@ -91,7 +91,6 @@ def test_memory_patches_runs_one_memory_per_patch_at_once(tmp_path):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
@@ -123,7 +122,7 @@ def test_no_patches_is_refused():
 def _yaml_run(config_path, seed):
     config = experiment.load_experiment(config_path)
     values = {"qpu.distance": 3, "qpu.round_period_microseconds": 1.1}
-    point = config.point_task(values, 1)
+    point = config.point_task(values)
     settings = point.settings
     machine = machine_module.Machine.build(settings, seed)
     result = machine.run()

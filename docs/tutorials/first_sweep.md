@@ -41,7 +41,7 @@ sweep:
       workload.arguments.physical_error_probability: [0.003]
       qpu.distance: [3, 5, 7]
       qpu.round_period_microseconds: [1.0]
-    shots: 400
+    collection: {max_shots: 400}
 ```
 
 Three things are happening here.
@@ -62,8 +62,9 @@ error rate is an argument of the maker that builds the circuit, and the
 distance and round period are the QPU's. The base file's workload reads
 the distance back with `distance: ${qpu.distance}`, the value at that
 path, so the code and the circuit share one number. Three distances
-times one error rate times one round period is three points, 400 shots
-each, so 1,200 shots in all.
+times one error rate times one round period is three points. The
+block's `collection` says when a point stops, here at `max_shots`, 400
+shots each, so 1,200 shots in all.
 
 Check what it resolves to before running it:
 
@@ -88,9 +89,9 @@ that host's, because this config names a decoder rather than pricing
 one:
 
 ```
-{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done
-{"qpu.distance": 5, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done
-{"qpu.distance": 7, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
+{"qpu.distance": 5, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
+{"qpu.distance": 7, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
 qpu.distance: 3
 qpu.round_period_microseconds: 1.0
 workload.arguments.physical_error_probability: 0.003

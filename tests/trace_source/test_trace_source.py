@@ -50,7 +50,6 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     bare = machine_module.Machine.build(settings, 0)

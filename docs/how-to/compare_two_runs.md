@@ -150,7 +150,7 @@ sweep:
       workload.arguments.physical_error_probability: [0.001]
       qpu.distance: [5]
       qpu.round_period_microseconds: [1.0]
-    shots: 100
+    collection: {max_shots: 100}
 ```
 
 and the same file with `strong_decoder`'s `units` raised, in a copy of

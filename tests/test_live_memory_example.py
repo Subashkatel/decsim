@@ -308,7 +308,7 @@ def test_the_files_row_runs_what_the_tool_builds_by_hand(
     )
     config = experiment.load_experiment(config_path)
     values = {"qpu.distance": 3, "qpu.round_period_microseconds": 1.1}
-    point = config.point_task(values, 1)
+    point = config.point_task(values)
     settings = point.settings
     machine = machine_module.Machine.build(settings, 17)
     result = machine.run()

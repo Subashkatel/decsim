@@ -230,7 +230,7 @@ def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
                         "qpu.distance": [3],
                         "qpu.round_period_microseconds": [1.0],
                     },
-                    "shots": 2,
+                    "collection": {"max_shots": 2},
                 }
             ],
         },

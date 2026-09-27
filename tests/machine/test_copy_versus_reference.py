@@ -113,7 +113,6 @@ def _machine_formed_at(where: str, distance: int = 3):
             "qpu.distance": distance,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     detection_events = _formed_at(settings, where)
@@ -149,7 +148,6 @@ def _seated_machine(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     detection_events = dataclasses.replace(
@@ -281,7 +279,6 @@ def _switching_machine_formed_at(where: str):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     detection_events = _formed_at(settings, where)
@@ -304,7 +301,6 @@ def _forward_switching_at_the_decoder():
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     detection_events = _formed_at(settings, "decoder")
@@ -432,7 +428,6 @@ def _machine(**weak_changes):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)

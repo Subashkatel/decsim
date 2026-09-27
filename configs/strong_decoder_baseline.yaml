@@ -23,27 +23,27 @@ sweep:
       workload.arguments.physical_error_probability: [0.001]              # timing
       qpu.distance: [3]
       qpu.round_period_microseconds: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
-    shots: 10
+    collection: {max_shots: 10}
   - axes:
       workload.arguments.physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER
       qpu.distance: [3]
       qpu.round_period_microseconds: [1.0]
-    shots: 2000
+    collection: {max_shots: 2000}
   - axes:
       workload.arguments.physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=5
       qpu.distance: [5]
       qpu.round_period_microseconds: [1.0]
-    shots: 300
+    collection: {max_shots: 300}
   - axes:
       workload.arguments.physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=7
       qpu.distance: [7]
       qpu.round_period_microseconds: [1.0]
-    shots: 200
+    collection: {max_shots: 200}
   - axes:
       workload.arguments.physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=9
       qpu.distance: [9]
       qpu.round_period_microseconds: [1.0]
-    shots: 100
+    collection: {max_shots: 100}
 
 controller:
   clock: fridge

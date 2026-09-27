@@ -111,7 +111,7 @@ It first prints what the yaml resolved to, one line per component, then
 the summary of each point:
 
 ```
-{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 2 shots done
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 2 shots done (cap)
 qpu.distance: 3
 qpu.round_period_microseconds: 1.0
 workload.arguments.physical_error_probability: 0.001

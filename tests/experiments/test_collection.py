@@ -6,33 +6,74 @@ two instead (sinter/_data/_collection_options.py:68-99), which would let
 the top's value cut a block that asks for more.
 """
 
+import random
+
 import pytest
+import sinter._collection._collection_manager as sinter_manager
 
 import decsim.experiments.collection as collection
+import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.refusal as refusal
 
+CAPPED = {"max_shots": 10}
+StopKind = failure_statistics.StopKind
 
-def test_no_section_gives_the_default_piece_rounds():
-    settings = collection.CollectionSettings.from_yaml(None, None, "block 0")
+
+def _settings(**keys) -> collection.CollectionSettings:
+    return collection.CollectionSettings.from_yaml(keys, None, "block 1")
+
+
+def _counts(shots, scored_shots, failures, core_seconds=0.0):
+    return collection.PrefixCounts(shots, scored_shots, failures, core_seconds)
+
+
+def _kind_at(settings, shots, scored_shots, failures, core_seconds=0.0):
+    """The stop kind of a prefix with these counts."""
+    counts = _counts(shots, scored_shots, failures, core_seconds)
+    return settings.stop_kind(counts)
+
+
+def test_a_capped_section_gives_the_default_piece_rounds():
+    settings = collection.CollectionSettings.from_yaml(CAPPED, None, "b")
 
     assert settings.piece_rounds == collection.DEFAULT_PIECE_ROUNDS
+    assert settings.min_shots == 0
+    assert settings.max_failures is None
 
 
 def test_a_blocks_key_wins_over_the_tops():
-    top = {"piece_rounds": 100}
+    top = {"piece_rounds": 100, "max_shots": 10}
     block = {"piece_rounds": 7}
 
     settings = collection.CollectionSettings.from_yaml(top, block, "block 0")
 
     assert settings.piece_rounds == 7
+    assert settings.max_shots == 10
 
 
 def test_the_tops_key_stands_where_the_block_sets_none():
-    top = {"piece_rounds": 100}
+    top = {"piece_rounds": 100, "max_shots": 10}
 
     settings = collection.CollectionSettings.from_yaml(top, {}, "block 0")
 
     assert settings.piece_rounds == 100
+
+
+def test_a_point_with_no_cap_is_refused():
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml(None, None, "block 3")
+
+    message = str(refused.value)
+    assert message.startswith("block 3 has no cap")
+    assert "max_shots or max_core_seconds" in message
+
+
+def test_a_time_cap_alone_is_a_cap():
+    top = {"max_core_seconds": 60}
+
+    settings = collection.CollectionSettings.from_yaml(top, None, "block 0")
+
+    assert settings.max_core_seconds == 60
 
 
 def test_a_piece_holds_its_rounds_over_a_shots_whole_shots():
@@ -52,8 +93,10 @@ def test_a_shot_longer_than_a_piece_is_a_piece_of_one_shot():
 
 
 def test_an_unknown_key_is_refused_by_name():
+    top = {"piece_shots": 5, "max_shots": 10}
+
     with pytest.raises(refusal.RefusalError) as refused:
-        collection.CollectionSettings.from_yaml({"piece_shots": 5}, None, "b")
+        collection.CollectionSettings.from_yaml(top, None, "b")
 
     message = str(refused.value)
     assert "['piece_shots']" in message
@@ -64,15 +107,155 @@ def test_a_section_that_is_no_mapping_is_refused():
     with pytest.raises(refusal.RefusalError) as refused:
         collection.CollectionSettings.from_yaml([1], None, "block 0")
 
-    assert "is [1]; it is a mapping of piece_rounds" in str(refused.value)
+    message = str(refused.value)
+    assert "is [1]; it is a mapping of max_failures, max_shots" in message
 
 
+@pytest.mark.parametrize("key", ["piece_rounds", "max_shots", "max_failures"])
 @pytest.mark.parametrize("value", [0, -3, 2.5, True, "20000"])
-def test_piece_rounds_that_is_no_count_is_refused(value):
-    block = {"piece_rounds": value}
+def test_a_count_that_is_no_count_is_refused(key, value):
+    block = {"max_shots": 10, key: value}
 
     with pytest.raises(refusal.RefusalError) as refused:
         collection.CollectionSettings.from_yaml(None, block, "block 2")
 
     message = str(refused.value)
-    assert message.startswith("block 2 collection piece_rounds must be")
+    assert message.startswith(f"block 2 collection {key} must be")
+
+
+@pytest.mark.parametrize("value", [0, -1.5, True, "60"])
+def test_a_time_cap_that_is_no_positive_number_is_refused(value):
+    block = {"max_core_seconds": value}
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml(None, block, "block 2")
+
+    message = str(refused.value)
+    assert message.startswith("block 2 collection max_core_seconds must be")
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, False, None])
+def test_a_minimum_that_is_no_count_is_refused(value):
+    block = {"max_shots": 10, "min_shots": value}
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml(None, block, "block 2")
+
+    message = str(refused.value)
+    assert message.startswith("block 2 collection min_shots must be")
+
+
+def test_a_prefix_short_of_every_stop_runs_on():
+    settings = _settings(max_failures=3, max_shots=10, min_shots=4)
+
+    kind = _kind_at(settings, 5, 5, 2)
+
+    assert kind is None
+
+
+def test_the_target_past_the_minimum_is_a_target_stop():
+    settings = _settings(max_failures=3, max_shots=10, min_shots=4)
+
+    kind = _kind_at(settings, 6, 5, 3)
+
+    assert kind is StopKind.TARGET
+
+
+def test_the_target_on_the_minimums_own_shot_is_a_minimum_stop():
+    """The rule stops there because of the minimum, not the target."""
+    settings = _settings(max_failures=3, max_shots=10, min_shots=4)
+
+    kind = _kind_at(settings, 4, 4, 3)
+
+    assert kind is StopKind.MINIMUM
+
+
+def test_failures_past_the_target_wait_for_the_minimum():
+    settings = _settings(max_failures=1, max_shots=10, min_shots=4)
+
+    early = _kind_at(settings, 3, 3, 2)
+    at_minimum = _kind_at(settings, 4, 4, 2)
+
+    assert early is None
+    assert at_minimum is StopKind.MINIMUM
+
+
+def test_the_minimum_counts_scored_shots_and_the_cap_every_shot():
+    settings = _settings(max_failures=1, max_shots=6, min_shots=4)
+
+    with_unscored = _kind_at(settings, 5, 3, 1)
+    at_cap = _kind_at(settings, 6, 3, 1)
+
+    assert with_unscored is None
+    assert at_cap is StopKind.CAP
+
+
+def test_the_target_on_the_caps_own_shot_is_a_target_stop():
+    settings = _settings(max_failures=2, max_shots=6)
+
+    kind = _kind_at(settings, 6, 6, 2)
+
+    assert kind is StopKind.TARGET
+
+
+def test_the_time_cap_stops_a_point_at_its_seconds():
+    settings = _settings(max_core_seconds=30.0)
+
+    before = _kind_at(settings, 9, 9, 0, 29.5)
+    at_cap = _kind_at(settings, 10, 10, 0, 30.0)
+
+    assert before is None
+    assert at_cap is StopKind.CAP
+
+
+def _sinter_stop_shot(outcomes, max_failures, max_shots) -> int:
+    """The shot after which sinter's own task state says it is complete.
+
+    sinter's manager starts errors_left at the smaller of max_errors and
+    max_shots and takes each shot and each error off
+    (sinter/_collection/_collection_manager.py:228-234, 330-342).
+    """
+    state = sinter_manager._ManagedTaskState(
+        partial_task=None,
+        strong_id="point",
+        shots_left=max_shots,
+        errors_left=min(max_failures, max_shots),
+    )
+    for shot, failed in enumerate(outcomes, start=1):
+        state.shots_left -= 1
+        state.errors_left -= failed
+        if state.is_completed():
+            return shot
+    return None
+
+
+def _decsim_stop_shot(outcomes, settings) -> int:
+    """The shot after which the collection's rule first gives a kind."""
+    counts = collection.PrefixCounts()
+    for failed in outcomes:
+        shot_counts = _counts(1, 1, failed)
+        counts.add(shot_counts)
+        if settings.stop_kind(counts) is not None:
+            return counts.shots
+    return None
+
+
+def test_the_rule_stops_where_sinters_stops_on_the_same_counts_property():
+    """No minimum and no time cap: the rule is sinter's, shot for shot."""
+    generator = random.Random(7)
+    for _case in range(300):
+        max_failures = generator.randint(1, 6)
+        max_shots = generator.randint(1, 40)
+        rate = generator.random()
+        outcomes = []
+        for _shot in range(max_shots):
+            draw = generator.random()
+            is_failed = draw < rate
+            failed = int(is_failed)
+            outcomes.append(failed)
+        settings = _settings(max_failures=max_failures, max_shots=max_shots)
+
+        sinter_stop = _sinter_stop_shot(outcomes, max_failures, max_shots)
+        decsim_stop = _decsim_stop_shot(outcomes, settings)
+
+        assert decsim_stop == sinter_stop

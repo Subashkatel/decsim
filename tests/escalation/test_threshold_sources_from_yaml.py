@@ -39,7 +39,7 @@ def point_task(config, *, physical_error_probability, distance):
         "qpu.distance": distance,
         "qpu.round_period_microseconds": 1.0,
     }
-    return config.point_task(values, 1)
+    return config.point_task(values)
 
 
 def resolve_gap_threshold_nats(config, *, physical_error_probability, distance):
@@ -72,7 +72,7 @@ def source_config(tmp_path, switching_card: dict, shots: int = 1):
     config_text = config_path.read_text()
     raw = yaml.safe_load(config_text)
     raw["escalation"] = {"kind": "switching", **switching_card}
-    raw["sweep"][0]["shots"] = shots
+    raw["sweep"][0]["collection"] = {"max_shots": shots}
     edited_text = yaml.safe_dump(raw)
     config_path.write_text(edited_text)
     return config_path
@@ -202,7 +202,12 @@ def test_a_window_only_sweep_finds_its_table_row_by_path(tmp_path):
     raw["workload"]["arguments"]["physical_error_probability"] = (
         NEAR_THRESHOLD_P
     )
-    raw["sweep"] = [{"axes": {"windows.commit_rounds": [2, 3]}, "shots": 1}]
+    raw["sweep"] = [
+        {
+            "axes": {"windows.commit_rounds": [2, 3]},
+            "collection": {"max_shots": 1},
+        }
+    ]
     edited_text = yaml.safe_dump(raw)
     config_path.write_text(edited_text)
     config = load_experiment(config_path)
@@ -237,7 +242,10 @@ def test_an_integer_key_matches_its_row_exactly(tmp_path):
         NEAR_THRESHOLD_P
     )
     raw["sweep"] = [
-        {"axes": {"windows.commit_rounds": [1000000001]}, "shots": 1}
+        {
+            "axes": {"windows.commit_rounds": [1000000001]},
+            "collection": {"max_shots": 1},
+        }
     ]
     edited_text = yaml.safe_dump(raw)
     config_path.write_text(edited_text)
@@ -476,8 +484,8 @@ def test_online_source_reproduces_its_decisions(tmp_path):
 
     first_tasks = config.tasks()
     second_tasks = config.tasks()
-    first = run_sweep(first_tasks)
-    second = run_sweep(second_tasks)
+    first = run_sweep(first_tasks, 2)
+    second = run_sweep(second_tasks, 2)
 
     first_links = [
         measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]

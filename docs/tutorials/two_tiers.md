@@ -88,7 +88,7 @@ sweep:
       workload.arguments.physical_error_probability: [0.008]
       qpu.distance: [3, 5]
       qpu.round_period_microseconds: [1.0]
-    shots: 50
+    collection: {max_shots: 50}
 ```
 
 The `escalation` section is the new part.
@@ -138,7 +138,7 @@ pauli_frame: kind logical_register
 workload: kind producer
 magic_state_factory: kind infinite
 links: card two_tiers.yaml
-sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distance [3, 5], qpu.round_period_microseconds [1.0], 50 shots
+sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distance [3, 5], qpu.round_period_microseconds [1.0]; max_shots 50, min_shots 0, piece_rounds 20000
 log: off
 trace: off
 values:

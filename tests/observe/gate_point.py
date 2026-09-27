@@ -34,7 +34,7 @@ def settings(**observation_changes):
     import decsim.experiments.experiment as experiment
 
     config = experiment.load_experiment(CONFIG_PATH)
-    task = config.point_task(POINT, 1)
+    task = config.point_task(POINT)
     shipped = task.settings
     changes = {"log_component_io": True, **observation_changes}
     observation = dataclasses.replace(shipped.observation, **changes)

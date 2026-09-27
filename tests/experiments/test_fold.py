@@ -87,7 +87,7 @@ def _one_point_config(folder, shots, piece_shots):
                     "qpu.distance": [3],
                     "qpu.round_period_microseconds": [1.0],
                 },
-                "shots": shots,
+                "collection": {"max_shots": shots},
             }
         ],
     }

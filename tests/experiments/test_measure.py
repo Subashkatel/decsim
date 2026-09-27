@@ -258,7 +258,6 @@ def switching_run(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     return collect.run_shot(task, seed)
 
@@ -692,7 +691,6 @@ def shipped_shot(config_name: str):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     return collect.run_shot(task, 0)
 
@@ -1112,7 +1110,7 @@ def seam_streams_shot(stream_count: int):
         pauli_frame=frame,
         links=links,
     )
-    task = collect.Task(settings, 1, {})
+    task = collect.Task(settings, {})
     return collect.run_shot(task, 0)
 
 
@@ -1284,14 +1282,12 @@ def _two_patch_burst_shot(tmp_path, *, seed: int) -> collect.Shot:
     config_text = yaml.safe_dump(raw)
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
-    shots = seed + 1
     task = config.point_task(
         {
             "workload.arguments.physical_error_probability": 0.001,
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        shots,
     )
     return collect.run_shot(task, seed)
 

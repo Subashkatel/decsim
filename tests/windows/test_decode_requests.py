@@ -447,7 +447,7 @@ FOLD_COUNTING_SWEEP = {
                 "qpu.distance": [3],
                 "qpu.round_period_microseconds": [1.0],
             },
-            "shots": 1,
+            "collection": {"max_shots": 1},
         }
     ],
 }
@@ -520,7 +520,7 @@ SWITCHING_FOLD_SWEEP = {
                 "qpu.distance": [3],
                 "qpu.round_period_microseconds": [1.0],
             },
-            "shots": len(FOLD_SEEDS),
+            "collection": {"max_shots": len(FOLD_SEEDS)},
         }
     ],
 }
@@ -573,7 +573,6 @@ def _fold_outcome(config, probability: float, seed: int) -> tuple:
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        len(FOLD_SEEDS),
     )
     shot = collect.run_shot(task, seed)
     measurement = measure.measure_shot(shot)

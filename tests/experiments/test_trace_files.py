@@ -61,7 +61,7 @@ def test_points_apart_only_in_basis_write_their_own_log_and_trace(tmp_path):
                         "surface_code:rotated_memory_z",
                     ]
                 },
-                "shots": 1,
+                "collection": {"max_shots": 1},
             }
         ],
     }
@@ -93,7 +93,9 @@ def test_a_run_of_one_point_and_one_traced_shot_writes_the_path_as_written(
         "qpu": {"kind": "stim_device", "distance": 3},
         "workload": workload,
         "observation": {"trace": str(written_path), "trace_shots": [0]},
-        "sweep": [{"axes": {"qpu.distance": [3]}, "shots": 1}],
+        "sweep": [
+            {"axes": {"qpu.distance": [3]}, "collection": {"max_shots": 1}}
+        ],
     }
     config_path = yaml_configs.write_config(tmp_path, card)
     run_dir = tmp_path / "run"

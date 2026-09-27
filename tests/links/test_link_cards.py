@@ -23,7 +23,7 @@ CARD_YAML = (
     "sweep: [{axes: {workload.arguments.physical_error_probability: [0.001],\n"
     "                qpu.distance: [3],\n"
     "                qpu.round_period_microseconds: [1.0]},\n"
-    "         shots: 1}]\n"
+    "         collection: {max_shots: 1}}]\n"
     "controller: {clock: fridge, "
     "readout_to_bits_cycles: 0, "
     "packing_cycles_per_round: 0, "
@@ -155,7 +155,6 @@ def test_a_separate_readout_cost_is_refused_on_an_uncarded_readout_hop(
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     with pytest.raises(ValueError) as refusal:
@@ -362,7 +361,6 @@ def _built_from(tmp_path, overrides: dict):
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        1,
     )
     settings = point.settings
     return machine_module.Machine.build(settings, 0)

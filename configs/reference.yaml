@@ -550,29 +550,47 @@ windows:
 
 # The sweep: a list of blocks. A block's axes map a yaml path to the values
 # the sweep sets there, and the block is their cartesian product in the
-# order written, as Hydra's multi-run makes one job per combination,
-# `shots` seeds per point (0..shots-1); the blocks are a union, and a
-# point named twice runs once. A path's section must exist. A mapping
-# value replaces the node at its path whole, so a decoder row with keys of
-# its own is one value: weak_decoder: [{kind: pymatching}, {kind: ...}].
-# A point's metadata is its {path: value}; each csv row carries its id,
-# then one column per swept path. The baselines put shots where they matter: a timing block sweeps many
-# round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
-# the load = 1 knee of its 0.028 card), and an LER block sweeps several
-# probabilities with many shots at one timing point, since timing knobs
-# never change the decoded answer.
+# order written, as Hydra's multi-run makes one job per combination; the
+# blocks are a union, and a point named twice runs once. A path's section
+# must exist. A mapping value replaces the node at its path whole, so a
+# decoder row with keys of its own is one value: weak_decoder: [{kind:
+# pymatching}, {kind: ...}]. A point's metadata is its {path: value}; each
+# csv row carries its id, then one column per swept path. A block may carry
+# a collection section of its own, whose keys override the file's one by
+# one. The baselines put shots where they matter: a timing block sweeps
+# many round periods with few shots (the weak baseline's 0.9/0.85/0.8
+# bracket the load = 1 knee of its 0.028 card), and an LER block sweeps
+# several probabilities with many shots at one timing point, since timing
+# knobs never change the decoded answer.
 sweep:
   - axes:
       workload.arguments.physical_error_probability: [0.001]
       qpu.distance: [3]
       qpu.round_period_microseconds: [1.0]
-    shots: 2
 
-# How a point's shots are cut, sinter's CollectionOptions as yaml
-# (sinter/_data/_collection_options.py). A sweep block may carry its own
-# collection section, whose keys override these one by one. No key enters
-# a point's id: collecting longer is the same point run longer.
+# How a point's shots are cut and when they stop, sinter's
+# CollectionOptions as yaml (sinter/_data/_collection_options.py). A point
+# runs seeds 0, 1, 2 and on and stops on its contiguous prefix: at the
+# first shot where its scored failures reach max_failures with min_shots
+# scored shots behind them, or where its shots reach max_shots or its
+# shots' own seconds reach max_core_seconds. No key enters a point's id:
+# collecting longer is the same point run longer.
 collection:
+  max_failures: null               # the target: the scored failures a point
+                                   # stops at; null for none. 100 puts the
+                                   # 95 percent interval within about 20
+                                   # percent of the rate, 1.96 / sqrt(100)
+  max_shots: 2                     # the shot cap, counting unscored shots
+                                   # too, since each costs its time; a point
+                                   # needs this or max_core_seconds, as sinter
+                                   # needs max_shots
+  max_core_seconds: null           # the time cap: the seconds a point's
+                                   # shots took, summed over processes; exact
+                                   # only when a shot's time does not depend
+                                   # on whether it failed
+  min_shots: 0                     # the scored shots a point runs whatever
+                                   # its failures, so a point that fails
+                                   # early still says something at its rate
   piece_rounds: 20000              # QEC rounds per piece: a piece holds
                                    # max(piece_rounds // a shot's rounds, 1)
                                    # shots and is saved whole when it ends,
@@ -580,9 +598,10 @@ collection:
                                    # pieces it was running. Sized in rounds,
                                    # a piece takes about as long at any
                                    # history length. A point whose threshold
-                                   # is calibrated online is one piece, since
-                                   # its calibrator learns over its shots in
-                                   # order.
+                                   # is calibrated online is one piece of
+                                   # max_shots, since its calibrator learns
+                                   # over its shots in order; it takes no
+                                   # max_failures and no max_core_seconds.
 
 controller:                        # controller work per round, in cycles of its
                                    # named clock domain

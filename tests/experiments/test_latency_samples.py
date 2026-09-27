@@ -33,7 +33,7 @@ def wall_clock_config(tmp_path, distances):
                         "qpu.distance": distances,
                         "qpu.round_period_microseconds": [1.0],
                     },
-                    "shots": 2,
+                    "collection": {"max_shots": 2},
                 }
             ],
         },
@@ -105,7 +105,7 @@ def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):
                         "qpu.distance": [3, 5],
                         "qpu.round_period_microseconds": [1.0],
                     },
-                    "shots": 1,
+                    "collection": {"max_shots": 1},
                 }
             ]
         },

@@ -335,7 +335,7 @@ def _point_task(arguments, settings) -> collect.Task:
         "qpu.distance": arguments.distance,
         "qpu.round_period_microseconds": arguments.period_microseconds,
     }
-    return collect.Task(settings, 1, metadata)
+    return collect.Task(settings, metadata)
 
 
 if __name__ == "__main__":

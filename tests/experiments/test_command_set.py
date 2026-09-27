@@ -885,6 +885,78 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
     assert _shot_count_of(target_run_dir) == expected_shots
 
 
+# a shot of NOISY_AXES runs 15 rounds, so a piece holds two shots
+TWO_SHOT_PIECE_ROUNDS = 30
+
+
+def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
+    """The NOISY_AXES point collected into out_dir under this collection."""
+    folder = tmp_path / name
+    folder.mkdir()
+    keys = {**collection, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": keys}]}
+    config_path = yaml_configs.write_config(folder, card)
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    return yaml_configs.run_folder_of(out_dir)
+
+
+def _piece_names(experiment_dir) -> list:
+    folders = experiment_dir.glob("pieces/*/*")
+    return sorted(folder.name for folder in folders)
+
+
+def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
+    """The referent is one collect run to the raised cap from the start.
+
+    A cap of 3 in pieces of two ends on a piece of one shot, 2-2. The
+    cap raised to 4 runs seed 3 alone beside it, so no seed is run
+    twice, and the fold is the uncut run's.
+    """
+    whole_dir = tmp_path / "whole"
+    raised_dir = tmp_path / "raised"
+    whole_run_dir = _collected_noisy_point(
+        tmp_path, "whole_config", {"max_shots": 4}, whole_dir
+    )
+    _collected_noisy_point(tmp_path, "first", {"max_shots": 3}, raised_dir)
+
+    raised_run_dir = _collected_noisy_point(
+        tmp_path, "second", {"max_shots": 4}, raised_dir
+    )
+
+    whole_rows = _rows_of_every_file(whole_run_dir)
+    raised_rows = _rows_of_every_file(raised_run_dir)
+    assert _piece_names(raised_dir) == ["0-1", "2-2", "3-3"]
+    assert raised_rows == whole_rows
+
+
+def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
+    """The referent is one collect run to the raised target from the start.
+
+    A point stopped at one failure is collected again for three, as a
+    pilot's target is raised for the final run: it runs on from its
+    saved pieces and folds to what the three-failure run folds to.
+    """
+    whole_dir = tmp_path / "whole"
+    raised_dir = tmp_path / "raised"
+    three = {"max_shots": 30, "max_failures": 3}
+    one = {"max_shots": 30, "max_failures": 1}
+    whole_run_dir = _collected_noisy_point(
+        tmp_path, "whole_config", three, whole_dir
+    )
+    _collected_noisy_point(tmp_path, "first", one, raised_dir)
+    first_pieces = _piece_names(raised_dir)
+
+    raised_run_dir = _collected_noisy_point(
+        tmp_path, "second", three, raised_dir
+    )
+
+    whole_rows = _rows_of_every_file(whole_run_dir)
+    raised_rows = _rows_of_every_file(raised_run_dir)
+    raised_pieces = _piece_names(raised_dir)
+    assert len(first_pieces) < len(raised_pieces)
+    assert raised_rows == whole_rows
+
+
 def _sweep_row_of(run_dir) -> dict:
     """The one point's sweep.csv row, its cells read as numbers."""
     sweep_path = run_dir / "sweep.csv"
@@ -1012,7 +1084,8 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     _write_a_failing_piece(tmp_path, point_id, 0)
     _write_a_failing_piece(tmp_path, point_id, 2)
     settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
-    point = collect_command.PointCollection(task, settings, 1, 15)
+    saved = pieces.saved_counts(tmp_path, point_id)
+    point = collect_command.PointCollection(task, settings, 1, 15, saved)
 
     units = point.next_units(tmp_path, 1)
 

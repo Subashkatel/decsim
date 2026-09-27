@@ -35,14 +35,6 @@ def piece_dir(
     return point_dir / f"{first_seed}-{last_seed}"
 
 
-def is_written(
-    experiment_dir: pathlib.Path, point_id: str, first_seed: int, count: int
-) -> bool:
-    """Whether the piece's folder is in place, which makes it whole."""
-    folder = piece_dir(experiment_dir, point_id, first_seed, count)
-    return folder.is_dir()
-
-
 def write(
     experiment_dir: pathlib.Path,
     point_id: str,
@@ -90,6 +82,15 @@ def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
         written = _whole_pieces(point_dir)
         folders.extend(written)
     return folders
+
+
+def saved_counts(experiment_dir: pathlib.Path, point_id: str) -> dict:
+    """One point's whole pieces, each first seed mapped to its count."""
+    counts = {}
+    for folder in folders_of(experiment_dir, [point_id]):
+        first_seed, count = _range_of(folder)
+        counts[first_seed] = count
+    return counts
 
 
 def seed_ranges_of(folders: list) -> dict:

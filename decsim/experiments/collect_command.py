@@ -39,16 +39,18 @@ import decsim.experiments.run_folder as run_folder
 class PointCollection:
     """One point's collection as it runs: its next seed and its prefix.
 
-    pending holds the (first seed, count) of the pieces handed out past
-    the counted prefix, in seed order; they are counted once they are
-    all saved, so the prefix stays contiguous whatever order the pool
-    ends them in.
+    saved maps the first seed of each piece saved before this collect
+    to its count, whatever collection cut it. pending holds the (first
+    seed, count) of the pieces handed out past the counted prefix, in
+    seed order; they are counted once they are all saved, so the prefix
+    stays contiguous whatever order the pool ends them in.
     """
 
     task: collect.Task
     settings: collection_module.CollectionSettings
     piece_shots: int
     rounds_per_shot: int
+    saved: dict
     next_seed: int = 0
     counts: collection_module.PrefixCounts = dataclasses.field(
         default_factory=collection_module.PrefixCounts
@@ -67,7 +69,7 @@ class PointCollection:
             count = self._next_piece_count()
             if count == 0:
                 break
-            unit = self._hand_out(experiment_dir, count)
+            unit = self._hand_out(count)
             if unit is None and not units:
                 self.count_the_pending(experiment_dir)
             if unit is not None:
@@ -97,24 +99,44 @@ class PointCollection:
             self.settings, is_adaptive, self.rounds_per_shot
         )
 
-    def _hand_out(
-        self, experiment_dir: pathlib.Path, count: int
-    ) -> Optional[collect.Unit]:
-        """The next piece made pending; its unit, or None when it is saved."""
+    def _hand_out(self, count: int) -> Optional[collect.Unit]:
+        """The next piece made pending; its unit, or None when it is saved.
+
+        A saved piece that starts at the next seed is taken whole, and a
+        new one ends where the next saved piece starts, so a collect run
+        again under a raised cap or target runs no seed twice.
+        """
         first_seed = self.next_seed
-        self.next_seed += count
-        self.pending.append((first_seed, count))
-        point_id = self.task.strong_id()
-        if pieces.is_written(experiment_dir, point_id, first_seed, count):
+        saved_count = self.saved.get(first_seed)
+        if saved_count is not None:
+            self._make_pending(first_seed, saved_count)
             return None
-        return collect.Unit(self.task, first_seed, count)
+        seeds_free = self._seeds_before_a_saved_piece(first_seed)
+        new_count = min(count, seeds_free)
+        self._make_pending(first_seed, new_count)
+        return collect.Unit(self.task, first_seed, new_count)
+
+    def _make_pending(self, first_seed: int, count: int) -> None:
+        self.next_seed = first_seed + count
+        self.pending.append((first_seed, count))
+
+    def _seeds_before_a_saved_piece(self, first_seed: int) -> float:
+        """The seeds from first_seed to the next saved piece, or infinity."""
+        later_starts = []
+        for saved_first in self.saved:
+            if saved_first > first_seed:
+                later_starts.append(saved_first)
+        if not later_starts:
+            return math.inf
+        return min(later_starts) - first_seed
 
     def _next_piece_count(self) -> int:
         """The next piece's shots: a piece, or what is left below max_shots."""
         max_shots = self.settings.max_shots
         if max_shots is None:
             return self.piece_shots
-        remaining = max_shots - self.next_seed
+        seeds_left = max_shots - self.next_seed
+        remaining = max(seeds_left, 0)
         return min(self.piece_shots, remaining)
 
 
@@ -278,7 +300,10 @@ def _point_collections(
         settings = collections[point_id]
         rounds_per_shot = records[point_id]["rounds_per_shot"]
         piece_shots = _piece_shots_of(task, settings, rounds_per_shot)
-        point = PointCollection(task, settings, piece_shots, rounds_per_shot)
+        saved = pieces.saved_counts(experiment_dir, point_id)
+        point = PointCollection(
+            task, settings, piece_shots, rounds_per_shot, saved
+        )
         points.append(point)
     return points
 

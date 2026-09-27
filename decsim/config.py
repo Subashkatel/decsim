@@ -131,7 +131,7 @@ def is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def setting_at(sections: Mapping, path: str, reader: str):
+def setting_at(sections: Mapping, path: str, reader: str) -> object:
     """The value at a dotted yaml path, a step that is not there refused.
 
     One lookup serves every reader of a point's resolved sections: a

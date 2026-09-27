@@ -33,9 +33,13 @@ The folder holds:
 - `points/<id>.csv`, each point's counts in sinter's CSV format;
 - `stats.csv`, every point's counts in one file, once you combine;
 - a copy of `run.py` and `commit.txt`, the commit that ran and
-  whether the tree had uncommitted changes. An interpreter with no git,
-  as in the container, writes `dirty None` unless the job exports
-  DECSIM_TREE_DIRTY (1 or 0).
+  whether the tree had uncommitted changes.
+
+On a node whose python has no git, as in the container, export
+DECSIM_TREE_DIRTY (1 for uncommitted changes, 0 for none) before
+running; without it `commit.txt` says `dirty None`. A folder compares
+the commit always and the dirty flag only where both sides could read
+it, so a gitless task and a git host agree on the same commit.
 
 A folder belongs to one script and one commit. Running a different
 script or commit into it is refused; give `--out` a new folder.

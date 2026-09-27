@@ -20,6 +20,7 @@ import sinter
 import stim
 
 import decsim.experiment_runner as experiment_runner
+import decsim.experiments.run_folder as run_folder
 
 _THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
@@ -148,6 +149,7 @@ def test_a_run_of_every_point_ends_with_stats_csv(tmp_path, monkeypatch):
 
 def test_the_folder_records_the_commit_that_ran(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
+    set_the_tree(monkeypatch, "abc123", False)
     out = tmp_path / "out"
     experiment = tiny_experiment()
 
@@ -155,9 +157,48 @@ def test_the_folder_records_the_commit_that_ran(tmp_path, monkeypatch):
 
     commit_path = out / "commit.txt"
     commit_text = commit_path.read_text()
-    lines = commit_text.splitlines()
-    assert lines[0].startswith("commit ")
-    assert lines[1].startswith("dirty ")
+    assert commit_text == "commit abc123\ndirty False\n"
+
+
+@pytest.mark.parametrize(
+    ("held_dirty", "is_dirty"), [("None", False), ("False", None)]
+)
+def test_a_side_that_could_not_read_git_is_not_refused(
+    tmp_path, monkeypatch, held_dirty, is_dirty
+):
+    """A gitless node records dirty None; the commit still decides."""
+    script = write_script(tmp_path, monkeypatch)
+    out = folder_of_the_run(tmp_path, script, "abc123", held_dirty)
+    set_the_tree(monkeypatch, "abc123", is_dirty)
+    experiment = tiny_experiment()
+
+    experiment.main(arguments=["0", "--out", str(out)])
+
+    point_path = out / "points" / "0.csv"
+    assert point_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("held_commit", "held_dirty", "is_dirty"),
+    [("def456", "False", False), ("abc123", "True", False)],
+)
+def test_another_commit_or_a_known_dirty_difference_is_refused(
+    tmp_path, monkeypatch, held_commit, held_dirty, is_dirty
+):
+    script = write_script(tmp_path, monkeypatch)
+    out = folder_of_the_run(tmp_path, script, held_commit, held_dirty)
+    set_the_tree(monkeypatch, "abc123", is_dirty)
+    experiment = tiny_experiment()
+
+    with pytest.raises(ValueError) as refused:
+        experiment.main(arguments=["0", "--out", str(out)])
+
+    assert str(refused.value) == (
+        f"{out / 'commit.txt'} records commit {held_commit} dirty "
+        f"{held_dirty}, and this is commit abc123 dirty {is_dirty}; a "
+        "results folder belongs to one script and one commit, so give "
+        "--out a new folder"
+    )
 
 
 def test_a_folder_holding_another_scripts_copy_is_refused(
@@ -282,6 +323,29 @@ def write_script(tmp_path, monkeypatch) -> pathlib.Path:
     script.write_text(SCRIPT_TEXT)
     monkeypatch.setattr(sys, "argv", [str(script)])
     return script
+
+
+def set_the_tree(monkeypatch, commit: str, is_dirty) -> None:
+    """The commit and dirty flag this process reads of its tree."""
+    identity = {
+        "commit": commit,
+        "dirty": is_dirty,
+        "host": "node",
+        "slurm_job_id": None,
+    }
+    monkeypatch.setattr(run_folder, "piece_identity", lambda: identity)
+
+
+def folder_of_the_run(tmp_path, script, commit: str, dirty: str):
+    """A results folder an earlier task of the same script recorded."""
+    out = tmp_path / "out"
+    out.mkdir()
+    script_text = script.read_text()
+    script_copy = out / "run.py"
+    script_copy.write_text(script_text)
+    commit_path = out / "commit.txt"
+    commit_path.write_text(f"commit {commit}\ndirty {dirty}\n")
+    return out
 
 
 def run_in_background(script, point_id: str, out, environment):

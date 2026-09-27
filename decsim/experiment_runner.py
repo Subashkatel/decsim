@@ -31,6 +31,10 @@ COMBINE = "combine"
 POINTS_FOLDER = "points"
 STATS_FILE = "stats.csv"
 COMMIT_FILE = "commit.txt"
+ONE_RUN_PER_FOLDER = (
+    "a results folder belongs to one script and one commit, so give --out "
+    "a new folder"
+)
 # where a folder goes when no --out names one
 RESULTS_ROOT_VARIABLE = "DECSIM_RESULTS"
 DEFAULT_RESULTS_ROOT = "results"
@@ -211,21 +215,27 @@ def _record_the_run(folder: pathlib.Path) -> None:
     """A copy of the running script and the commit, or a refusal.
 
     A folder holds one script's points from one commit, so a different
-    script or commit is refused rather than mixed into its results.
+    script or commit is refused rather than mixed into its results. The
+    commit and dirty flag are run_folder's reading of the tree, the one
+    every run folder records: the dirty flag is DECSIM_TREE_DIRTY when
+    the job exports it, else git's, else None on a node with no git.
     """
     folder.mkdir(parents=True, exist_ok=True)
     script = pathlib.Path(sys.argv[0])
     script_text = script.read_text()
     script_copy = folder / script.name
     _write_once(script_copy, script_text)
+    _refuse_another_text(script_copy, script_text)
     identity = run_folder.piece_identity()
-    commit_text = f"commit {identity['commit']}\ndirty {identity['dirty']}\n"
+    commit = str(identity["commit"])
+    dirty = str(identity["dirty"])
     commit_path = folder / COMMIT_FILE
-    _write_once(commit_path, commit_text)
+    _write_once(commit_path, f"commit {commit}\ndirty {dirty}\n")
+    _refuse_another_tree(commit_path, commit, dirty)
 
 
 def _write_once(path: pathlib.Path, text: str) -> None:
-    """The file written by whichever array task comes first, then checked.
+    """The file written by whichever array task comes first.
 
     The text is staged in a file created exclusively under a random name
     beside it, since process ids repeat across nodes, and hard-linked
@@ -245,14 +255,36 @@ def _write_once(path: pathlib.Path, text: str) -> None:
         except FileExistsError:
             pass
         staging.unlink()
+
+
+def _refuse_another_text(path: pathlib.Path, text: str) -> None:
     held_text = path.read_text()
     if held_text != text:
         message = (
-            f"{path} already holds another {path.name}; a results folder "
-            "belongs to one script and one commit, so give --out a new "
-            "folder"
+            f"{path} already holds another {path.name}; {ONE_RUN_PER_FOLDER}"
         )
         raise ValueError(message)
+
+
+def _refuse_another_tree(path: pathlib.Path, commit: str, dirty: str) -> None:
+    """The recorded commit, and the dirty flag where both sides read it.
+
+    A node with no git records dirty None, which says nothing either
+    way, so only two known flags that differ are refused.
+    """
+    held_text = path.read_text()
+    commit_line, dirty_line = held_text.splitlines()
+    held_commit = commit_line.removeprefix("commit ")
+    held_dirty = dirty_line.removeprefix("dirty ")
+    is_unread = "None" in (held_dirty, dirty)
+    is_same_flag = held_dirty == dirty or is_unread
+    if held_commit == commit and is_same_flag:
+        return
+    message = (
+        f"{path} records commit {held_commit} dirty {held_dirty}, and this "
+        f"is commit {commit} dirty {dirty}; {ONE_RUN_PER_FOLDER}"
+    )
+    raise ValueError(message)
 
 
 def _sinter_decoders(custom_decoders: Optional[Mapping]) -> dict:

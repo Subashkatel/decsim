@@ -63,6 +63,7 @@ import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collect_command as run
 import decsim.experiments.experiment as experiment
+import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
 import decsim.frontends.settings as workload_settings
@@ -239,6 +240,15 @@ def test_a_full_history_point_reproduces_the_retired_direct_columns(
     assert sum(mismatches) == 2
 
 
+def _columns_of_every_csv(run_dir) -> set:
+    """Every column name any csv file under the folder holds."""
+    columns = set()
+    for path in run_dir.rglob("*.csv"):
+        header = fold.header_of(path)
+        columns.update(header)
+    return columns
+
+
 def test_a_swept_section_keeps_its_column_beside_every_measured_one(
     tmp_path,
 ):
@@ -257,12 +267,7 @@ def test_a_swept_section_keeps_its_column_beside_every_measured_one(
     run_dir, _ = run.run_experiment(config_path)
     shots_path = run_dir / "shots.csv"
     shot, *_ = _csv_rows(shots_path)
-    columns = set()
-    for path in run_dir.rglob("*.csv"):
-        with open(path, newline="") as handle:
-            reader = csv.reader(handle)
-            header = next(reader)
-        columns.update(header)
+    columns = _columns_of_every_csv(run_dir)
     sections_written = columns & set(machine_settings.SECTIONS)
 
     assert json.loads(shot["windows"]) == windows
@@ -454,9 +459,8 @@ def test_a_point_with_an_online_threshold_is_one_piece(tmp_path):
 
     run.run_experiment(online, out_dir)
 
-    piece_folders = out_dir.glob("pieces/*/*")
-    names = [folder.name for folder in piece_folders]
-    assert names == ["0-1"]
+    (piece_folder,) = out_dir.glob("pieces/*/*")
+    assert piece_folder.name == "0-1"
 
 
 def test_two_points_under_one_cache_do_not_share_models():

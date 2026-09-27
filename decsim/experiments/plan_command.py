@@ -222,16 +222,20 @@ def _next_pieces(
 
 
 def _unsaved_seeds(saved: dict, planned_ranges: list) -> list:
-    """The planned seeds no saved piece holds, as (first seed, count).
+    """The planned seeds no saved piece holds, each once, as (first, count).
 
     A planned piece a task never saved comes back with its own seeds;
     one saved under another cut, by a plain collect, comes back only for
-    the seeds that cut left out.
+    the seeds that cut left out. Two rounds may plan the same seeds
+    under different cuts, a piece and then its unsaved part, so a seed
+    an earlier range already gave back is not given again.
     """
     missing = []
+    covered = dict(saved)
     for first_seed, count in planned_ranges:
-        unsaved = pieces.uncovered_ranges(saved, first_seed, count)
+        unsaved = pieces.uncovered_ranges(covered, first_seed, count)
         missing.extend(unsaved)
+        covered.update(unsaved)
     return missing
 
 

@@ -2852,3 +2852,41 @@ def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:
     status_path = experiment_dir / "status.csv"
     paths.append(status_path)
     return {str(path): path.read_bytes() for path in paths}
+
+
+def test_rounds_planned_again_before_the_last_ran_run_each_seed_once(
+    tmp_path, monkeypatch
+):
+    """The seeds planned by every round are one set, less the saved ones.
+
+    Round one plans seeds 0 to 9 in one piece; a plain collect capped at
+    five shots saves 0 to 4. Round two plans the rest, 5 to 9, and round
+    three is planned before round two runs. Round three lists seeds 5 to
+    9 once, and its task runs each of them once.
+    """
+    out_dir = tmp_path / "out"
+    config_path = _capped_noisy_config(tmp_path, 10, 150)
+    _plan([config_path], out_dir, 1)
+    _capped_noisy_config(tmp_path, 5, 150)
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    _capped_noisy_config(tmp_path, 10, 150)
+    _plan([config_path], out_dir, 1)
+    third_round = _plan([config_path], out_dir, 1)
+    ran_seeds = []
+    run_unit = functools.partial(
+        _run_the_unit_and_note, ran_seeds, collect.run_unit
+    )
+    monkeypatch.setattr(collect, "run_unit", run_unit)
+
+    _run_the_round(third_round)
+
+    ((_point_id, first_seed, count),) = _planned_ranges(third_round)
+    assert (first_seed, count) == (5, 5)
+    assert ran_seeds == [5, 6, 7, 8, 9]
+
+
+def _run_the_unit_and_note(ran_seeds: list, run_unit, unit, measure):
+    """run_unit, collect's own, noting the seeds it runs."""
+    end_seed = unit.first_seed + unit.seeds
+    ran_seeds.extend(range(unit.first_seed, end_seed))
+    return run_unit(unit, measure)

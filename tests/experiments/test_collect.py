@@ -335,24 +335,38 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
     assert escalation.online_threshold is task.online_threshold
 
 
-def _predictions_of(rows) -> list:
-    """What each shot decoded, the fields no timing knob can move."""
-    decoded = []
-    for row in rows:
-        decoded.append(
-            (
-                row.seed,
-                row.decoded_windows,
-                row.logical_failure,
-            )
-        )
-    return decoded
+def _decoded(shot: collect.Shot) -> tuple:
+    """What one shot drew, and what the loop and the whole circuit decoded.
+
+    The whole-circuit PyMatching decode is built here, apart from the
+    machine's models, so models the task shares cannot move it.
+    """
+    measurement = measure_shot.measure_shot(shot)
+    return (
+        shot.seed,
+        measurement.decoded_windows,
+        _drawn(shot),
+        yaml_configs.loop_predictions(shot),
+        yaml_configs.whole_circuit_predictions(shot),
+    )
 
 
-def _measured_alone(task, seed: int):
-    """One shot of the task, run and measured on its own."""
+def _drawn(shot: collect.Shot) -> list:
+    """Each operation's sampled detection events and observable truth."""
+    sampled = shot.machine.observation.sampled_shots.shots_by_operation
+    drawn = []
+    for operation_result in shot.result.operation_results:
+        sampled_shot = sampled[operation_result.operation_id]
+        events = tuple(sampled_shot.detection_events)
+        truth = tuple(operation_result.observable_truth)
+        drawn.append((events, truth))
+    return drawn
+
+
+def _decoded_alone(task, seed: int) -> tuple:
+    """One shot of the task, run on its own models and decoded."""
     shot = collect.run_shot(task, seed)
-    return measure_shot.measure_shot(shot)
+    return _decoded(shot)
 
 
 def _run_every_shot(task, built_models) -> None:
@@ -373,10 +387,10 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     )
 
     whole_task = collect.Unit(task, 0, task.shots)
-    shared, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
-    alone = [_measured_alone(task, seed) for seed in range(task.shots)]
+    shared, _ran = collect.run_unit(whole_task, _decoded)
+    alone = [_decoded_alone(task, seed) for seed in range(task.shots)]
 
-    assert _predictions_of(shared) == _predictions_of(alone)
+    assert shared == alone
 
 
 def test_the_first_shot_builds_the_models_and_the_rest_read_them():

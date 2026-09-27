@@ -94,17 +94,24 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         self.window_decoder = window_decoder.TesseractWindowDecoder(settings)
 
     def run_seed_children(self) -> tuple:
-        """The timing and detector-order seed owners by semantic role."""
+        """The timing and detector-order seed owners by semantic role.
+
+        A fixed detector_order_seed draws the orders from itself and
+        never from the run seed, so the window decoder owns no run seed
+        then, and a caller that binds seeds per block (the batch
+        sampling) keeps the row and its compiled backend.
+        """
         latency_path = (
             seed_records.RunSeedPathSegment("field", "latency_model"),
         )
+        timing = seed_records.RunSeedChild(latency_path, self.latency_model)
+        if self.window_decoder.settings.detector_order_seed is not None:
+            return (timing,)
         decoder_path = (
             seed_records.RunSeedPathSegment("field", "window_decoder"),
         )
-        return (
-            seed_records.RunSeedChild(latency_path, self.latency_model),
-            seed_records.RunSeedChild(decoder_path, self.window_decoder),
-        )
+        orders = seed_records.RunSeedChild(decoder_path, self.window_decoder)
+        return (timing, orders)
 
     def compile(self, faults, model):
         """The window decoder, which compiles the backend per model itself."""

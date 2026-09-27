@@ -17,6 +17,7 @@ every shot, since every shot costs its time, as sinter's shots_left
 counts its discards (_collection_manager.py:330).
 """
 
+import bisect
 import dataclasses
 import math
 from collections.abc import Mapping
@@ -163,6 +164,34 @@ class PrefixCounts:
 
 
 @dataclasses.dataclass(frozen=True)
+class ShotSpan:
+    """Seeds [first_seed, first_seed + count) of a point, kept as counts.
+
+    A batch piece keeps no row a shot: its failed shots and its unscored
+    shots are named by seed, each tuple in seed order, a failure being a
+    scored shot's. Its seconds are charged on its last shot, so a time
+    cap is read at the span's end and a target on the exact failure.
+    """
+
+    first_seed: int
+    count: int
+    failure_seeds: tuple
+    unscored_seeds: tuple
+    core_seconds: float
+
+    def counts_of_first(self, shot_count: int) -> PrefixCounts:
+        """The counts of the span's first shot_count shots."""
+        end_seed = self.first_seed + shot_count
+        failures = bisect.bisect_left(self.failure_seeds, end_seed)
+        unscored_shots = bisect.bisect_left(self.unscored_seeds, end_seed)
+        scored_shots = shot_count - unscored_shots
+        core_seconds = 0.0
+        if shot_count == self.count:
+            core_seconds = self.core_seconds
+        return PrefixCounts(shot_count, scored_shots, failures, core_seconds)
+
+
+@dataclasses.dataclass(frozen=True)
 class PointRule:
     """What a point's summary reads its prefix by.
 
@@ -176,6 +205,18 @@ class PointRule:
     settings: Optional[CollectionSettings] = None
     is_adaptive: bool = False
     rounds_per_shot: Optional[int] = None
+
+    @classmethod
+    def from_record(cls, record: Mapping) -> "PointRule":
+        """The rule a point's resolved/ record says its prefix is read by.
+
+        The record's experiment facts are what collect_command wrote when
+        it recorded the point, so a fold reads a point by the collection
+        it was run under, whatever the yaml says now.
+        """
+        facts = record["experiment"]
+        settings = CollectionSettings(**facts["collection"])
+        return cls(settings, facts["adaptive"], record["rounds_per_shot"])
 
 
 class PrefixTracker:
@@ -202,6 +243,28 @@ class PrefixTracker:
             return
         shot_counts = _shot_counts_of(row)
         self.counts.add(shot_counts)
+        if self.rule.settings is None:
+            return
+        self.stop_kind = self.rule.settings.stop_kind(self.counts)
+        if self.stop_kind is not None:
+            self.is_open = False
+
+    def add_span(self, span: ShotSpan) -> None:
+        """A span of shots onto the prefix, as its rows one by one would.
+
+        The rule's stop only grows with the counts (stop_kind), so the
+        shot the span stops on is found by bisection over the span's
+        first shots, not by a row a shot: a piece of 10^5 shots is about
+        seventeen reads of the rule.
+        """
+        if not self.is_open:
+            return
+        if span.first_seed != self.counts.shots:
+            self.is_open = False
+            return
+        shot_count = self._shots_to_the_stop(span)
+        span_counts = span.counts_of_first(shot_count)
+        self.counts.add(span_counts)
         if self.rule.settings is None:
             return
         self.stop_kind = self.rule.settings.stop_kind(self.counts)
@@ -242,6 +305,28 @@ class PrefixTracker:
         if self.stop_kind is None:
             return failure_statistics.StopKind.CAP
         return self.stop_kind
+
+    def _shots_to_the_stop(self, span: ShotSpan) -> int:
+        """The span's shots up to the one its rule stops on; all when none."""
+        if self.rule.settings is None:
+            return span.count
+        low = 1
+        high = span.count
+        while low < high:
+            middle = (low + high) // 2
+            if self._stops_within(span, middle):
+                high = middle
+            else:
+                low = middle + 1
+        return low
+
+    def _stops_within(self, span: ShotSpan, shot_count: int) -> bool:
+        """Whether the rule stops by the span's shot_count-th shot."""
+        counts = dataclasses.replace(self.counts)
+        span_counts = span.counts_of_first(shot_count)
+        counts.add(span_counts)
+        stop_kind = self.rule.settings.stop_kind(counts)
+        return stop_kind is not None
 
 
 def _shot_counts_of(row: Mapping) -> PrefixCounts:

@@ -25,7 +25,6 @@ from typing import Optional
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.collect as collect
-import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
@@ -41,6 +40,10 @@ FINISHED_FILE = "finished"
 # whose interpreter has no git of its own (slurm/slurm_run.sh exports
 # it): "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
+# The package this run imported, whose compiled libraries it loads.
+_THIS_FILE = pathlib.Path(__file__)
+_ABSOLUTE_FILE = _THIS_FILE.resolve()
+PACKAGE_DIR = _ABSOLUTE_FILE.parents[1]
 
 
 def run_dir_for(config, out_dir=None) -> pathlib.Path:
@@ -465,7 +468,7 @@ def _how_it_ran() -> dict:
         "git": _git_state(),
         "container": _container(),
         "versions": _versions(),
-        "union_find_library_sha256": _union_find_library_hash(),
+        "compiled_libraries": _compiled_library_hashes(),
         "host": platform.node(),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "argv": sys.argv,
@@ -587,17 +590,20 @@ def _sha256_of(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def _union_find_library_hash() -> Optional[str]:
-    """The compiled Union-Find library's sha256; None when it is not built.
+def _compiled_library_hashes() -> dict:
+    """Every compiled library in the imported package, each its sha256.
 
-    It is built from tracked C source by tools/build_union_find.sh and
-    is not tracked itself, so the commit does not name the bytes a
-    union_find decoder ran.
+    Keyed by the path below the package's folder. A library is built
+    from tracked C source (tools/build_union_find.sh) and is not tracked
+    itself, so the commit does not name the bytes a run loaded; a tree
+    with none built records none.
     """
-    path = compiled_decoder.library_path()
-    if not path.exists():
-        return None
-    return _sha256_of(path)
+    hashes = {}
+    library_paths = PACKAGE_DIR.rglob("*.so")
+    for path in sorted(library_paths):
+        relative = path.relative_to(PACKAGE_DIR.parent)
+        hashes[str(relative)] = _sha256_of(path)
+    return hashes
 
 
 def _untracked_files(checkout: pathlib.Path) -> Optional[list]:

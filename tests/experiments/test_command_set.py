@@ -19,7 +19,7 @@ import pytest
 import stim
 import yaml
 
-import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim
 import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -897,32 +897,64 @@ def test_a_manifest_names_every_installed_package(tmp_path):
     assert "numpy" in packages
 
 
-def test_a_manifest_names_the_union_find_library_it_loads(
+def test_a_manifest_names_every_compiled_library_in_the_imported_tree(
     tmp_path, compiled_union_find_library
 ):
-    """The library is built, not tracked, so the commit does not name it."""
+    """A library is built, not tracked, so the commit does not name it.
+
+    The referent is the imported package's folder read here: every .so
+    below it, hashed, the Union-Find library the suite built among them.
+    """
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
     run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
     manifest = _manifest_of(out_dir)
-    library_hash = _sha256_of(compiled_union_find_library)
+    package_file = pathlib.Path(decsim.__file__)
+    absolute_file = package_file.resolve()
+    package_dir = absolute_file.parent
+    expected = _library_hashes(package_dir)
+    union_find_path = compiled_union_find_library.resolve()
+    union_find_key = union_find_path.relative_to(package_dir.parent)
 
-    assert manifest["union_find_library_sha256"] == library_hash
+    assert manifest["compiled_libraries"] == expected
+    assert expected[str(union_find_key)] == _sha256_of(union_find_path)
 
 
-def test_a_manifest_without_the_union_find_library_names_none(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("library_names", "expected"),
+    [
+        ((), {}),
+        (
+            ("decoders/row/row.so",),
+            {
+                "decsim/decoders/row/row.so": (
+                    "ba7816bf8f01cfea414140de5dae2223"
+                    "b00361a396177a9cb410ff61f20015ad"
+                )
+            },
+        ),
+    ],
+)
+def test_a_manifest_names_exactly_the_libraries_its_tree_holds(
+    tmp_path, monkeypatch, library_names, expected
 ):
-    """A run that decodes with PyMatching needs no library built."""
-    absent = tmp_path / "absent.so"
-    monkeypatch.setattr(compiled_decoder, "library_path", lambda: absent)
+    """The libraries the tree holds, whatever built them, and none for none.
+
+    The one library's bytes are "abc", whose sha256 is FIPS 180-2's
+    first example.
+    """
+    package_dir = tmp_path / "tree" / "decsim"
+    package_dir.mkdir(parents=True)
+    library_paths = [package_dir / name for name in library_names]
+    _write_libraries(library_paths)
+    monkeypatch.setattr(run_folder, "PACKAGE_DIR", package_dir)
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
 
     run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
 
     manifest = _manifest_of(out_dir)
-    assert manifest["union_find_library_sha256"] is None
+    assert manifest["compiled_libraries"] == expected
 
 
 def test_a_run_where_git_cannot_answer_records_no_patch(tmp_path, monkeypatch):
@@ -1763,3 +1795,19 @@ def test_a_build_refusal_under_run_is_one_line(tmp_path, capsys):
     assert printed.err.startswith(
         f"decsim: {config_path}: burst_detector.kind event_count"
     )
+
+
+def _write_libraries(library_paths: list) -> None:
+    """Each path a stand-in library whose bytes are "abc"."""
+    for path in library_paths:
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"abc")
+
+
+def _library_hashes(package_dir: pathlib.Path) -> dict:
+    """Every .so below a package folder, by its path from the folder above."""
+    hashes = {}
+    for path in package_dir.rglob("*.so"):
+        relative = path.relative_to(package_dir.parent)
+        hashes[str(relative)] = _sha256_of(path)
+    return hashes

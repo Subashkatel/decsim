@@ -123,6 +123,7 @@ SHOT_SUMS = (
     "escalated_windows",
     "strong_decoded_rounds",
     *measure.WINDOW_STATUS_COLUMNS,
+    "provisional_no_correction_windows",
 )
 SHOT_TRUE_COUNTS = (
     "logical_failure",
@@ -793,9 +794,11 @@ def _failure_fraction(failures: int, scored_shots: int) -> float:
 
 
 def _add_status_columns(row: dict, totals) -> None:
-    """The point's committed windows per status besides success."""
+    """Windows by final status, and replaced provisional ones uncorrected."""
     for name in measure.WINDOW_STATUS_COLUMNS:
         row[name] = totals.sums[name]
+    provisional = totals.sums["provisional_no_correction_windows"]
+    row["provisional_no_correction_windows"] = provisional
 
 
 def _add_pool_columns(row: dict, totals) -> None:

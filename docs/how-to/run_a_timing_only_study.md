@@ -87,8 +87,8 @@ Run it a second time and compare:
 
 ```bash
 decsim collect configs/priced_cards_example.yaml
-diff <(cut -d, -f1-27 results/<first>/sweep.csv) \
-     <(cut -d, -f1-27 results/<second>/sweep.csv)
+diff <(cut -d, -f1-28 results/<first>/sweep.csv) \
+     <(cut -d, -f1-28 results/<second>/sweep.csv)
 ```
 
 Every column matches except `sim_wall_seconds_per_shot`, which is how

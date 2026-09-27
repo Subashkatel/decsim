@@ -222,12 +222,16 @@ class ShotMeasurement:
     # WINDOW_STATUS_COLUMNS -> the committed windows whose decode carried
     # that status; shots.csv holds one column per entry
     window_statuses: dict
-    # whether every committed window's backend produced a correction; an
-    # unscored shot is sinter's discard, never a logical failure
-    # (sinter/_decoding/_decoding.py:123-125), and unscored_reason names
-    # its windows' backend reasons, empty on a scored shot
+    # whether every decode a window committed, provisional or final, got
+    # a correction from its backend; an unscored shot is sinter's
+    # discard, never a logical failure (sinter/_decoding/_decoding.py:
+    # 123-125), and unscored_reason names the backends' reasons, empty on
+    # a scored shot. provisional_no_correction_windows counts the windows
+    # whose replaced provisional decode had none, which the status
+    # columns, counting final decodes, do not show
     is_scored: bool
     unscored_reason: str
+    provisional_no_correction_windows: int
     # sha256 of every operation's sampled detection events and observable
     # truth, so two points' shots of one seed are checked to be one draw
     sample_digest: str
@@ -793,6 +797,7 @@ def _measurement(
     window_statuses = _window_statuses(observation)
     unscored_reason = _unscored_reason(observation)
     is_scored = unscored_reason == ""
+    provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = verdicts.logical_failure and is_scored
     sample_digest = _sample_digest(observation, result)
     return ShotMeasurement(
@@ -838,6 +843,7 @@ def _measurement(
         window_statuses=window_statuses,
         is_scored=is_scored,
         unscored_reason=unscored_reason,
+        provisional_no_correction_windows=provisional_windows,
         sample_digest=sample_digest,
     )
 
@@ -872,9 +878,9 @@ def _burst_catch(
 def _window_statuses(observation: observation_module.Observation) -> dict:
     """How many committed windows carried each status besides success.
 
-    A window keeps the status of the decode it committed last
-    (windows/window_commits.py commit), so a provisional weak answer
-    the strong tier replaced is counted as the strong one.
+    A window keeps the status of its final decode (windows/
+    window_commits.py, commit and finish_strong), so an escalated window
+    counts the strong answer's status and not the weak one it replaced.
     """
     counts = dict.fromkeys(WINDOW_STATUS_COLUMNS, 0)
     for window in observation.windows.windows.values():
@@ -886,19 +892,38 @@ def _window_statuses(observation: observation_module.Observation) -> dict:
 
 
 def _unscored_reason(observation: observation_module.Observation) -> str:
-    """The backends' reasons for the windows committed with no correction.
+    """The backends' reasons for every decode committed with no correction.
 
-    Each distinct reason once, in sorted order and joined by ';', so the
-    text is the same however the windows were ordered; empty when every
-    committed window got a correction.
+    A final decode's and a replaced provisional one's alike: the strong
+    answer replaces the window's own correction, its prediction and its
+    held boundary, but not what the provisional commit already fed
+    forward, its boundary under eager shipping (ports.py BoundaryPolicy:
+    a shipped provisional boundary is never revised) and its crossing
+    commit, which the strong result keeps (window_commits.py
+    _with_the_crossing_commit). decsim does not trace which of those a
+    given window's commit reached, so any of them unscores the shot. A
+    provisional result never reaches the Pauli frame (commit_or_publish
+    publishes only a final one). Each distinct reason once, sorted and
+    joined by ';'; empty when every commit got a correction.
     """
     reasons = set()
     for window in observation.windows.windows.values():
-        reason = window.no_correction_reason
-        if reason is not None:
-            reasons.add(reason.value)
+        reasons.add(window.no_correction_reason)
+        reasons.add(window.provisional_no_correction_reason)
+    reasons.discard(None)
     ordered = sorted(reasons)
     return ";".join(ordered)
+
+
+def _provisional_no_correction_windows(
+    observation: observation_module.Observation,
+) -> int:
+    """The windows whose replaced provisional decode had no correction."""
+    count = 0
+    for window in observation.windows.windows.values():
+        if window.provisional_no_correction_reason is not None:
+            count += 1
+    return count
 
 
 def _sample_digest(

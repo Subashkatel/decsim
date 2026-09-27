@@ -20,7 +20,8 @@ tree's settings records, not a measured value, so it is left out of the
 comparison. Five zero columns came with the window decode statuses,
 one per status besides success, which no window of the recorded sweep
 carried, and two counts with the unscored shots, both its shots scored
-and none unscored. The weak
+and none unscored, and one zero count of replaced provisional decodes
+without a correction, which a weak-only sweep never makes. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park

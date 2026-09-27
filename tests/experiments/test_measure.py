@@ -37,6 +37,8 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.decoders.backend_outcome as backend_outcome
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
@@ -51,6 +53,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
+import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -1648,3 +1651,112 @@ def test_the_sample_digest_names_the_draw_and_not_the_decoder(tmp_path):
     assert matching.algorithm != union_find.algorithm
     assert matching.sample_digest == union_find.sample_digest
     assert matching.sample_digest != next_seed.sample_digest
+
+
+WEAK = window_records.DecoderTier.WEAK
+STRONG = window_records.DecoderTier.STRONG
+# more windows than any escalation shot here plans, so a set of every
+# index names every window of a tier
+EVERY_WINDOW = range(64)
+
+
+def no_correction_answer(self, job, backend, model, faults, syndrome):
+    """A backend that raised: no correction, the row's empty stand-in."""
+    del self, job, backend, model, syndrome
+    fault_count = faults.check.shape[1]
+    return backend_outcome.no_correction_decode(
+        decoding_records.BackendDecodeStatus.BACKEND_ERROR,
+        decoding_records.BackendFailureReason.UPSTREAM_EXCEPTION,
+        fault_count,
+    )
+
+
+def crashing_decodes(monkeypatch, crashing: set) -> dict:
+    """Each decode named in crashing, (tier, window), answers no correction.
+
+    Returns the syndrome every decode read, by (tier, window), the last
+    solve's when a window is solved more than once; crashing may change
+    between runs of one test.
+    """
+    decoder = decoder_module.WindowDecoderBase
+    real_answer = decoder.window_answer
+    syndromes = {}
+
+    def answer(self, job, backend, model, faults, syndrome):
+        key = (job.request_key.tier, job.request_key.window_id)
+        syndromes[key] = syndrome.tolist()
+        answers = dict.fromkeys(crashing, no_correction_answer)
+        chosen = answers.get(key, real_answer)
+        return chosen(self, job, backend, model, faults, syndrome)
+
+    monkeypatch.setattr(decoder, "window_answer", answer)
+    return syndromes
+
+
+def test_a_strong_decode_with_no_correction_unscores_its_shot(
+    tmp_path, monkeypatch
+):
+    """The strong answer is the window's final one, and so is its status.
+
+    Every window escalates and every strong decode produces nothing, so
+    each window's final decode is the strong one with no correction.
+    """
+    strong_windows = {(STRONG, index) for index in EVERY_WINDOW}
+    crashing_decodes(monkeypatch, strong_windows)
+    shot = switching_run(tmp_path, 1000000.0)
+    measurement = measure.measure_shot(shot)
+    statuses = measurement.window_statuses
+
+    assert measurement.escalated_windows == measurement.windows
+    assert measurement.is_scored is False
+    assert measurement.unscored_reason == "upstream_exception"
+    assert statuses["backend_error_windows"] == measurement.windows
+    assert measurement.provisional_no_correction_windows == 0
+
+
+def test_a_weak_decode_with_no_correction_unscores_its_shot_after_strong(
+    tmp_path, monkeypatch
+):
+    """The replaced weak answer counts apart and still unscores the shot.
+
+    The strong decodes all succeed, so no window's final status is an
+    error; each weak answer was committed provisionally first, and what
+    a provisional commit fed forward survives the strong answer.
+    """
+    weak_windows = {(WEAK, index) for index in EVERY_WINDOW}
+    crashing_decodes(monkeypatch, weak_windows)
+    shot = switching_run(tmp_path, 1000000.0)
+    measurement = measure.measure_shot(shot)
+    statuses = measurement.window_statuses
+
+    assert measurement.escalated_windows == measurement.windows
+    assert measurement.is_scored is False
+    assert measurement.unscored_reason == "upstream_exception"
+    assert statuses["backend_error_windows"] == 0
+    assert measurement.provisional_no_correction_windows == (
+        measurement.windows
+    )
+
+
+def test_a_strong_window_with_no_correction_moves_the_next_ones_input(
+    tmp_path, monkeypatch
+):
+    """Window 0's empty strong answer reaches window 1, whose decode is fine.
+
+    The held boundary ships from the strong result (window_boundaries.py
+    ship_held), so window 1 reads a different syndrome than it does when
+    window 0's strong decode answers, and the shot is unscored by window
+    0 alone.
+    """
+    crashing = set()
+    syndromes = crashing_decodes(monkeypatch, crashing)
+    switching_run(tmp_path, 1000000.0)
+    answered_input = syndromes[(WEAK, 1)]
+    crashing.add((STRONG, 0))
+    shot = switching_run(tmp_path, 1000000.0)
+    measurement = measure.measure_shot(shot)
+    crashed_input = syndromes[(WEAK, 1)]
+
+    assert crashed_input != answered_input
+    assert measurement.is_scored is False
+    assert measurement.window_statuses["backend_error_windows"] == 1

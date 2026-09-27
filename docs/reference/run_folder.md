@@ -109,10 +109,11 @@ and unit are its key's in `configs/reference.yaml`.
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `burst_first_flag_round` | the first round at or after the burst's onset that the burst detector fired on, counted from round 1 on a shot with no burst, and 0 when it fired on none; only when `burst_detector.kind` is not `none` |
 | `burst_caught_in_time` | whether that round came at most `burst_detector.catch_deadline_rounds` after the onset; only on a `burst_stim` shot whose burst probability is above 0, with a detector |
-| `is_scored` | whether every committed window's backend produced a correction. A backend that produced none (it raised, returned a vector that is not a correction, or found no correction at all) commits an empty correction in its place, and its shot is unscored |
+| `is_scored` | whether every decode a window committed, provisional or final, got a correction from its backend. A backend that produced none (it raised, returned a vector that is not a correction, or found no correction at all) commits an empty correction in its place, and its shot is unscored. An escalated window's weak answer is committed provisionally before the strong one replaces it, and the replacement does not undo what the provisional commit fed forward: its boundary, when `windows.boundaries` ships provisional boundaries (a shipped one is never revised), and its crossing commit, which the strong result keeps. decsim does not trace which of those reached a later decode, so a replaced provisional decode with no correction unscores the shot too. A provisional result never reaches the Pauli frame |
+| `provisional_no_correction_windows` | how many windows committed a provisional decode with no correction that the strong answer then replaced; the status columns below count final decodes and do not show these |
 | `unscored_reason` | the backends' reasons for the windows committed with no correction, each once, sorted and joined by `;` (`BackendFailureReason` in `decsim/records/decoding.py`: `upstream_exception`, `correction_not_binary`, `correction_wrong_arity`, `nonzero_syndrome_without_faults`, `no_perfect_matching`); empty on a scored shot |
 | `sample_digest` | the sha256 of every operation's sampled detection events and observable truth, one byte a bit, in operation order. Two points that differ only in their decoder hold the same digest at the same seed, so pairing their shots can be checked rather than assumed |
-| `<status>_windows` | one count per status a window's decode may carry besides success, `low_confidence_windows`, `nonconverged_windows`, `invalid_correction_windows`, `empty_model_unsatisfiable_windows` and `backend_error_windows` (`BackendDecodeStatus` in `decsim/records/decoding.py`): how many of the shot's windows committed a decode with that status. A window counts the decode it committed last, so a weak answer the strong tier replaced counts as the strong one |
+| `<status>_windows` | one count per status a window's decode may carry besides success, `low_confidence_windows`, `nonconverged_windows`, `invalid_correction_windows`, `empty_model_unsatisfiable_windows` and `backend_error_windows` (`BackendDecodeStatus` in `decsim/records/decoding.py`): how many of the shot's windows committed a decode with that status. A window counts its final decode, so an escalated window counts the strong answer's status and not the weak one it replaced |
 | `<point>_mean_us`, `<point>_max_us` | one pair per latency point below |
 
 The latency points are the tuple `POINTS` in `decsim/experiments/measure.py`,
@@ -266,7 +267,7 @@ point the run held:
 | `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96 over the scored shots, from `wilson_interval` |
 | `direct_pymatching_failures`, `prediction_mismatches_vs_direct` | the same shots decoded outside the machine, and the disagreements |
 | `scored_shots`, `unscored_shots` | how many of the point's shots were scored, and how many were not (`is_scored`) |
-| `<status>_windows` | the sums over the point's shots |
+| `<status>_windows`, `provisional_no_correction_windows` | the sums over the point's shots |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | the means |
 | `max_queued_windows` | the deepest queue over the point |
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |

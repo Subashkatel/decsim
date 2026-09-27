@@ -10,6 +10,8 @@ parameters swept around it).
 
 import pathlib
 
+import numpy
+import pymatching
 import yaml
 
 import decsim.collect as collect
@@ -53,15 +55,15 @@ QPU_ONLY_SWEEP = [
 ]
 
 
-def measure_point_shot(
+def point_shot(
     config,
     *,
     physical_error_probability,
     distance,
     round_period_microseconds,
     seed,
-):
-    """One seeded shot at one sweep point, collected and measured."""
+) -> collect.Shot:
+    """One seeded shot at one sweep point, run."""
     shots = seed + 1
     task = config.point_task(
         {
@@ -71,8 +73,42 @@ def measure_point_shot(
         },
         shots,
     )
-    shot = collect.run_shot(task, seed)
+    return collect.run_shot(task, seed)
+
+
+def measure_point_shot(config, **point):
+    """One seeded shot at one sweep point, collected and measured."""
+    shot = point_shot(config, **point)
     return measure.measure_shot(shot)
+
+
+def whole_circuit_predictions(shot: collect.Shot) -> list:
+    """Each operation's observables, PyMatching on its whole circuit.
+
+    The reference a windowed loop is checked against: the decomposed
+    detector error model of the circuit the source sampled, decoded in
+    one piece on the events it drew, operation by operation in the
+    result's order.
+    """
+    sampled = shot.machine.observation.sampled_shots.shots_by_operation
+    predictions = []
+    for operation_result in shot.result.operation_results:
+        sampled_shot = sampled[operation_result.operation_id]
+        model = sampled_shot.circuit.detector_error_model(decompose_errors=True)
+        matching = pymatching.Matching.from_detector_error_model(model)
+        events = numpy.asarray(sampled_shot.detection_events, dtype=bool)
+        predicted = matching.decode(events)
+        prediction = tuple(int(bit) for bit in predicted)
+        predictions.append(prediction)
+    return predictions
+
+
+def loop_predictions(shot: collect.Shot) -> list:
+    """Each operation's observables as the machine's loop decoded them."""
+    return [
+        tuple(operation_result.logical_observables)
+        for operation_result in shot.result.operation_results
+    ]
 
 
 # A complete runnable config, small enough for a functional test. Tests

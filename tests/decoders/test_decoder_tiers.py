@@ -10,6 +10,7 @@ import pytest
 
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.experiments.experiment as experiment
+import decsim.experiments.measure as measure
 import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
 
@@ -37,16 +38,18 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path, seed):
         },
     )
     config = experiment.load_experiment(config_path)
-    measurement = yaml_configs.measure_point_shot(
+    shot = yaml_configs.point_shot(
         config,
         physical_error_probability=0.005,
         distance=3,
         round_period_microseconds=1.0,
         seed=seed,
     )
+    measurement = measure.measure_shot(shot)
+    loop = yaml_configs.loop_predictions(shot)
     assert measurement.algorithm == "pymatching"
     assert measurement.decoded_windows > 0
-    assert not measurement.direct_mismatch
+    assert loop == yaml_configs.whole_circuit_predictions(shot)
 
 
 def test_strong_unit_runs_belief_matching(tmp_path):

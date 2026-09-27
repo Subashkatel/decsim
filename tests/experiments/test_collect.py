@@ -280,8 +280,6 @@ def _predictions_of(rows) -> list:
                 row.seed,
                 row.decoded_windows,
                 row.logical_failure,
-                row.direct_failure,
-                row.direct_mismatch,
             )
         )
     return decoded

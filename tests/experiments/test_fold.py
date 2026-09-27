@@ -764,7 +764,7 @@ def test_a_switching_run_writes_both_confidence_files(tmp_path):
 
 def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
     overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shots": "all"}
+    overrides["observation"] = {"confidence_shot_count": "all"}
     run_dir = _confidence_run(tmp_path, overrides, 3)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
@@ -778,7 +778,7 @@ def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
 
 def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
     overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shots": 0}
+    overrides["observation"] = {"confidence_shot_count": 0}
     run_dir = _confidence_run(tmp_path, overrides, 2)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"

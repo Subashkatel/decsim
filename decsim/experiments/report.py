@@ -518,7 +518,7 @@ def window_confidence_rows(measurements: list) -> list:
     (2510.25222 lines 722-731); a window has no truth of its own, so a
     row carries the shot's failure and whether the strong decode
     revised the window's answer. Only the shots
-    observation.confidence_shots names write rows; a run with no
+    observation.confidence_shot_count names write rows; a run with no
     confidence signal writes none.
     """
     rows = []

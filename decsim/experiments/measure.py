@@ -139,7 +139,7 @@ class ShotConfidence:
     signal names the confidence the escalation read
     (escalation.confidence); windows are the ledger's WindowConfidence
     records in window order; is_sampled says whether the shot is one of
-    observation.confidence_shots, whose windows window_confidence.csv
+    observation.confidence_shot_count, whose windows window_confidence.csv
     lists, while the histogram counts every shot.
     """
 

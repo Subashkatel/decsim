@@ -1525,7 +1525,7 @@ observation:                       # what a run records beyond its results
                                    # neither file, because a run that counted nothing
                                    # has no counts and a row of zeros would say
                                    # otherwise
-  confidence_shots: 100            # a count of shots from seed 0, or all. When a
+  confidence_shot_count: 100       # a count of shots from seed 0, or all. When a
                                    # confidence signal decides the escalation
                                    # (switching), those shots write each committed
                                    # window's gap, escalation and strong revision to

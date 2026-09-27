@@ -114,18 +114,18 @@ def test_a_negative_shot_number_is_refused():
 @pytest.mark.parametrize("written", ["-1", "true", "some", "2.5"])
 def test_a_confidence_shot_count_that_is_no_count_is_refused(written):
     """A count of shots from seed 0, or the word all; nothing else."""
-    section = _section(f"observation:\n  confidence_shots: {written}\n")
+    section = _section(f"observation:\n  confidence_shot_count: {written}\n")
 
     with pytest.raises(ValueError) as refusal:
         observe_settings.ObservationSettings.from_yaml(section)
 
-    assert "observation.confidence_shots must be a non-negative" in str(
+    assert "observation.confidence_shot_count must be a non-negative" in str(
         refusal.value
     )
 
 
 def test_every_shot_is_the_word_all_and_the_default_is_a_hundred():
-    every = _section("observation:\n  confidence_shots: all\n")
+    every = _section("observation:\n  confidence_shot_count: all\n")
     unset = _section("observation:\n  log: off\n")
 
     every_settings = observe_settings.ObservationSettings.from_yaml(every)

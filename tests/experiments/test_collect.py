@@ -917,7 +917,7 @@ RECORDING_ONLY_OBSERVATION = {
     "log_component_io": True,
     "syndrome_buffer_occupancy": True,
     "decoder_memory_occupancy": True,
-    "confidence_shots": 7,
+    "confidence_shot_count": 7,
 }
 
 

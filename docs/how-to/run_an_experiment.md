@@ -59,14 +59,18 @@ script or commit into it is refused; give `--out` a new folder.
 
 ## Run every point on Slurm
 
-One array task runs one point. Submit from the checkout's root, which
-each task puts on its PYTHONPATH, and pass the folder, so every task
-writes into the same one:
+One array task runs one point. Pass the folder, so every task writes
+into the same one:
 
 ```bash
 sbatch --array 0-$(( $(PYTHONPATH=. python experiments/decoder_baseline/run.py --list | wc -l) - 1 )) \
   slurm/run.sbatch experiments/decoder_baseline/run.py results/2026-09-27_decoder_baseline
 ```
+
+Each task imports the checkout the script sits in, two folders above
+`experiments/<name>/run.py`, ahead of any PYTHONPATH the job already
+has, so the job may be submitted from anywhere. A script outside a
+decsim checkout is refused.
 
 Each task has 16 cores and 24 hours (`slurm/run.sbatch`). Add the
 account, partition or QOS your cluster needs on the `sbatch` line.

@@ -218,7 +218,7 @@ preview copy. A run too long for one job is cut into pieces by
 | `configs/experiments/burst_detection/burst_detection.yaml` | four burst detectors on one burst at d = 5 and on quiet shots, the detector and the burst its only axes ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
 | `configs/experiments/data_movement/data_movement.yaml` | every copy, reference and move of the data path counted per hop, in four blocks: every hop copying, the weak input read in place, the boundary folded in place, and the switching escalation |
 | `configs/experiments/decoder_baseline/decoder_baseline.yaml` | the paper's decoder baseline: Union-Find, MWPM, Relay-BP-1 and Tesseract on the same samples of the rotated surface code memory, d = 5 to 15, six error rates, both bases, 100 rounds, each point stopped at 100 failures or 24 core-hours |
-| `configs/experiments/decoder_baseline/decoder_baseline_batch.yaml` | the same baseline under `sampling: stim_batch`: the same answers with no machine, counts only |
+| `configs/experiments/decoder_baseline_batch/decoder_baseline_batch.yaml` | the decoder baseline's points under `sampling: stim_batch`: the same answers with no machine, counts only |
 
 ## Read next
 

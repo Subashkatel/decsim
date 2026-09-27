@@ -58,7 +58,12 @@ BASELINE = (
     / "decoder_baseline"
     / "decoder_baseline.yaml"
 )
-BATCH_BASELINE = BASELINE.with_name("decoder_baseline_batch.yaml")
+BATCH_BASELINE = (
+    yaml_configs.CONFIGS_DIR
+    / "experiments"
+    / "decoder_baseline_batch"
+    / "decoder_baseline_batch.yaml"
+)
 CODE_TASKS = ("surface_code:rotated_memory_x", "surface_code:rotated_memory_z")
 ROUNDS = 5
 ERROR_RATE = 0.005
@@ -462,6 +467,16 @@ def test_the_key_gives_a_config_and_its_points_new_ids():
     shared = set(batch_ids) & set(machine_ids)
     assert len(batch_ids) == len(machine_ids)
     assert shared == set()
+
+
+def test_the_batch_baseline_runs_the_machine_baselines_points():
+    machine = experiment.load_experiment(BASELINE)
+    batch = experiment.load_experiment(BATCH_BASELINE)
+
+    machine_ids = identities(machine)
+    unkeyed_ids = point_ids_without_the_key(batch)
+
+    assert unkeyed_ids == machine_ids[1:]
 
 
 def test_a_window_scheme_other_than_naive_online_is_refused(tmp_path):
@@ -926,6 +941,16 @@ def identities(config) -> list:
     ids = [run_folder.configuration_id(config)]
     for task in config.tasks():
         point_id = task.strong_id()
+        ids.append(point_id)
+    return ids
+
+
+def point_ids_without_the_key(config) -> list:
+    """Every point id in task order, each task's sampling taken off."""
+    ids = []
+    for task in config.tasks():
+        unkeyed = dataclasses.replace(task, sampling=None)
+        point_id = unkeyed.strong_id()
         ids.append(point_id)
     return ids
 

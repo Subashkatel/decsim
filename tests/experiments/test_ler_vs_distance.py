@@ -7,18 +7,20 @@ never swept the requested p is refused rather than silently dropped.
 
 The two folders here are `decsim collect` folders written by hand: the
 columns are the first ten of sweep.csv, in the order report.summarize
-writes them, which is every column the figure reads. Writing them
-rather than running the sweep is what lets one tier hold a
-zero-failure point at d 5.
+writes them, and one resolved/ record with the escalation kind, which
+is every value the figure reads. Writing them rather than running the
+sweep is what lets one tier hold a zero-failure point at d 5.
 """
 
 import csv
+import json
 
 import matplotlib.figure
 import pytest
 
 import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 
 # The first ten columns of sweep.csv (decsim/experiments/report.py
 # summarize_point), which is all the figure reads.
@@ -61,6 +63,38 @@ def write_sweep_csv(run_dir, algorithm, points):
     return run_dir
 
 
+def write_resolved(run_dir, escalation_kind):
+    """One point's resolved/ record: its sweep point and escalation kind."""
+    resolved_dir = run_dir / run_folder.RESOLVED_FOLDER
+    resolved_dir.mkdir()
+    metadata = {
+        "physical_error_probability": 0.001,
+        "distance": 3,
+        "round_period_microseconds": 1.0,
+    }
+    settings = {"escalation": {"kind": escalation_kind}}
+    record = {"metadata": metadata, "settings": settings}
+    record_text = json.dumps(record)
+    record_path = resolved_dir / "point.json"
+    record_path.write_text(record_text)
+
+
+def legend_labels(run_dirs, tmp_path, monkeypatch) -> list:
+    """The labels of the figure's legend, read as the figure is saved."""
+    figure_path = tmp_path / "ler_vs_d.png"
+    labels = []
+
+    def record_the_labels(figure, path, **options):
+        del path, options
+        axis = figure.axes[0]
+        _, axis_labels = axis.get_legend_handles_labels()
+        labels.extend(axis_labels)
+
+    monkeypatch.setattr(matplotlib.figure.Figure, "savefig", record_the_labels)
+    plots.ler_vs_distance_plot(run_dirs, 0.001, figure_path)
+    return labels
+
+
 def two_tier_runs(tmp_path):
     weak_run_dir = tmp_path / "weak"
     weak_points = [
@@ -68,12 +102,14 @@ def two_tier_runs(tmp_path):
         (5, 0.001, 1000, 1, 1e-3, 2e-4, 6e-3),
     ]
     weak = write_sweep_csv(weak_run_dir, "0.028", weak_points)
+    write_resolved(weak, "weak_baseline")
     strong_run_dir = tmp_path / "strong"
     strong_points = [
         (3, 0.001, 1000, 6, 6e-3, 2e-3, 1.2e-2),
         (5, 0.001, 1000, 0, 0.0, 0.0, 3.8e-3),
     ]
     strong = write_sweep_csv(strong_run_dir, "belief_matching", strong_points)
+    write_resolved(strong, "strong_only")
     return weak, strong
 
 
@@ -102,6 +138,18 @@ def test_the_y_axis_names_no_round_count_the_sweep_did_not_write(
     plots.ler_vs_distance_plot([weak, strong], 0.001, figure_path)
 
     assert labels == ["Logical error rate per shot"]
+
+
+def test_a_strong_pymatching_run_is_labelled_strong(tmp_path, monkeypatch):
+    """The tier is the escalation row's, not guessed from the card name."""
+    strong_run_dir = tmp_path / "strong_pymatching"
+    strong_points = [(3, 0.001, 1000, 6, 6e-3, 2e-3, 1.2e-2)]
+    strong = write_sweep_csv(strong_run_dir, "pymatching", strong_points)
+    write_resolved(strong, "strong_only")
+
+    labels = legend_labels([strong], tmp_path, monkeypatch)
+
+    assert labels == ["pymatching (strong)"]
 
 
 def test_run_without_the_requested_p_is_refused(tmp_path):

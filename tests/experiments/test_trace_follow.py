@@ -12,6 +12,10 @@ import pytest
 import decsim.experiments.trace_file as trace_file
 import decsim.experiments.trace_follow as trace_follow
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
+import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as declared_fabric
 import tests.observe.gate_point as gate_point
 
 
@@ -31,6 +35,11 @@ def trace_path(tmp_path_factory):
 def traced(trace_path):
     """That file, read back and indexed."""
     return trace_file.load(trace_path)
+
+
+def _hops_of(path) -> list:
+    """Where and what, one pair per hop of a followed path."""
+    return [(hop.where, hop.what) for hop in path.hops]
 
 
 def _row_of(path, where, what):
@@ -80,7 +89,7 @@ def test_round_one_leaves_on_window_zeros_input_move(traced):
     assert move.tick == 6_008_000
     assert move.duration_ticks == 4_000
     assert move.bits == 44
-    assert "with W0 rounds 1..6" in move.what
+    assert "with W0 rounds 1:1..6" in move.what
     memory = _row_of(followed, "Decoder unit default#0", "residence")
     assert memory.tick == 6_012_000
     assert memory.duration_ticks == 92_000
@@ -141,8 +150,8 @@ def test_a_round_two_windows_read_shows_both_of_them(traced):
 
     moves = _what_happened_at(followed.hops, "weak_buffer_to_weak_decoder")
 
-    assert "with W0 rounds 1..6" in moves[0]
-    assert "with W1 rounds 4..9" in moves[1]
+    assert "with W0 rounds 1:1..6" in moves[0]
+    assert "with W1 rounds 1:4..9" in moves[1]
     assert followed.counts.job_references == 2
 
 
@@ -272,6 +281,103 @@ def test_a_key_that_is_not_an_operation_and_an_index_is_refused():
         trace_follow.main(["follow", "somewhere.json", "--round", "seven"])
 
     assert "is not a round key" in str(refusal.value)
+
+
+def test_a_round_is_followed_through_a_strong_window_hold(tmp_path):
+    """The hold names its round count apart from the rounds it reads.
+
+    Weak-primary switching with both tiers at once holds window 0's
+    strong job until its context lands, and round 1 still reaches the
+    strong unit's memory at 24 us on the declared fabric.
+    """
+    trace_path = tmp_path / "held.trace.json"
+    machine = declared_fabric.switching_machine(
+        rounds=9,
+        escalated_windows=set(),
+        run_both_at_once=True,
+        trace_path=trace_path,
+    )
+    machine.run()
+    machine.observation.trace_writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+
+    followed = trace_follow.follow(document, "round", "1:1")
+
+    landed = _row_of(followed, "Decoder unit strong#0", "memory copy")
+    assert landed.tick == 24_000_000
+
+
+def test_a_rounds_path_keeps_to_its_own_operation(tmp_path):
+    """Two memory operations each read their rounds 1..6 at once.
+
+    Round 2:1 is held by operation 2's window alone and lands in one
+    unit's memory, however many operations read a round 1.
+    """
+    trace_path = tmp_path / "two_operations.trace.json"
+    operations = [
+        declared_run.memory_operation(1),
+        declared_run.memory_operation(2),
+    ]
+    observation = observe_settings.ObservationSettings(trace=str(trace_path))
+    machine = declared_run.weak_only_run(
+        rounds=6, operations=operations, observation=observation
+    )
+    machine.observation.trace_writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+
+    followed = trace_follow.follow(document, "round", "2:1")
+
+    assert followed.counts.holds == 1
+    assert followed.counts.job_references == 1
+
+
+def test_a_window_across_two_operations_is_followed_from_each_ones_rounds(
+    tmp_path,
+):
+    """Window 1:1 reads rounds 4..6 of operation 1 and 1..3 of operation 2.
+
+    Operation 2 names operation 1 its boundary predecessor, so the
+    lookahead window reads on into it. Its hold, its readiness and its
+    input move each name both operations' rounds, so rounds 1:4 and 2:1
+    follow all three, and round 1:1, of the same index as 2:1, none.
+    """
+    trace_path = tmp_path / "across.trace.json"
+    operations = [
+        declared_run.memory_operation(1),
+        declared_run.memory_operation(2, decoder_boundary_predecessors=(1,)),
+    ]
+    scheme = declared_run.lookahead_sliding_scheme()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    observation = observe_settings.ObservationSettings(trace=str(trace_path))
+    machine = declared_run.weak_only_run(
+        rounds=6,
+        operations=operations,
+        windows=windows,
+        observation=observation,
+    )
+    machine.observation.trace_writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+
+    from_the_first = trace_follow.follow(document, "round", "1:4")
+    from_the_next = trace_follow.follow(document, "round", "2:1")
+    from_the_same_index = trace_follow.follow(document, "round", "1:1")
+
+    ready = ("Window planner", "W1 ready")
+    moved = (
+        "weak_buffer_to_weak_decoder",
+        "move, with W1 rounds 1:4..6 and 2:1..3",
+    )
+    first_hops = _hops_of(from_the_first)
+    next_hops = _hops_of(from_the_next)
+    same_index_hops = _hops_of(from_the_same_index)
+    assert ready in first_hops
+    assert moved in first_hops
+    assert ready in next_hops
+    assert moved in next_hops
+    assert ready not in same_index_hops
+    assert moved not in same_index_hops
+    # the next operation's own window 0 holds it too
+    assert from_the_next.counts.holds == 2
 
 
 def test_trace_does_only_what_it_says_it_does():

@@ -77,8 +77,7 @@ ATTRIBUTION_KEYS = {
     "operation_id",
     "patch_ids",
     "window_id",
-    "round_lo",
-    "round_hi",
+    "rounds_by_operation",
     "relation",
 }
 REQUEST_KEY_KEYS = {"operation_id", "window_id", "tier", "run_sequence"}
@@ -165,12 +164,8 @@ def ignore(_transfer):
 
 
 def round_attribution(round_index):
-    return transfer_records.TransferAttribution(
-        operation_id=OPERATION_ID,
-        patch_ids=(1, 2),
-        window_id=None,
-        first_round=round_index,
-        last_round=round_index,
+    return transfer_records.TransferAttribution.for_round(
+        OPERATION_ID, (1, 2), round_index
     )
 
 
@@ -191,6 +186,7 @@ def window_attribution(window_id, relation):
         first_round=1,
         last_round=2,
         relation=relation,
+        round_keys=((OPERATION_ID, 1), (OPERATION_ID, 2)),
     )
 
 
@@ -333,7 +329,7 @@ def test_the_traffic_json_carries_the_pinned_keys():
     transfer = report["transfers"][0]
     relation = transfer["attribution"]["relation"]
     assert set(report) == TRAFFIC_KEYS
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert set(report["semantic_edges"][0]) == SEMANTIC_EDGE_KEYS
     assert set(report["semantic_edges"][0]["counters"]) == COUNTER_KEYS
     assert set(report["physical_channels"][0]) == PHYSICAL_CHANNEL_KEYS
@@ -376,8 +372,9 @@ def test_the_traffic_json_writes_a_transfers_timing_and_identity():
         "operation_id": operation_json,
         "patch_ids": [first_patch_json, second_patch_json],
         "window_id": 3,
-        "round_lo": 1,
-        "round_hi": 2,
+        "rounds_by_operation": [
+            {"operation_id": operation_json, "round_lo": 1, "round_hi": 2}
+        ],
         "relation": {
             "request_key": {
                 "operation_id": operation_json,
@@ -387,6 +384,32 @@ def test_the_traffic_json_writes_a_transfers_timing_and_identity():
             }
         },
     }
+
+
+def test_a_window_reading_into_the_next_operation_names_each_ones_rounds():
+    """Window 1:1 reads rounds 4 to 6 of operation 1 and 1 to 3 of 2."""
+    run = Run()
+    request_key = request_key_for(1)
+    relation = transfer_records.RequestTransferRelation(request_key)
+    attribution = transfer_records.TransferAttribution(
+        operation_id=1,
+        patch_ids=(0,),
+        window_id=1,
+        first_round=4,
+        last_round=9,
+        relation=relation,
+        round_keys=((1, 4), (1, 5), (1, 6), (2, 1), (2, 2), (2, 3)),
+    )
+    run.send(PATH.WEAK_BUFFER_TO_WEAK_DECODER, 4, 0, attribution)
+    run.engine.run()
+    report = run.ledger.traffic_json_value()
+    transfer = report["transfers"][0]
+    first_json = identity_records.stable_identity_json(1)
+    second_json = identity_records.stable_identity_json(2)
+    assert transfer["attribution"]["rounds_by_operation"] == [
+        {"operation_id": first_json, "round_lo": 4, "round_hi": 6},
+        {"operation_id": second_json, "round_lo": 1, "round_hi": 3},
+    ]
 
 
 def test_the_traffic_json_itemizes_the_setup_per_path():

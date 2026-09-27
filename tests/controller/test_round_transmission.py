@@ -336,6 +336,6 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     for transfer in traffic["transfers"]:
         if transfer["path"] != "weak_buffer_to_weak_decoder":
             continue
-        round_lo = transfer["attribution"]["round_lo"]
-        rounds_on_the_wire.append(round_lo)
+        (rounds,) = transfer["attribution"]["rounds_by_operation"]
+        rounds_on_the_wire.append(rounds["round_lo"])
     assert rounds_on_the_wire == wire_order

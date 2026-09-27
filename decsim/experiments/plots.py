@@ -33,8 +33,11 @@ import statistics
 from typing import Optional
 
 import decsim.config as config_module
+import decsim.escalation.settings as escalation_settings
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.experiments.trace_file as trace_file
+import decsim.tables as tables
 
 WINDOW_COLORS = (
     "tab:blue",
@@ -242,7 +245,7 @@ def ler_vs_distance_plot(
     for run_index, run_dir in enumerate(run_dirs):
         rows = _ler_rows_at_probability(run_dir, probability)
         color = f"C{run_index}"
-        tier_label = _csv_tier_label(rows[0]["algorithm"])
+        tier_label = _run_tier_label(run_dir, rows[0]["algorithm"])
         measured_rows = _rows_with_failures(rows, swept_distances)
         _draw_measured_ler_points(axis, measured_rows, color, tier_label)
     axis.set_yscale("log")
@@ -670,9 +673,11 @@ def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
     if window_id is not None:
         by_window[(channel, window_id)] = span
         return
-    rounds_text = event["args"].get("rounds")
-    if rounds_text is None:
+    rounds = event["args"].get("rounds_by_operation")
+    if rounds is None:
         return
+    # a move that names no window carries one round of one operation
+    (rounds_text,) = rounds.values()
     round_lo, _round_hi = trace_file.range_of(rounds_text)
     by_round[(channel, round_lo)] = span
 
@@ -702,7 +707,7 @@ def _timeline_window(
 ) -> _TimelineWindow:
     """One window's rounds and the moment its unit was assigned."""
     window_id = trace_file.window_id_of(event)
-    read_lo, read_hi = trace_file.range_of(event["args"]["rounds"])
+    read_lo, read_hi = _own_read_range(event["args"])
     commit_lo, commit_hi = trace_file.range_of(event["args"]["commit"])
     ready_ticks = trace_file.tick_of(event)
     ready_microseconds = config_module.ticks_to_microseconds(ready_ticks)
@@ -715,6 +720,20 @@ def _timeline_window(
         commit_hi=commit_hi,
         dispatch_us=dispatch,
     )
+
+
+def _own_read_range(args: dict) -> tuple:
+    """The rounds a window reads of its own operation, the figure's stream.
+
+    The ready event names the rounds the stream has, so a lookahead
+    window's buffer past the stream's end is not among them
+    (windows/round_retention.py, read_keys_for_bounds).
+    """
+    window = args["window"]
+    operation, _window_index = window.split(":")
+    rounds_by_operation = args["rounds_by_operation"]
+    rounds_text = rounds_by_operation[operation]
+    return trace_file.range_of(rounds_text)
 
 
 def _timeline_stages(document) -> dict:
@@ -852,11 +871,10 @@ def _draw_windows(
         if window_id not in shot.frame:
             continue
         color = WINDOW_COLORS[window_id % len(WINDOW_COLORS)]
-        range_text = _window_range_text(window, stored)
+        range_text = _window_range_text(window)
         window_ranges.append(range_text)
         _draw_store_fill(timeline, lanes, window, color, stored)
-        read_end = _stored_read_end(window, stored)
-        stored_tick = stored[read_end].end_us
+        stored_tick = stored[window.read_hi].end_us
         timeline.window_bar(
             "wait", stored_tick, window.dispatch_us, window_id, color
         )
@@ -865,27 +883,13 @@ def _draw_windows(
     return window_ranges
 
 
-def _window_range_text(window: _TimelineWindow, stored: dict) -> str:
+def _window_range_text(window: _TimelineWindow) -> str:
     """The legend line for one window: what it commits and what it reads."""
-    read_end = _stored_read_end(window, stored)
     return (
         f"window {window.window_id}: "
         f"commits {window.commit_lo}-{window.commit_hi}, "
-        f"reads {window.read_lo}-{read_end}"
+        f"reads {window.read_lo}-{window.read_hi}"
     )
-
-
-def _stored_read_end(window: _TimelineWindow, stored: dict) -> int:
-    """The last round of the window's read range that reached the store.
-
-    Under the lookahead terminal policy the last window keeps the regular
-    stride, so its buffer names rounds past the stream's end
-    (windows/schemes/sliding.py); the decode reads to the last round the
-    stream has (windows/decode_requests.py, assemble_payloads), and so
-    does the figure.
-    """
-    last_stored = max(stored)
-    return min(window.read_hi, last_stored)
 
 
 def _draw_store_fill(
@@ -904,10 +908,9 @@ def _draw_store_fill(
     first_round = stored[window.read_lo].end_us
     commit_stored = stored[window.commit_hi].end_us
     timeline.window_bar(row, first_round, commit_stored, window_id, color)
-    read_end = _stored_read_end(window, stored)
-    if read_end <= window.commit_hi:
+    if window.read_hi <= window.commit_hi:
         return
-    stored_tick = stored[read_end].end_us
+    stored_tick = stored[window.read_hi].end_us
     timeline.window_bar(
         row, commit_stored, stored_tick, window_id, color, alpha=0.45
     )
@@ -1155,20 +1158,28 @@ def _power_of_ten_label(value: float) -> str:
     return f"${mantissa:g}{{\\times}}10^{{{exponent}}}$"
 
 
-def _csv_tier_label(algorithm_field: str) -> str:
-    """The csv's tier label, read back from its algorithm column.
+def _run_tier_label(run_dir, algorithm_field: str) -> str:
+    """The run's decoder and tier, read back from what the run recorded.
 
-    "pymatching (weak)" or "belief matching (strong)". A numeric card
-    reads as pymatching, the same ruling as decoder_title.
+    "pymatching (weak)" or "relay bp (strong)". The algorithm column
+    names the card of the tier that decodes the plan's windows, and that
+    tier is the escalation row's primary tier, read from the settings
+    the run's first point recorded in resolved/. A numeric card reads as
+    pymatching, the same ruling as decoder_title.
     """
     try:
         float(algorithm_field)
         algorithm_name = "pymatching"
     except ValueError:
         algorithm_name = algorithm_field
-    tier = "weak"
-    if algorithm_name == "belief_matching":
-        tier = "strong"
+    records = run_folder.resolved_by_point(run_dir)
+    record_values = records.values()
+    record = next(iter(record_values))
+    escalation_kind = record["settings"]["escalation"]["kind"]
+    escalation_row = tables.row(
+        escalation_settings.ESCALATIONS, "escalation.kind", escalation_kind
+    )
+    tier = escalation_row.primary_tier.value
     display_name = algorithm_name.replace("_", " ")
     return f"{display_name} ({tier})"
 

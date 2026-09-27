@@ -212,7 +212,7 @@ class TrafficLedger:
             transfers.append(transfer_json)
         path_order = [path.value for path in transfer_records.LinkPath]
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "path_order": path_order,
             "semantic_edges": semantic_edges,
             "physical_channels": physical_channels,
@@ -330,8 +330,7 @@ def _transfer_json(
             ),
             "patch_ids": patch_ids,
             "window_id": attribution.window_id,
-            "round_lo": attribution.first_round,
-            "round_hi": attribution.last_round,
+            "rounds_by_operation": _rounds_json(attribution.round_keys),
             "relation": _relation_json(attribution.relation),
         },
         "payload_bits": transfer.payload_bits,
@@ -349,6 +348,30 @@ def _transfer_json(
         "total_delay_ticks": transfer.total_delay_ticks,
         "physical_sequence": transfer.physical_sequence,
     }
+
+
+def _rounds_json(round_keys: tuple) -> list:
+    """Each operation's rounds among the keys, as its first and its last.
+
+    A lookahead window reads its operation's last rounds and the next
+    operation's first ones, so one range would name rounds of one
+    operation that the other owns.
+    """
+    indices_by_operation = {}
+    for operation_id, round_index in round_keys:
+        indices = indices_by_operation.setdefault(operation_id, [])
+        indices.append(round_index)
+    rounds = []
+    for operation_id, indices in indices_by_operation.items():
+        operation_json = identity_records.stable_identity_json(operation_id)
+        rounds.append(
+            {
+                "operation_id": operation_json,
+                "round_lo": min(indices),
+                "round_hi": max(indices),
+            }
+        )
+    return rounds
 
 
 def _relation_json(relation) -> Optional[dict]:

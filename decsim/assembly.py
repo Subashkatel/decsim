@@ -210,7 +210,9 @@ SEATS = (
 WIRES = (
     # the fabric every hop rides
     ("store_transfers.link", "links"),
+    ("store_transfers.retention", "retention"),
     ("window_transfers.link", "links"),
+    ("window_transfers.retention", "retention"),
     ("transmitter.link", "links"),
     ("syndrome_round_sender.link", "links"),
     ("controller.link", "links"),
@@ -266,6 +268,7 @@ WIRES = (
     ("results.factory", "factory"),
     ("courier.planner", "planner"),
     ("courier.transfers", "window_transfers"),
+    ("courier.retention", "retention"),
     ("courier.interaction", "window_interaction"),
     ("courier.boundary_policy", "boundary_policy"),
     ("courier.windows", "window_manager"),

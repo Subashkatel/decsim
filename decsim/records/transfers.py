@@ -73,7 +73,11 @@ class TransferAttribution:
     """Whose transfer this is.
 
     The operation, its patches, the window or the inclusive round range
-    the bits belong to, and the relation the path's rule asks for.
+    the bits belong to, and the relation the path's rule asks for. The
+    range counts past the operation's end the way its window does;
+    round_keys names every round the bits carry as (operation id, round
+    index), a lookahead window's next-operation rounds under their own
+    operation, and is empty when the bits carry no round.
     """
 
     # An operation id is whatever the front end chose; the links never
@@ -86,6 +90,7 @@ class TransferAttribution:
     relation: Optional[
         Union[RequestTransferRelation, BoundaryTransferRelation]
     ] = None
+    round_keys: tuple = ()
 
     @classmethod
     def for_round(
@@ -101,6 +106,7 @@ class TransferAttribution:
             window_id=None,
             first_round=round_index,
             last_round=round_index,
+            round_keys=((operation_id, round_index),),
         )
 
     @classmethod
@@ -109,6 +115,7 @@ class TransferAttribution:
         window: window_records.Window,
         operation: program_records.Operation,
         request_key,
+        round_keys: tuple,
     ) -> "TransferAttribution":
         """A window's transfer: the operation's patches, the rounds it reads."""
         ordered_patches = sorted(
@@ -123,11 +130,12 @@ class TransferAttribution:
             first_round=first_round,
             last_round=last_round,
             relation=relation,
+            round_keys=round_keys,
         )
 
     @classmethod
     def for_job(
-        cls, job: decoding_records.DecodeJob, request_key
+        cls, job: decoding_records.DecodeJob, request_key, round_keys: tuple
     ) -> "TransferAttribution":
         """A job's transfer: its payloads' patches, its window's rounds."""
         payloads = job.payloads or ()
@@ -149,6 +157,7 @@ class TransferAttribution:
             first_round=first_round,
             last_round=last_round,
             relation=relation,
+            round_keys=round_keys,
         )
 
     @classmethod
@@ -163,8 +172,10 @@ class TransferAttribution:
         first_packet = region.packets[0]
         last_packet = region.packets[-1]
         fragments = []
+        round_keys = []
         for packet in region.packets:
             fragments.extend(packet.fragments)
+            round_keys.append((packet.operation_id, packet.round_index))
         patch_ids = round_records.fragment_patch_ids(fragments)
         ordered_patch_ids = tuple(
             sorted(patch_ids, key=identity_records.stable_identity_order_key)
@@ -177,6 +188,7 @@ class TransferAttribution:
             first_round=first_packet.round_index,
             last_round=last_packet.round_index,
             relation=relation,
+            round_keys=tuple(round_keys),
         )
 
     @classmethod

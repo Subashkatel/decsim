@@ -157,6 +157,30 @@ def test_a_move_counts_the_header_and_known_payload_bits_the_ledger_charges():
     assert counted["move_bits"] == 44 + 16 + 16
 
 
+def test_a_move_counts_the_rounds_its_attribution_names():
+    """A window's range runs past the stream; its round keys do not.
+
+    The last lookahead window of a stream keeps the regular stride, so
+    its range reads 4 to 9 of a six-round stream while the move carries
+    rounds 4 to 6 (windows/round_retention.py, read_keys_for_bounds).
+    """
+    movement = data_movement.DataMovement()
+    terminal = _Delivered(payload_bits=24, header_bits=0)
+    terminal.attribution = transfer_records.TransferAttribution(
+        operation_id=1,
+        patch_ids=(0,),
+        window_id=1,
+        first_round=4,
+        last_round=9,
+        round_keys=((1, 4), (1, 5), (1, 6)),
+    )
+
+    movement.transfer_delivered(terminal)
+    counted = movement.json_value()
+
+    assert counted["moved_rounds"] == 3
+
+
 def test_the_same_round_emitted_twice_is_one_round():
     movement = data_movement.DataMovement()
 
@@ -200,8 +224,7 @@ class _Transfer:
 class _Attribution:
     """A move that carried one round."""
 
-    first_round = 1
-    last_round = 1
+    round_keys = ((1, 1),)
 
 
 class _Delivered:

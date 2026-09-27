@@ -540,7 +540,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
     assert args["request"] == "1:0:strong:1"
     assert args["waits_for"] == "stored rounds of operation 1"
     assert args["outcome"] == "strong context stored in strong syndrome buffer"
-    assert args["rounds"] == 6
+    assert args["round_count"] == 6
     assert args["tick"] == expected_held
     assert slice_row["dur"] == pytest.approx(3.0)
 

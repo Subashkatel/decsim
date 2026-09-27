@@ -184,6 +184,12 @@ def layer_detectors(round_index: int, total_rounds: int, distance: int) -> int:
     return bulk
 
 
+def own_range(attribution: dict) -> tuple:
+    """A transfer's first and last round in the one operation a run has."""
+    (rounds,) = attribution["rounds_by_operation"]
+    return rounds["round_lo"], rounds["round_hi"]
+
+
 def window_detectors(
     round_lo: int, round_hi: int, total_rounds: int, distance: int
 ) -> int:
@@ -339,12 +345,8 @@ def _checked_decoder_inputs(grouped: dict, distance: int) -> int:
     for path in DECODER_INPUT_PATHS:
         for transfer in grouped.get(path, ()):
             attribution = transfer["attribution"]
-            expected = window_detectors(
-                attribution["round_lo"],
-                attribution["round_hi"],
-                ROUNDS,
-                distance,
-            )
+            round_lo, round_hi = own_range(attribution)
+            expected = window_detectors(round_lo, round_hi, ROUNDS, distance)
             assert transfer["payload_bits"] == expected, attribution
             checked += 1
     return checked
@@ -364,7 +366,8 @@ def _wire_bits_by_round(transfers) -> dict:
     wire_by_round = {}
     for transfer in transfers:
         attribution = transfer["attribution"]
-        wire_by_round[attribution["round_lo"]] = transfer["payload_bits"]
+        round_index, _round_hi = own_range(attribution)
+        wire_by_round[round_index] = transfer["payload_bits"]
     return wire_by_round
 
 
@@ -381,9 +384,9 @@ def _checked_round_hops(transfers, width_of, distance) -> int:
     checked = 0
     for transfer in transfers:
         attribution = transfer["attribution"]
-        round_index = attribution["round_lo"]
+        round_index, round_hi = own_range(attribution)
         expected = width_of(round_index, ROUNDS, distance)
-        assert attribution["round_hi"] == round_index
+        assert round_hi == round_index
         assert transfer["payload_bits"] == expected, attribution
         checked += 1
     return checked
@@ -496,8 +499,7 @@ def escalation_transfers(distance: int) -> tuple:
 def bits_beside_the_layers(region: dict, distance: int) -> int:
     """What one region transfer carries beside its rounds' detector layers."""
     attribution = region["attribution"]
-    first_round = attribution["round_lo"]
-    last_round = attribution["round_hi"]
+    first_round, last_round = own_range(attribution)
     layers = window_detectors(first_round, last_round, ROUNDS, distance)
     return region["payload_bits"] - layers
 
@@ -507,8 +509,9 @@ def rounds_carried(regions: list) -> list:
     carried = []
     for region in regions:
         attribution = region["attribution"]
-        past_last = attribution["round_hi"] + 1
-        carried.extend(range(attribution["round_lo"], past_last))
+        first_round, last_round = own_range(attribution)
+        past_last = last_round + 1
+        carried.extend(range(first_round, past_last))
     return sorted(carried)
 
 

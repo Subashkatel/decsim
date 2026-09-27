@@ -3,8 +3,9 @@
 After every tier decode, the official Tesseract backend re-decodes the
 same window input and the owned observable contributions are compared;
 each comparison fires window_checked, and the audit that counts them is
-a listener (observe/referee_audit.py). Never priced: the engine reads
-timing from the inner decoder alone. The linked fault models are built
+a listener (observe/referee_audit.py). Never priced: the inner decoder
+starts every job on the engine, and the referee checks the result it
+delivers. The linked fault models are built
 whole-circuit, with memory linear in circuit length (verified through
 d=9 x 1000 rounds).
 """
@@ -17,6 +18,7 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.decoder as tesseract_decoder
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.trace_source as trace_source
@@ -66,18 +68,28 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         """The inner decoder's occupancy; None when it is measured."""
         return self.inner.occupancy(job)
 
-    def ticks_after_decode(
-        self,
-        result: Optional[decoding_records.DecodeResult],
-        elapsed_nanoseconds: int,
-        now: int,
-    ) -> int:
-        """The inner decoder's ticks: its own count, or the host's time."""
-        return self.inner.ticks_after_decode(result, elapsed_nanoseconds, now)
-
     def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
         """The inner decoder's pipeline depth."""
         return self.inner.pipeline_depth(job)
+
+    def start(
+        self,
+        job: decoding_records.DecodeJob,
+        engine: engine_module.Engine,
+        on_result: decoder_module.OnResult,
+    ) -> None:
+        """Start the job on the inner decoder; its result is checked."""
+
+        def on_inner_result(
+            result: Optional[decoding_records.DecodeResult],
+        ) -> None:
+            if result is None:
+                on_result(result)
+                return
+            checked = self._checked(job, result)
+            on_result(checked)
+
+        self.inner.start(job, engine, on_inner_result)
 
     def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Stop the inner decoder's job."""
@@ -89,12 +101,6 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         """The inner result, after the referee has checked it."""
         result = self.inner.decode(job)
         return self._checked(job, result)
-
-    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
-        """The inner decoder's measured call; the referee's is untimed."""
-        result, elapsed_ns = self.inner.decode_timed(job)
-        checked = self._checked(job, result)
-        return checked, elapsed_ns
 
     def _checked(
         self,

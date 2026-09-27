@@ -20,6 +20,7 @@ import decsim.links.window_transfers as window_transfers
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.boundary_payloads as boundary_payloads
+import decsim.windows.round_retention as round_retention
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 
@@ -80,6 +81,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     courier = window_boundaries.BoundaryCourier()
     courier.planner = planner
     courier.transfers = transfers
+    courier.retention = _retention_of(20)
     courier.interaction = interaction
     courier.boundary_policy = _EAGER
     courier.windows = types.SimpleNamespace(
@@ -112,6 +114,21 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     assert dict(dependent.boundary_in) == {4: [0, 1, 0]}
 
 
+def _retention_of(round_count: int) -> round_retention.RoundRetention:
+    """The retention of operation 1, round_count rounds, then operation 2."""
+    retention = round_retention.RoundRetention(
+        is_strong_context_retained=False,
+        primary_tier=window_records.DecoderTier.WEAK,
+    )
+    retention.tracker = types.SimpleNamespace(
+        effective_round_count_for_window=lambda _operation_id, _window: (
+            round_count
+        )
+    )
+    retention.planner = types.SimpleNamespace(successors_by_operation={1: [2]})
+    return retention
+
+
 class _RecordingTransfers:
     """The window transfers, with every boundary send recorded."""
 
@@ -141,7 +158,9 @@ def _pinned_courier():
 
     The strong window re-decodes rounds 4-6 with its past face pinned on
     window (1,0), so it reads from round 4 and its seam layer is round
-    4: eight detectors, d*d-1 of a d=3 bulk layer.
+    4: eight detectors, d*d-1 of a d=3 bulk layer. Operation 1 has six
+    rounds and operation 2 follows it, so the buffer past round 6 reads
+    operation 2's first rounds.
     """
     engine = engine_module.Engine()
     operation = program_records.Operation(
@@ -171,7 +190,7 @@ def _pinned_courier():
     planner = types.SimpleNamespace(
         windows_by_key=windows,
         models=no_models,
-        round_count_of=lambda _operation_id: 20,
+        round_count_of=lambda _operation_id: 6,
     )
     profile = link_profiles.logical_reference_profile()
     links = fabric.LinkFabric(profile, engine, channel_module.Channel)
@@ -185,6 +204,7 @@ def _pinned_courier():
     courier = window_boundaries.BoundaryCourier()
     courier.planner = planner
     courier.transfers = recording
+    courier.retention = _retention_of(6)
     courier.interaction = interaction
     courier.boundary_policy = _EAGER
     courier.windows = _NoWindows()
@@ -257,9 +277,18 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     assert attribution.relation.source_window_key == (1, 0)
     assert attribution.relation.destination_window_key == (1, 1)
     assert attribution.relation.source_request_key == request_key
-    # the transfer is the strong window's own: its index and its reads
+    # the transfer is the strong window's own: its index and its reads,
+    # the rounds past operation 1's sixth under operation 2
     assert attribution.window_id == 1
     assert (attribution.first_round, attribution.last_round) == (4, 9)
+    assert attribution.round_keys == (
+        (1, 4),
+        (1, 5),
+        (1, 6),
+        (2, 1),
+        (2, 2),
+        (2, 3),
+    )
 
 
 def test_a_face_pinned_on_its_own_window_folds_only_the_crossing_commit():

@@ -154,6 +154,7 @@ class _Fixture:
         link = _Link()
         transfers = window_transfers.WindowTransfers(self.engine)
         transfers.link = link
+        transfers.retention = self.retention
         store_output = round_output.SyndromeBufferOutput(
             self.engine,
             transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,

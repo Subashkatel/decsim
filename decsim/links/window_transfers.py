@@ -5,6 +5,9 @@ or a job into one Link send, so a caller names what it moves and never
 the fabric. Every send rides the Link port with a TransferAttribution naming the
 operation, its patches, the window and the round range, and the request
 the transfer serves; the delivery callback runs at the link's delivery.
+The rounds a window's send carries are the ones the retention says the
+window reads, so a lookahead window's next-operation rounds are named
+under their own operation.
 Every method here sends: an input that rides no link is the sending
 store's own business and never reaches this module.
 """
@@ -26,6 +29,7 @@ class WindowTransfers:
     """Sends in a window's or a job's name over the link fabric."""
 
     link = ports.Port(ports.Link)
+    retention = ports.Port(ports.WindowRetention)
 
     def __init__(self, engine: decsim.engine.Engine) -> None:
         self.engine = engine
@@ -40,8 +44,9 @@ class WindowTransfers:
         on_delivered: Callable[[], None],
     ) -> None:
         """Send in a window's name; on_delivered runs at the delivery."""
+        round_keys = self._read_keys(window)
         attribution = transfer_records.TransferAttribution.for_window(
-            window, operation, request_key
+            window, operation, request_key, round_keys
         )
         delivered = functools.partial(_run_at_delivery, on_delivered)
         self.link.send(
@@ -64,8 +69,9 @@ class WindowTransfers:
         relation_key = request_key
         if relation_key is None:
             relation_key = job.request_key
+        round_keys = self._read_keys(job.window)
         attribution = transfer_records.TransferAttribution.for_job(
-            job, relation_key
+            job, relation_key, round_keys
         )
         now_ticks = self.engine.now
         expected_delay_ticks = self.link.expected_delay_ticks(
@@ -128,6 +134,12 @@ class WindowTransfers:
             attribution,
             on_delivered,
         )
+
+    def _read_keys(self, window: window_records.Window) -> tuple:
+        read_keys = self.retention.read_keys_for_bounds(
+            window.operation_id, window.start_round, window.buffer_hi, window
+        )
+        return tuple(read_keys)
 
 
 def _run_at_delivery(

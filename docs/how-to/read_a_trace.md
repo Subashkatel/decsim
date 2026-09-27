@@ -67,7 +67,7 @@ tick (us)  where                        what                                    
 1.010      weak syndrome buffer         weak syndrome buffer copy                                                      copy       4
 1.010      weak syndrome buffer         residence, unbounded, data ready 1.010, freed at last hold released  5.006     copy       4
 6.012      Window planner               W0 ready
-6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                            0.004     move       44
+6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1:1..6                                          0.004     move       44
 6.016      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
 6.016      Decoder unit default#0       residence, unbounded, data ready 6.016, freed at decode done         11.548    copy       44
 
@@ -97,7 +97,7 @@ window 1:0 of decsim weak_baseline d3 p0.001 seed0
 tick (us)  where                        what                                                          dur (us)  transfer  bits
 6.012      Window planner               W0 ready
 6.012      Window planner               queued, dispatched to default#0                               0.000
-6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1..6                                     0.004     move      44
+6.012      weak_buffer_to_weak_decoder  move, with W0 rounds 1:1..6                                   0.004     move      44
 6.016      Decoder unit default#0       unit default#0 memory copy                                              copy      44
 6.016      Decoder unit default#0       stage fetch                                                   0.024
 6.016      Decoder unit default#0       decode service                                                11.548
@@ -105,8 +105,8 @@ tick (us)  where                        what                                    
 6.040      Decoder unit default#0       stage algorithm                                               11.520
 17.560     Decoder unit default#0       stage release                                                 0.004
 17.564     Window planner               verdict
-17.564     decoder_to_decoder           move, with W0 rounds 1..6                                     0.004     move      8
-17.564     weak_decoder_to_frame        move, with W0 rounds 1..6                                     0.004     move      1
+17.564     decoder_to_decoder           move, with W0 rounds 1:1..6                                   0.004     move      8
+17.564     weak_decoder_to_frame        move, with W0 rounds 1:1..6                                   0.004     move      1
 17.568     Frame                        residence, unbounded, committed 17.572, freed at end of run   20.172    copy
 17.572     Window planner               W0 committed
 17.572     Frame                        1:0 committed

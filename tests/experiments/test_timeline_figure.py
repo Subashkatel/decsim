@@ -98,7 +98,8 @@ def _transfer_spans(transfers) -> tuple:
         start = _microseconds(transfer["send_ticks"])
         end = _microseconds(transfer["delivery_ticks"])
         if window_id is None:
-            by_round.append(((path, attribution["round_lo"]), start, end))
+            (rounds,) = attribution["rounds_by_operation"]
+            by_round.append(((path, rounds["round_lo"]), start, end))
         else:
             by_window.append(((path, window_id), start, end))
     return by_round, by_window
@@ -233,8 +234,7 @@ def test_a_last_window_reading_past_the_stream_is_drawn_to_the_last_round(
     lanes = plots._timeline_lanes(document)
     stored = plots._stored_rounds(lanes, shot)
     last_window = shot.windows[max(shot.windows)]
-    assert last_window.read_hi > max(stored)
-    assert plots._stored_read_end(last_window, stored) == max(stored)
+    assert last_window.read_hi == max(stored)
     figure_path = tmp_path / "timeline.png"
     plots.timeline_plot(trace_path, figure_path)
     status = figure_path.stat()

@@ -228,10 +228,9 @@ class TraceWriter:
         if attribution.window_id is not None:
             window_key = (attribution.operation_id, attribution.window_id)
             args["window"] = window_text(window_key)
-        if attribution.first_round is not None:
-            first = attribution.first_round
-            last = attribution.last_round
-            args["rounds"] = f"{first}..{last}"
+        if attribution.round_keys:
+            round_keys = attribution.round_keys
+            args["rounds_by_operation"] = _rounds_by_operation(round_keys)
         name = _move_name(attribution)
         if attribution.window_id is None:
             category = "round,link"
@@ -314,7 +313,7 @@ class TraceWriter:
         """One consumer token keeps the listed rounds alive."""
         args = {
             "holder": _holder_text(holder),
-            "rounds": _rounds_text(round_keys),
+            "rounds_by_operation": _rounds_by_operation(round_keys),
             "transfer": "reference",
         }
         self._instant(store_name, "hold registered", "hold", args)
@@ -351,7 +350,7 @@ class TraceWriter:
         thread = f"{store_name} port {port_index}"
         duration = completion_tick - start_tick
         args = {
-            "rounds": _rounds_text(round_keys),
+            "rounds_by_operation": _rounds_by_operation(round_keys),
             "arrival": arrival_tick,
             "waited_ticks": start_tick - arrival_tick,
         }
@@ -368,11 +367,13 @@ class TraceWriter:
         name = f"W{window.window_index} planned"
         self._instant("Window planner", name, "window", args)
 
-    def window_ready(self, window: window_records.Window) -> None:
+    def window_ready(
+        self, window: window_records.Window, read_keys: list
+    ) -> None:
         """Every round the window reads is readable in its store."""
         args = {
             "window": window_text(window.key),
-            "rounds": f"{window.start_round}..{window.buffer_hi}",
+            "rounds_by_operation": _rounds_by_operation(read_keys),
             "commit": f"{window.commit_lo}..{window.commit_hi}",
         }
         name = f"W{window.window_index} ready"
@@ -434,14 +435,14 @@ class TraceWriter:
         self._instant("Window planner", name, "window", args)
 
     def strong_window_held(
-        self, request_key, window_key, waits_for: str, rounds: int
+        self, request_key, window_key, waits_for: str, round_count: int
     ) -> None:
         """A strong window's job waits for the condition its row declared."""
         args = {
             "window": window_text(window_key),
             "request": request_text(request_key),
             "waits_for": waits_for,
-            "rounds": rounds,
+            "round_count": round_count,
         }
         name = f"W{window_key[1]} strong window held"
         self._begin_residence(
@@ -505,7 +506,7 @@ class TraceWriter:
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
-            "rounds": _job_rounds_text(job),
+            "rounds_by_operation": _job_rounds_by_operation(job),
             "bits": _landed_bits(job),
             "transfer": "copy",
             "capacity_bits": unit.memory.capacity_bits,
@@ -817,7 +818,7 @@ class TraceWriter:
         and ends when its bits land in a unit's memory.
         """
         carries_window = attribution.window_id is not None
-        for round_key in _rounds_of(attribution):
+        for round_key in attribution.round_keys:
             is_flowing = round_key in self._open.flowing_rounds
             if not is_flowing and carries_window:
                 continue
@@ -1031,23 +1032,19 @@ def _copied_identity(key) -> dict:
         return {"round": round_text(key)}
     window_key = (key.operation_id, key.window_id)
     window = window_text(window_key)
-    rounds = _job_rounds_text(key)
-    return {"window": window, "rounds": rounds}
+    rounds = _job_rounds_by_operation(key)
+    return {"window": window, "rounds_by_operation": rounds}
 
 
-def _job_rounds_text(job: decoding_records.DecodeJob) -> str:
-    """The rounds a job's landed input holds, as `lo..hi`."""
+def _job_rounds_by_operation(job: decoding_records.DecodeJob) -> dict:
+    """The rounds a job's landed input holds, by operation."""
     decoder_input = job.decoder_input
     if decoder_input is None:
-        return ""
-    indices = []
+        return {}
+    round_keys = []
     for round_input in decoder_input.rounds:
-        indices.append(round_input.round_index)
-    if not indices:
-        return ""
-    low = min(indices)
-    high = max(indices)
-    return f"{low}..{high}"
+        round_keys.append((round_input.operation_id, round_input.round_index))
+    return _rounds_by_operation(round_keys)
 
 
 def _holder_text(holder) -> str:
@@ -1065,13 +1062,22 @@ def _holder_text(holder) -> str:
     return kind_name
 
 
-def _rounds_text(round_keys) -> str:
-    indices = []
-    for _operation_id, round_index in round_keys:
+def _rounds_by_operation(round_keys) -> dict:
+    """Each operation's rounds among the keys as `lo..hi`, by operation.
+
+    A lookahead window reads its operation's last rounds and the next
+    operation's first ones, so one range over every key would name
+    rounds of one operation that the other owns.
+    """
+    indices_by_operation = {}
+    for operation_id, round_index in round_keys:
+        operation = str(operation_id)
+        indices = indices_by_operation.setdefault(operation, [])
         indices.append(round_index)
-    if not indices:
-        return ""
-    return f"{min(indices)}..{max(indices)}"
+    ranges = {}
+    for operation, indices in indices_by_operation.items():
+        ranges[operation] = f"{min(indices)}..{max(indices)}"
+    return ranges
 
 
 def _move_name(attribution) -> str:
@@ -1080,17 +1086,6 @@ def _move_name(attribution) -> str:
     if attribution.first_round is not None:
         return f"move round {attribution.first_round}"
     return "move"
-
-
-def _rounds_of(attribution) -> tuple:
-    """The round keys one move carries, from its attribution."""
-    if attribution.first_round is None:
-        return ()
-    keys = []
-    last_round = attribution.last_round + 1
-    for index in range(attribution.first_round, last_round):
-        keys.append((attribution.operation_id, index))
-    return tuple(keys)
 
 
 def _packet_bits(packet) -> Optional[int]:

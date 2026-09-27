@@ -93,7 +93,7 @@ noticeable fraction as a bug in your decoder.
 For a second opinion per window rather than per shot, set
 `observation.check_windows_with: tesseract`, which re-decodes every
 window with Tesseract and counts the disagreements into
-`tesseract_window_disagreements`.
+`referee_window_disagreements`.
 
 ## 5. Read the worked example
 

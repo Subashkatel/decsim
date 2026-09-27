@@ -170,7 +170,7 @@ so check first that `escalated_windows` is equal in the two rows. Then:
 A burst that leaves the weak decoder confident and wrong shows in
 neither: it raises `logical_error_rate` with no rise in
 `escalated_fraction`. `observation.check_windows_with: tesseract`
-counts those windows in `tesseract_window_disagreements`.
+counts those windows in `referee_window_disagreements`.
 
 ## What to check before you believe a difference
 

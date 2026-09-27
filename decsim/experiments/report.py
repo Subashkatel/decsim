@@ -117,8 +117,8 @@ SHOT_MAXES = (
     *LOAD_MAXES,
 )
 SHOT_SUMS = (
-    "tesseract_windows_checked",
-    "tesseract_window_disagreements",
+    "referee_windows_checked",
+    "referee_window_disagreements",
     "decoded_windows",
     "escalated_windows",
     "strong_decoded_rounds",
@@ -269,9 +269,9 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     row["throughput_windows_per_us"] = totals.mean("throughput_windows_per_us")
     row["throughput_rounds_per_us"] = totals.mean("throughput_rounds_per_us")
     row["max_queued_windows"] = totals.maxes["max_queued_windows"]
-    row["tesseract_windows_checked"] = totals.sums["tesseract_windows_checked"]
-    row["tesseract_window_disagreements"] = totals.sums[
-        "tesseract_window_disagreements"
+    row["referee_windows_checked"] = totals.sums["referee_windows_checked"]
+    row["referee_window_disagreements"] = totals.sums[
+        "referee_window_disagreements"
     ]
     row["load"] = totals.mean("load")
     row["sim_wall_seconds_per_shot"] = totals.mean("sim_wall_seconds")

@@ -193,9 +193,9 @@ class ShotMeasurement:
     strong_wait_max_us: Optional[float]
     strong_held_in_units_max: Optional[int]
     backlog_peak_rounds: Optional[int]
-    tesseract_windows_checked: int  # referee re-decodes (0 = referee off)
+    referee_windows_checked: int  # referee re-decodes (0 = referee off)
     # referee reached a different owned observable contribution
-    tesseract_window_disagreements: int
+    referee_window_disagreements: int
     # path -> the run's own ledger counters plus rounds/windows context,
     # for links.csv; the totals come straight off the ledger's counters
     link_totals: dict
@@ -792,8 +792,8 @@ def _measurement(
         strong_wait_max_us=tiers.strong_wait_max_us,
         strong_held_in_units_max=tiers.strong_held_in_units_max,
         backlog_peak_rounds=backlog_peak,
-        tesseract_windows_checked=referee.windows_checked,
-        tesseract_window_disagreements=referee.window_disagreements,
+        referee_windows_checked=referee.windows_checked,
+        referee_window_disagreements=referee.window_disagreements,
         link_totals=totals,
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,

@@ -104,7 +104,7 @@ and unit are its key's in `configs/reference.yaml`.
 | `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from its enqueue to its compute start, for a unit and for the unit's compute; the same switch |
 | `strong_held_in_units_max` | the most strong decodes held in the units' memory at once, landed and free to compute but waiting for a unit's compute, by the rule of the queue peaks. A unit takes the next decode into its memory while it computes, so this wait never shows in `strong_queue_max`; the same switch |
 | `backlog_peak_rounds` | the most rounds produced and not yet decoded at once; only when `observation.backlog_trace` is on |
-| `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's count, when `observation.check_windows_with` asked for one |
+| `referee_windows_checked`, `referee_window_disagreements` | the referee's count, when `observation.check_windows_with` asked for one |
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `burst_first_flag_round` | the first round at or after the burst's onset that the burst detector fired on, counted from round 1 on a shot with no burst, and 0 when it fired on none; only when `burst_detector.kind` is not `none` |
 | `burst_caught_in_time` | whether that round came at most `burst_detector.catch_deadline_rounds` after the onset; only on a `burst_stim` shot whose burst probability is above 0, with a detector |
@@ -277,7 +277,7 @@ point the run held:
 | `weak_syndrome_weight_mean`, `weak_service_mean_us`, `strong_wait_mean_us` | the means over the point's shots, when they kept the switching records |
 | `weak_syndrome_weight_max`, `strong_wait_max_us`, `strong_held_in_units_max`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |
 | `escalated_fraction` | the windows the strong tier committed over the windows decoded, beside the columns above |
-| `tesseract_windows_checked`, `tesseract_window_disagreements` | the referee's totals |
+| `referee_windows_checked`, `referee_window_disagreements` | the referee's totals |
 | `flagged_share` | the share of the point's shots whose `burst_first_flag_round` is not 0. On shots with no burst it is the share holding a false alarm, and dividing it by one shot's time gives the false-alarm rate per second |
 | `caught_in_time_share` | the share of the point's shots with `burst_caught_in_time` true |
 | `load` | the mean load |

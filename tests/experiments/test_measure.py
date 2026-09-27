@@ -64,6 +64,7 @@ from tests.experiments.yaml_configs import (
     MINIMAL_CONFIG,
     measure_point_shot,
     memory_workload,
+    point_shot,
     write_config,
 )
 
@@ -1760,3 +1761,42 @@ def test_a_strong_window_with_no_correction_moves_the_next_ones_input(
     assert crashed_input != answered_input
     assert measurement.is_scored is False
     assert measurement.window_statuses["backend_error_windows"] == 1
+
+
+def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
+    """The columns are the referee audit's own counts, whatever referees.
+
+    The referee re-decodes every window the loop decoded
+    (decsim/decoders/verify_windows.py), so its checks are the decoded
+    windows, and the summary adds them up over the point's shots.
+    """
+    pytest.importorskip("tesseract_decoder")
+    card = {
+        "weak_decoder": {
+            **MINIMAL_CONFIG["weak_decoder"],
+            "kind": "pymatching",
+        },
+        "observation": {"check_windows_with": "tesseract"},
+    }
+    config_path = write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    shot = point_shot(
+        config,
+        physical_error_probability=0.01,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=0,
+    )
+
+    measurement = measure.measure_shot(shot)
+
+    audit = shot.machine.observation.referee_audit
+    record = report.record_of([measurement])
+    (row,) = report.summarize(record.shots, record.window_samples)
+    assert audit.windows_checked == measurement.decoded_windows
+    assert measurement.referee_windows_checked == audit.windows_checked
+    assert (
+        measurement.referee_window_disagreements == audit.window_disagreements
+    )
+    assert row["referee_windows_checked"] == audit.windows_checked
+    assert row["referee_window_disagreements"] == audit.window_disagreements

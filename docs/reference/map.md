@@ -38,6 +38,7 @@ docstring.
 - `decsim/records/log_sources.py`: The name each component narrates under, in one place.
 - `decsim/records/program.py`: The program the front end hands the machine, one operation at a time.
 - `decsim/records/results.py`: The records one run returns: the run and each logical operation.
+- `decsim/records/round_plans.py`: A round plan's records: one piece a round deals to a task.
 - `decsim/records/rounds.py`: One syndrome round on its way out of the QPU and through the controller.
 - `decsim/records/seeds.py`: The run-level seed graph's records: a path edge, a child, a reservation.
 - `decsim/records/transfers.py`: One transfer on one link: its hop, its bits, its timing, its ledger.

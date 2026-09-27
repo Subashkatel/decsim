@@ -33,6 +33,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
+import decsim.records.round_plans as round_plans
 
 
 @dataclasses.dataclass
@@ -436,7 +437,7 @@ def _planned_units(
 
 
 def _refuse_a_point_gone_from_its_yamls(
-    piece: pieces.PlannedPiece, configs: list
+    piece: round_plans.PlannedPiece, configs: list
 ) -> None:
     """The sentence for a planned point its yamls no longer make."""
     files = ", ".join(str(config.config_files[0]) for config in configs)

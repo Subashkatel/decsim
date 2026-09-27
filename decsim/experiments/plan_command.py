@@ -45,6 +45,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
+import decsim.records.round_plans as round_plans
 
 TASKS_FILE = "tasks.csv"
 TASK_COLUMNS = ("task", "cores", "memory_mb", "hours", "estimated_core_hours")
@@ -341,7 +342,7 @@ def _pieces_of(configuration_id: str, point_id: str, ranges: list) -> list:
     """Planned pieces of one point, one per (first seed, count)."""
     planned = []
     for first_seed, count in ranges:
-        piece = pieces.PlannedPiece(
+        piece = round_plans.PlannedPiece(
             configuration_id, point_id, first_seed, count
         )
         planned.append(piece)
@@ -432,7 +433,9 @@ def _measured_seconds_per_round(costs: dict) -> Optional[float]:
 
 
 def _piece_cost(
-    piece: pieces.PlannedPiece, costs: dict, seconds_per_round: Optional[float]
+    piece: round_plans.PlannedPiece,
+    costs: dict,
+    seconds_per_round: Optional[float],
 ) -> float:
     """A piece's seconds, or its rounds when nothing is measured."""
     cost = costs[piece.point_id]

@@ -18,7 +18,6 @@ task it was dealt to; `decsim plan` writes it and `decsim collect
 """
 
 import csv
-import dataclasses
 import hashlib
 import json
 import os
@@ -33,6 +32,7 @@ import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
 import decsim.ports as ports
+import decsim.records.round_plans as round_plans
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
@@ -43,16 +43,6 @@ STATE_FILE = "state.pickle"
 ROUND_PREFIX = "round"
 PLAN_FILE = "plan.csv"
 PLAN_COLUMNS = ("task", "configuration_id", "point_id", "first_seed", "count")
-
-
-@dataclasses.dataclass(frozen=True)
-class PlannedPiece:
-    """One piece of the plan: seeds [first_seed, first_seed + count)."""
-
-    configuration_id: str
-    point_id: str
-    first_seed: int
-    count: int
 
 
 def piece_dir(
@@ -254,7 +244,7 @@ def read_plan(plan_path: pathlib.Path) -> list:
         rows = list(reader)
     planned = []
     for row in rows:
-        piece = PlannedPiece(
+        piece = round_plans.PlannedPiece(
             row["configuration_id"],
             row["point_id"],
             int(row["first_seed"]),

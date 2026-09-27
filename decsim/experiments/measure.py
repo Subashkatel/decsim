@@ -210,12 +210,16 @@ class ShotMeasurement:
     burst_caught_in_time: Optional[bool]
 
 
-def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
+def measure_shot(
+    shot: collect.Shot, run_dir=None, *, only_traced_shot: bool = False
+) -> ShotMeasurement:
     """Read one collected shot's numbers off its machine and result.
 
     run_dir receives the log file when log: file|both is on and the
     Chrome trace when trace names one and the shot is in trace_shots;
     None writes nothing beyond the returned measurement.
+    only_traced_shot says the run traces this shot alone, so a trace
+    path the yaml names is written as it stands.
     """
     settings = shot.task.settings
     point_id = shot.task.strong_id()
@@ -225,7 +229,7 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
         _write_log(observation, run_dir, label)
     trace_path = None
     if run_dir is not None:
-        trace_path = _write_trace(shot, run_dir, label)
+        trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
     metadata = collect.metadata_text(shot.task.metadata)
     return _measurement(
         settings,
@@ -1516,12 +1520,15 @@ def _maxes(samples: dict) -> dict:
     return maxes
 
 
-def _write_trace(shot, run_dir, label: str) -> Optional[str]:
+def _write_trace(
+    shot, run_dir, label: str, only_traced_shot: bool
+) -> Optional[str]:
     """The shot's Chrome trace, when the section asked and named it.
 
     trace: chrome names the file by the shot's label, its point id and
     seed, under trace/; a path of its own is written where it says with
-    that label in the name, so no shot overwrites another's file. Only
+    that label in the name, so no shot overwrites another's file, unless
+    the run traces this shot alone and no other can take the path. Only
     the shots trace_shots names are written, so a sweep point of two
     thousand shots writes one file. The file it wrote
     comes back, so the shot's measurement can say where its trace is; a
@@ -1538,7 +1545,7 @@ def _write_trace(shot, run_dir, label: str) -> Optional[str]:
         trace_dir = run_dir / "trace"
         trace_dir.mkdir(parents=True, exist_ok=True)
         path = trace_dir / f"{label}.trace.json"
-    else:
+    elif not only_traced_shot:
         path = trace_path_for_shot(path, label)
     written = str(path)
     writer.write(written)

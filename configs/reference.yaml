@@ -1438,7 +1438,8 @@ observation:                       # what a run records beyond its results
                                    # referenced them. chrome writes one file per traced
                                    # shot next to the results, <id>_seed<n>.trace.json;
                                    # a path writes there instead, with _<id>_seed<n>
-                                   # before its suffix under collect (.gz
+                                   # before its suffix under collect unless the
+                                   # run is one point tracing one shot (.gz
                                    # compresses). Opens in Perfetto or
                                    # chrome://tracing. It costs one file per traced
                                    # shot, holding every hop of every round and window

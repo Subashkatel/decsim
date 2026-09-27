@@ -42,7 +42,12 @@ def run_sweep(
     the pool is a partial of a module-level function, so a worker
     process can unpickle it.
     """
-    measure_shot = functools.partial(measure.measure_shot, run_dir=run_dir)
+    only_traced_shot = _traces_one_shot(tasks)
+    measure_shot = functools.partial(
+        measure.measure_shot,
+        run_dir=run_dir,
+        only_traced_shot=only_traced_shot,
+    )
     on_task_done = functools.partial(_report_point_done, run_dir=run_dir)
     return collect.collect(
         tasks,
@@ -101,6 +106,15 @@ def run_experiment(
     plots.plots(run_dir)
     run_folder.finish_run(config, run_dir, point_ids, started_utc, **how_it_ran)
     return run_dir, rows
+
+
+def _traces_one_shot(tasks: list) -> bool:
+    """Whether the sweep is one point that traces one shot."""
+    unique = collect.unique_tasks(tasks)
+    if len(unique) != 1:
+        return False
+    observation = unique[0].settings.observation
+    return len(observation.trace_shots) == 1
 
 
 def _point_ids(tasks: list) -> list:

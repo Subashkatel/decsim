@@ -106,14 +106,12 @@ decsim combine results/weak_ler/*
 is double counted, because no summary is ever stored: a summary is
 computed when it is read. That is why the shards can be added at all.
 
-## 5. Plot
+## 5. Read the numbers
 
-```bash
-decsim plot results/<combined> --figure ler --x qpu.distance --where workload.arguments.physical_error_probability=0.001
-```
-
-`ler` draws the logical error rate against the swept setting `--x`
-names, and `--where` keeps the points at one physical error rate.
+The combined folder's `sweep.csv` holds one row per point, its values
+and its counts, and `decsim.results.load` reads it beside every setting
+([How to compare two runs](compare_two_runs.md)); the figure is drawn
+from there, as the question asks.
 
 ## If a task dies
 

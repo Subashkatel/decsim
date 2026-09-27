@@ -340,32 +340,20 @@ def test_load_gives_a_row_per_point_with_its_results_and_settings(runs):
     assert rows[0]["shots"] == 20
 
 
-def _point_count(line) -> int:
-    positions = line.get_xdata()
-    return len(positions)
+def test_a_loaded_row_holds_every_number_an_error_rate_figure_draws(runs):
+    """The rate, its Wilson bounds and counts, and the point's values.
 
+    decsim draws no error rate figure; a reader draws one from these
+    rows, the numbers sinter's plot_error_rate reads off its csv.
+    """
+    rows = results.load(runs["first"])
 
-def test_the_plot_draws_a_labelled_curve_per_group_of_the_kept_rows(runs):
-    """One probability is kept; each shot length is its own curve."""
-    rows = results.load(runs["first"], runs["shorter"])
-    figure = figure_module.Figure()
-    ax = figure.subplots()
-
-    results.plot_error_rate(
-        ax=ax,
-        rows=rows,
-        x=PROBABILITY_COLUMN,
-        group=ROUNDS_COLUMN,
-        where={PROBABILITY_COLUMN: 0.003},
-    )
-
-    labels = [line.get_label() for line in ax.lines]
-    point_counts = [_point_count(line) for line in ax.lines]
-    legend = ax.get_legend()
-    legend_title = legend.get_title()
-    assert labels == [f"{ROUNDS_COLUMN}=15", f"{ROUNDS_COLUMN}=12"]
-    assert point_counts == [1, 1]
-    assert legend_title.get_text() == ROUNDS_COLUMN
+    first = rows[0]
+    rate = first["logical_failures"] / first["shots"]
+    assert first["logical_error_rate"] == rate
+    assert first["ler_wilson_low"] <= rate <= first["ler_wilson_high"]
+    assert first[PROBABILITY_COLUMN] == 0.003
+    assert first["algorithm"] == 0.028
 
 
 def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
@@ -373,13 +361,9 @@ def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
     rows = results.load(*folders)
     figure = figure_module.Figure()
     ax = figure.subplots()
-
-    results.plot_error_rate(
-        ax=ax,
-        rows=rows,
-        x=PROBABILITY_COLUMN,
-        group=ROUNDS_COLUMN,
-    )
+    positions = [row[PROBABILITY_COLUMN] for row in rows]
+    rates = [row["logical_error_rate"] for row in rows]
+    ax.plot(positions, rates, marker="o")
     picture_path = tmp_path / "ler.png"
     results.save_figure(figure, picture_path, rows, folders)
 
@@ -393,7 +377,6 @@ def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
     record = json.loads(record_text)
     this_file = pathlib.Path(__file__)
     this_text = this_file.read_text()
-    assert len(ax.lines) == 2
     assert picture_path.is_file()
     assert script_copy.read_text() == this_text
     assert len(drawn_rows) == 4

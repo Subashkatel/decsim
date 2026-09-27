@@ -77,51 +77,34 @@ whether the move is within its error bars.
 
 `decsim.results` reads run folders into one table, a row per point with
 a column per result and one per setting (`settings.` and the setting's
-dotted path), and draws the logical error rate the way sinter's
-`plot_error_rate` does:
+dotted path). The figure is yours to draw, in whatever form the
+question needs; `save_figure` keeps what made it beside it:
 
 ```python
-from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 
 import decsim.results as results
 
 folders = ["results/first", "results/second"]
 rows = results.load(*folders)
-figure = Figure()
-ax = figure.subplots()
-results.plot_error_rate(
-    ax=ax,
-    rows=rows,
-    x="settings.workload.row_settings.arguments.physical_error_probability",
-    group="settings.qpu.distance",
-    where={"settings.qpu.round_period_microseconds": 1.0},
-)
+distance = "settings.qpu.distance"
+figure, ax = plt.subplots()
+for folder in folders:
+    kept = [row for row in rows if row["run_dir"] == folder]
+    kept.sort(key=lambda row: row[distance])
+    distances = [row[distance] for row in kept]
+    rates = [row["logical_error_rate"] for row in kept]
+    below = [row["logical_error_rate"] - row["ler_wilson_low"] for row in kept]
+    above = [row["ler_wilson_high"] - row["logical_error_rate"] for row in kept]
+    ax.errorbar(distances, rates, yerr=[below, above], fmt="o-", label=folder)
+ax.set_yscale("log")
+ax.legend()
 results.save_figure(figure, "ler.png", rows, folders)
 ```
 
 `save_figure` writes `ler.png` and, beside it, `ler.py` (a copy of the
 script that drew it), `ler.csv` (the rows drawn) and `ler.json` (the
 folders they came from).
-
-## If you want a picture, hand `plot` both folders
-
-```bash
-decsim plot results/<first> results/<second> \
-  --figure ler --x qpu.distance --where workload.arguments.physical_error_probability=0.001
-```
-
-```
-results/<first>/ler.png
-```
-
-`ler`, `latency` and `data_movement` read every folder given;
-`timeline` and `stage_breakdown` read only the first. The file is
-written next to the first folder unless `--out` says otherwise. Every
-figure but the timeline is drawn against the swept setting `--x` names,
-by the name the points' `metadata` gives it; `--group` draws a curve
-per value of another, and `--where PATH=VALUE`, given as often as
-needed, keeps the points whose sweep set that value, as sinter's plot
-reads a point's metadata (`--x_func`, `--group_func`, `--filter_func`).
 
 ## If a burst made things worse: harder windows or an overloaded strong side
 

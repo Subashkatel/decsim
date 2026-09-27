@@ -189,19 +189,34 @@ or quote the point as an upper bound.
 
 ## Step 4. Draw it
 
-```bash
-decsim plot results/first_sweep --figure ler --x qpu.distance --where workload.arguments.physical_error_probability=0.003
+decsim writes the numbers and leaves the figure to you, since only you
+know what it should show. `decsim.results.load` reads a run folder into
+one row per point, its `sweep.csv` columns beside every setting it ran
+with (`settings.` and the setting's path):
+
+```python
+import matplotlib.pyplot as plt
+
+import decsim.results as results
+
+folders = ["results/first_sweep"]
+rows = results.load(*folders)
+error_rate = "settings.workload.row_settings.arguments.physical_error_probability"
+kept = [row for row in rows if row[error_rate] == 0.003]
+distances = [row["settings.qpu.distance"] for row in kept]
+rates = [row["logical_error_rate"] for row in kept]
+below = [row["logical_error_rate"] - row["ler_wilson_low"] for row in kept]
+above = [row["ler_wilson_high"] - row["logical_error_rate"] for row in kept]
+figure, ax = plt.subplots()
+ax.errorbar(distances, rates, yerr=[below, above], fmt="o-")
+ax.set_xlabel("code distance")
+ax.set_ylabel("logical error rate")
+results.save_figure(figure, "ler.png", rows, folders)
 ```
 
-```
-results/first_sweep/ler.png
-```
-
-`ler` plots the logical error rate against the swept setting `--x`
-names, here the code distance, and `--where` keeps the points at one
-physical error rate. Both name a setting the way the point's metadata
-names it, which is the `metadata` column of `sweep.csv`. The error bars
-on it are the Wilson columns you just read.
+The error bars are the Wilson columns you just read. `save_figure`
+writes `ler.png` and, beside it, the script that drew it, the rows it
+drew and the folders they came from.
 
 ## Step 5. Cut it into shards and put it back together
 

@@ -181,6 +181,45 @@ def test_the_class_rows_are_listed_cheapest_first(tmp_path):
     assert listed == ["on_chip", "on_board", "off_board"]
 
 
+def test_the_class_rows_hold_every_points_copied_and_moved_bits(tmp_path):
+    """The numbers a data movement figure draws, at each swept distance.
+
+    decsim draws no such figure; data_movement.csv holds one row per
+    point per memory class, so the reader draws it from the file. An
+    off-board hop of this machine moves and never copies.
+    """
+    sweep = {
+        "observation": {"data_movement": True},
+        "sweep": [
+            {
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3, 5],
+                },
+                "shots": 1,
+            }
+        ],
+    }
+    config_path = yaml_configs.write_config(tmp_path, sweep)
+    out_dir = tmp_path / "run"
+    run_dir, _rows = collect_command.run_experiment(config_path, out_dir)
+    movement_path = run_dir / "data_movement.csv"
+
+    rows = sweep_report.read_rows(movement_path)
+
+    class_rows = [row for row in rows if row["grouping"] == "memory_class"]
+    points = {row["point_id"] for row in class_rows}
+    on_chip = [row for row in class_rows if row["name"] == "on_chip"]
+    off_board = [row for row in class_rows if row["name"] == "off_board"]
+    on_chip_copied = [row["copy_bits_per_shot"] > 0 for row in on_chip]
+    off_board_copied = [row["copy_bits_per_shot"] for row in off_board]
+    off_board_moved = [row["move_bits_per_shot"] > 0 for row in off_board]
+    assert len(points) == 2
+    assert on_chip_copied == [True, True]
+    assert off_board_copied == [0, 0]
+    assert off_board_moved == [True, True]
+
+
 def test_a_references_column_counts_one_shots_holds_once(tmp_path):
     """A reference is a token on a store's slot, not a hop of a path.
 

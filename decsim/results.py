@@ -1,15 +1,16 @@
-"""Run folders read back as one table, drawn and saved.
+"""Run folders read back as one table, and a figure saved with its source.
 
 A row per sweep point beside its settings is sinter's shape: its
 read_stats_from_csv_files gives one TaskStats per task with the task's
 json metadata beside its counts (Stim
-glue/sample/src/sinter/_data/_existing_data.py:135-142).
+glue/sample/src/sinter/_data/_existing_data.py:135-142). The figure is
+the reader's own; save_figure keeps the script, the rows and the
+folders beside it.
 """
 
 import inspect
 import pathlib
-from collections.abc import Mapping
-from typing import Optional, Union
+from typing import Union
 
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
@@ -37,36 +38,6 @@ def load(*run_dirs: Union[str, pathlib.Path]) -> list:
     return rows
 
 
-def plot_error_rate(
-    *,
-    ax,
-    rows: list,
-    x: str,
-    group: Optional[str] = None,
-    where: Optional[Mapping] = None,
-) -> None:
-    """The logical error rate against column x, a curve per value of group.
-
-    where keeps the rows whose columns hold the values it names. Each
-    curve carries its Wilson 95% band, as sinter shades a likelihood
-    region around each curve (sinter 1.16.0 _plotting.py:317-330).
-    """
-    kept = _kept_rows(rows, where)
-    for label, curve in _curves(kept, group):
-        curve.sort(key=lambda row: row[x])
-        positions = [row[x] for row in curve]
-        rates = [row["logical_error_rate"] for row in curve]
-        lows = [row["ler_wilson_low"] for row in curve]
-        highs = [row["ler_wilson_high"] for row in curve]
-        lines = ax.plot(positions, rates, marker="o", label=label)
-        color = lines[0].get_color()
-        ax.fill_between(positions, lows, highs, color=color, alpha=0.2)
-    ax.set_xlabel(x)
-    ax.set_ylabel("logical_error_rate")
-    if group is not None:
-        ax.legend(title=group)
-
-
 def save_figure(
     figure, path: Union[str, pathlib.Path], rows: list, input_folders: list
 ) -> None:
@@ -88,37 +59,3 @@ def save_figure(
     record = {"script": str(script), "input_folders": folders}
     record_path = path.with_suffix(".json")
     run_folder.write_json(record_path, record)
-
-
-def _kept_rows(rows: list, where: Optional[Mapping]) -> list:
-    if where is None:
-        return list(rows)
-    kept = []
-    for row in rows:
-        if _holds(row, where):
-            kept.append(row)
-    return kept
-
-
-def _holds(row: Mapping, where: Mapping) -> bool:
-    """Whether a row's columns hold every value where names."""
-    for column, value in where.items():
-        if row.get(column) != value:
-            return False
-    return True
-
-
-def _curves(rows: list, group: Optional[str]) -> list:
-    """(label, rows) per value of the group column, in first-seen order."""
-    curves = {}
-    for row in rows:
-        group_value = row.get(group)
-        curve = curves.setdefault(group_value, [])
-        curve.append(row)
-    labelled = []
-    for group_value, curve in curves.items():
-        label = None
-        if group is not None:
-            label = f"{group}={group_value}"
-        labelled.append((label, curve))
-    return labelled

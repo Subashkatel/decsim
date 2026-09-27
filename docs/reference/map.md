@@ -343,7 +343,7 @@ docstring.
 - `decsim/experiments/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
-- `decsim/experiments/plots.py`: The experiment figures.
+- `decsim/experiments/plots.py`: The figures that read decsim's own records, not a sweep's numbers.
 - `decsim/experiments/refusal.py`: The one refusal decsim.experiments raises when it will not do what was asked.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
 - `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
@@ -360,4 +360,4 @@ docstring.
 
 ### results
 
-- `decsim/results.py`: Run folders read back as one table, drawn and saved.
+- `decsim/results.py`: Run folders read back as one table, and a figure saved with its source.

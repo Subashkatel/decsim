@@ -1580,35 +1580,6 @@ def test_plot_refuses_a_figure_it_does_not_draw(tmp_path, capsys):
     assert printed.err.startswith("decsim: no figure named everything")
 
 
-def test_plot_refuses_a_figure_against_no_named_setting(tmp_path, capsys):
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["plot", str(tmp_path), "--figure", "ler"])
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.startswith(
-        "decsim: the ler figure is drawn against a swept setting"
-    )
-
-
-def test_plot_refuses_a_where_that_names_no_value(tmp_path, capsys):
-    arguments = [
-        "plot",
-        str(tmp_path),
-        "--figure",
-        "ler",
-        "--x",
-        "qpu.distance",
-    ]
-    arguments += ["--where", "qpu.distance"]
-    with pytest.raises(SystemExit) as stopped:
-        command.main(arguments)
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.startswith("decsim: --where qpu.distance names no value")
-
-
 def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):
     trace_path = tmp_path / "shot.json"
     with pytest.raises(SystemExit) as stopped:

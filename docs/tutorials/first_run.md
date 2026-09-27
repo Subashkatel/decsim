@@ -217,7 +217,7 @@ braces the terminal printed.
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/reference --figure stage_breakdown --x qpu.distance
+decsim plot results/reference --figure stage_breakdown
 ```
 
 ```
@@ -227,10 +227,12 @@ results/reference/stage_breakdown.png
 `stage_breakdown.png` shows where a window's time went, stage by stage:
 the buffer filling, the queue, the link into the decoder unit, the
 fetch, the algorithm, the release, the boundary handed to the next
-window, the link out and the frame commit, one bar per value of the
-swept setting `--x` names. `collect` draws only the `timeline.png` of a
-traced shot itself; every other figure is drawn against a setting the
-sweep varied, and only you know which one to put on the axis.
+window, the link out and the frame commit, one bar per sweep point.
+These two figures read decsim's own records, a trace and the stage
+columns in pipeline order. A figure of the sweep's numbers against a
+setting is yours to draw from the csv files, since only you know
+which setting belongs on the axis and what the figure should look
+like.
 
 ## Step 6. Follow one round
 

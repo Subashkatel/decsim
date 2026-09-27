@@ -36,12 +36,9 @@ Every argument below is read from the `argparse` definition that parses it. An a
 
 | Argument | Default | What it is |
 | --- | --- | --- |
-| `run_dirs` | required | the folders to read |
+| `run_dir` | required | the folder to read, or a trace file to draw |
 | `--figure` | 'timeline' | which figure to draw |
 | `--out` | None | where the figure goes |
-| `--x` | None | the swept setting's yaml path on x |
-| `--group` | None | the swept setting's yaml path a curve is drawn per value of |
-| `--where` | [] | PATH=VALUE: keep the points whose sweep set PATH to VALUE |
 
 ## `decsim run`
 

@@ -20,11 +20,13 @@ import pathlib
 import pickle
 import shutil
 import uuid
+from typing import Optional
 
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
+import decsim.ports as ports
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
@@ -47,7 +49,7 @@ def write(
     first_seed: int,
     measurements: list,
     facts: dict,
-    state=None,
+    state: Optional[ports.ThresholdSource] = None,
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
@@ -126,6 +128,26 @@ def read_piece(folder: pathlib.Path) -> dict:
     return json.loads(text)
 
 
+def read_state(folder: pathlib.Path) -> ports.ThresholdSource:
+    """The calibrator a piece saved, once its bytes match their sha256.
+
+    The file comes off a shared disk and may have been written on
+    another host, so bytes that do not hash to what piece.json records
+    are refused rather than unpickled.
+    """
+    piece = read_piece(folder)
+    state_path = folder / STATE_FILE
+    state_bytes = state_path.read_bytes()
+    digest = hashlib.sha256(state_bytes)
+    if digest.hexdigest() != piece["state_sha256"]:
+        raise refusal.RefusalError(
+            f"{state_path} does not hash to the state_sha256 its "
+            "piece.json records; the piece is damaged, so delete its "
+            "folder and collect it again"
+        )
+    return pickle.loads(state_bytes)
+
+
 def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
     """A hidden folder beside the piece that only this writer uses.
 
@@ -154,26 +176,6 @@ def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
         shutil.rmtree(staging)
 
 
-def read_state(folder: pathlib.Path):
-    """The calibrator a piece saved, once its bytes match their sha256.
-
-    The file comes off a shared disk and may have been written on
-    another host, so bytes that do not hash to what piece.json records
-    are refused rather than unpickled.
-    """
-    piece = read_piece(folder)
-    state_path = folder / STATE_FILE
-    state_bytes = state_path.read_bytes()
-    digest = hashlib.sha256(state_bytes)
-    if digest.hexdigest() != piece["state_sha256"]:
-        raise refusal.RefusalError(
-            f"{state_path} does not hash to the state_sha256 its "
-            "piece.json records; the piece is damaged, so delete its "
-            "folder and collect it again"
-        )
-    return pickle.loads(state_bytes)
-
-
 def _write_residence(staging: pathlib.Path, measurements: list) -> None:
     """The residence rows of the piece's traced shots, when it traced any."""
     residence_rows = residence.rows_of(measurements)
@@ -183,7 +185,7 @@ def _write_residence(staging: pathlib.Path, measurements: list) -> None:
     report.write_csv(residence_rows, residence_path)
 
 
-def _write_state(staging: pathlib.Path, state) -> str:
+def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:
     """The state pickled into the staging folder; its sha256."""
     state_bytes = pickle.dumps(state)
     state_path = staging / STATE_FILE

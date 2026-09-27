@@ -12,6 +12,7 @@ import copy
 import dataclasses
 import itertools
 import json
+import os
 import pathlib
 import re
 from collections.abc import Mapping
@@ -456,12 +457,24 @@ def _yaml_sections(path: pathlib.Path) -> tuple:
     folders = dict.fromkeys(sections, path.parent)
     if base_name is None:
         return sections, folders, (path,)
-    base_path = path.parent / base_name
+    written_path = path.parent / base_name
+    base_path = _plain_path(written_path)
     base_sections, base_folders, base_paths = _yaml_sections(base_path)
     base_sections.update(sections)
     base_folders.update(folders)
     files = (path,) + base_paths
     return base_sections, base_folders, files
+
+
+def _plain_path(path: pathlib.Path) -> pathlib.Path:
+    """The path with each `..` taken out against the folder before it.
+
+    Lexical, as os.path.normpath is, so a relative path stays relative
+    and show prints configs/bases/x.yaml rather than
+    configs/examples/../bases/x.yaml.
+    """
+    plain = os.path.normpath(path)
+    return pathlib.Path(plain)
 
 
 def _sweep_blocks(sweep_section: list, top_collection) -> tuple:

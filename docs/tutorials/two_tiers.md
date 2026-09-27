@@ -124,7 +124,7 @@ decsim show configs/examples/two_tiers.yaml
 ```
 
 ```
-config: configs/examples/two_tiers.yaml <- configs/examples/../bases/weak_decoder_baseline.yaml
+config: configs/examples/two_tiers.yaml <- configs/bases/weak_decoder_baseline.yaml
 qpu: kind stim_device
 idle_policy: kind separate_decode_jobs
 links: kind logical_reference
@@ -143,9 +143,9 @@ sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distan
 log: off
 trace: off
 values:
-clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:56]
-clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:57]
-qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:4]
+clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:56]
+clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:57]
+qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:4]
 qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:85]
 qpu.round_period_microseconds = [1.0]  [sweep, configs/examples/two_tiers.yaml:51-56]
 qpu.distance = [3, 5]  [sweep, configs/examples/two_tiers.yaml:51-56]

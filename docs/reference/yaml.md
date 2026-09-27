@@ -159,7 +159,7 @@ of `decsim show configs/examples/my_first_sweep.yaml`'s:
 
 ```
 qpu.distance = [3, 5, 7]  [sweep, configs/examples/my_first_sweep.yaml:16-21]
-controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:51]
+controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:51]
 controller.packing_overflow = "STALL"  [default, configs/reference.yaml:653]
 ```
 

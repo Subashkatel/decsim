@@ -1073,6 +1073,23 @@ def test_a_run_with_an_online_threshold_records_its_trajectory(
     assert len(rows) == 1 and len(list(records)) == 1
 
 
+def test_an_extends_chain_names_each_file_by_its_plain_path():
+    """A base in a sibling folder is named without the `..` that reached it.
+
+    show prints the chain and every value's source line by these paths,
+    so configs/examples/two_tiers.yaml's base reads as
+    configs/bases/weak_decoder_baseline.yaml.
+    """
+    config_path = yaml_configs.CONFIGS_DIR / "examples" / "two_tiers.yaml"
+    base_path = (
+        yaml_configs.CONFIGS_DIR / "bases" / "weak_decoder_baseline.yaml"
+    )
+
+    config = experiment.load_experiment(config_path)
+
+    assert config.config_files == (config_path, base_path)
+
+
 def test_two_config_files_of_one_name_are_both_copied(tmp_path):
     """The chain's files keep their places, so a base of one name stays."""
     base_path = yaml_configs.write_config(tmp_path, {})

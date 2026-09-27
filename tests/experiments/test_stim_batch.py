@@ -463,6 +463,20 @@ def test_a_sampling_off_the_table_is_refused(tmp_path):
     )
 
 
+def test_a_sampling_that_is_not_text_is_refused(tmp_path):
+    overrides = batch_overrides()
+    overrides["sampling"] = ["stim_batch"]
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        experiment.load_experiment(config_path)
+
+    assert str(refused.value) == (
+        f"{config_path}: sampling is ['stim_batch']; it names a sampling as "
+        "text, such as stim_batch, or is left out for the machine"
+    )
+
+
 def batch_rows() -> dict:
     """The shipped baseline's four weak decoder rows, by kind.
 

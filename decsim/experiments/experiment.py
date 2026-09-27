@@ -249,6 +249,7 @@ def load_experiment(path) -> ExperimentConfig:
     sweep_section = sections.pop("sweep")
     top_collection = sections.pop("collection", None)
     sampling = sections.pop("sampling", None)
+    _check_the_sampling_key(path, sampling)
     sweep = _sweep_blocks(sweep_section, top_collection)
     config = ExperimentConfig(
         name=path.stem,
@@ -273,6 +274,20 @@ def _refuse_a_path_that_is_not_a_file(path: pathlib.Path) -> None:
     listed = ", ".join(names)
     raise refusal.RefusalError(
         f"{path} is not a file; the shipped experiments are {listed}"
+    )
+
+
+def _check_the_sampling_key(path: pathlib.Path, sampling) -> None:
+    """The sampling key names a sampling as text, or is left out.
+
+    Which names exist is collect_command.SAMPLINGS's to say, where the
+    point's collect looks the name up.
+    """
+    if sampling is None or isinstance(sampling, str):
+        return
+    raise refusal.RefusalError(
+        f"{path}: sampling is {sampling!r}; it names a sampling as text, "
+        "such as stim_batch, or is left out for the machine"
     )
 
 

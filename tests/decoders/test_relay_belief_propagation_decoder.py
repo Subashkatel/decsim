@@ -145,7 +145,7 @@ def test_the_row_reports_relay_bps_own_iteration_count_property():
         assert result.iterations == detailed.iterations
 
 
-def test_bases_apart_equals_relay_bp_decoding_the_x_and_z_parts_alone():
+def test_bases_apart_equals_relay_bp_on_each_part_property():
     """Each part's correction is relay-bp's; the observables XOR."""
     relay_bp = pytest.importorskip("relay_bp")
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
@@ -175,7 +175,7 @@ def test_bases_apart_equals_relay_bp_decoding_the_x_and_z_parts_alone():
         assert result.logical_observables == windows.bit_tuple(observables)
 
 
-def test_bases_apart_equals_the_strong_backends_split_of_the_same_window():
+def test_bases_apart_equals_the_strong_backends_split_property():
     pytest.importorskip("relay_bp")
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
     model = windows.whole_circuit_window(circuit, ROUNDS, SPLIT_REQUIREMENT)

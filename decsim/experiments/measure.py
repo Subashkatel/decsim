@@ -414,7 +414,9 @@ def qpu_send_ticks(transfers: list) -> dict:
     for row in transfers:
         if row["path"] != "qpu_to_controller":
             continue
-        round_index = row["attribution"]["round_lo"]
+        # a readout carries one round of one operation
+        (rounds,) = row["attribution"]["rounds_by_operation"]
+        round_index = rounds["round_lo"]
         earlier = send.get(round_index)
         start = _hop_start_ticks(row)
         if earlier is None or start < earlier:

@@ -160,7 +160,7 @@ class DataMovement:
         bits = transfer.header_bits
         if transfer.payload_bits is not None:
             bits += transfer.payload_bits
-        rounds = _attributed_rounds(record.attribution)
+        rounds = len(record.attribution.round_keys)
         path = record.path.value
         memory_class = memory_class_of_link_path(path)
         self._add(self.moves, path, bits, rounds, memory_class)
@@ -266,13 +266,6 @@ def _rounds(key) -> int:
     if decoder_input is not None:
         return len(decoder_input.rounds)
     return 1
-
-
-def _attributed_rounds(attribution) -> int:
-    """The rounds one move carried, from its attribution's range."""
-    if attribution.first_round is None:
-        return 0
-    return attribution.last_round - attribution.first_round + 1
 
 
 def _row_of(rows: dict, key):

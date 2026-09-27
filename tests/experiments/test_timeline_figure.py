@@ -98,7 +98,8 @@ def _transfer_spans(transfers) -> tuple:
         start = _microseconds(transfer["send_ticks"])
         end = _microseconds(transfer["delivery_ticks"])
         if window_id is None:
-            by_round.append(((path, attribution["round_lo"]), start, end))
+            (rounds,) = attribution["rounds_by_operation"]
+            by_round.append(((path, rounds["round_lo"]), start, end))
         else:
             by_window.append(((path, window_id), start, end))
     return by_round, by_window

@@ -225,7 +225,7 @@ def sweep_point_of(row: dict) -> tuple:
     return (row["point_id"], fold.number_of(row["algorithm"]))
 
 
-def measured_point(measurement) -> tuple:
+def measured_point(measurement: measure.ShotMeasurement) -> tuple:
     """The sweep point one measured shot belongs to."""
     return (measurement.point_id, measurement.algorithm)
 
@@ -236,7 +236,7 @@ def point_columns(point: tuple) -> dict:
     return {"point_id": point_id, "algorithm": algorithm}
 
 
-def summarize_point(point: tuple, totals, counts: dict) -> dict:
+def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     """One sweep point: means over seeds of per-shot means, max of maxes."""
     failures = totals.true_counts["logical_failure"]
     shot_count = totals.rows
@@ -813,7 +813,7 @@ def _add_burst_columns(row: dict, totals) -> None:
             row[share] = flagged / totals.rows
 
 
-def strong_service_bound_us(totals) -> float:
+def strong_service_bound_us(totals: fold.RowTotals) -> float:
     """Toshio's Theorem 1 bound on one strong decode's time, per point.
 
     Theorem 1 bounds the strong decoder's time per round (2510.25222

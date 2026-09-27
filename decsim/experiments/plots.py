@@ -205,8 +205,7 @@ def ler_vs_distance_plot(
     a zero-failure point cannot sit on a log axis, so its curve simply
     ends at the last distance that saw failures.
 
-        python -m decsim.experiments.plots ler_vs_d <run_dir> <run_dir> <p>
-        <out.png>
+        decsim plot <run_dir> <run_dir> --figure ler_vs_d --probability <p>
     """
     import matplotlib
 
@@ -294,7 +293,7 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
 
     From syndrome arrival in the buffer to the Pauli-frame commit.
 
-        python -m decsim.experiments.plots stage_breakdown <run_dir> <out.png>
+        decsim plot <run_dir> --figure stage_breakdown
     """
     import matplotlib
 
@@ -384,7 +383,7 @@ def combined_latency_plot(sample_files: list, path: Path) -> None:
     legible: the tiers sit decades apart, which is itself the figure's
     message.
 
-        python -m decsim.experiments.plots latency <run_dir> <run_dir> <out.png>
+        decsim plot <run_dir> <run_dir> --figure latency
     """
     import matplotlib
 

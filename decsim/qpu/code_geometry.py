@@ -72,7 +72,10 @@ class SurfaceCodeModel:
         the number; the reader is a caller-supplied latency function
         (decoders/decoders.py FunctionLatencyDecoder), where the
         difference is a scale factor and reaches no correction. The seam
-        strip is a heuristic for a multi-patch operation.
+        strip is the one line of d intermediate qubits a lattice-surgery
+        merge of two patches adds (Horsman et al. arXiv:1111.4022 Sec.
+        3.1); for more patches the paper gives no count, and one line
+        stays.
         """
         node_count_per_patch = self.distance * self.distance
         seam_node_count = 0

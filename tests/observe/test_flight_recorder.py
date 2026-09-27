@@ -566,8 +566,8 @@ def test_the_ledger_holds_over_random_runs_of_every_mode(seed):
     and a round count from 6 to 9. Whatever the shape, the ledger passes
     its causal and conservation checks, every round a decoded window
     read is accounted for by a publication or a room-side landing, and
-    each window's five stamps run forwards. The staged-pipeline mode of
-    the older sweep is left out because the builders declare one preset
+    each window's five stamps run forwards. The staged-pipeline mode is
+    left out because the builders declare one preset
     decoder per tier and cannot express it.
     """
     generator = random.Random(seed)

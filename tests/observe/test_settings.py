@@ -29,7 +29,7 @@ def _section(text: str):
 
 
 def test_a_stale_observation_key_is_refused_by_name():
-    """trace_io was the narrator's key two renames ago."""
+    """A key the section does not have is refused with the keys it has."""
     section = _section("observation:\n  trace_io: true\n")
 
     with pytest.raises(ValueError) as refusal:
@@ -42,7 +42,7 @@ def test_a_stale_observation_key_is_refused_by_name():
 
 
 def test_the_narrators_word_in_the_trace_key_is_refused():
-    """Every config saved before the rename carries `trace: print`."""
+    """The narrator's words name the log, so the trace key refuses them."""
     section = _section("observation:\n  trace: print\n")
 
     with pytest.raises(ValueError) as refusal:

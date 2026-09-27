@@ -273,9 +273,9 @@ def _machine_on(decoder, **observation):
 def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
     """The wiring recognises a decoder by the port, not by a base class.
 
-    A row that inherits nothing of decsim's decodes every window; before
-    the walk asked the port it was invisible to the stage ledger, the
-    referee audit and the trace.
+    A row that inherits nothing of decsim's decodes every window, and the
+    walk that asks the port shows it to the stage ledger, the referee
+    audit and the trace.
     """
     ticks = decsim.config.microseconds_to_ticks(1.0)
     decoder = PortOnlyDecoder(ticks)

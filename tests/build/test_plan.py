@@ -352,8 +352,7 @@ def test_an_outside_escalation_row_names_its_own_default_boundary_row(
 ):
     """A row that never escalates names the default; plan.py holds none.
 
-    The default used to be the literal "eager" inside plan.py, so no row
-    of BOUNDARY_POLICIES written outside decsim could ever be it.
+    So a row of BOUNDARY_POLICIES written outside decsim can be it.
     """
     monkeypatch.setitem(
         window_settings.BOUNDARY_POLICIES,

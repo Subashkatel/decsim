@@ -1,0 +1,20 @@
+# The decoder baseline with no machine: the same points, each shot drawn
+# in blocks and decoded by the same weak decoder row on the same one
+# window, counts kept and no latency (decsim/experiments/stim_batch.py).
+# The key gives every point and the configuration ids of their own, so
+# a batch collect and a machine collect never fold into one row.
+# Every key is documented in configs/reference.yaml.
+
+extends: decoder_baseline.yaml
+
+sampling: stim_batch
+
+# A unit builds its window model and compiles its row before its first
+# shot (at d 15, 2.1 s for PyMatching and 19 s for Tesseract), so a
+# piece holds 10^5 shots of 100 rounds to pay that once.
+collection:
+  max_failures: 100
+  max_shots: 1000000000
+  max_core_seconds: 86400
+  min_shots: 0
+  piece_rounds: 10000000

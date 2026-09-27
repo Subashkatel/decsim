@@ -34,8 +34,15 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
+import decsim.experiments.stim_batch as stim_batch
 import decsim.records.results as result_records
 import decsim.records.round_plans as round_plans
+
+# What a yaml's top-level `sampling` key names: a module that runs a
+# point's units in place of the machine, saves them as pieces, reads a
+# piece's shots back and folds the pieces. A point with none runs the
+# machine.
+SAMPLINGS = {"stim_batch": stim_batch}
 
 
 @dataclasses.dataclass
@@ -104,8 +111,7 @@ class PointCollection:
             folder = pieces.piece_dir(
                 experiment_dir, point_id, first_seed, count
             )
-            shots_path = folder / "shots.csv"
-            for row in fold.row_stream(shots_path):
+            for row in _shot_rows_of(self.task, folder):
                 self.tracker.add(row)
         self.pending = []
         if self.tracker.stop_kind is not None:
@@ -364,6 +370,11 @@ def _fold_into_the_staging(
 ) -> list:
     """Every file of the fold written into staging; the summary rows."""
     records = run_folder.resolved_by_point(experiment_dir)
+    sampling = _sampling_of_the_points(records, point_ids)
+    if sampling is not None:
+        return sampling.fold_into_the_staging(
+            experiment_dir, folders, point_ids, staging
+        )
     swept = run_folder.swept_values(experiment_dir, point_ids)
     rules = {}
     for point_id in point_ids:
@@ -457,7 +468,11 @@ def _run_the_planned_pieces(
     save = _planned_piece_saver(experiment_dir, config, units, facts)
     independent, online = _independent_and_online(units)
     collect.run_units(
-        independent, measure_shot, on_unit_done=save, processes=processes
+        independent,
+        measure_shot,
+        on_unit_done=save,
+        processes=processes,
+        unit_runner=_run_unit,
     )
     for unit in online:
         resumed = _resumed_from_the_piece_before(experiment_dir, unit)
@@ -637,6 +652,7 @@ def _resolved_points(configuration_id: str, configs: list) -> list:
             continue
         settings = collections[point_id]
         _check_the_stop_of_an_online_point(task, settings)
+        _check_the_sampling(task)
         sections = config.resolved_sections(task.metadata)
         facts = _experiment_facts(task, configuration_id, settings)
         record = run_folder.point_record(task, None, sections, facts)
@@ -715,12 +731,15 @@ def _experiment_facts(
     online; and the kind of the tier that decodes its windows, which
     names its trajectory's rows.
     """
-    return {
+    facts = {
         "configuration_id": configuration_id,
         "collection": dataclasses.asdict(settings),
         "adaptive": task.online_threshold is not None,
         "algorithm": measure.active_decoder_kind(task.settings),
     }
+    if task.sampling is not None:
+        facts["sampling"] = task.sampling
+    return facts
 
 
 def _unique_tasks(point_tasks: list) -> list:
@@ -814,7 +833,11 @@ def _collect_until_stopped(
         if not units:
             return
         collect.run_units(
-            units, measure_shot, on_unit_done=save, processes=processes
+            units,
+            measure_shot,
+            on_unit_done=save,
+            processes=processes,
+            unit_runner=_run_unit,
         )
         for point in points:
             point.count_the_pending(experiment_dir)
@@ -869,8 +892,15 @@ def _save_the_piece(
     configuration id, and a planned piece's round and task. The piece
     counts its rounds, since a shot's cost grows with its rounds, and
     the peak memory of the process that ran it. An adaptive point's
-    piece keeps its calibrator as the unit's shots left it.
+    piece keeps its calibrator as the unit's shots left it. A point's
+    sampling saves its own piece.
     """
+    if unit.task.sampling is not None:
+        sampling = SAMPLINGS[unit.task.sampling]
+        sampling.write_piece(
+            experiment_dir, facts, rounds_by_point, unit, outcome
+        )
+        return
     point_id = unit.task.strong_id()
     rows = outcome.rows
     rounds_per_shot = rounds_by_point[point_id]
@@ -883,6 +913,54 @@ def _save_the_piece(
     pieces.write(
         experiment_dir, point_id, unit.first_seed, rows, piece_facts, state
     )
+
+
+def _run_unit(unit: collect.Unit, measure_shot) -> result_records.UnitOutcome:
+    """One unit run by the machine, or by the sampling its point names.
+
+    It is a module-level function, so a pool can pickle it.
+    """
+    if unit.task.sampling is None:
+        return collect.run_unit(unit, measure_shot)
+    sampling = SAMPLINGS[unit.task.sampling]
+    return sampling.run_unit(unit, measure_shot)
+
+
+def _shot_rows_of(task: collect.Task, folder: pathlib.Path):
+    """A saved piece's shot rows in seed order, as its sampling kept them."""
+    if task.sampling is not None:
+        sampling = SAMPLINGS[task.sampling]
+        return sampling.shot_rows(folder)
+    shots_path = folder / "shots.csv"
+    return fold.row_stream(shots_path)
+
+
+def _sampling_of_the_points(records: dict, point_ids: list):
+    """The sampling module the points' records name, None for the machine.
+
+    The key is a configuration's, so its points share it.
+    """
+    if not point_ids:
+        return None
+    facts = records[point_ids[0]]["experiment"]
+    name = facts.get("sampling")
+    if name is None:
+        return None
+    return SAMPLINGS[name]
+
+
+def _check_the_sampling(task: collect.Task) -> None:
+    """A point's sampling is a row of SAMPLINGS that can run it, or refused."""
+    if task.sampling is None:
+        return
+    sampling = SAMPLINGS.get(task.sampling)
+    if sampling is None:
+        rows = sorted(SAMPLINGS)
+        raise refusal.RefusalError(
+            f"sampling {task.sampling!r} is not a row of its table; the "
+            f"rows are {rows}"
+        )
+    sampling.check_task(task)
 
 
 def _echo_description(config, settings, run_dir: pathlib.Path) -> None:

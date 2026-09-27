@@ -146,6 +146,24 @@ one of the two caps. No piece past the stop is started. The section
 goes at the top of a file or in a sweep block, whose keys override the
 top's one by one, and no key of it enters a point's id.
 
+## The sampling
+
+```yaml
+sampling: stim_batch
+```
+
+How a point's shots are drawn (`decsim/experiments/stim_batch.py`).
+With no `sampling` key the machine runs every shot and times it. With
+`stim_batch`, each point's shots are drawn in blocks of 1024 seeds and
+each is decoded by the point's weak decoder row on the one window
+`naive_online` lays over the whole circuit, with no machine: the same
+answers as the machine, a piece keeping counts only and no latency.
+Every decoder of a point decodes the same samples. It takes
+`windows.kind naive_online`, `escalation.kind weak_baseline`,
+`qpu.kind stim_device` and one operation a shot, and refuses anything
+else. The key enters every point's id and the configuration's id, so a
+batch collect and a machine collect of one file are different points.
+
 ## Seeing what a file resolves to
 
 ```bash
@@ -161,7 +179,7 @@ of `decsim show configs/examples/my_first_sweep.yaml`'s:
 ```
 qpu.distance = [3, 5, 7]  [sweep, configs/examples/my_first_sweep.yaml:16-21]
 controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:51]
-controller.packing_overflow = "STALL"  [default, configs/reference.yaml:653]
+controller.packing_overflow = "STALL"  [default, configs/reference.yaml:667]
 ```
 
 The bracket names the layer that set the value, `your file`, `preset`
@@ -200,6 +218,7 @@ preview copy. A run too long for one job is cut into pieces by
 | `configs/experiments/burst_detection/burst_detection.yaml` | four burst detectors on one burst at d = 5 and on quiet shots, the detector and the burst its only axes ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
 | `configs/experiments/data_movement/data_movement.yaml` | every copy, reference and move of the data path counted per hop, in four blocks: every hop copying, the weak input read in place, the boundary folded in place, and the switching escalation |
 | `configs/experiments/decoder_baseline/decoder_baseline.yaml` | the paper's decoder baseline: Union-Find, MWPM, Relay-BP-1 and Tesseract on the same samples of the rotated surface code memory, d = 5 to 15, six error rates, both bases, 100 rounds, each point stopped at 100 failures or 24 core-hours |
+| `configs/experiments/decoder_baseline/decoder_baseline_batch.yaml` | the same baseline under `sampling: stim_batch`: the same answers with no machine, counts only |
 
 ## Read next
 

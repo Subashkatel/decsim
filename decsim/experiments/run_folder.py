@@ -112,11 +112,15 @@ def configuration_id(config: experiment.ExperimentConfig) -> str:
 
     The sweep and the collection are not sections (load_experiment pops
     them), so collecting more points or more shots is the same
-    configuration. Two yaml files that resolve to the same sections are
-    one configuration, whatever their names, as a point is named by what
-    it resolves to (collect.Task.strong_id).
+    configuration; the sampling is popped too, and is hashed beside the
+    sections when it is set. Two yaml files that resolve to the same
+    sections are one configuration, whatever their names, as a point is
+    named by what it resolves to (collect.Task.strong_id).
     """
     value = collect.json_value(config.sections)
+    # Only a set sampling enters the json, as in collect.Task.strong_id.
+    if config.sampling is not None:
+        value["sampling"] = config.sampling
     text = json.dumps(value, sort_keys=True)
     encoded = text.encode("utf8")
     digest = hashlib.sha256(encoded)

@@ -87,6 +87,9 @@ class ExperimentConfig:
     # the yaml files this config was read from, nearest first (an extends
     # chain)
     config_files: tuple
+    # the top-level `sampling` key: the row of collect_command.SAMPLINGS
+    # that runs the points' shots, None for the machine
+    sampling: Optional[str] = None
 
     def tasks(self) -> list:
         """One task per sweep point, blocks in order, each block a product."""
@@ -120,7 +123,7 @@ class ExperimentConfig:
         path = self.config_files[0]
         with _refused_in(path):
             resolved, settings = self._read_point(values)
-            return _point_task_of(settings, resolved, values)
+            return _point_task_of(settings, resolved, values, self.sampling)
 
     def first_point_task(self) -> collect.Task:
         """The task of the first point of the first sweep block."""
@@ -245,6 +248,7 @@ def load_experiment(path) -> ExperimentConfig:
         )
     sweep_section = sections.pop("sweep")
     top_collection = sections.pop("collection", None)
+    sampling = sections.pop("sampling", None)
     sweep = _sweep_blocks(sweep_section, top_collection)
     config = ExperimentConfig(
         name=path.stem,
@@ -252,6 +256,7 @@ def load_experiment(path) -> ExperimentConfig:
         section_folders=section_folders,
         sweep=sweep,
         config_files=config_files,
+        sampling=sampling,
     )
     first_block = sweep[0]
     first_points = first_block.points()
@@ -291,6 +296,7 @@ def _point_task_of(
     settings: machine_settings.MachineSettings,
     resolved: dict,
     values: Mapping,
+    sampling: Optional[str],
 ) -> collect.Task:
     """A point's task: its workload made, its escalation's threshold set.
 
@@ -308,7 +314,7 @@ def _point_task_of(
         settings, workload=workload, escalation=escalation
     )
     metadata = copy.deepcopy(dict(values))
-    return collect.Task(point_settings, metadata, online_threshold)
+    return collect.Task(point_settings, metadata, online_threshold, sampling)
 
 
 def _place(sections: dict, path: str, value) -> None:

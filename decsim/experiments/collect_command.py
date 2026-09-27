@@ -216,11 +216,30 @@ def run_experiment(
     _echo_description(config, first_task.settings, report_dir)
     points = _point_collections(experiment_dir, point_tasks, unique)
     measure_shot = _shot_measure(unique, report_dir)
-    swept = run_folder.swept_values(experiment_dir, point_ids)
     configuration_id = run_folder.configuration_id(config)
     _collect_until_stopped(
         points, experiment_dir, configuration_id, measure_shot, processes
     )
+    rows = _write_the_run_folder(experiment_dir, points, point_ids, report_dir)
+    run_folder.finish_run(config, report_dir, point_ids, started_utc)
+    return report_dir, rows
+
+
+def _write_the_run_folder(
+    experiment_dir: pathlib.Path,
+    points: list,
+    point_ids: list,
+    report_dir: pathlib.Path,
+) -> list:
+    """The saved pieces folded into the run folder, beside what they give.
+
+    Every file comes from the pieces, not from what this collect ran,
+    so a collect that found its pieces saved writes the folder whole:
+    the online thresholds' trajectories from their last pieces' states,
+    the residence table from the pieces' traced shots, and the figures.
+    Returns the summary rows.
+    """
+    swept = run_folder.swept_values(experiment_dir, point_ids)
     for point in points:
         task = point.task_as_its_last_piece_left_it(experiment_dir)
         _write_online_threshold_record(task, report_dir, swept)
@@ -229,8 +248,7 @@ def run_experiment(
     residence_rows = residence.rows_in(folders)
     residence.write_residence(residence_rows, report_dir)
     plots.plots(report_dir)
-    run_folder.finish_run(config, report_dir, point_ids, started_utc)
-    return report_dir, rows
+    return rows
 
 
 def _shot_measure(tasks: list, run_dir):

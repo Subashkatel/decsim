@@ -25,7 +25,7 @@ import decsim.collect as collect
 import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collection as collection_module
 import decsim.experiments.experiment as experiment
-import decsim.experiments.failure_statistics as failure_statistics
+import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.pieces as pieces
 import decsim.experiments.plots as plots
@@ -39,10 +39,13 @@ import decsim.experiments.run_folder as run_folder
 class PointCollection:
     """One point's collection as it runs: its next seed and its prefix.
 
-    saved maps the first seed of each piece saved before this collect
-    to its count, whatever collection cut it. pending holds the (first
-    seed, count) of the pieces handed out past the counted prefix, in
-    seed order; they are counted once they are all saved, so the prefix
+    tracker reads the prefix shot by shot off the saved pieces'
+    shots.csv, as the report does (collection.PrefixTracker), so the
+    collector stops on the shot the report's row stops on. saved maps
+    the first seed of each piece saved before this collect to its
+    count, whatever collection cut it. pending holds the (first seed,
+    count) of the pieces handed out past the counted prefix, in seed
+    order; they are counted once they are all saved, so the prefix
     stays contiguous whatever order the pool ends them in.
     """
 
@@ -52,11 +55,12 @@ class PointCollection:
     rounds_per_shot: int
     saved: dict
     next_seed: int = 0
-    counts: collection_module.PrefixCounts = dataclasses.field(
-        default_factory=collection_module.PrefixCounts
-    )
-    stop_kind: Optional[failure_statistics.StopKind] = None
     pending: list = dataclasses.field(default_factory=list)
+    tracker: collection_module.PrefixTracker = dataclasses.field(init=False)
+
+    def __post_init__(self) -> None:
+        rule = self.rule()
+        self.tracker = collection_module.PrefixTracker(rule)
 
     def next_units(self, experiment_dir: pathlib.Path, wanted: int) -> list:
         """Up to `wanted` unsaved pieces past the prefix, as work units.
@@ -65,7 +69,7 @@ class PointCollection:
         a point whose saved pieces reach its stop starts nothing.
         """
         units = []
-        while self.stop_kind is None and len(units) < wanted:
+        while self.tracker.stop_kind is None and len(units) < wanted:
             count = self._next_piece_count()
             if count == 0:
                 break
@@ -77,19 +81,19 @@ class PointCollection:
         return units
 
     def count_the_pending(self, experiment_dir: pathlib.Path) -> None:
-        """The pending pieces' counts onto the prefix, until it stops."""
+        """The pending pieces' shots onto the prefix, until it stops."""
         point_id = self.task.strong_id()
         for first_seed, count in self.pending:
-            if self.stop_kind is not None:
+            if self.tracker.stop_kind is not None:
                 break
             folder = pieces.piece_dir(
                 experiment_dir, point_id, first_seed, count
             )
-            piece_counts = _prefix_counts_of(folder)
-            self.counts.add(piece_counts)
-            self.stop_kind = self.settings.stop_kind(self.counts)
+            shots_path = folder / "shots.csv"
+            for row in fold.row_stream(shots_path):
+                self.tracker.add(row)
         self.pending = []
-        if self.stop_kind is not None:
+        if self.tracker.stop_kind is not None:
             _say_the_point_stopped(self)
 
     def rule(self) -> collection_module.PointRule:
@@ -382,7 +386,7 @@ def _next_round(
     """The next round's pieces: the running points' shares of the pool."""
     running = []
     for point in points:
-        if point.stop_kind is None:
+        if point.tracker.stop_kind is None:
             running.append(point)
     if not running:
         return []
@@ -395,25 +399,21 @@ def _next_round(
     return units
 
 
-def _prefix_counts_of(folder: pathlib.Path) -> collection_module.PrefixCounts:
-    """One saved piece's counts, read from its piece.json."""
-    piece = pieces.read_piece(folder)
-    scored_shots = piece["scored_shots"]
-    shots = scored_shots + piece["unscored_shots"]
-    return collection_module.PrefixCounts(
-        shots=shots,
-        scored_shots=scored_shots,
-        failures=piece["failures"],
-        core_seconds=piece["core_seconds"],
-    )
-
-
 def _say_the_point_stopped(point: PointCollection) -> None:
-    """The progress line of a point that stopped, and why."""
+    """The progress line of a point that stopped, and why.
+
+    A piece runs whole, so the shots of the stop's piece past its stop,
+    and of any piece handed out beside it, ran and count nowhere; the
+    line says how many.
+    """
     metadata = collect.metadata_text(point.task.metadata)
-    shots = point.counts.shots
-    reason = point.stop_kind.value
-    print(f"{metadata}: {shots} shots done ({reason})", file=sys.stderr)
+    shots = point.tracker.counts.shots
+    reason = point.tracker.stop_kind.value
+    line = f"{metadata}: {shots} shots done ({reason})"
+    past_the_stop = point.next_seed - shots
+    if past_the_stop > 0:
+        line += f"; {past_the_stop} more ran past the stop"
+    print(line, file=sys.stderr)
 
 
 def _run_the_pieces(

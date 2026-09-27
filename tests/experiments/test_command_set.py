@@ -27,6 +27,7 @@ import decsim.experiments.collect_command as collect_command
 import decsim.experiments.collection as collection_module
 import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
+import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
 import decsim.experiments.pieces as pieces
 import decsim.experiments.report as report
@@ -1081,8 +1082,8 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     config = experiment.load_experiment(config_path)
     task = config.first_point_task()
     point_id = task.strong_id()
-    _write_a_failing_piece(tmp_path, point_id, 0)
-    _write_a_failing_piece(tmp_path, point_id, 2)
+    _write_a_saved_piece(tmp_path, point_id, 0, [True])
+    _write_a_saved_piece(tmp_path, point_id, 2, [True])
     settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
     saved = pieces.saved_counts(tmp_path, point_id)
     point = collect_command.PointCollection(task, settings, 1, 15, saved)
@@ -1090,22 +1091,58 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     units = point.next_units(tmp_path, 1)
 
     assert units == [collect.Unit(task, 1, 1)]
-    assert point.stop_kind is None
-    assert point.counts.failures == 1
+    assert point.tracker.stop_kind is None
+    assert point.tracker.counts.failures == 1
 
 
-def _write_a_failing_piece(experiment_dir, point_id: str, first_seed: int):
-    """A saved piece of one scored shot that failed, as pieces.write writes."""
-    folder = pieces.piece_dir(experiment_dir, point_id, first_seed, 1)
+def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
+    tmp_path, capsys
+):
+    """The collector stops where the report's prefix does: on a shot.
+
+    One saved piece of four scored shots fails on its second. A target
+    of one failure behind a minimum of two scored shots stops on shot
+    two, a minimum stop, which is what the report reads off the same
+    rows (collection.PrefixTracker); the piece's other two shots ran
+    past the stop, and the progress line says so.
+    """
+    config_path = yaml_configs.write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    point_id = task.strong_id()
+    failed = [False, True, False, False]
+    _write_a_saved_piece(tmp_path, point_id, 0, failed)
+    settings = collection_module.CollectionSettings(
+        max_shots=10, max_failures=1, min_shots=2
+    )
+    saved = pieces.saved_counts(tmp_path, point_id)
+    point = collect_command.PointCollection(task, settings, 4, 15, saved)
+
+    units = point.next_units(tmp_path, 1)
+
+    printed = capsys.readouterr()
+    assert units == []
+    assert point.tracker.stop_kind is failure_statistics.StopKind.MINIMUM
+    assert point.tracker.counts.shots == 2
+    assert printed.err.endswith(
+        ": 2 shots done (minimum); 2 more ran past the stop\n"
+    )
+
+
+def _write_a_saved_piece(
+    experiment_dir, point_id: str, first_seed: int, failed: list
+):
+    """A saved piece of scored shots, failed or not, as pieces.write lays it."""
+    count = len(failed)
+    folder = pieces.piece_dir(experiment_dir, point_id, first_seed, count)
     folder.mkdir(parents=True)
-    piece = {
-        "scored_shots": 1,
-        "unscored_shots": 0,
-        "failures": 1,
-        "core_seconds": 0.5,
-    }
-    piece_path = folder / pieces.PIECE_FILE
-    run_folder.write_json(piece_path, piece)
+    lines = ["seed,is_scored,logical_failure,sim_wall_seconds"]
+    for offset, is_failure in enumerate(failed):
+        seed = first_seed + offset
+        lines.append(f"{seed},True,{is_failure},0.5")
+    shots_text = "\n".join(lines) + "\n"
+    (folder / "shots.csv").write_text(shots_text)
+    (folder / pieces.PIECE_FILE).write_text("{}")
 
 
 def test_a_sweep_block_that_says_shots_is_refused(tmp_path, capsys):

@@ -46,6 +46,7 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
+import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
@@ -1235,6 +1236,33 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     patches' shared plane, misses patch 0 entirely; at seed 1 patch 1's
     observable comes out wrong.
     """
+    shot = _two_patch_burst_shot(tmp_path, seed=1)
+    measurement = measure.measure_shot(shot)
+    first, second = shot.result.operation_results
+
+    assert first.logical_observables == first.observable_truth
+    assert second.logical_observables != second.observable_truth
+    assert measurement.logical_failure is True
+
+
+def test_a_shot_records_each_operations_prediction(tmp_path):
+    """The two patches' observables, each its own, not one failure flag.
+
+    At seed 4 both truths are 0 and the loop predicts 1 on patch 1,
+    under the burst, and 0 on patch 0, so operation 2's cell is 1 and
+    operation 1's is 0. A csv reader that types a number would read the
+    bits 01 as 1; the json cell reads back as the text it was written.
+    """
+    shot = _two_patch_burst_shot(tmp_path, seed=4)
+
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.predictions == '{"1":"0","2":"1"}'
+    assert fold.typed_value(measurement.predictions) == measurement.predictions
+
+
+def _two_patch_burst_shot(tmp_path, *, seed: int) -> collect.Shot:
+    """One seed of two memory patches under a burst on the second."""
     raw = dict(MINIMAL_CONFIG)
     raw["workload"] = {
         "kind": "producer",
@@ -1256,21 +1284,16 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     config_text = yaml.safe_dump(raw)
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
+    shots = seed + 1
     task = config.point_task(
         {
             "workload.arguments.physical_error_probability": 0.001,
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
-        2,
+        shots,
     )
-    shot = collect.run_shot(task, 1)
-    measurement = measure.measure_shot(shot)
-    first, second = shot.result.operation_results
-
-    assert first.logical_observables == first.observable_truth
-    assert second.logical_observables != second.observable_truth
-    assert measurement.logical_failure is True
+    return collect.run_shot(task, seed)
 
 
 LOAD_FLAGS = ("record_switching_windows", "backlog_trace")

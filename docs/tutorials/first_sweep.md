@@ -127,8 +127,11 @@ To see what decoding in windows costs, add one more value to the sweep:
 `windows.commit_rounds` long enough to hold the whole shot, so one window
 decodes the full history the way a whole-circuit decode does. At one seed
 the two points draw the same shot (their `sample_digest` cells in
-`shots.csv` are equal), so a seed where their `logical_failure` differs is
-a shot the window's missing rounds decided.
+`shots.csv` are equal), so a seed where their `predictions` differ is
+a shot the window's missing rounds decided. This memory has one
+observable, so there a differing prediction is a differing
+`logical_failure`; with several observables or patches, two failures
+can be two different answers, and `predictions` tells them apart.
 
 Expect a few. A sliding window commits its correction without the rounds
 the whole-circuit decode can see, so windowed decoding is an

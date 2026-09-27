@@ -14,6 +14,7 @@ other.
 import collections
 import dataclasses
 import hashlib
+import json
 import math
 import pathlib
 import statistics
@@ -230,6 +231,9 @@ class ShotMeasurement:
     # sha256 of every operation's sampled detection events and observable
     # truth, so two points' shots of one seed are checked to be one draw
     sample_digest: str
+    # every operation's predicted observables, so two decoders' shots of
+    # one seed compare answer by answer and not only failure by failure
+    predictions: str
 
 
 def measure_shot(
@@ -735,6 +739,7 @@ def _measurement(
     sample_digest = _sample_digest(observation, result)
     samples = collect_samples(observation, result)
     logical_failure = _logical_failure(result)
+    predictions = _predictions(result)
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
@@ -805,6 +810,7 @@ def _measurement(
         unscored_reason=unscored_reason,
         provisional_no_correction_windows=provisional_windows,
         sample_digest=sample_digest,
+        predictions=predictions,
     )
 
 
@@ -1034,6 +1040,31 @@ def _logical_failure(result: result_records.RunResult) -> bool:
         loop_prediction = tuple(operation_result.logical_observables)
         is_logical_failure |= loop_prediction != truth
     return is_logical_failure
+
+
+def _predictions(result: result_records.RunResult) -> str:
+    """Each operation's predicted observables, keyed by operation id.
+
+    Each value is one character a bit in observable order, Stim's 01
+    format (sample_detectors obs_out_format), and null for an operation
+    the loop left unanswered. The cell is compact sorted json, the form
+    sinter writes a json cell in (sinter/_data/_csv_out.py:35-37), and a
+    csv reader that types a number would read the bits 01 as 1.
+    """
+    predicted = {}
+    for operation_result in result.operation_results:
+        key = str(operation_result.operation_id)
+        observables = operation_result.logical_observables
+        predicted[key] = _bit_text(observables)
+    return json.dumps(predicted, sort_keys=True, separators=(",", ":"))
+
+
+def _bit_text(bits: Optional[tuple]) -> Optional[str]:
+    """Bits as the characters 0 and 1, or None for no bits."""
+    if bits is None:
+        return None
+    characters = [str(int(bit)) for bit in bits]
+    return "".join(characters)
 
 
 def _throughput_per_microsecond(

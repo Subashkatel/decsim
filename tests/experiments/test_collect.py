@@ -209,8 +209,12 @@ def test_a_full_history_point_reproduces_the_retired_direct_columns(
     One window of 16 rounds decodes the shot's whole 15-round history,
     which is whole-circuit PyMatching on the same events, so seed by
     seed its failure is the retired direct_failure, and the sliding and
-    full-history failures differ exactly where direct_mismatch said
-    (NOTE section 9 item 7). The frozen seeds hold two mismatches.
+    full-history predictions differ exactly where direct_mismatch said
+    (NOTE section 9 item 7). The frozen seeds hold two mismatches. The
+    referent is one operation with one observable, so it shows the
+    equivalence there only; with several observables or operations two
+    failures can be two different answers, which is why the pair is
+    compared by predictions.
     """
     config_path = yaml_configs.write_config(tmp_path, FULL_HISTORY_PAIR)
     out_dir = tmp_path / "out"
@@ -940,8 +944,12 @@ def _frozen_columns(row: dict) -> tuple:
 
 
 def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:
-    """The three columns as the pair of points gives them for one seed."""
+    """The three columns as the pair of points gives them for one seed.
+
+    The mismatch compares the two points' predictions, as the retired
+    column compared the loop's with the reference's, not their failures.
+    """
     sliding_failure = sliding_row["logical_failure"] == "True"
     full_history_failure = full_history_row["logical_failure"] == "True"
-    is_mismatch = sliding_failure != full_history_failure
+    is_mismatch = sliding_row["predictions"] != full_history_row["predictions"]
     return (int(sliding_failure), int(full_history_failure), int(is_mismatch))

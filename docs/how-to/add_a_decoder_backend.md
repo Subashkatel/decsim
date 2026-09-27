@@ -82,7 +82,10 @@ with your row named as `weak_decoder.kind`. To check its answers, make
 `weak_decoder.kind` an axis with your row and `pymatching` as its two
 values: at one seed both points draw the same shot (their
 `sample_digest` cells in `shots.csv` are equal), so a seed where their
-`logical_failure` differs is a shot the two decoders answered apart. A
+`predictions` differ is a shot the two decoders answered apart. On a
+one-observable memory that is a seed where `logical_failure` differs;
+with several observables or patches, compare `predictions`, since two
+failures can be two different answers. A
 backend that is correct and different from matching will disagree on
 some shots; a backend that is broken disagrees on most. Even two
 matching decoders disagree on a few when their windows differ, since a

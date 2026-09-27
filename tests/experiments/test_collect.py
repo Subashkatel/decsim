@@ -65,6 +65,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
+import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
@@ -780,6 +781,83 @@ def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
     assert collect.json_value(narrow.settings) != collect.json_value(
         wide.settings
     )
+
+
+def test_one_yaml_saved_under_two_names_names_its_points_alike(tmp_path):
+    """A point is named by what it runs, not by the file that says it.
+
+    sinter keeps a task's circuit_path out of its strong id and hashes
+    the circuit's text (sinter/_data/_task.py:157, 167-204). The
+    reference yaml saved as t2.yaml and as t6.yaml runs the same points,
+    so its points' ids are equal, though the links card's labels name
+    the two files.
+    """
+    first_path = tmp_path / "t2.yaml"
+    second_path = tmp_path / "t6.yaml"
+    shutil.copyfile(REFERENCE_YAML, first_path)
+    shutil.copyfile(REFERENCE_YAML, second_path)
+
+    first_ids = _point_ids_of(first_path)
+    second_ids = _point_ids_of(second_path)
+
+    assert first_ids
+    assert first_ids == second_ids
+
+
+def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
+    """resolved/<id>.json is where a label is read, so it keeps them all."""
+    config_path = tmp_path / "t6.yaml"
+    shutil.copyfile(REFERENCE_YAML, config_path)
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+
+    point_id = run_folder.record_point(tmp_path, task)
+
+    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_text = record_path.read_text()
+    record = json.loads(record_text)
+    links = record["settings"]["links"]
+    channel = links["qpu_to_controller"]["channel"]
+    assert links["profile_name"] == "t6.yaml"
+    assert channel["configuration_source"] == "configs/t6.yaml links"
+
+
+def test_settings_that_differ_only_in_labels_are_one_point():
+    """A label changes no id; a latency, which changes the run, does."""
+    config = experiment.load_experiment(REFERENCE_YAML)
+    task = config.first_point_task()
+    links = task.settings.links
+    relabelled = dataclasses.replace(links, profile_name="other.yaml")
+    channel = links.qpu_to_controller.channel
+    slower_ticks = channel.propagation_latency_ticks + 1
+    slower_channel = dataclasses.replace(
+        channel, propagation_latency_ticks=slower_ticks
+    )
+    slower_path = dataclasses.replace(
+        links.qpu_to_controller, channel=slower_channel
+    )
+    slower = dataclasses.replace(links, qpu_to_controller=slower_path)
+
+    relabelled_task = _task_with_links(task, relabelled)
+    slower_task = _task_with_links(task, slower)
+
+    assert relabelled_task.strong_id() == task.strong_id()
+    assert relabelled_task.settings == task.settings
+    assert slower_task.strong_id() != task.strong_id()
+
+
+def _point_ids_of(config_path: pathlib.Path) -> list:
+    config = experiment.load_experiment(config_path)
+    point_ids = []
+    for task, _collection in config.point_tasks():
+        point_id = task.strong_id()
+        point_ids.append(point_id)
+    return point_ids
+
+
+def _task_with_links(task: collect.Task, links) -> collect.Task:
+    settings = dataclasses.replace(task.settings, links=links)
+    return collect.Task(settings, task.metadata, task.online_threshold)
 
 
 @pytest.mark.parametrize(

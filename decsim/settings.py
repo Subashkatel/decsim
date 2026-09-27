@@ -140,7 +140,7 @@ class MachineSettings:
     ) -> "MachineSettings":
         """One yaml's sections, each handed to the package that owns it.
 
-        name labels the links card in the traffic ledger; section_folders
+        name labels the links card in the run's description; section_folders
         maps a section to the folder of the yaml that wrote it, which the
         escalation section's relative table path and the workload's
         relative files resolve against.

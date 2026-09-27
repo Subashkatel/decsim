@@ -40,7 +40,8 @@ class CapacitySettings:
     """
 
     input_bits_per_microsecond: Union[float, fractions.Fraction]
-    source: str
+    # where the rate was written, a label: no part of a point's id
+    source: str = dataclasses.field(compare=False)
 
     def __post_init__(self) -> None:
         _require_finite_number(
@@ -114,7 +115,8 @@ class ChannelSettings:
     name: str
     propagation_latency_ticks: int
     capacity: Optional[CapacitySettings]
-    configuration_source: str
+    # where the card was written, a label: no part of a point's id
+    configuration_source: str = dataclasses.field(compare=False)
     protocol: ProtocolSettings = ProtocolSettings()
 
     def __post_init__(self) -> None:
@@ -219,9 +221,10 @@ class FabricSettings:
     prices that processing on its own line. kind names the row of
     LINK_FABRICS (link_profiles.py) that supplied these numbers and
     builds the run's fabric from them with build(card, engine);
-    profile_name is the same row's name with the yaml's own file
-    appended, for the traffic report. Python callers can set readout_routes
-    to choose a path card by the complete contributing patch footprint.
+    profile_name is the row's name, or the yaml's own file name for a
+    card read from a yaml, which the run's description prints. Python
+    callers can set readout_routes to choose a path card by the complete
+    contributing patch footprint.
     Unmatched footprints use qpu_to_controller. Equal channel names share
     the same setup engine and serializer, including across routed cards.
     """
@@ -237,7 +240,9 @@ class FabricSettings:
     frame_to_controller: PathSettings
     controller_to_qpu: PathSettings
     controller_to_strong_buffer: PathSettings
-    profile_name: str
+    # the card's name for the run's description, a label: no part of a
+    # point's id
+    profile_name: str = dataclasses.field(compare=False)
     kind: str = "logical_reference"
     readout_routes: tuple[ReadoutRoute, ...] = ()
 

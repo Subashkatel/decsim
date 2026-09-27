@@ -60,9 +60,16 @@ class Task:
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
 
     def strong_id(self) -> str:
-        """sha256 of the json text of the settings and the metadata."""
+        """sha256 of the json text of the settings and the metadata.
+
+        A settings field declared compare=False is a label, a name or a
+        source that changes nothing the machine does, and is left out,
+        as sinter leaves a task's circuit_path out of its strong id
+        (sinter/_data/_task.py:157, 167-204). The point's resolved
+        record keeps every label (run_folder.record_point).
+        """
         value = {
-            "settings": json_value(self.settings),
+            "settings": json_value(self.settings, keep_labels=False),
             "metadata": json_value(self.metadata),
         }
         text = json.dumps(value, sort_keys=True)
@@ -238,7 +245,7 @@ def metadata_text(metadata: Mapping[str, Any]) -> str:
     return json.dumps(value, sort_keys=True)
 
 
-def json_value(value: Any) -> Any:
+def json_value(value: Any, *, keep_labels: bool = True) -> Any:
     """A settings record as plain json: every value by its content.
 
     A dataclass (a settings record, a round policy) appears as its
@@ -248,15 +255,16 @@ def json_value(value: Any) -> Any:
     carries the task's circuit (sinter/_data/_task.py:193), so two tasks
     that run different circuits are two tasks. A Python-built component
     (a decoder, a device) has no record form and appears by its content
-    too (_json_object).
+    too (_json_object). keep_labels False leaves out every dataclass
+    field declared compare=False, the labels a strong id does not hash.
     """
     if dataclasses.is_dataclass(value):
-        return _json_record(value)
+        return _json_record(value, keep_labels)
     if isinstance(value, Mapping):
-        return _json_mapping(value)
+        return _json_mapping(value, keep_labels)
     if isinstance(value, (list, tuple)):
-        return _json_list(value)
-    return _json_scalar(value)
+        return _json_list(value, keep_labels)
+    return _json_scalar(value, keep_labels)
 
 
 def _report_a_finished_task(
@@ -321,20 +329,22 @@ def _submitted(
     return futures
 
 
-def _json_record(record: Any) -> dict:
-    """A dataclass as its fields, each one walked."""
+def _json_record(record: Any, keep_labels: bool) -> dict:
+    """A dataclass as its fields, each one walked; labels when kept."""
     fields = {}
     for field in dataclasses.fields(record):
+        if not field.compare and not keep_labels:
+            continue
         field_value = getattr(record, field.name)
-        fields[field.name] = json_value(field_value)
+        fields[field.name] = json_value(field_value, keep_labels=keep_labels)
     return fields
 
 
-def _json_mapping(mapping: Mapping) -> dict:
+def _json_mapping(mapping: Mapping, keep_labels: bool) -> dict:
     """A mapping with its keys as text and its values walked."""
     items = {}
     for key, item in mapping.items():
-        items[str(key)] = json_value(item)
+        items[str(key)] = json_value(item, keep_labels=keep_labels)
     return items
 
 
@@ -360,16 +370,16 @@ def _refuse_a_key_that_is_not_text(value: Any, where: str) -> None:
         _refuse_a_key_that_is_not_text(item, f"{where}.{key}")
 
 
-def _json_list(sequence) -> list:
+def _json_list(sequence, keep_labels: bool) -> list:
     """A list or a tuple, each item walked."""
     items = []
     for item in sequence:
-        json_item = json_value(item)
+        json_item = json_value(item, keep_labels=keep_labels)
         items.append(json_item)
     return items
 
 
-def _json_scalar(value: Any) -> Any:
+def _json_scalar(value: Any, keep_labels: bool) -> Any:
     """A number exactly, a string, flag or path as written; others named."""
     if isinstance(value, (numbers.Number, numpy.generic)):
         return _json_number(value)
@@ -381,10 +391,10 @@ def _json_scalar(value: Any) -> Any:
         return value.name
     if isinstance(value, stim.Circuit):
         return str(value)
-    return _json_object(value)
+    return _json_object(value, keep_labels)
 
 
-def _json_object(value: Any) -> Any:
+def _json_object(value: Any, keep_labels: bool) -> Any:
     """A Python-built component: its class, and its attributes walked.
 
     Two instances that hold different values are two tasks. The id is
@@ -399,7 +409,7 @@ def _json_object(value: Any) -> Any:
     attributes = _attributes_of(value)
     if not attributes:
         return class_name
-    content = _json_mapping(attributes)
+    content = _json_mapping(attributes, keep_labels)
     return {"class": class_name, "attributes": content}
 
 

@@ -29,7 +29,11 @@ is the decoder-to-decoder seam.
 
 import collections
 import dataclasses
+import io
 import math
+import pathlib
+import re
+import tokenize
 from typing import Optional
 
 import pytest
@@ -57,6 +61,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 from tests.experiments.yaml_configs import (
@@ -1800,3 +1805,50 @@ def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
     )
     assert row["referee_windows_checked"] == audit.windows_checked
     assert row["referee_window_disagreements"] == audit.window_disagreements
+
+
+def test_no_runner_module_names_a_row_of_the_decoder_table():
+    """A new decoder is one table row and one axis value, no runner edit.
+
+    The referent is the decoder table itself (decoders/settings.py
+    DECODERS). The runner is the experiments package with collect.py and
+    results.py; no name, import or string in it is a row's key (NOTE
+    section 9 item 10), so what it measures holds for every row.
+    """
+    rows = set(decoder_settings.DECODERS)
+    measure_file = pathlib.Path(measure.__file__)
+    experiments_dir = measure_file.parent
+    experiment_files = experiments_dir.glob("*.py")
+    collect_file = pathlib.Path(collect.__file__)
+    results_file = pathlib.Path(results.__file__)
+    runner_files = [*experiment_files, collect_file, results_file]
+
+    named = _rows_named_in(runner_files, rows)
+
+    assert named == []
+
+
+def _rows_named_in(paths: list, rows: set) -> list:
+    """Each (file, row) where a file's names or strings hold a row's key."""
+    named = []
+    for path in sorted(paths):
+        source = path.read_text()
+        words = _source_words(source)
+        found = words & rows
+        for row in sorted(found):
+            named.append((path.name, row))
+    return named
+
+
+def _source_words(source: str) -> set:
+    """Every name token, and every word inside a string token, of a source."""
+    source_text = io.StringIO(source)
+    readline = source_text.readline
+    words = set()
+    for token in tokenize.generate_tokens(readline):
+        if token.type == tokenize.NAME:
+            words.add(token.string)
+        if token.type == tokenize.STRING:
+            string_words = re.findall(r"[A-Za-z_]+", token.string)
+            words.update(string_words)
+    return words

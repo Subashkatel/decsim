@@ -140,7 +140,7 @@ class PrefixCounts:
     core_seconds: float = 0.0
 
     def add(self, other: "PrefixCounts") -> None:
-        """The next seeds' counts, added on."""
+        """Counts of the seeds right after these: a prefix grows at its end."""
         self.shots += other.shots
         self.scored_shots += other.scored_shots
         self.failures += other.failures

@@ -1245,9 +1245,8 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
     command.main(["collect", str(whole_config), "--out", str(whole_dir)])
     cut_config = _online_config(tmp_path, 15)
     command.main(["collect", str(cut_config), "--out", str(cut_dir)])
-    for lost_name in ("2-2", "3-3"):
-        (lost_piece,) = cut_dir.glob(f"pieces/*/{lost_name}")
-        shutil.rmtree(lost_piece)
+    _lose_the_piece(cut_dir, "2-2")
+    _lose_the_piece(cut_dir, "3-3")
 
     command.main(["collect", str(cut_config), "--out", str(cut_dir)])
 
@@ -1261,6 +1260,12 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
     assert cut_decisions == whole_decisions
     assert whole_trajectory[-1]["window_count"] == "20"
     assert cut_trajectory == whole_trajectory
+
+
+def _lose_the_piece(experiment_dir, name: str) -> None:
+    """The piece gone, as a killed job leaves it missing."""
+    (lost_piece,) = experiment_dir.glob(f"pieces/*/{name}")
+    shutil.rmtree(lost_piece)
 
 
 def _online_config(tmp_path, piece_rounds: int):

@@ -19,7 +19,7 @@ import pytest
 import stim
 import yaml
 
-import decsim
+import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -897,63 +897,53 @@ def test_a_manifest_names_every_installed_package(tmp_path):
     assert "numpy" in packages
 
 
-def test_a_manifest_names_every_compiled_library_in_the_imported_tree(
-    tmp_path, compiled_union_find_library
+def test_a_manifest_names_the_library_a_loader_loads(
+    tmp_path, monkeypatch, compiled_union_find_library
 ):
     """A library is built, not tracked, so the commit does not name it.
 
-    The referent is the imported package's folder read here: every .so
-    below it, hashed, the Union-Find library the suite built among them.
+    The referent is the file the suite built, hashed here, keyed by its
+    absolute path.
     """
+    monkeypatch.delenv(compiled_decoder.LIBRARY_VARIABLE, raising=False)
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
     run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
     manifest = _manifest_of(out_dir)
-    package_file = pathlib.Path(decsim.__file__)
-    absolute_file = package_file.resolve()
-    package_dir = absolute_file.parent
-    expected = _library_hashes(package_dir)
     union_find_path = compiled_union_find_library.resolve()
-    union_find_key = union_find_path.relative_to(package_dir.parent)
+    expected = {str(union_find_path): _sha256_of(union_find_path)}
 
     assert manifest["compiled_libraries"] == expected
-    assert expected[str(union_find_key)] == _sha256_of(union_find_path)
 
 
 @pytest.mark.parametrize(
-    ("library_names", "expected"),
+    ("library_bytes", "expected_digest"),
     [
-        ((), {}),
         (
-            ("decoders/row/row.so",),
-            {
-                "decsim/decoders/row/row.so": (
-                    "ba7816bf8f01cfea414140de5dae2223"
-                    "b00361a396177a9cb410ff61f20015ad"
-                )
-            },
+            b"abc",
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
         ),
+        (None, None),
     ],
 )
-def test_a_manifest_names_exactly_the_libraries_its_tree_holds(
-    tmp_path, monkeypatch, library_names, expected
+def test_a_manifest_names_a_library_loaded_from_outside_the_package(
+    tmp_path, monkeypatch, library_bytes, expected_digest
 ):
-    """The libraries the tree holds, whatever built them, and none for none.
+    """The bytes the loader's own environment names, and none when unbuilt.
 
-    The one library's bytes are "abc", whose sha256 is FIPS 180-2's
+    The stand-in library's bytes are "abc", whose sha256 is FIPS 180-2's
     first example.
     """
-    package_dir = tmp_path / "tree" / "decsim"
-    package_dir.mkdir(parents=True)
-    library_paths = [package_dir / name for name in library_names]
-    _write_libraries(library_paths)
-    monkeypatch.setattr(run_folder, "PACKAGE_DIR", package_dir)
+    library_path = tmp_path / "elsewhere" / "union_find.so"
+    _write_library(library_path, library_bytes)
+    monkeypatch.setenv(compiled_decoder.LIBRARY_VARIABLE, str(library_path))
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
 
     run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
 
     manifest = _manifest_of(out_dir)
+    expected = _named_library(library_path, expected_digest)
     assert manifest["compiled_libraries"] == expected
 
 
@@ -1797,17 +1787,16 @@ def test_a_build_refusal_under_run_is_one_line(tmp_path, capsys):
     )
 
 
-def _write_libraries(library_paths: list) -> None:
-    """Each path a stand-in library whose bytes are "abc"."""
-    for path in library_paths:
-        path.parent.mkdir(parents=True)
-        path.write_bytes(b"abc")
+def _write_library(path: pathlib.Path, contents) -> None:
+    """A stand-in library holding the bytes, or no file for None."""
+    path.parent.mkdir(parents=True)
+    if contents is not None:
+        path.write_bytes(contents)
 
 
-def _library_hashes(package_dir: pathlib.Path) -> dict:
-    """Every .so below a package folder, by its path from the folder above."""
-    hashes = {}
-    for path in package_dir.rglob("*.so"):
-        relative = path.relative_to(package_dir.parent)
-        hashes[str(relative)] = _sha256_of(path)
-    return hashes
+def _named_library(path: pathlib.Path, digest) -> dict:
+    """The manifest's entry for one library, or none for no digest."""
+    if digest is None:
+        return {}
+    absolute = path.resolve()
+    return {str(absolute): digest}

@@ -25,6 +25,7 @@ from typing import Optional
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.collect as collect
+import decsim.compiled_libraries as compiled_libraries
 import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
@@ -40,10 +41,6 @@ FINISHED_FILE = "finished"
 # whose interpreter has no git of its own (slurm/slurm_run.sh exports
 # it): "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
-# The package this run imported, whose compiled libraries it loads.
-_THIS_FILE = pathlib.Path(__file__)
-_ABSOLUTE_FILE = _THIS_FILE.resolve()
-PACKAGE_DIR = _ABSOLUTE_FILE.parents[1]
 
 
 def run_dir_for(config, out_dir=None) -> pathlib.Path:
@@ -591,18 +588,15 @@ def _sha256_of(path: pathlib.Path) -> str:
 
 
 def _compiled_library_hashes() -> dict:
-    """Every compiled library in the imported package, each its sha256.
+    """Every library a loader of this process names, each its sha256.
 
-    Keyed by the path below the package's folder. A library is built
-    from tracked C source (tools/build_union_find.sh) and is not tracked
-    itself, so the commit does not name the bytes a run loaded; a tree
-    with none built records none.
+    Keyed by its absolute path, since a loader may take it from outside
+    the package. A library is built from tracked C source and is not
+    tracked itself, so the commit does not name the bytes a run loaded.
     """
     hashes = {}
-    library_paths = PACKAGE_DIR.rglob("*.so")
-    for path in sorted(library_paths):
-        relative = path.relative_to(PACKAGE_DIR.parent)
-        hashes[str(relative)] = _sha256_of(path)
+    for path in compiled_libraries.paths():
+        hashes[str(path)] = _sha256_of(path)
     return hashes
 
 

@@ -331,7 +331,7 @@ One object. Its keys, from `write_manifest` in
 | `git` | the commit and whether the checkout was dirty, read once when the process started |
 | `container` | the container image, when one was in use |
 | `versions` | the Python version, and `packages`: every installed package and its version |
-| `compiled_libraries` | every compiled library in the decsim package the run imported, keyed by its path (`decsim/decoders/union_find/union_find.so`), each its sha256, since a library is built and not tracked and the commit does not name it; empty when none is built |
+| `compiled_libraries` | every compiled library a loader the run imported names, keyed by its absolute path, each its sha256, since a library is built and not tracked and the commit does not name it; a loader may take its file from outside the package (the environment variable the Union-Find row reads, `LIBRARY_VARIABLE` in `decsim/decoders/union_find/compiled_decoder.py`), and a named file not built is left out |
 | `host`, `slurm_job_id` | where it ran |
 | `argv` | the command line as it was invoked |
 | `started_utc`, `finished_utc` | when |

@@ -18,7 +18,11 @@ docstring.
 
 - `decsim/__init__.py`: decsim, a discrete-event simulator of the QEC reaction path.
 
-## Level 0: config, records, tables, trace_source
+## Level 0: compiled_libraries, config, records, tables, trace_source
+
+### compiled_libraries
+
+- `decsim/compiled_libraries.py`: The compiled libraries this process's loaders name, for the manifest.
 
 ### config
 

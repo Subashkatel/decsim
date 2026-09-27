@@ -398,19 +398,10 @@ def _run_the_planned_pieces(
     units = _planned_units(
         experiment_dir, config_pieces, task_by_point, configs
     )
-    records = run_folder.resolved_by_point(experiment_dir)
-    rounds_by_point = {}
-    for unit in units:
-        point_id = unit.task.strong_id()
-        rounds_by_point[point_id] = records[point_id]["rounds_per_shot"]
     report_dir = run_folder.combined_folder(experiment_dir, config)
     report_dir.mkdir(parents=True, exist_ok=True)
     measure_shot = _shot_measure(unique, report_dir)
-    configuration_id = run_folder.configuration_id(config)
-    piece_facts = {"configuration_id": configuration_id, **facts}
-    save = functools.partial(
-        _save_the_piece, experiment_dir, piece_facts, rounds_by_point
-    )
+    save = _planned_piece_saver(experiment_dir, config, units, facts)
     independent, online = _independent_and_online(units)
     collect.run_units(
         independent, measure_shot, on_unit_done=save, processes=processes
@@ -418,6 +409,29 @@ def _run_the_planned_pieces(
     for unit in online:
         resumed = _resumed_from_the_piece_before(experiment_dir, unit)
         collect.run_units([resumed], measure_shot, on_unit_done=save)
+
+
+def _planned_piece_saver(
+    experiment_dir: pathlib.Path,
+    config: experiment.ExperimentConfig,
+    units: list,
+    facts: dict,
+):
+    """The unit callback that saves a planned unit as its piece.
+
+    Each piece names its configuration beside the round's facts, and
+    counts its rounds by its point's record, which the plan wrote.
+    """
+    records = run_folder.resolved_by_point(experiment_dir)
+    rounds_by_point = {}
+    for unit in units:
+        point_id = unit.task.strong_id()
+        rounds_by_point[point_id] = records[point_id]["rounds_per_shot"]
+    configuration_id = run_folder.configuration_id(config)
+    piece_facts = {"configuration_id": configuration_id, **facts}
+    return functools.partial(
+        _save_the_piece, experiment_dir, piece_facts, rounds_by_point
+    )
 
 
 def _independent_and_online(units: list) -> tuple:

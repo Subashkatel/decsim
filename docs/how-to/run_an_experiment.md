@@ -7,10 +7,20 @@ lists its points, and each point runs until it has enough errors or
 reaches its shot cap. The commands below use the decoder baseline,
 `experiments/decoder_baseline/run.py`.
 
+## Before you start
+
+- A python environment with decsim's dependencies and sinter,
+  relay-bp and tesseract-decoder, the packages the baseline's decoders
+  come from. The `run` extra does not install the last three.
+- The Union-Find library, built once in each checkout:
+  `tools/build_union_find.sh`.
+- Every command runs from the checkout's root with `PYTHONPATH=.`, so
+  python imports this checkout's decsim and not another installed one.
+
 ## List the points
 
 ```bash
-python experiments/decoder_baseline/run.py --list
+PYTHONPATH=. python experiments/decoder_baseline/run.py --list
 ```
 
 Each line is a point's id, its decoder and its labels, for example
@@ -20,7 +30,7 @@ in the order the script adds the points.
 ## Run one point
 
 ```bash
-python experiments/decoder_baseline/run.py 7 --workers 4 --out results/baseline_test
+PYTHONPATH=. python experiments/decoder_baseline/run.py 7 --workers 4 --out results/baseline_test
 ```
 
 This runs point 7 with 4 worker processes. Without `--out`, the results
@@ -46,11 +56,12 @@ script or commit into it is refused; give `--out` a new folder.
 
 ## Run every point on Slurm
 
-One array task runs one point. Pass the folder, so every task writes
-into the same one:
+One array task runs one point. Submit from the checkout's root, which
+each task puts on its PYTHONPATH, and pass the folder, so every task
+writes into the same one:
 
 ```bash
-sbatch --array 0-$(( $(python experiments/decoder_baseline/run.py --list | wc -l) - 1 )) \
+sbatch --array 0-$(( $(PYTHONPATH=. python experiments/decoder_baseline/run.py --list | wc -l) - 1 )) \
   slurm/run.sbatch experiments/decoder_baseline/run.py results/2026-09-27_decoder_baseline
 ```
 
@@ -59,13 +70,15 @@ account, partition or QOS your cluster needs on the `sbatch` line.
 
 ## Resume
 
-Submit the same command again. A point reads its own CSV and goes on
-from there; a point that already stopped takes no new shots.
+Submit the same command again, with the same folder. A point reads its
+own CSV and goes on from there; a point that already stopped takes no
+new shots. On a later day, `--out` or the sbatch folder must name the
+original folder: the dated default would be a new, empty one.
 
 ## Combine
 
 ```bash
-python experiments/decoder_baseline/run.py combine --out results/2026-09-27_decoder_baseline
+PYTHONPATH=. python experiments/decoder_baseline/run.py combine --out results/2026-09-27_decoder_baseline
 ```
 
 This writes `stats.csv` from every point's CSV, with sinter's own

@@ -1,7 +1,10 @@
-"""The records one run returns: the run and each logical operation."""
+"""The records one run returns: the run and each logical operation.
+
+And what a collect unit's runs return together, its rows and memory.
+"""
 
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclasses.dataclass(frozen=True)
@@ -37,3 +40,18 @@ class RunResult:
     # the copies, references and moves of the data path; None unless the
     # observation section asked for them
     data_movement: Optional[dict]
+
+
+@dataclasses.dataclass(frozen=True)
+class UnitOutcome:
+    """What one unit ran: its measured rows, its task, its memory.
+
+    task is the decsim.collect.Task the unit ran. peak_memory_mb is the
+    peak resident memory of the process that ran the unit, read when the
+    unit ended. A worker runs units one after another, so it bounds the
+    unit's own peak from above, which is the side a memory request needs.
+    """
+
+    rows: list
+    task: Any
+    peak_memory_mb: float

@@ -112,21 +112,6 @@ class Unit:
 
 
 @dataclasses.dataclass(frozen=True)
-class UnitOutcome:
-    """What one unit ran: its measured rows, its task, its memory.
-
-    peak_memory_mb is the peak resident memory of the process that ran
-    the unit, read when the unit ended. A worker runs units one after
-    another, so it bounds the unit's own peak from above, which is the
-    side a memory request needs.
-    """
-
-    rows: list
-    task: "Task"
-    peak_memory_mb: float
-
-
-@dataclasses.dataclass(frozen=True)
 class Shot:
     """One seeded run of a task: the machine, its result, its wall time."""
 
@@ -169,7 +154,7 @@ def run_units(
     units: list,
     measure: Callable[[Shot], Any],
     *,
-    on_unit_done: Callable[[Unit, UnitOutcome], None],
+    on_unit_done: Callable[[Unit, result_records.UnitOutcome], None],
     processes: int = 1,
 ) -> None:
     """Every unit run, each handed on the moment it ends.
@@ -197,7 +182,9 @@ def work_units(tasks: list, shots: int) -> list:
     return units
 
 
-def run_unit(unit: Unit, measure: Callable[[Shot], Any]) -> UnitOutcome:
+def run_unit(
+    unit: Unit, measure: Callable[[Shot], Any]
+) -> result_records.UnitOutcome:
     """Every seed of one unit, measured, the task that ran them, the memory.
 
     The task comes back because its online threshold calibrator learned
@@ -213,7 +200,7 @@ def run_unit(unit: Unit, measure: Callable[[Shot], Any]) -> UnitOutcome:
         row = measure(shot)
         rows.append(row)
     peak_memory_mb = _peak_memory_mb()
-    return UnitOutcome(rows, unit.task, peak_memory_mb)
+    return result_records.UnitOutcome(rows, unit.task, peak_memory_mb)
 
 
 def unique_tasks(tasks: Iterable[Task]) -> list:
@@ -285,7 +272,7 @@ def _keep_rows(
     rows_by_task: dict,
     on_task_done: Optional[Callable[[Task], None]],
     unit: Unit,
-    outcome: UnitOutcome,
+    outcome: result_records.UnitOutcome,
 ) -> None:
     """A unit callback that keeps a task's rows; its unit is the whole task."""
     task_id = unit.task.strong_id()

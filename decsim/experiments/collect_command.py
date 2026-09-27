@@ -33,6 +33,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
+import decsim.records.results as result_records
 import decsim.records.round_plans as round_plans
 
 
@@ -840,7 +841,7 @@ def _save_the_piece(
     facts: dict,
     rounds_by_point: dict,
     unit: collect.Unit,
-    outcome: collect.UnitOutcome,
+    outcome: result_records.UnitOutcome,
 ) -> None:
     """One unit's measurements saved as its piece.
 

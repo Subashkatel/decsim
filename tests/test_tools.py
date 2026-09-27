@@ -486,7 +486,8 @@ def test_a_wall_clock_tutorial_holds_its_counts_and_not_its_timings():
         r"^(load .*: )[0-9.]+", r"\g<1>99.99", text, count=1, flags=re.MULTILINE
     )
     new_count = text.replace(
-        "logical failures: 0 of 2 shots", "logical failures: 1 of 2 shots"
+        "logical failures: 0 of 2 scored shots",
+        "logical failures: 1 of 2 scored shots",
     )
 
     load_differences = check.page_differences(tutorial, new_load, outputs)

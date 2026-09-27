@@ -252,6 +252,10 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     failures = totals.true_counts["logical_failure"]
     shot_count = totals.rows
     scored_shots = totals.true_counts["is_scored"]
+    unscored_shots = shot_count - scored_shots
+    failures_or_unscored = failures + unscored_shots
+    # a bound on this sample's rate, not a confidence bound
+    rate_unscored_as_failures = failures_or_unscored / shot_count
     ler_low, ler_high = wilson_interval(failures, scored_shots)
     row = point_columns(point)
     row["shots"] = shot_count
@@ -265,7 +269,8 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
         "direct_mismatch"
     ]
     row["scored_shots"] = scored_shots
-    row["unscored_shots"] = shot_count - scored_shots
+    row["unscored_shots"] = unscored_shots
+    row["logical_error_rate_unscored_as_failures"] = rate_unscored_as_failures
     _add_status_columns(row, totals)
     row["throughput_windows_per_us"] = totals.mean("throughput_windows_per_us")
     row["throughput_rounds_per_us"] = totals.mean("throughput_rounds_per_us")
@@ -1443,27 +1448,32 @@ def _terminal_block(row: dict, values: dict) -> str:
     """One sweep point's terminal block, one labeled line per number.
 
     The block opens with the point's value at each swept path. The
-    lines above the latency ones are columns every row has, and the
-    unscored shots when there are any, which the failures leave out. The
-    latency lines are the points the row holds (_points_held), because a
-    row folded from an older tree's folders holds only the points that
-    tree measured.
+    lines above the latency ones are columns every row has. The failures
+    and their rate are of the scored shots, which the rate's label says,
+    and the unscored shots are counted beside them. The latency lines
+    are the points the row holds (_points_held), because a row folded
+    from an older tree's folders holds only the points that tree
+    measured.
     """
     algorithm = row["algorithm"]
     algorithm_text = _algorithm_text(algorithm)
+    unscored_fraction = row["unscored_shots"] / row["shots"]
     lines = []
     for path, value in values.items():
         lines.append(f"{path}: {value}")
     lines += [
         f"algorithm: {algorithm_text}",
         f"load (service per window / window inter-arrival): {row['load']:.2f}",
-        f"logical failures: {row['logical_failures']} of {row['shots']} shots",
+        f"logical failures: {row['logical_failures']} of "
+        f"{row['scored_shots']} scored shots",
+        "logical error rate among scored shots: "
+        f"{row['logical_error_rate']:.3g}",
+        f"unscored shots: {row['unscored_shots']} of {row['shots']} "
+        f"({unscored_fraction:.3g})",
         f"mismatches vs direct PyMatching: "
         f"{row['prediction_mismatches_vs_direct']}",
         f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
     ]
-    if row["unscored_shots"] > 0:
-        lines.append(f"unscored shots: {row['unscored_shots']}")
     latency_lines = _terminal_latency_lines(row)
     lines.extend(latency_lines)
     return "\n".join(lines)

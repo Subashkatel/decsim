@@ -96,7 +96,9 @@ qpu.round_period_microseconds: 1.0
 workload.arguments.physical_error_probability: 0.003
 algorithm: pymatching
 load (service per window / window inter-arrival): 2.53
-logical failures: 16 of 400 shots
+logical failures: 16 of 400 scored shots
+logical error rate among scored shots: 0.04
+unscored shots: 0 of 400 (0)
 mismatches vs direct PyMatching: 0
 throughput: 0.412 rounds per us
 queue wait, mean: 12.764 us
@@ -105,12 +107,16 @@ ready to frame commit: median 26.504 us, p99 55.052 us
 
 qpu.distance: 5
 ...
-logical failures: 12 of 400 shots
+logical failures: 12 of 400 scored shots
+logical error rate among scored shots: 0.03
+unscored shots: 0 of 400 (0)
 mismatches vs direct PyMatching: 0
 ...
 qpu.distance: 7
 ...
-logical failures: 8 of 400 shots
+logical failures: 8 of 400 scored shots
+logical error rate among scored shots: 0.02
+unscored shots: 0 of 400 (0)
 mismatches vs direct PyMatching: 0
 ...
 ```
@@ -157,7 +163,7 @@ summary printed them. Each row's first columns name its point: its id,
 then one column per yaml path the sweep sets, here the error rate, the
 distance and the round period.
 
-`logical_error_rate` is the failures divided by the shots. It is an
+`logical_error_rate` is the failures divided by the scored shots. It is an
 estimate, and 16 out of 400 would have come out differently with
 different seeds. The two Wilson columns say how differently.
 

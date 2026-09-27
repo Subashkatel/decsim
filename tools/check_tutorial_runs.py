@@ -11,7 +11,8 @@ of the config and the seed, so each block is compared whole: the
 timings, the trace and the counts alike. On a page that names a decoder,
 a decode is charged the wall clock it took (decsim/decoders/decoder.py,
 decode_timed), so only the lines no clock moves are compared there: the
-logical failure counts, the correctness check, the QPU's finishing
+logical failure counts, their rate and the unscored shots, the
+correctness check, the QPU's finishing
 tick, the decoded observable, and everything `cut` and `ls` print.
 
 Run it from the repo root in an environment with the run extra:
@@ -35,6 +36,7 @@ FENCE = "```"
 COMMAND_WORDS = ("decsim", "cut", "ls")
 CLOCK_FREE_LINE = re.compile(
     r"^(?:terminal status|execution done|operation 1|logical failures"
+    r"|logical error rate among scored shots|unscored shots"
     r"|mismatches vs direct PyMatching): "
 )
 

@@ -19,8 +19,9 @@ algorithm when a point came to be named by its id: the id hashes the
 tree's settings records, not a measured value, so it is left out of the
 comparison. Five zero columns came with the window decode statuses,
 one per status besides success, which no window of the recorded sweep
-carried, and two counts with the unscored shots, both its shots scored
-and none unscored, and one zero count of replaced provisional decodes
+carried, and three columns with the unscored shots, both its shots
+scored, none unscored and a zero rate counting them as failures, and
+one zero count of replaced provisional decodes
 without a correction, which a weak-only sweep never makes. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
@@ -794,8 +795,8 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     The crash is relay-bp's own decode_detailed raising, which the row
     turns into BACKEND_ERROR with no correction; each shot is unscored
     with that reason, counts its windows under backend_error_windows,
-    and is not a failure, and the point has no failure fraction and no
-    interval.
+    and is not a failure; the point has no failure fraction and no
+    interval, and counting its unscored shots as failures gives 1.
     """
     monkeypatch.setattr(
         relay_window, "_load_relay_decoder_type", _crashing_relay_type
@@ -825,4 +826,7 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     assert math.isnan(rows[0]["logical_error_rate"])
     assert math.isnan(rows[0]["ler_wilson_low"])
     assert math.isnan(rows[0]["ler_wilson_high"])
-    assert "unscored shots: 2" in lines
+    assert rows[0]["logical_error_rate_unscored_as_failures"] == 1.0
+    assert "logical failures: 0 of 0 scored shots" in lines
+    assert "logical error rate among scored shots: nan" in lines
+    assert "unscored shots: 2 of 2 (1)" in lines

@@ -267,6 +267,7 @@ point the run held:
 | `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96 over the scored shots, from `wilson_interval`; both NaN when no shot was scored |
 | `direct_pymatching_failures`, `prediction_mismatches_vs_direct` | the same shots decoded outside the machine, and the disagreements |
 | `scored_shots`, `unscored_shots` | how many of the point's shots were scored, and how many were not (`is_scored`) |
+| `logical_error_rate_unscored_as_failures` | the failures and the unscored shots together over every shot: the rate this sample would read if every unscored shot had failed, a bound on the sample and not a confidence bound. Beside `logical_error_rate`, which is conditional on scoring, it shows how much a backend that failed on hard syndromes could hide |
 | `<status>_windows`, `provisional_no_correction_windows` | the sums over the point's shots |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | the means |
 | `max_queued_windows` | the deepest queue over the point |

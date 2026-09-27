@@ -117,7 +117,9 @@ qpu.round_period_microseconds: 1.0
 workload.arguments.physical_error_probability: 0.001
 algorithm: pymatching
 load (service per window / window inter-arrival): 2.39
-logical failures: 0 of 2 shots
+logical failures: 0 of 2 scored shots
+logical error rate among scored shots: 0
+unscored shots: 0 of 2 (0)
 mismatches vs direct PyMatching: 0
 throughput: 0.449 rounds per us
 queue wait, mean: 2.603 us
@@ -202,7 +204,7 @@ qpu.distance,shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson
 3,2,0,0.0,0.0,0.6576280471103807
 ```
 
-`logical_error_rate` is the fraction of shots whose decoded observable
+`logical_error_rate` is the fraction of scored shots whose decoded observable
 did not match the truth: zero out of two here. `ler_wilson_low` and
 `ler_wilson_high` bracket it. Two shots say almost nothing, which is why
 the interval runs from 0 to 0.66. The next tutorial,

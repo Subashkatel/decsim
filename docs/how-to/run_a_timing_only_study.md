@@ -67,7 +67,9 @@ qpu.round_period_microseconds: 1.0
 workload.arguments.physical_error_probability: 0.001
 algorithm: 1 us
 load (service per window / window inter-arrival): 0.36
-logical failures: 0 of 20 shots
+logical failures: 0 of 20 scored shots
+logical error rate among scored shots: 0
+unscored shots: 0 of 20 (0)
 mismatches vs direct PyMatching: 0
 throughput: 0.997 rounds per us
 queue wait, mean: 0.000 us
@@ -87,8 +89,8 @@ Run it a second time and compare:
 
 ```bash
 decsim collect configs/priced_cards_example.yaml
-diff <(cut -d, -f1-28 results/<first>/sweep.csv) \
-     <(cut -d, -f1-28 results/<second>/sweep.csv)
+diff <(cut -d, -f1-29 results/<first>/sweep.csv) \
+     <(cut -d, -f1-29 results/<second>/sweep.csv)
 ```
 
 Every column matches except `sim_wall_seconds_per_shot`, which is how

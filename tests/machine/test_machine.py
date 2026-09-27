@@ -191,11 +191,15 @@ def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a decoder added as a row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
     monkeypatch.setitem(decoder_settings.DECODERS, "fake", FakeWeakDecoder)
@@ -213,11 +217,15 @@ def test_a_second_table_row_runs_gate_point_one():
     """Gate point 1's settings run to completion on the union_find row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
@@ -241,11 +249,15 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     """
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
 
@@ -1297,11 +1309,15 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a store added as a row."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     counting = dataclasses.replace(
         settings.weak_syndrome_buffer, kind="counting"
     )
@@ -1339,11 +1355,15 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
     """The row declares its tier, so no second table names the kind."""
     config_path = CONFIGS / "strong_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     escalation = dataclasses.replace(settings.escalation, kind="always_strong")
     settings = dataclasses.replace(settings, escalation=escalation)
     monkeypatch.setitem(
@@ -1399,11 +1419,15 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
     """One constructor call, so a row that reads only the engine builds."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     factory_settings = qpu_settings.FactorySettings(kind="always_ready")
     settings = dataclasses.replace(
         settings, magic_state_factory=factory_settings
@@ -2079,11 +2103,15 @@ def reference_run(escalation_kind):
     """One shot of reference.yaml at d=3, p=0.001, on one escalation kind."""
     config_path = CONFIGS / "reference.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     escalation = dataclasses.replace(settings.escalation, kind=escalation_kind)
     settings = dataclasses.replace(settings, escalation=escalation)
     machine = machine_module.Machine.build(settings, 0)
@@ -2233,10 +2261,12 @@ def late_landing_shot(directory, links):
     config_path = yaml_configs.write_config(directory, card)
     experiment_config = experiment.load_experiment(config_path)
     task = experiment_config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
     return collect.run_shot(task, 0)
 
@@ -2338,10 +2368,12 @@ def campaign_point_task(family):
     config_path = CAMPAIGN_DIRECTORY / f"{family}_d3.yaml"
     config = experiment.load_experiment(config_path)
     return config.point_task(
-        physical_error_probability=CAMPAIGN_PHYSICAL_ERROR,
-        distance=CAMPAIGN_DISTANCE,
-        round_period_microseconds=CAMPAIGN_ROUND_PERIOD_US,
-        shots=CAMPAIGN_SHOT_COUNT,
+        {
+            yaml_configs.ERROR_RATE_PATH: CAMPAIGN_PHYSICAL_ERROR,
+            "qpu.distance": CAMPAIGN_DISTANCE,
+            "qpu.round_period_microseconds": CAMPAIGN_ROUND_PERIOD_US,
+        },
+        CAMPAIGN_SHOT_COUNT,
     )
 
 

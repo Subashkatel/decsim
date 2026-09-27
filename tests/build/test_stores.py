@@ -125,11 +125,15 @@ def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
     path = configs / "data_movement_switching.yaml"
     text = path.read_text()
     config = experiment.load_experiment(path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     ported_strong = dataclasses.replace(
         settings.strong_syndrome_buffer, kind="ported_syndrome_buffer"
     )

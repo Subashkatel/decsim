@@ -64,15 +64,19 @@ def test_every_file_loads_with_its_detector_and_the_catch_deadline(detector):
     burst_path = FOLDER / f"{detector}_burst.yaml"
     quiet_path = FOLDER / f"{detector}_quiet.yaml"
 
-    burst = experiment.load_experiment(burst_path)
-    quiet = experiment.load_experiment(quiet_path)
+    burst_config = experiment.load_experiment(burst_path)
+    quiet_config = experiment.load_experiment(quiet_path)
+    burst_point = burst_config.first_point_task()
+    quiet_point = quiet_config.first_point_task()
 
+    burst = burst_point.settings
+    quiet = quiet_point.settings
     kind = DETECTORS[detector]["kind"]
-    assert burst.settings.burst_detector.kind == kind
-    assert quiet.settings.burst_detector == burst.settings.burst_detector
-    assert burst.settings.burst_detector.catch_deadline_rounds == 300
-    assert burst.settings.qpu.kind == "burst_stim"
-    assert quiet.settings.qpu.kind == "stim_device"
+    assert burst.burst_detector.kind == kind
+    assert quiet.burst_detector == burst.burst_detector
+    assert burst.burst_detector.catch_deadline_rounds == 300
+    assert burst.qpu.kind == "burst_stim"
+    assert quiet.qpu.kind == "stim_device"
 
 
 def _written(path) -> dict:

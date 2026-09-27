@@ -56,7 +56,7 @@ The output:
 
 ```
 config: reference
-point: {"distance": 3, "physical_error_probability": 0.001, "round_period_microseconds": 1.0} seed 0
+point: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001} seed 0
 terminal status: complete
 execution done: 15000000 ticks
 fully done: 37356000 ticks
@@ -67,12 +67,14 @@ run dir: results/first_shot
 Line by line:
 
 - `point: {...} seed 0`. One point of a sweep is one machine, and the
-  braces hold the settings its sweep block set, each by its name.
-  `physical_error_probability` 0.001 says each physical operation on the
-  QPU fails with probability one in a thousand. `distance` is the code
-  distance, the size of the error correcting code: distance 3 corrects
-  one error. `round_period_microseconds` is how long one round of
-  measurement takes on the QPU, one microsecond here.
+  braces hold the settings its sweep block set, each by its path in the
+  yaml. `qpu.distance` is the code distance, the size of the error
+  correcting code: distance 3 corrects one error.
+  `qpu.round_period_microseconds` is how long one round of measurement
+  takes on the QPU, one microsecond here.
+  `workload.arguments.physical_error_probability` 0.001 says each
+  physical operation on the QPU fails with probability one in a
+  thousand.
 - `execution done: 15000000 ticks`. A **tick** is the engine's integer
   unit of time, and one microsecond is a million ticks
   (`decsim/config.py`). So the QPU finished its quantum work after 15
@@ -109,10 +111,10 @@ It first prints what the yaml resolved to, one line per component, then
 the summary of each point:
 
 ```
-{"distance": 3, "physical_error_probability": 0.001, "round_period_microseconds": 1.0}: 2 shots done
-distance: 3
-physical_error_probability: 0.001
-round_period_microseconds: 1.0
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 2 shots done
+qpu.distance: 3
+qpu.round_period_microseconds: 1.0
+workload.arguments.physical_error_probability: 0.001
 algorithm: pymatching
 load (service per window / window inter-arrival): 2.39
 logical failures: 0 of 2 shots
@@ -216,7 +218,7 @@ braces the terminal printed.
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/reference --figure stage_breakdown --x distance
+decsim plot results/reference --figure stage_breakdown --x qpu.distance
 ```
 
 ```

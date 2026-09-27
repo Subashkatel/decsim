@@ -33,9 +33,11 @@ CONFIGS_DIR = yaml_configs.CONFIGS_DIR
 FOUR_POINT_SWEEP = {
     "sweep": [
         {
-            "physical_error_probability": [0.001, 0.003],
-            "distance": [3, 5],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001, 0.003],
+                "qpu.distance": [3, 5],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": 2,
         }
     ]
@@ -187,7 +189,8 @@ def test_help_prints_the_verbs_without_failing(capsys):
 def test_show_lists_every_sections_kind_of_every_shipped_config(name):
     config_path = CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
-    lines = experiment.resolved_description(config)
+    first_point = config.first_point_task()
+    lines = experiment.resolved_description(config, first_point.settings)
     text = "\n".join(lines)
     assert f"config: {config_path}" in lines[0]
     assert "qpu: kind stim_device" in text
@@ -267,7 +270,8 @@ def test_show_names_the_fabric_card_the_run_resolved_to():
     """
     config_path = CONFIGS_DIR / "reference.yaml"
     config = experiment.load_experiment(config_path)
-    lines = experiment.resolved_description(config)
+    first_point = config.first_point_task()
+    lines = experiment.resolved_description(config, first_point.settings)
     text = "\n".join(lines)
     assert "links: card reference.yaml" in text
 
@@ -305,7 +309,8 @@ def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
     )
     config = experiment.load_experiment(config_path)
 
-    lines = experiment.value_lines(config)
+    first_point = config.first_point_task()
+    lines = experiment.value_lines(config, first_point.settings)
 
     sweep_line = _line_number_of(reference_path, "sweep:")
     last_shots_line = _line_number_of(reference_path, "    shots: 2")
@@ -351,7 +356,8 @@ def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
     )
     config = experiment.load_experiment(config_path)
 
-    lines = experiment.value_lines(config)
+    first_point = config.first_point_task()
+    lines = experiment.value_lines(config, first_point.settings)
 
     bits_line = _first_line_starting(reference_path, "    bits: null")
     fridge_line = _first_line_starting(reference_path, "  fridge:")
@@ -399,14 +405,13 @@ def _cited_line(value_line: str) -> tuple:
 
 
 def _value_key(value_line: str) -> tuple:
-    """The yaml key a value line's value is read from."""
-    dotted, _, _ = value_line.partition(" = ")
+    """The yaml key a value line's value is read from, a swept one's sweep."""
+    dotted, _, rest = value_line.partition(" = ")
+    if "  [sweep, " in rest:
+        return ("sweep",)
     names = dotted.split(".")
     path = tuple(names)
-    key = experiment._yaml_key(path)
-    if key in experiment.SWEEP_PATHS:
-        return ("sweep",)
-    return key
+    return experiment._yaml_key(path)
 
 
 def _cited_lines(lines: list) -> list:
@@ -438,7 +443,8 @@ def test_every_line_show_cites_holds_the_key_of_its_value(name):
     """Run on a shipped config, show cites only its values' own keys."""
     config_path = CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
-    lines = experiment.value_lines(config)
+    point = config.first_point_task()
+    lines = experiment.value_lines(config, point.settings)
     cited = _cited_lines(lines)
 
     miscited = _miscited_lines(cited)
@@ -459,7 +465,8 @@ def _first_line_starting(path, start: str) -> int:
 def test_show_prints_every_value_after_the_sections(capsys):
     config_path = CONFIGS_DIR / "reference.yaml"
     config = experiment.load_experiment(config_path)
-    value_lines = experiment.value_lines(config)
+    first_point = config.first_point_task()
+    value_lines = experiment.value_lines(config, first_point.settings)
 
     command.main(["show", str(config_path)])
     printed = capsys.readouterr()
@@ -473,12 +480,8 @@ def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
     config_path = gate_point.CONFIG_PATH
     lines = run_command.run_one_shot(config_path, seed=0, out_dir=tmp_path)
     config = experiment.load_experiment(config_path)
-    block = config.sweep[0]
-    settings = config.point_settings(
-        physical_error_probability=block.physical_error_probabilities[0],
-        distance=block.distances[0],
-        round_period_microseconds=block.round_periods_microseconds[0],
-    )
+    point = config.first_point_task()
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     row = result.operation_results[0]
@@ -575,7 +578,11 @@ def test_a_collect_makes_each_points_workload_once(tmp_path, monkeypatch):
     maker_path.write_text(GROWING_MAKER)
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.delitem(sys.modules, "growing_maker", raising=False)
-    workload = {"kind": "producer", "function": "growing_maker:growing_memory"}
+    workload = {
+        "kind": "producer",
+        "function": "growing_maker:growing_memory",
+        "arguments": {"distance": "${qpu.distance}"},
+    }
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
     run_dir = tmp_path / "run"
 
@@ -597,7 +604,8 @@ def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
     files = {"kind": "files", "operations": str(operations_path)}
     rerun_folder = tmp_path / "rerun"
     rerun_folder.mkdir()
-    rerun_path = yaml_configs.write_config(rerun_folder, {"workload": files})
+    rerun_card = {"workload": files, "sweep": yaml_configs.QPU_ONLY_SWEEP}
+    rerun_path = yaml_configs.write_config(rerun_folder, rerun_card)
     second_dir = tmp_path / "second"
     run_command.run_one_shot(rerun_path, seed=0, out_dir=second_dir)
     first_result = (first_dir / "result.json").read_text()
@@ -1363,9 +1371,11 @@ def test_one_points_seeds_divide_across_two_shards(tmp_path):
     one_point = {
         "sweep": [
             {
-                "physical_error_probability": [0.001],
-                "distance": [3],
-                "round_period_microseconds": [1.0],
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.0],
+                },
                 "shots": 4,
             }
         ]
@@ -1471,9 +1481,11 @@ def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
     unknown_axis = {
         "sweep": [
             {
-                "physical_error_probability": [0.001],
-                "distance": [3],
-                "round_period_microseconds": [1.0],
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.0],
+                },
                 "algorithm": ["pymatching"],
                 "shots": 1,
             }
@@ -1486,7 +1498,8 @@ def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
     printed = capsys.readouterr()
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
-    assert "sweep block 1 does not know ['algorithm']" in printed.err
+    assert "sweep block 1 is " in printed.err
+    assert "a block is axes" in printed.err
 
 
 @pytest.mark.parametrize("shots", [0, -1, 1.5, "many", True])
@@ -1496,9 +1509,11 @@ def test_show_refuses_a_shot_count_that_is_not_a_whole_number_of_one_or_more(
     bad_count = {
         "sweep": [
             {
-                "physical_error_probability": [0.001],
-                "distance": [3],
-                "round_period_microseconds": [1.0],
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.0],
+                },
                 "shots": shots,
             }
         ]
@@ -1520,9 +1535,11 @@ def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
     scalar_axis = {
         "sweep": [
             {
-                "physical_error_probability": [0.001],
-                "distance": 3,
-                "round_period_microseconds": [1.0],
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": 3,
+                    "qpu.round_period_microseconds": [1.0],
+                },
                 "shots": 1,
             }
         ]
@@ -1533,9 +1550,8 @@ def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
 
     printed = capsys.readouterr()
     assert stopped.value.code == 1
-    assert "sweep block 1 distance must be a list of at least one value" in (
-        printed.err
-    )
+    sentence = "sweep block 1 axis qpu.distance must be a list of at least"
+    assert sentence in printed.err
 
 
 def test_plot_refuses_a_figure_it_does_not_draw(tmp_path, capsys):

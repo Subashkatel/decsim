@@ -442,9 +442,11 @@ FOLD_COUNTING_SWEEP = {
     "observation": {"data_movement": True},
     "sweep": [
         {
-            "physical_error_probability": [0.001, 0.01],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001, 0.01],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": 1,
         }
     ],
@@ -508,9 +510,14 @@ SWITCHING_FOLD_SWEEP = {
     },
     "sweep": [
         {
-            "physical_error_probability": [0.0001, 0.008],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [
+                    0.0001,
+                    0.008,
+                ],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": len(FOLD_SEEDS),
         }
     ],
@@ -559,10 +566,12 @@ def _fold_run(tmp_path, boundary_fold: str, probability: float) -> list:
 def _fold_outcome(config, probability: float, seed: int) -> tuple:
     """One shot's committed corrections, its outcome and its agreement."""
     task = config.point_task(
-        physical_error_probability=probability,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=len(FOLD_SEEDS),
+        {
+            "workload.arguments.physical_error_probability": probability,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        len(FOLD_SEEDS),
     )
     shot = collect.run_shot(task, seed)
     measurement = measure.measure_shot(shot)

@@ -58,23 +58,6 @@ class Task:
     metadata: Mapping[str, Any]
     online_threshold: Optional[Any] = None
 
-    @classmethod
-    def at_point(
-        cls,
-        settings: machine_settings.MachineSettings,
-        shots: int,
-        metadata: Mapping[str, Any],
-    ) -> "Task":
-        """The task, with the point's online threshold when there is one."""
-        physical_error_probability = (
-            settings.workload.physical_error_probability
-        )
-        distance = settings.qpu.distance
-        online_threshold = settings.escalation.online_threshold_for(
-            physical_error_probability, distance
-        )
-        return cls(settings, shots, metadata, online_threshold)
-
     def strong_id(self) -> str:
         """sha256 of the json text of the settings and the metadata."""
         value = {

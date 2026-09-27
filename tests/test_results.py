@@ -22,23 +22,27 @@ import tests.experiments.yaml_configs as yaml_configs
 
 TWO_POINT_SWEEP = [
     {
-        "physical_error_probability": [0.003, 0.01],
-        "distance": [3],
-        "round_period_microseconds": [1.0],
+        "axes": {
+            "workload.arguments.physical_error_probability": [0.003, 0.01],
+            "qpu.distance": [3],
+            "qpu.round_period_microseconds": [1.0],
+        },
         "shots": 20,
     }
 ]
 
 ROUNDS_COLUMN = "settings.workload.row_settings.arguments.rounds_per_shot"
-PROBABILITY_COLUMN = "settings.workload.physical_error_probability"
+PROBABILITY_COLUMN = (
+    "settings.workload.row_settings.arguments.physical_error_probability"
+)
 
 
 def _point_text(probability: float) -> str:
     """How diff names a point: its metadata's json text."""
     metadata = {
-        "distance": 3,
-        "physical_error_probability": probability,
-        "round_period_microseconds": 1.0,
+        "qpu.distance": 3,
+        "workload.arguments.physical_error_probability": probability,
+        "qpu.round_period_microseconds": 1.0,
     }
     text = json.dumps(metadata, sort_keys=True)
     return f"{text}:"

@@ -331,9 +331,9 @@ def _check_replay_parameter(input_folder, name, selected, recorded) -> None:
 def _point_task(arguments, settings) -> collect.Task:
     """The run's one point, its values the command line's."""
     metadata = {
-        "physical_error_probability": arguments.probability,
-        "distance": arguments.distance,
-        "round_period_microseconds": arguments.period_microseconds,
+        "workload.arguments.physical_error_probability": arguments.probability,
+        "qpu.distance": arguments.distance,
+        "qpu.round_period_microseconds": arguments.period_microseconds,
     }
     return collect.Task(settings, 1, metadata)
 

@@ -57,11 +57,15 @@ def reference_run(distance: int):
     """One shot of the weak baseline at that distance."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=distance,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": distance,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     return machine.run()
 
@@ -239,11 +243,15 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
     """
     config_path = CONFIGS / "seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.008,
-        distance=distance,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": distance,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     escalation = dataclasses.replace(
         settings.escalation, strong_window=strong_window
     )
@@ -393,11 +401,15 @@ def _parallel_run(distance: int, seed: int):
     """
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.005,
-        distance=distance,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.005,
+            "qpu.distance": distance,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     windows = dataclasses.replace(
         settings.windows, kind="parallel", boundary_payload="sparse_seam_list"
     )

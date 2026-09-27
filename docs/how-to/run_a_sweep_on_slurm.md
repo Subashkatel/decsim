@@ -109,7 +109,7 @@ computed when it is read. That is why the shards can be added at all.
 ## 5. Plot
 
 ```bash
-decsim plot results/<combined> --figure ler --x distance --where physical_error_probability=0.001
+decsim plot results/<combined> --figure ler --x qpu.distance --where workload.arguments.physical_error_probability=0.001
 ```
 
 `ler` draws the logical error rate against the swept setting `--x`

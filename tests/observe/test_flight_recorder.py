@@ -711,10 +711,12 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     config_path = yaml_configs.CONFIGS_DIR / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=10.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 10.0,
+        },
+        1,
     )
     shot = collect.run_shot(task, 0)
     ledger = shot.machine.observation.flight_recorder.ledger

@@ -49,9 +49,7 @@ qpu:
                                    # as qec-burst-scaling's qecburst/
                                    # circuit.py does). A source row with keys
                                    # of its own reads them here (its
-                                   # Settings); the sweep sets the distance
-                                   # and the round period, so neither is a
-                                   # key here. burst_stim's, with their
+                                   # Settings); burst_stim's, with their
                                    # defaults (a probability of 0 is no
                                    # burst, and the shot is stim_device's):
   # burst_onset_round: 1           # the first one-based round with extra noise
@@ -78,8 +76,14 @@ qpu:
                                    # so one whose region covers the patch
                                    # and finds none of its channels there
                                    # (a sweep point at p = 0) is refused
+  distance: 3                      # the code distance d, which the code card
+                                   # prices and a maker reads through
+                                   # ${qpu.distance}; one LER curve per d
+  round_period_microseconds: 1.0   # the QPU's physical round period: a
+                                   # quantum-device cadence, deliberately
+                                   # not a classical clock's cycles
   code_card: rotated_surface       # rotated_surface | bivariate_bicycle: the
-                                   # code card the run prices, at the sweep's
+                                   # code card the run prices, at the qpu's
                                    # distance, with windows.commit_rounds and
                                    # buffer_rounds as its window sizes.
                                    # rotated_surface, the default, is Stim's
@@ -432,11 +436,9 @@ workload:
                                    # workload, an operation list and its
                                    # physical circuit (records/workload.py).
                                    # producer calls a maker function once
-                                   # per sweep point with its arguments and
-                                   # the sweep values its parameters name
-                                   # (physical_error_probability, distance,
-                                   # round_period_microseconds); files reads
-                                   # a maker's two outputs from disk
+                                   # per sweep point with its arguments;
+                                   # files reads a maker's two outputs from
+                                   # disk
                                    # (docs/how-to/plug_in_a_workload_maker.md)
   function: decsim.producers:memory_circuit   # module:function. The
                                    # makers decsim ships (decsim/producers.py):
@@ -455,13 +457,20 @@ workload:
                                    # after decode_after_rounds rounds, its
                                    # stream owner, protected region and
                                    # rounds derived (the deltakit extra)
-  arguments:                       # the maker's own arguments; a sweep value
-                                   # written here stops the maker's call
+  arguments:                       # the maker's own arguments, as each sweep
+                                   # point resolves them
     code_task: surface_code:rotated_memory_z   # stim generator task
     rounds_per_shot: 15            # QEC rounds per shot: a fixed count, or
-                                   # "<n>d" to scale with the swept distance
+                                   # "<n>d" to scale with the distance
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
+    distance: ${qpu.distance}      # a whole-value reference: the value at
+                                   # that yaml path, resolved per point, so
+                                   # the circuit and the code card share one
+                                   # distance (OmegaConf's ${path}); a
+                                   # reference names a whole value, never
+                                   # part of a text
+    physical_error_probability: 0.001   # p on all four Stim noise channels
     # patch_count: 4               # memory_patches only, and required there:
                                    # the patches, at least 1
   # The files row's keys, instead of function and arguments; paths are
@@ -539,21 +548,23 @@ windows:
                                    # check generators" (2303.04846 lines
                                    # 784-786)
 
-# The sweep: a list of blocks; each block is the cross product of its three
-# axes, `shots` seeds per point (0..shots-1); a point named twice runs
-# once. The algorithm is NOT a sweep axis: it is structure, fixed per unit
-# on the decoder sections below; comparing algorithms is comparing configs.
-# The baselines put shots where they matter: a timing block sweeps many
+# The sweep: a list of blocks. A block's axes map a yaml path to the values
+# the sweep sets there, and the block is their cartesian product in the
+# order written, as Hydra's multi-run makes one job per combination,
+# `shots` seeds per point (0..shots-1); the blocks are a union, and a
+# point named twice runs once. A path's section must exist. A mapping
+# value replaces the node at its path whole, so a decoder row with keys of
+# its own is one value: weak_decoder: [{kind: pymatching}, {kind: ...}].
+# A point's metadata is its {path: value}. The baselines put shots where they matter: a timing block sweeps many
 # round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
 # the load = 1 knee of its 0.028 card), and an LER block sweeps several
 # probabilities with many shots at one timing point, since timing knobs
 # never change the decoded answer.
 sweep:
-  - physical_error_probability: [0.001]    # p on all four Stim noise channels
-    distance: [3]                          # code distance d; one LER curve per d
-    round_period_microseconds: [1.0]       # the QPU's physical round period:
-                                           # a quantum-device cadence, deliberately
-                                           # not a classical clock's cycles
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [3]
+      qpu.round_period_microseconds: [1.0]
     shots: 2
 
 controller:                        # controller work per round, in cycles of its

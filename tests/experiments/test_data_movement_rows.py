@@ -22,9 +22,11 @@ COUNTING_SWEEP = {
     "observation": {"data_movement": True},
     "sweep": [
         {
-            "physical_error_probability": [0.001],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": 2,
         }
     ],
@@ -53,9 +55,11 @@ ESCALATING_SWEEP = {
     },
     "sweep": [
         {
-            "physical_error_probability": [0.005],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.005],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": 8,
         }
     ],
@@ -236,9 +240,13 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
         {
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3],
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "shots": 1,
                 }
             ]

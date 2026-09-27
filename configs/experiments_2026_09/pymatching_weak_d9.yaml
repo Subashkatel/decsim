@@ -4,23 +4,28 @@
 extends: pymatching_weak.yaml
 
 sweep:
-  - physical_error_probability: [0.001, 0.002]
-    distance: [9]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.001, 0.002]
+      qpu.distance: [9]
+      qpu.round_period_microseconds: [1.0]
     shots: 200000
-  - physical_error_probability: [0.003]
-    distance: [9]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.003]
+      qpu.distance: [9]
+      qpu.round_period_microseconds: [1.0]
     shots: 35714
-  - physical_error_probability: [0.005]
-    distance: [9]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.005]
+      qpu.distance: [9]
+      qpu.round_period_microseconds: [1.0]
     shots: 2702
-  - physical_error_probability: [0.007]
-    distance: [9]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.007]
+      qpu.distance: [9]
+      qpu.round_period_microseconds: [1.0]
     shots: 586
-  - physical_error_probability: [0.01]
-    distance: [9]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.01]
+      qpu.distance: [9]
+      qpu.round_period_microseconds: [1.0]
     shots: 400

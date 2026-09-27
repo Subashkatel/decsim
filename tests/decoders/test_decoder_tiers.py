@@ -89,11 +89,15 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings)
     machine.run()
     cycle_count = settings.weak_decoder.row_settings.cycle_count
@@ -122,11 +126,15 @@ def test_a_measured_table_tier_is_held_by_the_measured_line(tmp_path):
     card.update(strong_decoder)
     config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=5,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 5,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings)
     machine.run()
     algorithm = _algorithm_records(machine)

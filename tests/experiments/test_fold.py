@@ -74,9 +74,11 @@ def _one_point_config(tmp_path, shots):
     sweep = {
         "sweep": [
             {
-                "physical_error_probability": [0.001],
-                "distance": [3],
-                "round_period_microseconds": [1.0],
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.0],
+                },
                 "shots": shots,
             }
         ]

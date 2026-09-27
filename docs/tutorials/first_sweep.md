@@ -37,9 +37,10 @@ weak_decoder:
     release_cycles_per_round: 0
 
 sweep:
-  - physical_error_probability: [0.003]
-    distance: [3, 5, 7]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.003]
+      qpu.distance: [3, 5, 7]
+      qpu.round_period_microseconds: [1.0]
     shots: 400
 ```
 
@@ -55,9 +56,14 @@ The `weak_decoder` block names `pymatching`, so decsim decodes every
 window for real. The baseline prices its decoder with a number instead,
 which is right for a timing study and wrong for an accuracy one.
 
-The `sweep` block is the set of points: every combination of the three
-lists. Three distances times one error rate times one round period is
-three points, 400 shots each, so 1,200 shots in all.
+The `sweep` block is the set of points: every combination of its
+`axes`, each a yaml path and the values the sweep sets there. The
+error rate is an argument of the maker that builds the circuit, and the
+distance and round period are the QPU's. The base file's workload reads
+the distance back with `distance: ${qpu.distance}`, the value at that
+path, so the code and the circuit share one number. Three distances
+times one error rate times one round period is three points, 400 shots
+each, so 1,200 shots in all.
 
 Check what it resolves to before running it:
 
@@ -82,12 +88,12 @@ that host's, because this config names a decoder rather than pricing
 one:
 
 ```
-{"distance": 3, "physical_error_probability": 0.003, "round_period_microseconds": 1.0}: 400 shots done
-{"distance": 5, "physical_error_probability": 0.003, "round_period_microseconds": 1.0}: 400 shots done
-{"distance": 7, "physical_error_probability": 0.003, "round_period_microseconds": 1.0}: 400 shots done
-distance: 3
-physical_error_probability: 0.003
-round_period_microseconds: 1.0
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done
+{"qpu.distance": 5, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done
+{"qpu.distance": 7, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done
+qpu.distance: 3
+qpu.round_period_microseconds: 1.0
+workload.arguments.physical_error_probability: 0.003
 algorithm: pymatching
 load (service per window / window inter-arrival): 2.53
 logical failures: 16 of 400 shots
@@ -97,12 +103,12 @@ queue wait, mean: 12.764 us
 service time per window, mean: 7.593 us
 ready to frame commit: median 26.504 us, p99 55.052 us
 
-distance: 5
+qpu.distance: 5
 ...
 logical failures: 12 of 400 shots
 mismatches vs direct PyMatching: 0
 ...
-distance: 7
+qpu.distance: 7
 ...
 logical failures: 8 of 400 shots
 mismatches vs direct PyMatching: 0
@@ -184,7 +190,7 @@ or quote the point as an upper bound.
 ## Step 4. Draw it
 
 ```bash
-decsim plot results/first_sweep --figure ler --x distance --where physical_error_probability=0.003
+decsim plot results/first_sweep --figure ler --x qpu.distance --where workload.arguments.physical_error_probability=0.003
 ```
 
 ```

@@ -240,10 +240,12 @@ def switching_run(
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
     return collect.run_shot(task, seed)
 
@@ -672,10 +674,12 @@ def shipped_shot(config_name: str):
     config_path = CONFIGS_DIR / config_name
     config = experiment.load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
     return collect.run_shot(task, 0)
 
@@ -1063,7 +1067,6 @@ def seam_streams_shot(stream_count: int):
     workload = workload_settings.WorkloadSettings(
         operations=operations,
         rounds_policy=rounds_policy,
-        physical_error_probability=0.001,
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(
@@ -1096,7 +1099,7 @@ def seam_streams_shot(stream_count: int):
         pauli_frame=frame,
         links=links,
     )
-    task = collect.Task.at_point(settings, 1, {})
+    task = collect.Task(settings, 1, {})
     return collect.run_shot(task, 0)
 
 
@@ -1228,6 +1231,7 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
             "code_task": "surface_code:rotated_memory_z",
             "rounds_per_shot": 6,
             "patch_count": 2,
+            "distance": "${qpu.distance}",
         },
     }
     raw["qpu"] = {
@@ -1241,10 +1245,12 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=2,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        2,
     )
     shot = collect.run_shot(task, 1)
     measurement = measure.measure_shot(shot)

@@ -127,9 +127,11 @@ def _traced_switching_run(tmp_path, trace_path):
     """
     workload = yaml_configs.memory_workload(9)
     sweep_point = {
-        "physical_error_probability": [0.008],
-        "distance": [3],
-        "round_period_microseconds": [1.0],
+        "axes": {
+            "workload.arguments.physical_error_probability": [0.008],
+            "qpu.distance": [3],
+            "qpu.round_period_microseconds": [1.0],
+        },
         "shots": 1,
     }
     card = {
@@ -140,11 +142,15 @@ def _traced_switching_run(tmp_path, trace_path):
     }
     config_path = yaml_configs.write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
-    shipped = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    shipped = point.settings
     observation = dataclasses.replace(
         shipped.observation, trace=str(trace_path)
     )

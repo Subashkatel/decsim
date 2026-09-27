@@ -32,9 +32,13 @@ def wall_clock_config(tmp_path, distances):
             },
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": distances,
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": distances,
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "shots": 2,
                 }
             ],
@@ -82,7 +86,7 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
     deadlines = {}
     for sample in samples:
         metadata = json.loads(sample["metadata"])
-        deadlines[metadata["distance"]] = float(sample["window_period_us"])
+        deadlines[metadata["qpu.distance"]] = float(sample["window_period_us"])
     windows = 0
     for shot in shots:
         windows += int(shot["windows"])
@@ -100,9 +104,13 @@ def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):
         {
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3, 5],
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3, 5],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "shots": 1,
                 }
             ]
@@ -129,9 +137,13 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
             **strong_decoder_section,
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3, 5],
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3, 5],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "shots": 1,
                 }
             ],
@@ -143,7 +155,7 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
     weak_samples_path = weak_run_dir / "latency_samples.csv"
     strong_samples_path = strong_run_dir / "latency_samples.csv"
     sample_paths = [weak_samples_path, strong_samples_path]
-    selection = plots.Selection("distance", None, {})
+    selection = plots.Selection("qpu.distance", None, {})
     combined_latency_plot(sample_paths, selection, combined)
     assert combined.exists()
 
@@ -152,6 +164,6 @@ def test_a_run_without_latency_samples_is_refused(tmp_path):
     empty_run = tmp_path / "timing_only"
     empty_run.mkdir()
     figure_path = tmp_path / "figure.png"
-    selection = plots.Selection("distance", None, {})
+    selection = plots.Selection("qpu.distance", None, {})
     with pytest.raises(refusal.RefusalError, match="latency_samples.csv"):
         plots.figure("latency", [empty_run], figure_path, selection)

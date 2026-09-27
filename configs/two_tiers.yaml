@@ -49,7 +49,8 @@ strong_decoder:
     release_cycles_per_round: 0
 
 sweep:
-  - physical_error_probability: [0.008]
-    distance: [3, 5]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.008]
+      qpu.distance: [3, 5]
+      qpu.round_period_microseconds: [1.0]
     shots: 50

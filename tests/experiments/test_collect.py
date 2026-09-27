@@ -186,10 +186,12 @@ def test_a_task_named_by_two_blocks_runs_once(tmp_path):
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
     config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
     weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = dataclasses.replace(task.settings, weak_decoder=weak_decoder)
@@ -215,10 +217,12 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
     online = _written_yaml(raw, online_path)
     config = experiment.load_experiment(online)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=2,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        2,
     )
     assert task.online_threshold is not None
     shot_settings = task.shot_settings()
@@ -257,10 +261,12 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     """The task's own referent: sinter compiles once per task."""
     config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=4,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        4,
     )
 
     whole_task = collect.Unit(task, 0, task.shots)
@@ -273,10 +279,12 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
 def test_the_first_shot_builds_the_models_and_the_rest_read_them():
     config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=3,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        3,
     )
     built = built_window_models.BuiltWindowModels()
 
@@ -289,10 +297,12 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
 def test_a_machine_built_alone_builds_its_own_models():
     config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
     settings = task.shot_settings()
 
@@ -302,10 +312,12 @@ def test_a_machine_built_alone_builds_its_own_models():
 def test_a_task_is_one_unit_until_a_unit_size_splits_it():
     config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=5,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        5,
     )
 
     whole = collect.work_units([task])
@@ -331,10 +343,12 @@ def test_a_point_with_an_online_threshold_stays_one_unit(tmp_path):
     online = _written_yaml(raw, online_path)
     config = experiment.load_experiment(online)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=5,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        5,
     )
 
     units = collect.work_units([task], 1)
@@ -352,22 +366,28 @@ def test_two_points_under_one_cache_do_not_share_models():
     config = experiment.load_experiment(REFERENCE_YAML)
     built = built_window_models.BuiltWindowModels()
     at_three = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
     at_five = config.point_task(
-        physical_error_probability=0.001,
-        distance=5,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 5,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
     noisier_at_three = config.point_task(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=1,
+        {
+            "workload.arguments.physical_error_probability": 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
 
     collect.run_shot(at_three, 0, built_models=built)
@@ -390,10 +410,12 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
     """
     config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        shots=3,
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        3,
     )
     whole_task = collect.Unit(task, 0, task.shots)
     measurements, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
@@ -645,10 +667,12 @@ def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
         path.write_text(priced_text)
         config = experiment.load_experiment(path)
         task = config.point_task(
-            physical_error_probability=0.001,
-            distance=3,
-            round_period_microseconds=1.0,
-            shots=1,
+            {
+                "workload.arguments.physical_error_probability": 0.001,
+                "qpu.distance": 3,
+                "qpu.round_period_microseconds": 1.0,
+            },
+            1,
         )
         tasks.append(task)
     return tasks

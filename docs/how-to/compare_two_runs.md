@@ -92,7 +92,7 @@ ax = figure.subplots()
 results.plot_error_rate(
     ax=ax,
     rows=rows,
-    x="settings.workload.physical_error_probability",
+    x="settings.workload.row_settings.arguments.physical_error_probability",
     group="settings.qpu.distance",
     where={"settings.qpu.round_period_microseconds": 1.0},
 )
@@ -107,7 +107,7 @@ folders they came from).
 
 ```bash
 decsim plot results/<first> results/<second> \
-  --figure ler --x distance --where physical_error_probability=0.001
+  --figure ler --x qpu.distance --where workload.arguments.physical_error_probability=0.001
 ```
 
 ```
@@ -149,6 +149,7 @@ workload:
     code_task: surface_code:rotated_memory_z
     rounds_per_shot: 40
     patch_count: 4
+    distance: ${qpu.distance}
 qpu:
   kind: burst_stim
   burst_onset_round: 15
@@ -160,9 +161,10 @@ observation:
   record_switching_windows: true
   backlog_trace: true
 sweep:
-  - physical_error_probability: [0.001]
-    distance: [5]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [5]
+      qpu.round_period_microseconds: [1.0]
     shots: 100
 ```
 

@@ -1,10 +1,10 @@
 """The workload makers decsim ships: Stim's and Deltakit's memories.
 
 A maker is a plain function a yaml names as module:function under
-workload.kind producer. decsim hands it the sweep point's values its
-parameters name (experiments/experiment.py SWEEP_AXES) and the yaml's
-arguments, and it returns a records.workload.Workload. A maker written
-outside decsim has the same shape; these are the ones that ship.
+workload.kind producer. decsim calls it with the yaml's arguments as
+each sweep point resolves them, and it returns a
+records.workload.Workload. A maker written outside decsim has the same
+shape; these are the ones that ship.
 """
 
 from typing import Optional, Union

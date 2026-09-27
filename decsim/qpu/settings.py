@@ -39,9 +39,11 @@ CODE_CARDS = {
 FACTORY_KEYS = ("kind",)
 # The keys the qpu section reads for itself; any other key is the source
 # row's or the code card row's own (its Settings, decsim/tables.py
-# row_settings). The sweep sets the distance and the round period, so
-# neither is a key here.
-QPU_KEYS = ("kind", "code_card")
+# row_settings).
+QPU_KEYS = ("kind", "code_card", "distance", "round_period_microseconds")
+# The keys above that are the section's fields, each left at the field's
+# default when the yaml does not write it.
+QPU_VALUE_KEYS = ("distance", "round_period_microseconds")
 # magic_state_factory.kind names one of these rows: what supplies the T
 # states an operation consumes.
 MAGIC_STATE_FACTORIES = {
@@ -69,7 +71,7 @@ class QpuSettings:
     (2605.04892). The code card is the row code_card names (CODE_CARDS,
     above: rotated_surface, the default, after Stim's generated
     surface_code:rotated_memory_z; bivariate_bicycle, Bravyi et al.
-    2308.07915) at the sweep's distance, with the windows section's
+    2308.07915) at the section's distance, with the windows section's
     commit and buffer sizes; a Python-built code, layout, device or
     error-model provider is used as it is. The card provisions the links
     and sizes the circuit-less sources' rounds; a circuit source's
@@ -100,13 +102,12 @@ class QpuSettings:
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "QpuSettings":
-        """The `qpu` section: the source kind; the sweep sets the rest.
+        """The `qpu` section: the source, the code card, distance and period.
 
-        A distance or a period written here, which the sweep would
-        silently replace, is refused with every other key the section
-        and its row do not declare. The kind is looked up here, where the
-        yaml enters, so a misspelt source is refused before `decsim show`
-        prints it or a run folder exists.
+        A key the section and its rows do not declare is refused. The
+        kind is looked up here, where the yaml enters, so a misspelt
+        source is refused before `decsim show` prints it or a run folder
+        exists.
         """
         kind = section.get("kind")
         source_row = tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
@@ -122,11 +123,16 @@ class QpuSettings:
         code_card_settings = tables.row_settings(
             card_row, "qpu", section, keys_beside_the_card
         )
+        values = {}
+        for key in QPU_VALUE_KEYS:
+            if key in section:
+                values[key] = section[key]
         return cls(
             kind=kind,
             code_card=code_card,
             row_settings=row_settings,
             code_card_settings=code_card_settings,
+            **values,
         )
 
     def build_code(
@@ -158,7 +164,7 @@ class QpuSettings:
         commit_rounds_override: Optional[int],
         buffer_rounds_override: Optional[int],
     ) -> ports.CodeModel:
-        """The code_card row, at the sweep's distance and the yaml's windows."""
+        """The code_card row, at the qpu's distance and the yaml's windows."""
         card_row = tables.row(CODE_CARDS, "qpu.code_card", self.code_card)
         arguments = {
             "commit_rounds_override": commit_rounds_override,

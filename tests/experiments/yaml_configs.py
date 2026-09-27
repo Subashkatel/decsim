@@ -41,6 +41,16 @@ SHIPPED_CONFIGS = (
     "weak_latency.yaml",
     "weak_ler.yaml",
 )
+# Where a memory maker's physical error rate sits in a point's sections.
+ERROR_RATE_PATH = "workload.arguments.physical_error_probability"
+# The minimal config's sweep without the error rate, for a files row or a
+# maker that takes none.
+QPU_ONLY_SWEEP = [
+    {
+        "axes": {"qpu.distance": [3], "qpu.round_period_microseconds": [1.0]},
+        "shots": 1,
+    }
+]
 
 
 def measure_point_shot(
@@ -54,10 +64,12 @@ def measure_point_shot(
     """One seeded shot at one sweep point, collected and measured."""
     shots = seed + 1
     task = config.point_task(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_microseconds=round_period_microseconds,
-        shots=shots,
+        {
+            ERROR_RATE_PATH: physical_error_probability,
+            "qpu.distance": distance,
+            "qpu.round_period_microseconds": round_period_microseconds,
+        },
+        shots,
     )
     shot = collect.run_shot(task, seed)
     return measure.measure_shot(shot)
@@ -75,6 +87,7 @@ MINIMAL_CONFIG = {
         "arguments": {
             "code_task": "surface_code:rotated_memory_z",
             "rounds_per_shot": 15,
+            "distance": "${qpu.distance}",
         },
     },
     "windows": {
@@ -84,9 +97,11 @@ MINIMAL_CONFIG = {
     },
     "sweep": [
         {
-            "physical_error_probability": [0.001],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": 1,
         }
     ],
@@ -131,6 +146,7 @@ def memory_workload(rounds_per_shot) -> dict:
         "arguments": {
             "code_task": "surface_code:rotated_memory_z",
             "rounds_per_shot": rounds_per_shot,
+            "distance": "${qpu.distance}",
         },
     }
 
@@ -233,9 +249,10 @@ def example_tool_config(
         "workload": workload,
         "sweep": [
             {
-                "physical_error_probability": [0.001],
-                "distance": [3],
-                "round_period_microseconds": [1.1],
+                "axes": {
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.1],
+                },
                 "shots": 1,
             }
         ],

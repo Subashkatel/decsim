@@ -6,7 +6,8 @@
 extends: strong_decoder_baseline.yaml
 
 sweep:
-  - physical_error_probability: [0.001]
-    distance: [3, 5, 7, 9, 11]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [3, 5, 7, 9, 11]
+      qpu.round_period_microseconds: [1.0]
     shots: 500

@@ -15,11 +15,11 @@ import pytest
 import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
 
-BY_DISTANCE = plots.Selection("distance", None, {})
+BY_DISTANCE = plots.Selection("qpu.distance", None, {})
 
 
 def shots_csv_row(distance, stage_us, stage_columns):
-    metadata = json.dumps({"distance": distance})
+    metadata = json.dumps({"qpu.distance": distance})
     row = {"metadata": metadata, "algorithm": "pymatching"}
     for column in stage_columns:
         row[column] = stage_us.get(column, 0.0)

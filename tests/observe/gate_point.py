@@ -19,9 +19,9 @@ _ABSOLUTE_FILE = _THIS_FILE.resolve()
 CONFIGS_DIR = _ABSOLUTE_FILE.parents[2] / "configs"
 CONFIG_PATH = CONFIGS_DIR / "weak_decoder_baseline.yaml"
 POINT = {
-    "physical_error_probability": 0.003,
-    "distance": 3,
-    "round_period_microseconds": 1.0,
+    "workload.arguments.physical_error_probability": 0.003,
+    "qpu.distance": 3,
+    "qpu.round_period_microseconds": 1.0,
 }
 SEED = 0
 # the log hash of the point; it moves when a log line changes text, and the
@@ -34,7 +34,8 @@ def settings(**observation_changes):
     import decsim.experiments.experiment as experiment
 
     config = experiment.load_experiment(CONFIG_PATH)
-    shipped = config.point_settings(**POINT)
+    task = config.point_task(POINT, 1)
+    shipped = task.settings
     changes = {"log_component_io": True, **observation_changes}
     observation = dataclasses.replace(shipped.observation, **changes)
     return dataclasses.replace(shipped, observation=observation)

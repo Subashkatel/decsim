@@ -39,20 +39,17 @@ def _switching_machine(
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
     sections["strong_decoder"]["kind"] = 20.0
+    sections["qpu"]["distance"] = 3
+    sections["qpu"]["round_period_microseconds"] = 1.0
+    arguments = sections["workload"]["arguments"]
+    arguments["distance"] = 3
+    arguments["physical_error_probability"] = 0.008
     base_directory = pathlib.Path(".")
     section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
         sections, name="switching_validation", section_folders=section_folders
     )
-    qpu = dataclasses.replace(
-        settings.qpu, distance=3, round_period_microseconds=1.0
-    )
-    sweep_values = {
-        "physical_error_probability": 0.008,
-        "distance": 3,
-        "round_period_microseconds": 1.0,
-    }
-    workload = settings.workload.at_point(sweep_values)
+    workload = settings.workload.made()
     trace = "off"
     if trace_path is not None:
         trace = str(trace_path)
@@ -60,7 +57,7 @@ def _switching_machine(
         settings.observation, record_switching_windows=True, trace=trace
     )
     settings = dataclasses.replace(
-        settings, qpu=qpu, workload=workload, observation=observation
+        settings, workload=workload, observation=observation
     )
     return machine_module.Machine.build(settings, 0)
 

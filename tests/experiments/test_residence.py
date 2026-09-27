@@ -226,9 +226,13 @@ def test_a_traced_run_writes_the_table_beside_its_rows(tmp_path, monkeypatch):
             "observation": {"trace": "chrome", "trace_shots": [0]},
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3],
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "shots": 2,
                 }
             ],

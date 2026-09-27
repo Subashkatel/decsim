@@ -20,16 +20,18 @@ COUNTING_SWEEP = {
     "observation": {"data_movement": True},
     "sweep": [
         {
-            "physical_error_probability": [0.001],
-            "distance": [3, 5],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001],
+                "qpu.distance": [3, 5],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": 1,
         }
     ],
 }
 
 
-BY_DISTANCE = plots.Selection("distance", None, {})
+BY_DISTANCE = plots.Selection("qpu.distance", None, {})
 
 
 def counting_run(tmp_path, out_name):
@@ -101,9 +103,13 @@ def test_a_run_that_counted_no_movement_is_refused(tmp_path):
         {
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3],
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "shots": 1,
                 }
             ]

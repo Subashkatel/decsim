@@ -31,9 +31,10 @@ weak_decoder:
     release_cycles_per_round: 0
 
 sweep:
-  - physical_error_probability: [0.001]
-    distance: [3, 5, 7]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.001]
+      qpu.distance: [3, 5, 7]
+      qpu.round_period_microseconds: [1.0]
     shots: 20
 ```
 
@@ -60,10 +61,10 @@ decsim collect configs/priced_cards_example.yaml
 ```
 
 ```
-{"distance": 3, "physical_error_probability": 0.001, "round_period_microseconds": 1.0}: 20 shots done
-distance: 3
-physical_error_probability: 0.001
-round_period_microseconds: 1.0
+{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 20 shots done
+qpu.distance: 3
+qpu.round_period_microseconds: 1.0
+workload.arguments.physical_error_probability: 0.001
 algorithm: 1 us
 load (service per window / window inter-arrival): 0.36
 logical failures: 0 of 20 shots

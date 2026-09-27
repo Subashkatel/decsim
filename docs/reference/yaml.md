@@ -89,6 +89,38 @@ written here replaces the base's sweep rather than adding to it.
 `manifest.json` records the whole chain, nearest first, and `config/`
 in the run folder holds a verbatim copy of every file in it.
 
+## The sweep
+
+```yaml
+sweep:
+  - axes:
+      workload.arguments.physical_error_probability: [0.001, 0.003]
+      qpu.distance: [3, 5]
+      windows.commit_rounds: [1, 3]
+    shots: 400
+```
+
+A block's `axes` map a yaml path to the values the sweep sets there, and
+the block is every combination of them in the order written, `shots`
+seeds each: Hydra's multi-run makes one job per combination of
+`key=v1,v2` overrides the same way. The blocks are a union, and a point
+named twice runs once. Any key can be an axis. Its section must exist,
+and a value that is a mapping replaces the node at its path whole, so a
+decoder row with keys of its own is one value of a `weak_decoder` axis.
+
+Each point is then read the way a written file is: the axes placed,
+every whole-value reference such as `distance: ${qpu.distance}` replaced
+by the value at that path (OmegaConf's interpolation, kept to whole
+values; inside a flow mapping `{...}` it is quoted, `'${qpu.distance}'`,
+since a brace opens a mapping there), and the sections read by the
+packages that own them
+(`decsim/experiments/experiment.py`, `ExperimentConfig.point_task`). A
+path that does not resolve and a reference that leads back to itself
+are refused with the path named. A point's metadata is its
+`{path: value}`, and its id is a hash of that and every setting it
+resolves to (`decsim/collect.py`, `Task.strong_id`); the run folder
+names its rows and files by them.
+
 ## Seeing what a file resolves to
 
 ```bash
@@ -102,9 +134,9 @@ every value the machine is built with, one per line, gem5's
 of `decsim show configs/weak_ler.yaml`'s:
 
 ```
-qpu.distance = [3, 5, 7, 9, 11]  [sweep, configs/weak_ler.yaml:17-33]
-controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:45]
-controller.packing_overflow = "STALL"  [default, configs/reference.yaml:513]
+qpu.distance = [3, 5, 7, 9, 11]  [sweep, configs/weak_ler.yaml:17-37]
+controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
+controller.packing_overflow = "STALL"  [default, configs/reference.yaml:615]
 ```
 
 The bracket names the layer that set the value, `your file`, `preset`

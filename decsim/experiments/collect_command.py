@@ -77,8 +77,9 @@ def run_experiment(
     tasks = config.tasks()
     point_ids = _point_ids(tasks)
     started_utc = run_folder.start_run(config, run_dir, point_ids, **how_it_ran)
-    _record_the_points(config, run_dir, tasks, **how_it_ran)
-    _echo_description(config, run_dir, shard)
+    _record_the_points(run_dir, tasks, **how_it_ran)
+    first_task = tasks[0]
+    _echo_description(config, first_task.settings, run_dir, shard)
     measurements = run_sweep(
         tasks,
         run_dir,
@@ -113,16 +114,20 @@ def _point_ids(tasks: list) -> list:
 
 
 def _record_the_points(
-    config, run_dir: pathlib.Path, tasks: list, shard, shots_per_unit
+    run_dir: pathlib.Path, tasks: list, shard, shots_per_unit
 ) -> None:
     """The maker, and every point's values and workload, before any shot.
+
+    producer.json holds the first point's maker and arguments; every
+    point's own arguments are in its resolved/ record.
 
     Every shard records every point, with its own units' seeds, so a
     shard's folder alone says what its sweep was and combine folds the
     content-named files into one set. Recording builds each point's
     plan, so a point the build refuses stops the run before any shot.
     """
-    run_folder.write_producer(run_dir, config.settings.workload)
+    first_task = tasks[0]
+    run_folder.write_producer(run_dir, first_task.settings.workload)
     unique = collect.unique_tasks(tasks)
     units = collect.work_units(unique, shots_per_unit)
     selected = collect.shard_of(units, shard)
@@ -165,10 +170,13 @@ def _report_no_work_unit() -> None:
 
 
 def _echo_description(
-    config, run_dir: pathlib.Path, shard: Optional[tuple]
+    config, settings, run_dir: pathlib.Path, shard: Optional[tuple]
 ) -> None:
-    """The resolved experiment, before the first shot, as gem5 dumps it."""
-    description = experiment.resolved_description(config)
+    """The resolved experiment, before the first shot, as gem5 dumps it.
+
+    settings is the first point's, whose sections the lines name.
+    """
+    description = experiment.resolved_description(config, settings)
     if shard is not None:
         index, count = shard
         description.append(f"shard: {index} of {count}")

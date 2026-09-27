@@ -8,11 +8,13 @@ and a run writes its manifest and its per-shot records.
 
 import dataclasses
 import json
+import re
 
 import pytest
 import yaml
 
 import decsim.build.escalation as escalation_build
+import decsim.collect as collect
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
@@ -28,7 +30,8 @@ import tests.experiments.yaml_configs as yaml_configs
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     reference_path = yaml_configs.CONFIGS_DIR / "reference.yaml"
     config = experiment.load_experiment(reference_path)
-    settings = config.settings
+    point = config.first_point_task()
+    settings = point.settings
     assert settings.weak_decoder.kind == "pymatching"
     assert settings.strong_decoder.kind == "belief_matching"
     assert escalation_build.primary_tier(settings.escalation) == "weak"
@@ -47,9 +50,10 @@ def test_the_reference_controller_charges_the_traced_issue_pipeline():
     """
     reference_path = yaml_configs.CONFIGS_DIR / "reference.yaml"
     config = experiment.load_experiment(reference_path)
-    controller = config.settings.controller
+    point = config.first_point_task()
+    controller = point.settings.controller
     assert controller.decision_to_pulse_cycles == 8
-    assert controller.clock == config.settings.clocks.clock("fridge")
+    assert controller.clock == point.settings.clocks.clock("fridge")
 
 
 @pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
@@ -81,16 +85,21 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
         },
     )
     config = experiment.load_experiment(config_path)
-    controller = config.settings.controller
+    first_point = config.first_point_task()
+    controller = first_point.settings.controller
     assert controller.readout_to_bits_cycles == 27
     assert controller.decision_to_pulse_cycles == 8
     assert controller.clock.period_ticks == 2000
 
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     completed = machine_module.Machine.build(settings, 0)
     built = completed.controller.settings
     assert built.clock.edge(27, 0) == config_module.microseconds_to_ticks(0.054)
@@ -106,7 +115,8 @@ def test_the_packing_overflow_word_reaches_the_controller(tmp_path):
         tmp_path, {"controller": controller}
     )
     config = experiment.load_experiment(config_path)
-    assert config.settings.controller.packing_overflow is (
+    first_point = config.first_point_task()
+    assert first_point.settings.controller.packing_overflow is (
         controller_settings.PackingOverflowPolicy.DROP_ROUND
     )
 
@@ -114,7 +124,8 @@ def test_the_packing_overflow_word_reaches_the_controller(tmp_path):
 def test_the_default_packing_overflow_is_backpressure(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {})
     config = experiment.load_experiment(config_path)
-    assert config.settings.controller.packing_overflow is (
+    first_point = config.first_point_task()
+    assert first_point.settings.controller.packing_overflow is (
         controller_settings.PackingOverflowPolicy.STALL
     )
 
@@ -218,7 +229,8 @@ def test_the_idle_policy_kind_reaches_the_controller(tmp_path):
         tmp_path, {"idle_policy": {"kind": "ignore"}}
     )
     config = experiment.load_experiment(config_path)
-    assert config.settings.idle_policy.kind == "ignore"
+    first_point = config.first_point_task()
+    assert first_point.settings.idle_policy.kind == "ignore"
 
 
 def test_an_idle_policy_written_as_a_bare_word_is_refused_with_its_mapping(
@@ -262,7 +274,8 @@ def test_an_idle_policy_rows_own_key_reaches_its_settings(
 
     config = experiment.load_experiment(config_path)
 
-    row_settings = config.settings.idle_policy.row_settings
+    first_point = config.first_point_task()
+    row_settings = first_point.settings.idle_policy.row_settings
     assert row_settings == _EveryNthIdlePolicy.Settings(every_nth_round=2)
 
 
@@ -291,11 +304,15 @@ def test_a_factory_row_named_in_the_yaml_is_built_with_its_own_keys(
         tmp_path, {"magic_state_factory": factory}
     )
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
 
     machine = machine_module.Machine.build(settings, 0)
 
@@ -335,7 +352,8 @@ def test_a_distillation_row_without_its_three_counts_is_refused(tmp_path):
 def test_a_yaml_without_a_factory_section_runs_the_infinite_row(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {})
     config = experiment.load_experiment(config_path)
-    assert config.settings.magic_state_factory.kind == "infinite"
+    first_point = config.first_point_task()
+    assert first_point.settings.magic_state_factory.kind == "infinite"
 
 
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
@@ -343,13 +361,15 @@ def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):
         tmp_path, {"decoder_manager": {"bulk_strong": True}}
     )
     config = experiment.load_experiment(config_path)
-    assert config.settings.decoder_manager.bulk_strong is True
+    first_point = config.first_point_task()
+    assert first_point.settings.decoder_manager.bulk_strong is True
 
 
 def test_the_default_decoder_manager_does_not_batch(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {})
     config = experiment.load_experiment(config_path)
-    assert config.settings.decoder_manager.bulk_strong is False
+    first_point = config.first_point_task()
+    assert first_point.settings.decoder_manager.bulk_strong is False
 
 
 @pytest.mark.parametrize("value", ["batch", 1, 0])
@@ -384,24 +404,207 @@ def test_a_yaml_without_a_sweep_is_refused(tmp_path):
 
 
 def test_a_sweep_axis_given_as_one_value_is_refused(tmp_path):
-    block = {
-        "physical_error_probability": [0.001],
-        "distance": 3,
-        "round_period_microseconds": [1.0],
-        "shots": 1,
-    }
+    block = {"axes": {"qpu.distance": 3}, "shots": 1}
     config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
-    with pytest.raises(ValueError, match="distance must be a list"):
+    sentence = "sweep block 1 axis qpu.distance must be a list"
+    with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
 
 
-def test_a_qpu_key_other_than_kind_is_refused(tmp_path):
-    """The sweep sets the distance, so the section refuses one written here."""
-    qpu = {"kind": "stim_device", "distance": 5}
+# A decoder row with keys of its own, one value of a weak_decoder axis.
+PRICED_DECODER_ROW = {
+    "kind": 0.05,
+    "units": 2,
+    "unit_memory": {"bits": None},
+    "engine": {
+        "clock": "fridge",
+        "fetch_cycles_per_round": 2,
+        "fetch_cycles_per_job": 0,
+        "release_cycles_per_job": 1,
+        "release_cycles_per_round": 0,
+    },
+}
+MEMORY_X = "surface_code:rotated_memory_x"
+MEMORY_Z = "surface_code:rotated_memory_z"
+
+
+def test_every_axis_kind_resolves_to_the_settings_a_written_file_gives(
+    tmp_path,
+):
+    """A scalar, a mapping that replaces a row, and a referenced value.
+
+    The referent is the same machine written out by hand with no axis
+    and no reference: Hydra's multi-run sets a node by its dotted path
+    and a config-group override replaces a sub-config, so the swept
+    point and the written file are one machine.
+    """
+    swept_block = {
+        "axes": {
+            yaml_configs.ERROR_RATE_PATH: [0.002],
+            "qpu.distance": [5],
+            "qpu.round_period_microseconds": [0.5],
+            "windows.commit_rounds": [2],
+            "weak_decoder": [PRICED_DECODER_ROW],
+        },
+        "shots": 1,
+    }
+    swept_folder = tmp_path / "swept"
+    swept_folder.mkdir()
+    swept_path = yaml_configs.write_config(
+        swept_folder, {"sweep": [swept_block]}
+    )
+    written_workload = yaml_configs.memory_workload(15)
+    written_workload["arguments"]["distance"] = 5
+    written_workload["arguments"]["physical_error_probability"] = 0.002
+    written = {
+        "qpu": {
+            "kind": "stim_device",
+            "distance": 5,
+            "round_period_microseconds": 0.5,
+        },
+        "workload": written_workload,
+        "windows": {
+            "kind": "sliding",
+            "commit_rounds": 2,
+            "buffer_rounds": None,
+        },
+        "weak_decoder": PRICED_DECODER_ROW,
+        "sweep": [{"axes": {}, "shots": 1}],
+    }
+    written_folder = tmp_path / "written"
+    written_folder.mkdir()
+    written_path = yaml_configs.write_config(written_folder, written)
+    swept = experiment.load_experiment(swept_path)
+    by_hand = experiment.load_experiment(written_path)
+
+    swept_task = swept.first_point_task()
+    written_task = by_hand.first_point_task()
+
+    swept_settings = collect.json_value(swept_task.settings)
+    written_settings = collect.json_value(written_task.settings)
+    assert swept_settings == written_settings
+    assert swept_task.settings.weak_decoder.units == 2
+    assert written_task.metadata == {}
+
+
+def test_a_sweep_block_is_every_combination_of_its_axes_in_written_order(
+    tmp_path,
+):
+    """itertools.product over the axes in the order the file writes them.
+
+    The helper writes a yaml with its keys sorted, so weak_decoder.kind is
+    the outer axis and the basis the inner one.
+    """
+    block = {
+        "axes": {
+            "weak_decoder.kind": [0.028, "pymatching"],
+            "workload.arguments.code_task": [MEMORY_X, MEMORY_Z],
+        },
+        "shots": 1,
+    }
+    workload = yaml_configs.memory_workload(15)
+    workload["arguments"]["physical_error_probability"] = 0.001
+    qpu = {"kind": "stim_device", "distance": 3}
+    card = {"qpu": qpu, "workload": workload, "sweep": [block]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+
+    tasks = config.tasks()
+
+    metadata = [task.metadata for task in tasks]
+    assert metadata == [
+        {"weak_decoder.kind": 0.028, "workload.arguments.code_task": MEMORY_X},
+        {"weak_decoder.kind": 0.028, "workload.arguments.code_task": MEMORY_Z},
+        {
+            "weak_decoder.kind": "pymatching",
+            "workload.arguments.code_task": MEMORY_X,
+        },
+        {
+            "weak_decoder.kind": "pymatching",
+            "workload.arguments.code_task": MEMORY_Z,
+        },
+    ]
+    kinds = [task.settings.weak_decoder.kind for task in tasks]
+    assert kinds == [0.028, 0.028, "pymatching", "pymatching"]
+    z_arguments = tasks[1].settings.workload.row_settings.arguments
+    assert z_arguments["code_task"] == MEMORY_Z
+
+
+def test_an_axis_under_a_section_that_is_not_there_is_refused(tmp_path):
+    block = {"axes": {"windows.commit.rounds": [2]}, "shots": 1}
+    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
+    sentence = (
+        "the sweep axis windows.commit.rounds names windows.commit, but "
+        "windows has no key commit; its keys are ['buffer_rounds', "
+        "'commit_rounds', 'kind']"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        experiment.load_experiment(config_path)
+
+
+def test_a_reference_to_a_path_that_is_not_there_is_refused(tmp_path):
+    workload = yaml_configs.memory_workload(15)
+    workload["arguments"]["distance"] = "${qpu.distanc}"
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    sentence = (
+        "the reference ${qpu.distanc} names qpu.distanc, but qpu has no key "
+        "distanc; its keys are ['kind', 'distance', "
+        "'round_period_microseconds']"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        experiment.load_experiment(config_path)
+
+
+def test_a_reference_cycle_is_refused_naming_its_paths(tmp_path):
+    workload = yaml_configs.memory_workload("${workload.arguments.distance}")
+    workload["arguments"]["distance"] = "${workload.arguments.rounds_per_shot}"
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    sentence = (
+        "the references workload.arguments.rounds_per_shot -> "
+        "workload.arguments.distance -> workload.arguments.rounds_per_shot "
+        "form a cycle"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        experiment.load_experiment(config_path)
+
+
+def test_one_point_written_two_ways_has_one_id(tmp_path):
+    """A reference and the value it names are one point.
+
+    The id is over the resolved settings, as sinter's strong id is over
+    the task's (sinter/_data/_task.py:167-204).
+    """
+    referenced_folder = tmp_path / "referenced"
+    referenced_folder.mkdir()
+    referenced_path = yaml_configs.write_config(referenced_folder, {})
+    literal_workload = yaml_configs.memory_workload(15)
+    literal_workload["arguments"]["distance"] = 3
+    literal_folder = tmp_path / "literal"
+    literal_folder.mkdir()
+    literal_path = yaml_configs.write_config(
+        literal_folder, {"workload": literal_workload}
+    )
+    referenced = experiment.load_experiment(referenced_path)
+    literal = experiment.load_experiment(literal_path)
+
+    referenced_task = referenced.first_point_task()
+    literal_task = literal.first_point_task()
+
+    assert referenced_task.strong_id() == literal_task.strong_id()
+
+
+def test_a_qpu_key_the_section_does_not_read_is_refused(tmp_path):
+    qpu = {"kind": "stim_device", "colour": 5}
     config_path = yaml_configs.write_config(tmp_path, {"qpu": qpu})
     sentence = (
-        r"qpu does not know \['distance'\]; its keys are "
-        r"\['kind', 'code_card'\]"
+        r"qpu does not know \['colour'\]; its keys are "
+        r"\['kind', 'code_card', 'distance', 'round_period_microseconds'\]"
     )
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
@@ -437,11 +640,15 @@ def test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys(
     }
     config_path = yaml_configs.write_config(tmp_path, {"qpu": qpu})
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=2,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 2,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
 
     machine = machine_module.Machine.build(settings, 0)
 
@@ -455,7 +662,7 @@ def test_a_card_key_on_a_card_that_declares_none_is_refused(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {"qpu": qpu})
     sentence = (
         r"qpu does not know \['qubit_count'\]; its keys are "
-        r"\['kind', 'code_card'\]"
+        r"\['kind', 'code_card', 'distance', 'round_period_microseconds'\]"
     )
     with pytest.raises(ValueError, match=sentence):
         experiment.load_experiment(config_path)
@@ -474,11 +681,15 @@ def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
     qpu = {"kind": "split", "one_payload_per_patch": True}
     config_path = yaml_configs.write_config(tmp_path, {"qpu": qpu})
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
 
     machine = machine_module.Machine.build(settings, 0)
 
@@ -499,11 +710,15 @@ def test_the_burst_rows_keys_reach_the_source_that_runs(tmp_path):
     }
     config_path = yaml_configs.write_config(tmp_path, {"qpu": qpu})
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
 
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -526,11 +741,15 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
         tmp_path, {"escalation": {"kind": "strong_only"}}
     )  # only weak_decoder is defined
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     with pytest.raises(ValueError, match="strong tier, which names no decoder"):
         machine_module.Machine.build(settings)
 
@@ -574,32 +793,37 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         {
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3],
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "algorithm_latency_us": [0.028],
                     "shots": 1,
                 }
             ]
         },
     )
-    with pytest.raises(ValueError, match="decoder card"):
+    with pytest.raises(ValueError, match="a block is axes"):
         experiment.load_experiment(old_sweep_axis)
 
-    fixed_distance_key = yaml_configs.write_config(
+    fixed_axis_key = yaml_configs.write_config(
         tmp_path,
         {
             "sweep": [
                 {
                     "physical_error_probability": [0.001],
+                    "distance": [3],
                     "round_period_microseconds": [1.0],
                     "shots": 1,
                 }
             ]
         },
     )
-    with pytest.raises(ValueError, match=r"sweep block 1 lacks \['distance'\]"):
-        experiment.load_experiment(fixed_distance_key)
+    with pytest.raises(ValueError, match="sweep block 1 is .*a block is axes"):
+        experiment.load_experiment(fixed_axis_key)
 
 
 def test_a_qpu_kind_off_its_table_is_refused_when_the_yaml_loads(tmp_path):
@@ -686,25 +910,37 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
             "workload": workload,
             "sweep": [
                 {
-                    "physical_error_probability": [0.001],
-                    "distance": [3, 5],
-                    "round_period_microseconds": [1.0],
+                    "axes": {
+                        "workload.arguments.physical_error_probability": [
+                            0.001
+                        ],
+                        "qpu.distance": [3, 5],
+                        "qpu.round_period_microseconds": [1.0],
+                    },
                     "shots": 1,
                 }
             ],
         },
     )
     config = experiment.load_experiment(config_path)
-    at_three = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
-    at_five = config.point_settings(
-        physical_error_probability=0.001,
-        distance=5,
-        round_period_microseconds=1.0,
+    at_three = point.settings
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 5,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    at_five = point.settings
     assert at_three.workload.rounds_policy.rounds_by_operation[1] == 30
     assert at_five.workload.rounds_policy.rounds_by_operation[1] == 50
     measurement = yaml_configs.measure_point_shot(
@@ -715,7 +951,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         seed=0,
     )
     metadata = json.loads(measurement.metadata)
-    assert metadata["distance"] == 5
+    assert metadata["qpu.distance"] == 5
     assert measurement.windows > 5
 
 
@@ -733,7 +969,7 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     manifest = json.loads(manifest_text)
     assert manifest["versions"]["packages"]["stim"]
     assert (
-        manifest["resolved_config"]["settings"]["escalation"]["kind"]
+        manifest["resolved_config"]["sections"]["escalation"]["kind"]
         == "weak_baseline"
     )
     assert manifest["started_utc"] and manifest["finished_utc"]

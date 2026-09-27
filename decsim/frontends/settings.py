@@ -2,14 +2,13 @@
 
 A yaml names what makes its workload (WORKLOADS, below): a maker
 function with its arguments (producer), or the maker's two outputs read
-from disk (files). A maker runs once per sweep point (at_point) and its
+from disk (files). A maker runs once per sweep point (made) and its
 records.workload.Workload is lowered into the operations the machine
 issues (circuit_frontend.lowered); a Python caller hands the same
 fields in directly.
 """
 
 import dataclasses
-import inspect
 import pathlib
 import pkgutil
 from collections.abc import Mapping
@@ -83,7 +82,6 @@ class WorkloadSettings:
     """
 
     kind: Optional[str] = None
-    physical_error_probability: Optional[float] = None
     operations: tuple = ()
     decode_operations: Optional[tuple] = None
     dynamic_streams: tuple = ()
@@ -118,15 +116,11 @@ class WorkloadSettings:
         )
         return cls(kind=kind, row_settings=row_settings)
 
-    def at_point(self, sweep_values: Mapping) -> "WorkloadSettings":
-        """The section at one sweep point, its row's workload made there."""
-        probability = sweep_values["physical_error_probability"]
-        placed = dataclasses.replace(
-            self, physical_error_probability=probability
-        )
+    def made(self) -> "WorkloadSettings":
+        """The section running the workload its row makes, once per point."""
         row = tables.row(WORKLOADS, "workload.kind", self.kind)
-        workload = row.workload(self.row_settings, sweep_values)
-        return placed.running(workload)
+        workload = row.workload(self.row_settings)
+        return self.running(workload)
 
     def running(
         self, workload: workload_records.Workload
@@ -151,8 +145,9 @@ class ProducerWorkload:
     Python's entry points are; Hydra's instantiate calls a named target
     with its keyword arguments the same way
     (hydra/_internal/instantiate/_instantiate2.py:76-82). The maker is
-    called once per sweep point with its arguments and the sweep values
-    its parameters name.
+    called once per sweep point with its arguments as that point
+    resolves them: an axis may set one, and a reference such as
+    `distance: ${qpu.distance}` shares a value the machine reads too.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -173,16 +168,11 @@ class ProducerWorkload:
 
     @staticmethod
     def workload(
-        settings: "ProducerWorkload.Settings", sweep_values: Mapping
+        settings: "ProducerWorkload.Settings",
     ) -> workload_records.Workload:
         """The maker's workload at one sweep point."""
         maker = _maker(settings.function)
-        signature = inspect.signature(maker)
-        named = {}
-        for name, value in sweep_values.items():
-            if name in signature.parameters:
-                named[name] = value
-        made = maker(**settings.arguments, **named)
+        made = maker(**settings.arguments)
         if isinstance(made, workload_records.Workload):
             return made
         made_type = type(made)
@@ -225,10 +215,9 @@ class FilesWorkload:
 
     @staticmethod
     def workload(
-        settings: "FilesWorkload.Settings", sweep_values: Mapping
+        settings: "FilesWorkload.Settings",
     ) -> workload_records.Workload:
-        """The workload the files hold, the same at every sweep point."""
-        del sweep_values
+        """The workload the files hold."""
         return workload_files.read_workload(
             settings.operations,
             settings.circuit,

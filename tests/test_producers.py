@@ -80,15 +80,20 @@ def test_memory_patches_runs_one_memory_per_patch_at_once(tmp_path):
             "code_task": "surface_code:rotated_memory_z",
             "rounds_per_shot": 6,
             "patch_count": 3,
+            "distance": "${qpu.distance}",
         },
     }
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     shots = machine.observation.sampled_shots.shots_by_operation
@@ -117,11 +122,9 @@ def test_no_patches_is_refused():
 
 def _yaml_run(config_path, seed):
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.1,
-    )
+    values = {"qpu.distance": 3, "qpu.round_period_microseconds": 1.1}
+    point = config.point_task(values, 1)
+    settings = point.settings
     machine = machine_module.Machine.build(settings, seed)
     result = machine.run()
     return machine, result
@@ -142,7 +145,12 @@ def _producer(function: str, arguments: dict) -> dict:
 
 def test_the_yaml_deltakit_memory_runs_what_the_example_tool_runs(tmp_path):
     pytest.importorskip("deltakit_explorer")
-    workload = _producer("decsim.producers:deltakit_memory", {"rounds": 24})
+    arguments = {
+        "rounds": 24,
+        "distance": "${qpu.distance}",
+        "physical_error_probability": 0.001,
+    }
+    workload = _producer("decsim.producers:deltakit_memory", arguments)
     config_path = yaml_configs.example_tool_config(
         tmp_path, "stim_device", workload
     )
@@ -170,7 +178,12 @@ def test_the_yaml_deltakit_memory_runs_what_the_example_tool_runs(tmp_path):
 def test_the_yaml_live_deltakit_memory_runs_what_the_live_tool_runs(tmp_path):
     """The owner, region and rounds the tool writes by hand are derived."""
     pytest.importorskip("deltakit_explorer")
-    arguments = {"decode_after_rounds": 3}
+    arguments = {
+        "decode_after_rounds": 3,
+        "distance": "${qpu.distance}",
+        "physical_error_probability": 0.001,
+        "round_period_microseconds": "${qpu.round_period_microseconds}",
+    }
     workload = _producer("decsim.producers:deltakit_live_memory", arguments)
     config_path = yaml_configs.example_tool_config(
         tmp_path, "streaming_stim", workload

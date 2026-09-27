@@ -307,11 +307,9 @@ def test_the_files_row_runs_what_the_tool_builds_by_hand(
         folder, "streaming_stim", workload, feedback_microseconds
     )
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.1,
-    )
+    values = {"qpu.distance": 3, "qpu.round_period_microseconds": 1.1}
+    point = config.point_task(values, 1)
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 17)
     result = machine.run()
     tool_settings = example.live_settings(

@@ -73,7 +73,6 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
     workload = workload_settings.WorkloadSettings(
         operations=(first, second),
         rounds_policy=nine_rounds,
-        physical_error_probability=0.001,
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(

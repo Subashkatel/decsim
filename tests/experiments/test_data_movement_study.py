@@ -5,9 +5,9 @@ tier's unit gets its rounds, weak_decoder.input and
 weak_decoder.boundary_fold, both copy by default, and the switching
 config adds the strong tier and its two priced links. So the configs
 must differ in exactly those settings and in nothing else, and the pair
-the load refuses, both in place, must not be among them. The sweep grammar
-carries no setting axis, so each combination is its own yaml through
-`extends`, and these tests pin what each one changed.
+the load refuses, both in place, must not be among them. Each
+combination is its own yaml through `extends`, and these tests pin what
+each one changed.
 """
 
 import pytest
@@ -26,7 +26,8 @@ def study_settings(name):
     """One study config's resolved settings."""
     config_path = yaml_configs.CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
-    return config.settings
+    first_point = config.first_point_task()
+    return first_point.settings
 
 
 def test_the_base_config_copies_at_both_settings():
@@ -84,7 +85,7 @@ def swept_distances(name):
     distances = set()
     for block in config.sweep:
         for point in block.points():
-            distances.add(point[1])
+            distances.add(point["qpu.distance"])
     return sorted(distances)
 
 
@@ -123,9 +124,11 @@ def _both_in_place_config(tmp_path):
     raw["weak_decoder"] = weak
     raw["sweep"] = [
         {
-            "physical_error_probability": [0.01],
-            "distance": [3],
-            "round_period_microseconds": [1.0],
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.01],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
             "shots": 1,
         }
     ]

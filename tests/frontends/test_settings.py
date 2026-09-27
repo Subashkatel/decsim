@@ -55,13 +55,19 @@ def _outside_package(tmp_path, monkeypatch) -> None:
     monkeypatch.syspath_prepend(str(tmp_path))
 
 
-def _point(config_path):
+# A point that sets the distance only, for a maker that takes no error
+# rate, and one that sets both, for Stim's memory circuit.
+AT_DISTANCE_3 = {"qpu.distance": 3}
+AT_DISTANCE_3_AND_P = {
+    "qpu.distance": 3,
+    "workload.arguments.physical_error_probability": 0.001,
+}
+
+
+def _point(config_path, values):
     config = experiment.load_experiment(config_path)
-    return config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-    )
+    task = config.point_task(values, 1)
+    return task.settings
 
 
 def _producer(function: str, arguments: dict) -> dict:
@@ -72,11 +78,12 @@ def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
     """Its module:function and its arguments are the whole edit."""
     _outside_package(tmp_path, monkeypatch)
     workload = _producer(
-        "outside_makers.makers:two_patch_memory", {"patch_rounds": 4}
+        "outside_makers.makers:two_patch_memory",
+        {"patch_rounds": 4, "distance": "${qpu.distance}"},
     )
     card = {"workload": workload, "qpu": {"kind": "timing_only"}}
     config_path = yaml_configs.write_config(tmp_path, card)
-    settings = _point(config_path)
+    settings = _point(config_path, AT_DISTANCE_3)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     rounds = settings.workload.rounds_policy.rounds_by_operation
@@ -92,13 +99,14 @@ def test_a_maker_with_keyword_arguments_takes_what_the_yaml_writes(
 ):
     """Python's own call rules: **options takes any argument the yaml has."""
     _outside_package(tmp_path, monkeypatch)
+    arguments = {"distance": "${qpu.distance}", **arguments}
     workload = _producer(
         "outside_makers.makers:rounds_from_keywords", arguments
     )
     card = {"workload": workload, "qpu": {"kind": "timing_only"}}
     config_path = yaml_configs.write_config(tmp_path, card)
 
-    settings = _point(config_path)
+    settings = _point(config_path, AT_DISTANCE_3_AND_P)
 
     policy = settings.workload.rounds_policy
     assert policy.rounds_by_operation == {1: rounds}
@@ -108,7 +116,8 @@ def test_a_maker_that_returns_no_workload_is_refused_at_the_point(
     monkeypatch, tmp_path
 ):
     _outside_package(tmp_path, monkeypatch)
-    workload = _producer("outside_makers.makers:not_a_workload", {})
+    arguments = {"distance": "${qpu.distance}"}
+    workload = _producer("outside_makers.makers:not_a_workload", arguments)
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
     sentence = (
         "outside_makers.makers:not_a_workload returned a list; a maker "
@@ -116,7 +125,7 @@ def test_a_maker_that_returns_no_workload_is_refused_at_the_point(
     )
 
     with pytest.raises(ValueError, match=sentence):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 @pytest.mark.parametrize(
@@ -133,7 +142,7 @@ def test_a_maker_that_is_not_there_is_refused_at_the_point(
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
 
     with pytest.raises(ValueError, match=sentence):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 @pytest.mark.parametrize(
@@ -143,10 +152,9 @@ def test_a_maker_that_is_not_there_is_refused_at_the_point(
             {"code_task": "x", "rounds_per_shot": 3, "colour": 1},
             "got an unexpected keyword argument 'colour'",
         ),
-        ({"code_task": "x"}, "missing 1 required positional argument"),
         (
-            {"code_task": "x", "rounds_per_shot": 3, "distance": 5},
-            "got multiple values for keyword argument 'distance'",
+            {"code_task": "x", "distance": "${qpu.distance}"},
+            "missing 1 required positional argument",
         ),
     ],
 )
@@ -156,13 +164,14 @@ def test_a_bad_argument_stops_the_makers_call(tmp_path, arguments, sentence):
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
 
     with pytest.raises(TypeError, match=sentence):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3_AND_P)
 
 
 def test_a_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
     """The table's own refusal, at the yaml boundary."""
     workload = {"kind": "memory_circuit", "rounds_per_shot": 6}
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    card = {"workload": workload, "sweep": yaml_configs.QPU_ONLY_SWEEP}
+    config_path = yaml_configs.write_config(tmp_path, card)
 
     with pytest.raises(ValueError, match="workload.kind 'memory_circuit' is"):
         experiment.load_experiment(config_path)
@@ -184,7 +193,7 @@ def test_a_shot_of_fewer_than_one_round_is_refused_at_the_point(
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
 
     with pytest.raises(ValueError, match="a round count of at least 1"):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3_AND_P)
 
 
 # The audit's merge probe: two memories, their merge, a measurement, as
@@ -208,7 +217,11 @@ def _write_json(folder, name: str, value) -> None:
 
 
 def _files_config(tmp_path, workload: dict, qpu_kind="timing_only"):
-    card = {"workload": workload, "qpu": {"kind": qpu_kind}}
+    card = {
+        "workload": workload,
+        "qpu": {"kind": qpu_kind},
+        "sweep": yaml_configs.QPU_ONLY_SWEEP,
+    }
     return yaml_configs.write_config(tmp_path, card)
 
 
@@ -217,7 +230,7 @@ def test_the_merge_probe_runs_from_an_operations_file(tmp_path):
     _write_json(tmp_path, "merge.json", MERGE_OPERATIONS)
     workload = {"kind": "files", "operations": "merge.json"}
     config_path = _files_config(tmp_path, workload)
-    settings = _point(config_path)
+    settings = _point(config_path, AT_DISTANCE_3)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     merge = machine.operations[2]
@@ -246,9 +259,9 @@ def test_an_inherited_files_row_reads_beside_the_yaml_that_wrote_it(
     child_path.write_text(f"extends: base/{base_path.name}\n")
     expected_path = base_folder / "merge.json"
 
-    config = experiment.load_experiment(child_path)
+    settings = _point(child_path, AT_DISTANCE_3)
 
-    files = config.settings.workload.row_settings
+    files = settings.workload.row_settings
     assert files.operations == expected_path
 
 
@@ -274,7 +287,7 @@ def test_one_circuit_under_two_operations_from_files_is_refused(tmp_path):
     config_path = _files_config(tmp_path, workload, "stim_device")
 
     with pytest.raises(ValueError, match="none names its round range"):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 def test_a_files_section_naming_two_physical_circuits_is_refused(tmp_path):
@@ -298,7 +311,7 @@ def test_a_files_section_naming_a_missing_file_stops_at_the_point(tmp_path):
     config_path = _files_config(tmp_path, workload)
 
     with pytest.raises(FileNotFoundError, match="absent.json"):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)
 
 
 def test_an_operations_file_of_another_schema_is_refused(tmp_path):
@@ -309,4 +322,4 @@ def test_an_operations_file_of_another_schema_is_refused(tmp_path):
     config_path = _files_config(tmp_path, workload)
 
     with pytest.raises(ValueError, match="is not a decsim.ops/1 operation"):
-        _point(config_path)
+        _point(config_path, AT_DISTANCE_3)

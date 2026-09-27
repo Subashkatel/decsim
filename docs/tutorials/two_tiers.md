@@ -84,9 +84,10 @@ strong_decoder:
     release_cycles_per_round: 0
 
 sweep:
-  - physical_error_probability: [0.008]
-    distance: [3, 5]
-    round_period_microseconds: [1.0]
+  - axes:
+      workload.arguments.physical_error_probability: [0.008]
+      qpu.distance: [3, 5]
+      qpu.round_period_microseconds: [1.0]
     shots: 50
 ```
 
@@ -137,16 +138,16 @@ pauli_frame: kind logical_register
 workload: kind producer
 magic_state_factory: kind infinite
 links: card two_tiers.yaml
-sweep block 1: p [0.008], d [3, 5], round period [1.0] us, 50 shots
+sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distance [3, 5], qpu.round_period_microseconds [1.0], 50 shots
 log: off
 trace: off
 values:
-clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:50]
-clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
+clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:56]
+clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:57]
 qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:4]
-qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:81]
-qpu.round_period_microseconds = [1.0]  [sweep, configs/two_tiers.yaml:51-55]
-qpu.distance = [3, 5]  [sweep, configs/two_tiers.yaml:51-55]
+qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:85]
+qpu.round_period_microseconds = [1.0]  [sweep, configs/two_tiers.yaml:51-56]
+qpu.distance = [3, 5]  [sweep, configs/two_tiers.yaml:51-56]
 ```
 
 Below `values:` the list goes on to every value the machine is built
@@ -168,9 +169,9 @@ The command prints the same resolved config, then one line per point as
 it finishes, then the summary. This is the summary:
 
 ```
-distance: 3
-physical_error_probability: 0.008
-round_period_microseconds: 1.0
+qpu.distance: 3
+qpu.round_period_microseconds: 1.0
+workload.arguments.physical_error_probability: 0.008
 algorithm: 1 us
 load (service per window / window inter-arrival): 3.67
 logical failures: 15 of 50 shots
@@ -180,9 +181,9 @@ queue wait, mean: 16.643 us
 service time per window, mean: 5.941 us
 ready to frame commit: median 28.900 us, p99 79.656 us
 
-distance: 5
-physical_error_probability: 0.008
-round_period_microseconds: 1.0
+qpu.distance: 5
+qpu.round_period_microseconds: 1.0
+workload.arguments.physical_error_probability: 0.008
 algorithm: 1 us
 load (service per window / window inter-arrival): 2.54
 logical failures: 16 of 50 shots
@@ -221,7 +222,7 @@ decsim run configs/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
 
 ```
 config: two_tiers
-point: {"distance": 3, "physical_error_probability": 0.008, "round_period_microseconds": 1.0} seed 1
+point: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.008} seed 1
 terminal status: complete
 execution done: 30000000 ticks
 fully done: 80316000 ticks

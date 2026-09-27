@@ -292,11 +292,15 @@ def test_a_frame_row_written_outside_decsim_runs_from_a_yaml(
     section["kind"] = "counting"
     config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
     experiment_config = experiment.load_experiment(config_path)
-    settings = experiment_config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = experiment_config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
 
@@ -368,11 +372,15 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     """
     config_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"
     experiment_config = experiment.load_experiment(config_path)
-    settings = experiment_config.point_settings(
-        physical_error_probability=0.01,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = experiment_config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.01,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     (operation_result,) = result.operation_results

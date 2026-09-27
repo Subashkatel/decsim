@@ -22,7 +22,7 @@ docstring.
 
 ### config
 
-- `decsim/config.py`: The tick, and the clock domains a yaml prices its cycles on.
+- `decsim/config.py`: The tick, the clock domains a yaml prices its cycles on, and yaml paths.
 
 ### records
 

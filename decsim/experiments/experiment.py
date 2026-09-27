@@ -1,23 +1,26 @@
 """One yaml file is one experiment; this module is the only yaml reader.
 
 The file's sections are handed to the packages that own them, one
-settings record each (decsim.settings.MachineSettings.from_mapping); the
-sweep blocks stay here, since the machine knows nothing of sweeps.
-`extends: other.yaml` starts from that file (same folder) and overrides
-the top-level keys this file names.
+settings record each (decsim.settings.MachineSettings.from_mapping), at
+every point of its sweep; the sweep blocks stay here, since the machine
+knows nothing of sweeps. `extends: other.yaml` starts from that file
+(same folder) and overrides the top-level keys this file names.
 """
 
 import contextlib
+import copy
 import dataclasses
 import itertools
 import json
 import pathlib
+import re
 from collections.abc import Mapping
 from typing import Optional
 
 import yaml
 
 import decsim.collect as collect
+import decsim.config as config_module
 import decsim.experiments.refusal as refusal
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
@@ -28,56 +31,51 @@ _REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 # configs/ sits beside the decsim package, gem5's configs/ beside its
 # binary; the shipped experiments are what a refused path is listed with.
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
-SWEEP_AXES = (
-    "physical_error_probability",
-    "distance",
-    "round_period_microseconds",
-)
-SWEEP_KEYS = SWEEP_AXES + ("shots",)
-# The settings paths a sweep point sets, each with its sweep block field.
-SWEEP_PATHS = {
-    ("qpu", "distance"): "distances",
-    ("qpu", "round_period_microseconds"): "round_periods_microseconds",
-    ("workload", "physical_error_probability"): (
-        "physical_error_probabilities"
-    ),
-}
 REFERENCE_FILE = CONFIGS_DIR / "reference.yaml"
+SWEEP_BLOCK_KEYS = ("axes", "shots")
+# A value that is one whole reference to another setting, `${a.b}`:
+# OmegaConf's node interpolation, whose value "will be the value of that
+# node" (OmegaConf 2.3, "Variable interpolation"), kept to a whole value
+# so that no text is spliced.
+WHOLE_VALUE_REFERENCE = re.compile(r"\$\{([^${}]+)\}")
 
 
 @dataclasses.dataclass(frozen=True)
 class SweepBlock:
-    """One cross product of the three axes, `shots` seeds per point.
+    """One cartesian product of axes, `shots` seeds per point.
 
-    The algorithm is not a sweep axis: it is structure, fixed per unit on
-    the decoder section; comparing algorithms is comparing configs.
-    Distance is an axis because the papers' LER plots are one curve per
-    d (Toshio 2510.25222 sweeps d at fixed p; threshold plots sweep p
-    per d).
+    An axis is a yaml path and the values the sweep sets there. A block
+    is every combination of its axes, in the order they are written, as
+    Hydra's multi-run makes one job per combination of `key=v1,v2`
+    overrides, each override a config node's dotted path (hydra.cc,
+    "Multi-run"). A sweep's blocks are a union.
     """
 
-    physical_error_probabilities: tuple
-    distances: tuple
-    round_periods_microseconds: tuple
+    axes: Mapping  # yaml path -> tuple of values
     shots: int
 
     def points(self) -> list:
-        """Its cross product, one (p, distance, round period) per point."""
-        axes = itertools.product(
-            self.physical_error_probabilities,
-            self.distances,
-            self.round_periods_microseconds,
-        )
-        points = list(axes)
+        """Its cartesian product, one {yaml path: value} per point."""
+        paths = list(self.axes)
+        value_lists = self.axes.values()
+        combinations = itertools.product(*value_lists)
+        points = []
+        for values in combinations:
+            pairs = zip(paths, values, strict=True)
+            points.append(dict(pairs))
         return points
 
 
 @dataclasses.dataclass(frozen=True)
 class ExperimentConfig:
-    """Everything one yaml file says: the machine, and the sweep over it."""
+    """Everything one yaml file says: its sections, and the sweep over them."""
 
     name: str  # the yaml stem; suffixes the run folder
-    settings: machine_settings.MachineSettings
+    # the sections after extends, the sweep taken out: each point reads
+    # its machine from them (resolved_sections)
+    sections: Mapping
+    # each section's yaml folder, which its relative paths resolve against
+    section_folders: Mapping
     sweep: tuple  # of SweepBlock
     # the yaml files this config was read from, nearest first (an extends
     # chain)
@@ -87,86 +85,48 @@ class ExperimentConfig:
         """One task per sweep point, blocks in order, each block a product."""
         tasks = []
         for block in self.sweep:
-            for point in block.points():
-                task = self._point_task(point, block.shots)
+            for values in block.points():
+                task = self.point_task(values, block.shots)
                 tasks.append(task)
         return tasks
 
-    def _point_task(self, point: tuple, shots: int) -> collect.Task:
-        """The task of one (p, distance, round period) point."""
-        physical_error_probability, distance, round_period_microseconds = point
-        return self.point_task(
-            physical_error_probability=physical_error_probability,
-            distance=distance,
-            round_period_microseconds=round_period_microseconds,
-            shots=shots,
-        )
+    def point_task(self, values: Mapping, shots: int) -> collect.Task:
+        """The task of one sweep point: its settings, shots and metadata.
 
-    def point_task(
-        self,
-        *,
-        physical_error_probability: float,
-        distance: int,
-        round_period_microseconds: float,
-        shots: int,
-    ) -> collect.Task:
-        """The task of one sweep point: its settings, shots and metadata."""
-        settings = self.point_settings(
-            physical_error_probability=physical_error_probability,
-            distance=distance,
-            round_period_microseconds=round_period_microseconds,
-        )
-        metadata = {
-            "physical_error_probability": physical_error_probability,
-            "distance": distance,
-            "round_period_microseconds": round_period_microseconds,
-        }
-        return collect.Task.at_point(settings, shots, metadata)
-
-    def point_settings(
-        self,
-        *,
-        physical_error_probability: float,
-        distance: int,
-        round_period_microseconds: float,
-    ) -> machine_settings.MachineSettings:
-        """The machine at one sweep point.
-
-        The point sets the QPU's distance and round period, the workload
-        its maker makes there, and the escalation threshold the point
-        certifies.
+        values maps a yaml path to what the point sets there, and they
+        are the point's metadata, sinter's json_metadata
+        (sinter/_data/_task.py:36-52). The task's strong id covers them
+        and every setting they resolve to, so a point is named by what
+        it runs, as gem5's multisim names each simulation's output by
+        its one id (src/python/gem5/utils/multisim/multisim.py). Every
+        point is read by the one yaml reader, so an axis meets the checks
+        a written value meets; then the workload's maker runs there and
+        the escalation takes the threshold its source gives the point.
         """
-        settings = self.settings
-        qpu = dataclasses.replace(
-            settings.qpu,
-            distance=distance,
-            round_period_microseconds=round_period_microseconds,
-        )
-        sweep_values = {
-            "physical_error_probability": physical_error_probability,
-            "distance": distance,
-            "round_period_microseconds": round_period_microseconds,
-        }
-        workload = self._workload_at(sweep_values)
-        threshold_nats = settings.escalation.threshold_nats_for(
-            physical_error_probability, distance
-        )
-        escalation = dataclasses.replace(
-            settings.escalation, gap_threshold_nats=threshold_nats
-        )
-        return dataclasses.replace(
-            settings, qpu=qpu, workload=workload, escalation=escalation
-        )
+        path = self.config_files[0]
+        with _refused_in(path):
+            resolved, settings = self._read_point(values)
+            return _point_task_of(settings, resolved, values, shots)
 
     def first_point_task(self) -> collect.Task:
         """The task of the first point of the first sweep block, one shot."""
         block = self.sweep[0]
-        return self.point_task(
-            physical_error_probability=block.physical_error_probabilities[0],
-            distance=block.distances[0],
-            round_period_microseconds=block.round_periods_microseconds[0],
-            shots=1,
-        )
+        points = block.points()
+        return self.point_task(points[0], 1)
+
+    def resolved_sections(self, values: Mapping) -> dict:
+        """The sections at one point: its axes placed, references resolved.
+
+        An axis sets the value at its yaml path, and a mapping replaces
+        the node there whole, as a Hydra config-group override replaces
+        a sub-config. A whole-value reference then takes the value at its
+        path, so a fact the machine and the workload share is written
+        once: `distance: ${qpu.distance}`.
+        """
+        sections = copy.deepcopy(self.sections)
+        for path, value in values.items():
+            _place(sections, path, value)
+        return _resolved(sections, sections, ())
 
     def built_machine(
         self, settings: machine_settings.MachineSettings, seed: int
@@ -176,48 +136,55 @@ class ExperimentConfig:
         with _refused_in(path):
             return machine_module.Machine.build(settings, seed)
 
-    def _workload_at(self, sweep_values: dict):
-        """The workload section at one point, a maker's refusal one line."""
-        path = self.config_files[0]
-        with _refused_in(path):
-            return self.settings.workload.at_point(sweep_values)
+    def _read_point(self, values: Mapping) -> tuple:
+        """A point's resolved sections, and the settings read from them."""
+        resolved = self.resolved_sections(values)
+        settings = machine_settings.MachineSettings.from_mapping(
+            resolved, name=self.name, section_folders=self.section_folders
+        )
+        return resolved, settings
 
 
-def resolved_description(config: ExperimentConfig) -> list:
+def resolved_description(
+    config: ExperimentConfig, settings: machine_settings.MachineSettings
+) -> list:
     """What one yaml really says, after its extends chain is applied.
 
-    An edit that did not land shows up here immediately: a config that
-    extends another replaces its base's keys whole, so a `sweep` edited
-    in the base never reaches a child that declares its own. gem5 prints
-    the same thing with --dump-config (src/python/m5/main.py:241).
+    settings is the first point's. An edit that did not land shows up
+    here immediately: a config that extends another replaces its base's
+    keys whole, so a `sweep` edited in the base never reaches a child
+    that declares its own. gem5 prints the same thing with --dump-config
+    (src/python/m5/main.py:241).
     """
     lines = [_files_line(config)]
-    for line in _section_lines(config.settings):
+    for line in _section_lines(settings):
         lines.append(line)
-    links_line = _links_line(config.settings.links)
+    links_line = _links_line(settings.links)
     lines.append(links_line)
     for index, block in enumerate(config.sweep, start=1):
         block_line = _sweep_block_line(index, block)
         lines.append(block_line)
-    for line in _observation_lines(config.settings.observation):
+    for line in _observation_lines(settings.observation):
         lines.append(line)
     return lines
 
 
-def value_lines(config: ExperimentConfig) -> list:
-    """Every value the config resolves to, and who set it where it is sure.
+def value_lines(
+    config: ExperimentConfig, settings: machine_settings.MachineSettings
+) -> list:
+    """Every value the first point resolves to, and who set it where sure.
 
     One line per value of the settings records: its dotted path, its
-    value (a swept value lists the sweep's values), and in brackets its
-    layer and source line when the value is one yaml key's (_origin_of).
-    gem5's config.ini lists every parameter of every object the same way
-    (src/python/m5/simulate.py:122-127).
+    value (a value an axis sets lists the sweep's values), and in
+    brackets its layer and source line when the value is one yaml key's
+    (_origin_of). gem5's config.ini lists every parameter of every object
+    the same way (src/python/m5/simulate.py:122-127).
     """
     written = _written_keys(config)
     documented = _documented_keys()
     swept = _swept_values(config.sweep)
-    settings = collect.json_value(config.settings)
-    leaves = value_leaves(settings, ())
+    settings_value = collect.json_value(settings)
+    leaves = value_leaves(settings_value, ())
     lines = []
     for path, value in leaves:
         key = _yaml_key(path)
@@ -225,7 +192,7 @@ def value_lines(config: ExperimentConfig) -> list:
         value_text = json.dumps(value)
         dotted = ".".join(path)
         line = f"{dotted} = {value_text}"
-        origin = _origin_of(key, written, documented)
+        origin = _origin_of(key, swept, written, documented)
         if origin is not None:
             line = f"{line}  [{origin}]"
         lines.append(line)
@@ -248,24 +215,34 @@ def value_leaves(value, path: tuple) -> list:
 
 
 def load_experiment(path) -> ExperimentConfig:
-    """Read one yaml file, its extends chain applied, into settings."""
+    """Read one yaml file, its extends chain applied, and its sweep.
+
+    The first point's sections are read here, so a section the yaml
+    reader refuses is refused when the file loads; a value an axis sets
+    at a later point is read when that point's task is made.
+    """
     path = pathlib.Path(path)
     _refuse_a_path_that_is_not_a_file(path)
     sections, section_folders, config_files = _yaml_sections(path)
-    if "sweep" not in sections:
+    if not sections.get("sweep"):
         raise refusal.RefusalError(
             f"{path} has no sweep; a yaml names at least one sweep block "
             "(configs/reference.yaml)"
         )
     sweep_section = sections.pop("sweep")
     sweep = _sweep_blocks(sweep_section)
-    settings = _settings_of(sections, path, section_folders)
-    return ExperimentConfig(
+    config = ExperimentConfig(
         name=path.stem,
-        settings=settings,
+        sections=sections,
+        section_folders=section_folders,
         sweep=sweep,
         config_files=config_files,
     )
+    first_block = sweep[0]
+    first_points = first_block.points()
+    with _refused_in(path):
+        config._read_point(first_points[0])
+    return config
 
 
 def _refuse_a_path_that_is_not_a_file(path: pathlib.Path) -> None:
@@ -282,20 +259,83 @@ def _refuse_a_path_that_is_not_a_file(path: pathlib.Path) -> None:
     )
 
 
-def _settings_of(
-    sections: dict, path: pathlib.Path, section_folders: dict
-) -> machine_settings.MachineSettings:
-    """The machine's settings records, one per section of the file.
+def _point_task_of(
+    settings: machine_settings.MachineSettings,
+    resolved: dict,
+    values: Mapping,
+    shots: int,
+) -> collect.Task:
+    """A point's task: its workload made, its escalation's threshold set.
 
-    A settings record checks its own section and raises ValueError
-    (STYLE.md rule 4); the file is the experiments layer's input, so a
-    refused key reaches the user as one sentence naming the file it is
-    in.
+    The calibration table and the online source read the point's values
+    by path from its resolved sections, so a point that sweeps no
+    distance or error rate still finds them.
     """
-    with _refused_in(path):
-        return machine_settings.MachineSettings.from_mapping(
-            sections, name=path.stem, section_folders=section_folders
+    workload = settings.workload.made()
+    threshold_nats = settings.escalation.threshold_nats_for(resolved)
+    escalation = dataclasses.replace(
+        settings.escalation, gap_threshold_nats=threshold_nats
+    )
+    online_threshold = escalation.online_threshold_for(resolved)
+    point_settings = dataclasses.replace(
+        settings, workload=workload, escalation=escalation
+    )
+    metadata = dict(values)
+    return collect.Task(point_settings, shots, metadata, online_threshold)
+
+
+def _place(sections: dict, path: str, value) -> None:
+    """Set an axis's value at its yaml path, under a section that exists."""
+    parent_path, _, key = path.rpartition(".")
+    parent = sections
+    if parent_path:
+        reader = f"the sweep axis {path}"
+        parent = config_module.setting_at(sections, parent_path, reader)
+    if not isinstance(parent, Mapping):
+        raise ValueError(
+            f"the sweep axis {path} sets a key under {parent_path}, which "
+            f"holds {parent!r}, not a section"
         )
+    parent[key] = value
+
+
+def _resolved(value, root: dict, chain: tuple):
+    """A value with every whole-value reference replaced by what it names.
+
+    chain is the references followed to reach this value, so a reference
+    that leads back to itself is refused rather than followed forever.
+    """
+    if isinstance(value, Mapping):
+        resolved = {}
+        for key, item in value.items():
+            resolved[key] = _resolved(item, root, chain)
+        return resolved
+    if isinstance(value, list):
+        items = []
+        for item in value:
+            resolved_item = _resolved(item, root, chain)
+            items.append(resolved_item)
+        return items
+    return _referenced(value, root, chain)
+
+
+def _referenced(value, root: dict, chain: tuple):
+    """The value a whole-value reference names, or the value itself."""
+    if not isinstance(value, str):
+        return value
+    match = WHOLE_VALUE_REFERENCE.fullmatch(value)
+    if match is None:
+        return value
+    path = match.group(1)
+    followed = chain + (path,)
+    if path in chain:
+        cycle = " -> ".join(followed)
+        raise ValueError(
+            f"the references {cycle} form a cycle; each names the next, "
+            "so none has a value"
+        )
+    target = config_module.setting_at(root, path, f"the reference {value}")
+    return _resolved(target, root, followed)
 
 
 @contextlib.contextmanager
@@ -334,14 +374,13 @@ def _links_line(links) -> str:
 
 
 def _sweep_block_line(index: int, block: SweepBlock) -> str:
-    """One sweep block's three axes and its shot count, as one line."""
-    probabilities = list(block.physical_error_probabilities)
-    distances = list(block.distances)
-    periods = list(block.round_periods_microseconds)
-    return (
-        f"sweep block {index}: p {probabilities}, d {distances}, "
-        f"round period {periods} us, {block.shots} shots"
-    )
+    """One sweep block's axes and its shot count, as one line."""
+    axes = []
+    for path, values in block.axes.items():
+        values_text = json.dumps(list(values))
+        axes.append(f"{path} {values_text}")
+    axes_text = ", ".join(axes)
+    return f"sweep block {index}: {axes_text}, {block.shots} shots"
 
 
 def _observation_lines(observation) -> list:
@@ -385,42 +424,34 @@ def _sweep_blocks(sweep_section: list) -> tuple:
 
 
 def _sweep_block(block: dict, index: int) -> SweepBlock:
-    unknown = set(block) - set(SWEEP_KEYS)
-    if unknown:
-        listed = sorted(unknown)
+    """One block: its axes, each a yaml path and a list of values, and shots."""
+    if not isinstance(block, Mapping) or set(block) != set(SWEEP_BLOCK_KEYS):
         raise refusal.RefusalError(
-            f"sweep block {index} does not know {listed}; its axes "
-            "are physical_error_probability, distance and "
-            "round_period_microseconds, plus shots (the algorithm lives "
-            "on the decoder card, not in the sweep)"
+            f"sweep block {index} is {block!r}; a block is axes, a mapping "
+            "of yaml paths to the values the sweep sets there, and shots"
         )
-    _check_axes(block, index)
+    axes = block["axes"]
+    _check_axes(axes, index)
     shots = block["shots"]
     _check_shots(shots, index)
-    return SweepBlock(
-        physical_error_probabilities=tuple(block["physical_error_probability"]),
-        distances=tuple(block["distance"]),
-        round_periods_microseconds=tuple(block["round_period_microseconds"]),
-        shots=shots,
-    )
+    values = {}
+    for path, axis_values in axes.items():
+        values[path] = tuple(axis_values)
+    return SweepBlock(axes=values, shots=shots)
 
 
-def _check_axes(block: dict, index: int) -> None:
-    """Every key is there, and each axis lists the values it sweeps."""
-    missing = set(SWEEP_KEYS) - set(block)
-    if missing:
-        listed = sorted(missing)
+def _check_axes(axes, index: int) -> None:
+    """The axes are a mapping, and each axis lists the values it sweeps."""
+    if not isinstance(axes, Mapping):
         raise refusal.RefusalError(
-            f"sweep block {index} lacks {listed}; a block lists "
-            "physical_error_probability, distance and "
-            "round_period_microseconds and names its shots"
+            f"sweep block {index} axes must map yaml paths to values, got "
+            f"{axes!r}"
         )
-    for axis in SWEEP_AXES:
-        values = block[axis]
+    for path, values in axes.items():
         if not isinstance(values, list) or not values:
             raise refusal.RefusalError(
-                f"sweep block {index} {axis} must be a list of at least one "
-                f"value, got {values!r}"
+                f"sweep block {index} axis {path} must be a list of at least "
+                f"one value, got {values!r}"
             )
 
 
@@ -443,13 +474,15 @@ class _WrittenKey:
     source: str  # file:line
 
 
-def _origin_of(key: tuple, written: dict, documented: dict) -> Optional[str]:
+def _origin_of(
+    key: tuple, swept: dict, written: dict, documented: dict
+) -> Optional[str]:
     """The layer that set a value and its yaml line, or None.
 
     Only a value that is one yaml key's has an origin, so a value the
     build derives cites no line rather than a guessed one.
     """
-    if key in SWEEP_PATHS:
+    if _is_swept(key, swept):
         sweep_key = written[("sweep",)]
         return f"sweep, {sweep_key.source}"
     if key in written:
@@ -547,22 +580,36 @@ def _last_scalar(node):
     return node
 
 
+def _is_swept(key: tuple, swept: dict) -> bool:
+    """Whether an axis sets this key, itself or a section holding it."""
+    for axis in swept:
+        prefix = key[: len(axis)]
+        if prefix == axis:
+            return True
+    return False
+
+
 def _swept_values(sweep: tuple) -> dict:
-    """Each value a sweep point sets, as the list of the sweep's values."""
+    """Each axis's values across the sweep blocks, each once, in order.
+
+    The key is the axis's yaml path as a tuple of names, the shape
+    _yaml_key gives a settings path.
+    """
     swept = {}
-    for key, field_name in SWEEP_PATHS.items():
-        swept[key] = _values_of(sweep, field_name)
+    for block in sweep:
+        for path, values in block.axes.items():
+            names = path.split(".")
+            key = tuple(names)
+            known = swept.setdefault(key, [])
+            _add_new_values(known, values)
     return swept
 
 
-def _values_of(sweep: tuple, field_name: str) -> list:
-    """One axis's values across the sweep blocks, each once, in order."""
-    values = []
-    for block in sweep:
-        block_values = getattr(block, field_name)
-        values.extend(block_values)
-    unique_values = dict.fromkeys(values)
-    return list(unique_values)
+def _add_new_values(known: list, values: tuple) -> None:
+    """Append the values not known yet; a mapping value is not hashable."""
+    for value in values:
+        if value not in known:
+            known.append(value)
 
 
 def _yaml_key(path: tuple) -> tuple:

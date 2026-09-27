@@ -107,11 +107,15 @@ def _machine_formed_at(where: str, distance: int = 3):
     """The weak baseline, forming its detection events there."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=distance,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": distance,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     detection_events = _formed_at(settings, where)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
@@ -139,11 +143,15 @@ def _seated_machine(
     """
     config_path = CONFIGS / config_name
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     detection_events = dataclasses.replace(
         settings.detection_events,
         formed_at=formed_at,
@@ -267,11 +275,15 @@ def _switching_machine_formed_at(where: str):
     """A switching run at d=3, where both tiers decode the same rounds."""
     config_path = CONFIGS / "seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     detection_events = _formed_at(settings, where)
     settings = dataclasses.replace(settings, detection_events=detection_events)
     return machine_module.Machine.build(settings, 0)
@@ -286,11 +298,15 @@ def _forward_switching_at_the_decoder():
     """
     config_path = CONFIGS / "seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.008,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.008,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     detection_events = _formed_at(settings, "decoder")
     escalation = dataclasses.replace(
         settings.escalation, strong_window="forward_seam_pinned"
@@ -410,11 +426,15 @@ def _machine(**weak_changes):
     """The weak baseline at d=3, counting its data movement."""
     config_path = CONFIGS / "weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
-    settings = config.point_settings(
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
+    point = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+        1,
     )
+    settings = point.settings
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(

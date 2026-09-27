@@ -1,20 +1,23 @@
 """A piece: seeds [first, first + count) of one sweep point, kept as one folder.
 
 pieces/<point id>/<first>-<last>/ holds the piece's additive files and
-piece.json. They are written into a hidden partial folder beside it,
+piece.json. They are written into a hidden staging folder beside it,
 piece.json last, and the folder is renamed into place last, so a piece
 folder exists only whole: a rename within one directory is atomic under
 POSIX, and GPFS keeps POSIX semantics under its distributed locking
 (Schmuck and Haskin, FAST 2002). A run skips a piece whose folder
 exists, which is how a killed collect resumes, as sinter resumes from
 the counts its save file already holds
-(sinter/_collection/_collection.py:387-397).
+(sinter/_collection/_collection.py:387-397). A staging folder a killed
+writer left is no piece and is passed over; no writer can tell from
+another host whether its owner is still writing, so none removes it.
 """
 
 import json
 import os
 import pathlib
 import shutil
+import uuid
 
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
@@ -49,18 +52,15 @@ def write(
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
-    A partial folder a killed run left for this piece is removed first;
-    only this piece's own, since another task may be writing its piece
-    beside it. facts are the piece's own lines of piece.json, beside
-    the counts read off its shots.
+    facts are the piece's own lines of piece.json, beside the counts
+    read off its shots.
     """
     count = len(measurements)
     folder = piece_dir(experiment_dir, point_id, first_seed, count)
-    partial = folder.with_name(f".{folder.name}.partial")
-    shutil.rmtree(partial, ignore_errors=True)
-    partial.mkdir(parents=True)
+    staging = _staging_dir(folder)
+    staging.mkdir(parents=True)
     record = report.record_of(measurements)
-    report.write_record(record, partial, None)
+    report.write_record(record, staging, None)
     counts = _counts_of(record.shots)
     identity = run_folder.piece_identity()
     piece = {
@@ -71,16 +71,16 @@ def write(
         **facts,
         **identity,
     }
-    piece_path = partial / PIECE_FILE
+    piece_path = staging / PIECE_FILE
     run_folder.write_json(piece_path, piece)
-    os.replace(partial, folder)
+    _publish(staging, folder)
     return folder
 
 
 def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
     """Every whole piece of these points, point by point, in seed order.
 
-    A partial folder is no piece and is passed over.
+    A staging folder is no piece and is passed over.
     """
     folders = []
     for point_id in point_ids:
@@ -113,8 +113,36 @@ def read_piece(folder: pathlib.Path) -> dict:
     return json.loads(text)
 
 
+def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
+    """A hidden folder beside the piece that only this writer uses.
+
+    Two tasks handed the same piece may write it at once, so each
+    stages its own copy under a random name and neither touches the
+    other's files.
+    """
+    identifier = uuid.uuid4()
+    token = identifier.hex
+    return folder.with_name(f".{folder.name}.{token}.partial")
+
+
+def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
+    """The staged piece renamed into place, or dropped when one is there.
+
+    A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
+    so of two writers of one piece the first to rename wins. The other's
+    copy holds the same seeds of the same point, the same piece, and is
+    dropped.
+    """
+    try:
+        os.replace(staging, folder)
+    except OSError:
+        if not folder.is_dir():
+            raise
+        shutil.rmtree(staging)
+
+
 def _whole_pieces(point_dir: pathlib.Path) -> list:
-    """One point's piece folders in first-seed order, partial ones left out."""
+    """One point's piece folders in first-seed order, staging ones left out."""
     pieces = []
     for folder in point_dir.iterdir():
         if folder.name.startswith("."):

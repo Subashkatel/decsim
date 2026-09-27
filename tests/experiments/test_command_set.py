@@ -701,8 +701,8 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     assert cut_rows == whole_rows
 
 
-def test_a_partial_piece_a_killed_run_left_is_written_again(tmp_path):
-    """A partial folder is no piece: the piece runs, the partial goes."""
+def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
+    """A killed writer's staging folder: the piece runs, the fold skips it."""
     config_path = yaml_configs.write_config(tmp_path, {})
     whole_dir = tmp_path / "whole"
     out_dir = tmp_path / "out"
@@ -714,7 +714,7 @@ def test_a_partial_piece_a_killed_run_left_is_written_again(tmp_path):
         out_dir
         / "pieces"
         / point_dir.name
-        / f".{piece_path.parent.name}.partial"
+        / f".{piece_path.parent.name}.0123abcd.partial"
     )
     partial.mkdir(parents=True)
     (partial / "shots.csv").write_text("half a file")
@@ -726,9 +726,39 @@ def test_a_partial_piece_a_killed_run_left_is_written_again(tmp_path):
     whole_rows = _rows_of_every_file(whole_run_dir)
     out_run_dir = yaml_configs.run_folder_of(out_dir)
     out_rows = _rows_of_every_file(out_run_dir)
-    assert not partial.exists()
     assert (written / "piece.json").exists()
     assert out_rows == whole_rows
+
+
+def test_two_writers_of_one_piece_both_leave_it_whole(tmp_path, monkeypatch):
+    """Two tasks handed the same piece write it at once and neither fails.
+
+    The second writer runs whole while the first is between its files
+    and its piece.json, which is where one shared staging folder was
+    deleted under the first. Each ends with the piece in place and no
+    staging folder left behind.
+    """
+    config_path = yaml_configs.write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    ((task, _collection),) = config.point_tasks()
+    measurements = collect_command.run_sweep([task], 1)
+    experiment_dir = tmp_path / "experiment"
+    point_id = task.strong_id()
+    write_json = run_folder.write_json
+
+    def second_writer_first(path, value):
+        monkeypatch.setattr(run_folder, "write_json", write_json)
+        pieces.write(experiment_dir, point_id, 0, measurements, {})
+        write_json(path, value)
+
+    monkeypatch.setattr(run_folder, "write_json", second_writer_first)
+    folder = pieces.write(experiment_dir, point_id, 0, measurements, {})
+
+    beside = folder.parent.iterdir()
+    names = sorted(entry.name for entry in beside)
+    assert names == ["0-0"]
+    assert (folder / "piece.json").is_file()
+    assert (folder / "shots.csv").is_file()
 
 
 NOISY_AXES = {

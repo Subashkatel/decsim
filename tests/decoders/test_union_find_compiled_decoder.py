@@ -51,16 +51,15 @@ GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 REQUIREMENT = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 WEIGHT_STEP = 0.1
 
-# the four distances the experiments_2026_09 grid runs below eleven, each
-# with as many rounds as its distance, at three of the grid's error rates
+# the four distances below eleven, each with as many rounds as its
+# distance, at the low, middle and high error rates of a memory sweep
 CORPUS_DISTANCES = (3, 5, 7, 9)
 CORPUS_PROBABILITIES = (0.001, 0.005, 0.01)
 CORPUS_SHOTS = 300
 CIRCUIT_SEED = 5
 
-# the two distances above that, at the rate the experiment's largest
-# points run, with fewer shots because the oracle costs a second a
-# decode there
+# the two distances above that, at the middle rate, with fewer shots
+# because the oracle costs a second a decode there
 LARGE_DISTANCES = (11, 13)
 LARGE_PROBABILITY = 0.005
 LARGE_SHOTS = 30

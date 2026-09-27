@@ -54,10 +54,10 @@ worktree needs `PYTHONPATH` naming it.
 ## 3. Plan a round
 
 ```bash
-decsim plan configs/weak_ler.yaml --out $PWD/results/weak_ler --tasks 300
+decsim plan configs/seam_pinned_switching.yaml --out $PWD/results/seam_pinned_switching --tasks 300
 ```
 
-This writes `results/weak_ler/round1/plan.csv`, with its pieces dealt to
+This writes `results/seam_pinned_switching/round1/plan.csv`, with its pieces dealt to
 at most 300 tasks, and `tasks.csv`, with each task's cores, memory and
 hours.
 
@@ -97,12 +97,12 @@ four-core tasks fill the cores.
 ## 4. Submit it
 
 ```bash
-SBATCH_QOS=short slurm/round.sh results/weak_ler 1
+SBATCH_QOS=short slurm/round.sh results/seam_pinned_switching 1
 ```
 
 The script submits one job array per shape of job in `tasks.csv`,
 since an array has one memory request. Each array task runs
-`decsim collect --plan results/weak_ler/round1/plan.csv --task <id>`,
+`decsim collect --plan results/seam_pinned_switching/round1/plan.csv --task <id>`,
 one process per core. Its log goes to `round1/<id>/log.txt`, beside its
 manifest.
 
@@ -136,14 +136,14 @@ whichever runs first.
 ## 6. Read the numbers
 
 ```bash
-decsim status results/weak_ler
+decsim status results/seam_pinned_switching
 ```
 
 This folds every saved piece into its configuration's run folder,
-`results/weak_ler/combined/<name>-<id8>/`. It reads what the plans and
+`results/seam_pinned_switching/combined/<name>-<id8>/`. It reads what the plans and
 collects recorded of each point, not the yamls, so a point a yaml no
 longer sweeps is still counted, and a point two configurations reach is
-counted once. It writes `results/weak_ler/status.csv`, one row per
+counted once. It writes `results/seam_pinned_switching/status.csv`, one row per
 point, with these columns:
 
 - its configuration id

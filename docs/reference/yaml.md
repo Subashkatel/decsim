@@ -155,12 +155,12 @@ prints the resolved sections, one line per component, and the sweep
 blocks, without running anything. Then, under `values:`, it prints
 every value the machine is built with, one per line, gem5's
 `config.ini` in one list (`src/python/m5/simulate.py:122-127`). Three
-of `decsim show configs/weak_ler.yaml`'s:
+of `decsim show configs/my_first_sweep.yaml`'s:
 
 ```
-qpu.distance = [3, 5, 7, 9, 11]  [sweep, configs/weak_ler.yaml:17-37]
+qpu.distance = [3, 5, 7]  [sweep, configs/my_first_sweep.yaml:16-21]
 controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
-controller.packing_overflow = "STALL"  [default, configs/reference.yaml:615]
+controller.packing_overflow = "STALL"  [default, configs/reference.yaml:653]
 ```
 
 The bracket names the layer that set the value, `your file`, `preset`
@@ -180,11 +180,6 @@ chain says what you meant.
 | `configs/reference.yaml` | every key, commented, with a two-shot sweep so it runs in seconds |
 | `configs/weak_decoder_baseline.yaml` | the defaults a weak-tier study starts from |
 | `configs/strong_decoder_baseline.yaml` | the same for a strong-tier study |
-| `configs/weak_ler.yaml` | the weak tier's logical error rate sweep, 35 points and 10,425,000 shots |
-| `configs/strong_ler.yaml` | the strong tier's logical error rate sweep |
-| `configs/weak_latency.yaml` | the weak tier's latency sweep |
-| `configs/strong_latency.yaml` | the strong tier's latency sweep |
-| `configs/strong_latency_preview.yaml` | a short version of it |
 | `configs/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
 | `configs/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
 | `configs/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
@@ -194,8 +189,6 @@ chain says what you meant.
 | `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
 | `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |
 | `configs/data_movement_switching.yaml` | the same under the switching escalation |
-| `configs/experiments_2026_09/` | the sixteen decoder experiments: sixteen experiment files that differ only in their decoder rows, one file per experiment and distance for the Slurm arrays, and `configs/experiments_2026_09/PLAN.md` with the shot table, the costs and the submit lines |
-| `configs/common/experiments_2026_09_base.yaml` | the shared base those sixteen extend; it names no decoder, so it is not run by itself |
 | `configs/burst_detectors_compared/` | four burst detectors on one burst at d = 5 and on quiet shots, a file each, each changing only its detector or its burst ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
 | `configs/common/burst_detectors_compared_base.yaml` | the shared base of that folder; it names no detector, so it is not a comparison by itself |
 

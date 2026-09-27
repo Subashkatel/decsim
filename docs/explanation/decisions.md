@@ -547,10 +547,9 @@ detectors.
 
 **Why.** decsim's timing comes from the latency card and never from how
 long a decoder runs, so a faster decoder must move the bill and no
-result. The bill is the reason: the experiments in
-`configs/experiments_2026_09` run union find at distances up to 15,
-where
-the Python row cost 48 seconds a shot. Identity is held by a property
+result. The bill is the reason: the September 2026 decoder experiments
+ran union find at distances up to 15, where the Python row cost 48
+seconds a shot. Identity is held by a property
 test rather than by review: the Python growth, forest and peeling live
 on as the oracle at `tests/decoders/union_find_oracle.py`, and
 `tests/decoders/test_union_find_compiled_decoder.py` puts the two side
@@ -641,11 +640,12 @@ the identity claim.
 
 **Decided.** The package that holds the yaml experiment, the sweep, the
 collected rows, the figures, the trace viewer and the `decsim` command
-is `decsim/experiments`, its tests are `tests/experiments`, the sixteen
-decoder runs are `configs/experiments_2026_09`. Nothing inside any of
-them moved: every module, class and function keeps its name, every yaml
-key and every number is what it was, and a run charges exactly what it
-charged before.
+is `decsim/experiments`, its tests are `tests/experiments`, and the
+sixteen decoder runs were the folder configs/experiments_2026_09 until
+their experiment was cancelled and the folder left the tree. Nothing
+inside any of them moved: every module, class and function keeps its
+name, every yaml key and every number is what it was, and a run
+charges exactly what it charged before.
 
 **Why.** A name should say what the thing is for. `front` said only
 where the package sat in the uses order, and it collided with
@@ -656,9 +656,8 @@ and the pieces it is cut into, and two words for
 one thing make a reader ask what the difference is when there is none.
 
 **Where to see it.** `decsim/experiments/`, `tests/experiments/`, level
-9 of the uses order in `decsim/machine.py`, the generated
-[The module map](../reference/map.md),
-and `configs/experiments_2026_09/PLAN.md`.
+9 of the uses order in `decsim/machine.py`, and the generated
+[The module map](../reference/map.md).
 
 ## D20. The weak decoder chip can form the detection events, once
 

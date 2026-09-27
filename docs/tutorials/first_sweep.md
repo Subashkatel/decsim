@@ -191,8 +191,8 @@ Now look at the rows together. Distance 5's interval runs from 1.6 to
 5.2 percent and distance 7's from 0.9 to 3.9 percent. They overlap. On
 400 shots this run has **not** shown that distance 7 is better than
 distance 5, even though its estimate is lower. That is the honest
-reading, and it is the reason `configs/weak_ler.yaml` runs a million
-shots at its lowest error rates.
+reading, and it is the reason a real sweep runs a million shots at its
+lowest error rates.
 
 The rule of thumb the shipped sweeps are sized by: aim for at least 100
 failures at a point you want to quote. A point can stop there by

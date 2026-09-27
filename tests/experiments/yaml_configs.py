@@ -36,13 +36,8 @@ SHIPPED_CONFIGS = (
     "reference.yaml",
     "seam_pinned_switching.yaml",
     "strong_decoder_baseline.yaml",
-    "strong_latency.yaml",
-    "strong_latency_preview.yaml",
-    "strong_ler.yaml",
     "two_tiers.yaml",
     "weak_decoder_baseline.yaml",
-    "weak_latency.yaml",
-    "weak_ler.yaml",
 )
 # Where a memory maker's physical error rate sits in a point's sections.
 ERROR_RATE_PATH = "workload.arguments.physical_error_probability"

@@ -584,10 +584,11 @@ collection:
                                    # too, since each costs its time; a point
                                    # needs this or max_core_seconds, as sinter
                                    # needs max_shots
-  max_core_seconds: null           # the time cap: the seconds a point's
-                                   # shots took, summed over processes; exact
-                                   # only when a shot's time does not depend
-                                   # on whether it failed
+  max_core_seconds: null           # the time cap, finite: the seconds a
+                                   # point's shots took, summed over
+                                   # processes; exact only when a shot's
+                                   # time does not depend on whether it
+                                   # failed
   min_shots: 0                     # the scored shots a point runs whatever
                                    # its failures, so a point that fails
                                    # early still says something at its rate

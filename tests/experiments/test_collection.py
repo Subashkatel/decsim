@@ -6,6 +6,7 @@ two instead (sinter/_data/_collection_options.py:68-99), which would let
 the top's value cut a block that asks for more.
 """
 
+import math
 import random
 
 import pytest
@@ -123,8 +124,9 @@ def test_a_count_that_is_no_count_is_refused(key, value):
     assert message.startswith(f"block 2 collection {key} must be")
 
 
-@pytest.mark.parametrize("value", [0, -1.5, True, "60"])
-def test_a_time_cap_that_is_no_positive_number_is_refused(value):
+@pytest.mark.parametrize("value", [0, -1.5, True, "60", math.inf])
+def test_a_time_cap_that_is_no_finite_positive_number_is_refused(value):
+    """An infinite time cap never stops a point that has no other cap."""
     block = {"max_core_seconds": value}
 
     with pytest.raises(refusal.RefusalError) as refused:

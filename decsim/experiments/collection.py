@@ -18,6 +18,7 @@ counts its discards (_collection_manager.py:330).
 """
 
 import dataclasses
+import math
 from collections.abc import Mapping
 from typing import Optional
 
@@ -277,16 +278,20 @@ def _check_count(value, key: str, where: str) -> None:
 
 
 def _check_core_seconds(merged: dict, where: str) -> None:
-    """The time cap, when given, is a number of seconds above zero."""
+    """The time cap, when given, is a finite number of seconds above zero.
+
+    An infinite cap is no cap: a point with no other would never stop.
+    """
     value = merged.get("max_core_seconds")
     if value is None:
         return
     is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
-    if is_number and value > 0:
+    is_finite_number = is_number and math.isfinite(value)
+    if is_finite_number and value > 0:
         return
     raise refusal.RefusalError(
-        f"{where} collection max_core_seconds must be a number of seconds "
-        f"above 0, got {value!r}"
+        f"{where} collection max_core_seconds must be a finite number of "
+        f"seconds above 0, got {value!r}"
     )
 
 

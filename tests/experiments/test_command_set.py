@@ -735,9 +735,8 @@ def test_two_writers_of_one_piece_both_leave_it_whole(tmp_path, monkeypatch):
     """Two tasks handed the same piece write it at once and neither fails.
 
     The second writer runs whole while the first is between its files
-    and its piece.json, which is where one shared staging folder was
-    deleted under the first. Each ends with the piece in place and no
-    staging folder left behind.
+    and its piece.json. Each ends with the piece in place and no staging
+    folder left behind.
     """
     config_path = yaml_configs.write_config(tmp_path, {})
     config = experiment.load_experiment(config_path)

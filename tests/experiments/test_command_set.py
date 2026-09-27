@@ -32,6 +32,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
 import decsim.experiments.pieces as pieces
+import decsim.experiments.plan_command as plan_command
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_command as run_command
@@ -2580,9 +2581,35 @@ def test_a_plan_asking_for_no_task_core_hour_or_memory_is_refused(
         command.main(["plan", *arguments, *shape_arguments])
 
     printed = capsys.readouterr()
-    round_dirs = pieces.round_dirs(experiment_dir)
     assert f"{flag} must be at least 1" in printed.err
-    assert round_dirs == []
+    assert not experiment_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "flag, task_count, shape",
+    [
+        ("--tasks", 0, (1, 1, 1)),
+        ("--cores", 1, (0, 1, 1)),
+        ("--hours", 1, (1, -1, 1)),
+        ("--memory-mb", 1, (1, 1, -1)),
+    ],
+)
+def test_plan_round_refuses_no_task_core_hour_or_memory_before_writing(
+    tmp_path, flag, task_count, shape
+):
+    """plan_round itself refuses a shape below one, whoever calls it.
+
+    shape is the task's cores, hours and memory in MB.
+    """
+    job = plan_command.JobShape(*shape)
+    config_path = yaml_configs.write_config(tmp_path, {})
+    experiment_dir = tmp_path / "experiment"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        plan_command.plan_round([config_path], experiment_dir, task_count, job)
+
+    assert f"{flag} must be at least 1" in str(refused.value)
+    assert not experiment_dir.exists()
 
 
 def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(

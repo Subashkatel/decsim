@@ -43,6 +43,7 @@ import decsim.experiments.collect_command as collect_command
 import decsim.experiments.collection as collection
 import decsim.experiments.experiment as experiment
 import decsim.experiments.pieces as pieces
+import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.records.round_plans as round_plans
 
@@ -83,7 +84,6 @@ def main(argv: list) -> None:
     """Plan the next round and print where it went and how to submit it."""
     parser = _parser()
     parsed = parser.parse_args(argv)
-    _refuse_a_shape_below_one(parser, parsed)
     job = JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
     experiment_dir = pathlib.Path(parsed.out)
     round_dir = plan_round(parsed.configs, experiment_dir, parsed.tasks, job)
@@ -111,7 +111,9 @@ def plan_round(
     run the round only read them. Yamls of one configuration id, which
     split its sweep, are planned as one configuration, and a point two
     configurations reach is planned once (collect_command.recorded_points).
+    A shape below one is refused before anything is written.
     """
+    _refuse_a_shape_below_one(task_count, job)
     experiment_dir.mkdir(parents=True, exist_ok=True)
     planned = pieces.planned_pieces(experiment_dir)
     bundles = []
@@ -163,17 +165,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _refuse_a_shape_below_one(parser, parsed) -> None:
+def _refuse_a_shape_below_one(task_count: int, job: JobShape) -> None:
     """A round has a task, and a task a core, an hour and some memory."""
     shape = {
-        "--tasks": parsed.tasks,
-        "--cores": parsed.cores,
-        "--hours": parsed.hours,
-        "--memory-mb": parsed.memory_mb,
+        "--tasks": task_count,
+        "--cores": job.cores,
+        "--hours": job.hours,
+        "--memory-mb": job.memory_mb,
     }
     for flag, value in shape.items():
         if value < 1:
-            parser.error(f"{flag} must be at least 1, got {value}")
+            raise refusal.RefusalError(
+                f"{flag} must be at least 1, got {value}"
+            )
 
 
 def _configs_by_id(config_paths: list) -> dict:

@@ -30,6 +30,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
 import decsim.experiments.pieces as pieces
+import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
@@ -1260,6 +1261,37 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
     assert cut_decisions == whole_decisions
     assert whole_trajectory[-1]["window_count"] == "20"
     assert cut_trajectory == whole_trajectory
+
+
+def test_a_saved_calibrator_whose_bytes_changed_is_refused(tmp_path):
+    """A state that no longer hashes to its record is never unpickled.
+
+    The piece's calibrator reads back as saved; one byte appended to its
+    file, as a damaged copy on a shared disk would hold, and the read
+    refuses it by name.
+    """
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    measurements = collect_command.run_sweep([task], 1)
+    experiment_dir = tmp_path / "experiment"
+    point_id = task.strong_id()
+    calibrator = task.online_threshold
+    folder = pieces.write(
+        experiment_dir, point_id, 0, measurements, {}, calibrator
+    )
+    saved = pieces.read_state(folder)
+    state_path = folder / pieces.STATE_FILE
+    damaged_bytes = state_path.read_bytes() + b"\x00"
+    state_path.write_bytes(damaged_bytes)
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        pieces.read_state(folder)
+
+    message = str(refused.value)
+    assert saved.summary() == calibrator.summary()
+    assert message.startswith(f"{state_path} does not hash")
 
 
 def _lose_the_piece(experiment_dir, name: str) -> None:

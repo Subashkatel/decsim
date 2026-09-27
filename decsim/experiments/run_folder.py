@@ -19,6 +19,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from typing import Optional
 
 import decsim.build.escalation as escalation_build
@@ -251,13 +252,19 @@ def write_combined_manifest(
 
 
 def record_point(
-    run_dir: pathlib.Path, task: collect.Task, seeds: Optional[list] = None
+    run_dir: pathlib.Path,
+    task: collect.Task,
+    seeds: Optional[list] = None,
+    sections: Optional[Mapping] = None,
 ) -> str:
     """One sweep point's values and workload, named by its strong id.
 
-    resolved/<id>.json holds the metadata, the seed ranges run, every
-    setting and the values the build derives; inputs/<id>/ holds the
-    workload as the files row reads it, with each file's sha256 in
+    resolved/<id>.json holds the metadata, the seed ranges run, the
+    sections the point's yaml resolved to (its axes placed and its
+    references resolved, as Hydra keeps each job's composed config in
+    .hydra/config.yaml), every setting and the values the build derives;
+    a point a Python caller built has no sections. inputs/<id>/ holds
+    the workload as the files row reads it, with each file's sha256 in
     hashes.json, so a rerun needs no maker installed. Returns the id.
     """
     point_id = task.strong_id()
@@ -267,6 +274,7 @@ def record_point(
         "id": point_id,
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
+        "sections": collect.json_value(sections),
         "settings": collect.json_value(settings),
         "built": _built_values(shot_settings),
     }

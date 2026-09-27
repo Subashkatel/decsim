@@ -1042,6 +1042,25 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
 
 
+def test_a_points_record_holds_the_sections_it_resolved_to(tmp_path):
+    """The yaml of one point: its axes placed, its references resolved.
+
+    Hydra keeps each job's composed config beside its output
+    (.hydra/config.yaml, hydra.cc "Output/Working directory"); a point's
+    record holds the same, so the point reruns from its record alone.
+    """
+    config_path = yaml_configs.write_config(tmp_path, {})
+    run_dir = tmp_path / "run"
+
+    collect_command.run_experiment(config_path, run_dir)
+
+    records = run_folder.resolved_by_point(run_dir)
+    (record,) = records.values()
+    sections = record["sections"]
+    assert sections["workload"]["arguments"]["distance"] == 3
+    assert "sweep" not in sections
+
+
 def test_a_run_with_an_online_threshold_records_its_trajectory(
     tmp_path, monkeypatch
 ):

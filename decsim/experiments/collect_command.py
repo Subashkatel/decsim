@@ -82,7 +82,7 @@ def run_experiment(
     tasks = config.tasks()
     point_ids = _point_ids(tasks)
     started_utc = run_folder.start_run(config, run_dir, point_ids, **how_it_ran)
-    _record_the_points(run_dir, tasks, **how_it_ran)
+    _record_the_points(run_dir, config, tasks, **how_it_ran)
     first_task = tasks[0]
     _echo_description(config, first_task.settings, run_dir, shard)
     measurements = run_sweep(
@@ -128,7 +128,11 @@ def _point_ids(tasks: list) -> list:
 
 
 def _record_the_points(
-    run_dir: pathlib.Path, tasks: list, shard, shots_per_unit
+    run_dir: pathlib.Path,
+    config: experiment.ExperimentConfig,
+    tasks: list,
+    shard,
+    shots_per_unit,
 ) -> None:
     """The maker, and every point's values and workload, before any shot.
 
@@ -147,7 +151,8 @@ def _record_the_points(
     selected = collect.shard_of(units, shard)
     for task in unique:
         seeds = _seeds_of(task, selected)
-        run_folder.record_point(run_dir, task, seeds)
+        sections = config.resolved_sections(task.metadata)
+        run_folder.record_point(run_dir, task, seeds, sections)
 
 
 def _seeds_of(task, units: list) -> list:

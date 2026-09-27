@@ -2357,3 +2357,51 @@ def test_a_task_whose_point_its_yaml_no_longer_makes_is_refused(
     printed = capsys.readouterr()
     assert "no point of" in printed.err
     assert "plan again" in printed.err
+
+
+def test_a_point_two_configurations_reach_is_planned_once(tmp_path):
+    """One point, two configurations: its seeds are planned once.
+
+    The yamls differ in a base distance their sweeps both set, so their
+    configuration ids differ and their four points are the same four.
+    """
+    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
+    second_path = _base_distance_config(tmp_path, 7, FOUR_POINT_SWEEP)
+    experiment_dir = tmp_path / "experiment"
+
+    round_dir = _plan([first_path, second_path], experiment_dir, 3)
+
+    planned = _planned_ranges(round_dir)
+    point_ids = {point_id for point_id, _first, _count in planned}
+    assert len(planned) == 4
+    assert len(point_ids) == 4
+
+
+def test_a_point_two_configurations_collect_two_ways_is_refused(
+    tmp_path, capsys
+):
+    """A point stops by one rule, so two collections for it are refused."""
+    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
+    (block,) = FOUR_POINT_SWEEP["sweep"]
+    other_block = {**block, "collection": {"max_shots": 3}}
+    other_sweep = {"sweep": [other_block]}
+    second_path = _base_distance_config(tmp_path, 7, other_sweep)
+    experiment_dir = tmp_path / "experiment"
+    arguments = [str(first_path), str(second_path)]
+    out = ["--out", str(experiment_dir), "--tasks", "3"]
+
+    with pytest.raises(SystemExit):
+        command.main(["plan", *arguments, *out])
+
+    printed = capsys.readouterr()
+    round_dirs = pieces.round_dirs(experiment_dir)
+    assert "two configurations" in printed.err
+    assert round_dirs == []
+
+
+def _base_distance_config(tmp_path, distance: int, card: dict):
+    """The card over a base qpu distance, in a folder of its own."""
+    folder = tmp_path / f"base_distance_{distance}"
+    folder.mkdir()
+    qpu = {"kind": "stim_device", "distance": distance}
+    return yaml_configs.write_config(folder, {**card, "qpu": qpu})

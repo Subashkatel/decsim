@@ -63,7 +63,8 @@ hours.
 
 Several yamls may share one experiment folder. Yamls of one
 configuration, such as a grid split into one file per distance, are
-planned as one.
+planned as one. A point two configurations both reach is planned once,
+and refused if they give it two collections.
 
 How the plan decides a point's pieces:
 

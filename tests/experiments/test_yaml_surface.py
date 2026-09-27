@@ -1008,8 +1008,6 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         round_period_microseconds=1.0,
         seed=0,
     )
-    metadata = json.loads(measurement.metadata)
-    assert metadata["qpu.distance"] == 5
     assert measurement.windows > 5
 
 

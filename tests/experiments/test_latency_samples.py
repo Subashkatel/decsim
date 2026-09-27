@@ -8,7 +8,6 @@ latency figure; these rows are everything one needs.
 """
 
 import csv
-import json
 
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
@@ -74,19 +73,13 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
         reader = csv.DictReader(handle)
         shots = list(reader)
 
-    deadlines = {(row["metadata"], row["window_period_us"]) for row in samples}
+    deadlines = {
+        (row["qpu.distance"], row["window_period_us"]) for row in samples
+    }
     windows_per_shot = [int(row["windows"]) for row in shots]
     windows = sum(windows_per_shot)
-    at_three = json.dumps(
-        {
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-            "workload.arguments.physical_error_probability": 0.001,
-        }
-    )
-    at_five = at_three.replace('"qpu.distance": 3', '"qpu.distance": 5')
     assert len(samples) == windows
-    assert deadlines == {(at_three, "3.0"), (at_five, "5.0")}
+    assert deadlines == {("3", "3.0"), ("5", "5.0")}
 
 
 def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):

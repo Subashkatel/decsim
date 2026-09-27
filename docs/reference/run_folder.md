@@ -60,18 +60,32 @@ One row per shot. The first columns are the shot's own scalars, and then
 every latency point appears twice, once as that shot's mean and once as
 its maximum.
 
-A point is named by two columns, as sinter's csv names a task by its
-`strong_id` and `json_metadata` (`sinter/_data/_csv_out.py:69-77`):
-`point_id`, the point's content id, which is also the name of its
-`resolved/` record, and `metadata`, the values its sweep block set, as
-one line of json with its keys sorted. Every other file below names its
-point by the same two columns, and `algorithm` rides with them. The two
-are each file's last columns, where sinter writes them too, so the json's
-commas come after every column a reader cuts the file for.
+A point is named by `point_id`, its content id, as sinter's csv names
+a task by its `strong_id` (`sinter/_data/_csv_out.py:69-77`); it is
+also the name of its `resolved/` record. Right after it come the
+point's swept values, one column per yaml path the sweep sets, named
+by that path (`qpu.distance`,
+`workload.arguments.physical_error_probability`), in the order the
+sweep first sets them (`decsim/experiments/run_folder.py`,
+`swept_values`). Every other file below names its point by the same
+columns, and `algorithm` follows them. The values the design fixed come
+first and what was measured after, one variable per column, which is
+Wickham's tidy table (Tidy Data, J. Stat. Softw. 59(10), 2014, section
+2.3), so a reader groups, filters and plots by a column with no parsing.
+
+A point whose sweep block did not set a path holds the value its yaml
+resolved to there, since that is its value; a path its yaml does not
+hold is an empty cell. A string or a number is written as itself, and
+any other value (a flag, a null, a whole decoder row an axis set) as one
+cell of compact json with its keys sorted, as sinter writes
+`json_metadata` (`sinter/_data/_csv_out.py:35-37`). The typed value is
+in the point's `resolved/` record. A column's unit is in its name
+(`_us` microseconds, `_bits`, `_per_shot`), and a swept path's meaning
+and unit are its key's in `configs/reference.yaml`.
 
 | Column | What it is |
 | --- | --- |
-| `point_id`, `metadata`, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
+| `point_id`, the swept paths, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
 | `windows` | how many windows this shot decoded |
 | `logical_failure` | 1 when any operation's decoded observable did not match its truth, else 0; a `memory_patches` shot fails when any patch does |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
@@ -192,7 +206,7 @@ counters.
 
 | Column | What it is |
 | --- | --- |
-| `point_id`, `metadata`, `algorithm`, `seed` | the shot |
+| `point_id`, the swept paths, `algorithm`, `seed` | the shot |
 | `link` | the link path's name, one of the values in `decsim/records/transfers.py` |
 | `transfers` | how many transfers crossed that path |
 | `payload_bits` | how many bits they carried |
@@ -208,7 +222,7 @@ One row per sweep point, latency point and distinct microsecond value.
 
 | Column | What it is |
 | --- | --- |
-| `point_id`, `metadata`, `algorithm` | the sweep point |
+| `point_id`, the swept paths, `algorithm` | the sweep point |
 | `name` | which latency point, from the list above |
 | `value_us` | one microsecond value that occurred |
 | `count` | how many windows carried it |
@@ -226,7 +240,7 @@ with no rows writes no file.
 
 | Column | What it is |
 | --- | --- |
-| `point_id`, `metadata`, `algorithm`, `seed` | the shot |
+| `point_id`, the swept paths, `algorithm`, `seed` | the shot |
 | `algorithm_us` | the time the algorithm stage held the unit for one decode: its wall clock, or its cycle count |
 | `window_period_us` | the shot's window inter-arrival, the deadline the latency figure draws |
 
@@ -239,7 +253,7 @@ point the run held:
 
 | Column | What it is |
 | --- | --- |
-| `point_id`, `metadata`, `algorithm` | the point |
+| `point_id`, the swept paths, `algorithm` | the point |
 | `shots` | how many shots the point ran |
 | `windows_per_shot` | the mean over those shots |
 | `logical_failures`, `logical_error_rate` | the count and the fraction |
@@ -273,7 +287,7 @@ One row per sweep point per link path, averaged over that point's shots.
 
 | Column | What it is |
 | --- | --- |
-| `point_id`, `metadata`, `algorithm` | the point |
+| `point_id`, the swept paths, `algorithm` | the point |
 | `link` | the path's name |
 | `transfers_per_shot`, `payload_bits_per_shot` | the means |
 | `bits_per_transfer` | the payload bits divided by the transfers |
@@ -289,7 +303,7 @@ here.
 
 | Column | What it is |
 | --- | --- |
-| `point_id`, `metadata`, `algorithm`, `seed` | the traced shot |
+| `point_id`, the swept paths, `algorithm`, `seed` | the traced shot |
 | `counting` | what the row counts: `residence` for stays in a structure, `link_path` for a path's moves |
 | `name` | the structure (a store, a decoder unit, the controller, the frame) or the link path |
 | `samples` | how many stays or moves the shot had there |

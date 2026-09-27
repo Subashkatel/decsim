@@ -128,8 +128,12 @@ def _result_lines(first: pathlib.Path, second: pathlib.Path) -> list:
     unmatched = _unmatched_lines(first_rows, second_rows)
     lines.extend(unmatched)
     for point in _shared(first_rows, second_rows):
-        comparison = _Comparison(first, second, point)
-        point_lines = comparison.lines(first_rows[point], second_rows[point])
+        first_row = first_rows[point]
+        second_row = second_rows[point]
+        first_shots = _shot_rows_of(first, first_row["point_id"])
+        second_shots = _shot_rows_of(second, second_row["point_id"])
+        comparison = _Comparison(point, first_shots, second_shots)
+        point_lines = comparison.lines(first_row, second_row)
         lines.extend(point_lines)
     return _or_same(lines)
 
@@ -138,11 +142,11 @@ class _Comparison:
     """One point's results in two folders, and the error bars of each."""
 
     def __init__(
-        self, first: pathlib.Path, second: pathlib.Path, point: str
+        self, point: str, first_shots: list, second_shots: list
     ) -> None:
         self.point_text = _point_text(point)
-        self.first_shots = _shot_rows_of(first, point)
-        self.second_shots = _shot_rows_of(second, point)
+        self.first_shots = first_shots
+        self.second_shots = second_shots
 
     def lines(self, first_row: dict, second_row: dict) -> list:
         """One line per compared column that differs, with its verdict."""
@@ -218,12 +222,12 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float))
 
 
-def _shot_rows_of(run_dir: pathlib.Path, point: str) -> list:
+def _shot_rows_of(run_dir: pathlib.Path, point_id: str) -> list:
     """One point's rows of shots.csv, the per-shot values of its means."""
     path = run_dir / "shots.csv"
     rows = []
     for row in fold.row_stream(path):
-        if row["metadata"] == point:
+        if row["point_id"] == point_id:
             typed = fold.typed_row(row)
             rows.append(typed)
     return rows
@@ -240,11 +244,16 @@ def _records_by_metadata(run_dir: pathlib.Path) -> dict:
 
 
 def _rows_by_metadata(run_dir: pathlib.Path) -> dict:
-    """sweep.csv's rows, keyed by their metadata's text."""
+    """sweep.csv's rows, keyed by their point's metadata's text.
+
+    A shard records every point but holds rows of the points it ran.
+    """
+    records = _records_by_metadata(run_dir)
     by_id = report.rows_by_point(run_dir)
     rows = {}
-    for row in by_id.values():
-        rows[row["metadata"]] = row
+    for point, record in records.items():
+        if record["id"] in by_id:
+            rows[point] = by_id[record["id"]]
     return rows
 
 

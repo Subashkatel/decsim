@@ -316,6 +316,32 @@ def resolved_by_point(run_dir: pathlib.Path) -> dict:
     return records
 
 
+def swept_values(run_dir: pathlib.Path, point_ids: list) -> dict:
+    """Each point's value at every yaml path the sweep sets, as csv cells.
+
+    One column per swept path is Wickham's tidy table, each variable a
+    column and each observation a row (Tidy Data, J. Stat. Softw.
+    59(10), 2014, section 2.3); the paths come in the order the points
+    first set them. A point whose block did not set a path holds the
+    value its yaml resolved to there, from its record's sections, since
+    that is its value; a path its sections do not hold is an empty cell,
+    not available. A value other than a string or a number is one cell
+    of compact json, as sinter writes json_metadata
+    (sinter/_data/_csv_out.py:35-37); the typed value is in the record.
+    """
+    records = resolved_by_point(run_dir)
+    paths = {}
+    for point_id in point_ids:
+        metadata = records[point_id]["metadata"]
+        new_paths = dict.fromkeys(metadata)
+        paths.update(new_paths)
+    values = {}
+    for point_id in point_ids:
+        record = records[point_id]
+        values[point_id] = _cells_of(record, list(paths))
+    return values
+
+
 def resolved_values(record: dict, names: tuple) -> dict:
     """The named parts of a resolved record, each value at its dotted path.
 
@@ -509,6 +535,38 @@ def _producer(workload: workload_settings.WorkloadSettings) -> Optional[dict]:
         "arguments": collect.json_value(row_settings.arguments),
         "version": _package_version(module_name),
     }
+
+
+def _cells_of(record: dict, paths: list) -> dict:
+    """One point's cell at each swept path, its sweep's value first."""
+    metadata = record["metadata"]
+    cells = {}
+    for path in paths:
+        if path in metadata:
+            cells[path] = _cell_of(metadata[path])
+            continue
+        cells[path] = _resolved_cell(record["sections"], path)
+    return cells
+
+
+def _resolved_cell(sections: Optional[dict], path: str):
+    """The cell of a value the point's sections hold, or an empty one."""
+    value = sections
+    for name in path.split("."):
+        if not isinstance(value, Mapping) or name not in value:
+            return ""
+        value = value[name]
+    return _cell_of(value)
+
+
+def _cell_of(value):
+    """A string or a number as itself, any other value as compact json."""
+    if isinstance(value, str):
+        return value
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    if is_number:
+        return value
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _package_version(module_name: str) -> Optional[str]:

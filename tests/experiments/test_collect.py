@@ -420,7 +420,8 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
     whole_task = collect.Unit(task, 0, task.shots)
     measurements, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
     record = sweep_report.record_of(measurements)
-    sweep_report.write_record(record, tmp_path)
+    swept = {task.strong_id(): task.metadata}
+    sweep_report.write_record(record, tmp_path, swept)
     shots_path = tmp_path / "shots.csv"
     samples_path = tmp_path / "window_samples.csv"
     shot_links_path = tmp_path / "shot_links.csv"

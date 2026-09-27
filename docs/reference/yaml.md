@@ -119,7 +119,8 @@ path that does not resolve and a reference that leads back to itself
 are refused with the path named. A point's metadata is its
 `{path: value}`, and its id is a hash of that and every setting it
 resolves to (`decsim/collect.py`, `Task.strong_id`); the run folder
-names its rows and files by them.
+names its files by the id, and each csv row carries the id and then one
+column per swept path ([The run folder](run_folder.md)).
 
 ## Seeing what a file resolves to
 

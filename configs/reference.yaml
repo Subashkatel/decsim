@@ -555,7 +555,8 @@ windows:
 # point named twice runs once. A path's section must exist. A mapping
 # value replaces the node at its path whole, so a decoder row with keys of
 # its own is one value: weak_decoder: [{kind: pymatching}, {kind: ...}].
-# A point's metadata is its {path: value}. The baselines put shots where they matter: a timing block sweeps many
+# A point's metadata is its {path: value}; each csv row carries its id,
+# then one column per swept path. The baselines put shots where they matter: a timing block sweeps many
 # round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
 # the load = 1 knee of its 0.028 card), and an LER block sweeps several
 # probabilities with many shots at one timing point, since timing knobs

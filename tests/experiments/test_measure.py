@@ -1533,9 +1533,7 @@ def test_the_point_holds_the_shares_flagged_and_caught_in_time(tmp_path):
     """
     caught = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
     late_alone = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
-    late = dataclasses.replace(
-        late_alone, point_id=caught.point_id, metadata=caught.metadata
-    )
+    late = dataclasses.replace(late_alone, point_id=caught.point_id)
     quiet = burst_detector_shot(tmp_path, 0.0)
     burst_record = report.record_of([caught, late])
     quiet_record = report.record_of([quiet])

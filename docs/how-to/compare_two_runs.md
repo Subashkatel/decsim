@@ -23,8 +23,9 @@ the two runs share and the columns the question is about.
 
 For example, the reference config's point at distance 3, decoded by
 PyMatching and charged its measured wall clock. A row names its point
-in its last two columns, `point_id` and `metadata`, left out here. Every column
-after `shots` is that host's, so yours will differ:
+in its first columns, `point_id` and then one column per swept path,
+left out here. Every column after `shots` is that host's, so yours will
+differ:
 
 ```
 algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
@@ -76,8 +77,8 @@ whether the move is within its error bars.
 ## Read the folders from Python
 
 `decsim.results` reads run folders into one table, a row per point with
-a column per result and one per setting (`settings.` and the setting's
-dotted path). The figure is yours to draw, in whatever form the
+a column per result, one per swept path, and one per setting
+(`settings.` and the setting's dotted path). The figure is yours to draw, in whatever form the
 question needs; `save_figure` keeps what made it beside it:
 
 ```python
@@ -87,7 +88,7 @@ import decsim.results as results
 
 folders = ["results/first", "results/second"]
 rows = results.load(*folders)
-distance = "settings.qpu.distance"
+distance = "qpu.distance"
 figure, ax = plt.subplots()
 for folder in folders:
     kept = [row for row in rows if row["run_dir"] == folder]

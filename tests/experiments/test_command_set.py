@@ -502,6 +502,13 @@ def test_run_with_trace_writes_the_shots_trace_file(tmp_path):
     assert len(written) == 1
 
 
+def _csv_rows(path: pathlib.Path) -> list:
+    """One csv file's rows, each value as its text."""
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)
+
+
 def _one_file(folder: pathlib.Path, pattern: str) -> pathlib.Path:
     found = folder.glob(pattern)
     matches = sorted(found)
@@ -688,6 +695,81 @@ def test_a_combined_folder_holds_every_shards_points(tmp_path):
 
     assert len(resolved) == 4
     assert (combined_dir / "finished").exists()
+
+
+def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
+    """The values the design fixed first, then what was measured.
+
+    Wickham's tidy order (Tidy Data, J. Stat. Softw. 59(10), 2014,
+    section 2.3): one column per yaml path the sweep sets, right after
+    the point id, in every file a point's rows are in.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    sweep_path = out_dir / "sweep.csv"
+    shots_path = out_dir / "shots.csv"
+    links_path = out_dir / "shot_links.csv"
+    sweep_header = fold.header_of(sweep_path)
+    shots_header = fold.header_of(shots_path)
+    links_header = fold.header_of(links_path)
+    sweep_rows = _csv_rows(sweep_path)
+    first_columns = [
+        "point_id",
+        "qpu.distance",
+        "qpu.round_period_microseconds",
+        "workload.arguments.physical_error_probability",
+        "algorithm",
+    ]
+    error_rate = "workload.arguments.physical_error_probability"
+    points = {(row["qpu.distance"], row[error_rate]) for row in sweep_rows}
+    assert sweep_header[:5] == first_columns
+    assert shots_header[:5] == first_columns
+    assert links_header[:5] == first_columns
+    assert points == {
+        ("3", "0.001"),
+        ("5", "0.001"),
+        ("3", "0.003"),
+        ("5", "0.003"),
+    }
+
+
+def test_a_point_holds_its_own_value_at_a_path_another_block_sets(tmp_path):
+    """Each point has a value at every swept path, so no cell is missing.
+
+    The first block leaves the window and the frame as the file writes
+    them, and the second block leaves the distance; a mapping is one
+    cell of compact json, as sinter writes json_metadata
+    (sinter/_data/_csv_out.py:35-37).
+    """
+    frame = {"clock": "fridge", "write_cycles": 2}
+    card = {
+        "qpu": {"kind": "stim_device", "distance": 3},
+        "workload": yaml_configs.memory_workload(15),
+        "sweep": [
+            {"axes": {"qpu.distance": [5]}, "shots": 1},
+            {
+                "axes": {"windows.commit_rounds": [2], "pauli_frame": [frame]},
+                "shots": 1,
+            },
+        ],
+    }
+    card["workload"]["arguments"]["physical_error_probability"] = 0.001
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    sweep_path = out_dir / "sweep.csv"
+    first, second = _csv_rows(sweep_path)
+    assert first["qpu.distance"] == "5"
+    assert first["windows.commit_rounds"] == "null"
+    assert first["pauli_frame"] == '{"clock":"fridge","write_cycles":1}'
+    assert second["qpu.distance"] == "3"
+    assert second["windows.commit_rounds"] == "2"
+    assert second["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
 
 
 def test_every_point_records_its_own_makers_arguments(tmp_path):

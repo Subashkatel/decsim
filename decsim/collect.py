@@ -237,9 +237,9 @@ def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
 def metadata_text(metadata: Mapping[str, Any]) -> str:
     """A point's metadata as one line of json, its keys sorted.
 
-    The form a row carries it in, sinter's json_metadata column
-    (sinter/_data/_csv_out.py:69-77), so the same point's rows and its
-    resolved record name it with the same text.
+    The text a progress line and `decsim diff` name a point by, sinter's
+    json_metadata form (sinter/_data/_csv_out.py:35-37), so two folders'
+    records of one point name it alike.
     """
     value = json_value(metadata)
     return json.dumps(value, sort_keys=True)

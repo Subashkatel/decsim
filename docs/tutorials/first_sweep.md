@@ -142,19 +142,20 @@ fraction of the shots is a broken machine.
 ## Step 3. Read the error bars
 
 ```bash
-cut -d, -f2,4-7 results/first_sweep/sweep.csv
+cut -d, -f3,6,8-11 results/first_sweep/sweep.csv
 ```
 
 ```
-shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-400,16,0.04,0.024768847722620668,0.06398278162908555
-400,12,0.03,0.017242849034032177,0.05169903312966765
-400,8,0.02,0.010168264597915496,0.038963870377777945
+qpu.distance,shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
+3,400,16,0.04,0.024768847722620668,0.06398278162908555
+5,400,12,0.03,0.017242849034032177,0.05169903312966765
+7,400,8,0.02,0.010168264597915496,0.038963870377777945
 ```
 
 The rows come in the sweep's order, distance 3, 5 and 7, the order the
-summary printed them; each row's last column, `metadata`, names its
-point.
+summary printed them. Each row's first columns name its point: its id,
+then one column per yaml path the sweep sets, here the error rate, the
+distance and the round period.
 
 `logical_error_rate` is the failures divided by the shots. It is an
 estimate, and 16 out of 400 would have come out differently with
@@ -191,8 +192,8 @@ or quote the point as an upper bound.
 
 decsim writes the numbers and leaves the figure to you, since only you
 know what it should show. `decsim.results.load` reads a run folder into
-one row per point, its `sweep.csv` columns beside every setting it ran
-with (`settings.` and the setting's path):
+one row per point, its `sweep.csv` columns, one of them per swept path,
+beside every setting it ran with (`settings.` and the setting's path):
 
 ```python
 import matplotlib.pyplot as plt
@@ -201,9 +202,9 @@ import decsim.results as results
 
 folders = ["results/first_sweep"]
 rows = results.load(*folders)
-error_rate = "settings.workload.row_settings.arguments.physical_error_probability"
+error_rate = "workload.arguments.physical_error_probability"
 kept = [row for row in rows if row[error_rate] == 0.003]
-distances = [row["settings.qpu.distance"] for row in kept]
+distances = [row["qpu.distance"] for row in kept]
 rates = [row["logical_error_rate"] for row in kept]
 below = [row["logical_error_rate"] - row["ler_wilson_low"] for row in kept]
 above = [row["ler_wilson_high"] - row["logical_error_rate"] for row in kept]
@@ -238,14 +239,14 @@ folders' additive files, adds them, and recomputes the summary.
 The combined report's counts:
 
 ```bash
-cut -d, -f2,4,5 results/combined/sweep.csv
+cut -d, -f3,6,8,9 results/combined/sweep.csv
 ```
 
 ```
-shots,logical_failures,logical_error_rate
-400,16,0.04
-400,12,0.03
-400,8,0.02
+qpu.distance,shots,logical_failures,logical_error_rate
+3,400,16,0.04
+5,400,12,0.03
+7,400,8,0.02
 ```
 
 The same three counts as the single run. That is not luck: a shot's seed

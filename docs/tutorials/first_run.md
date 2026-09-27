@@ -191,15 +191,15 @@ the facts.
 ## Step 5. Read one row and one figure
 
 `sweep.csv` has one row per sweep point and more than a hundred
-columns. The first few:
+columns. The distance and the first counts:
 
 ```bash
-cut -d, -f1-7 results/reference/sweep.csv
+cut -d, -f3,6,8-11 results/reference/sweep.csv
 ```
 
 ```
-algorithm,shots,windows_per_shot,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-pymatching,2,4.0,0,0.0,0.0,0.6576280471103807
+qpu.distance,shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
+3,2,0,0.0,0.0,0.6576280471103807
 ```
 
 `logical_error_rate` is the fraction of shots whose decoded observable
@@ -209,10 +209,13 @@ the interval runs from 0 to 0.66. The next tutorial,
 [Your first sweep](first_sweep.md), explains that interval and runs enough
 shots to make it narrow.
 
-The row's last two columns name its point. `point_id` is a hash of
-every setting the point ran with, so two points that differ in any
-setting have two ids, and `metadata` is the values its sweep set, the
-braces the terminal printed.
+The row's first columns name its point. `point_id`, left out here, is a
+hash of every setting the point ran with, so two points that differ in
+any setting have two ids. After it comes one column per yaml path the
+sweep sets, named by that path, holding the point's value there: the
+lines the terminal printed at the top of the point's block. Every other
+csv file of the folder names its rows the same way, so a table of any
+of them groups by a setting with no parsing.
 
 `collect` also drew a figure. Draw a second one:
 

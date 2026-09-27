@@ -52,7 +52,8 @@ def write_residence(rows: list, report_dir: pathlib.Path) -> None:
     if not rows:
         return
     path = pathlib.Path(report_dir) / "residence.csv"
-    report.write_csv(rows, path)
+    swept = report.swept_values_of(report_dir)
+    report.write_csv(rows, path, swept)
 
 
 def residence_ticks_by_structure(document) -> dict:

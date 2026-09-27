@@ -124,9 +124,6 @@ SHOT_SUMS = (
 )
 SHOT_TRUE_COUNTS = ("logical_failure", "direct_failure", "direct_mismatch")
 
-# the columns write_csv puts last
-POINT_ID_COLUMNS = ("point_id", "metadata")
-
 # the burst detector's shot columns, counted true per point when a run
 # with a detector wrote them: a first flag round is true when the
 # detector flagged a round, since rounds count from 1 and 0 is none
@@ -215,36 +212,28 @@ def percentile_of_counts(multiset: dict, fraction: float) -> float:
 
 
 def sweep_point_of(row: dict) -> tuple:
-    """The point a row belongs to: its id, its metadata, its algorithm.
+    """The point a row belongs to: its id and its algorithm.
 
     The id is the point's strong id, sinter's strong_id column, so two
-    points apart in any setting are two points; the metadata and the
-    algorithm ride with it so every derived row says what it is of. A
-    row read back off a csv file holds text and a row this process
-    measured holds numbers, so the algorithm is read as the value it was
-    written from: one streamed row and one measured row of the same
-    shot name the same point.
+    points apart in any setting are two points; the algorithm rides
+    with it so every derived row says what it is of, and write_csv adds
+    the point's swept values. A row read back off a csv file holds text
+    and a row this process measured holds numbers, so the algorithm is
+    read as the value it was written from: one streamed row and one
+    measured row of the same shot name the same point.
     """
-    return (
-        row["point_id"],
-        row["metadata"],
-        fold.number_of(row["algorithm"]),
-    )
+    return (row["point_id"], fold.number_of(row["algorithm"]))
 
 
 def measured_point(measurement) -> tuple:
     """The sweep point one measured shot belongs to."""
-    return (
-        measurement.point_id,
-        measurement.metadata,
-        measurement.algorithm,
-    )
+    return (measurement.point_id, measurement.algorithm)
 
 
 def point_columns(point: tuple) -> dict:
-    """The three columns that name a sweep point."""
-    point_id, metadata, algorithm = point
-    return {"point_id": point_id, "metadata": metadata, "algorithm": algorithm}
+    """The two columns that name a sweep point."""
+    point_id, algorithm = point
+    return {"point_id": point_id, "algorithm": algorithm}
 
 
 def summarize_point(point: tuple, totals, counts: dict) -> dict:
@@ -310,22 +299,21 @@ def summary_rows(totals: dict, counts: dict) -> list:
     return rows
 
 
-def write_csv(rows: list, path: Path) -> None:
+def write_csv(rows: list, path: Path, swept: Optional[dict] = None) -> None:
     """The rows as a csv file, every column any row holds, first seen first.
 
-    The point's id and metadata go last, where sinter writes a task's
-    strong_id and json_metadata (sinter/_data/_csv_out.py:69-77): the
-    metadata is json holding commas, and after it no column is left for
-    a reader cutting the file on commas to lose.
+    swept maps a point id to its value at each swept yaml path
+    (run_folder.swept_values), and a row of that point takes one column
+    per path right after its point_id: the values the design fixed
+    first, then what was measured, Wickham's order (Tidy Data, J. Stat.
+    Softw. 59(10), 2014, section 2.3).
     """
+    if swept is not None:
+        rows = _with_swept_values(rows, swept)
     columns = {}
     for row in rows:
         row_columns = dict.fromkeys(row)
         columns.update(row_columns)
-    for name in POINT_ID_COLUMNS:
-        if name in columns:
-            del columns[name]
-            columns[name] = None
     field_names = list(columns)
     with open(path, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=field_names)
@@ -344,9 +332,11 @@ def terminal_lines(rows: list, report_dir: Path) -> list:
     nothing has no counts and a row of zeros would claim otherwise.
     """
     movement = _data_movement_of(report_dir)
+    swept = swept_values_of(report_dir)
     blocks = []
     for row in rows:
-        block = _terminal_block(row)
+        values = swept[row["point_id"]]
+        block = _terminal_block(row, values)
         at_point = _movement_at_point(movement, row)
         with_classes = _block_with_classes(block, at_point)
         blocks.append(with_classes)
@@ -495,18 +485,18 @@ def record_of(measurements: list) -> RunRecord:
     return RunRecord(shots, links, movement, samples, latency)
 
 
-def write_record(record: RunRecord, report_dir: Path) -> None:
+def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
     """The record's five files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
-    _write_rows(record.shots, shots_path)
+    _write_rows(record.shots, shots_path, swept)
     links_path = report_dir / "shot_links.csv"
-    _write_rows(record.shot_links, links_path)
+    _write_rows(record.shot_links, links_path, swept)
     movement_path = report_dir / "shot_data_movement.csv"
-    _write_rows(record.shot_data_movement, movement_path)
+    _write_rows(record.shot_data_movement, movement_path, swept)
     samples_path = report_dir / "window_samples.csv"
-    _write_rows(record.window_samples, samples_path)
+    _write_rows(record.window_samples, samples_path, swept)
     latency_path = report_dir / "latency_samples.csv"
-    _write_rows(record.latency_samples, latency_path)
+    _write_rows(record.latency_samples, latency_path, swept)
 
 
 def read_rows(path: Path) -> list:
@@ -570,8 +560,9 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     _refuse_a_point_this_tree_cannot_place(folders)
     _refuse_a_repeated_shot(folders, order)
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows = _fold_the_folders(folders, order, out_dir)
     run_folder.copy_point_records(folders, out_dir)
+    swept = run_folder.swept_values(out_dir, point_ids)
+    rows = _fold_the_folders(folders, order, out_dir, swept)
     finished_utc = run_folder.utc_now()
     run_folder.write_combined_manifest(
         manifest["experiment_config"],
@@ -585,27 +576,30 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     return rows
 
 
-def write_report(
-    rows: list, report_dir: Path, record: Optional[RunRecord] = None
-) -> None:
-    """sweep.csv per point, and the additive files when a record comes.
+def write_report(rows: list, report_dir: Path, record: RunRecord) -> None:
+    """sweep.csv per point, and the additive files of the record.
 
     links.csv and data_movement.csv are derived from the record's
     per-shot rows, so a single run's folder and a folded folder hold
-    files built by the same code.
+    files built by the same code. Every row takes its point's swept
+    values from the points the folder recorded before its first shot.
     """
-    report_dir.mkdir(parents=True, exist_ok=True)
+    swept = swept_values_of(report_dir)
     sweep_path = report_dir / "sweep.csv"
-    write_csv(rows, sweep_path)
-    if record is None:
-        return
-    write_record(record, report_dir)
+    write_csv(rows, sweep_path, swept)
+    write_record(record, report_dir, swept)
     per_link = link_rows(record.shot_links)
     links_path = report_dir / "links.csv"
-    write_csv(per_link, links_path)
+    write_csv(per_link, links_path, swept)
     per_movement = data_movement_rows(record.shot_data_movement)
     movement_path = report_dir / "data_movement.csv"
-    _write_rows(per_movement, movement_path)
+    _write_rows(per_movement, movement_path, swept)
+
+
+def swept_values_of(report_dir: Path) -> dict:
+    """The swept values of every point a run folder's manifest lists."""
+    manifest = _manifest_of(report_dir)
+    return run_folder.swept_values(report_dir, manifest["points"])
 
 
 class _PointMovement:
@@ -675,30 +669,30 @@ class _PointMovement:
         return sorted(names)
 
 
-def _fold_the_folders(folders: list, order, out_dir: Path) -> list:
+def _fold_the_folders(folders: list, order, out_dir: Path, swept: dict) -> list:
     """Every folder's additive files into one folder's, a pass per file.
 
     A pass reads one file of every folder at once, writes the folded
     file row by row and feeds the totals its summary needs, so no pass
     holds a folder's rows. The three derived files come last, off the
-    totals the passes built.
+    totals the passes built, each point's swept values beside its rows.
     """
     shot_totals = _fold_shots(folders, order, out_dir)
     counts = _folded_counts(folders)
     rows = summary_rows(shot_totals, counts)
     sweep_path = out_dir / "sweep.csv"
-    write_csv(rows, sweep_path)
+    write_csv(rows, sweep_path, swept)
     samples_path = out_dir / "window_samples.csv"
     samples_rows = _rows_of_counts(counts, list(shot_totals))
-    _write_rows(samples_rows, samples_path)
+    _write_rows(samples_rows, samples_path, swept)
     link_totals = _fold_shot_links(folders, order, out_dir)
     per_link = _link_rows_of(link_totals)
     links_path = out_dir / "links.csv"
-    write_csv(per_link, links_path)
+    write_csv(per_link, links_path, swept)
     movement_totals = _fold_shot_movement(folders, order, out_dir)
     per_movement = _movement_rows_of(movement_totals)
     movement_path = out_dir / "data_movement.csv"
-    _write_rows(per_movement, movement_path)
+    _write_rows(per_movement, movement_path, swept)
     _fold_latency_samples(folders, order, out_dir)
     return rows
 
@@ -988,11 +982,23 @@ def _movement_rows_at_point(point: tuple, movement: _PointMovement) -> list:
     return rows
 
 
-def _write_rows(rows: list, path: Path) -> None:
+def _write_rows(rows: list, path: Path, swept: dict) -> None:
     """One file of the record, left unwritten when it has no rows."""
     if not rows:
         return
-    write_csv(rows, path)
+    write_csv(rows, path, swept)
+
+
+def _with_swept_values(rows: list, swept: dict) -> list:
+    """Each row with its point's swept values right after its point_id."""
+    placed = []
+    for row in rows:
+        point_id = row["point_id"]
+        with_values = {"point_id": point_id}
+        with_values.update(swept[point_id])
+        with_values.update(row)
+        placed.append(with_values)
+    return placed
 
 
 def _total_count(multiset: dict) -> int:
@@ -1290,7 +1296,7 @@ def _refuse_a_repeated_shot(run_dirs: list, order) -> None:
 def _refuse_the_folders(row: dict, run_dirs: list) -> None:
     """Say which shot is doubled and in which folders it was found."""
     listed = _named(run_dirs)
-    shot = f"{row['metadata']} seed {row['seed']}"
+    shot = f"{row['point_id']} seed {row['seed']}"
     raise refusal.RefusalError(
         f"the shot {shot} is in more than one of {listed}; a shot is one "
         "seeded run of one sweep point, so folding both folders would "
@@ -1397,17 +1403,20 @@ def _add_latency_point_columns(
     row[f"{name}_max_us"] = totals.maxes[f"{name}_max_us"]
 
 
-def _terminal_block(row: dict) -> str:
+def _terminal_block(row: dict, values: dict) -> str:
     """One sweep point's terminal block, one labeled line per number.
 
-    The lines above the latency ones are columns every row has. The
-    latency lines are the points the row holds (_points_held), because
-    a row folded from an older tree's folders holds only the points
-    that tree measured.
+    The block opens with the point's value at each swept path. The
+    lines above the latency ones are columns every row has. The latency
+    lines are the points the row holds (_points_held), because a row
+    folded from an older tree's folders holds only the points that tree
+    measured.
     """
     algorithm = row["algorithm"]
     algorithm_text = _algorithm_text(algorithm)
-    lines = _metadata_lines(row["metadata"])
+    lines = []
+    for path, value in values.items():
+        lines.append(f"{path}: {value}")
     lines += [
         f"algorithm: {algorithm_text}",
         f"load (service per window / window inter-arrival): {row['load']:.2f}",
@@ -1447,16 +1456,6 @@ def _terminal_latency_lines(row: dict) -> list:
             f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
             f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us"
         )
-    return lines
-
-
-def _metadata_lines(metadata: str) -> list:
-    """One line per setting the point's sweep set: its path and value."""
-    values = json.loads(metadata)
-    lines = []
-    for path, value in values.items():
-        value_text = json.dumps(value)
-        lines.append(f"{path}: {value_text}")
     return lines
 
 

@@ -169,9 +169,9 @@ The command prints the same resolved config, then one line per point as
 it finishes, then the summary. This is the summary:
 
 ```
+workload.arguments.physical_error_probability: 0.008
 qpu.distance: 3
 qpu.round_period_microseconds: 1.0
-workload.arguments.physical_error_probability: 0.008
 algorithm: 1 us
 load (service per window / window inter-arrival): 3.67
 logical failures: 15 of 50 shots
@@ -181,9 +181,9 @@ queue wait, mean: 16.643 us
 service time per window, mean: 5.941 us
 ready to frame commit: median 28.900 us, p99 79.656 us
 
+workload.arguments.physical_error_probability: 0.008
 qpu.distance: 5
 qpu.round_period_microseconds: 1.0
-workload.arguments.physical_error_probability: 0.008
 algorithm: 1 us
 load (service per window / window inter-arrival): 2.54
 logical failures: 16 of 50 shots

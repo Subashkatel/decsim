@@ -125,11 +125,9 @@ INPUT_LINK_BY_TIER = {
 class ShotMeasurement:
     """One shot's numbers; the field names are the csv columns."""
 
-    # the point's strong id and its {setting path: value} as one line of
-    # json, sinter's strong_id and json_metadata columns
-    # (sinter/_data/_csv_out.py:69-77)
+    # the point's strong id, sinter's strong_id column
+    # (sinter/_data/_csv_out.py:69-77); the report adds its swept values
     point_id: str
-    metadata: str
     algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
     windows: int
@@ -230,13 +228,11 @@ def measure_shot(
     trace_path = None
     if run_dir is not None:
         trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
-    metadata = collect.metadata_text(shot.task.metadata)
     return _measurement(
         settings,
         observation,
         shot.result,
         point_id=point_id,
-        metadata=metadata,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
         trace_path=trace_path,
@@ -735,7 +731,6 @@ def _measurement(
     result: result_records.RunResult,
     *,
     point_id: str,
-    metadata: str,
     seed: int,
     wall_seconds: float,
     trace_path: Optional[str],
@@ -772,7 +767,6 @@ def _measurement(
     first_flag_round, is_caught = _burst_catch(settings, observation)
     return ShotMeasurement(
         point_id=point_id,
-        metadata=metadata,
         algorithm=algorithm,
         seed=seed,
         windows=decoded_windows,

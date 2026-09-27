@@ -137,7 +137,6 @@ class _TracedShot:
         self.trace_path = trace_path
         self.seed = 0
         self.point_id = "0123abcd"
-        self.metadata = '{"qpu.distance": 3}'
         self.algorithm = 1.0
 
 
@@ -195,10 +194,8 @@ def test_a_row_names_the_sweep_point_its_shot_ran_at(tmp_path):
     rows = residence.rows_of([measurement])
 
     point_ids = {row["point_id"] for row in rows}
-    metadata = {row["metadata"] for row in rows}
     seeds = {row["seed"] for row in rows}
     assert point_ids == {"0123abcd"}
-    assert metadata == {'{"qpu.distance": 3}'}
     assert seeds == {0}
 
 

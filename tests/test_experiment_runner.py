@@ -303,6 +303,27 @@ def test_a_task_on_another_node_with_the_same_process_id_keeps_its_file(
     assert other_text == "the other node's staged copy\n"
 
 
+def test_the_script_copy_and_commit_record_keep_the_umasks_permissions(
+    tmp_path, monkeypatch
+):
+    """Another user sharing the folder reads them, as it reads the CSVs."""
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    experiment = tiny_experiment()
+    umask = os.umask(0)
+    os.umask(umask)
+    ordinary_mode = 0o666 & ~umask
+
+    experiment.main(arguments=["0", "--out", str(results_folder)])
+
+    script_copy = results_folder / "run.py"
+    commit_path = results_folder / "commit.txt"
+    script_status = script_copy.stat()
+    commit_status = commit_path.stat()
+    assert script_status.st_mode & 0o777 == ordinary_mode
+    assert commit_status.st_mode & 0o777 == ordinary_mode
+
+
 @pytest.mark.parametrize("worker_count", ["0", "-2"])
 def test_fewer_than_one_worker_is_refused(tmp_path, monkeypatch, worker_count):
     write_script(tmp_path, monkeypatch)

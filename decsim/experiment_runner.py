@@ -16,8 +16,8 @@ import argparse
 import datetime
 import os
 import pathlib
+import secrets
 import sys
-import tempfile
 from collections.abc import Mapping
 from typing import Optional
 
@@ -35,6 +35,8 @@ ONE_RUN_PER_FOLDER = (
     "a results folder belongs to one script and one commit, so give --out "
     "a new folder"
 )
+# what open gives a new file before the umask filters it
+ORDINARY_FILE_MODE = 0o666
 # where a folder goes when no --out names one
 RESULTS_ROOT_VARIABLE = "DECSIM_RESULTS"
 DEFAULT_RESULTS_ROOT = "results"
@@ -241,16 +243,17 @@ def _write_once(path: pathlib.Path, text: str) -> None:
     The text is staged in a file created exclusively under a random name
     beside it, since process ids repeat across nodes, and hard-linked
     into place, which fails when the file exists, so a task that starts
-    beside another never reads a half-written file.
+    beside another never reads a half-written file. The staging file is
+    created with mode 0666 filtered by the umask, as open would create
+    the file itself, so a group sharing the folder can read it.
     """
     if not path.exists():
-        prefix = f".{path.name}."
-        descriptor, staging_name = tempfile.mkstemp(
-            prefix=prefix, dir=path.parent
-        )
+        random_suffix = secrets.token_hex(8)
+        staging = path.with_name(f".{path.name}.{random_suffix}")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        descriptor = os.open(staging, flags, ORDINARY_FILE_MODE)
         with os.fdopen(descriptor, "w") as staging_file:
             staging_file.write(text)
-        staging = pathlib.Path(staging_name)
         try:
             os.link(staging, path)
         except FileExistsError:

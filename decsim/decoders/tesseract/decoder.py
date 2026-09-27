@@ -27,20 +27,25 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
     class Settings:
         """The row's own keys in its tier section: Tesseract's search.
 
-        detector_beam, beam_climbing, no_revisit_detectors and
-        priority_queue_limit are tesseract_decoder's TesseractConfig
-        det_beam, beam_climbing, no_revisit_dets and pqlimit;
+        detector_beam, beam_climbing, no_revisit_detectors,
+        priority_queue_limit and merge_errors are tesseract_decoder's
+        TesseractConfig det_beam, beam_climbing, no_revisit_dets, pqlimit
+        and merge_errors;
         detector_order_count and detector_order_method are the
         num_det_orders and DetOrder its utils.build_det_orders takes.
         The defaults are the package's tesseract-short-beam profile
         (tesseract-decoder src/tesseract_sinter_compat.pybind.h, the
         profile the Tesseract paper 2503.10988 runs); its
-        tesseract-long-beam is beam 20, queue 1,000,000 and 21 orders.
-        Backend merging stays off whatever the keys say, so the physical
-        columns keep their identity. detector_order_seed is the seed
+        tesseract-long-beam is beam 20, queue 1,000,000 and 21 orders,
+        and both profiles merge errors and fix the order seed at 2384753.
+        merge_errors off by default keeps every physical column a search
+        choice of its own; on, the backend searches one error per set of
+        columns with the same detectors and observables and answers with
+        the set's first column (src/tesseract.cc:153-168, 461-465), so
+        the correction still names physical columns and flips the same
+        detectors and observables. detector_order_seed is the seed
         build_det_orders draws the orders from; None draws them from the
-        run seed (decsim/seeding.py), and the package's profiles fix it
-        at 2384753.
+        run seed (decsim/seeding.py).
         """
 
         detector_beam: int = 15
@@ -50,6 +55,7 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         detector_order_method: str = "index"
         detector_order_count: int = 16
         detector_order_seed: Optional[int] = None
+        merge_errors: bool = False
 
         @classmethod
         def from_yaml(
@@ -128,11 +134,11 @@ _COUNT_KEYS = {
 _LARGEST_SEED = 2**64 - 1
 
 # the on-or-off keys
-_SWITCH_KEYS = ("beam_climbing", "no_revisit_detectors")
+_SWITCH_KEYS = ("beam_climbing", "no_revisit_detectors", "merge_errors")
 
 
 def _switches(section: Mapping, section_name: str) -> dict:
-    """Beam climbing and no-revisit, each true or false."""
+    """Beam climbing, no-revisit and merging, each true or false."""
     switches = {}
     for key in _SWITCH_KEYS:
         default = getattr(_DEFAULTS, key)

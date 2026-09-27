@@ -5,15 +5,20 @@ faults (tesseract/window_decoder.py, detector_error_model_of) and
 compiles the official backend with a detector-order seed; the same
 backend built here from that model with the row's settings and the same
 seed returns the same error indices, and the backend the row built
-reads back those settings. The wheel is the bb-decoders extra; the
-reference tests skip until it is installed. The yaml refusals need no
-wheel.
+reads back those settings. With merge_errors on and the order seed
+2384753 the row predicts what the package's own tesseract-short-beam
+profile (tesseract-decoder src/tesseract_sinter_compat.pybind.h:466-472)
+predicts on the model sinter hands a decoder
+(.pydeps/sinter/_collection/_collection_worker_state.py:28). The wheel
+is the bb-decoders extra; the reference tests skip until it is
+installed. The yaml refusals need no wheel.
 """
 
 import dataclasses
 
 import numpy
 import pytest
+import stim
 
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
@@ -35,7 +40,13 @@ SETTINGS = tesseract.TesseractDecoder.Settings(
     priority_queue_limit=50_000,
     detector_order_method="breadth_first",
     detector_order_count=3,
+    merge_errors=True,
 )
+# the package's tesseract-short-beam profile
+SHORT_BEAM = tesseract.TesseractDecoder.Settings(
+    merge_errors=True, detector_order_seed=2384753
+)
+PROFILE_SHOTS = 100
 # the least seed build_det_orders cannot take as a uint64
 ONE_PAST_UINT64 = 2**64
 
@@ -60,7 +71,7 @@ def _direct_backend(backend, detector_error_model):
         beam_climbing=False,
         no_revisit_dets=False,
         verbose=False,
-        merge_errors=False,
+        merge_errors=True,
         pqlimit=50_000,
         det_orders=orders,
         det_penalty=0.0,
@@ -121,8 +132,73 @@ def test_the_backend_the_row_built_reads_back_its_settings():
     assert built.config.beam_climbing is False
     assert built.config.no_revisit_dets is False
     assert built.config.pqlimit == 50_000
+    assert built.config.merge_errors is True
+    assert built.config.det_orders == orders
+
+
+def test_the_default_row_decodes_unmerged_with_orders_from_the_run_seed():
+    backend = pytest.importorskip("tesseract_decoder")
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    physical = model.require_faults(PHYSICAL)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 3)
+    row = tesseract.TesseractDecoder()
+    reservation = row.window_decoder.reserve_run_seed(SEED)
+    row.window_decoder.commit_run_seed(reservation)
+    job = windows.job_for(model, detection_events[0])
+    row.decode(job)
+    _reference, built = row.window_decoder.compiled_by_model[id(model)]
+    detector_error_model, _coordinates = (
+        tesseract_window.detector_error_model_of(model, physical)
+    )
+    order_method = backend.utils.DetOrder.DetIndex
+    orders = backend.utils.build_det_orders(
+        detector_error_model, 16, order_method, SEED
+    )
     assert built.config.merge_errors is False
     assert built.config.det_orders == orders
+
+
+@pytest.mark.parametrize("distance", [3, 5])
+@pytest.mark.parametrize(
+    "code_task",
+    ["surface_code:rotated_memory_x", "surface_code:rotated_memory_z"],
+)
+def test_the_short_beam_row_predicts_the_packages_profile_property(
+    distance: int, code_task: str
+):
+    backend = pytest.importorskip("tesseract_decoder")
+    circuit = stim.Circuit.generated(
+        code_task,
+        distance=distance,
+        rounds=distance,
+        after_clifford_depolarization=0.003,
+        before_measure_flip_probability=0.003,
+        after_reset_flip_probability=0.003,
+        before_round_data_depolarization=0.003,
+    )
+    model = windows.whole_circuit_window(
+        circuit, distance, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    detection_events, _ = windows.sampled_shots(circuit, PROFILE_SHOTS, 3)
+    sinter_model = circuit.detector_error_model(
+        decompose_errors=True, approximate_disjoint_errors=True
+    )
+    profiles = backend.make_tesseract_sinter_decoders_dict()
+    profile = profiles["tesseract-short-beam"]
+    compiled = profile.compile_decoder_for_dem(dem=sinter_model)
+    packed = numpy.packbits(detection_events, axis=1, bitorder="little")
+    predicted = compiled.decode_shots_bit_packed(
+        bit_packed_detection_event_data=packed
+    )
+    predictions = numpy.unpackbits(predicted, axis=1, bitorder="little")
+    row = tesseract.TesseractDecoder(settings=SHORT_BEAM)
+    for shot, prediction in zip(detection_events, predictions, strict=True):
+        job = windows.job_for(model, shot)
+        result = row.decode(job)
+        assert result.logical_observables == (prediction[0],)
 
 
 def test_a_fixed_detector_order_seed_replaces_the_run_seed():
@@ -170,6 +246,7 @@ def test_the_tier_sections_keys_reach_the_rows_settings():
         "detector_order_method": "breadth_first",
         "detector_order_count": 3,
         "detector_order_seed": 2384753,
+        "merge_errors": True,
     }
     clocks = config.ClockSettings({"decoder": 250.0})
     tier = decoder_settings.DecoderSettings.from_yaml(
@@ -192,6 +269,7 @@ def test_a_section_with_no_keys_keeps_the_short_beam_profile():
         detector_order_method="index",
         detector_order_count=16,
         detector_order_seed=None,
+        merge_errors=False,
     )
 
 
@@ -208,6 +286,7 @@ def test_a_section_with_no_keys_keeps_the_short_beam_profile():
         ("detector_order_count", True, "orders, at least 1"),
         ("beam_climbing", 1, "must be true or false"),
         ("no_revisit_detectors", None, "must be true or false"),
+        ("merge_errors", 1, "must be true or false"),
         ("detector_order_method", "random", "is not a row of its table"),
         ("detector_order_seed", -1, "must be null or a whole number from 0"),
         ("detector_order_seed", 1.5, "must be null or a whole number from 0"),

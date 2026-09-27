@@ -4,8 +4,8 @@ The official tesseract_decoder package (Google Quantum AI's Tesseract, a
 search-based most-likely-error decoder; its paper is not on disk) is
 compiled once per live window model from a Stim detector error model
 rebuilt out of the window's physical check, observables, priors and
-detector coordinates; one decode is one decode_to_errors call. Backend
-merging is off so the physical columns keep their one-to-one identity.
+detector coordinates; one decode is one decode_to_errors call, whose
+indices are physical columns whether the backend merges or not.
 """
 
 import math
@@ -224,7 +224,7 @@ def _compile_backend(
             beam_climbing=settings.beam_climbing,
             no_revisit_dets=settings.no_revisit_detectors,
             verbose=False,
-            merge_errors=False,
+            merge_errors=settings.merge_errors,
             pqlimit=settings.priority_queue_limit,
             det_orders=detector_orders,
             det_penalty=0.0,

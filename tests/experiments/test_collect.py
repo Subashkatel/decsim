@@ -389,7 +389,8 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     )
 
     whole_task = collect.Unit(task, 0, 4)
-    shared, _ran = collect.run_unit(whole_task, _decoded)
+    shared_outcome = collect.run_unit(whole_task, _decoded)
+    shared = shared_outcome.rows
     alone = [_decoded_alone(task, seed) for seed in range(4)]
 
     assert shared == alone
@@ -498,7 +499,8 @@ def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
         },
     )
     whole_task = collect.Unit(task, 0, 3)
-    measurements, _ran = collect.run_unit(whole_task, measure_shot.measure_shot)
+    outcome = collect.run_unit(whole_task, measure_shot.measure_shot)
+    measurements = outcome.rows
     record = sweep_report.record_of(measurements)
     swept = {task.strong_id(): task.metadata}
     sweep_report.write_record(record, tmp_path, swept)

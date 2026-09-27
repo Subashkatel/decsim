@@ -11,6 +11,7 @@ import functools
 import hashlib
 import json
 import pathlib
+import resource
 import shutil
 import subprocess
 import sys
@@ -666,6 +667,29 @@ def test_a_collect_run_again_into_its_folder_reruns_no_saved_piece(tmp_path):
     second_rows = _rows_without_wall_clock(report_dir, "sweep.csv")
     assert second_status.st_mtime_ns == first_status.st_mtime_ns
     assert second_rows == first_rows
+
+
+def test_a_piece_records_the_peak_memory_of_the_process_that_ran_it(
+    tmp_path,
+):
+    """The referent is getrusage in the process that ran the piece.
+
+    A serial collect runs its piece here, and a process's peak never
+    falls, so the piece's peak is above zero and at most this process's
+    peak read after it (ru_maxrss in kilobytes on Linux).
+    """
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    pieces_dir = out_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    peak_after_mb = usage.ru_maxrss / 1024
+    assert 0 < piece["peak_memory_mb"] <= peak_after_mb
 
 
 def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):

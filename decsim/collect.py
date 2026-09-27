@@ -29,6 +29,8 @@ import hashlib
 import json
 import numbers
 import pathlib
+import resource
+import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
@@ -109,6 +111,21 @@ class Unit:
 
 
 @dataclasses.dataclass(frozen=True)
+class UnitOutcome:
+    """What one unit ran: its measured rows, its task, its memory.
+
+    peak_memory_mb is the peak resident memory of the process that ran
+    the unit, read when the unit ended. A worker runs units one after
+    another, so it bounds the unit's own peak from above, which is the
+    side a memory request needs.
+    """
+
+    rows: list
+    task: "Task"
+    peak_memory_mb: float
+
+
+@dataclasses.dataclass(frozen=True)
 class Shot:
     """One seeded run of a task: the machine, its result, its wall time."""
 
@@ -153,12 +170,12 @@ def run_units(
     measure: Callable[[Shot], Any],
     on_task_done: Optional[Callable[[Task], None]] = None,
     *,
-    on_unit_done: Callable[[Unit, list], None],
+    on_unit_done: Callable[[Unit, UnitOutcome], None],
     processes: int = 1,
 ) -> None:
     """Every unit run and handed on, in unit order, whatever order it ran.
 
-    on_unit_done takes each unit with its measured rows, the moment the
+    on_unit_done takes each unit with its outcome, the moment the
     unit's turn comes, so a caller saves a unit before the next one
     finishes. The unit it takes holds the task as it ran, whose online
     calibrator learned over the unit's shots, in a worker process when
@@ -168,11 +185,10 @@ def run_units(
     """
     outcomes = _unit_outcomes(units, measure, processes)
     for position, outcome in enumerate(outcomes):
-        unit_rows, ran = outcome
         unit = units[position]
-        ran_unit = dataclasses.replace(unit, task=ran)
-        on_unit_done(ran_unit, unit_rows)
-        _report_a_finished_task(on_task_done, units, position, ran)
+        ran_unit = dataclasses.replace(unit, task=outcome.task)
+        on_unit_done(ran_unit, outcome)
+        _report_a_finished_task(on_task_done, units, position, outcome.task)
 
 
 def work_units(tasks: list, shots: int) -> list:
@@ -184,8 +200,8 @@ def work_units(tasks: list, shots: int) -> list:
     return units
 
 
-def run_unit(unit: Unit, measure: Callable[[Shot], Any]) -> tuple:
-    """Every seed of one unit, measured, and the task that ran them.
+def run_unit(unit: Unit, measure: Callable[[Shot], Any]) -> UnitOutcome:
+    """Every seed of one unit, measured, the task that ran them, the memory.
 
     The task comes back because its online threshold calibrator learned
     over these shots, and in a pool that learning happened in another
@@ -199,7 +215,8 @@ def run_unit(unit: Unit, measure: Callable[[Shot], Any]) -> tuple:
         shot = run_shot(unit.task, seed, built_models=built_models)
         row = measure(shot)
         rows.append(row)
-    return rows, unit.task
+    peak_memory_mb = _peak_memory_mb()
+    return UnitOutcome(rows, unit.task, peak_memory_mb)
 
 
 def unique_tasks(tasks: Iterable[Task]) -> list:
@@ -295,13 +312,26 @@ def _is_a_tasks_last_unit(units: list, position: int) -> bool:
     return later.task is not unit.task
 
 
-def _keep_rows(rows: list, _unit: Unit, unit_rows: list) -> None:
+def _keep_rows(rows: list, _unit: Unit, outcome: UnitOutcome) -> None:
     """A unit callback that keeps each unit's rows in one list."""
-    rows.extend(unit_rows)
+    rows.extend(outcome.rows)
+
+
+def _peak_memory_mb() -> float:
+    """This process's peak resident memory so far, in megabytes.
+
+    getrusage's ru_maxrss is in kilobytes on Linux and in bytes on macOS
+    (getrusage(2) on each).
+    """
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    kilobytes = usage.ru_maxrss
+    if sys.platform == "darwin":
+        kilobytes = usage.ru_maxrss / 1024
+    return kilobytes / 1024
 
 
 def _unit_outcomes(units: list, measure: Callable[[Shot], Any], processes: int):
-    """Each unit's (rows, task) in unit order, run here or in a pool."""
+    """Each unit's outcome in unit order, run here or in a pool."""
     if processes <= 1:
         for unit in units:
             yield run_unit(unit, measure)

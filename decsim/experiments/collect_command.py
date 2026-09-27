@@ -460,7 +460,7 @@ def _save_the_piece(
     configuration_id: str,
     rounds_by_point: dict,
     unit: collect.Unit,
-    rows: list,
+    outcome: collect.UnitOutcome,
 ) -> None:
     """One unit's measurements saved as its piece.
 
@@ -469,10 +469,12 @@ def _save_the_piece(
     its calibrator as the unit's shots left it.
     """
     point_id = unit.task.strong_id()
+    rows = outcome.rows
     rounds_per_shot = rounds_by_point[point_id]
     facts = {
         "configuration_id": configuration_id,
         "rounds": rounds_per_shot * len(rows),
+        "peak_memory_mb": outcome.peak_memory_mb,
     }
     state = unit.task.online_threshold
     pieces.write(experiment_dir, point_id, unit.first_seed, rows, facts, state)

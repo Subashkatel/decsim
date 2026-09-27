@@ -73,14 +73,14 @@ def test_a_point_run_by_id_writes_only_its_own_csv(tmp_path, monkeypatch):
 
     points = results_folder / "points"
     point_path = points / "1.csv"
-    (point_stats,) = sinter.read_stats_from_csv_files(point_path)
+    (point_statistics,) = sinter.read_stats_from_csv_files(point_path)
     written = os.listdir(points)
     script_copy = results_folder / "run.py"
     copy_text = script_copy.read_text()
     script_text = script.read_text()
     assert written == ["1.csv"]
-    assert point_stats.json_metadata == {"d": 5}
-    assert point_stats.errors >= 10
+    assert point_statistics.json_metadata == {"d": 5}
+    assert point_statistics.errors >= 10
     assert copy_text == script_text
 
 
@@ -106,9 +106,9 @@ def test_a_point_its_shot_cap_stopped_takes_no_new_shots(tmp_path, monkeypatch):
 
     experiment.main(arguments=["0", "--out", str(results_folder)])
 
-    (point_stats,) = sinter.read_stats_from_csv_files(point_path)
+    (point_statistics,) = sinter.read_stats_from_csv_files(point_path)
     assert point_path.read_text() == first_text
-    assert point_stats.shots == 300
+    assert point_statistics.shots == 300
 
 
 def test_an_unfinished_point_goes_on_from_its_saved_shots(
@@ -125,10 +125,10 @@ def test_an_unfinished_point_goes_on_from_its_saved_shots(
 
     raised.main(arguments=["0", "--out", str(results_folder)])
 
-    (point_stats,) = sinter.read_stats_from_csv_files(point_path)
+    (point_statistics,) = sinter.read_stats_from_csv_files(point_path)
     raised_text = point_path.read_text()
     assert raised_text.startswith(first_text)
-    assert point_stats.shots == 700
+    assert point_statistics.shots == 700
 
 
 def test_each_point_decodes_with_the_decoder_its_name_maps_to(
@@ -154,7 +154,7 @@ def test_each_point_decodes_with_the_decoder_its_name_maps_to(
 
     stats_path = results_folder / "stats.csv"
     combined = sinter.read_stats_from_csv_files(stats_path)
-    decoder_names = {point_stats.decoder for point_stats in combined}
+    decoder_names = {point_statistics.decoder for point_statistics in combined}
     assert decoder_names == {"union-find", "pymatching"}
 
 
@@ -171,11 +171,11 @@ def test_two_points_run_at_once_write_different_files(tmp_path):
     assert second.wait() == 0
     first_path = results_folder / "points" / "0.csv"
     second_path = results_folder / "points" / "1.csv"
-    (first_stats,) = sinter.read_stats_from_csv_files(first_path)
-    (second_stats,) = sinter.read_stats_from_csv_files(second_path)
+    (first_statistics,) = sinter.read_stats_from_csv_files(first_path)
+    (second_statistics,) = sinter.read_stats_from_csv_files(second_path)
     written = os.listdir(results_folder)
-    assert first_stats.json_metadata == {"d": 3}
-    assert second_stats.json_metadata == {"d": 5}
+    assert first_statistics.json_metadata == {"d": 3}
+    assert second_statistics.json_metadata == {"d": 5}
     assert sorted(written) == ["commit.txt", "points", "run.py"]
 
 

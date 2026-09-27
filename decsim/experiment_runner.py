@@ -110,10 +110,10 @@ class Experiment:
             path = _point_path(folder, point_id)
             if path.exists():
                 paths.append(path)
-        saved_stats = sinter.read_stats_from_csv_files(*paths)
+        saved_statistics = sinter.read_stats_from_csv_files(*paths)
         lines = [sinter.CSV_HEADER]
-        for point_stats in saved_stats:
-            line = point_stats.to_csv_line()
+        for point_statistics in saved_statistics:
+            line = point_statistics.to_csv_line()
             lines.append(line)
         lines.append("")
         text = "\n".join(lines)
@@ -160,16 +160,16 @@ class Experiment:
         task = self.tasks[point_id]
         path = _point_path(folder, point_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        (point_stats,) = sinter.collect(
+        (point_statistics,) = sinter.collect(
             num_workers=worker_count,
             tasks=[task],
             custom_decoders=decoders,
             save_resume_filepath=path,
         )
         print(
-            f"point {point_id}: {point_stats.shots} shots, "
-            f"{point_stats.errors} errors, "
-            f"{point_stats.seconds:.0f} core seconds"
+            f"point {point_id}: {point_statistics.shots} shots, "
+            f"{point_statistics.errors} errors, "
+            f"{point_statistics.seconds:.0f} core seconds"
         )
 
 

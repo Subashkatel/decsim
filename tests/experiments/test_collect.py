@@ -29,12 +29,15 @@ columns that carry decode time (algorithm, service, queue wait, the park
 before the compute, the four totals, load, throughput, the queue peak and
 the wall seconds) vary between two runs of the same code; they are left
 out of the comparison, and the columns kept are exactly the ones two
-recorded runs agreed on. Referent two
+recorded runs agreed on. Its two columns of the per-shot whole-circuit
+PyMatching reference went when that reference did. Referent two
 is sinter (sinter/_collection/_collection.py collect, sinter/_data/_task.py
 strong_id): a task named twice runs once, and a decoder off the table is
 refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder"),
 and a shot its decoder could not answer is a discard, counted apart and
-never an error (sinter/_decoding/_decoding.py:123-125).
+never an error (sinter/_decoding/_decoding.py:123-125). Referent three
+is that retired reference's own columns, frozen by seed before it went,
+which a full-history point beside a sliding one reproduces.
 """
 
 import csv
@@ -173,6 +176,63 @@ def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     stable_now = _stable_columns(sweep_measured[0])
     assert stable_now == _stable_columns(sweep_before[0])
     assert links_measured == links_before
+
+
+# the sliding pymatching point's logical_failure, direct_failure and
+# direct_mismatch for seeds 0 to 239, written at commit 9a4334b2, the
+# last commit that measured the whole-circuit reference on every shot
+DIRECT_REFERENCE = DATA / "direct_reference.csv"
+FULL_HISTORY_PAIR = {
+    "weak_decoder": {
+        **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
+        "kind": "pymatching",
+    },
+    "sweep": [
+        {
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.015],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+                "windows.commit_rounds": [None, 16],
+            },
+            "shots": 240,
+        }
+    ],
+}
+
+
+def test_a_full_history_point_reproduces_the_retired_direct_columns(
+    tmp_path,
+):
+    """The per-shot whole-circuit reference, from a pair of points by seed.
+
+    One window of 16 rounds decodes the shot's whole 15-round history,
+    which is whole-circuit PyMatching on the same events, so seed by
+    seed its failure is the retired direct_failure, and the sliding and
+    full-history failures differ exactly where direct_mismatch said
+    (NOTE section 9 item 7). The frozen seeds hold two mismatches.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FULL_HISTORY_PAIR)
+    out_dir = tmp_path / "out"
+
+    run_dir, _rows = run.run_experiment(config_path, out_dir)
+
+    shots_path = run_dir / "shots.csv"
+    shots = _csv_rows(shots_path)
+    sliding = _shots_by_seed(shots, "null")
+    full_history = _shots_by_seed(shots, "16")
+    reference = _csv_rows(DIRECT_REFERENCE)
+    seeds = [int(row["seed"]) for row in reference]
+    expected = [_frozen_columns(row) for row in reference]
+    reproduced = [
+        _retired_columns(sliding[seed], full_history[seed]) for seed in seeds
+    ]
+    sliding_digests = [sliding[seed]["sample_digest"] for seed in seeds]
+    full_digests = [full_history[seed]["sample_digest"] for seed in seeds]
+    mismatches = [columns[2] for columns in expected]
+    assert reproduced == expected
+    assert sliding_digests == full_digests
+    assert sum(mismatches) == 2
 
 
 def test_a_swept_section_keeps_its_column_beside_every_measured_one(
@@ -860,3 +920,28 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     assert "logical failures: 0 of 0 scored shots" in lines
     assert "logical error rate among scored shots: nan" in lines
     assert "unscored shots: 2 of 2 (1)" in lines
+
+
+def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
+    """One point's shots.csv rows by seed, the point named by its window."""
+    by_seed = {}
+    for row in shots:
+        if row["windows.commit_rounds"] == commit_rounds_cell:
+            by_seed[int(row["seed"])] = row
+    return by_seed
+
+
+def _frozen_columns(row: dict) -> tuple:
+    """A frozen row's logical_failure, direct_failure, direct_mismatch."""
+    logical_failure = int(row["logical_failure"])
+    direct_failure = int(row["direct_failure"])
+    direct_mismatch = int(row["direct_mismatch"])
+    return (logical_failure, direct_failure, direct_mismatch)
+
+
+def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:
+    """The three columns as the pair of points gives them for one seed."""
+    sliding_failure = sliding_row["logical_failure"] == "True"
+    full_history_failure = full_history_row["logical_failure"] == "True"
+    is_mismatch = sliding_failure != full_history_failure
+    return (int(sliding_failure), int(full_history_failure), int(is_mismatch))

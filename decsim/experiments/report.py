@@ -127,8 +127,6 @@ SHOT_SUMS = (
 )
 SHOT_TRUE_COUNTS = (
     "logical_failure",
-    "direct_failure",
-    "direct_mismatch",
     "is_scored",
 )
 # the burst detector's shot columns, counted true per point when a run
@@ -264,10 +262,6 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     row["logical_error_rate"] = _failure_fraction(failures, scored_shots)
     row["ler_wilson_low"] = ler_low
     row["ler_wilson_high"] = ler_high
-    row["direct_pymatching_failures"] = totals.true_counts["direct_failure"]
-    row["prediction_mismatches_vs_direct"] = totals.true_counts[
-        "direct_mismatch"
-    ]
     row["scored_shots"] = scored_shots
     row["unscored_shots"] = unscored_shots
     row["logical_error_rate_unscored_as_failures"] = rate_unscored_as_failures
@@ -1470,8 +1464,6 @@ def _terminal_block(row: dict, values: dict) -> str:
         f"{row['logical_error_rate']:.3g}",
         f"unscored shots: {row['unscored_shots']} of {row['shots']} "
         f"({unscored_fraction:.3g})",
-        f"mismatches vs direct PyMatching: "
-        f"{row['prediction_mismatches_vs_direct']}",
         f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
     ]
     latency_lines = _terminal_latency_lines(row)

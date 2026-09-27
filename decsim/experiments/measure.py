@@ -19,10 +19,6 @@ import pathlib
 import statistics
 from typing import Optional
 
-import numpy
-import pymatching
-import stim
-
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
@@ -30,6 +26,7 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
+import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
@@ -149,8 +146,6 @@ class ShotMeasurement:
     means: dict  # point -> mean us over this shot's windows
     maxes: dict  # point -> max us
     load: float  # service per window / window inter-arrival
-    direct_failure: bool  # whole-circuit PyMatching on the same events failed
-    direct_mismatch: bool  # loop prediction differs from direct PyMatching
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     max_queued_windows: int
@@ -650,39 +645,6 @@ def collect_samples(
     return samples
 
 
-def direct_prediction(
-    observation: observation_module.Observation, operation_id
-) -> tuple:
-    """Whole-circuit PyMatching on the detection events the device sampled.
-
-    The reference the loop must agree with. The shot is the one the
-    source drew for this operation, heard at sampling time. A source that
-    draws no shot (qpu.kind timing_only and syndrome_bits) leaves the loop
-    nothing to be judged against, so the shot is refused rather than
-    counted as right or wrong.
-    """
-    shots_by_operation = observation.sampled_shots.shots_by_operation
-    if operation_id not in shots_by_operation:
-        raise refusal.RefusalError(
-            "decsim collect judges every shot against the logical "
-            "observables its syndrome source sampled, and the source "
-            f"sampled none for operation {operation_id}; name a qpu.kind "
-            "that samples the circuit, such as stim_device"
-        )
-    shot = shots_by_operation[operation_id]
-    circuit: stim.Circuit = shot.circuit
-    detector_error_model = circuit.detector_error_model(decompose_errors=True)
-    matching = pymatching.Matching.from_detector_error_model(
-        detector_error_model
-    )
-    events = numpy.asarray(shot.detection_events, dtype=bool)
-    predicted = matching.decode(events)
-    bits = []
-    for bit in predicted:
-        bits.append(int(bit))
-    return tuple(bits)
-
-
 def chain_load(samples: dict, window_period_us: float) -> float:
     """rho: the serial chain's service per window over the window period.
 
@@ -770,8 +732,9 @@ def _measurement(
     and placed in the record, top to bottom, and a split would put the
     reading and the placing of one number in two places.
     """
+    sample_digest = _sample_digest(observation, result)
     samples = collect_samples(observation, result)
-    verdicts = _logical_verdicts(observation, result)
+    logical_failure = _logical_failure(result)
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
@@ -798,8 +761,7 @@ def _measurement(
     unscored_reason = _unscored_reason(observation)
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
-    is_scored_failure = verdicts.logical_failure and is_scored
-    sample_digest = _sample_digest(observation, result)
+    is_scored_failure = logical_failure and is_scored
     return ShotMeasurement(
         point_id=point_id,
         algorithm=algorithm,
@@ -810,8 +772,6 @@ def _measurement(
         means=means,
         maxes=maxes,
         load=load,
-        direct_failure=verdicts.direct_failure,
-        direct_mismatch=verdicts.direct_mismatch,
         throughput_windows_per_us=throughput.windows_per_microsecond,
         throughput_rounds_per_us=throughput.rounds_per_microsecond,
         max_queued_windows=queued,
@@ -940,14 +900,34 @@ def _sample_digest(
     than assumed.
     """
     digest = hashlib.sha256()
-    shots_by_operation = observation.sampled_shots.shots_by_operation
     for operation_result in result.operation_results:
-        shot = shots_by_operation[operation_result.operation_id]
+        operation_id = operation_result.operation_id
+        shot = _sampled_shot(observation, operation_id)
         event_bytes = bytes(shot.detection_events)
         truth_bytes = bytes(operation_result.observable_truth)
         digest.update(event_bytes)
         digest.update(truth_bytes)
     return digest.hexdigest()
+
+
+def _sampled_shot(
+    observation: observation_module.Observation, operation_id
+) -> sampled_shots_module.SampledShot:
+    """The shot the source drew for an operation, heard at sampling time.
+
+    A source that draws no shot (qpu.kind timing_only and syndrome_bits)
+    leaves the loop no truth to be scored against, so the shot is
+    refused rather than counted as right or wrong.
+    """
+    shots_by_operation = observation.sampled_shots.shots_by_operation
+    if operation_id not in shots_by_operation:
+        raise refusal.RefusalError(
+            "decsim collect scores every shot against the logical "
+            "observables its syndrome source sampled, and the source "
+            f"sampled none for operation {operation_id}; name a qpu.kind "
+            "that samples the circuit, such as stim_device"
+        )
+    return shots_by_operation[operation_id]
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:
@@ -982,15 +962,6 @@ class _CommittedDecode:
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
     round_count: int  # the rounds it read, its job's own count
-
-
-@dataclasses.dataclass(frozen=True)
-class _LogicalVerdicts:
-    """Whether the loop, and whole-circuit PyMatching, reached the truth."""
-
-    logical_failure: bool
-    direct_failure: bool
-    direct_mismatch: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1050,32 +1021,19 @@ class _TierRecords:
     strong_held_in_units_max: Optional[int] = None
 
 
-def _logical_verdicts(
-    observation: observation_module.Observation,
-    result: result_records.RunResult,
-) -> _LogicalVerdicts:
-    """The loop's observables beside the truth and beside the reference.
+def _logical_failure(result: result_records.RunResult) -> bool:
+    """Whether the loop's observables missed the truth.
 
     A shot fails when any of its operations reads a wrong observable, as
     a computation fails when any of its logical qubits does; a workload
     of several patches is judged over all of them.
     """
     is_logical_failure = False
-    is_direct_failure = False
-    is_direct_mismatch = False
     for operation_result in result.operation_results:
-        operation_id = operation_result.operation_id
-        reference_prediction = direct_prediction(observation, operation_id)
         truth = tuple(operation_result.observable_truth)
         loop_prediction = tuple(operation_result.logical_observables)
         is_logical_failure |= loop_prediction != truth
-        is_direct_failure |= reference_prediction != truth
-        is_direct_mismatch |= loop_prediction != reference_prediction
-    return _LogicalVerdicts(
-        logical_failure=is_logical_failure,
-        direct_failure=is_direct_failure,
-        direct_mismatch=is_direct_mismatch,
-    )
+    return is_logical_failure
 
 
 def _throughput_per_microsecond(

@@ -99,7 +99,6 @@ load (service per window / window inter-arrival): 2.53
 logical failures: 16 of 400 scored shots
 logical error rate among scored shots: 0.04
 unscored shots: 0 of 400 (0)
-mismatches vs direct PyMatching: 0
 throughput: 0.412 rounds per us
 queue wait, mean: 12.764 us
 service time per window, mean: 7.593 us
@@ -110,14 +109,12 @@ qpu.distance: 5
 logical failures: 12 of 400 scored shots
 logical error rate among scored shots: 0.03
 unscored shots: 0 of 400 (0)
-mismatches vs direct PyMatching: 0
 ...
 qpu.distance: 7
 ...
 logical failures: 8 of 400 scored shots
 logical error rate among scored shots: 0.02
 unscored shots: 0 of 400 (0)
-mismatches vs direct PyMatching: 0
 ...
 ```
 
@@ -126,23 +123,22 @@ at distance 7. The logical error rate falls as the code gets bigger,
 which is what a code below its threshold does: more physical qubits buy
 a better logical qubit.
 
-`mismatches vs direct PyMatching: 0` is a correctness check that runs on
-every shot. decsim decodes the shot in windows, through the whole
-machine, while the experiments layer decodes the same shot's detection
-events in one piece with PyMatching outside the machine, and the two
-predictions are compared.
+To see what decoding in windows costs, add one more value to the sweep:
+`windows.commit_rounds` long enough to hold the whole shot, so one window
+decodes the full history the way a whole-circuit decode does. At one seed
+the two points draw the same shot (their `sample_digest` cells in
+`shots.csv` are equal), so a seed where their `logical_failure` differs is
+a shot the window's missing rounds decided.
 
-Do not read zero as a promise. A sliding window commits its correction
-without the rounds the whole-circuit decode can see, so windowed
-decoding is an approximation of global decoding, and the two are
-expected to disagree on a small fraction of shots: Skoric et al.
-(arXiv:2209.08552, Sec. I B) put it as processing only a subset of the
-syndrome data inevitably reducing the logical fidelity, with a fidelity
-close to the global decoder's retained by buffering a whole distance,
-which is what decsim's default window does. A run of 1800 shots at
-distances 3 and 5 and physical error rates 0.003 to 0.01 disagreed on 4
-of them. So zero here says these 400 shots had no disagreement; a
-handful in a larger sweep is the approximation showing, and a noticeable
+Expect a few. A sliding window commits its correction without the rounds
+the whole-circuit decode can see, so windowed decoding is an
+approximation of global decoding: Skoric et al. (arXiv:2209.08552,
+Sec. I B) put it as processing only a subset of the syndrome data
+inevitably reducing the logical fidelity, with a fidelity close to the
+global decoder's retained by buffering a whole distance, which is what
+decsim's default window does. A run of 1800 shots at distances 3 and 5
+and physical error rates 0.003 to 0.01 disagreed on 4 of them. A handful
+in a larger sweep is the approximation showing, and a noticeable
 fraction of the shots is a broken machine.
 
 ## Step 3. Read the error bars

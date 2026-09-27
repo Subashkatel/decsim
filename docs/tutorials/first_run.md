@@ -120,7 +120,6 @@ load (service per window / window inter-arrival): 2.39
 logical failures: 0 of 2 scored shots
 logical error rate among scored shots: 0
 unscored shots: 0 of 2 (0)
-mismatches vs direct PyMatching: 0
 throughput: 0.449 rounds per us
 queue wait, mean: 2.603 us
 service time per window, mean: 7.158 us

@@ -78,16 +78,16 @@ package to the `bb-decoders` extra in `pyproject.toml`.
 decsim collect configs/reference.yaml
 ```
 
-with your row named as `weak_decoder.kind`. The summary line
-`mismatches vs direct PyMatching: 0` is decsim decoding every window
-through the machine and PyMatching decoding the same shots straight
-through, outside it, and comparing the predictions. A backend that is
-correct and different from matching will disagree on some windows; a
-backend that is broken disagrees on most. Even a matching backend
-disagrees on a few. The window commits without the later rounds that a
-whole-circuit decode reads, so the two can differ. In one measurement at
-distances 3 and 5 and physical error rates 0.003 to 0.01, 4 shots in
-1800 disagreed. Read a handful of disagreements as the windowing and a
+with your row named as `weak_decoder.kind`. To check its answers, make
+`weak_decoder.kind` an axis with your row and `pymatching` as its two
+values: at one seed both points draw the same shot (their
+`sample_digest` cells in `shots.csv` are equal), so a seed where their
+`logical_failure` differs is a shot the two decoders answered apart. A
+backend that is correct and different from matching will disagree on
+some shots; a backend that is broken disagrees on most. Even two
+matching decoders disagree on a few when their windows differ, since a
+window commits without the later rounds a whole-circuit decode reads.
+Read a handful of disagreements as the decoders differing and a
 noticeable fraction as a bug in your decoder.
 
 For a second opinion per window rather than per shot, set

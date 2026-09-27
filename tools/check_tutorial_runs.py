@@ -36,8 +36,7 @@ FENCE = "```"
 COMMAND_WORDS = ("decsim", "cut", "ls")
 CLOCK_FREE_LINE = re.compile(
     r"^(?:terminal status|execution done|operation 1|logical failures"
-    r"|logical error rate among scored shots|unscored shots"
-    r"|mismatches vs direct PyMatching): "
+    r"|logical error rate among scored shots|unscored shots): "
 )
 
 

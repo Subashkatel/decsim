@@ -2,9 +2,11 @@
 
 A listener on the SyndromeSource port's shot_sampled source. A sampled
 shot is the run's input, not its output: the detection events the device
-drew and the circuit they came from are what a whole-circuit reference
-decode reads to check the loop's answer (experiments/measure.py), so they are
-heard once at sampling time instead of read back off the device.
+drew, which the shot's sample digest hashes (experiments/measure.py), and
+the circuit they came from, which a whole-circuit reference decode reads
+to check the loop's answer. They are heard once at sampling time instead
+of read back off the device, since a streaming source forms its circuit
+only when it samples.
 """
 
 import dataclasses

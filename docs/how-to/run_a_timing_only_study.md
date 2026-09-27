@@ -70,7 +70,6 @@ load (service per window / window inter-arrival): 0.36
 logical failures: 0 of 20 scored shots
 logical error rate among scored shots: 0
 unscored shots: 0 of 20 (0)
-mismatches vs direct PyMatching: 0
 throughput: 0.997 rounds per us
 queue wait, mean: 0.000 us
 service time per window, mean: 1.064 us
@@ -102,18 +101,16 @@ configuration and the seed.
 
 The decode does. A priced tier still decodes the window through
 PyMatching and still returns a correction, so the logical error rate is
-still measured; only the time it is charged comes from the card. That is
-why `mismatches vs direct PyMatching: 0` is still meaningful above.
+still measured; only the time it is charged comes from the card, so the
+logical failures above are real decodes.
 
 If you want a run with no syndrome data at all, `qpu.kind: timing_only`
 emits payloads that state the code's size per round and carry no values,
 so links and memories are still charged in bits. It builds and runs as a
 machine, but
-`decsim collect` currently raises `KeyError` on it, because the
-experiments layer's per-shot measurement always compares the loop's
-prediction against PyMatching on the device's sampled shot, and a
-timing-only device samples none. Use a priced card on a real device
-instead.
+`decsim collect` refuses it with a sentence, because every shot is
+scored against the observables its source sampled, and a timing-only
+device samples none. Use a priced card on a real device instead.
 
 ## Read next
 

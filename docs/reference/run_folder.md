@@ -91,7 +91,6 @@ and unit are its key's in `configs/reference.yaml`.
 | `decoded_windows` | how many windows this shot decoded |
 | `logical_failure` | 1 when any operation's decoded observable did not match its truth, else 0; a `memory_patches` shot fails when any patch does. An unscored shot is never a failure, as sinter never counts an error on a discarded shot |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
-| `direct_failure`, `direct_mismatch` | the same shot decoded straight through PyMatching outside the machine, and whether the machine disagreed with it |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the most jobs that waited in the ready queue at once; a depth counts only when time passes at it, so a job that joins and leaves in one tick never waited |
 | `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
@@ -265,7 +264,6 @@ point the run held:
 | `windows_per_shot` | the mean over those shots |
 | `logical_failures`, `logical_error_rate` | the count and the fraction of the scored shots, sinter's errors over shots less discards; the fraction is NaN when no shot was scored |
 | `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96 over the scored shots, from `wilson_interval`; both NaN when no shot was scored |
-| `direct_pymatching_failures`, `prediction_mismatches_vs_direct` | the same shots decoded outside the machine, and the disagreements |
 | `scored_shots`, `unscored_shots` | how many of the point's shots were scored, and how many were not (`is_scored`) |
 | `logical_error_rate_unscored_as_failures` | the failures and the unscored shots together over every shot: the rate this sample would read if every unscored shot had failed, a bound on the sample and not a confidence bound. Beside `logical_error_rate`, which is conditional on scoring, it shows how much a backend that failed on hard syndromes could hide |
 | `<status>_windows`, `provisional_no_correction_windows` | the sums over the point's shots |

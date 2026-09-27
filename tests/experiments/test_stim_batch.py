@@ -426,10 +426,11 @@ def test_a_raised_target_resumes_from_the_saved_pieces(tmp_path):
 
     (row,) = rows
     after = piece_texts(experiment_dir)
-    kept = {name: after[name] for name in saved}
+    saved_items = saved.items()
+    after_items = after.items()
     assert row["prefix_failures"] == 4
     assert row["state"] == "target"
-    assert kept == saved
+    assert saved_items <= after_items
     assert len(after) > len(saved)
 
 

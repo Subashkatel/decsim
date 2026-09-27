@@ -27,8 +27,9 @@ one; and the two decoder managers, which share the ledger of strong
 requests that the chip's side opens and the host's side serves. Each
 such row therefore sits after the rows it reads.
 
-The member readers come before the tables because a tuple is built when
-the module loads and every row names its builder.
+The public functions read the tables only when called, so they come
+first; the member readers come before the tables because a tuple is
+built when the module loads and every row names its builder.
 """
 
 import decsim.build.controller_side as controller_side
@@ -38,6 +39,68 @@ import decsim.build.parts as build_parts
 import decsim.build.stores as store_build
 import decsim.build.window_side as window_side
 import decsim.ports as ports
+
+
+def build_seats(parts: build_parts.Parts) -> dict:
+    """Every seat of this run, built from its settings, in SEATS order."""
+    for name, build in seats_for(parts):
+        parts.seats[name] = build(parts)
+    return parts.seats
+
+
+def seats_for(parts: build_parts.Parts) -> tuple:
+    """The rows this run builds; a seat it has no use for has none."""
+    absent = _absent_seats(parts)
+    rows = []
+    for name, build in SEATS:
+        if name not in absent:
+            rows.append((name, build))
+    return tuple(rows)
+
+
+def wires_for(parts: build_parts.Parts) -> tuple:
+    """The rows whose two ends this run builds."""
+    built = set()
+    for name, _build in seats_for(parts):
+        built.add(name)
+    rows = []
+    for source, target in WIRES:
+        if _both_ends_are_built(source, target, built):
+            rows.append((source, target))
+    return tuple(rows)
+
+
+def bind(wires: tuple, seats: dict) -> None:
+    """Fill every named port with the seat that answers it.
+
+    The assignment runs the port's own refusal of a second bind
+    (decsim/ports.py, Port), gem5's PortRef.connect
+    (gem5 src/python/m5/params/port_params.py:109-114). The
+    table is this file's input, so a row that names a seat the run did
+    not build, a port a class does not declare, or a peer that does not
+    answer the port's protocol is refused here, with the row printed.
+    """
+    for source, target in wires:
+        seat_name, port_name = source.split(".")
+        seat = _seat(seat_name, seats, source)
+        port = _port(seat, port_name, source)
+        peer = _peer(target, seats, source)
+        _check_answers(peer, port, source, target)
+        setattr(seat, port_name, peer)
+
+
+def start_wired_seats(seats: dict) -> None:
+    """Let every seat whose first work needs its ports do that work."""
+    for name in STARTS_WHEN_WIRED:
+        seats[name].start()
+
+
+def seed_roots(parts: build_parts.Parts, seats: dict) -> tuple:
+    """The seed path of every stochastic owner; the segments are results."""
+    owners = {}
+    for name, target in SEED_ROOTS:
+        owners[name] = _seed_owner(target, parts, seats)
+    return listener_build.build_seed_roots(**owners)
 
 
 def _escalation_policy(parts):
@@ -325,68 +388,6 @@ SEED_ROOTS = (
     ("pauli_frame", "pauli_frame"),
     ("links", "links"),
 )
-
-
-def build_seats(parts: build_parts.Parts) -> dict:
-    """Every seat of this run, built from its settings, in SEATS order."""
-    for name, build in seats_for(parts):
-        parts.seats[name] = build(parts)
-    return parts.seats
-
-
-def seats_for(parts: build_parts.Parts) -> tuple:
-    """The rows this run builds; a seat it has no use for has none."""
-    absent = _absent_seats(parts)
-    rows = []
-    for name, build in SEATS:
-        if name not in absent:
-            rows.append((name, build))
-    return tuple(rows)
-
-
-def wires_for(parts: build_parts.Parts) -> tuple:
-    """The rows whose two ends this run builds."""
-    built = set()
-    for name, _build in seats_for(parts):
-        built.add(name)
-    rows = []
-    for source, target in WIRES:
-        if _both_ends_are_built(source, target, built):
-            rows.append((source, target))
-    return tuple(rows)
-
-
-def bind(wires: tuple, seats: dict) -> None:
-    """Fill every named port with the seat that answers it.
-
-    The assignment runs the port's own refusal of a second bind
-    (decsim/ports.py, Port), gem5's PortRef.connect
-    (gem5 src/python/m5/params/port_params.py:109-114). The
-    table is this file's input, so a row that names a seat the run did
-    not build, a port a class does not declare, or a peer that does not
-    answer the port's protocol is refused here, with the row printed.
-    """
-    for source, target in wires:
-        seat_name, port_name = source.split(".")
-        seat = _seat(seat_name, seats, source)
-        port = _port(seat, port_name, source)
-        peer = _peer(target, seats, source)
-        _check_answers(peer, port, source, target)
-        setattr(seat, port_name, peer)
-
-
-def start_wired_seats(seats: dict) -> None:
-    """Let every seat whose first work needs its ports do that work."""
-    for name in STARTS_WHEN_WIRED:
-        seats[name].start()
-
-
-def seed_roots(parts: build_parts.Parts, seats: dict) -> tuple:
-    """The seed path of every stochastic owner; the segments are results."""
-    owners = {}
-    for name, target in SEED_ROOTS:
-        owners[name] = _seed_owner(target, parts, seats)
-    return listener_build.build_seed_roots(**owners)
 
 
 def _seed_owner(target, parts: build_parts.Parts, seats: dict):

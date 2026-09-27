@@ -5,11 +5,10 @@ the merged order is the stable sort of the folders' rows, a streamed sum
 is math.fsum of the values it was given, what a fold holds does not grow
 with the shots the folders hold, and a summary reports the latency
 points its folders' rows hold. The third is the reason the module
-exists: `decsim combine` over the 500 shard folders of one weak_ler
-experiment was OOM-killed at 120 GB while reading their 115
-million link rows into lists. The fourth is why that experiment can be
-folded at all: its shards hold the sixteen latency points that tree
-measured, and this tree measures twenty-two.
+exists: the 500 shard folders of one weak_ler experiment hold 115
+million link rows, which do not fit in memory as lists. The fourth is
+why that experiment can be folded at all: its shards hold the sixteen
+latency points that tree measured, and this tree measures twenty-two.
 """
 
 import csv
@@ -479,9 +478,9 @@ def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
 
     A fold writes a point's counts where that point sits among this
     tree's own, so a folder whose window samples name a point this tree
-    does not measure used to raise a bare ValueError out of that sort,
-    with sweep.csv and shots.csv already written and a half folder left
-    behind. It is refused at the boundary instead, by name.
+    does not measure would fail that sort with sweep.csv and shots.csv
+    already written and a half folder left behind, so it is refused at
+    the boundary, by name.
     """
     run_dirs = _shards_of_one_point(tmp_path, 4, 2)
     for run_dir in run_dirs:

@@ -69,6 +69,24 @@ def main(argv: list) -> None:
     print(text)
 
 
+def write_shot(
+    machine: machine_module.Machine,
+    settings: machine_settings.MachineSettings,
+    run_dir: pathlib.Path,
+    label: str,
+    result: result_records.RunResult,
+) -> None:
+    """A shot's files in its run folder, the log and the trace named label.
+
+    result.json and commands.json always, and the log and the trace when
+    the observation asks for them. tools/deltakit_example.py and
+    tools/live_memory_example.py write their shot through it too.
+    """
+    _write_files(machine, settings, run_dir, label)
+    _write_result(result, run_dir)
+    _write_commands(machine, run_dir)
+
+
 @dataclasses.dataclass(frozen=True)
 class _Arguments:
     """What `decsim run` was asked for."""
@@ -109,24 +127,6 @@ def _parsed(argv: list) -> _Arguments:
         log=parsed.log,
         trace=parsed.trace,
     )
-
-
-def write_shot(
-    machine: machine_module.Machine,
-    settings: machine_settings.MachineSettings,
-    run_dir: pathlib.Path,
-    label: str,
-    result: result_records.RunResult,
-) -> None:
-    """A shot's files in its run folder, the log and the trace named label.
-
-    result.json and commands.json always, and the log and the trace when
-    the observation asks for them. tools/deltakit_example.py and
-    tools/live_memory_example.py write their shot through it too.
-    """
-    _write_files(machine, settings, run_dir, label)
-    _write_result(result, run_dir)
-    _write_commands(machine, run_dir)
 
 
 def _with_observation(

@@ -17,8 +17,7 @@ WINDOW_CHECKS = {
 # the trace's own word for "name the file yourself", so a study asks for
 # a Chrome trace without choosing a path
 CHROME_TRACE = "chrome"
-# the narrator's words, which observation.trace carried before the trace
-# took the key
+# the narrator's words: they name the log, never a trace file
 NARRATOR_MODES = ("print", "file", "both")
 OBSERVATION_KEYS = (
     "log",

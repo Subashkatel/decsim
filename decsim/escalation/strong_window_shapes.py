@@ -617,6 +617,34 @@ class ForwardSeamWindow(StrongWindowPorts):
 FOLDS_NO_BOUNDARY: tuple = ()
 
 
+def strong_job_payloads(
+    shape: StrongWindowPorts,
+    strong_window: window_records.Window,
+    model,
+    operation: program_records.Operation,
+    request_key: window_records.DecoderRequestKey,
+    folded_boundaries: tuple,
+) -> list:
+    """The rounds a strong job reads, and the boundaries it folds into them.
+
+    A row that reads a face raw folds no boundary there: the input is
+    the stored rounds of the window, and a mask on a face read raw would
+    double count the rounds behind it (Bombin et al. 2303.04846 lines
+    775-788). A row that pins a face carries its
+    neighbour's committed correction into the input instead: the
+    courier ships the committed boundary to this window over
+    decoder_to_decoder and writes it into the window's boundary state,
+    and the job's gate XORs it into the landed input when the decode
+    starts (windows/decode_requests.py, WindowInputGate.mask_input),
+    which is the path the weak side's boundaries already take.
+    """
+    for source_key in folded_boundaries:
+        shape.courier.pin_strong_face(
+            source_key, strong_window, model, operation, request_key
+        )
+    return shape.retention.strong_window_input(shape.builder, strong_window)
+
+
 def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
     """The faces a row pins, as StrongAssignment names them."""
     if pinned_source_key is None:
@@ -836,31 +864,3 @@ class _HeldForwardWindow:
     strong_request_key: window_records.DecoderRequestKey
     strong_request_created_ticks: int
     folded_boundaries: tuple
-
-
-def strong_job_payloads(
-    shape: StrongWindowPorts,
-    strong_window: window_records.Window,
-    model,
-    operation: program_records.Operation,
-    request_key: window_records.DecoderRequestKey,
-    folded_boundaries: tuple,
-) -> list:
-    """The rounds a strong job reads, and the boundaries it folds into them.
-
-    A row that reads a face raw folds no boundary there: the input is
-    the stored rounds of the window, and a mask on a face read raw would
-    double count the rounds behind it (Bombin et al. 2303.04846 lines
-    775-788). A row that pins a face carries its
-    neighbour's committed correction into the input instead: the
-    courier ships the committed boundary to this window over
-    decoder_to_decoder and writes it into the window's boundary state,
-    and the job's gate XORs it into the landed input when the decode
-    starts (windows/decode_requests.py, WindowInputGate.mask_input),
-    which is the path the weak side's boundaries already take.
-    """
-    for source_key in folded_boundaries:
-        shape.courier.pin_strong_face(
-            source_key, strong_window, model, operation, request_key
-        )
-    return shape.retention.strong_window_input(shape.builder, strong_window)

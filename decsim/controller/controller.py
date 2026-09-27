@@ -53,7 +53,6 @@ class Controller:
         The fragment reaches the assembler after the readout delay.
         """
         fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
-        fragment_count = readout.fragment_count
         self.assembler.expect_round(fragment, route)
         round_key = (fragment.operation_id, fragment.round_index)
         self.trace.copy_made.fire(
@@ -65,13 +64,14 @@ class Controller:
         readout_cycles = self.settings.readout_to_bits_cycles
 
         def receive():
-            self.assembler.add(fragment, fragment_count, route)
+            self.assembler.add(fragment, readout.fragment_count, route)
 
         def at_controller(_transfer):
             if readout_cycles == 0:
                 receive()
                 return
-            delay = self._readout_delay(readout_cycles)
+            now = self.engine.now
+            delay = self.settings.clock.ticks_to_edge(readout_cycles, now)
             self.engine.schedule(
                 delay, receive, label="controller-binary-availability"
             )
@@ -83,12 +83,6 @@ class Controller:
             attribution,
             at_controller,
         )
-
-    def _readout_delay(self, cycles: int) -> int:
-        """The ticks from now to the controller clock edge `cycles` away."""
-        now = self.engine.now
-        edge = self.settings.clock.edge(cycles, now)
-        return edge - now
 
 
 @dataclasses.dataclass(frozen=True)

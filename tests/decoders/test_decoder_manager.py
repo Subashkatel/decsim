@@ -353,11 +353,11 @@ class _Model:
 
 
 def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
-    """C8 item 5: the line belongs to the component whose row reports it.
+    """The line belongs to the component whose row reports it.
 
-    observe wrote it, so the log the frozen gate hashes was not a pure
-    product of the components. The manager owns the rows that report
-    it, so it says it, and a run with no observer says it too.
+    The log the frozen gate hashes is a product of the components alone.
+    The manager owns the rows that report it, so it says it, and a run
+    with no observer says it too.
     """
     engine = engine_module.Engine()
     log = log_writers.LogWriter()

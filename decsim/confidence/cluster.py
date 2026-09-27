@@ -169,15 +169,6 @@ def require_weight_step(graph, weight_step: float) -> None:
     )
 
 
-def _cluster_gap(
-    hard_evidence: evidence_records.UnionFindHardEvidence, weight_step: float
-) -> float:
-    gap_half_ticks = compiled_decoder.cluster_gap(
-        hard_evidence.graph, hard_evidence.edge_intervals
-    )
-    return gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)
-
-
 def gap_half_ticks_to_natural_log_weight(
     gap_half_ticks: Union[int, float], weight_step: float
 ) -> float:
@@ -197,3 +188,12 @@ def gap_half_ticks_to_natural_log_weight(
         return float(exact_gap_nats)
     except OverflowError:
         return math.inf
+
+
+def _cluster_gap(
+    hard_evidence: evidence_records.UnionFindHardEvidence, weight_step: float
+) -> float:
+    gap_half_ticks = compiled_decoder.cluster_gap(
+        hard_evidence.graph, hard_evidence.edge_intervals
+    )
+    return gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)

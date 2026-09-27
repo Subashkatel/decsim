@@ -517,11 +517,13 @@ def _require_roce_framing(
 def _read_connection_keys(section: Mapping, path_name: str) -> tuple:
     """(window, ack interval, timeout, retry count, bit error rate)."""
     section_name = f"links.{path_name}.protocol"
-    window_packets = _positive_key(section, "window_packets", section_name)
-    ack_every_packets = _positive_key(
+    window_packets = link_settings.positive_count_key(
+        section, "window_packets", section_name
+    )
+    ack_every_packets = link_settings.positive_count_key(
         section, "ack_every_packets", section_name
     )
-    timeout_cycles = _required(
+    timeout_cycles = link_settings.required_key(
         section, "retransmit_timeout_cycles", section_name
     )
     timeout_name = f"{section_name}.retransmit_timeout_cycles"
@@ -541,7 +543,7 @@ def _read_connection_keys(section: Mapping, path_name: str) -> tuple:
 
 def _retry_count(section: Mapping, section_name: str) -> int:
     """The card's retry count, rxe's retry_cnt: a whole number, 0 to 7."""
-    value = _required(section, "retry_count", section_name)
+    value = link_settings.required_key(section, "retry_count", section_name)
     is_whole = isinstance(value, int) and not isinstance(value, bool)
     if is_whole and 0 <= value <= UNSPENT_RETRY_COUNT:
         return value
@@ -553,7 +555,7 @@ def _retry_count(section: Mapping, section_name: str) -> int:
 
 def _bit_error_rate(section: Mapping, section_name: str) -> float:
     """A probability below one: a wire that always errs never delivers."""
-    value = _required(section, "bit_error_rate", section_name)
+    value = link_settings.required_key(section, "bit_error_rate", section_name)
     is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
     if is_number and 0 <= value < 1:
         return float(value)
@@ -561,21 +563,3 @@ def _bit_error_rate(section: Mapping, section_name: str) -> float:
         f"{section_name}.bit_error_rate is {value!r}; it is the probability "
         f"that one bit is wrong, at least 0 and below 1"
     )
-
-
-def _positive_key(section: Mapping, key: str, section_name: str) -> int:
-    """A key the connection needs: a positive whole number."""
-    value = _required(section, key, section_name)
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and value > 0:
-        return value
-    raise ValueError(
-        f"{section_name}.{key} is {value!r}; it is a positive whole number"
-    )
-
-
-def _required(section: Mapping, key: str, section_name: str):
-    """A key the protocol needs, refused by name when missing."""
-    if key not in section:
-        raise ValueError(f"{section_name} needs {key}")
-    return section[key]

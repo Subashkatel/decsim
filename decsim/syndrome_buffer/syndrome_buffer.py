@@ -40,36 +40,6 @@ import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.trace_source as trace_source
 
 
-@dataclasses.dataclass(frozen=True)
-class _TraceSources:
-    """Every event the store reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through store.trace.
-    """
-
-    round_stored: trace_source.TraceSource = trace_source.new_source()
-    round_published: trace_source.TraceSource = trace_source.new_source()
-    round_released: trace_source.TraceSource = trace_source.new_source()
-    hold_registered: trace_source.TraceSource = trace_source.new_source()
-    hold_transferred: trace_source.TraceSource = trace_source.new_source()
-    hold_released: trace_source.TraceSource = trace_source.new_source()
-    access_served: trace_source.TraceSource = trace_source.new_source()
-
-
-class _StoredRound:
-    """One stored round: its packet, its bits, and once published its tick."""
-
-    def __init__(
-        self, packet: round_records.SyndromeRoundPacket, held_bits: int
-    ) -> None:
-        self.packet = packet
-        self.held_bits = held_bits
-        self.publication_tick: Optional[int] = None
-
-
 class SyndromeBuffer:
     """The store: rounds by key, their holds, and the operations it serves.
 
@@ -498,6 +468,36 @@ class SyndromeBuffer:
         self.trace.round_released.fire(round_key)
         if self.held_rounds is not None:
             self.held_rounds.retry()
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceSources:
+    """Every event the store reports, as one member.
+
+    gem5 groups a component's statistics into one nested Group member
+    (gem5 src/base/stats/group.hh:60-92) rather than one
+    member per counter; a component's events are the same shape, so a
+    listener reaches all of them through store.trace.
+    """
+
+    round_stored: trace_source.TraceSource = trace_source.new_source()
+    round_published: trace_source.TraceSource = trace_source.new_source()
+    round_released: trace_source.TraceSource = trace_source.new_source()
+    hold_registered: trace_source.TraceSource = trace_source.new_source()
+    hold_transferred: trace_source.TraceSource = trace_source.new_source()
+    hold_released: trace_source.TraceSource = trace_source.new_source()
+    access_served: trace_source.TraceSource = trace_source.new_source()
+
+
+class _StoredRound:
+    """One stored round: its packet, its bits, and once published its tick."""
+
+    def __init__(
+        self, packet: round_records.SyndromeRoundPacket, held_bits: int
+    ) -> None:
+        self.packet = packet
+        self.held_bits = held_bits
+        self.publication_tick: Optional[int] = None
 
 
 def _costs(

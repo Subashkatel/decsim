@@ -142,36 +142,6 @@ def tested_classes(tree: ast.AST) -> list:
     return found
 
 
-def _call_classes(node: ast.Call) -> list:
-    """The classes an isinstance call names, with the call's line."""
-    func = node.func
-    if not isinstance(func, ast.Name):
-        return []
-    if func.id != "isinstance":
-        return []
-    found = []
-    for element in isinstance_classes(node):
-        text = ast.unparse(element)
-        found.append((node.lineno, text))
-    return found
-
-
-def _identity_classes(node: ast.Compare) -> list:
-    """The classes an `is` comparison names, with the comparison's line."""
-    tests_identity = False
-    for operator in node.ops:
-        if isinstance(operator, (ast.Is, ast.IsNot)):
-            tests_identity = True
-    if not tests_identity:
-        return []
-    found = []
-    for comparator in node.comparators:
-        text = ast.unparse(comparator)
-        if is_class_name(text):
-            found.append((node.lineno, text))
-    return found
-
-
 def findings_of(path: pathlib.Path) -> list:
     """Every class this module tests against that is not on the list."""
     text = path.read_text()
@@ -205,6 +175,36 @@ def main(arguments) -> int:
     if findings:
         return 1
     return 0
+
+
+def _call_classes(node: ast.Call) -> list:
+    """The classes an isinstance call names, with the call's line."""
+    func = node.func
+    if not isinstance(func, ast.Name):
+        return []
+    if func.id != "isinstance":
+        return []
+    found = []
+    for element in isinstance_classes(node):
+        text = ast.unparse(element)
+        found.append((node.lineno, text))
+    return found
+
+
+def _identity_classes(node: ast.Compare) -> list:
+    """The classes an `is` comparison names, with the comparison's line."""
+    tests_identity = False
+    for operator in node.ops:
+        if isinstance(operator, (ast.Is, ast.IsNot)):
+            tests_identity = True
+    if not tests_identity:
+        return []
+    found = []
+    for comparator in node.comparators:
+        text = ast.unparse(comparator)
+        if is_class_name(text):
+            found.append((node.lineno, text))
+    return found
 
 
 if __name__ == "__main__":

@@ -1021,8 +1021,8 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # and the run counts a reference instead of a
                                    # copy (AFS's processing elements "can
                                    # directly access the data stored on-chip",
-                                   # 2001.06598 lines 528-531). copy is what
-                                   # every hop of this tree does today
+                                   # 2001.06598 lines 528-531). copy is the
+                                   # default
   boundary_fold: copy              # copy | in_place: how the window's boundary
                                    # mask reaches the decode. copy duplicates
                                    # the landed input and XORs the mask into the

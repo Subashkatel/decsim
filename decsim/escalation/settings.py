@@ -21,7 +21,6 @@ from numbers import Real
 from typing import Optional
 
 import decsim.config as config
-import decsim.escalation.burst_detectors as burst_detectors
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
@@ -47,12 +46,6 @@ THRESHOLD_SOURCES = {
     "fixed": threshold_sources.FixedThreshold,
     "table": threshold_sources.TableThreshold,
     "online": threshold_sources.OnlineThreshold,
-}
-# burst_detector.kind names one of these rows: none builds no detector,
-# event_count counts detection events against their usual rates.
-BURST_DETECTORS = {
-    "none": None,
-    "event_count": burst_detectors.EventCountBurstDetector,
 }
 # How many of the strong region's buffer regions the restarted weak
 # window re-reads under the forward strong window (Toshio 2510.25222
@@ -417,30 +410,6 @@ class EscalationSettings:
         return table_path
 
 
-@dataclasses.dataclass(frozen=True)
-class BurstDetectorSettings:
-    """The yaml's `burst_detector` section: the row and its own keys.
-
-    The row none, the default, builds no detector and takes no keys, so
-    a run without the section is the machine without a detector.
-    """
-
-    kind: str = "none"
-    row_settings: Optional[object] = None
-
-    @classmethod
-    def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
-    ) -> "BurstDetectorSettings":
-        """The kind, and the keys its row declares."""
-        kind = section.get("kind", "none")
-        row = tables.row(BURST_DETECTORS, "burst_detector.kind", kind)
-        row_settings = tables.row_settings(
-            row, "burst_detector", section, ("kind",), clocks
-        )
-        return cls(kind=kind, row_settings=row_settings)
-
-
 def decibels_to_nats(decibels: float) -> float:
     """A gap threshold in the paper's decibels as matching weight."""
     scaled = decibels * LN_TEN
@@ -485,7 +454,7 @@ def _switching_settings(
     named_confidence = section.get("confidence", "complementary_gap")
     confidence = str(named_confidence)
     walk_microseconds = _confidence_walk_microseconds(section)
-    run_both_at_once = _switching_boolean(section, "run_both_at_once")
+    run_both_at_once = config.boolean(section, "escalation", "run_both_at_once")
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, threshold_row, strong_window)
     reread_regions = _restart_reread_buffer_regions(section)
@@ -510,20 +479,6 @@ def _switching_settings(
         restart_reread_buffer_regions=reread_regions,
         base_directory=base_directory,
     )
-
-
-def _switching_boolean(section: Mapping, key: str) -> bool:
-    """One of the switching section's on-or-off knobs, off when silent.
-
-    The test is the type, because 1 == True and 0 == False would let a
-    count stand in for a flag.
-    """
-    value = section.get(key, False)
-    if not isinstance(value, bool):
-        raise ValueError(
-            f"escalation.{key} must be true or false, got {value!r}"
-        )
-    return value
 
 
 def _restart_reread_buffer_regions(section: Mapping) -> int:

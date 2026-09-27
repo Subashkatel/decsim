@@ -4,6 +4,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Optional
 
+import decsim.config as config
 import decsim.decoders.verify_windows as verify_windows
 
 LOG_MODES = ("off", "print", "file", "both")
@@ -75,14 +76,20 @@ class ObservationSettings:
         trace = _trace_word_or_path(section)
         trace_shots = _trace_shots(section)
         check_windows_with = _window_check(section)
-        log_component_io = _boolean(section, "log_component_io")
-        record_switching_windows = _boolean(section, "record_switching_windows")
-        syndrome_buffer_occupancy = _boolean(
-            section, "syndrome_buffer_occupancy"
+        log_component_io = config.boolean(
+            section, "observation", "log_component_io"
         )
-        backlog_trace = _boolean(section, "backlog_trace")
-        decoder_memory_occupancy = _boolean(section, "decoder_memory_occupancy")
-        data_movement = _boolean(section, "data_movement")
+        record_switching_windows = config.boolean(
+            section, "observation", "record_switching_windows"
+        )
+        syndrome_buffer_occupancy = config.boolean(
+            section, "observation", "syndrome_buffer_occupancy"
+        )
+        backlog_trace = config.boolean(section, "observation", "backlog_trace")
+        decoder_memory_occupancy = config.boolean(
+            section, "observation", "decoder_memory_occupancy"
+        )
+        data_movement = config.boolean(section, "observation", "data_movement")
         return cls(
             log=log,
             trace=trace,
@@ -214,18 +221,3 @@ def _refuse_a_shot_that_is_not_a_count(shot) -> None:
         "observation.trace_shots must be a list of non-negative whole "
         f"numbers, got {shot!r}"
     )
-
-
-def _boolean(section: Mapping, key: str) -> bool:
-    """One of the section's on-or-off knobs, off when the yaml is silent.
-
-    The check is by identity: 1 == True and 0 == False in Python (the
-    language reference, "The standard type hierarchy", bool is a subtype
-    of int), so a membership test would let a count through as a knob.
-    """
-    value = section.get(key, False)
-    if value is not True and value is not False:
-        raise ValueError(
-            f"observation.{key} must be true or false, got {value!r}"
-        )
-    return value

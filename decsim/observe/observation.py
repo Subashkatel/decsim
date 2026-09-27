@@ -7,12 +7,14 @@ from its listeners and never from a component. The log writer, the
 window ledger, the flight recorder, the runtime stamps, the queue
 depth, the controller counters, the command events, the frame's
 corrections, the referee's audit and the sampled shots are always
-there; the ones a study asks for are None when the section did not ask.
+there; the ones a study asks for are None when the section did not ask,
+and the burst flags are None when the run has no burst detector.
 """
 
 import dataclasses
 from typing import Optional
 
+import decsim.observe.burst_flags as burst_flags_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -60,3 +62,4 @@ class Observation:
     ]
     referee_audit: referee_audit_module.RefereeAudit
     sampled_shots: sampled_shots_module.SampledShots
+    burst_flags: Optional[burst_flags_module.BurstFlags]

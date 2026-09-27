@@ -61,6 +61,7 @@ and one table row. These guides are the recipe and its variants.
 
 - [How to add a row to a table](how-to/add_a_table_row.md)
 - [How to add a decoder backend](how-to/add_a_decoder_backend.md)
+- [How to add a burst detector](how-to/add_a_burst_detector.md)
 - [How to plug a component in without a table row](how-to/plug_in_without_a_table_row.md)
 - [How to add a yaml key](how-to/add_a_yaml_key.md)
 - [How to plug in a workload maker](how-to/plug_in_a_workload_maker.md)
@@ -71,6 +72,7 @@ and reading what it wrote.
 - [How to run a sweep on Slurm](how-to/run_a_sweep_on_slurm.md)
 - [How to read a trace and follow one round or one window](how-to/read_a_trace.md)
 - [How to compare two runs](how-to/compare_two_runs.md)
+- [How to compare burst detectors](how-to/compare_burst_detectors.md)
 - [How to run a timing study whose numbers do not depend on your computer](how-to/run_a_timing_only_study.md)
 - [How to run a workload whose next operation waits on a decision](how-to/run_a_feedback_workload.md)
 - [How to run Deltakit memory and protection workloads](how-to/run_deltakit_workloads.md)

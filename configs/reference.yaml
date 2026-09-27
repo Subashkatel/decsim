@@ -289,16 +289,34 @@ escalation:
 #                                  # rounds it reads
 
 burst_detector:
-  kind: none                       # none | event_count. none builds no
-                                   # detector. event_count counts each
+  kind: none                       # none | event_count |
+                                   # masked_regional_cusum. none builds no
+                                   # detector. The other rows read each
                                    # round's bulk detection events where
-                                   # they are formed and flags a burst; a
+                                   # they are formed and flag a burst; a
                                    # flagged window escalates under
                                    # escalation.kind switching, the only kind
-                                   # it is accepted with. Its keys (refused
-                                   # under none, so documented as comments):
+                                   # they are accepted with. Their keys
+                                   # (refused under none, so documented as
+                                   # comments):
 # burst_detector:
-#   kind: event_count
+#   catch_deadline_rounds: 300     # either row: a flag at most this many
+#                                  # rounds after a burst_stim burst's onset
+#                                  # catches it in time, the shots.csv
+#                                  # column burst_caught_in_time and the
+#                                  # sweep.csv caught_in_time_share. 300 is
+#                                  # half the 600-round decay of the
+#                                  # burst the comparison folder draws
+#                                  # (configs/burst_detectors_compared)
+#
+# burst_detector:
+#   kind: event_count              # the simple count baseline: the patch's
+#                                  # detection events over a window, the
+#                                  # Hamming weight of Tan 2406.18897
+#                                  # lines 956-966 widened to W rounds, and
+#                                  # each position's events over a window,
+#                                  # Q3DE's active node counter (2501.00331
+#                                  # lines 713-727)
 #   patch_window_rounds: 4         # W: fires when the patch's events over
 #                                  # the last W rounds pass their threshold
 #                                  # (Tan 2406.18897 lines 956-966 at W = 1)
@@ -334,6 +352,79 @@ burst_detector:
 #                                  # explain the measured rate, the graph
 #                                  # unchanged (IonQ 2608.25027 lines
 #                                  # 334-340)
+#
+# burst_detector:
+#   kind: masked_regional_cusum    # a bank of Page CUSUMs, one per region
+#                                  # and design, on each round's events
+#                                  # (Page 1954; Lucas's count step
+#                                  # c log rho - (rho - 1) mu, Ward
+#                                  # 2208.01494 lines 274-296); it fires
+#                                  # when any chart reaches its group's
+#                                  # threshold (multichart CUSUM, Zhang
+#                                  # 1410.8765 lines 338-350) and stops
+#                                  # when every group is below it. A
+#                                  # flag's onset is the round after the
+#                                  # leading chart was last zero. The
+#                                  # papers fix the method, not the
+#                                  # numbers below: those are the values
+#                                  # the method was tuned at
+#   mask_window_rounds: 64         # the window of each check's repeat
+#                                  # count (fired this round and the one
+#                                  # before) and each pair's joint count
+#   mask_count: 8                  # either count reaching this flags the
+#                                  # check as a defect, which leaves the
+#                                  # counts for mask_hold_rounds (Q3DE
+#                                  # removes detected positions, 2501.00331
+#                                  # lines 729-733). null never masks: the
+#                                  # plain regional CUSUM
+#   mask_hold_rounds: 100          # how long a flag masks its check
+#   region_radii: [0.0, 1.5, 2.3, 3.2]  # disc radii around each check, in
+#                                  # grid units (a Stim distance over
+#                                  # sqrt(2)); the whole patch is always a
+#                                  # region too, Kulldorff's circular zones
+#                                  # (Commun. Stat. 26(6) 1997). [] leaves
+#                                  # the whole patch the only region: the
+#                                  # whole-patch CUSUM
+#   fault_rate_multipliers: [2.0, 4.0, 20.0]  # the designs k: a check of
+#                                  # usual rate q0 fires with
+#                                  # (1 - (1 - 2 q0)^k) / 2 under design k;
+#                                  # each above 1
+#   rate_tracking_rounds: 5000     # time constant of each region's usual
+#                                  # count, an exponential average of its
+#                                  # unmasked events
+#   unmasked_share_floor: 0.2      # a region's usual count is held while
+#                                  # at most this share of its usual rate
+#                                  # is unmasked
+#   false_alarms_per_second: 0.03  # the bank's false-alarm budget. A
+#                                  # shot's share is this rate times the
+#                                  # shot's length, the operation's rounds
+#                                  # times the sweep point's
+#                                  # round_period_microseconds: at 1.0 us
+#                                  # and 15 rounds, 0.03/s is 4.5e-7 of
+#                                  # shots. Thresholds are
+#                                  # set so that share of quiet shots
+#                                  # alarms, each group's level read off
+#                                  # its maxima (the empirical tail, else
+#                                  # an exponential fit to the top 20);
+#                                  # a share of 1 or
+#                                  # more is refused
+#   calibration_shot_count: 20000  # quiet Stim shots of the operation's own
+#                                  # circuit the thresholds are read from,
+#                                  # a fixed seed, once per run in memory
+#   clock: fridge                  # a clocks domain; with none the bank's
+#                                  # verdict is published as its round is
+#                                  # formed, and the two keys below are
+#                                  # refused
+#   datapath_count: 1              # the timing card: a round costs
+#   pipeline_cycles: 30            # ceil(regions x designs /
+#                                  # datapath_count) + pipeline_cycles
+#                                  # cycles (97 regions
+#                                  # x 3 designs at d = 5 is 321 at the
+#                                  # defaults). regions x designs is the
+#                                  # algorithm's count; datapath_count and
+#                                  # pipeline_cycles are hardware figures,
+#                                  # fitted by hand until a design is built
+#   raise_strong_priors: false     # as event_count's
 
 workload:
   kind: producer                   # producer | files (WORKLOADS,

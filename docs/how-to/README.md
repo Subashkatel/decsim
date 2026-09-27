@@ -10,7 +10,7 @@ the [explanation](../explanation/README.md) pages and the facts in the
 ## Plug something in
 
 decsim is built so that a new part is one class filling a port and one
-row in a table, and nothing else changes. These five are that recipe
+row in a table, and nothing else changes. These six are that recipe
 and its variants.
 
 - [How to add a row to a table](add_a_table_row.md): the general recipe
@@ -18,6 +18,8 @@ and its variants.
   worked examples in the tests.
 - [How to add a decoder backend](add_a_decoder_backend.md): the decoder
   case, with the fault model contract and the check against PyMatching.
+- [How to add a burst detector](add_a_burst_detector.md): one folder and
+  one table line, with the shared layout, flag log and window answers.
 - [How to plug a component in without a table row](plug_in_without_a_table_row.md):
   hand the machine your own object while the class is still changing.
 - [How to add a yaml key](add_a_yaml_key.md): a knob a config file can
@@ -41,6 +43,9 @@ read back.
 - [How to compare two runs](compare_two_runs.md): add shards, read two
   rows side by side, or plot both folders, and what to check before
   believing a difference.
+- [How to compare burst detectors](compare_burst_detectors.md): run
+  the comparison folder and read each detector's caught share and
+  false-alarm rate.
 - [How to run a timing study whose numbers do not depend on your computer](run_a_timing_only_study.md):
   price the decoders with cards so the ticks are a function of the
   configuration and the seed.

@@ -13,6 +13,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Optional
 
+import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
@@ -110,8 +111,8 @@ class MachineSettings:
     escalation: escalation_settings.EscalationSettings = (
         escalation_settings.EscalationSettings()
     )
-    burst_detector: escalation_settings.BurstDetectorSettings = (
-        escalation_settings.BurstDetectorSettings()
+    burst_detector: burst_detector_settings.BurstDetectorSettings = (
+        burst_detector_settings.BurstDetectorSettings()
     )
     pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
     workload: workload_settings.WorkloadSettings = (
@@ -200,8 +201,10 @@ class MachineSettings:
             escalation_section, clocks, escalation_folder, controller.clock
         )
         burst_detector_section = sections.get("burst_detector", {})
-        burst_detector = escalation_settings.BurstDetectorSettings.from_yaml(
-            burst_detector_section, clocks
+        burst_detector = (
+            burst_detector_settings.BurstDetectorSettings.from_yaml(
+                burst_detector_section, clocks
+            )
         )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks

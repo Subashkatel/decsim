@@ -35,6 +35,7 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
+import decsim.trace_source as trace_source
 
 
 class Port:
@@ -1939,20 +1940,33 @@ class EscalationPolicy(Protocol):
         """The strong tier answered for the window; a source may learn."""
 
 
+class BurstDetectorTrace(Protocol):
+    """The one event a burst detector reports, as its trace member."""
+
+    round_flagged: trace_source.TraceSource
+
+
 @runtime_checkable
 class BurstDetector(Protocol):
     """Whether an error burst is under way, read off the detection events.
 
-    Table rows: none and event_count (BURST_DETECTORS,
-    escalation/settings.py), named by burst_detector.kind; none builds
-    no detector. The former the detection event placement forms through
-    hands every round to observe_round as it forms it, in round order;
+    Table rows: none, event_count and masked_regional_cusum
+    (BURST_DETECTORS, burst_detectors/settings.py), named by
+    burst_detector.kind; none builds no detector. The former the
+    detection event placement forms through hands every round to
+    observe_round as it forms it, in round order;
     the switching policy asks is_burst_window at a verdict, and the
     strong regions ask with_burst_priors for a strong window's model.
     Both answers read only the rounds the detector has published by the
     engine's current tick, so its own latency delays them. The model is
     the detector error model's record, named here by position only.
+
+    trace holds round_flagged(operation_id, round_index), fired for each
+    round the detector fires on; it is on the port because the machine
+    connects the run's burst flag record to whatever answers this port.
     """
+
+    trace: BurstDetectorTrace
 
     def observe_round(
         self, operation_id: Any, round_index: int, events: Sequence[int]

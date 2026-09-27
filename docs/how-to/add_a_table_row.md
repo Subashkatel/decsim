@@ -180,6 +180,7 @@ than any description of it.
 | a windowing scheme with a key of its own | `tests/windows/test_settings.py::test_a_scheme_rows_own_key_reaches_its_settings` |
 | a link fabric | `tests/links/test_link_profiles.py::test_a_fabric_row_written_outside_decsim_runs_from_a_yaml`, and the `Link` port |
 | an escalation policy | `tests/escalation/test_policies.py`, and the `EscalationPolicy` port |
+| a burst detector | `tests/burst_detectors/test_settings.py`, and [How to add a burst detector](add_a_burst_detector.md) |
 
 ## Two rules your class has to keep
 

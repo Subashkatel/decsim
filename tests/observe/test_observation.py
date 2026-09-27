@@ -35,6 +35,8 @@ ASKED_FOR_BY_A_STUDY = (
     "decode_backlog",
     "decoder_memory_occupancy",
     "syndrome_buffer_occupancy",
+    # built when burst_detector.kind names a detector
+    "burst_flags",
 )
 
 

@@ -45,6 +45,7 @@ import math
 from pathlib import Path
 from typing import Optional
 
+import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collection as collection
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
@@ -152,6 +153,16 @@ FOLDED_FILES = (
     "latency_samples.csv",
     "window_confidence.csv",
 )
+# the confidence histogram's bin, a tenth of a decibel: Gidney et al.
+# bin gaps to the nearest whole decibel (2312.04522 main.tex:459, 505),
+# and a tenth resolves the 20 dB threshold's neighbourhood
+CONFIDENCE_BINS_PER_DECIBEL = 10
+# the histogram's two kinds of row: every window's gap, and each shot's
+# smallest window gap, the gap over many rounds that Gidney et al. take
+# as the minimum of draws over fewer (main.tex:448, 513), against the
+# shot's failure, Toshio's P(e|g) (2510.25222 lines 807-841)
+WINDOW_HISTOGRAM = "window"
+SHOT_MINIMUM_HISTOGRAM = "shot_minimum"
 # links.csv is the mean of these over a point's shots, one row per link
 LINK_MEANS = (
     "transfers",
@@ -169,11 +180,12 @@ class RunRecord:
 
     Each field is a list of csv rows and each list is one file of the
     run folder: shots.csv, shot_links.csv, shot_data_movement.csv,
-    window_samples.csv, latency_samples.csv and window_confidence.csv.
-    No field holds a summary, so two folders' records join by
-    concatenation (the window samples' counts add), and the summaries
-    derived from the join are the summaries a single run over the same
-    shots would have written.
+    window_samples.csv, latency_samples.csv, window_confidence.csv and
+    confidence_histogram.csv. No field holds a summary, so two folders'
+    records join by concatenation (the window samples' and the
+    histogram's counts add), and the summaries derived from the join
+    are the summaries a single run over the same shots would have
+    written.
     """
 
     shots: list
@@ -182,6 +194,7 @@ class RunRecord:
     window_samples: list
     latency_samples: list
     window_confidence: list
+    confidence_histogram: list
 
 
 def percentile_of_counts(multiset: dict, fraction: float) -> float:
@@ -519,6 +532,39 @@ def window_confidence_rows(measurements: list) -> list:
     return rows
 
 
+def confidence_histogram_rows(measurements: list) -> list:
+    """Every shot's window gaps and smallest gap, counted per 0.1 dB bin.
+
+    The counts add across pieces as sinter's custom_counts do
+    (sinter/_data/_task_stats.py:51-71), so the histogram covers every
+    shot however many window_confidence.csv lists. From it come Toshio's
+    p(g) and P(e|g) and the brute-force cutoff (2510.25222 lines
+    807-841, 863-900).
+    """
+    counts = {}
+    for measurement in measurements:
+        _count_the_shots_gaps(counts, measurement)
+    points = _points_of_counts(counts)
+    return _confidence_histogram_rows_of(counts, points)
+
+
+def gap_bin_low_db(gap_nats: float) -> float:
+    """The lower edge, in decibels, of the 0.1 dB bin holding the gap.
+
+    A gap in nats is ln of the likelihood ratio and a decibel is
+    10 log10 of it (escalation/settings.py nats_to_decibels); Toshio et
+    al. histogram their gaps in decibels (2510.25222 main.tex:564). An
+    infinite gap, a window whose other class has no fault set, keeps
+    its own bin.
+    """
+    decibels = escalation_settings.nats_to_decibels(gap_nats)
+    if math.isinf(decibels):
+        return decibels
+    scaled = decibels * CONFIDENCE_BINS_PER_DECIBEL
+    tenths = math.floor(scaled)
+    return tenths / CONFIDENCE_BINS_PER_DECIBEL
+
+
 def record_of(measurements: list) -> RunRecord:
     """The additive facts of the shots this process measured."""
     shots = shot_rows(measurements)
@@ -527,11 +573,14 @@ def record_of(measurements: list) -> RunRecord:
     samples = window_sample_rows(measurements)
     latency = latency_sample_rows(measurements)
     confidence = window_confidence_rows(measurements)
-    return RunRecord(shots, links, movement, samples, latency, confidence)
+    histogram = confidence_histogram_rows(measurements)
+    return RunRecord(
+        shots, links, movement, samples, latency, confidence, histogram
+    )
 
 
 def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
-    """The record's six files; one with no rows is not written."""
+    """The record's seven files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
     _write_rows(record.shots, shots_path, swept)
     links_path = report_dir / "shot_links.csv"
@@ -544,6 +593,8 @@ def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
     _write_rows(record.latency_samples, latency_path, swept)
     confidence_path = report_dir / "window_confidence.csv"
     _write_rows(record.window_confidence, confidence_path, swept)
+    histogram_path = report_dir / "confidence_histogram.csv"
+    _write_rows(record.confidence_histogram, histogram_path, swept)
 
 
 def read_rows(path: Path) -> list:
@@ -739,6 +790,10 @@ def _fold_the_folders(
     _write_rows(per_movement, movement_path, swept)
     _fold_latency_samples(folders, order, out_dir, swept)
     _fold_window_confidence(folders, order, out_dir, swept)
+    histogram = _folded_confidence_histogram(folders)
+    histogram_rows = _confidence_histogram_rows_of(histogram, list(shot_totals))
+    histogram_path = out_dir / "confidence_histogram.csv"
+    _write_rows(histogram_rows, histogram_path, swept)
     return rows
 
 
@@ -1773,3 +1828,135 @@ def _window_confidence_row(
     row["strong_revised"] = window.is_strong_revised
     row["shot_failed"] = measurement.logical_failure
     return row
+
+
+def _count_the_shots_gaps(
+    counts: dict, measurement: measure.ShotMeasurement
+) -> None:
+    """One shot's window gaps and its smallest gap into the counts."""
+    confidence = measurement.confidence
+    if confidence is None or not confidence.windows:
+        return
+    point = measured_point(measurement)
+    failed = measurement.logical_failure
+    for window in confidence.windows:
+        key = _histogram_key(
+            point, confidence.signal, WINDOW_HISTOGRAM, window.gap_nats
+        )
+        window_cell = key + (window.is_escalated, failed)
+        _add_count(counts, window_cell, 1)
+    smallest = _smallest_gap(confidence.windows)
+    shot_key = _histogram_key(
+        point, confidence.signal, SHOT_MINIMUM_HISTOGRAM, smallest
+    )
+    shot_cell = shot_key + (None, failed)
+    _add_count(counts, shot_cell, 1)
+
+
+def _smallest_gap(windows: tuple) -> Optional[float]:
+    """A shot's smallest window gap; None when a window had no gap.
+
+    A window with no gap escalates as one below every threshold does
+    (escalation/policies.py), so it is the shot's least confident.
+    """
+    gaps = []
+    for window in windows:
+        if window.gap_nats is None:
+            return None
+        gaps.append(window.gap_nats)
+    return min(gaps)
+
+
+def _histogram_key(point: tuple, signal: str, kind: str, gap_nats) -> tuple:
+    """A gap's place in the histogram: point, signal, kind and bin.
+
+    A window with no gap has the bin None, written empty.
+    """
+    low = None
+    if gap_nats is not None:
+        low = gap_bin_low_db(gap_nats)
+    return (point, signal, kind, low)
+
+
+def _add_count(counts: dict, key: tuple, count: int) -> None:
+    """Add to one histogram cell."""
+    already = counts.get(key, 0)
+    counts[key] = already + count
+
+
+def _points_of_counts(counts: dict) -> list:
+    """The points the counts name, in the order they first came."""
+    points = {}
+    for key in counts:
+        points[key[0]] = None
+    return list(points)
+
+
+def _confidence_histogram_rows_of(counts: dict, points: list) -> list:
+    """The counts as rows: points' order, kind, bin, escalated, failed."""
+    positions = _task_positions(points)
+    order = functools.partial(_histogram_order, positions)
+    rows = []
+    for key in sorted(counts, key=order):
+        point, signal, kind, low, escalated, failed = key
+        row = point_columns(point)
+        row["signal"] = signal
+        row["histogram"] = kind
+        row["gap_db_low"] = low
+        row["escalated"] = escalated
+        row["shot_failed"] = failed
+        row["count"] = counts[key]
+        rows.append(row)
+    return rows
+
+
+def _histogram_order(positions: dict, key: tuple) -> tuple:
+    """A histogram cell where a single run would write it."""
+    point, signal, kind, low, escalated, failed = key
+    point_order = positions[point]
+    kind_order = kind != WINDOW_HISTOGRAM
+    low_order = _bin_order(low)
+    escalated_order = escalated is True
+    return (point_order, signal, kind_order, low_order, escalated_order, failed)
+
+
+def _bin_order(low: Optional[float]) -> float:
+    """A bin's place: the empty bin, a window with no gap, below every gap."""
+    if low is None:
+        return -math.inf
+    return low
+
+
+def _folded_confidence_histogram(folders: list) -> dict:
+    """Every folder's histogram counts added into one set of cells."""
+    counts = {}
+    for run_dir in folders:
+        path = Path(run_dir) / "confidence_histogram.csv"
+        if not path.is_file():
+            continue
+        for row in read_rows(path):
+            _add_a_histogram_row(counts, row)
+    return counts
+
+
+def _add_a_histogram_row(counts: dict, row: dict) -> None:
+    """One histogram row read back, added to its cell."""
+    point = sweep_point_of(row)
+    low = _empty_as_none(row["gap_db_low"])
+    escalated = _empty_as_none(row["escalated"])
+    key = (
+        point,
+        row["signal"],
+        row["histogram"],
+        low,
+        escalated,
+        row["shot_failed"],
+    )
+    _add_count(counts, key, row["count"])
+
+
+def _empty_as_none(value):
+    """A cell read back, None where the row wrote nothing."""
+    if value == "":
+        return None
+    return value

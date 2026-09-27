@@ -11,7 +11,9 @@ why that experiment can be folded at all: its shards hold the sixteen
 latency points that tree measured, and this tree measures twenty-two.
 
 A switching run's window_confidence.csv folds as the other per-shot
-files do, so its pieces give the file one uncut run writes.
+files do, and its confidence_histogram.csv counts add as sinter's
+custom_counts do (sinter/_data/_task_stats.py:51-71), so its pieces give
+the files one uncut run writes.
 """
 
 import csv
@@ -21,15 +23,18 @@ import pathlib
 import random
 import shutil
 import statistics
+import types
 
 import pytest
 
 import decsim.experiments.command as command
 import decsim.experiments.fold as fold
+import decsim.experiments.measure as measure
 import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
+import decsim.observe.decode_records as decode_records
 import tests.experiments.yaml_configs as yaml_configs
 
 CANCELLING = (1e100, 1.0, -1e100, 1.0)
@@ -742,36 +747,105 @@ def _rows_with_qpu_kind(rows, sweep, kind) -> list:
     return selected
 
 
-def test_a_switching_run_writes_its_windows_confidence(tmp_path):
+def test_a_switching_run_writes_both_confidence_files(tmp_path):
     overrides = yaml_configs.fixed_threshold_switching()
     run_dir = _confidence_run(tmp_path, overrides, 2)
     confidence_path = run_dir / "window_confidence.csv"
+    histogram_path = run_dir / "confidence_histogram.csv"
 
     window_rows = _rows_of(confidence_path)
+    histogram_rows = _rows_of(histogram_path)
 
     assert window_rows
     assert {row["signal"] for row in window_rows} == {"complementary_gap"}
     assert {row["seed"] for row in window_rows} == {"0", "1"}
+    assert histogram_rows
 
 
-def test_pieces_fold_to_the_window_confidence_of_one_uncut_run(tmp_path):
-    """Four one-shot pieces fold to the file one four-shot run writes."""
+def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
+    overrides = yaml_configs.fixed_threshold_switching()
+    overrides["observation"] = {"confidence_shots": "all"}
+    run_dir = _confidence_run(tmp_path, overrides, 3)
+    confidence_path = run_dir / "window_confidence.csv"
+    histogram_path = run_dir / "confidence_histogram.csv"
+
+    window_rows = _rows_of(confidence_path)
+    histogram_rows = _rows_of(histogram_path)
+
+    assert _counts_of(histogram_rows, "window") == len(window_rows)
+    assert _counts_of(histogram_rows, "shot_minimum") == 3
+
+
+def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
+    overrides = yaml_configs.fixed_threshold_switching()
+    overrides["observation"] = {"confidence_shots": 0}
+    run_dir = _confidence_run(tmp_path, overrides, 2)
+    confidence_path = run_dir / "window_confidence.csv"
+    histogram_path = run_dir / "confidence_histogram.csv"
+
+    histogram_rows = _rows_of(histogram_path)
+
+    assert not confidence_path.exists()
+    assert _counts_of(histogram_rows, "shot_minimum") == 2
+
+
+def test_pieces_fold_to_the_confidence_files_of_one_uncut_run(tmp_path):
+    """Four one-shot pieces fold to the files one four-shot run writes."""
     overrides = yaml_configs.fixed_threshold_switching()
     uncut_dir = _confidence_run(tmp_path, overrides, 4, out="uncut")
     pieces_dir = _confidence_run(tmp_path, overrides, 4, 1, out="pieces")
-    uncut_path = uncut_dir / "window_confidence.csv"
-    folded_path = pieces_dir / "window_confidence.csv"
+    uncut_windows = uncut_dir / "window_confidence.csv"
+    folded_windows = pieces_dir / "window_confidence.csv"
+    uncut_histogram = uncut_dir / "confidence_histogram.csv"
+    folded_histogram = pieces_dir / "confidence_histogram.csv"
 
-    assert folded_path.read_bytes() == uncut_path.read_bytes()
+    assert folded_windows.read_bytes() == uncut_windows.read_bytes()
+    assert folded_histogram.read_bytes() == uncut_histogram.read_bytes()
 
 
-def test_a_run_whose_escalation_reads_no_confidence_writes_no_windows(
+def test_a_run_whose_escalation_reads_no_confidence_writes_neither_file(
     tmp_path,
 ):
     run_dir = _confidence_run(tmp_path, {}, 2)
     confidence_path = run_dir / "window_confidence.csv"
+    histogram_path = run_dir / "confidence_histogram.csv"
 
     assert not confidence_path.exists()
+    assert not histogram_path.exists()
+
+
+def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():
+    ten_decibels_in_nats = 2.302585092994046
+
+    assert report.gap_bin_low_db(ten_decibels_in_nats) == 10.0
+    assert report.gap_bin_low_db(0.0) == 0.0
+    assert report.gap_bin_low_db(math.inf) == math.inf
+
+
+def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
+    """A gapless window escalates as the least confident: its shot's too."""
+    ten_decibels_in_nats = 2.302585092994046
+    windows = (
+        decode_records.WindowConfidence(
+            (1, 0), ten_decibels_in_nats, False, None
+        ),
+        decode_records.WindowConfidence((1, 1), None, True, None),
+    )
+    confidence = measure.ShotConfidence("complementary_gap", windows, True)
+    shot = types.SimpleNamespace(
+        point_id="p",
+        algorithm="pymatching",
+        confidence=confidence,
+        logical_failure=False,
+    )
+
+    rows = report.confidence_histogram_rows([shot])
+
+    assert rows == [
+        _one_count("window", None, True),
+        _one_count("window", 10.0, False),
+        _one_count("shot_minimum", None, None),
+    ]
 
 
 def _confidence_run(
@@ -795,3 +869,26 @@ def _confidence_run(
     experiment_dir = tmp_path / out
     command.main(["collect", str(config_path), "--out", str(experiment_dir)])
     return yaml_configs.run_folder_of(experiment_dir)
+
+
+def _counts_of(rows, histogram) -> int:
+    """The counts of one histogram's rows, summed."""
+    counts = []
+    for row in rows:
+        if row["histogram"] == histogram:
+            counts.append(int(row["count"]))
+    return sum(counts)
+
+
+def _one_count(histogram, gap_db_low, escalated) -> dict:
+    """A histogram row of one window or shot of that no-failure shot."""
+    return {
+        "point_id": "p",
+        "algorithm": "pymatching",
+        "signal": "complementary_gap",
+        "histogram": histogram,
+        "gap_db_low": gap_db_low,
+        "escalated": escalated,
+        "shot_failed": False,
+        "count": 1,
+    }

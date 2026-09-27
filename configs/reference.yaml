@@ -1518,6 +1518,12 @@ observation:                       # what a run records beyond its results
                                    # confidence signal decides the escalation
                                    # (switching), those shots write each committed
                                    # window's gap, escalation and strong revision to
-                                   # window_confidence.csv. A gap is written in nats,
-                                   # ln of the likelihood ratio. It records the run
+                                   # window_confidence.csv, and every shot's gaps are
+                                   # counted into confidence_histogram.csv. A gap is
+                                   # written in nats, ln of the likelihood ratio, and
+                                   # binned in decibels, 10 log10 of it, so dB = nats
+                                   # x 10 / ln 10 (decsim/escalation/settings.py
+                                   # nats_to_decibels; Toshio et al. 2510.25222
+                                   # histogram gaps in dB, main.tex:564).
+                                   # 0 writes the histogram alone. It records the run
                                    # and is no part of a point's id

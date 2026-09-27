@@ -16,7 +16,7 @@ them:
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one sweep point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`) without the swept columns, the `residence.csv` rows of its traced shots when it traced any, an online point's calibrator as the piece left it in `state.pickle`, which the point's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a collect skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one sweep point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`) without the swept columns, the `residence.csv` rows of its traced shots when it traced any, an online point's calibrator as the piece left it in `state.pickle`, which the point's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a collect skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `point_id`, `first_seed` and `count`, its `scored_shots`, `failures`, `unscored_shots` and `core_seconds` (its shots' own wall time), its window status counts (the summary's `*_windows` status columns and `provisional_no_correction_windows`), its `configuration_id` and its `rounds` (its shots times the point's rounds per shot), the `state_sha256` of an online point's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended, which a later round's memory request is sized by), a planned piece's `round` and `task`, and the `commit`, `dirty`, `host` and `slurm_job_id` of the process that ran it |
 | `resolved/<id>.json`, `inputs/<id>/` | `decsim/experiments/run_folder.py`, `write_point_record` | each point's record and workload, written before any shot and only once every yaml of the plan or collect has resolved and been accepted, so a refused one changes no record, as a run folder holds them below; the record also holds `rounds_per_shot`, the QEC rounds of a shot, which sizes the point's pieces, and `experiment`: its `configuration_id` (the configuration that recorded it last), its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which a status folds it by whatever its yaml says later |
 | `configurations.csv` | `decsim/experiments/run_folder.py`, `record_configuration` | one row per configuration: its `configuration_id` (the sha256 of its sections, the sweep and the collection left out), its `name` and its `config_chain` |
@@ -41,6 +41,7 @@ one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
 | `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the first `observation.confidence_shots` shots of a point, written only when a confidence signal decides the escalation |
+| `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `links.csv` | `decsim/experiments/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
@@ -286,6 +287,27 @@ and whether the strong decode changed the window's answer.
 | `escalated` | whether the verdict sent the window to the strong tier |
 | `strong_revised` | for an escalated window, whether the strong decode predicted other observables than the weak one; empty for a kept window |
 | `shot_failed` | whether the shot ended in a logical failure |
+
+### `confidence_histogram.csv`
+
+Counts over every shot of a point, whatever `confidence_shots` says, so
+the counts of pieces add, as sinter's `custom_counts` do. A gap is
+binned in decibels, `dB = nats x 10 / ln 10`, to the tenth below it; an
+infinite gap has its own bin.
+
+| Column | What it is |
+| --- | --- |
+| `point_id`, the swept paths, `algorithm` | the sweep point |
+| `signal` | the confidence the verdict read |
+| `histogram` | `window`, every window's gap, or `shot_minimum`, each shot's smallest window gap |
+| `gap_db_low` | the bin's lower edge in decibels; empty for a window with no gap, and for a shot one of whose windows had none |
+| `escalated` | for a `window` row, whether the window escalated; empty for a `shot_minimum` row |
+| `shot_failed` | whether the shot ended in a logical failure |
+| `count` | how many windows, or shots, fell in that cell |
+
+The `shot_minimum` rows give Toshio et al.'s gap density and the
+failure rate at each gap (2510.25222), and Gidney et al.'s minimum over
+a span's draws (2312.04522).
 
 ### `sweep.csv`
 

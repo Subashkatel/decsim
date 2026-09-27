@@ -19,7 +19,7 @@
 #
 # Every key is documented in reference.yaml.
 
-extends: weak_decoder_baseline.yaml
+extends: bases/weak_decoder_baseline.yaml
 
 weak_decoder:
   kind: 1.0                         # tau_gen, Toshio 2510.25222 lines 1109-1114

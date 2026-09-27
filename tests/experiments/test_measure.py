@@ -495,7 +495,7 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     in the strong columns and the weak columns read zero, the mirror of
     test_the_pool_columns_read_each_tiers_own_queue_and_units.
     """
-    shot = shipped_shot("strong_decoder_baseline.yaml")
+    shot = shipped_shot("bases/strong_decoder_baseline.yaml")
     measurement = measure.measure_shot(shot)
 
     assert measurement.weak_queue_max == 0
@@ -743,13 +743,13 @@ def later_solve_ticks(shot, window_id: int) -> int:
 def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
     """The identity on a config the repository ships, not a test's own.
 
-    configs/weak_decoder_baseline.yaml decodes each of its nine windows
-    once and answers on that decode, so its confidence step is zero and
-    every window's points are its whole path from its data being
+    configs/bases/weak_decoder_baseline.yaml decodes each of its nine
+    windows once and answers on that decode, so its confidence step is zero
+    and every window's points are its whole path from its data being
     complete in the weak syndrome buffer to its correction committed in the
     frame.
     """
-    shot = shipped_shot("weak_decoder_baseline.yaml")
+    shot = shipped_shot("bases/weak_decoder_baseline.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -761,7 +761,7 @@ def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
 
 
 def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
-    """The identity on every window of configs/two_tiers.yaml.
+    """The identity on every window of configs/examples/two_tiers.yaml.
 
     Windows 0, 1, 8 and 9 escalated: their weak attempt, the strong
     decode that committed and the hops around it are the whole path, and
@@ -772,7 +772,7 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
     III A steps 2 to 4 for the order of the escalated ones). Both sum
     to the tick.
     """
-    shot = shipped_shot("two_tiers.yaml")
+    shot = shipped_shot("examples/two_tiers.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -791,13 +791,13 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
 def test_the_shipped_pinned_config_sums_to_its_reaction_time():
     """The same law where the strong tier's time is measured, not declared.
 
-    configs/seam_pinned_switching.yaml names a belief-matching strong
-    tier, whose decode time is read off the host clock, so the values
-    move from host to host and the identity does not: every window's
-    points still add up to its reaction time to the tick, the solve it
-    ran after the committing one being its confidence step.
+    configs/experiments/switching/seam_pinned_switching.yaml names a
+    belief-matching strong tier, whose decode time is read off the host
+    clock, so the values move from host to host and the identity does not:
+    every window's points still add up to its reaction time to the tick, the
+    solve it ran after the committing one being its confidence step.
     """
-    shot = shipped_shot("seam_pinned_switching.yaml")
+    shot = shipped_shot("experiments/switching/seam_pinned_switching.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -814,16 +814,16 @@ def test_the_shipped_pinned_config_sums_to_its_reaction_time():
 def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
     """The identity where the confidence step is a card of its own.
 
-    configs/cluster_gap_switching.yaml walks a union find decode for its
-    signal and prices that walk at 12.0 us on the weak unit (decision
-    D8), so a window the weak tier answered carries the walk between its
-    decode's end and its verdict. A window that escalated carries none:
-    its weak attempt already runs to the verdict and the strong decode
-    it commits answers after it. The union find decode itself is read
-    off the host clock, so the assertions are in ticks and about the
+    configs/experiments/switching/cluster_gap_switching.yaml walks a union
+    find decode for its signal and prices that walk at 12.0 us on the weak
+    unit (decision D8), so a window the weak tier answered carries the walk
+    between its decode's end and its verdict. A window that escalated
+    carries none: its weak attempt already runs to the verdict and the
+    strong decode it commits answers after it. The union find decode itself
+    is read off the host clock, so the assertions are in ticks and about the
     identity, never about a magnitude.
     """
-    shot = shipped_shot("cluster_gap_switching.yaml")
+    shot = shipped_shot("experiments/switching/cluster_gap_switching.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)

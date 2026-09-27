@@ -1,7 +1,7 @@
 """Gate point 1 for the observation tests: how to run it, what it holds.
 
 weak_decoder_baseline d 3 p 0.003 seed 0, the first strict point of the
-frozen gate: the shipped configs/weak_decoder_baseline.yaml with the
+frozen gate: the shipped configs/bases/weak_decoder_baseline.yaml with the
 component I/O log on, which is the one line the gate's copy of that yaml
 adds. captured_fields returns the row the gate hashes, so a test can say
 that a knob moved nothing.
@@ -17,7 +17,7 @@ import decsim.machine as machine_module
 _THIS_FILE = pathlib.Path(__file__)
 _ABSOLUTE_FILE = _THIS_FILE.resolve()
 CONFIGS_DIR = _ABSOLUTE_FILE.parents[2] / "configs"
-CONFIG_PATH = CONFIGS_DIR / "weak_decoder_baseline.yaml"
+CONFIG_PATH = CONFIGS_DIR / "bases/weak_decoder_baseline.yaml"
 POINT = {
     "workload.arguments.physical_error_probability": 0.003,
     "qpu.distance": 3,

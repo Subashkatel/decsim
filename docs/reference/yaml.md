@@ -79,11 +79,11 @@ Three conventions are worth knowing before you read:
 ## Starting from another file
 
 ```yaml
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 ```
 
-`extends` reads the named file from the same folder first, then applies
-this file's keys over it (`decsim/experiments/experiment.py`). A
+`extends` reads the named file first, its path taken from this file's
+folder, then applies this file's keys over it (`decsim/experiments/experiment.py`). A
 section this file names replaces the base's section whole, so a `sweep`
 written here replaces the base's sweep rather than adding to it.
 `manifest.json` records the whole chain, nearest first, and `config/`
@@ -155,11 +155,11 @@ prints the resolved sections, one line per component, and the sweep
 blocks, without running anything. Then, under `values:`, it prints
 every value the machine is built with, one per line, gem5's
 `config.ini` in one list (`src/python/m5/simulate.py:122-127`). Three
-of `decsim show configs/my_first_sweep.yaml`'s:
+of `decsim show configs/examples/my_first_sweep.yaml`'s:
 
 ```
-qpu.distance = [3, 5, 7]  [sweep, configs/my_first_sweep.yaml:16-21]
-controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:51]
+qpu.distance = [3, 5, 7]  [sweep, configs/examples/my_first_sweep.yaml:16-21]
+controller.decision_to_pulse_cycles = 0  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:51]
 controller.packing_overflow = "STALL"  [default, configs/reference.yaml:653]
 ```
 
@@ -178,13 +178,13 @@ chain says what you meant.
 | File | What it is for |
 | --- | --- |
 | `configs/reference.yaml` | every key, commented, with a two-shot sweep so it runs in seconds |
-| `configs/weak_decoder_baseline.yaml` | the defaults a weak-tier study starts from |
-| `configs/strong_decoder_baseline.yaml` | the same for a strong-tier study |
-| `configs/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
-| `configs/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
-| `configs/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
-| `configs/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
-| `configs/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
+| `configs/bases/weak_decoder_baseline.yaml` | the defaults a weak-tier study starts from |
+| `configs/bases/strong_decoder_baseline.yaml` | the same for a strong-tier study |
+| `configs/experiments/switching/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
+| `configs/examples/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
+| `configs/examples/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
+| `configs/examples/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
+| `configs/experiments/switching/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
 | `configs/data_movement.yaml` | the data-movement study: every copy, reference and move counted per hop |
 | `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
 | `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |

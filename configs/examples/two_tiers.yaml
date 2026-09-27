@@ -5,7 +5,7 @@
 # simulations (arXiv:2510.25222, tau_strong_dec = 10 tau_gen).
 # docs/tutorials/two_tiers.md runs this config. Every key is documented
 # in reference.yaml.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 escalation:
   kind: switching

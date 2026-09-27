@@ -11,12 +11,12 @@ For a timing study, price the decoder with a **card** instead.
 
 A tier's `kind` may be a number instead of a name. The number is the
 decode's core latency in microseconds, charged on the
-minimum-weight-perfect-matching path. `configs/priced_cards_example.yaml`
+minimum-weight-perfect-matching path. `configs/examples/priced_cards_example.yaml`
 is a worked one:
 
-```yaml configs/priced_cards_example.yaml
+```yaml configs/examples/priced_cards_example.yaml
 # Priced cards: the decoder costs a stated number, not a measured one.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 weak_decoder:
   kind: 1.0
@@ -57,7 +57,7 @@ device you build in Python.
 ## 2. Run it
 
 ```bash
-decsim collect configs/priced_cards_example.yaml
+decsim collect configs/examples/priced_cards_example.yaml
 ```
 
 ```
@@ -87,7 +87,7 @@ load is whatever the host's wall clock gives.
 Run it a second time and compare:
 
 ```bash
-decsim collect configs/priced_cards_example.yaml
+decsim collect configs/examples/priced_cards_example.yaml
 diff <(cut -d, -f1-29 results/<first>/sweep.csv) \
      <(cut -d, -f1-29 results/<second>/sweep.csv)
 ```

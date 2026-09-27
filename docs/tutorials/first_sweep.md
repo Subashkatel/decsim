@@ -12,17 +12,18 @@ It takes about fifteen minutes, two of which are the machine running.
 
 ## Step 1. Copy a shipped config and make a sweep of it
 
-Every shipped config is a starting point. `weak_decoder_baseline.yaml`
-is the defaults a single-tier study begins from, with every key
+Every shipped config is a starting point.
+`configs/bases/weak_decoder_baseline.yaml` is the defaults a
+single-tier study begins from, with every key
 documented in `configs/reference.yaml`.
 
 This lesson's config ships with decsim, as
-`configs/my_first_sweep.yaml`, so you can read it here rather than
+`configs/examples/my_first_sweep.yaml`, so you can read it here rather than
 type it:
 
-```yaml configs/my_first_sweep.yaml
+```yaml configs/examples/my_first_sweep.yaml
 # My first sweep: three distances at one physical error rate.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 weak_decoder:
   kind: pymatching
@@ -46,8 +47,8 @@ sweep:
 
 Three things are happening here.
 
-`extends` reads `weak_decoder_baseline.yaml` from the same folder first
-and applies this file's keys over it. A section written here replaces
+`extends` reads `../bases/weak_decoder_baseline.yaml` first, its path
+taken from this file's folder, and applies this file's keys over it. A section written here replaces
 the base's section **whole**, which is why the `weak_decoder` block
 repeats `units`, `unit_memory` and `engine` even though the base
 already had them. Leave `engine` out and the load fails.
@@ -69,13 +70,13 @@ shots each, so 1,200 shots in all.
 Check what it resolves to before running it:
 
 ```bash
-decsim show configs/my_first_sweep.yaml
+decsim show configs/examples/my_first_sweep.yaml
 ```
 
 ## Step 2. Run it, on four processes
 
 ```bash
-decsim collect configs/my_first_sweep.yaml --processes 4 --out results/first_sweep
+decsim collect configs/examples/my_first_sweep.yaml --processes 4 --out results/first_sweep
 ```
 
 `--processes` gives each worker one piece at a time. A piece is a block
@@ -252,7 +253,7 @@ leave them missing, and run the same command again:
 
 ```bash
 rm -r results/first_sweep/pieces/*/0-*
-decsim collect configs/my_first_sweep.yaml --processes 4 --out results/first_sweep
+decsim collect configs/examples/my_first_sweep.yaml --processes 4 --out results/first_sweep
 cut -d, -f3,6,8,12 results/first_sweep/combined/*/sweep.csv
 ```
 

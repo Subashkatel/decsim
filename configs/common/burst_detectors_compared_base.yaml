@@ -12,7 +12,7 @@
 # to burst_detector.catch_deadline_rounds (300) after it lands inside
 # the shot.
 
-extends: ../seam_pinned_switching.yaml
+extends: ../experiments/switching/seam_pinned_switching.yaml
 
 qpu:
   kind: burst_stim

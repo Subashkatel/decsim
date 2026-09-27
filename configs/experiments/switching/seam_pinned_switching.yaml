@@ -6,7 +6,7 @@
 # logical errors are frequent enough to measure. Every key is documented
 # in reference.yaml.
 
-extends: weak_decoder_baseline.yaml
+extends: ../../bases/weak_decoder_baseline.yaml
 
 escalation:
   kind: switching

@@ -28,11 +28,11 @@ the signals and the shapes behind the knobs.
 
 ## Step 1. Read the config
 
-This lesson's config ships with decsim, as `configs/two_tiers.yaml`.
+This lesson's config ships with decsim, as `configs/examples/two_tiers.yaml`.
 Both tiers are priced by cards rather than measured, so every tick
 below is the same on your machine as on this page's.
 
-```yaml configs/two_tiers.yaml
+```yaml configs/examples/two_tiers.yaml
 # Two tiers on priced cards, so the whole switching loop is
 # deterministic and the same on every host. The weak card is one
 # syndrome generation time at this sweep's round period and the strong
@@ -40,7 +40,7 @@ below is the same on your machine as on this page's.
 # simulations (arXiv:2510.25222, tau_strong_dec = 10 tau_gen).
 # docs/tutorials/two_tiers.md runs this config. Every key is documented
 # in reference.yaml.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 escalation:
   kind: switching
@@ -119,11 +119,11 @@ logical failures below are measured and only the time is stated
 One row is chosen for you and matters below. `decsim show` prints it:
 
 ```bash
-decsim show configs/two_tiers.yaml
+decsim show configs/examples/two_tiers.yaml
 ```
 
 ```
-config: configs/two_tiers.yaml <- configs/weak_decoder_baseline.yaml
+config: configs/examples/two_tiers.yaml <- configs/examples/../bases/weak_decoder_baseline.yaml
 qpu: kind stim_device
 idle_policy: kind separate_decode_jobs
 links: kind logical_reference
@@ -142,12 +142,12 @@ sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distan
 log: off
 trace: off
 values:
-clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:56]
-clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:57]
-qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/weak_decoder_baseline.yaml:4]
+clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:56]
+clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:57]
+qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/examples/../bases/weak_decoder_baseline.yaml:4]
 qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:85]
-qpu.round_period_microseconds = [1.0]  [sweep, configs/two_tiers.yaml:51-56]
-qpu.distance = [3, 5]  [sweep, configs/two_tiers.yaml:51-56]
+qpu.round_period_microseconds = [1.0]  [sweep, configs/examples/two_tiers.yaml:51-56]
+qpu.distance = [3, 5]  [sweep, configs/examples/two_tiers.yaml:51-56]
 ```
 
 Below `values:` the list goes on to every value the machine is built
@@ -162,7 +162,7 @@ the strong decoder, and nothing else in this run.
 ## Step 2. Run the sweep
 
 ```bash
-decsim collect configs/two_tiers.yaml --out results/two_tiers
+decsim collect configs/examples/two_tiers.yaml --out results/two_tiers
 ```
 
 The command prints the same resolved config, then one line per point as
@@ -219,7 +219,7 @@ A sweep gives averages. To see one window escalate you need the trace,
 so run a single shot with `--trace`.
 
 ```bash
-decsim run configs/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
+decsim run configs/examples/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
 ```
 
 ```

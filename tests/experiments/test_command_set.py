@@ -1847,7 +1847,9 @@ def test_run_refuses_a_yaml_that_is_not_there(tmp_path, capsys):
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
     assert printed.err.startswith(f"decsim: {missing} is not a file")
-    assert "reference" in printed.err
+    assert "reference.yaml" in printed.err
+    assert "examples/two_tiers.yaml" in printed.err
+    assert "bases/" not in printed.err
 
 
 def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
@@ -1957,7 +1959,7 @@ def test_a_build_refusal_under_run_is_one_line(tmp_path, capsys):
     weak baseline is refused when the machine is built
     (decsim/build/escalation.py).
     """
-    base_path = CONFIGS_DIR / "weak_decoder_baseline.yaml"
+    base_path = CONFIGS_DIR / "bases/weak_decoder_baseline.yaml"
     config_path = tmp_path / "burst.yaml"
     config_path.write_text(
         f"extends: {base_path}\nburst_detector:\n  kind: event_count\n"

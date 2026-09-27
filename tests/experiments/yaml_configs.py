@@ -1,11 +1,9 @@
-"""A complete runnable yaml, small enough for a functional test.
+"""The runnable yamls this repository ships, and a small one for tests.
 
-The shape is a design rule: the algorithm is structure
-on a per-tier unit card (weak_decoder / strong_decoder), never a sweep
-axis, mirroring the tiered architecture itself (Toshio arXiv 2510.25222:
-lightweight decoders decode constantly, a separate accurate decoder is
-invoked on demand) and gem5's config split (structure on the component,
-parameters swept around it).
+SHIPPED_CONFIGS names the runnable files under configs/; the files
+under configs/bases/ are starting points other files extend, so they
+are left out.
+MINIMAL_CONFIG is a complete machine small enough for a functional test.
 """
 
 import pathlib
@@ -26,18 +24,16 @@ CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 # shipped config walk this tuple and not the folder, so a config a user
 # writes into configs/ of their own checkout fails none of them.
 SHIPPED_CONFIGS = (
-    "cluster_gap_switching.yaml",
+    "reference.yaml",
+    "examples/my_first_sweep.yaml",
+    "examples/priced_cards_example.yaml",
+    "examples/two_tiers.yaml",
+    "experiments/switching/cluster_gap_switching.yaml",
+    "experiments/switching/seam_pinned_switching.yaml",
     "data_movement.yaml",
     "data_movement_fold_in_place.yaml",
     "data_movement_input_in_place.yaml",
     "data_movement_switching.yaml",
-    "my_first_sweep.yaml",
-    "priced_cards_example.yaml",
-    "reference.yaml",
-    "seam_pinned_switching.yaml",
-    "strong_decoder_baseline.yaml",
-    "two_tiers.yaml",
-    "weak_decoder_baseline.yaml",
 )
 # Where a memory maker's physical error rate sits in a point's sections.
 ERROR_RATE_PATH = "workload.arguments.physical_error_probability"

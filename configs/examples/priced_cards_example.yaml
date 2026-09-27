@@ -1,5 +1,5 @@
 # Priced cards: the decoder costs a stated number, not a measured one.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 weak_decoder:
   kind: 1.0

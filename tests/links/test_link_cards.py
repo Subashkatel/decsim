@@ -408,7 +408,7 @@ def test_a_reliable_card_at_no_errors_runs_as_its_credit_card(tmp_path):
         retry_count=7,
         bit_error_rate=0.0,
     )
-    base_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"
+    base_path = yaml_configs.CONFIGS_DIR / "examples/two_tiers.yaml"
     base = str(base_path)
     links = {"weak_decoder_to_strong_decoder": _off_board_card(credit)}
     by_credit = _built_from(tmp_path, {"extends": base, "links": links})

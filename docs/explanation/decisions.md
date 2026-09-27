@@ -528,7 +528,7 @@ occupancy in `load`.
 **Where to see it.** `POINTS`, `window_points_us` and `chain_load` in
 `decsim/experiments/measure.py`, the row in
 [The run folder](../reference/run_folder.md),
-`configs/cluster_gap_switching.yaml`, and the four shipped-config
+`configs/experiments/switching/cluster_gap_switching.yaml`, and the four shipped-config
 identity tests in `tests/experiments/test_measure.py`.
 
 ## D17. The Union-Find growth, forest and peeling run in C

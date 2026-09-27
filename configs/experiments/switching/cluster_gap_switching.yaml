@@ -6,7 +6,7 @@
 # can point at rather than one the host clock decides. Otherwise
 # two_tiers.yaml's fabric and strong tier. Every key is documented in
 # reference.yaml.
-extends: two_tiers.yaml
+extends: ../../examples/two_tiers.yaml
 
 escalation:
   kind: switching

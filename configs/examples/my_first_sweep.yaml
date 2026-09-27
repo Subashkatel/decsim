@@ -1,5 +1,5 @@
 # My first sweep: three distances at one physical error rate.
-extends: weak_decoder_baseline.yaml
+extends: ../bases/weak_decoder_baseline.yaml
 
 weak_decoder:
   kind: pymatching

@@ -16,8 +16,8 @@ weak-buffer path publishes it 4 us on while the strong-buffer path
 lands it in the strong syndrome buffer 7 us on.
 
 The window trace walk at the end of the file reads one shot of
-configs/weak_decoder_baseline.yaml as well, because the four events a
-latency claim rests on are read off a shipped config's own run. IBM
+configs/bases/weak_decoder_baseline.yaml as well, because the four
+events a latency claim rests on are read off a shipped config's own run. IBM
 arXiv 2510.21600 lines 517-519 name them on the hardware: the decoder
 FPGA's trace observes when the decoders start and stop, when the
 syndromes and codewords arrive, and when the logical Pauli frame is
@@ -697,18 +697,18 @@ def ledger_without(ledger, kind, window_id):
 def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     """The shipped weak baseline, window by window, in pipeline order.
 
-    One shot of configs/weak_decoder_baseline.yaml at p = 0.001,
-    distance 3 and a 10 us round period decodes nine sliding windows,
-    and each carries the four events a latency claim is read from, with
-    non-decreasing ticks: the window complete in the weak syndrome buffer, its
-    decode started on a unit, its decode done, and its correction written into
-    the frame. Those are the four the hardware trace of a decoder FPGA
-    reports (IBM arXiv 2510.21600 lines 517-519: when the decoders start
-    and stop, when the syndromes and codewords arrive, and when the
-    logical Pauli frame is produced), each one a named probe point a
-    listener reads here (gem5 src/sim/probe/probe.hh lines 122 and 272).
+    One shot of configs/bases/weak_decoder_baseline.yaml at p = 0.001,
+    distance 3 and a 10 us round period decodes nine sliding windows, and
+    each carries the four events a latency claim is read from, with
+    non-decreasing ticks: the window complete in the weak syndrome buffer,
+    its decode started on a unit, its decode done, and its correction
+    written into the frame. Those are the four the hardware trace of a
+    decoder FPGA reports (IBM arXiv 2510.21600 lines 517-519: when the
+    decoders start and stop, when the syndromes and codewords arrive, and
+    when the logical Pauli frame is produced), each one a named probe point
+    a listener reads here (gem5 src/sim/probe/probe.hh lines 122 and 272).
     """
-    config_path = yaml_configs.CONFIGS_DIR / "weak_decoder_baseline.yaml"
+    config_path = yaml_configs.CONFIGS_DIR / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     task = config.point_task(
         {

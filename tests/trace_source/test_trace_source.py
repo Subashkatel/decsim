@@ -42,7 +42,7 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     here = pathlib.Path(__file__)
     repository = here.resolve()
     repository = repository.parents[2]
-    config_path = repository / "configs/weak_decoder_baseline.yaml"
+    config_path = repository / "configs/bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {

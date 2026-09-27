@@ -54,7 +54,8 @@ worktree needs `PYTHONPATH` naming it.
 ## 3. Plan a round
 
 ```bash
-decsim plan configs/seam_pinned_switching.yaml --out $PWD/results/seam_pinned_switching --tasks 300
+decsim plan configs/experiments/switching/seam_pinned_switching.yaml \
+  --out $PWD/results/seam_pinned_switching --tasks 300
 ```
 
 This writes `results/seam_pinned_switching/round1/plan.csv`, with its pieces dealt to

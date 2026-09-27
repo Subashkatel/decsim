@@ -190,7 +190,7 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
 
 def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a decoder added as a row."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -215,7 +215,7 @@ def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
 
 def test_a_second_table_row_runs_gate_point_one():
     """Gate point 1's settings run to completion on the union_find row."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -246,7 +246,7 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     tick, because no component has queued anything while the rest of the
     machine is still being built.
     """
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -1305,7 +1305,7 @@ class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
 
 def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
     """Gate point 1's settings run to completion on a store added as a row."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -1350,7 +1350,7 @@ class AlwaysStrongEscalation(escalation_policies.EscalationPolicyBase):
 
 def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
     """The row declares its tier, so no second table names the kind."""
-    config_path = CONFIGS / "strong_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/strong_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -1413,7 +1413,7 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
     monkeypatch,
 ):
     """One constructor call, so a row that reads only the engine builds."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {

@@ -129,7 +129,7 @@ burst between patches 0 and 1 (each patch is 2d + 2 = 12 units wide on
 the shared plane, so their centres are at x = 5 and 17):
 
 ```yaml
-extends: two_tiers.yaml
+extends: examples/two_tiers.yaml
 workload:
   kind: producer
   function: decsim.producers:memory_patches

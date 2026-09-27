@@ -55,7 +55,7 @@ def _source_committing(commit_lo: int, commit_hi: int):
 
 def reference_run(distance: int):
     """One shot of the weak baseline at that distance."""
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -235,12 +235,12 @@ def _pinned_faces(result) -> list:
 
 
 def _pinned_run(strong_window: str, distance: int, seed: int = 0):
-    """The switching point of configs/seam_pinned_switching.yaml, one shot.
+    """One shot of the seam-pinned switching experiment's switching point.
 
     The yaml names near_seam_pinned; the row under test replaces it in
     the escalation card, which is where the build reads it from.
     """
-    config_path = CONFIGS / "seam_pinned_switching.yaml"
+    config_path = CONFIGS / "experiments/switching/seam_pinned_switching.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -397,7 +397,7 @@ def _parallel_run(distance: int, seed: int):
     The sparse row prices the flips the message carries, so which layer
     is counted is visible in the bits.
     """
-    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {

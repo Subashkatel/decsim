@@ -369,7 +369,7 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     stream's logical correction is the sum of its committed windows'
     effects). Both folds must agree.
     """
-    config_path = yaml_configs.CONFIGS_DIR / "two_tiers.yaml"
+    config_path = yaml_configs.CONFIGS_DIR / "examples/two_tiers.yaml"
     experiment_config = experiment.load_experiment(config_path)
     point = experiment_config.point_task(
         {

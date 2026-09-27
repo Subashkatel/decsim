@@ -182,7 +182,7 @@ Everything above has a price, and decsim's point is to charge all of it:
 - and the strong decode itself.
 
 A study of switching is a study of whether the accuracy bought is worth
-that list. `configs/seam_pinned_switching.yaml` is a worked point, and
+that list. `configs/experiments/switching/seam_pinned_switching.yaml` is a worked point, and
 [Two tiers](../tutorials/two_tiers.md) runs one.
 
 ## Read next

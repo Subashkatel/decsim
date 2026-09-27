@@ -33,6 +33,7 @@ _REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 # binary; the shipped experiments are what a refused path is listed with.
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 REFERENCE_FILE = CONFIGS_DIR / "reference.yaml"
+BASES_FOLDER = "bases"
 SWEEP_BLOCK_KEYS = ("axes",)
 # A block may also carry its own collection keys, over the file's.
 OPTIONAL_SWEEP_BLOCK_KEYS = ("collection",)
@@ -262,14 +263,27 @@ def _refuse_a_path_that_is_not_a_file(path: pathlib.Path) -> None:
     """A yaml that is not there, with the shipped experiments to pick from."""
     if path.is_file():
         return
-    shipped_files = CONFIGS_DIR.glob("*.yaml")
-    names = []
-    for shipped in sorted(shipped_files):
-        names.append(shipped.stem)
+    names = _shipped_experiment_names()
     listed = ", ".join(names)
     raise refusal.RefusalError(
         f"{path} is not a file; the shipped experiments are {listed}"
     )
+
+
+def _shipped_experiment_names() -> list:
+    """Every runnable yaml under configs/, by its path there.
+
+    The files under configs/bases/ are starting points other files
+    extend, not runs, so they are left out.
+    """
+    shipped_files = CONFIGS_DIR.rglob("*.yaml")
+    names = []
+    for shipped in sorted(shipped_files):
+        relative = shipped.relative_to(CONFIGS_DIR)
+        if relative.parts[0] == BASES_FOLDER:
+            continue
+        names.append(str(relative))
+    return names
 
 
 def _point_task_of(

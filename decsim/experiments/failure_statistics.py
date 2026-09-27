@@ -234,14 +234,8 @@ def empirical_bernstein_sequence(
     deviations = outcomes - predictions
     squared_deviations = deviations * deviations
     deviation_sum = numpy.sum(squared_deviations)
-    variance = max(deviation_sum, 1.0)
-    doubled_variance = 2 * variance
-    log_doubled = math.log(doubled_variance)
-    iterated_log = math.log(log_doubled)
-    root_argument = variance * (iterated_log + 3.8)
-    root = math.sqrt(root_argument)
-    numerator = 1.7 * root + 3.4 * iterated_log + 13
-    radius = numerator / count
+    boundary = _stitched_boundary(deviation_sum)
+    radius = boundary / count
     mean = running_means[-1]
     low = mean - radius
     high = mean + radius
@@ -280,6 +274,25 @@ def difference_sequence(
     low = doubled_low - 1
     high = doubled_high - 1
     return (low, high)
+
+
+def _stitched_boundary(deviation_sum: float) -> float:
+    """Eq. (24)'s boundary at V, the radius times t.
+
+    1.7 sqrt(V (log log 2V + 3.8)) + 3.4 log log 2V + 13, with V the
+    deviation sum floored at one.
+    """
+    variance = max(deviation_sum, 1.0)
+    doubled_variance = 2 * variance
+    log_doubled = math.log(doubled_variance)
+    iterated_log = math.log(log_doubled)
+    shifted_log = iterated_log + 3.8
+    root_argument = variance * shifted_log
+    root = math.sqrt(root_argument)
+    root_term = 1.7 * root
+    log_term = 3.4 * iterated_log
+    terms = root_term + log_term
+    return terms + 13
 
 
 def _upper_limit(

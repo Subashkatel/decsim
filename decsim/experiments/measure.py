@@ -27,10 +27,10 @@ import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
-import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.transfers as transfer_records
@@ -111,14 +111,14 @@ POINTS = (
 )
 
 # One count column per status a committed window's decode may carry
-# besides success (decoders/decoder.py BackendDecodeStatus), so a status
+# besides success (records/decoding.py BackendDecodeStatus), so a status
 # the enum gains is counted with no change here; sinter keeps its
 # custom counts the same way, one named counter per kind
 # (sinter/_data/_task_stats.py:71)
 WINDOW_STATUS_COLUMNS = tuple(
     f"{status.value}_windows"
-    for status in decoder_module.BackendDecodeStatus
-    if status is not decoder_module.BackendDecodeStatus.SUCCEEDED
+    for status in decoding_records.BackendDecodeStatus
+    if status is not decoding_records.BackendDecodeStatus.SUCCEEDED
 )
 
 # which store's output link carries a tier's window in; the way home is

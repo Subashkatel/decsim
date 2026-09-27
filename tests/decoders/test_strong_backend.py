@@ -14,7 +14,6 @@ import functools
 import numpy
 import pytest
 
-import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
@@ -360,8 +359,8 @@ def test_a_split_region_with_no_correction_in_a_part_carries_its_reason(
     device = _RelayDevice()
     decoder = strong_backend.StrongBackendDecoder(device, "apart")
     joined = decoder.decode(job)
-    backend_error = decoder_module.BackendDecodeStatus.BACKEND_ERROR
-    reasons = backend_outcome.BackendFailureReason
+    backend_error = decoding_records.BackendDecodeStatus.BACKEND_ERROR
+    reasons = decoding_records.BackendFailureReason
     assert joined.decode_status is backend_error
     assert joined.no_correction_reason is reasons.UPSTREAM_EXCEPTION
 

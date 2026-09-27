@@ -141,5 +141,5 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
 def _status_of(evidence: evidence_records.UnionFindHardEvidence):
     if evidence.unmatched_detectors:
-        return decoder_module.BackendDecodeStatus.INVALID_CORRECTION
+        return decoding_records.BackendDecodeStatus.INVALID_CORRECTION
     return None

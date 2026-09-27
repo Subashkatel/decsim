@@ -378,6 +378,32 @@ FORCED_CLASS_SOLVES = frozenset({DecoderEvidence.FORCED_CLASS_WEIGHT})
 CLUSTER_GROWTH_EVIDENCE = frozenset({DecoderEvidence.CLUSTER_GROWTH})
 
 
+class BackendDecodeStatus(Enum):
+    """Backend-neutral disposition of one window decode attempt."""
+
+    SUCCEEDED = "succeeded"
+    LOW_CONFIDENCE = "low_confidence"
+    NONCONVERGED = "nonconverged"
+    INVALID_CORRECTION = "invalid_correction"
+    EMPTY_MODEL_UNSATISFIABLE = "empty_model_unsatisfiable"
+    BACKEND_ERROR = "backend_error"
+
+
+class BackendFailureReason(Enum):
+    """Typed reason a backend attempt could not be committed."""
+
+    SEARCH_LIMIT_EXHAUSTED = "search_limit_exhausted"
+    NO_CONVERGED_RELAY_SOLUTION = "no_converged_relay_solution"
+    CORRECTION_NOT_BINARY = "correction_not_binary"
+    CORRECTION_WRONG_ARITY = "correction_wrong_arity"
+    CORRECTION_DOES_NOT_MATCH_SYNDROME = "correction_does_not_match_syndrome"
+    NONZERO_SYNDROME_WITHOUT_FAULTS = "nonzero_syndrome_without_faults"
+    UPSTREAM_EXCEPTION = "upstream_exception"
+    # PyMatching raises on a syndrome no matching explains; the matching
+    # rows report it with no correction under INVALID_CORRECTION
+    NO_PERFECT_MATCHING = "no_perfect_matching"
+
+
 @dataclass(frozen=True)
 class WindowDecode:
     """What one backend call on one window answers.
@@ -397,11 +423,11 @@ class WindowDecode:
     """
 
     selected_faults: Any
-    decode_status: Optional[Any] = None
+    decode_status: Optional[BackendDecodeStatus] = None
     forced_class_weight: Optional[float] = None
     cluster_evidence: Optional[Any] = None
     iterations: Optional[int] = None
-    no_correction_reason: Optional[Any] = None
+    no_correction_reason: Optional[BackendFailureReason] = None
 
 
 @dataclass(frozen=True)
@@ -451,10 +477,10 @@ class DecodeResult:
     # confidence, does not reproduce the syndrome); None when the decode
     # succeeded. The correction is committed either way and the status travels
     # with it, as cudaqx's per-window converged flag does.
-    decode_status: Optional[Any] = None
+    decode_status: Optional[BackendDecodeStatus] = None
     # BackendFailureReason of a backend that produced no correction, whose
     # empty stand-in is the correction above; None when it produced one
-    no_correction_reason: Optional[Any] = None
+    no_correction_reason: Optional[BackendFailureReason] = None
 
 
 @dataclass

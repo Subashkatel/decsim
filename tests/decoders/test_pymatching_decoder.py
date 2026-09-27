@@ -16,7 +16,6 @@ import pymatching
 import pytest
 import sinter
 
-import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
@@ -157,8 +156,8 @@ def test_an_unmatchable_syndrome_is_reported_and_not_raised():
     job = windows.job_for(model, syndrome)
     row = adapter.PyMatchingDecoder()
     result = row.decode(job)
-    invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
-    reasons = backend_outcome.BackendFailureReason
+    invalid = decoding_records.BackendDecodeStatus.INVALID_CORRECTION
+    reasons = decoding_records.BackendFailureReason
     assert result.decode_status is invalid
     assert result.no_correction_reason is reasons.NO_PERFECT_MATCHING
     assert result.correction.tolist() == [0, 0]

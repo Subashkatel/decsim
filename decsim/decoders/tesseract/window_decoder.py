@@ -22,6 +22,7 @@ import stim
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
 
 if TYPE_CHECKING:
@@ -37,8 +38,8 @@ DETECTOR_ORDER_METHODS = {
     "coordinate": "DetCoordinate",
 }
 
-_Status = decoder_module.BackendDecodeStatus
-_Reason = backend_outcome.BackendFailureReason
+_Status = decoding_records.BackendDecodeStatus
+_Reason = decoding_records.BackendFailureReason
 
 
 class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
@@ -477,8 +478,8 @@ def _outcome_of(
 
 def _failed_outcome(
     *,
-    status: decoder_module.BackendDecodeStatus,
-    reason: backend_outcome.BackendFailureReason,
+    status: decoding_records.BackendDecodeStatus,
+    reason: decoding_records.BackendFailureReason,
     physical_correction=None,
     reconstructed_syndrome=None,
 ) -> backend_outcome.BackendDecodeOutcome:

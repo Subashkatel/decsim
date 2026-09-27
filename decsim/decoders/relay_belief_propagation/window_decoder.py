@@ -25,13 +25,14 @@ import scipy.sparse
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
 
 if TYPE_CHECKING:
     import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 
-_Status = decoder_module.BackendDecodeStatus
-_Reason = backend_outcome.BackendFailureReason
+_Status = decoding_records.BackendDecodeStatus
+_Reason = decoding_records.BackendFailureReason
 
 
 class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):

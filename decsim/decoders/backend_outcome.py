@@ -11,52 +11,30 @@ discard, counted apart and never as an error
 """
 
 import dataclasses
-import enum
 import math
 import numbers
 from typing import Optional
 
 import numpy
 
-import decsim.decoders.decoder as decoder_module
 import decsim.records.decoding as decoding_records
 
-
-class BackendFailureReason(enum.Enum):
-    """Typed reason a backend attempt could not be committed."""
-
-    SEARCH_LIMIT_EXHAUSTED = "search_limit_exhausted"
-    NO_CONVERGED_RELAY_SOLUTION = "no_converged_relay_solution"
-    CORRECTION_NOT_BINARY = "correction_not_binary"
-    CORRECTION_WRONG_ARITY = "correction_wrong_arity"
-    CORRECTION_DOES_NOT_MATCH_SYNDROME = "correction_does_not_match_syndrome"
-    NONZERO_SYNDROME_WITHOUT_FAULTS = "nonzero_syndrome_without_faults"
-    UPSTREAM_EXCEPTION = "upstream_exception"
-    # PyMatching raises on a syndrome no matching explains; the matching
-    # rows report it with no correction under INVALID_CORRECTION
-    NO_PERFECT_MATCHING = "no_perfect_matching"
-
-
+_Status = decoding_records.BackendDecodeStatus
+_Reason = decoding_records.BackendFailureReason
 _STATUS_REASONS = {
-    decoder_module.BackendDecodeStatus.LOW_CONFIDENCE: frozenset(
-        {BackendFailureReason.SEARCH_LIMIT_EXHAUSTED}
-    ),
-    decoder_module.BackendDecodeStatus.NONCONVERGED: frozenset(
-        {BackendFailureReason.NO_CONVERGED_RELAY_SOLUTION}
-    ),
-    decoder_module.BackendDecodeStatus.INVALID_CORRECTION: frozenset(
+    _Status.LOW_CONFIDENCE: frozenset({_Reason.SEARCH_LIMIT_EXHAUSTED}),
+    _Status.NONCONVERGED: frozenset({_Reason.NO_CONVERGED_RELAY_SOLUTION}),
+    _Status.INVALID_CORRECTION: frozenset(
         {
-            BackendFailureReason.CORRECTION_NOT_BINARY,
-            BackendFailureReason.CORRECTION_WRONG_ARITY,
-            BackendFailureReason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
+            _Reason.CORRECTION_NOT_BINARY,
+            _Reason.CORRECTION_WRONG_ARITY,
+            _Reason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
         }
     ),
-    decoder_module.BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE: frozenset(
-        {BackendFailureReason.NONZERO_SYNDROME_WITHOUT_FAULTS}
+    _Status.EMPTY_MODEL_UNSATISFIABLE: frozenset(
+        {_Reason.NONZERO_SYNDROME_WITHOUT_FAULTS}
     ),
-    decoder_module.BackendDecodeStatus.BACKEND_ERROR: frozenset(
-        {BackendFailureReason.UPSTREAM_EXCEPTION}
-    ),
+    _Status.BACKEND_ERROR: frozenset({_Reason.UPSTREAM_EXCEPTION}),
 }
 
 
@@ -64,8 +42,8 @@ _STATUS_REASONS = {
 class BackendDecodeOutcome:
     """Immutable correction, disposition and diagnostics of one backend call."""
 
-    status: decoder_module.BackendDecodeStatus
-    failure_reason: Optional[BackendFailureReason]
+    status: _Status
+    failure_reason: Optional[_Reason]
     physical_correction: Optional[tuple[int, ...]]
     component_correction: Optional[tuple[int, ...]]
     reconstructed_syndrome: Optional[tuple[int, ...]]
@@ -75,9 +53,7 @@ class BackendDecodeOutcome:
 
     def __post_init__(self) -> None:
         _check_status_reason(self.status, self.failure_reason)
-        may_lack_correction = (
-            self.status is not decoder_module.BackendDecodeStatus.SUCCEEDED
-        )
+        may_lack_correction = self.status is not _Status.SUCCEEDED
         physical_correction = _binary_tuple(
             self.physical_correction,
             name="physical_correction",
@@ -111,7 +87,7 @@ class BackendDecodeOutcome:
     @property
     def succeeded(self) -> bool:
         """Whether the backend committed a correction it stands behind."""
-        return self.status is decoder_module.BackendDecodeStatus.SUCCEEDED
+        return self.status is _Status.SUCCEEDED
 
 
 def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
@@ -123,14 +99,12 @@ def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
     reconstructed = (0,) * detector_count
     if numpy.any(syndrome):
         return _empty_model_outcome(
-            decoder_module.BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE,
-            BackendFailureReason.NONZERO_SYNDROME_WITHOUT_FAULTS,
+            _Status.EMPTY_MODEL_UNSATISFIABLE,
+            _Reason.NONZERO_SYNDROME_WITHOUT_FAULTS,
             None,
             reconstructed,
         )
-    return _empty_model_outcome(
-        decoder_module.BackendDecodeStatus.SUCCEEDED, None, (), reconstructed
-    )
+    return _empty_model_outcome(_Status.SUCCEEDED, None, (), reconstructed)
 
 
 def window_decode_of(
@@ -161,8 +135,8 @@ def window_decode_of(
 
 
 def no_correction_decode(
-    status: decoder_module.BackendDecodeStatus,
-    reason: BackendFailureReason,
+    status: _Status,
+    reason: _Reason,
     fault_count: int,
 ) -> decoding_records.WindowDecode:
     """The answer of a backend that produced no correction: empty, marked."""
@@ -173,11 +147,11 @@ def no_correction_decode(
 
 
 def _check_status_reason(
-    status: decoder_module.BackendDecodeStatus,
-    reason: Optional[BackendFailureReason],
+    status: _Status,
+    reason: Optional[_Reason],
 ) -> None:
     """A failed outcome names a reason of its status; a success names none."""
-    if status is decoder_module.BackendDecodeStatus.SUCCEEDED:
+    if status is _Status.SUCCEEDED:
         if reason is not None:
             raise ValueError(
                 "a successful outcome cannot have a failure reason"
@@ -251,8 +225,8 @@ def _nonnegative_integer(value, *, name: str):
 
 
 def _empty_model_outcome(
-    status: decoder_module.BackendDecodeStatus,
-    reason: Optional[BackendFailureReason],
+    status: _Status,
+    reason: Optional[_Reason],
     physical_correction,
     reconstructed: tuple,
 ) -> BackendDecodeOutcome:

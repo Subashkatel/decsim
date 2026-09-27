@@ -437,7 +437,9 @@ def _joined_observables(parts: list) -> tuple:
     return decoder_module.bit_tuple(flips)
 
 
-def _joined_status(parts: list) -> Optional[Any]:
+def _joined_status(
+    parts: list,
+) -> Optional[decoding_records.BackendDecodeStatus]:
     """The first part's best-effort status; None when both succeeded."""
     for part in parts:
         if part.decode_status is not None:
@@ -445,7 +447,9 @@ def _joined_status(parts: list) -> Optional[Any]:
     return None
 
 
-def _joined_no_correction_reason(parts: list) -> Optional[Any]:
+def _joined_no_correction_reason(
+    parts: list,
+) -> Optional[decoding_records.BackendFailureReason]:
     """The first part's reason for no correction; None when both had one."""
     for part in parts:
         if part.no_correction_reason is not None:

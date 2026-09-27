@@ -14,6 +14,7 @@ import numpy
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 from tests.decoders import windows
 
 GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
@@ -77,8 +78,8 @@ def test_an_outcome_that_carries_a_correction_is_committed_with_its_status():
     the machine has for the window, so the row commits it and carries
     NONCONVERGED on the result for the frame and the reports to read.
     """
-    nonconverged = decoder_module.BackendDecodeStatus.NONCONVERGED
-    reasons = backend_outcome.BackendFailureReason
+    nonconverged = decoding_records.BackendDecodeStatus.NONCONVERGED
+    reasons = decoding_records.BackendFailureReason
     reason = reasons.NO_CONVERGED_RELAY_SOLUTION
     outcome = outcome_of(nonconverged, reason, (1, 0))
     answer = backend_outcome.window_decode_of(outcome, 2)
@@ -107,8 +108,8 @@ def test_an_outcome_with_no_correction_commits_an_empty_one_and_its_reason():
     correction of the model's width and names the backend's own reason,
     which is what makes the shot unscored.
     """
-    backend_error = decoder_module.BackendDecodeStatus.BACKEND_ERROR
-    reasons = backend_outcome.BackendFailureReason
+    backend_error = decoding_records.BackendDecodeStatus.BACKEND_ERROR
+    reasons = decoding_records.BackendFailureReason
     reason = reasons.UPSTREAM_EXCEPTION
     outcome = outcome_of(backend_error, reason, None)
     answer = backend_outcome.window_decode_of(outcome, 3)

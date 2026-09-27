@@ -112,7 +112,7 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
             return result
         syndrome = decoder_module.payload_syndrome(job)
         outcome = self.referee.decode(model, syndrome)
-        succeeded = decoder_module.BackendDecodeStatus.SUCCEEDED
+        succeeded = decoding_records.BackendDecodeStatus.SUCCEEDED
         if outcome.status is not succeeded:
             return result
         referee_flips = _owned_observable_flips(model, outcome)

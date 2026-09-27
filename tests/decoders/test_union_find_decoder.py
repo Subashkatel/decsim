@@ -19,7 +19,6 @@ import numpy
 import pytest
 import scipy.sparse
 
-import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -201,7 +200,7 @@ def test_an_unsatisfiable_syndrome_is_marked_and_a_satisfiable_one_is_not():
     unsatisfiable = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     unsatisfiable_job = _job(model, unsatisfiable)
     unsatisfiable_result = row.decode(unsatisfiable_job)
-    invalid = decoder_module.BackendDecodeStatus.INVALID_CORRECTION
+    invalid = decoding_records.BackendDecodeStatus.INVALID_CORRECTION
     assert unsatisfiable_result.decode_status is invalid
     satisfiable = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     satisfiable_job = _job(model, satisfiable)

@@ -113,8 +113,8 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
                 raise
             fault_count = faults.check.shape[1]
             return backend_outcome.no_correction_decode(
-                decoder_module.BackendDecodeStatus.INVALID_CORRECTION,
-                backend_outcome.BackendFailureReason.NO_PERFECT_MATCHING,
+                decoding_records.BackendDecodeStatus.INVALID_CORRECTION,
+                decoding_records.BackendFailureReason.NO_PERFECT_MATCHING,
                 fault_count,
             )
         correction = numpy.asarray(selected, dtype=numpy.uint8)

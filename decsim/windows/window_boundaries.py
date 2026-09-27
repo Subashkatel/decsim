@@ -38,7 +38,6 @@ import decsim.windows.window_planner as window_planner
 class HeldBoundary:
     """A boundary kept back until the window's result is final (Held)."""
 
-    source_request_key: window_records.DecoderRequestKey
     operation: program_records.Operation
     boundary: object
 
@@ -76,7 +75,7 @@ class BoundaryCourier:
             )
             return
         record = self._record(window.key)
-        record.held = HeldBoundary(request_key, operation, boundary)
+        record.held = HeldBoundary(operation, boundary)
 
     def ship_held(
         self,

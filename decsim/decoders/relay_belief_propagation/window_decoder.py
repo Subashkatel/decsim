@@ -28,7 +28,7 @@ import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.seeding as seeding
 
-_Status = backend_outcome.BackendDecodeStatus
+_Status = decoder_module.BackendDecodeStatus
 _Reason = backend_outcome.BackendFailureReason
 _SEED_LIMIT = 2**64
 

@@ -152,15 +152,10 @@ class AuditLane:
         self.audited_count = 0
         self.audited_bad_count = 0
         self.weighted_bad_sum = 0.0
-        self.kept_count = 0
 
     def should_audit(self, unit_random: float) -> bool:
         """Whether this kept window is audited, from one uniform draw."""
         return unit_random < self.audit_rate
-
-    def record_kept(self) -> None:
-        """One more window was kept."""
-        self.kept_count += 1
 
     def record_audit(self, weak_was_bad: bool) -> None:
         """One audit's label; a bad one weighs 1/audit_rate windows."""
@@ -241,7 +236,6 @@ class OnlineThresholdController:
         escalated = self.tracker.observe(gap)
         audited = False
         if not escalated:
-            self.audit.record_kept()
             audited = self.audit.should_audit(unit_random)
         return escalated, audited
 

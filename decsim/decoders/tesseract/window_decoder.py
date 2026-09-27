@@ -27,7 +27,7 @@ import decsim.seeding as seeding
 
 _DETECTOR_ORDER_METHODS = frozenset({"index", "breadth_first", "coordinate"})
 _SEED_LIMIT = 1 << 64
-_Status = backend_outcome.BackendDecodeStatus
+_Status = decoder_module.BackendDecodeStatus
 _Reason = backend_outcome.BackendFailureReason
 
 
@@ -537,7 +537,7 @@ def _outcome_of(
 
 def _failed_outcome(
     *,
-    status: backend_outcome.BackendDecodeStatus,
+    status: decoder_module.BackendDecodeStatus,
     reason: backend_outcome.BackendFailureReason,
     physical_correction=None,
     reconstructed_syndrome=None,

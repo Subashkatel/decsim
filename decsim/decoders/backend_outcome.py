@@ -19,8 +19,6 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.records.decoding as decoding_records
 
-BackendDecodeStatus = decoder_module.BackendDecodeStatus
-
 
 class BackendFailureReason(enum.Enum):
     """Typed reason a backend attempt could not be committed."""
@@ -35,23 +33,23 @@ class BackendFailureReason(enum.Enum):
 
 
 _STATUS_REASONS = {
-    BackendDecodeStatus.LOW_CONFIDENCE: frozenset(
+    decoder_module.BackendDecodeStatus.LOW_CONFIDENCE: frozenset(
         {BackendFailureReason.SEARCH_LIMIT_EXHAUSTED}
     ),
-    BackendDecodeStatus.NONCONVERGED: frozenset(
+    decoder_module.BackendDecodeStatus.NONCONVERGED: frozenset(
         {BackendFailureReason.NO_CONVERGED_RELAY_SOLUTION}
     ),
-    BackendDecodeStatus.INVALID_CORRECTION: frozenset(
+    decoder_module.BackendDecodeStatus.INVALID_CORRECTION: frozenset(
         {
             BackendFailureReason.CORRECTION_NOT_BINARY,
             BackendFailureReason.CORRECTION_WRONG_ARITY,
             BackendFailureReason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
         }
     ),
-    BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE: frozenset(
+    decoder_module.BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE: frozenset(
         {BackendFailureReason.NONZERO_SYNDROME_WITHOUT_FAULTS}
     ),
-    BackendDecodeStatus.BACKEND_ERROR: frozenset(
+    decoder_module.BackendDecodeStatus.BACKEND_ERROR: frozenset(
         {BackendFailureReason.UPSTREAM_EXCEPTION}
     ),
 }
@@ -61,7 +59,7 @@ _STATUS_REASONS = {
 class BackendDecodeOutcome:
     """Immutable correction, disposition and diagnostics of one backend call."""
 
-    status: BackendDecodeStatus
+    status: decoder_module.BackendDecodeStatus
     failure_reason: Optional[BackendFailureReason]
     physical_correction: Optional[tuple[int, ...]]
     component_correction: Optional[tuple[int, ...]]
@@ -72,7 +70,9 @@ class BackendDecodeOutcome:
 
     def __post_init__(self) -> None:
         _check_status_reason(self.status, self.failure_reason)
-        may_lack_correction = self.status is not BackendDecodeStatus.SUCCEEDED
+        may_lack_correction = (
+            self.status is not decoder_module.BackendDecodeStatus.SUCCEEDED
+        )
         physical_correction = _binary_tuple(
             self.physical_correction,
             name="physical_correction",
@@ -106,7 +106,7 @@ class BackendDecodeOutcome:
     @property
     def succeeded(self) -> bool:
         """Whether the backend committed a correction it stands behind."""
-        return self.status is BackendDecodeStatus.SUCCEEDED
+        return self.status is decoder_module.BackendDecodeStatus.SUCCEEDED
 
 
 def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
@@ -118,13 +118,13 @@ def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
     reconstructed = (0,) * detector_count
     if numpy.any(syndrome):
         return _empty_model_outcome(
-            BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE,
+            decoder_module.BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE,
             BackendFailureReason.NONZERO_SYNDROME_WITHOUT_FAULTS,
             None,
             reconstructed,
         )
     return _empty_model_outcome(
-        BackendDecodeStatus.SUCCEEDED, None, (), reconstructed
+        decoder_module.BackendDecodeStatus.SUCCEEDED, None, (), reconstructed
     )
 
 
@@ -155,10 +155,11 @@ def window_decode_of(
 
 
 def _check_status_reason(
-    status: BackendDecodeStatus, reason: Optional[BackendFailureReason]
+    status: decoder_module.BackendDecodeStatus,
+    reason: Optional[BackendFailureReason],
 ) -> None:
     """A failed outcome names a reason of its status; a success names none."""
-    if status is BackendDecodeStatus.SUCCEEDED:
+    if status is decoder_module.BackendDecodeStatus.SUCCEEDED:
         if reason is not None:
             raise ValueError(
                 "a successful outcome cannot have a failure reason"
@@ -232,7 +233,7 @@ def _nonnegative_integer(value, *, name: str):
 
 
 def _empty_model_outcome(
-    status: BackendDecodeStatus,
+    status: decoder_module.BackendDecodeStatus,
     reason: Optional[BackendFailureReason],
     physical_correction,
     reconstructed: tuple,

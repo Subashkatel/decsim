@@ -92,16 +92,6 @@ class WindowManager:
                 window_info
             )
 
-    @property
-    def ledger(self):
-        """The logical ledger: which owner committed which rounds."""
-        return self.results.ledger
-
-    @property
-    def windows(self) -> dict:
-        """Every window by key; the planner's table."""
-        return self.planner.windows_by_key
-
     # ---- the plan: operations, streams, windows and their holds
 
     def register_operation(self, operation: program_records.Operation) -> None:

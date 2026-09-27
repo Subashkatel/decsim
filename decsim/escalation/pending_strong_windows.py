@@ -41,9 +41,6 @@ class ReleaseConditions:
     released_description: str = ""
 
 
-RELEASED_AT_ONCE = ReleaseConditions()
-
-
 @dataclasses.dataclass(frozen=True)
 class PendingStrongWindow:
     """One held strong window: what was assigned, and what releases it."""

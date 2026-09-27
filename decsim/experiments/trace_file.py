@@ -50,14 +50,6 @@ class TraceDocument:
                 found.add(channel)
         return found
 
-    def moves_on(self, channel: str) -> list:
-        """Every move over one link path, in send order."""
-        found = []
-        for event in self.of_phase("X"):
-            if event["args"].get("channel") == channel:
-                found.append(event)
-        return found
-
 
 def load(path) -> TraceDocument:
     """Read one trace file, plain or gzipped, and index its events."""
@@ -112,15 +104,6 @@ def range_of(text: str) -> tuple:
 def window_id_of(event: dict) -> Optional[int]:
     """The window an event belongs to, by its "op:window" argument."""
     key = event["args"].get("window")
-    if key is None:
-        return None
-    words = key.split(":")
-    return int(words[1])
-
-
-def round_number_of(event: dict) -> Optional[int]:
-    """The round an event belongs to, by its "op:round" argument."""
-    key = event["args"].get("round")
     if key is None:
         return None
     words = key.split(":")

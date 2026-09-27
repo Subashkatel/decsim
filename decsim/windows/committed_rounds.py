@@ -29,10 +29,6 @@ class LogicalLedger:
         """The owner's contribution, or None."""
         return self.contributions.get(owner_key)
 
-    def drop(self, owner_key: tuple) -> None:
-        """A window is decoded again: its contribution is gone until commit."""
-        self.contributions.pop(owner_key, None)
-
     def replace_contributions(
         self,
         owner_key: tuple,

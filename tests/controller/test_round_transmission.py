@@ -172,7 +172,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     store_output.store = store
     store_output.link = links
     weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
-        engine, settings
+        engine
     )
     weak_receiver.store = store
     weak_receiver.output = store_output

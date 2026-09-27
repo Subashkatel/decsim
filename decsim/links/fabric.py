@@ -325,11 +325,3 @@ class _EveryChannelsFrames:
         """Hear every frame of every channel from now on."""
         for channel in self._channels:
             channel.trace.frame_landed.connect(listener)
-
-    @property
-    def has_listeners(self) -> bool:
-        """Whether any channel's frames are heard."""
-        for channel in self._channels:
-            if channel.trace.frame_landed.has_listeners:
-                return True
-        return False

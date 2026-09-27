@@ -781,25 +781,16 @@ def _folder_files(folders: list, name: str) -> list:
 def _add_pool_columns(
     row: dict, totals, round_period_microseconds: float
 ) -> None:
-    """The pool columns and Toshio's bound, when the shots hold them.
-
-    A folder an older tree wrote holds no pool columns, or no
-    commit_rounds and so no bound, and the rule of _points_held applies:
-    it gets none rather than a column of zeros or a bound on a guessed
-    r_com.
-    """
-    if "strong_decoded_rounds" not in totals.sums:
-        return
+    """The pool columns and Toshio's bound."""
     row["weak_queue_max"] = totals.maxes["weak_queue_max"]
     row["strong_queue_max"] = totals.maxes["strong_queue_max"]
     row["weak_busy_fraction"] = totals.mean("weak_busy_fraction")
     row["strong_busy_fraction"] = totals.mean("strong_busy_fraction")
     row["escalated_windows"] = totals.sums["escalated_windows"]
     row["strong_service_mean_us"] = totals.mean("strong_service_mean_us")
-    if "commit_rounds" in totals.maxes:
-        row["strong_service_bound_us"] = strong_service_bound_us(
-            totals, round_period_microseconds
-        )
+    row["strong_service_bound_us"] = strong_service_bound_us(
+        totals, round_period_microseconds
+    )
     row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
 
 

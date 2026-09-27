@@ -178,6 +178,24 @@ def test_a_folder_holding_another_scripts_copy_is_refused(
     )
 
 
+def test_a_task_on_another_node_with_the_same_process_id_keeps_its_file(
+    tmp_path, monkeypatch
+):
+    """Process ids repeat across nodes; a staged copy is named at random."""
+    write_script(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    out.mkdir()
+    other_staging = out / ".run.py.4242"
+    other_staging.write_text("the other node's staged copy\n")
+    monkeypatch.setattr(os, "getpid", lambda: 4242)
+    experiment = tiny_experiment()
+
+    experiment.main(arguments=["0", "--out", str(out)])
+
+    other_text = other_staging.read_text()
+    assert other_text == "the other node's staged copy\n"
+
+
 def test_an_id_past_the_last_point_is_refused(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
     experiment = tiny_experiment()

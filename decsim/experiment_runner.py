@@ -17,6 +17,7 @@ import datetime
 import os
 import pathlib
 import sys
+import tempfile
 from collections.abc import Mapping
 from typing import Optional
 
@@ -215,14 +216,19 @@ def _record_the_run(folder: pathlib.Path) -> None:
 def _write_once(path: pathlib.Path, text: str) -> None:
     """The file written by whichever array task comes first, then checked.
 
-    The text is staged under this process's own name and hard-linked
+    The text is staged in a file created exclusively under a random name
+    beside it, since process ids repeat across nodes, and hard-linked
     into place, which fails when the file exists, so a task that starts
     beside another never reads a half-written file.
     """
     if not path.exists():
-        process_id = os.getpid()
-        staging = path.with_name(f".{path.name}.{process_id}")
-        staging.write_text(text)
+        prefix = f".{path.name}."
+        descriptor, staging_name = tempfile.mkstemp(
+            prefix=prefix, dir=path.parent
+        )
+        with os.fdopen(descriptor, "w") as staging_file:
+            staging_file.write(text)
+        staging = pathlib.Path(staging_name)
         try:
             os.link(staging, path)
         except FileExistsError:

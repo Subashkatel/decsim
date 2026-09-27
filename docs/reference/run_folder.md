@@ -73,9 +73,11 @@ first and what was measured after, one variable per column, which is
 Wickham's tidy table (Tidy Data, J. Stat. Softw. 59(10), 2014, section
 2.3), so a reader groups, filters and plots by a column with no parsing.
 
-A point whose sweep block did not set a path holds the value its yaml
-resolved to there, since that is its value; a path its yaml does not
-hold is an empty cell. A string or a number is written as itself, and
+Every cell is the value the point ran with, read from its resolved
+yaml: a swept reference such as `${windows.commit_rounds}` is written
+as the value it names, a mapping as its child axes changed it, and a
+point whose block did not set a path holds the value its yaml resolved
+to there. A path its yaml does not hold is an empty cell. A string or a number is written as itself, and
 any other value (a flag, a null, a whole decoder row an axis set) as one
 cell of compact json with its keys sorted, as sinter writes
 `json_metadata` (`sinter/_data/_csv_out.py:35-37`). The typed value is

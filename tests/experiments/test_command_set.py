@@ -772,6 +772,63 @@ def test_a_point_holds_its_own_value_at_a_path_another_block_sets(tmp_path):
     assert second["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
 
 
+def test_a_swept_reference_is_written_as_the_value_it_resolved_to(tmp_path):
+    """A table is built from the value a point ran, not the text it wrote."""
+    card = {
+        "qpu": {"kind": "stim_device", "distance": 7},
+        "workload": yaml_configs.memory_workload(15),
+        "sweep": [
+            {
+                "axes": {
+                    "qpu.distance": ["${windows.commit_rounds}"],
+                    "windows.commit_rounds": [3, 5],
+                },
+                "shots": 1,
+            }
+        ],
+    }
+    card["workload"]["arguments"]["physical_error_probability"] = 0.001
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    sweep_path = out_dir / "sweep.csv"
+    rows = _csv_rows(sweep_path)
+    distances = [row["qpu.distance"] for row in rows]
+    assert distances == ["3", "5"]
+
+
+def test_a_child_axis_under_a_swept_mapping_shows_in_the_mappings_cell(
+    tmp_path,
+):
+    """The mapping is placed first, then its child: the point ran both."""
+    frame = {"clock": "fridge", "write_cycles": 1}
+    card = {
+        "qpu": {"kind": "stim_device", "distance": 3},
+        "workload": yaml_configs.memory_workload(15),
+        "sweep": [
+            {
+                "axes": {
+                    "pauli_frame": [frame],
+                    "pauli_frame.write_cycles": [2],
+                },
+                "shots": 1,
+            }
+        ],
+    }
+    card["workload"]["arguments"]["physical_error_probability"] = 0.001
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    sweep_path = out_dir / "sweep.csv"
+    (row,) = _csv_rows(sweep_path)
+    assert row["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
+    assert row["pauli_frame.write_cycles"] == "2"
+
+
 def test_every_point_records_its_own_makers_arguments(tmp_path):
     """Each point's maker was called with its own arguments and version."""
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)

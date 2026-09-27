@@ -322,12 +322,13 @@ def swept_values(run_dir: pathlib.Path, point_ids: list) -> dict:
     One column per swept path is Wickham's tidy table, each variable a
     column and each observation a row (Tidy Data, J. Stat. Softw.
     59(10), 2014, section 2.3); the paths come in the order the points
-    first set them. A point whose block did not set a path holds the
-    value its yaml resolved to there, from its record's sections, since
-    that is its value; a path its sections do not hold is an empty cell,
-    not available. A value other than a string or a number is one cell
-    of compact json, as sinter writes json_metadata
-    (sinter/_data/_csv_out.py:35-37); the typed value is in the record.
+    first set them. Every cell is the value the point resolved to, from
+    its record's sections, whether its block set the path or not, so a
+    swept reference is the value it names; a path its sections do not
+    hold is an empty cell, not available. A value other than a string
+    or a number is one cell of compact json, as sinter writes
+    json_metadata (sinter/_data/_csv_out.py:35-37); the typed value is
+    in the record.
     """
     records = resolved_by_point(run_dir)
     paths = {}
@@ -538,14 +539,15 @@ def _producer(workload: workload_settings.WorkloadSettings) -> Optional[dict]:
 
 
 def _cells_of(record: dict, paths: list) -> dict:
-    """One point's cell at each swept path, its sweep's value first."""
-    metadata = record["metadata"]
+    """One point's cell at each swept path, the value it ran with.
+
+    The resolved sections hold it: a swept reference as the value it
+    names, and a mapping as its child axes changed it.
+    """
+    sections = record["sections"]
     cells = {}
     for path in paths:
-        if path in metadata:
-            cells[path] = _cell_of(metadata[path])
-            continue
-        cells[path] = _resolved_cell(record["sections"], path)
+        cells[path] = _resolved_cell(sections, path)
     return cells
 
 

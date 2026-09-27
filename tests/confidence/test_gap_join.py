@@ -12,6 +12,7 @@ overlap, and the committed corrections are the same either way.
 import copy
 import dataclasses
 import json
+import math
 import pathlib
 
 import pytest
@@ -437,3 +438,18 @@ def test_only_the_answering_solve_carries_the_windows_soft_output():
 
     assert light_result.soft_output.gap == 1.0
     assert heavy_result.soft_output is None
+
+
+def test_a_class_no_correction_reaches_never_answers_the_window():
+    """The reachable class answers, whichever order the two arrived in."""
+    engine, join, verdict, queue = _two_solve_join(0)
+    unreachable_job, unreachable_result = _forced_solve(
+        "unreachable", 0, math.inf
+    )
+    reachable_job, reachable_result = _forced_solve("reachable", 1, 4.0)
+
+    join.accept_result(unreachable_job, unreachable_result)
+    join.accept_result(reachable_job, reachable_result)
+    (answered_job, _answered_result, _tick) = verdict.answers[0]
+
+    assert answered_job is reachable_job

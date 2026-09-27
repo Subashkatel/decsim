@@ -13,6 +13,7 @@ logical class (Gidney et al. 2312.04522 Sec. "Complementary gap").
 """
 
 import dataclasses
+import math
 from typing import Optional
 
 import numpy
@@ -98,12 +99,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         except ValueError as error:
             if "perfect matching" not in str(error):
                 raise
-            fault_count = faults.check.shape[1]
-            return backend_outcome.no_correction_decode(
-                decoding_records.BackendDecodeStatus.INVALID_CORRECTION,
-                decoding_records.BackendFailureReason.NO_PERFECT_MATCHING,
-                fault_count,
-            )
+            return _no_matching_decode(faults)
         return decoding_records.WindowDecode(selected)
 
     def decode_forced_window(
@@ -116,12 +112,24 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         (Gidney et al. 2312.04522 Sec. "Complementary gap"). A window
         that pins no observable has no forced solve, and the plain
         decode answers it with no weight, which leaves the confidence
-        without a gap and escalates the window.
+        without a gap and escalates the window. A class no matching
+        reaches raises in PyMatching as the plain decode does; it has no
+        correction and probability zero, so its weight is +inf, the
+        complementary gap being the log-likelihood ratio of the two
+        classes' best hypotheses (Gidney et al. 2312.04522 Sec. 4).
         """
         if backend.forced is None:
             return self.decode_window(backend, model, faults, syndrome)
         pinned = _with_pinned_observable(syndrome, forced_logical_class)
-        selected, weight = backend.forced.decode(pinned, return_weight=True)
+        try:
+            selected, weight = backend.forced.decode(pinned, return_weight=True)
+        except ValueError as error:
+            if "perfect matching" not in str(error):
+                raise
+            no_matching = _no_matching_decode(faults)
+            return dataclasses.replace(
+                no_matching, forced_class_weight=math.inf
+            )
         return decoding_records.WindowDecode(
             selected, forced_class_weight=float(weight)
         )
@@ -160,6 +168,16 @@ class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     def _weights_for(self, faults):
         fault_count = len(faults.priors)
         return numpy.ones(fault_count)
+
+
+def _no_matching_decode(faults) -> decoding_records.WindowDecode:
+    """PyMatching found no perfect matching: no correction, marked invalid."""
+    fault_count = faults.check.shape[1]
+    return backend_outcome.no_correction_decode(
+        decoding_records.BackendDecodeStatus.INVALID_CORRECTION,
+        decoding_records.BackendFailureReason.NO_PERFECT_MATCHING,
+        fault_count,
+    )
 
 
 def _warm_up(matching, faults) -> None:

@@ -22,6 +22,7 @@ import stim
 import decsim.confidence.complementary as complementary
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 import tests.decoders.windows as windows
 
 DECIBELS_PER_NAT = 10.0 * math.log10(math.e)
@@ -224,3 +225,37 @@ def test_the_two_class_weights_are_the_pinned_graphs_own_edges():
         2.2540580520993854, abs=1e-6
     )
     assert soft_output.gap == pytest.approx(0.5185306701404, abs=1e-6)
+
+
+def _class_solve(weight: float) -> decoding_records.DecodeResult:
+    """One forced solve's result, carrying only its class weight."""
+    result = decoding_records.DecodeResult(1, 0)
+    result.forced_class_weight = weight
+    return result
+
+
+def test_a_class_no_correction_reaches_makes_the_gap_infinite():
+    """A class of probability zero leaves the decoder certain of the other.
+
+    The gap is the log-likelihood ratio of the two classes' best
+    hypotheses (Gidney et al. 2312.04522 Sec. 4, lines 830-834), and a
+    class no matching reaches has probability zero, weight +inf.
+    """
+    reachable = _class_solve(2.5)
+    unreachable = _class_solve(math.inf)
+    signal = complementary.ComplementaryGap()
+    computation = signal.compute((reachable, unreachable))
+    soft_output = computation.soft_output
+
+    assert soft_output.gap == math.inf
+    assert soft_output.decoded_class_weight == 2.5
+
+
+def test_two_classes_no_correction_reaches_leave_no_gap():
+    """With neither class possible there is no ratio, and no gap."""
+    first = _class_solve(math.inf)
+    second = _class_solve(math.inf)
+    signal = complementary.ComplementaryGap()
+    computation = signal.compute((first, second))
+
+    assert computation.soft_output is None

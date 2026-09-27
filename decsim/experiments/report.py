@@ -26,7 +26,7 @@ summaries.
 
 The per-value counts file stays small because every sample is a whole
 number of ticks divided by the ticks in a microsecond
-(measure.ticks_to_microseconds). Under a fixed-latency decoder card,
+(config.ticks_to_microseconds). Under a fixed-latency decoder card,
 which is what an LER sweep of a million shots runs, a point's windows
 take one of a handful of tick spans, so the file's length follows the
 spread of the values and not the shot count. A wall-clock decoder

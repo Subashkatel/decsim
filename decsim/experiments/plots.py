@@ -89,11 +89,6 @@ MOVEMENT_SERIES = (
 TRACE_DIR = "trace"
 
 
-def ticks_to_microseconds(ticks) -> float:
-    """A tick count as a float of microseconds, the figures' time unit."""
-    return ticks / config_module.TICKS_PER_MICROSECOND
-
-
 def timeline_plot(trace_path, path: Path) -> None:
     """One traced shot's hops and stages, in the time they happened.
 
@@ -678,30 +673,34 @@ def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
 
 def _timeline_windows(document) -> dict:
     """Window id -> the rounds it reads and the tick its unit took it."""
-    dispatch_us = {}
+    dispatch_microseconds = {}
     for event in document.of_phase("X"):
         if not event["name"].endswith(" queued"):
             continue
         window_id = trace_file.window_id_of(event)
         dispatch_ticks = trace_file.end_tick_of(event)
-        dispatch_us[window_id] = ticks_to_microseconds(dispatch_ticks)
+        dispatch_microseconds[window_id] = config_module.ticks_to_microseconds(
+            dispatch_ticks
+        )
     windows = {}
     for event in document.of_phase("i"):
         if not event["name"].endswith(" ready"):
             continue
-        window = _timeline_window(event, dispatch_us)
+        window = _timeline_window(event, dispatch_microseconds)
         windows[window.window_id] = window
     return windows
 
 
-def _timeline_window(event: dict, dispatch_us: dict) -> _TimelineWindow:
+def _timeline_window(
+    event: dict, dispatch_microseconds: dict
+) -> _TimelineWindow:
     """One window's rounds and the moment its unit was assigned."""
     window_id = trace_file.window_id_of(event)
     read_lo, read_hi = trace_file.range_of(event["args"]["rounds"])
     commit_lo, commit_hi = trace_file.range_of(event["args"]["commit"])
     ready_ticks = trace_file.tick_of(event)
-    ready_us = ticks_to_microseconds(ready_ticks)
-    dispatch = dispatch_us.get(window_id, ready_us)
+    ready_microseconds = config_module.ticks_to_microseconds(ready_ticks)
+    dispatch = dispatch_microseconds.get(window_id, ready_microseconds)
     return _TimelineWindow(
         window_id=window_id,
         read_lo=read_lo,
@@ -725,21 +724,23 @@ def _timeline_stages(document) -> dict:
 
 def _frame_spans(document) -> dict:
     """Window id -> the span from the frame accepting a write to landing."""
-    accepted_us = {}
+    accepted_microseconds = {}
     for event in document.of_phase("X"):
         if not event["name"].endswith(" correction"):
             continue
         window_id = trace_file.window_id_of(event)
         accepted_ticks = trace_file.tick_of(event)
-        accepted_us[window_id] = ticks_to_microseconds(accepted_ticks)
+        accepted_microseconds[window_id] = config_module.ticks_to_microseconds(
+            accepted_ticks
+        )
     spans = {}
     for event in document.of_phase("i"):
         if not event["name"].endswith(" committed"):
             continue
         window_id = trace_file.window_id_of(event)
         committed_ticks = trace_file.tick_of(event)
-        committed = ticks_to_microseconds(committed_ticks)
-        accepted = accepted_us.get(window_id, committed)
+        committed = config_module.ticks_to_microseconds(committed_ticks)
+        accepted = accepted_microseconds.get(window_id, committed)
         spans[window_id] = _Span(start_us=accepted, end_us=committed)
     return spans
 
@@ -748,9 +749,9 @@ def _span_of(event: dict) -> _Span:
     """A complete event's bar, from its own ticks and not its float ts."""
     start_ticks = trace_file.tick_of(event)
     end_ticks = trace_file.end_tick_of(event)
-    start_us = ticks_to_microseconds(start_ticks)
-    end_us = ticks_to_microseconds(end_ticks)
-    return _Span(start_us=start_us, end_us=end_us)
+    start_microseconds = config_module.ticks_to_microseconds(start_ticks)
+    end_microseconds = config_module.ticks_to_microseconds(end_ticks)
+    return _Span(start_us=start_microseconds, end_us=end_microseconds)
 
 
 def _round_period_microseconds(moves_by_round: dict) -> float:
@@ -1306,12 +1307,8 @@ def _ler_rows_at_probability(run_dir, probability: float) -> list:
         raise refusal.RefusalError(
             f"{run_dir} swept no p={probability:g} point"
         )
-    selected_rows.sort(key=_by_distance_text)
+    selected_rows.sort(key=_row_distance)
     return selected_rows
-
-
-def _by_distance_text(row: dict) -> int:
-    return int(row["distance"])
 
 
 def _rows_with_failures(rows: list, swept_distances: set) -> list:

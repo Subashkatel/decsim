@@ -658,7 +658,7 @@ class TraceWriter:
             "s": "t",
             "name": name,
             "cat": category,
-            "ts": _microseconds(exact),
+            "ts": config.ticks_to_microseconds(exact),
             "pid": PROCESS_ID,
             "tid": self._tid(thread),
             "args": dict(args, tick=exact),
@@ -690,7 +690,7 @@ class TraceWriter:
         row = {
             "ph": "C",
             "name": name,
-            "ts": _microseconds(tick),
+            "ts": config.ticks_to_microseconds(tick),
             "pid": PROCESS_ID,
             "tid": self._tid(thread),
             "args": dict(values),
@@ -868,7 +868,7 @@ class TraceWriter:
             "name": name,
             "cat": category,
             "id": flow_id,
-            "ts": _microseconds(tick),
+            "ts": config.ticks_to_microseconds(tick),
             "pid": PROCESS_ID,
             "tid": self._tid(thread),
             "args": dict(identity, tick=tick),
@@ -936,16 +936,12 @@ def _complete_event(
         "ph": "X",
         "name": name,
         "cat": category,
-        "ts": _microseconds(start),
-        "dur": _microseconds(duration),
+        "ts": config.ticks_to_microseconds(start),
+        "dur": config.ticks_to_microseconds(duration),
         "pid": PROCESS_ID,
         "tid": tid,
         "args": dict(args, tick=start),
     }
-
-
-def _microseconds(ticks: int) -> float:
-    return ticks / config.TICKS_PER_MICROSECOND
 
 
 def _by_tid(item) -> int:

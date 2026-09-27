@@ -1307,7 +1307,7 @@ def lindley_waits_us(requests, stages) -> list:
         duration = max(ends) - min(starts)
         start = max(arrival, free_at)
         wait_ticks = start - arrival
-        wait = measure.ticks_to_microseconds(wait_ticks)
+        wait = config_module.ticks_to_microseconds(wait_ticks)
         waits.append(wait)
         free_at = start + duration
     return waits

@@ -13,12 +13,11 @@ diagnostic only and never becomes simulated time.
 
 import dataclasses
 import math
-import numbers
 import os
 import secrets
 import threading
 import weakref
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import numpy
 import scipy.sparse
@@ -28,49 +27,27 @@ import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.seeding as seeding
 
+if TYPE_CHECKING:
+    import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
+
 _Status = decoder_module.BackendDecodeStatus
 _Reason = backend_outcome.BackendFailureReason
-_SEED_LIMIT = 2**64
 
 
 class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
     """Decode physical fault columns with one fixed-gamma Relay-BP profile.
 
     Inputs are original physical fault columns, not graph
-    decompositions. Gamma tables are fixed per live model; native
-    per-shot resampling is not exposed.
+    decompositions. Gamma tables are fixed per live model and drawn from
+    the run seed; native per-shot resampling is not exposed.
     """
 
-    _explicit_seed_label = "gamma-table seed"
-
     def __init__(
-        self,
-        *,
-        alpha: Optional[float] = None,
-        alpha_iteration_scaling_factor: float = 1.0,
-        gamma0: Optional[float] = 0.1,
-        pre_iterations: int = 80,
-        relay_set_count: int = 300,
-        iterations_per_set: int = 60,
-        gamma_interval: tuple[float, float] = (-0.24, 0.66),
-        converged_solution_count: int = 1,
-        gamma_table_seed: Optional[int] = None,
+        self, settings: "relay_decoder.RelayBeliefPropagationDecoder.Settings"
     ) -> None:
-        self.profile = _relay_profile(
-            alpha,
-            alpha_iteration_scaling_factor,
-            gamma0,
-            pre_iterations,
-            relay_set_count,
-            iterations_per_set,
-            gamma_interval,
-            converged_solution_count,
-        )
-        self._explicit_gamma_table_seed = _validated_seed(
-            gamma_table_seed, "gamma_table_seed"
-        )
-        self._initialize_run_seed_binding(self._explicit_gamma_table_seed)
-        self._effective_gamma_table_seed = self._explicit_seed
+        self.settings = settings
+        self._initialize_run_seed_binding(None)
+        self._effective_gamma_table_seed = None
         self._thread_state = threading.local()
 
     def decode(
@@ -119,13 +96,13 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         check, priors = _validated_model(faults)
         seed = self._gamma_seed()
         column_count = check.shape[1]
-        gamma_table = _gamma_table(self.profile, seed, column_count)
+        gamma_table = _gamma_table(self.settings, seed, column_count)
         if column_count == 0:
             return _CompiledRelayModel(
                 backend=None, backend_construction_failed=False
             )
         backend = _construct_backend(
-            self.profile, check, priors, gamma_table, seed
+            self.settings, check, priors, gamma_table, seed
         )
         construction_failed = backend is None
         return _CompiledRelayModel(
@@ -175,20 +152,6 @@ def _decode_once(backend, faults, syndrome):
 
 
 @dataclasses.dataclass(frozen=True)
-class _RelayProfile:
-    """One fixed-gamma Relay-BP profile, in relay-bp's own argument names."""
-
-    alpha: Optional[float]
-    alpha_iteration_scaling_factor: float
-    gamma0: Optional[float]
-    pre_iterations: int
-    relay_set_count: int
-    iterations_per_set: int
-    gamma_interval: tuple[float, float]
-    converged_solution_count: int
-
-
-@dataclasses.dataclass(frozen=True)
 class _CompiledRelayModel:
     backend: object
     backend_construction_failed: bool
@@ -213,83 +176,6 @@ class _NonbinaryCorrectionError(ValueError):
     pass
 
 
-def _finite_real(value, name: str, *, allow_none: bool = False):
-    if value is None and allow_none:
-        return None
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
-        raise TypeError(f"{name} must be a finite real number")
-    normalized = float(value)
-    if not math.isfinite(normalized):
-        raise ValueError(f"{name} must be finite")
-    return normalized
-
-
-def _nonnegative_integer(value, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
-        raise TypeError(f"{name} must be a nonnegative integer")
-    normalized = int(value)
-    if normalized < 0:
-        raise ValueError(f"{name} must be nonnegative")
-    return normalized
-
-
-def _validated_seed(value, name: str):
-    if value is None:
-        return None
-    if type(value) is not int or not 0 <= value < _SEED_LIMIT:
-        raise TypeError(f"{name} must be an unsigned 64-bit integer or None")
-    return value
-
-
-def _relay_profile(
-    alpha,
-    alpha_iteration_scaling_factor,
-    gamma0,
-    pre_iterations,
-    relay_set_count,
-    iterations_per_set,
-    gamma_interval,
-    converged_solution_count,
-) -> _RelayProfile:
-    """The profile with every argument checked once."""
-    if type(gamma_interval) is not tuple or len(gamma_interval) != 2:
-        raise TypeError("gamma_interval must be an exact pair")
-    gamma_low = _finite_real(gamma_interval[0], "gamma_interval[0]")
-    gamma_high = _finite_real(gamma_interval[1], "gamma_interval[1]")
-    if gamma_low > gamma_high:
-        raise ValueError("gamma_interval must be ordered low to high")
-    converged_solution_count = _nonnegative_integer(
-        converged_solution_count, "converged_solution_count"
-    )
-    if converged_solution_count == 0:
-        raise ValueError("converged_solution_count must be positive")
-    pre_iterations = _nonnegative_integer(pre_iterations, "pre_iterations")
-    if pre_iterations == 0:
-        # relay-bp runs its first leg for pre_iter iterations and keeps the
-        # previous call's decoding when that loop never runs
-        # (relay.rs decode_inner), so a zero first leg returns stale state
-        raise ValueError("pre_iterations must be positive")
-    alpha = _finite_real(alpha, "alpha", allow_none=True)
-    scaling = _finite_real(
-        alpha_iteration_scaling_factor, "alpha_iteration_scaling_factor"
-    )
-    gamma0 = _finite_real(gamma0, "gamma0", allow_none=True)
-    relay_set_count = _nonnegative_integer(relay_set_count, "relay_set_count")
-    iterations_per_set = _nonnegative_integer(
-        iterations_per_set, "iterations_per_set"
-    )
-    return _RelayProfile(
-        alpha=alpha,
-        alpha_iteration_scaling_factor=scaling,
-        gamma0=gamma0,
-        pre_iterations=pre_iterations,
-        relay_set_count=relay_set_count,
-        iterations_per_set=iterations_per_set,
-        gamma_interval=(gamma_low, gamma_high),
-        converged_solution_count=converged_solution_count,
-    )
-
-
 def _load_relay_decoder_type():
     try:
         import relay_bp
@@ -302,19 +188,27 @@ def _load_relay_decoder_type():
     return relay_bp.RelayDecoderF32
 
 
-def _gamma_table(profile: _RelayProfile, seed: int, column_count: int):
+def _gamma_table(
+    settings: "relay_decoder.RelayBeliefPropagationDecoder.Settings",
+    seed: int,
+    column_count: int,
+):
     """The fixed gamma table of one model, drawn from the seed."""
     bit_generator = numpy.random.PCG64(seed)
     generator = numpy.random.Generator(bit_generator)
-    gamma_low, gamma_high = profile.gamma_interval
-    shape = (profile.relay_set_count, column_count)
+    gamma_low, gamma_high = settings.gamma_interval
+    shape = (settings.relay_set_count, column_count)
     gamma_table = generator.uniform(gamma_low, gamma_high, size=shape)
     gamma_table = gamma_table.astype(numpy.float64, copy=False)
     return numpy.ascontiguousarray(gamma_table)
 
 
 def _construct_backend(
-    profile: _RelayProfile, check, priors, gamma_table, seed: int
+    settings: "relay_decoder.RelayBeliefPropagationDecoder.Settings",
+    check,
+    priors,
+    gamma_table,
+    seed: int,
 ):
     """The backend decoder, or None when the backend refused the model."""
     decoder_type = _load_relay_decoder_type()
@@ -323,17 +217,17 @@ def _construct_backend(
         return decoder_type(
             sparse_check,
             priors,
-            alpha=profile.alpha,
+            alpha=settings.alpha,
             alpha_iteration_scaling_factor=(
-                profile.alpha_iteration_scaling_factor
+                settings.alpha_iteration_scaling_factor
             ),
-            gamma0=profile.gamma0,
-            pre_iter=profile.pre_iterations,
-            num_sets=profile.relay_set_count,
-            set_max_iter=profile.iterations_per_set,
-            gamma_dist_interval=profile.gamma_interval,
+            gamma0=settings.gamma0,
+            pre_iter=settings.pre_iterations,
+            num_sets=settings.relay_set_count,
+            set_max_iter=settings.iterations_per_set,
+            gamma_dist_interval=settings.gamma_interval,
             explicit_gammas=gamma_table,
-            stop_nconv=profile.converged_solution_count,
+            stop_nconv=settings.converged_solution_count,
             stopping_criterion="nconv",
             logging=False,
             seed=seed,

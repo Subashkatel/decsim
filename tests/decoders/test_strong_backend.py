@@ -271,11 +271,19 @@ def _recorder(ended: dict, label: str, engine):
     return record
 
 
+def _seeded_relay():
+    """The relay_bp row with its gamma table seeded as a run seeds it."""
+    decoder = relay.RelayBeliefPropagationDecoder()
+    reservation = decoder.window_decoder.reserve_run_seed(5)
+    decoder.window_decoder.commit_run_seed(reservation)
+    return decoder
+
+
 class _RelayDevice:
     """One server that answers with decsim's Relay-BP at once."""
 
     def __init__(self) -> None:
-        self.decoder = relay.RelayBeliefPropagationDecoder(gamma_table_seed=5)
+        self.decoder = _seeded_relay()
 
     def capacities(self) -> dict:
         return {strong_backend.DISPATCHER: 1}
@@ -314,7 +322,7 @@ def test_a_split_regions_answer_joins_its_two_parts_decoded_alone():
     job = windows.job_for(model, detection_events[0])
     device = _RelayDevice()
     decoder = strong_backend.StrongBackendDecoder(device, "apart")
-    reference = relay.RelayBeliefPropagationDecoder(gamma_table_seed=5)
+    reference = _seeded_relay()
     part_by_basis = basis_split.split_by_basis(model)
     parts = part_by_basis.values()
     observables, flipped = _decoded_alone(reference, parts, detection_events[0])

@@ -481,8 +481,8 @@ def test_every_window_with_a_predecessor_folds_its_boundary(
     by_path = measurement.data_movement["copies_by_path"]
     folds = by_path["unit default#0 memory -> masked view"]
 
-    assert measurement.windows == 4
-    assert folds["events"] == measurement.windows - 1
+    assert measurement.decoded_windows == 4
+    assert folds["events"] == measurement.decoded_windows - 1
     assert folds["rounds"] == 18
     assert measurement.direct_mismatch is False
 

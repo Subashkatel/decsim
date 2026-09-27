@@ -143,7 +143,7 @@ class ShotMeasurement:
     point_id: str
     algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
-    windows: int
+    decoded_windows: int
     logical_failure: bool
     samples: dict  # point -> us list, one per window (per round for cwb)
     means: dict  # point -> mean us over this shot's windows
@@ -804,7 +804,7 @@ def _measurement(
         point_id=point_id,
         algorithm=algorithm,
         seed=seed,
-        windows=decoded_windows,
+        decoded_windows=decoded_windows,
         logical_failure=is_scored_failure,
         samples=samples,
         means=means,

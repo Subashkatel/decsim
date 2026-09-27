@@ -96,7 +96,7 @@ LOAD_MAXES = (
 # shots hold it true. The latency points' own mean and max columns are
 # added to the first two per measure.POINTS.
 SHOT_MEANS = (
-    "windows",
+    "decoded_windows",
     "throughput_windows_per_us",
     "throughput_rounds_per_us",
     "load",
@@ -119,7 +119,7 @@ SHOT_MAXES = (
 SHOT_SUMS = (
     "tesseract_windows_checked",
     "tesseract_window_disagreements",
-    "windows",
+    "decoded_windows",
     "escalated_windows",
     "strong_decoded_rounds",
     *measure.WINDOW_STATUS_COLUMNS,
@@ -259,7 +259,7 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     ler_low, ler_high = wilson_interval(failures, scored_shots)
     row = point_columns(point)
     row["shots"] = shot_count
-    row["windows_per_shot"] = totals.mean("windows")
+    row["windows_per_shot"] = totals.mean("decoded_windows")
     row["logical_failures"] = failures
     row["logical_error_rate"] = _failure_fraction(failures, scored_shots)
     row["ler_wilson_low"] = ler_low
@@ -837,7 +837,7 @@ def _add_load_columns(row: dict, totals) -> None:
             row[name] = totals.maxes[name]
     if "strong_wait_max_us" not in totals.maxes:
         return
-    windows = totals.sums["windows"]
+    windows = totals.sums["decoded_windows"]
     escalated = totals.sums["escalated_windows"]
     row["escalated_fraction"] = escalated / windows
 
@@ -871,7 +871,7 @@ def strong_service_bound_us(totals: fold.RowTotals) -> float:
     escalated_windows = totals.sums["escalated_windows"]
     if escalated_windows == 0:
         return math.inf
-    windows = totals.sums["windows"]
+    windows = totals.sums["decoded_windows"]
     window_period_us = totals.maxes["window_period_us"]
     return window_period_us * windows / escalated_windows
 

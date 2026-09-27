@@ -580,7 +580,7 @@ def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(
     rows = report.summarize(record.shots, record.window_samples)
 
     assert record.shots[0]["commit_rounds"] == 2
-    assert measurement.windows == 15
+    assert measurement.decoded_windows == 15
     assert measurement.escalated_windows == 15
     assert rows[0]["strong_service_bound_us"] == 2.0
 
@@ -1707,10 +1707,10 @@ def test_a_strong_decode_with_no_correction_unscores_its_shot(
     measurement = measure.measure_shot(shot)
     statuses = measurement.window_statuses
 
-    assert measurement.escalated_windows == measurement.windows
+    assert measurement.escalated_windows == measurement.decoded_windows
     assert measurement.is_scored is False
     assert measurement.unscored_reason == "upstream_exception"
-    assert statuses["backend_error_windows"] == measurement.windows
+    assert statuses["backend_error_windows"] == measurement.decoded_windows
     assert measurement.provisional_no_correction_windows == 0
 
 
@@ -1729,12 +1729,12 @@ def test_a_weak_decode_with_no_correction_unscores_its_shot_after_strong(
     measurement = measure.measure_shot(shot)
     statuses = measurement.window_statuses
 
-    assert measurement.escalated_windows == measurement.windows
+    assert measurement.escalated_windows == measurement.decoded_windows
     assert measurement.is_scored is False
     assert measurement.unscored_reason == "upstream_exception"
     assert statuses["backend_error_windows"] == 0
     assert measurement.provisional_no_correction_windows == (
-        measurement.windows
+        measurement.decoded_windows
     )
 
 

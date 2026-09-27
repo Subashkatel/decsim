@@ -179,7 +179,7 @@ def _spread_shots(run_dir, column: str, half_width: float) -> None:
 
 @pytest.mark.parametrize(
     "column, shot_column",
-    [("load", "load"), ("windows_per_shot", "windows")],
+    [("load", "load"), ("windows_per_shot", "decoded_windows")],
 )
 def test_diff_judges_a_mean_by_the_standard_error_of_its_shots(
     runs, tmp_path, capsys, column, shot_column

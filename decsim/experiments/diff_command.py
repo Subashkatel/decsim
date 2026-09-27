@@ -30,7 +30,7 @@ NOT_COMPARED_COLUMNS = (
 LATENCY_MEAN_SUFFIX = "_mean_us"
 # The sweep.csv means named apart from the shots.csv column they average
 # (report.summarize_point).
-SHOT_COLUMN_OF_MEAN = {"windows_per_shot": "windows"}
+SHOT_COLUMN_OF_MEAN = {"windows_per_shot": "decoded_windows"}
 # Two means agree within their error bars when they differ by at most
 # this many standard errors of their difference (a 95% interval).
 AGREEMENT_STANDARD_ERRORS = 1.96

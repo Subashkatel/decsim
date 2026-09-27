@@ -51,7 +51,7 @@ def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
         seed=0,
     )
     samples = measurement.samples["algorithm"]
-    assert len(samples) == measurement.windows
+    assert len(samples) == measurement.decoded_windows
     assert all(sample > 0 for sample in samples)
 
 
@@ -118,5 +118,5 @@ def _windows_by_point(shots: list) -> collections.Counter:
     """The windows every point's shots decoded, off shots.csv."""
     windows = collections.Counter()
     for row in shots:
-        windows[row["point_id"]] += int(row["windows"])
+        windows[row["point_id"]] += int(row["decoded_windows"])
     return windows

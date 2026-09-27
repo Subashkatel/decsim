@@ -45,7 +45,7 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path, seed):
         seed=seed,
     )
     assert measurement.algorithm == "pymatching"
-    assert measurement.windows > 0
+    assert measurement.decoded_windows > 0
     assert not measurement.direct_mismatch
 
 
@@ -63,7 +63,7 @@ def test_strong_unit_runs_belief_matching(tmp_path):
         seed=0,
     )
     assert measurement.algorithm == "belief_matching"
-    assert measurement.windows > 0
+    assert measurement.decoded_windows > 0
     assert not measurement.logical_failure
 
 

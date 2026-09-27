@@ -41,6 +41,7 @@ import csv
 import dataclasses
 import decimal
 import fractions
+import json
 import math
 import pathlib
 import re
@@ -174,6 +175,37 @@ def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     assert links_measured == links_before
 
 
+def test_a_swept_section_keeps_its_column_beside_every_measured_one(
+    tmp_path,
+):
+    """A whole yaml section is an axis, and no measured column shares it.
+
+    A row takes its swept values first and its measured values after
+    (report._with_swept_values), so a measured column named as a section
+    would overwrite the swept value in its cell. The swept windows cell
+    is the section's compact json (run_folder.swept_values), and no csv
+    column the run wrote is named as another yaml section.
+    """
+    windows = yaml_configs.MINIMAL_CONFIG["windows"]
+    block = dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])
+    block["axes"] = dict(block["axes"], windows=[windows])
+    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
+    run_dir, _ = run.run_experiment(config_path)
+    shots_path = run_dir / "shots.csv"
+    shot, *_ = _csv_rows(shots_path)
+    columns = set()
+    for path in run_dir.rglob("*.csv"):
+        with open(path, newline="") as handle:
+            reader = csv.reader(handle)
+            header = next(reader)
+        columns.update(header)
+    sections_written = columns & set(machine_settings.SECTIONS)
+
+    assert json.loads(shot["windows"]) == windows
+    assert int(shot["decoded_windows"]) > 0
+    assert sections_written == {"windows"}
+
+
 def test_a_task_named_by_two_blocks_runs_once(tmp_path):
     raw = _reference_yaml()
     raw["sweep"] = [raw["sweep"][0], dict(raw["sweep"][0])]
@@ -246,7 +278,7 @@ def _predictions_of(rows) -> list:
         decoded.append(
             (
                 row.seed,
-                row.windows,
+                row.decoded_windows,
                 row.logical_failure,
                 row.direct_failure,
                 row.direct_mismatch,
@@ -816,7 +848,7 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     assert [first["seed"], second["seed"]] == ["0", "1"]
     assert first["is_scored"] == "False"
     assert first["unscored_reason"] == "upstream_exception"
-    assert first["backend_error_windows"] == first["windows"]
+    assert first["backend_error_windows"] == first["decoded_windows"]
     assert first["logical_failure"] == "False"
     assert second["is_scored"] == "False"
     assert rows[0]["shots"] == 2

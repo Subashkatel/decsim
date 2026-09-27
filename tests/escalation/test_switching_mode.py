@@ -327,7 +327,7 @@ def test_every_window_commits_once_across_both_output_links(tmp_path):
         assert links["strong_decoder_to_frame"]["transfers"] == escalations
         assert (
             links["weak_decoder_to_frame"]["transfers"] + escalations
-            == measurement.windows
+            == measurement.decoded_windows
         )
         found_escalation = found_escalation or escalations > 0
     assert found_escalation, (
@@ -343,7 +343,10 @@ def test_zero_threshold_never_escalates(tmp_path):
     links = measurement.link_totals
     assert links["weak_decoder_to_strong_decoder"]["transfers"] == 0
     assert links["strong_decoder_to_frame"]["transfers"] == 0
-    assert links["weak_decoder_to_frame"]["transfers"] == measurement.windows
+    assert (
+        links["weak_decoder_to_frame"]["transfers"]
+        == measurement.decoded_windows
+    )
 
 
 def test_unreachable_threshold_escalates_every_window(tmp_path):
@@ -351,7 +354,7 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
     config = load_experiment(config_path)
     measurement = measured_shot(config, seed=0)
     links = measurement.link_totals
-    windows = measurement.windows
+    windows = measurement.decoded_windows
     escalation_hops = links["weak_decoder_to_strong_decoder"]["transfers"]
     assert windows <= escalation_hops <= 2 * windows
     assert links["strong_buffer_to_strong_decoder"]["transfers"] == windows

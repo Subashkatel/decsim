@@ -418,7 +418,7 @@ def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
 
     shots_path = run_dir / "shots.csv"
     shots = _csv_rows(shots_path)
-    windows_per_shot = int(shots[0]["windows"])
+    windows_per_shot = int(shots[0]["decoded_windows"])
     calibrator = online_threshold_calibrator(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
     )

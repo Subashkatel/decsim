@@ -1008,7 +1008,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         round_period_microseconds=1.0,
         seed=0,
     )
-    assert measurement.windows > 5
+    assert measurement.decoded_windows > 5
 
 
 def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):

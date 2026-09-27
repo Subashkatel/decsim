@@ -88,7 +88,7 @@ and unit are its key's in `configs/reference.yaml`.
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
-| `windows` | how many windows this shot decoded |
+| `decoded_windows` | how many windows this shot decoded |
 | `logical_failure` | 1 when any operation's decoded observable did not match its truth, else 0; a `memory_patches` shot fails when any patch does. An unscored shot is never a failure, as sinter never counts an error on a discarded shot |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
 | `direct_failure`, `direct_mismatch` | the same shot decoded straight through PyMatching outside the machine, and whether the machine disagreed with it |

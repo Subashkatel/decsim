@@ -280,12 +280,16 @@ def _point_task_of(
     point_settings = dataclasses.replace(
         settings, workload=workload, escalation=escalation
     )
-    metadata = dict(values)
+    metadata = copy.deepcopy(dict(values))
     return collect.Task(point_settings, shots, metadata, online_threshold)
 
 
 def _place(sections: dict, path: str, value) -> None:
-    """Set an axis's value at its yaml path, under a section that exists."""
+    """Set an axis's value at its yaml path, under a section that exists.
+
+    The value is copied in, so an axis under a mapping another axis
+    placed edits this point's copy and not the value the sweep holds.
+    """
     parent_path, _, key = path.rpartition(".")
     parent = sections
     if parent_path:
@@ -296,7 +300,7 @@ def _place(sections: dict, path: str, value) -> None:
             f"the sweep axis {path} sets a key under {parent_path}, which "
             f"holds {parent!r}, not a section"
         )
-    parent[key] = value
+    parent[key] = copy.deepcopy(value)
 
 
 def _resolved(value, root: dict, chain: tuple):

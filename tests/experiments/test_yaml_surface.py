@@ -599,6 +599,30 @@ def test_one_point_written_two_ways_has_one_id(tmp_path):
     assert referenced_task.strong_id() == literal_task.strong_id()
 
 
+def test_a_later_point_leaves_an_earlier_points_values_as_they_were(
+    tmp_path,
+):
+    """A section axis and an axis under it share no mapping across points.
+
+    The qpu axis is the outer one, so both points place the same written
+    qpu mapping and then set its distance; the first point keeps 3.
+    """
+    qpu = {"kind": "stim_device", "distance": 3}
+    block = {"axes": {"qpu": [qpu], "qpu.distance": [3, 5]}, "shots": 1}
+    workload = yaml_configs.memory_workload(15)
+    workload["arguments"]["physical_error_probability"] = 0.001
+    card = {"workload": workload, "sweep": [block]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    first_alone = config.first_point_task()
+
+    first, _second = config.tasks()
+
+    assert first.metadata == {"qpu": qpu, "qpu.distance": 3}
+    assert first.settings.qpu.distance == 3
+    assert first.strong_id() == first_alone.strong_id()
+
+
 def test_a_qpu_key_the_section_does_not_read_is_refused(tmp_path):
     qpu = {"kind": "stim_device", "colour": 5}
     config_path = yaml_configs.write_config(tmp_path, {"qpu": qpu})

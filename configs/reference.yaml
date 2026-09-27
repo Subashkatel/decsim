@@ -310,8 +310,9 @@ burst_detector:
 #                                  # column burst_caught_in_time and the
 #                                  # sweep.csv caught_in_time_share. 300 is
 #                                  # half the 600-round decay of the
-#                                  # burst the comparison folder draws
-#                                  # (configs/burst_detectors_compared)
+#                                  # burst the comparison grid draws
+#                                  # (configs/experiments/burst_detection/
+#                                  # burst_detection.yaml)
 #
 # burst_detector:
 #   kind: event_count              # the simple count baseline: the patch's

@@ -1514,3 +1514,10 @@ observation:                       # what a run records beyond its results
                                    # neither file, because a run that counted nothing
                                    # has no counts and a row of zeros would say
                                    # otherwise
+  confidence_shots: 100            # a count of shots from seed 0, or all. When a
+                                   # confidence signal decides the escalation
+                                   # (switching), those shots write each committed
+                                   # window's gap, escalation and strong revision to
+                                   # window_confidence.csv. A gap is written in nats,
+                                   # ln of the likelihood ratio. It records the run
+                                   # and is no part of a point's id

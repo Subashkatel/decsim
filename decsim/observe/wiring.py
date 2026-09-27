@@ -103,6 +103,9 @@ def observe(
     sampled_shots = _connect_sampled_shots(syndrome_source)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
+    confidence = _connect_confidence(
+        seats["escalation_policy"], decoder_managers
+    )
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
     _connect_data_path(trace_writer, data_movement, seats, pool)
@@ -147,6 +150,7 @@ def observe(
         round_events=round_events,
         syndrome_buffer_occupancy=syndrome_buffer_occupancy,
         burst_flags=burst_flags,
+        confidence=confidence,
     )
 
 
@@ -461,6 +465,19 @@ def _connect_decode_records(
         outcomes = manager.outcomes
         outcomes.trace.request_ended.connect(decode_records.request_ended)
         outcomes.trace.service_ended.connect(decode_records.service_ended)
+
+
+def _connect_confidence(
+    escalation_policy, decoder_managers: tuple
+) -> Optional[decode_records_module.ConfidenceLedger]:
+    """The confidence ledger, only when a confidence decides the verdict."""
+    if not escalation_policy.decides_on_a_confidence:
+        return None
+    confidence = decode_records_module.ConfidenceLedger()
+    for manager in decoder_managers:
+        outcomes = manager.outcomes
+        outcomes.trace.request_ended.connect(confidence.request_ended)
+    return confidence
 
 
 def _connect_runtime_stamps(

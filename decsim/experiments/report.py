@@ -64,6 +64,7 @@ NON_COLUMN_FIELDS = (
     "data_movement",
     "trace_path",
     "window_statuses",
+    "confidence",
 )
 # the counters shot_data_movement.csv carries per path, as
 # observe/data_movement.py's json_value names them
@@ -149,6 +150,7 @@ FOLDED_FILES = (
     "shot_links.csv",
     "shot_data_movement.csv",
     "latency_samples.csv",
+    "window_confidence.csv",
 )
 # links.csv is the mean of these over a point's shots, one row per link
 LINK_MEANS = (
@@ -167,10 +169,11 @@ class RunRecord:
 
     Each field is a list of csv rows and each list is one file of the
     run folder: shots.csv, shot_links.csv, shot_data_movement.csv,
-    window_samples.csv and latency_samples.csv. No field holds a
-    summary, so two folders' records join by concatenation (the window
-    samples' counts add), and the summaries derived from the join are
-    the summaries a single run over the same shots would have written.
+    window_samples.csv, latency_samples.csv and window_confidence.csv.
+    No field holds a summary, so two folders' records join by
+    concatenation (the window samples' counts add), and the summaries
+    derived from the join are the summaries a single run over the same
+    shots would have written.
     """
 
     shots: list
@@ -178,6 +181,7 @@ class RunRecord:
     shot_data_movement: list
     window_samples: list
     latency_samples: list
+    window_confidence: list
 
 
 def percentile_of_counts(multiset: dict, fraction: float) -> float:
@@ -494,6 +498,27 @@ def latency_sample_rows(measurements: list) -> list:
     return rows
 
 
+def window_confidence_rows(measurements: list) -> list:
+    """One row per window of each sampled shot: its gap and its verdict.
+
+    Toshio et al. keep each shot's gap with whether the decode was right
+    (2510.25222 lines 722-731); a window has no truth of its own, so a
+    row carries the shot's failure and whether the strong decode
+    revised the window's answer. Only the shots
+    observation.confidence_shots names write rows; a run with no
+    confidence signal writes none.
+    """
+    rows = []
+    for measurement in measurements:
+        confidence = measurement.confidence
+        if confidence is None or not confidence.is_sampled:
+            continue
+        for window in confidence.windows:
+            row = _window_confidence_row(measurement, confidence, window)
+            rows.append(row)
+    return rows
+
+
 def record_of(measurements: list) -> RunRecord:
     """The additive facts of the shots this process measured."""
     shots = shot_rows(measurements)
@@ -501,11 +526,12 @@ def record_of(measurements: list) -> RunRecord:
     movement = shot_data_movement_rows(measurements)
     samples = window_sample_rows(measurements)
     latency = latency_sample_rows(measurements)
-    return RunRecord(shots, links, movement, samples, latency)
+    confidence = window_confidence_rows(measurements)
+    return RunRecord(shots, links, movement, samples, latency, confidence)
 
 
 def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
-    """The record's five files; one with no rows is not written."""
+    """The record's six files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
     _write_rows(record.shots, shots_path, swept)
     links_path = report_dir / "shot_links.csv"
@@ -516,6 +542,8 @@ def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
     _write_rows(record.window_samples, samples_path, swept)
     latency_path = report_dir / "latency_samples.csv"
     _write_rows(record.latency_samples, latency_path, swept)
+    confidence_path = report_dir / "window_confidence.csv"
+    _write_rows(record.window_confidence, confidence_path, swept)
 
 
 def read_rows(path: Path) -> list:
@@ -710,6 +738,7 @@ def _fold_the_folders(
     movement_path = out_dir / "data_movement.csv"
     _write_rows(per_movement, movement_path, swept)
     _fold_latency_samples(folders, order, out_dir, swept)
+    _fold_window_confidence(folders, order, out_dir, swept)
     return rows
 
 
@@ -757,6 +786,14 @@ def _fold_latency_samples(
 ) -> None:
     """Every folder's latency_samples.csv into one; no summary reads it."""
     name = "latency_samples.csv"
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
+
+
+def _fold_window_confidence(
+    folders: list, order, out_dir: Path, swept: dict
+) -> None:
+    """Every folder's window_confidence.csv into one; no summary reads it."""
+    name = "window_confidence.csv"
     _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
 
 
@@ -1716,3 +1753,23 @@ def _class_bits_line(label: str, at_point: list, counter: str) -> str:
         return f"{label} by memory class: none"
     listed = ", ".join(named)
     return f"{label} by memory class: {listed}"
+
+
+def _window_confidence_row(
+    measurement: measure.ShotMeasurement,
+    confidence: measure.ShotConfidence,
+    window,
+) -> dict:
+    """One window of one shot, as window_confidence.csv writes it."""
+    point = measured_point(measurement)
+    operation_id, window_index = window.window_key
+    row = point_columns(point)
+    row["seed"] = measurement.seed
+    row["signal"] = confidence.signal
+    row["operation_id"] = operation_id
+    row["window_index"] = window_index
+    row["gap_nats"] = window.gap_nats
+    row["escalated"] = window.is_escalated
+    row["strong_revised"] = window.is_strong_revised
+    row["shot_failed"] = measurement.logical_failure
+    return row

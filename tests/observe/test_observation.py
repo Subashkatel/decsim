@@ -37,6 +37,8 @@ ASKED_FOR_BY_A_STUDY = (
     "syndrome_buffer_occupancy",
     # built when burst_detector.kind names a detector
     "burst_flags",
+    # built when a confidence signal decides the escalation
+    "confidence",
 )
 
 

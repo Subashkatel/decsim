@@ -224,6 +224,17 @@ def online_threshold() -> dict:
     return overrides
 
 
+def fixed_threshold_switching() -> dict:
+    """The overrides of a switching machine that escalates below 20 dB."""
+    overrides = online_threshold()
+    overrides["escalation"] = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "near_seam_pinned",
+    }
+    return overrides
+
+
 def example_tool_config(
     tmp_path, qpu_kind: str, workload: dict, feedback_microseconds=4.0
 ) -> pathlib.Path:

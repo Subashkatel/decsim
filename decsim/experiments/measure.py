@@ -133,6 +133,22 @@ INPUT_LINK_BY_TIER = {
 
 
 @dataclasses.dataclass(frozen=True)
+class ShotConfidence:
+    """A shot's windows' confidence gaps, when a signal decided escalation.
+
+    signal names the confidence the escalation read
+    (escalation.confidence); windows are the ledger's WindowConfidence
+    records in window order; is_sampled says whether the shot is one of
+    observation.confidence_shots, whose windows window_confidence.csv
+    lists, while the histogram counts every shot.
+    """
+
+    signal: str
+    windows: tuple
+    is_sampled: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class ShotMeasurement:
     """One shot's numbers; the field names are the csv columns."""
 
@@ -231,6 +247,9 @@ class ShotMeasurement:
     # sha256 of every operation's sampled detection events and observable
     # truth, so two points' shots of one seed are checked to be one draw
     sample_digest: str
+    # the windows' confidence gaps, None when no confidence signal
+    # decided the escalation; its own files hold it, not shots.csv
+    confidence: Optional[ShotConfidence]
     # every operation's predicted observables, so two decoders' shots of
     # one seed compare answer by answer and not only failure by failure
     predictions: str
@@ -767,6 +786,7 @@ def _measurement(
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
+    confidence = _shot_confidence(settings, observation, seed)
     return ShotMeasurement(
         point_id=point_id,
         algorithm=algorithm,
@@ -810,8 +830,24 @@ def _measurement(
         unscored_reason=unscored_reason,
         provisional_no_correction_windows=provisional_windows,
         sample_digest=sample_digest,
+        confidence=confidence,
         predictions=predictions,
     )
+
+
+def _shot_confidence(
+    settings: machine_settings.MachineSettings,
+    observation: observation_module.Observation,
+    seed: int,
+) -> Optional[ShotConfidence]:
+    """The confidence ledger's windows, None when no signal ran."""
+    ledger = observation.confidence
+    if ledger is None:
+        return None
+    windows = ledger.windows()
+    is_sampled = settings.observation.samples_confidence_of(seed)
+    signal = settings.escalation.confidence
+    return ShotConfidence(signal, windows, is_sampled)
 
 
 def _burst_catch(

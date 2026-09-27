@@ -53,6 +53,7 @@ import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
+import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
@@ -1998,3 +1999,63 @@ def _is_within(name: str, modules) -> bool:
         if name == module or name.startswith(f"{module}."):
             return True
     return False
+
+
+def test_a_windows_confidence_is_the_gap_the_decode_record_ledger_holds(
+    tmp_path,
+):
+    """Each verdict's gap and escalation, as the request records end them.
+
+    The decode-record ledger keeps every request's soft output and
+    terminal outcome; the kept and the escalated weak requests are the
+    windows whose confidence the verdict read (Toshio et al. 2510.25222
+    Sec. III A step 3).
+    """
+    overrides = yaml_configs.fixed_threshold_switching()
+    overrides["observation"] = {"record_switching_windows": True}
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    shot = yaml_configs.point_shot(
+        config,
+        physical_error_probability=0.003,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=0,
+    )
+
+    measurement = measure.measure_shot(shot)
+    ledger = shot.machine.observation.decode_records
+    rows = report.window_confidence_rows([measurement])
+
+    assert _verdicts_of_rows(rows) == _verdicts_of_ledger(ledger)
+    assert {row["seed"] for row in rows} == {0}
+    assert any(row["escalated"] for row in rows)
+
+
+def _verdicts_of_rows(rows) -> dict:
+    """Each row's window: its gap, and whether it escalated."""
+    verdicts = {}
+    for row in rows:
+        key = (row["operation_id"], row["window_index"])
+        verdicts[key] = (row["gap_nats"], row["escalated"])
+    return verdicts
+
+
+def _verdicts_of_ledger(ledger) -> dict:
+    """Each verdict request's window: its gap, and whether it escalated."""
+    escalated = decoding_records.RequestProcessingOutcome.WEAK_AWAITED_STRONG
+    verdicts = {}
+    for record in ledger.requests:
+        outcome = record.terminal_processing_outcome
+        if outcome not in decode_records.VERDICT_OUTCOMES:
+            continue
+        key = (record.request_key.operation_id, record.request_key.window_id)
+        verdicts[key] = (_gap_of(record.soft_output), outcome is escalated)
+    return verdicts
+
+
+def _gap_of(soft_output):
+    """A request's gap, None when the signal gave none."""
+    if soft_output is None:
+        return None
+    return soft_output.gap

@@ -30,7 +30,10 @@ OBSERVATION_KEYS = (
     "trace",
     "trace_shots",
     "data_movement",
+    "confidence_shots",
 )
+# observation.confidence_shots's word for every shot of a point
+EVERY_SHOT = "all"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,14 +55,18 @@ class ObservationSettings:
     decoder_memory_occupancy builds the memory sweep's sampler (the
     decoder utilization is always integrated, every run's pool columns
     read it); data_movement builds the copy, reference and move counters
-    the RunResult carries.
+    the RunResult carries. confidence_shots is how many shots of each
+    point, from seed 0, write their windows' confidence gaps to
+    window_confidence.csv when a confidence signal decides the
+    escalation; None writes every shot's.
 
-    The keys that only record the run, the log, the trace and the two
-    occupancy listeners, are labels (compare=False) and no part of a
-    point's id, as sinter keeps its output options out of a task's
-    strong id (sinter/_data/_task.py:167-204): each writer and listener
-    schedules nothing and calls no component (observe/trace_writer.py),
-    so the shots' rows are the same with them or without. The others
+    The keys that only record the run, the log, the trace, the two
+    occupancy listeners and confidence_shots, are labels
+    (compare=False) and no part of a point's id, as sinter keeps its
+    output options out of a task's strong id
+    (sinter/_data/_task.py:167-204): each writer and listener schedules
+    nothing and calls no component (observe/trace_writer.py), so the
+    shots' rows are the same with them or without. The others
     stay in the id because they change a shot's row: the referee fills
     the referee columns, record_switching_windows and backlog_trace add
     the wait and backlog columns (experiments/measure.py), and
@@ -80,6 +87,9 @@ class ObservationSettings:
     trace: str = dataclasses.field(compare=False, default="off")
     trace_shots: tuple = dataclasses.field(compare=False, default=(0,))
     data_movement: bool = False
+    confidence_shots: Optional[int] = dataclasses.field(
+        compare=False, default=100
+    )
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":
@@ -104,6 +114,7 @@ class ObservationSettings:
             section, "observation", "decoder_memory_occupancy"
         )
         data_movement = config.boolean(section, "observation", "data_movement")
+        confidence_shots = _confidence_shots(section)
         return cls(
             log=log,
             trace=trace,
@@ -115,6 +126,7 @@ class ObservationSettings:
             backlog_trace=backlog_trace,
             decoder_memory_occupancy=decoder_memory_occupancy,
             data_movement=data_movement,
+            confidence_shots=confidence_shots,
         )
 
     @property
@@ -131,6 +143,12 @@ class ObservationSettings:
     def writes_trace(self) -> bool:
         """Whether the run builds the Chrome trace writer at all."""
         return self.trace != "off"
+
+    def samples_confidence_of(self, seed: int) -> bool:
+        """Whether this seed's windows go into window_confidence.csv."""
+        if self.confidence_shots is None:
+            return True
+        return seed < self.confidence_shots
 
     @property
     def trace_path(self) -> Optional[str]:
@@ -222,6 +240,20 @@ def _trace_shots(section: Mapping) -> tuple:
     for shot in shots:
         _refuse_a_shot_that_is_not_a_count(shot)
     return tuple(shots)
+
+
+def _confidence_shots(section: Mapping) -> Optional[int]:
+    """How many shots of a point write their windows' gaps; None, all."""
+    shots = section.get("confidence_shots", 100)
+    if shots == EVERY_SHOT:
+        return None
+    is_a_count = isinstance(shots, int) and not isinstance(shots, bool)
+    if is_a_count and shots >= 0:
+        return shots
+    raise ValueError(
+        "observation.confidence_shots must be a non-negative whole number "
+        f"of shots or {EVERY_SHOT}, got {shots!r}"
+    )
 
 
 def _refuse_a_shot_that_is_not_a_count(shot) -> None:

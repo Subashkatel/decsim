@@ -9,6 +9,9 @@ exists: the 500 shard folders of one weak_ler experiment hold 115
 million link rows, which do not fit in memory as lists. The fourth is
 why that experiment can be folded at all: its shards hold the sixteen
 latency points that tree measured, and this tree measures twenty-two.
+
+A switching run's window_confidence.csv folds as the other per-shot
+files do, so its pieces give the file one uncut run writes.
 """
 
 import csv
@@ -737,3 +740,58 @@ def _rows_with_qpu_kind(rows, sweep, kind) -> list:
         if row["point_id"] in point_ids:
             selected.append(row)
     return selected
+
+
+def test_a_switching_run_writes_its_windows_confidence(tmp_path):
+    overrides = yaml_configs.fixed_threshold_switching()
+    run_dir = _confidence_run(tmp_path, overrides, 2)
+    confidence_path = run_dir / "window_confidence.csv"
+
+    window_rows = _rows_of(confidence_path)
+
+    assert window_rows
+    assert {row["signal"] for row in window_rows} == {"complementary_gap"}
+    assert {row["seed"] for row in window_rows} == {"0", "1"}
+
+
+def test_pieces_fold_to_the_window_confidence_of_one_uncut_run(tmp_path):
+    """Four one-shot pieces fold to the file one four-shot run writes."""
+    overrides = yaml_configs.fixed_threshold_switching()
+    uncut_dir = _confidence_run(tmp_path, overrides, 4, out="uncut")
+    pieces_dir = _confidence_run(tmp_path, overrides, 4, 1, out="pieces")
+    uncut_path = uncut_dir / "window_confidence.csv"
+    folded_path = pieces_dir / "window_confidence.csv"
+
+    assert folded_path.read_bytes() == uncut_path.read_bytes()
+
+
+def test_a_run_whose_escalation_reads_no_confidence_writes_no_windows(
+    tmp_path,
+):
+    run_dir = _confidence_run(tmp_path, {}, 2)
+    confidence_path = run_dir / "window_confidence.csv"
+
+    assert not confidence_path.exists()
+
+
+def _confidence_run(
+    tmp_path, overrides, shots, piece_shots=None, out="experiment"
+):
+    """A one-point d3 collect of shots, in pieces if asked; its run folder."""
+    if piece_shots is not None:
+        piece_rounds = piece_shots * ROUNDS_PER_SHOT
+        overrides["collection"] = {"piece_rounds": piece_rounds}
+    overrides["sweep"] = [
+        {
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.003],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": shots},
+        }
+    ]
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    experiment_dir = tmp_path / out
+    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    return yaml_configs.run_folder_of(experiment_dir)

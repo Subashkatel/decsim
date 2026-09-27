@@ -1,5 +1,6 @@
-"""The record ledger: a listener on the two terminal sources."""
+"""The record ledgers: listeners on the two terminal sources."""
 
+import decsim.confidence.complementary as complementary
 import decsim.observe.decode_records as decode_records
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
@@ -50,3 +51,69 @@ def test_a_request_and_its_service_are_recorded_at_their_end():
     assert request.terminal_processing_outcome is outcome
     assert service.service_ticks == 25
     assert service.completed_request_keys == (job.request_key,)
+
+
+WEAK_KEPT = (
+    decoding_records.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
+)
+WEAK_ESCALATED = decoding_records.RequestProcessingOutcome.WEAK_AWAITED_STRONG
+STRONG_ANSWER = (
+    decoding_records.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY
+)
+CANCELLED = (
+    decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH
+)
+
+
+def _gap(nats):
+    source = complementary.COMPLEMENTARY_GAP_SOURCE
+    return decoding_records.SoftOutput(gap=nats, source=source)
+
+
+def test_a_kept_window_has_its_gap_and_no_strong_answer():
+    ledger = decode_records.ConfidenceLedger()
+    job = _job()
+    gap = _gap(5.0)
+    kept = decoding_records.DecodeResult(1, 0, soft_output=gap)
+
+    ledger.request_ended(job, kept, WEAK_KEPT, 40)
+
+    (window,) = ledger.windows()
+    assert window == decode_records.WindowConfidence((1, 0), 5.0, False, None)
+
+
+def test_an_escalated_window_the_strong_tier_answered_otherwise_is_revised():
+    ledger = decode_records.ConfidenceLedger()
+    job = _job()
+    gap = _gap(0.5)
+    weak = decoding_records.DecodeResult(
+        1, 0, logical_observables=(0,), soft_output=gap
+    )
+    strong = decoding_records.DecodeResult(1, 0, logical_observables=(1,))
+
+    ledger.request_ended(job, weak, WEAK_ESCALATED, 40)
+    ledger.request_ended(job, strong, STRONG_ANSWER, 90)
+
+    (window,) = ledger.windows()
+    assert window == decode_records.WindowConfidence((1, 0), 0.5, True, True)
+
+
+def test_a_window_the_signal_gave_no_gap_is_listed_with_none():
+    ledger = decode_records.ConfidenceLedger()
+    job = _job()
+    gapless = decoding_records.DecodeResult(1, 0)
+
+    ledger.request_ended(job, gapless, WEAK_ESCALATED, 40)
+
+    (window,) = ledger.windows()
+    assert window.gap_nats is None
+    assert window.is_escalated
+
+
+def test_a_request_that_ended_with_no_result_is_no_window():
+    ledger = decode_records.ConfidenceLedger()
+    job = _job()
+
+    ledger.request_ended(job, None, CANCELLED, None)
+
+    assert ledger.windows() == ()

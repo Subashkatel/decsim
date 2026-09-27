@@ -93,13 +93,32 @@ def whole_count(
     )
 
 
-def boolean(section: Mapping, section_name: str, key: str) -> bool:
-    """An on-or-off knob, off when the yaml is silent.
+def whole_counts(
+    section: Mapping, section_name: str, count_keys: Mapping, defaults
+) -> dict:
+    """Each count key's value, read as whole_count reads one.
+
+    count_keys maps a key to its unit and least value; a key the section
+    leaves out takes its attribute on defaults.
+    """
+    counts = {}
+    for key, (unit, minimum) in count_keys.items():
+        default = getattr(defaults, key)
+        counts[key] = whole_count(
+            section, section_name, key, default, unit, minimum
+        )
+    return counts
+
+
+def boolean(
+    section: Mapping, section_name: str, key: str, default: bool = False
+) -> bool:
+    """An on-or-off knob, the default when the yaml is silent.
 
     The test is the type, because 1 == True and 0 == False would let a
     count stand in for a knob (bool is a subtype of int).
     """
-    value = section.get(key, False)
+    value = section.get(key, default)
     if isinstance(value, bool):
         return value
     raise ValueError(

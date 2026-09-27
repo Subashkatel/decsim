@@ -51,7 +51,15 @@ Three conventions are worth knowing before you read:
   row with keys of its own declares them on a nested `Settings` record,
   and they sit in its section beside the keys every row of that table
   shares (`decsim/tables.py`, `row_settings`): `union_find`'s
-  `weight_step` and `cycle_count` in a decoder tier, `measured_table`'s
+  `weight_step` and `cycle_count` in a decoder tier, `relay_bp`'s
+  `alpha`, `alpha_iteration_scaling_factor`, `gamma0`,
+  `pre_iterations`, `relay_set_count`, `iterations_per_set`,
+  `gamma_interval`, `converged_solution_count` and `bases` there too
+  (relay-bp's own arguments, with the Relay-BP paper's surface code
+  values shown beside them, and whether X and Z are decoded apart), `tesseract`'s `detector_beam`, `beam_climbing`,
+  `no_revisit_detectors`, `priority_queue_limit`,
+  `detector_order_method` and `detector_order_count` there too,
+  `measured_table`'s
   `device`, `partition` and `bases` in a decoder tier, `dispatch_steps`'s
   `device`, `path` and `workers` there too, and the
   `bivariate_bicycle` code card's `qubit_count` and

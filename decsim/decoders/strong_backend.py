@@ -39,7 +39,8 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 
-# <tier>_decoder.bases names one of these rows on a strong backend row:
+# <tier>_decoder.bases names one of these rows on a strong backend row
+# and on the relay_bp row:
 # whether a region's X and Z detectors are decoded together, which keeps
 # the correlation a Y error makes between them, or apart, as two
 # smaller problems that model X and Z errors as independent (Relay-BP
@@ -103,11 +104,11 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
             ticket = self.backend.submit(job, 0)
             return self.backend.result(ticket)
         results = {}
-        parts = _part_jobs(job)
+        parts = part_jobs(job)
         for basis, part in parts.items():
             ticket = self.backend.submit(part, 0)
             results[basis] = self.backend.result(ticket)
-        return _joined_result(job, results)
+        return joined_result(job, results)
 
     def latency(self, job: decoding_records.DecodeJob) -> int:
         """A device's time is its own; there is none before it runs."""
@@ -131,10 +132,10 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
         if not self.splits_by_basis:
             self._arrive(job, on_result, engine)
             return
-        parts = _part_jobs(job)
+        parts = part_jobs(job)
         region_id = id(job)
-        part_jobs = parts.values()
-        self._parts_by_region[region_id] = tuple(part_jobs)
+        region_parts = parts.values()
+        self._parts_by_region[region_id] = tuple(region_parts)
         forget = self._forget(job)
         join = _RegionJoin(job, len(parts), on_result, forget)
         for basis, part in parts.items():
@@ -231,6 +232,63 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
             return
         result = self.backend.result(walk.ticket)
         walk.on_result(result)
+
+
+def part_jobs(job: decoding_records.DecodeJob) -> dict:
+    """The region's X part and Z part as jobs of their own.
+
+    Each carries its part's model and its part's rows of the region's
+    syndrome, as one fragment, which is all a backend reads of a job.
+    The relay_bp row splits a weak window the same way, so the two tiers
+    decode apart by one split.
+    """
+    model = job.detector_error_model
+    syndrome = decoder_module.payload_syndrome(job)
+    parts = {}
+    part_models = basis_split.split_by_basis(model)
+    for basis, part_model in part_models.items():
+        rows = basis_split.rows_of_basis(model, basis)
+        part_syndrome = syndrome[rows]
+        parts[basis] = _part_job(job, basis, part_model, part_syndrome)
+    return parts
+
+
+def joined_result(
+    job: decoding_records.DecodeJob, results: dict
+) -> decoding_records.DecodeResult:
+    """One region's answer from its parts'.
+
+    The observables and the detectors flipped are XORs of the parts',
+    which never share a detector; the correction is the parts' columns
+    in basis order; the region is best effort when either part is.
+    """
+    model = job.detector_error_model
+    parts = [results[basis] for basis in sorted(results)]
+    residuals = [part.boundary_data for part in parts]
+    crossings = [part.crossing_commit for part in parts]
+    crossing_residuals = [crossing.residual for crossing in crossings]
+    crossing_residual = _joined_residual(model, crossing_residuals)
+    crossing_observables = _joined_observables(crossings)
+    crossing = window_records.CrossingCommit(
+        crossing_residual, crossing_observables
+    )
+    corrections = [part.correction for part in parts]
+    correction = numpy.concatenate(corrections)
+    iterations = [part.iterations or 0 for part in parts]
+    iteration_count = sum(iterations)
+    observables = _joined_observables(parts)
+    residual = _joined_residual(model, residuals)
+    status = _joined_status(parts)
+    return decoding_records.DecodeResult(
+        job.operation_id,
+        job.window_id,
+        correction=correction,
+        logical_observables=observables,
+        boundary_data=residual,
+        crossing_commit=crossing,
+        decode_status=status,
+        iterations=iteration_count,
+    )
 
 
 @dataclasses.dataclass
@@ -337,25 +395,8 @@ class _RegionJoin:
         if len(self.results) < self.part_count:
             return
         self.on_joined()
-        joined = _joined_result(self.job, self.results)
+        joined = joined_result(self.job, self.results)
         self.on_result(joined)
-
-
-def _part_jobs(job: decoding_records.DecodeJob) -> dict:
-    """The region's X part and Z part as jobs of their own.
-
-    Each carries its part's model and its part's rows of the region's
-    syndrome, as one fragment, which is all a backend reads of a job.
-    """
-    model = job.detector_error_model
-    syndrome = decoder_module.payload_syndrome(job)
-    parts = {}
-    part_models = basis_split.split_by_basis(model)
-    for basis, part_model in part_models.items():
-        rows = basis_split.rows_of_basis(model, basis)
-        part_syndrome = syndrome[rows]
-        parts[basis] = _part_job(job, basis, part_model, part_syndrome)
-    return parts
 
 
 def _part_job(
@@ -373,44 +414,6 @@ def _part_job(
     label = f"{job.label} {basis}"
     return dataclasses.replace(
         job, detector_error_model=part_model, payloads=[fragment], label=label
-    )
-
-
-def _joined_result(
-    job: decoding_records.DecodeJob, results: dict
-) -> decoding_records.DecodeResult:
-    """One region's answer from its parts'.
-
-    The observables and the detectors flipped are XORs of the parts',
-    which never share a detector; the correction is the parts' columns
-    in basis order; the region is best effort when either part is.
-    """
-    model = job.detector_error_model
-    parts = [results[basis] for basis in sorted(results)]
-    residuals = [part.boundary_data for part in parts]
-    crossings = [part.crossing_commit for part in parts]
-    crossing_residuals = [crossing.residual for crossing in crossings]
-    crossing_residual = _joined_residual(model, crossing_residuals)
-    crossing_observables = _joined_observables(crossings)
-    crossing = window_records.CrossingCommit(
-        crossing_residual, crossing_observables
-    )
-    corrections = [part.correction for part in parts]
-    correction = numpy.concatenate(corrections)
-    iterations = [part.iterations or 0 for part in parts]
-    iteration_count = sum(iterations)
-    observables = _joined_observables(parts)
-    residual = _joined_residual(model, residuals)
-    status = _joined_status(parts)
-    return decoding_records.DecodeResult(
-        job.operation_id,
-        job.window_id,
-        correction=correction,
-        logical_observables=observables,
-        boundary_data=residual,
-        crossing_commit=crossing,
-        decode_status=status,
-        iterations=iteration_count,
     )
 
 

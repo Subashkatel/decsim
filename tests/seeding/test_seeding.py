@@ -20,7 +20,6 @@ import types
 import pytest
 
 import decsim.decoders.decoders as decoders
-import decsim.decoders.relay_belief_propagation.window_decoder as relay
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
@@ -264,12 +263,13 @@ def test_a_cycle_in_the_component_graph_is_refused_naming_both_paths():
 def test_a_components_own_seed_conflicts_with_the_runs_root_seed():
     """A component seeded by hand cannot also take a derived seed.
 
-    A relay-BP decoder built with its own gamma-table seed is the case
+    A sampled-confidence decoder built with its own seed is the case
     that reaches this: the run would silently overwrite the seed the
     caller asked for, so the binding is refused instead.
     """
-    decoder = relay.RelayBeliefPropagationWindowDecoder(gamma_table_seed=5)
-    with pytest.raises(ValueError, match="explicit gamma-table seed"):
+    inner = decoders.PresetLatencyDecoder(0.0)
+    decoder = decoders.SampledConfidenceDecoder(inner, 0.5, seed=5)
+    with pytest.raises(ValueError, match="explicit seed that conflicts"):
         decoder.reserve_run_seed(9)
 
 

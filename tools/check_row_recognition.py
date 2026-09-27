@@ -82,7 +82,6 @@ FOREIGN_TYPES = frozenset(
         "numpy.ndarray",
         "stim.Circuit",
         "stim.CircuitRepeatBlock",
-        "TesseractDecoderConfig",
     }
 )
 

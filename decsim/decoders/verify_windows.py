@@ -14,6 +14,7 @@ from typing import Optional
 import numpy
 
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.tesseract.decoder as tesseract_decoder
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
@@ -33,7 +34,10 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
 
     def __init__(self, inner: decoder_module.DecoderBase):
         self.inner = inner
-        self.referee = tesseract_window_decoder.TesseractWindowDecoder()
+        referee_settings = tesseract_decoder.TesseractDecoder.Settings()
+        self.referee = tesseract_window_decoder.TesseractWindowDecoder(
+            referee_settings
+        )
         # The referee reads the physical view, the tier the graphlike one.
         self.fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
         self.decoder_evidence = inner.decoder_evidence

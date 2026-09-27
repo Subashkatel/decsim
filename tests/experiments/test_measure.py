@@ -27,13 +27,13 @@ Python through the circuit_list row, on a fabric whose only priced hop
 is the decoder-to-decoder seam.
 """
 
+import ast
 import collections
 import dataclasses
-import io
+import functools
 import math
 import pathlib
-import re
-import tokenize
+import sys
 from typing import Optional
 
 import pytest
@@ -1834,44 +1834,171 @@ def test_no_runner_module_names_a_row_of_the_decoder_table():
     """A new decoder is one table row and one axis value, no runner edit.
 
     The referent is the decoder table itself (decoders/settings.py
-    DECODERS). The runner is the experiments package with collect.py and
-    results.py; no name, import or string in it is a row's key (NOTE
-    section 9 item 10), so what it measures holds for every row.
+    DECODERS). The runner is every module below the experiments package,
+    with collect.py and results.py. None imports a row's package, or a
+    package only the rows import (a decoder backend), under any alias,
+    and no string constant in it is a row's key (NOTE section 9 item
+    10), so what it measures holds for every row.
     """
-    rows = set(decoder_settings.DECODERS)
-    measure_file = pathlib.Path(measure.__file__)
-    experiments_dir = measure_file.parent
-    experiment_files = experiments_dir.glob("*.py")
-    collect_file = pathlib.Path(collect.__file__)
-    results_file = pathlib.Path(results.__file__)
-    runner_files = [*experiment_files, collect_file, results_file]
+    runner_paths = _runner_paths()
 
-    named = _rows_named_in(runner_files, rows)
+    named = _rows_named_in(runner_paths)
 
     assert named == []
 
 
-def _rows_named_in(paths: list, rows: set) -> list:
-    """Each (file, row) where a file's names or strings hold a row's key."""
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "import decsim.decoders.minimum_weight_perfect_matching.decoder"
+            " as plain\n",
+            ["decsim.decoders.minimum_weight_perfect_matching.decoder"],
+        ),
+        (
+            "from decsim.decoders import union_find as plain\n",
+            ["decsim.decoders.union_find"],
+        ),
+        ("import pymatching as harmless\n", ["pymatching"]),
+        ("from relay_bp import RelayDecoder\n", ["relay_bp.RelayDecoder"]),
+        ('KIND = "tesseract"\n', ["tesseract"]),
+        ('"""A tesseract has eight cells."""\n', []),
+        ('SENTENCE = "a tesseract has eight cells"\n', []),
+        ("import decsim.decoders.settings as decoder_settings\n", []),
+    ],
+)
+def test_the_row_check_reads_imports_and_keys_and_not_prose(source, expected):
+    """An aliased import is caught and a word in a sentence is not.
+
+    A docstring is prose and is not read. A key joined from two
+    literals is out of scope: the check catches coupling a reader
+    writes, not every way to hide it.
+    """
+    assert _row_names_of(source) == expected
+
+
+def _runner_paths() -> list:
+    """Every module below the experiments package, collect.py, results.py."""
+    measure_file = pathlib.Path(measure.__file__)
+    experiments_dir = measure_file.parent
+    experiment_files = experiments_dir.rglob("*.py")
+    collect_file = pathlib.Path(collect.__file__)
+    results_file = pathlib.Path(results.__file__)
+    return sorted([*experiment_files, collect_file, results_file])
+
+
+def _rows_named_in(paths: list) -> list:
+    """Each (file, name) where a module couples to a decoder row."""
     named = []
-    for path in sorted(paths):
+    for path in paths:
         source = path.read_text()
-        words = _source_words(source)
-        found = words & rows
-        for row in sorted(found):
-            named.append((path.name, row))
+        names = _row_names_of(source)
+        named.extend((path.name, name) for name in names)
     return named
 
 
-def _source_words(source: str) -> set:
-    """Every name token, and every word inside a string token, of a source."""
-    source_text = io.StringIO(source)
-    readline = source_text.readline
-    words = set()
-    for token in tokenize.generate_tokens(readline):
-        if token.type == tokenize.NAME:
-            words.add(token.string)
-        if token.type == tokenize.STRING:
-            string_words = re.findall(r"[A-Za-z_]+", token.string)
-            words.update(string_words)
-    return words
+def _row_names_of(source: str) -> list:
+    """The row modules a source imports and the row keys it spells.
+
+    A docstring, or any string standing alone as a statement, is prose.
+    """
+    keys, row_modules = _decoder_rows()
+    tree = ast.parse(source)
+    prose = _prose_strings(tree)
+    names = []
+    for node in ast.walk(tree):
+        imported = _imported_names(node)
+        coupled = _within(imported, row_modules)
+        names.extend(coupled)
+        is_string = isinstance(node, ast.Constant) and id(node) not in prose
+        if is_string and node.value in keys:
+            names.append(node.value)
+    return names
+
+
+@functools.cache
+def _decoder_rows() -> tuple:
+    """The row keys, and the modules only a row may import.
+
+    Those are each row class's package, and every package the rows'
+    modules import that no other decsim module does: the backends
+    (pymatching, tesseract_decoder, relay_bp, ldpc). A package the rest
+    of decsim shares, such as stim or numpy, is no row's.
+    """
+    rows = decoder_settings.DECODERS
+    row_packages = set()
+    for row in rows.values():
+        package, _, _ = row.__module__.rpartition(".")
+        row_packages.add(package)
+    row_imports = _packages_imported(row_packages, inside=True)
+    other_imports = _packages_imported(row_packages, inside=False)
+    shared = other_imports | sys.stdlib_module_names | {"decsim"}
+    backends = row_imports - shared
+    row_modules = row_packages | backends
+    keys = frozenset(rows)
+    return keys, frozenset(row_modules)
+
+
+def _packages_imported(row_packages: set, *, inside: bool) -> set:
+    """The top-level packages decsim's modules import, in or out of rows."""
+    collect_file = pathlib.Path(collect.__file__)
+    package_dir = collect_file.parent
+    packages = set()
+    for path in package_dir.rglob("*.py"):
+        module = _module_name(path, package_dir.parent)
+        if _is_within(module, row_packages) != inside:
+            continue
+        source = path.read_text()
+        tree = ast.parse(source)
+        for name in _all_imports(tree):
+            package, _, _ = name.partition(".")
+            packages.add(package)
+    return packages
+
+
+def _module_name(path: pathlib.Path, root: pathlib.Path) -> str:
+    """The dotted module name of a source file below a root."""
+    relative = path.relative_to(root)
+    stem = relative.with_suffix("")
+    return ".".join(stem.parts)
+
+
+def _prose_strings(tree: ast.AST) -> set:
+    """The ids of the strings that stand alone as statements."""
+    prose = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr):
+            statement_id = id(node.value)
+            prose.add(statement_id)
+    return prose
+
+
+def _imported_names(node: ast.AST) -> list:
+    """The modules one import names, a from-import's names joined on."""
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        return [f"{node.module}.{alias.name}" for alias in node.names]
+    return []
+
+
+def _all_imports(tree: ast.AST) -> list:
+    """Every module a module's imports name, at any depth."""
+    names = []
+    for node in ast.walk(tree):
+        imported = _imported_names(node)
+        names.extend(imported)
+    return names
+
+
+def _within(names: list, modules: frozenset) -> list:
+    """The names that are one of the modules or below one."""
+    return [name for name in names if _is_within(name, modules)]
+
+
+def _is_within(name: str, modules) -> bool:
+    """Whether a dotted name is one of the modules or below one."""
+    for module in modules:
+        if name == module or name.startswith(f"{module}."):
+            return True
+    return False

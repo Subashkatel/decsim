@@ -145,8 +145,10 @@ def test_the_pymatching_row_answers_as_sinters_pymatching_up_to_ties(
     window = stim_batch.WholeCircuitWindow(task)
     row = stim_batch.bound_row(task, 0)
     batch = batch_predictions(window, row, events)
-    dem = circuit.detector_error_model(decompose_errors=True)
-    matching = pymatching.Matching.from_detector_error_model(dem)
+    detector_error_model = circuit.detector_error_model(decompose_errors=True)
+    matching = pymatching.Matching.from_detector_error_model(
+        detector_error_model
+    )
     package = matching.decode_batch(events)
 
     untied = disagreements_off_ties(window, row, matching, events, package)
@@ -209,12 +211,12 @@ def test_the_tesseract_row_answers_as_the_short_beam_profile(
     window = stim_batch.WholeCircuitWindow(task)
     row = stim_batch.bound_row(task, 0)
     batch = batch_predictions(window, row, events)
-    dem = circuit.detector_error_model(
+    detector_error_model = circuit.detector_error_model(
         decompose_errors=True, approximate_disjoint_errors=True
     )
     profiles = tesseract_decoder.make_tesseract_sinter_decoders_dict()
     profile = profiles["tesseract-short-beam"]
-    compiled = profile.compile_decoder_for_dem(dem=dem)
+    compiled = profile.compile_decoder_for_dem(dem=detector_error_model)
     packed = numpy.packbits(events, axis=1, bitorder="little")
 
     predicted = compiled.decode_shots_bit_packed(

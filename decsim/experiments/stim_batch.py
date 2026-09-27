@@ -47,10 +47,10 @@ import decsim.windows.built_window_models as built_window_models
 SAMPLING = "stim_batch"
 # Stim repeats a seed's samples only for the same calls, the same
 # version, the same SIMD width and the same shot count (Stim API,
-# compile_detector_sampler). So every block is drawn whole, BLOCK_SHOTS
+# compile_detector_sampler). So every block is drawn whole, BLOCK_SHOT_COUNT
 # shots in one call, and a seed's shot is the same in every piece cut,
 # every process and for every decoder of the point.
-BLOCK_SHOTS = 1024
+BLOCK_SHOT_COUNT = 1024
 # The machine's seed path to its weak decoder row: assembly.SEED_ROOTS
 # names the router decoder_router, the CodeRouter its default row, and
 # the staged unit its algorithm decoder. A row bound under this path to
@@ -181,10 +181,10 @@ def block_seed(circuit: stim.Circuit, block: int) -> int:
 
 
 def block_samples(circuit: stim.Circuit, block: int) -> tuple:
-    """One block's detection events and observables, BLOCK_SHOTS shots."""
+    """One block's detection events and observables, BLOCK_SHOT_COUNT shots."""
     seed = block_seed(circuit, block)
     sampler = circuit.compile_detector_sampler(seed=seed)
-    return sampler.sample(shots=BLOCK_SHOTS, separate_observables=True)
+    return sampler.sample(shots=BLOCK_SHOT_COUNT, separate_observables=True)
 
 
 def samples_of_seeds(
@@ -242,7 +242,7 @@ def run_unit(
         events, observables = block_samples(circuit, block)
         block_events = events[low:high]
         block_observables = observables[low:high]
-        first_seed = block * BLOCK_SHOTS + low
+        first_seed = block * BLOCK_SHOT_COUNT + low
         tally.add_samples(block_events, block_observables)
         _decode_the_block(
             window, row, tally, first_seed, block_events, block_observables
@@ -440,16 +440,16 @@ def _refuse_a_python_built_part(python_built_parts: tuple) -> None:
 def _block_spans(first_seed: int, count: int) -> list:
     """(block, low, high) of every block the seeds touch, their slice of it."""
     end_seed = first_seed + count
-    first_block = first_seed // BLOCK_SHOTS
-    last_block = (end_seed - 1) // BLOCK_SHOTS
+    first_block = first_seed // BLOCK_SHOT_COUNT
+    last_block = (end_seed - 1) // BLOCK_SHOT_COUNT
     spans = []
     past_the_last_block = last_block + 1
     for block in range(first_block, past_the_last_block):
-        block_start = block * BLOCK_SHOTS
+        block_start = block * BLOCK_SHOT_COUNT
         low_offset = first_seed - block_start
         high_offset = end_seed - block_start
         low = max(low_offset, 0)
-        high = min(high_offset, BLOCK_SHOTS)
+        high = min(high_offset, BLOCK_SHOT_COUNT)
         spans.append((block, low, high))
     return spans
 

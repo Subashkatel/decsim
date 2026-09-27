@@ -794,7 +794,8 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     The crash is relay-bp's own decode_detailed raising, which the row
     turns into BACKEND_ERROR with no correction; each shot is unscored
     with that reason, counts its windows under backend_error_windows,
-    and is not a failure, and the point has no failure fraction.
+    and is not a failure, and the point has no failure fraction and no
+    interval.
     """
     monkeypatch.setattr(
         relay_window, "_load_relay_decoder_type", _crashing_relay_type
@@ -822,4 +823,6 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     assert rows[0]["unscored_shots"] == 2
     assert rows[0]["logical_failures"] == 0
     assert math.isnan(rows[0]["logical_error_rate"])
+    assert math.isnan(rows[0]["ler_wilson_low"])
+    assert math.isnan(rows[0]["ler_wilson_high"])
     assert "unscored shots: 2" in lines

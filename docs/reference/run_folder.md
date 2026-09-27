@@ -264,7 +264,7 @@ point the run held:
 | `shots` | how many shots the point ran |
 | `windows_per_shot` | the mean over those shots |
 | `logical_failures`, `logical_error_rate` | the count and the fraction of the scored shots, sinter's errors over shots less discards; the fraction is NaN when no shot was scored |
-| `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96 over the scored shots, from `wilson_interval` |
+| `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96 over the scored shots, from `wilson_interval`; both NaN when no shot was scored |
 | `direct_pymatching_failures`, `prediction_mismatches_vs_direct` | the same shots decoded outside the machine, and the disagreements |
 | `scored_shots`, `unscored_shots` | how many of the point's shots were scored, and how many were not (`is_scored`) |
 | `<status>_windows`, `provisional_no_correction_windows` | the sums over the point's shots |

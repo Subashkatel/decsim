@@ -177,9 +177,13 @@ class RunRecord:
 
 
 def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:
-    """Wilson 95% confidence interval for a failure fraction."""
+    """Wilson 95% confidence interval for a failure fraction.
+
+    With no shot there is no fraction and so no interval: both ends are
+    NaN, as the fraction itself is (_failure_fraction).
+    """
     if shots == 0:
-        return (0.0, 0.0)
+        return (math.nan, math.nan)
     fraction = failures / shots
     denominator = 1 + z * z / shots
     center = fraction + z * z / (2 * shots)

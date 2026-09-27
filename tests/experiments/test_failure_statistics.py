@@ -4,7 +4,9 @@ Limits against scipy.stats.beta and the NIST/SEMATECH e-Handbook
 7.2.4.1 closed form; coverage and the Girshick, Mosteller and Savage
 estimator's unbiasedness by exact enumeration of one small plan, with
 scipy's nbinom and binom as the outcome probabilities; the per-round
-rate against sinter 1.16.0 shot_error_rate_to_piece_error_rate; McNemar
+rate against sinter 1.16.0 shot_error_rate_to_piece_error_rate and
+against the root at 60 digits in mpmath 1.3.0 (installed with the test
+extra, through qldpc's sympy); McNemar
 against scipy.stats.binomtest; the mixture against the ratio of
 scipy's betabinom and binom probabilities, and its crossing rate under
 the null by a seeded simulation; the empirical-Bernstein sequence
@@ -12,6 +14,7 @@ against Howard et al. (arXiv 1810.08240) eq. (24) computed at every
 prefix at once, and its coverage on seeded learning runs.
 """
 
+import mpmath
 import numpy
 import pytest
 import scipy.stats
@@ -130,7 +133,8 @@ def test_unscored_shots_count_as_failures():
 @pytest.mark.parametrize(
     ("shot_rate", "rounds"),
     [
-        (1e-9, 100),
+        (1e-12, 1),
+        (1e-12, 1_000_000),
         (0.05, 100),
         (0.1, 2),
         (0.5, 10),
@@ -145,7 +149,30 @@ def test_the_per_round_rate_is_sinters(shot_rate, rounds):
     sinter_rate = sinter.shot_error_rate_to_piece_error_rate(
         shot_rate, pieces=rounds
     )
-    assert per_round == pytest.approx(sinter_rate, rel=1e-12)
+    assert per_round == pytest.approx(sinter_rate, rel=1e-9, abs=0)
+
+
+@pytest.mark.parametrize(
+    ("shot_rate", "rounds"),
+    [
+        (1e-12, 1),
+        (1e-12, 1_000_000),
+        (1e-9, 100),
+        (0.05, 100),
+        (0.3, 1_000_000_000),
+    ],
+)
+def test_the_per_round_rate_is_the_exact_root(shot_rate, rounds):
+    """(1 - (1 - 2P)^(1/R)) / 2 at 60 digits, with mpmath."""
+    per_round = failure_statistics.per_round_rate(shot_rate, rounds)
+
+    mpmath.mp.dps = 60
+    doubled = 2 * mpmath.mpf(shot_rate)
+    survival = 1 - doubled
+    root = mpmath.root(survival, rounds)
+    exact = (1 - root) / 2
+    expected = float(exact)
+    assert per_round == pytest.approx(expected, rel=1e-12, abs=0)
 
 
 @pytest.mark.parametrize(

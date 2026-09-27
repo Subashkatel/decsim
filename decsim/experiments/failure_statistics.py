@@ -130,22 +130,27 @@ def per_round_rate(shot_rate: float, rounds: int) -> float:
 
     sinter 1.16.0 shot_error_rate_to_piece_error_rate
     (_probability_util.py:465-475): each round flips the observable with
-    probability e, independently, so 1 - 2P = (1 - 2e)^R. Above one half
-    the rate goes through its complement (:468-469), which keeps the map
-    increasing, so an interval's limits map to the per-round limits. A
-    shot rate above one half needs a per-round rate above one half, so a
-    row there is flagged by its reader.
+    probability e, independently, so 1 - 2P = (1 - 2e)^R, and
+    e = -expm1(log1p(-2P) / R) / 2, the form that keeps a small rate's
+    digits where sinter's 1 - (1 - 2P)^(1/R) rounds to zero and falls
+    back to P / R. Above one half the rate goes through its complement
+    (:468-469), a convention that keeps the map increasing, so an
+    interval's limits map to the per-round limits; for an even R no
+    round-flip probability gives a shot rate above one half, so a row
+    there is flagged by its reader.
     """
+    if shot_rate == 0.5:
+        # log1p(-1) is minus infinity: every round is a fair coin.
+        return 0.5
     if shot_rate > 0.5:
         complement = 1 - shot_rate
         complement_per_round = per_round_rate(complement, rounds)
         return 1 - complement_per_round
     doubled = 2 * shot_rate
-    shot_survival = 1 - doubled
-    exponent = 1 / rounds
-    round_survival = shot_survival**exponent
-    round_flip = 1 - round_survival
-    return round_flip / 2
+    shot_log_survival = math.log1p(-doubled)
+    round_log_survival = shot_log_survival / rounds
+    negative_round_flip = math.expm1(round_log_survival)
+    return -negative_round_flip / 2
 
 
 def mcnemar_p_value(

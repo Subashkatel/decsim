@@ -38,6 +38,12 @@ PLAN_COVERAGE_BY_MINIMUM = {0: 0.9504484671, 100: 0.9595339421}
 COVERAGE_ROUNDING = 1e-9
 # The float error of an exact sum over a few hundred outcomes.
 SUM_ROUNDING = 1e-12
+# Eq. (24)'s boundary, 1.7 sqrt(V (log log 2V + 3.8)) + 3.4 log log 2V
+# + 13, worked by hand: at V = 1, log log 2 = -0.366512920581664 and the
+# root is sqrt(3.433487079418336); at V = 2, log log 4 = 0.326634259978281
+# and the root is sqrt(8.253268519956562).
+BOUNDARY_AT_ONE = 14.903900142653546
+BOUNDARY_AT_TWO = 18.99440189739641
 # The digits mpmath carries for a referent: log-gamma terms near 1e10
 # leave some forty digits past the decision.
 REFERENCE_DIGITS = 60
@@ -300,6 +306,29 @@ def test_the_difference_sequence_is_equation_24_on_the_shifted_differences():
     expected_high = 2 * reference_high[-1] - 1
     assert low == pytest.approx(expected_low, rel=1e-12)
     assert high == pytest.approx(expected_high, rel=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("values", "mean", "boundary"),
+    [
+        # Every prediction is right: V = 0, floored to one.
+        ([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0.0, BOUNDARY_AT_ONE),
+        # Only the first prediction, zero, misses: V = 1.
+        ([1, 1, 1, 1], 1.0, BOUNDARY_AT_ONE),
+        # The first misses by a half: V = 1/4, floored to one.
+        ([0.5, 0.5, 0.5, 0.5], 0.5, BOUNDARY_AT_ONE),
+        # Predictions 0 then 1 miss by one each: V = 2.
+        ([1, 0], 0.5, BOUNDARY_AT_TWO),
+    ],
+)
+def test_the_sequence_floors_the_variance_at_one(values, mean, boundary):
+    low, high = failure_statistics.empirical_bernstein_sequence(values)
+
+    radius = boundary / len(values)
+    expected_low = mean - radius
+    expected_high = mean + radius
+    assert low == pytest.approx(expected_low, rel=1e-12, abs=0)
+    assert high == pytest.approx(expected_high, rel=1e-12, abs=0)
 
 
 def test_no_value_gives_no_sequence():

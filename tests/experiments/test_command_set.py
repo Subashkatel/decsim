@@ -1267,8 +1267,8 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
 def _online_config(tmp_path, piece_rounds: int):
     """The noisy point with an online threshold that audits often.
 
-    Written over the same file each time: the strong unit's card is read
-    relative to the config's folder, which so enters the point's id.
+    Written over the same file each time; the collect that read it has
+    run by then.
     """
     overrides = yaml_configs.online_threshold()
     overrides["escalation"]["online"] = {

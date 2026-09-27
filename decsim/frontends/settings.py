@@ -216,12 +216,24 @@ class FilesWorkload:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The workload's files, their paths resolved."""
+        """The workload's files, their paths resolved.
 
-        operations: pathlib.Path
-        circuit: Optional[pathlib.Path] = None
-        measurement_rounds: Optional[pathlib.Path] = None
-        fragments: Optional[pathlib.Path] = None
+        The paths are labels, no part of a point's id: the workload
+        they are read into is on the point's settings
+        (WorkloadSettings.running), so its content names the point and
+        the folder the files sit in does not.
+        """
+
+        operations: pathlib.Path = dataclasses.field(compare=False)
+        circuit: Optional[pathlib.Path] = dataclasses.field(
+            compare=False, default=None
+        )
+        measurement_rounds: Optional[pathlib.Path] = dataclasses.field(
+            compare=False, default=None
+        )
+        fragments: Optional[pathlib.Path] = dataclasses.field(
+            compare=False, default=None
+        )
 
         @classmethod
         def from_yaml(

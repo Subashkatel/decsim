@@ -238,7 +238,10 @@ class EscalationSettings:
     they overlap. A Python-built policy is used as it is. The
     threshold in nats and the online threshold source are set per sweep
     point by the experiments layer; base_directory resolves a relative
-    threshold_table.
+    threshold_table. base_directory is a label, no part of a point's
+    id: the threshold the table gives a point is set on its settings
+    (experiments/experiment.py _point_task_of), so the value names the
+    point and the folder the table sits in does not.
     """
 
     clock: Optional[config.Clock] = None
@@ -258,7 +261,9 @@ class EscalationSettings:
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
     online_threshold: Optional[ports.ThresholdSource] = None
-    base_directory: Optional[pathlib.Path] = None
+    base_directory: Optional[pathlib.Path] = dataclasses.field(
+        compare=False, default=None
+    )
 
     def __post_init__(self) -> None:
         config.check_cycles(

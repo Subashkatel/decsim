@@ -265,6 +265,25 @@ def test_an_inherited_files_row_reads_beside_the_yaml_that_wrote_it(
     assert files.operations == expected_path
 
 
+def test_one_files_row_read_from_two_folders_names_its_point_alike(
+    tmp_path,
+):
+    """The files' folder is where they were read; their content is the point."""
+    folders = [tmp_path / "first", tmp_path / "elsewhere"]
+    workload = {"kind": "files", "operations": "merge.json"}
+    point_ids = []
+    for folder in folders:
+        folder.mkdir()
+        _write_json(folder, "merge.json", MERGE_OPERATIONS)
+        config_path = _files_config(folder, workload)
+        config = experiment.load_experiment(config_path)
+        task = config.point_task(AT_DISTANCE_3)
+        point_id = task.strong_id()
+        point_ids.append(point_id)
+
+    assert point_ids[0] == point_ids[1]
+
+
 def test_one_circuit_under_two_operations_from_files_is_refused(tmp_path):
     """No merged circuit is built, so each needs its round range."""
     operations = {

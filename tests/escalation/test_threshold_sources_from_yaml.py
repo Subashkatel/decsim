@@ -15,6 +15,7 @@ import csv
 import math
 import random
 import re
+import shutil
 
 import pytest
 import yaml
@@ -145,6 +146,35 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     )
     resolved_decibels = resolved * NATS_TO_DB
     assert math.isclose(resolved_decibels, 2.5)
+
+
+def test_a_table_read_from_two_folders_names_its_points_alike(tmp_path):
+    """The folder a yaml sits in is no part of what its points run.
+
+    One switching yaml with a relative threshold_table, and its table
+    beside it, saved in two folders under two names: the threshold each
+    point reads is the same, so each point's id is the same.
+    """
+    first_folder = tmp_path / "first"
+    second_folder = tmp_path / "elsewhere"
+    first_folder.mkdir()
+    second_folder.mkdir()
+    table = calibration_table(first_folder)
+    card = {"threshold_source": "table", "threshold_table": table}
+    first_path = source_config(first_folder, card)
+    shutil.copytree(first_folder, second_folder, dirs_exist_ok=True)
+    copied_path = second_folder / first_path.name
+    second_path = second_folder / "renamed.yaml"
+    shutil.move(copied_path, second_path)
+    first_config = load_experiment(first_path)
+    second_config = load_experiment(second_path)
+
+    first_task = first_config.first_point_task()
+    second_task = second_config.first_point_task()
+
+    first_escalation = first_task.settings.escalation
+    assert first_escalation.base_directory == first_folder
+    assert first_task.strong_id() == second_task.strong_id()
 
 
 @pytest.mark.parametrize(

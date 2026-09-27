@@ -285,31 +285,31 @@ def write_piece(
     return folder
 
 
-def shot_rows(folder: pathlib.Path):
-    """A piece's shots as the rows a prefix tracker reads, in seed order.
-
-    A shot failed or went unscored when piece.json names its seed. The
-    piece's seconds ride on its last shot, so a time cap stops a point
-    at a piece's end; a target stops it on the exact shot of its last
-    wanted failure.
-    """
+def count_the_piece(
+    tracker: collection_module.PrefixTracker, folder: pathlib.Path
+) -> None:
+    """A saved piece onto a point's prefix, as one span of its shots."""
     piece = pieces.read_piece(folder)
-    failure_seeds = set(piece["failure_seeds"])
-    unscored_seeds = set(piece["unscored_seeds"])
-    first_seed = piece["first_seed"]
-    end_seed = first_seed + piece["count"]
-    last_seed = end_seed - 1
-    for seed in range(first_seed, end_seed):
-        seconds = 0.0
-        if seed == last_seed:
-            seconds = piece["core_seconds"]
-        yield {
-            "point_id": piece["point_id"],
-            "seed": seed,
-            "is_scored": seed not in unscored_seeds,
-            "logical_failure": seed in failure_seeds,
-            "sim_wall_seconds": seconds,
-        }
+    span = span_of(piece)
+    tracker.add_span(span)
+
+
+def span_of(piece: dict) -> collection_module.ShotSpan:
+    """A piece.json's shots as a span, its failures and unscored by seed.
+
+    The piece's seconds ride on its last shot, so a time cap stops a
+    point at a piece's end; a target stops it on the exact shot of its
+    last wanted failure.
+    """
+    failure_seeds = tuple(piece["failure_seeds"])
+    unscored_seeds = tuple(piece["unscored_seeds"])
+    return collection_module.ShotSpan(
+        piece["first_seed"],
+        piece["count"],
+        failure_seeds,
+        unscored_seeds,
+        piece["core_seconds"],
+    )
 
 
 def fold_into_the_staging(
@@ -489,9 +489,22 @@ def _decode_the_block(
 
 
 def _point_row(record: dict, point_folders: list) -> dict:
-    """One point's sweep row from its pieces' counts and its prefix."""
-    tracker = _prefix_of(record, point_folders)
-    totals = _summed_counts(point_folders)
+    """One point's sweep row from its pieces, each piece.json read once.
+
+    The counts cover every shot the point holds; the prefix is read by
+    the collection the point recorded.
+    """
+    rule = collection_module.PointRule.from_record(record)
+    tracker = collection_module.PrefixTracker(rule)
+    names = ("count", "failures", "scored_shots", "unscored_shots")
+    totals = dict.fromkeys(names, 0)
+    totals["core_seconds"] = 0.0
+    for folder in point_folders:
+        piece = pieces.read_piece(folder)
+        span = span_of(piece)
+        tracker.add_span(span)
+        for name in totals:
+            totals[name] += piece[name]
     row = {
         "point_id": record["id"],
         "algorithm": record["experiment"]["algorithm"],
@@ -504,30 +517,6 @@ def _point_row(record: dict, point_folders: list) -> dict:
     _add_the_prefix_columns(row, tracker)
     row["core_seconds_per_shot"] = totals["core_seconds"] / totals["count"]
     return row
-
-
-def _prefix_of(
-    record: dict, point_folders: list
-) -> collection_module.PrefixTracker:
-    """The point's contiguous prefix, read by the collection it recorded."""
-    rule = collection_module.PointRule.from_record(record)
-    tracker = collection_module.PrefixTracker(rule)
-    for folder in point_folders:
-        for row in shot_rows(folder):
-            tracker.add(row)
-    return tracker
-
-
-def _summed_counts(point_folders: list) -> dict:
-    """A point's piece.json counts summed over its pieces."""
-    names = ("count", "failures", "scored_shots", "unscored_shots")
-    totals = dict.fromkeys(names, 0)
-    totals["core_seconds"] = 0.0
-    for folder in point_folders:
-        piece = pieces.read_piece(folder)
-        for name in totals:
-            totals[name] += piece[name]
-    return totals
 
 
 def _add_the_prefix_columns(

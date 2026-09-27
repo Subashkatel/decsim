@@ -111,8 +111,7 @@ class PointCollection:
             folder = pieces.piece_dir(
                 experiment_dir, point_id, first_seed, count
             )
-            for row in _shot_rows_of(self.task, folder):
-                self.tracker.add(row)
+            _count_the_piece(self.tracker, self.task, folder)
         self.pending = []
         if self.tracker.stop_kind is not None:
             _say_the_point_stopped(self)
@@ -917,13 +916,19 @@ def _run_unit(unit: collect.Unit, measure_shot) -> result_records.UnitOutcome:
     return sampling.run_unit(unit, measure_shot)
 
 
-def _shot_rows_of(task: collect.Task, folder: pathlib.Path):
-    """A saved piece's shot rows in seed order, as its sampling kept them."""
+def _count_the_piece(
+    tracker: collection_module.PrefixTracker,
+    task: collect.Task,
+    folder: pathlib.Path,
+) -> None:
+    """A saved piece's shots onto a prefix, as its sampling kept them."""
     if task.sampling is not None:
         sampling = SAMPLINGS[task.sampling]
-        return sampling.shot_rows(folder)
+        sampling.count_the_piece(tracker, folder)
+        return
     shots_path = folder / "shots.csv"
-    return fold.row_stream(shots_path)
+    for row in fold.row_stream(shots_path):
+        tracker.add(row)
 
 
 def _sampling_of_the_points(records: dict, point_ids: list):

@@ -37,8 +37,8 @@ submit from a worktree pinned at a commit, and leave the tree you work
 in free:
 
 ```bash
-git worktree add ../decsim-weak_ler <commit>
-cd ../decsim-weak_ler
+git worktree add ../decsim-pinned <commit>
+cd ../decsim-pinned
 ```
 
 `slurm/round.sh` refuses a tree with uncommitted changes, or one git
@@ -117,6 +117,8 @@ submission past the limit. So before it submits any array, the script
 adds the round's tasks to the jobs you have queued, and refuses the
 round if they pass `SUBMIT_LIMIT` (1,000 unless you set it). Plan the
 round again with fewer `--tasks`, or wait for queued jobs to end.
+A `SUBMIT_LIMIT` that is not a positive whole number refuses the round
+too.
 
 ## 5. If a task dies
 

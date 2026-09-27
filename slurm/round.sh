@@ -85,6 +85,11 @@ refuse_a_round_past_the_submit_limit() {
     queued=$(squeue -h -r -u "$(id -un)" | wc -l)
   fi
   limit=${SUBMIT_LIMIT:-1000}
+  if ! [[ "$limit" =~ ^[1-9][0-9]*$ ]]; then
+    echo "refusing to submit: SUBMIT_LIMIT must be a whole number of jobs" \
+      "of at least 1, got '$limit'" >&2
+    exit 1
+  fi
   if [ $((task_count + queued)) -gt "$limit" ]; then
     echo "refusing to submit: round $round has $task_count tasks and" \
       "$queued of your jobs are queued, past the submit limit of $limit" \

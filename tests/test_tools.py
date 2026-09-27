@@ -553,3 +553,20 @@ def test_a_round_past_the_submit_limit_is_refused_before_any_array(
     assert _sbatch_lines(completed.stdout) == []
     assert not task_folder.exists()
     assert not submissions.exists()
+
+
+@pytest.mark.parametrize("limit", ["mistyped", "0", "-3", "1.5"])
+def test_a_submit_limit_that_is_no_positive_whole_number_is_refused(
+    tmp_path, limit
+):
+    """A limit the script cannot compare would let any round through."""
+    malformed = {"SUBMIT_LIMIT": limit}
+
+    completed, _experiment_dir = _run_the_round_script(
+        tmp_path, "clean", malformed
+    )
+
+    submissions = tmp_path / "submissions.txt"
+    assert completed.returncode != 0
+    assert "SUBMIT_LIMIT must be a whole number" in completed.stderr
+    assert not submissions.exists()

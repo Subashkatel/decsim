@@ -18,6 +18,7 @@ import pytest
 import scipy.sparse
 
 import decsim.config as config
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_backend as strong_backend
@@ -305,6 +306,28 @@ def test_a_gamma_interval_that_is_not_low_below_high_is_refused(interval):
         "strong_decoder.gamma_interval must be [low, high], two finite real "
         f"numbers with low below high (got {interval!r})"
     )
+
+
+def test_bases_apart_takes_the_sum_of_the_two_parts_times(monkeypatch):
+    """One weak unit decodes the X part, then the Z part."""
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(circuit, ROUNDS, SPLIT_REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 3)
+    row = _seeded_row(SURFACE_APART)
+    job = windows.job_for(model, detection_events[0])
+    part_nanoseconds = iter([30, 70])
+    timed_part = decoder_module.WindowDecoderBase.decode_timed
+
+    def timed_at_a_set_cost(decoder, part):
+        result, _ = timed_part(decoder, part)
+        return result, next(part_nanoseconds)
+
+    monkeypatch.setattr(
+        decoder_module.WindowDecoderBase, "decode_timed", timed_at_a_set_cost
+    )
+    _, elapsed_nanoseconds = row.decode_timed(job)
+    assert elapsed_nanoseconds == 100
 
 
 def test_a_memory_strength_that_is_not_a_number_is_refused():

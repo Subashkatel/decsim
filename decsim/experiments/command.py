@@ -69,10 +69,34 @@ def _run(argv: list) -> None:
 
 def _collect(argv: list) -> None:
     """The whole sweep of one yaml, or one task of a round's plan."""
-    import argparse
-
     import decsim.experiments.collect_command as collect_command
     import decsim.experiments.report as report
+
+    parser = _collect_parser()
+    parsed = parser.parse_args(argv)
+    if parsed.plan is not None:
+        _check_the_plan_arguments(parser, parsed)
+        plan_path = pathlib.Path(parsed.plan)
+        collect_command.run_planned(
+            plan_path, parsed.task, processes=parsed.processes
+        )
+        return
+    if parsed.config is None:
+        parser.error("name the yaml to sweep, or --plan and --task")
+    run_dir, rows = collect_command.run_experiment(
+        parsed.config, parsed.out, processes=parsed.processes
+    )
+    if not rows:
+        return
+    lines = report.terminal_lines(rows, run_dir)
+    text = "\n".join(lines)
+    print(text)
+    print(f"\nevery column: {run_dir}/sweep.csv")
+
+
+def _collect_parser():
+    """The collect command's arguments."""
+    import argparse
 
     parser = argparse.ArgumentParser(prog="decsim collect")
     parser.add_argument(
@@ -93,25 +117,7 @@ def _collect(argv: list) -> None:
     parser.add_argument(
         "--task", type=int, default=None, help="the plan's task to run"
     )
-    parsed = parser.parse_args(argv)
-    if parsed.plan is not None:
-        _check_the_plan_arguments(parser, parsed)
-        plan_path = pathlib.Path(parsed.plan)
-        collect_command.run_planned(
-            plan_path, parsed.task, processes=parsed.processes
-        )
-        return
-    if parsed.config is None:
-        parser.error("name the yaml to sweep, or --plan and --task")
-    run_dir, rows = collect_command.run_experiment(
-        parsed.config, parsed.out, processes=parsed.processes
-    )
-    if not rows:
-        return
-    lines = report.terminal_lines(rows, run_dir)
-    text = "\n".join(lines)
-    print(text)
-    print(f"\nevery column: {run_dir}/sweep.csv")
+    return parser
 
 
 def _check_the_plan_arguments(parser, parsed) -> None:

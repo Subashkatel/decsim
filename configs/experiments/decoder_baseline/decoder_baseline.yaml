@@ -1,0 +1,119 @@
+# The decoder baseline: four decoders on the rotated surface code memory,
+# 100 rounds, full history (one window), paired shots across decoders.
+# A point stops at 100 failures or 24 core-hours; a point stopped by the
+# time cap plots as an upper bound, and a raised cap resumes it.
+# Every key is documented in configs/reference.yaml.
+
+qpu:
+  kind: stim_device
+
+escalation:
+  kind: weak_baseline
+
+workload:
+  kind: producer
+  function: decsim.producers:memory_circuit
+  arguments:
+    code_task: surface_code:rotated_memory_z
+    rounds_per_shot: 100
+    distance: ${qpu.distance}
+    physical_error_probability: 0.001
+
+windows:
+  kind: naive_online
+  commit_rounds: null
+  buffer_rounds: null
+
+# Seeds 0, 1, 2 and on at every point, so each decoder decodes the same
+# samples at the same seed; shots.csv's sample_digest checks the pairing.
+sweep:
+  - axes:
+      workload.arguments.code_task: [surface_code:rotated_memory_x, surface_code:rotated_memory_z]
+      qpu.distance: [5, 7, 9, 11, 13, 15]
+      workload.arguments.physical_error_probability: [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
+      qpu.round_period_microseconds: [1.0]
+      weak_decoder:
+        # Union-Find: decsim's compiled C row
+        - {kind: union_find, units: 1, unit_memory: {bits: null},
+           engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
+                    release_cycles_per_job: 10, release_cycles_per_round: 0}}
+        # MWPM: pymatching
+        - {kind: pymatching, units: 1, unit_memory: {bits: null},
+           engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
+                    release_cycles_per_job: 10, release_cycles_per_round: 0}}
+        # Relay-BP-1: Mueller et al. 2506.01779 surface values (lines 307,
+        # 332, 343); relay_set_count 300 is R 301; X and Z decoded apart
+        - {kind: relay_bp, units: 1, unit_memory: {bits: null},
+           gamma0: 0.35, gamma_interval: [-0.254, 0.985],
+           relay_set_count: 300, converged_solution_count: 1,
+           pre_iterations: 80, iterations_per_set: 60, bases: apart,
+           engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
+                    release_cycles_per_job: 10, release_cycles_per_round: 0}}
+        # Tesseract: the package's tesseract-short-beam profile
+        # (src/tesseract_sinter_compat.pybind.h:466-472), merging on and
+        # the order seed fixed
+        - {kind: tesseract, units: 1, unit_memory: {bits: null},
+           detector_beam: 15, beam_climbing: true, no_revisit_detectors: true,
+           priority_queue_limit: 200000, detector_order_method: index,
+           detector_order_count: 16, merge_errors: true, detector_order_seed: 2384753,
+           engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
+                    release_cycles_per_job: 10, release_cycles_per_round: 0}}
+
+collection:
+  max_failures: 100
+  max_shots: 1000000000
+  max_core_seconds: 86400
+  min_shots: 0
+  piece_rounds: 20000
+
+controller:
+  clock: fridge
+  readout_to_bits_cycles: 0
+  decision_to_pulse_cycles: 0
+  packing_cycles_per_round: 0
+  packing_rounds_in_flight: null
+
+clocks:
+  fridge: 250.0
+  room: 250.0
+
+links:
+  qpu_to_controller: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  decoder_to_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_strong_buffer: null
+  strong_buffer_to_strong_decoder: null
+  weak_decoder_to_strong_decoder: null
+  frame_to_controller: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_qpu: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+
+weak_syndrome_buffer:
+  bits: null
+strong_syndrome_buffer:
+  bits: null
+
+weak_decoder:
+  kind: pymatching
+  units: 1
+  unit_memory:
+    bits: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    fetch_cycles_per_job: 0
+    release_cycles_per_job: 10
+    release_cycles_per_round: 0
+
+pauli_frame:
+  clock: fridge
+  write_cycles: 1
+
+idle_policy:
+  kind: separate_decode_jobs
+
+observation:
+  check_windows_with: none
+  log_component_io: false
+  log: off

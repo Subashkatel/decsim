@@ -30,6 +30,7 @@ SHIPPED_CONFIGS = (
     "examples/two_tiers.yaml",
     "experiments/burst_detection/burst_detection.yaml",
     "experiments/data_movement/data_movement.yaml",
+    "experiments/decoder_baseline/decoder_baseline.yaml",
     "experiments/switching/cluster_gap_switching.yaml",
     "experiments/switching/seam_pinned_switching.yaml",
 )

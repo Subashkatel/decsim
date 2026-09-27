@@ -17,8 +17,9 @@ sinter/_collection/_collection_worker_state.py, capped by
 --max_batch_size), and the pool (sinter's --processes,
 _main_collect.py:83) runs whole units. A unit's window error models are
 built by its first shot and read by the rest, as sinter compiles its
-decoder once per task. Rows come back in unit order whatever order the
-units finish in, so a run writes its rows in task and seed order.
+decoder once per task. A pool hands each unit on the moment it ends, so
+a caller saves it while slower units run; collect puts the rows back in
+task and seed order.
 """
 
 import concurrent.futures
@@ -153,42 +154,38 @@ def collect(
     """
     unique = unique_tasks(tasks)
     units = work_units(unique, shots)
+    rows_by_task = {}
+    keep_rows = functools.partial(_keep_rows, rows_by_task, on_task_done)
+    run_units(units, measure, on_unit_done=keep_rows, processes=processes)
     rows = []
-    keep_rows = functools.partial(_keep_rows, rows)
-    run_units(
-        units,
-        measure,
-        on_task_done,
-        on_unit_done=keep_rows,
-        processes=processes,
-    )
+    for task in unique:
+        task_id = task.strong_id()
+        task_rows = rows_by_task[task_id]
+        rows.extend(task_rows)
     return rows
 
 
 def run_units(
     units: list,
     measure: Callable[[Shot], Any],
-    on_task_done: Optional[Callable[[Task], None]] = None,
     *,
     on_unit_done: Callable[[Unit, UnitOutcome], None],
     processes: int = 1,
 ) -> None:
-    """Every unit run and handed on, in unit order, whatever order it ran.
+    """Every unit run, each handed on the moment it ends.
 
-    on_unit_done takes each unit with its outcome, the moment the
-    unit's turn comes, so a caller saves a unit before the next one
-    finishes. The unit it takes holds the task as it ran, whose online
-    calibrator learned over the unit's shots, in a worker process when
-    there is a pool. on_task_done runs after the last unit of a task in
-    the list. With processes above one, whole units run in a worker
-    pool.
+    on_unit_done takes each unit with its outcome, so a caller saves a
+    unit while slower ones run, and a job killed at its time limit
+    loses only the units still running. The unit it takes holds the
+    task as it ran, whose online calibrator learned over the unit's
+    shots, in a worker process when there is a pool. With processes
+    above one, whole units run in a worker pool, `processes` at a time.
     """
     outcomes = _unit_outcomes(units, measure, processes)
-    for position, outcome in enumerate(outcomes):
+    for position, outcome in outcomes:
         unit = units[position]
         ran_unit = dataclasses.replace(unit, task=outcome.task)
         on_unit_done(ran_unit, outcome)
-        _report_a_finished_task(on_task_done, units, position, outcome.task)
 
 
 def work_units(tasks: list, shots: int) -> list:
@@ -284,37 +281,17 @@ def json_value(value: Any, *, keep_labels: bool = True) -> Any:
     return _json_scalar(value, keep_labels)
 
 
-def _report_a_finished_task(
+def _keep_rows(
+    rows_by_task: dict,
     on_task_done: Optional[Callable[[Task], None]],
-    units: list,
-    position: int,
-    ran: Task,
+    unit: Unit,
+    outcome: UnitOutcome,
 ) -> None:
-    """The progress callback, once per task, after its last unit here."""
-    if on_task_done is None:
-        return
-    if not _is_a_tasks_last_unit(units, position):
-        return
-    on_task_done(ran)
-
-
-def _is_a_tasks_last_unit(units: list, position: int) -> bool:
-    """Whether the next unit of this list belongs to another task.
-
-    work_units keeps a task's units together, so a task's last unit in a
-    list is the one whose successor does not share its task.
-    """
-    next_position = position + 1
-    if next_position == len(units):
-        return True
-    unit = units[position]
-    later = units[next_position]
-    return later.task is not unit.task
-
-
-def _keep_rows(rows: list, _unit: Unit, outcome: UnitOutcome) -> None:
-    """A unit callback that keeps each unit's rows in one list."""
-    rows.extend(outcome.rows)
+    """A unit callback that keeps a task's rows; its unit is the whole task."""
+    task_id = unit.task.strong_id()
+    rows_by_task[task_id] = outcome.rows
+    if on_task_done is not None:
+        on_task_done(unit.task)
 
 
 def _peak_memory_mb() -> float:
@@ -331,32 +308,62 @@ def _peak_memory_mb() -> float:
 
 
 def _unit_outcomes(units: list, measure: Callable[[Shot], Any], processes: int):
-    """Each unit's outcome in unit order, run here or in a pool."""
+    """Each unit's position and outcome as it ends, run here or in a pool."""
     if processes <= 1:
-        for unit in units:
-            yield run_unit(unit, measure)
+        for position, unit in enumerate(units):
+            outcome = run_unit(unit, measure)
+            yield position, outcome
         return
-    futures = _submitted(units, measure, processes)
-    for future in futures:
-        yield future.result()
+    yield from _pooled_outcomes(units, measure, processes)
 
 
-def _submitted(
+def _pooled_outcomes(
     units: list, measure: Callable[[Shot], Any], processes: int
-) -> list:
-    """Every unit handed to the pool, in unit order.
+):
+    """Each unit's position and outcome as it ends, `processes` at a time.
 
-    The pool is shut down when the last future has been read, which the
-    caller does in this same order, so a unit's rows are appended where
-    the unit sits and not where it finished.
+    A unit is handed to the pool only when one ends, so what a killed
+    job loses is at most the units then running (concurrent.futures.wait
+    with FIRST_COMPLETED). The pool's queued work is dropped if the
+    caller stops reading.
     """
+    queued = enumerate(units)
+    running = {}
     pool = concurrent.futures.ProcessPoolExecutor(processes)
-    futures = []
-    for unit in units:
+    try:
+        _submit_up_to(pool, running, queued, measure, processes)
+        while running:
+            yield from _ended_outcomes(running)
+            _submit_up_to(pool, running, queued, measure, processes)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _ended_outcomes(running: dict):
+    """The running units that have ended, each position and outcome, taken out.
+
+    It waits until at least one has ended.
+    """
+    ended, _still_running = concurrent.futures.wait(
+        running, return_when=concurrent.futures.FIRST_COMPLETED
+    )
+    for future in ended:
+        position = running.pop(future)
+        outcome = future.result()
+        yield position, outcome
+
+
+def _submit_up_to(
+    pool, running: dict, queued, measure: Callable[[Shot], Any], limit: int
+) -> None:
+    """Queued units handed to the pool until `limit` of them run."""
+    while len(running) < limit:
+        queued_unit = next(queued, None)
+        if queued_unit is None:
+            return
+        position, unit = queued_unit
         future = pool.submit(run_unit, unit, measure)
-        futures.append(future)
-    pool.shutdown(wait=False)
-    return futures
+        running[future] = position
 
 
 def _json_record(record: Any, keep_labels: bool) -> dict:

@@ -44,10 +44,12 @@ import csv
 import dataclasses
 import decimal
 import fractions
+import functools
 import json
 import pathlib
 import re
 import shutil
+import time
 
 import numpy
 import pytest
@@ -605,6 +607,58 @@ def _memory_task(rounds: int) -> collect.Task:
     workload = workload_settings.WorkloadSettings(operations=(operation,))
     settings = machine_settings.MachineSettings(workload=workload)
     return collect.Task(settings, {"point": 1})
+
+
+def test_a_unit_that_ended_is_handed_on_while_one_before_it_runs(tmp_path):
+    """A pool hands each unit on the moment it ends, not in list order.
+
+    The first unit waits until the two after it have been handed on, as
+    a slow piece runs beside short ones. Handed on in list order, the
+    short ones would wait behind it unsaved, and a job killed at its
+    time limit would lose them.
+    """
+    config = experiment.load_experiment(REFERENCE_YAML)
+    task = config.point_task(
+        {
+            "workload.arguments.physical_error_probability": 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
+    )
+    units = [
+        collect.Unit(task, 0, 1),
+        collect.Unit(task, 1, 1),
+        collect.Unit(task, 2, 1),
+    ]
+    release_path = tmp_path / "release"
+    measure = functools.partial(_seed_after_the_release, release_path)
+    handed_on = []
+    on_unit_done = functools.partial(_hand_on, handed_on, release_path)
+
+    collect.run_units(units, measure, on_unit_done=on_unit_done, processes=2)
+
+    assert handed_on == [1, 2, 0]
+
+
+# how long the first unit waits for its release before it gives up
+RELEASE_WAIT_SECONDS = 20
+
+
+def _seed_after_the_release(release_path: pathlib.Path, shot) -> int:
+    """The shot's seed; seed 0 once release_path exists, or the wait ends."""
+    deadline = time.monotonic() + RELEASE_WAIT_SECONDS
+    while shot.seed == 0 and not release_path.exists():
+        if time.monotonic() > deadline:
+            break
+        time.sleep(0.05)
+    return shot.seed
+
+
+def _hand_on(handed_on: list, release_path: pathlib.Path, unit, _outcome):
+    """Each unit's first seed as it is handed on; the release after two."""
+    handed_on.append(unit.first_seed)
+    if len(handed_on) == 2:
+        release_path.touch()
 
 
 def test_two_tasks_that_run_different_circuits_are_two_tasks():

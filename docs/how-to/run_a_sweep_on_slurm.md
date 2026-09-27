@@ -132,10 +132,12 @@ longer sweeps is still counted, and a point two configurations reach is
 counted once. It writes `results/weak_ler/status.csv`, one row per
 point, with these columns:
 
-- the point's state: `running`, `target`, `minimum`, `cap`, or `no data`
-- its shots, failures and unscored shots
-- the estimate and exact interval of its contiguous prefix
-- its core seconds
+- its configuration id
+- its row of the run folder's `sweep.csv`, whole: its values, its state
+  (`running`, `target`, `minimum`, `cap`, `time cap`, or `no data`), its
+  shots, failures and unscored shots, and every estimate and exact
+  interval of its contiguous prefix, per shot and per round
+- the rounds and core seconds of all its pieces
 
 Status can run while a round runs. Plan the next round when the last
 one ends.

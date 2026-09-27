@@ -2467,3 +2467,47 @@ def _total_shots(rows: list) -> int:
     for row in rows:
         total += row["shots"]
     return total
+
+
+def test_a_status_row_is_its_points_sweep_row_and_its_rounds(tmp_path):
+    """status.csv carries every column the fold gives a point, and more.
+
+    Each row holds its point's sweep.csv row whole, the per-round and
+    plan-unbiased estimates among them, then the rounds and core seconds
+    of all its pieces: two shots of fifteen rounds each here.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    experiment_dir = tmp_path / "experiment"
+    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+
+    command.main(["status", str(experiment_dir)])
+
+    status_path = experiment_dir / "status.csv"
+    status_rows = _csv_rows(status_path)
+    run_dir = yaml_configs.run_folder_of(experiment_dir)
+    sweep_path = run_dir / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
+    typed_rows = _typed_status_rows(experiment_dir)
+    rounds = {row["rounds"] for row in typed_rows}
+    assert _sweep_cells_status_misses(status_rows, sweep_rows) == []
+    assert rounds == {30}
+
+
+def _sweep_cells_status_misses(status_rows: list, sweep_rows: list) -> list:
+    """Each (point id, column) of sweep.csv its status row lacks or changes."""
+    status_by_point = {row["point_id"]: row for row in status_rows}
+    missed = []
+    for sweep_row in sweep_rows:
+        point_id = sweep_row["point_id"]
+        status_row = status_by_point[point_id]
+        point_missed = _cells_missed(point_id, status_row, sweep_row)
+        missed.extend(point_missed)
+    return missed
+
+
+def _cells_missed(point_id: str, status_row: dict, sweep_row: dict) -> list:
+    missed = []
+    for column, cell in sweep_row.items():
+        if status_row.get(column) != cell:
+            missed.append((point_id, column))
+    return missed

@@ -6,11 +6,12 @@ collect of it folds them. What a fold reads is the points' resolved/
 records and the pieces, never the yamls, so a point a yaml no longer
 sweeps is still counted, and a point two configurations recorded is
 counted once, under the one that recorded it last. status.csv gets one
-row per point: its configuration and point ids, its swept values, the
-state of its contiguous prefix, its counts, the estimate and exact
-limits the fold computed for that prefix (failure_statistics), and the
-core seconds of all its pieces. A point with no piece yet is a row in
-state "no data". Status reads and writes nothing a running task writes,
+row per point: its configuration id, then its sweep.csv row whole (its
+id and swept values, the state of its contiguous prefix, its counts,
+and every estimate and exact limit the fold computed for that prefix,
+per shot, per round and plan-unbiased, failure_statistics), then the
+rounds and core seconds of all its pieces. A point with no piece yet is
+a row in state "no data". Status reads and writes nothing a running task writes,
 so it can run while a round runs; its files are replaced whole.
 """
 
@@ -25,20 +26,6 @@ import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 
 STATUS_FILE = "status.csv"
-# The fold's sweep columns a status row carries, in order.
-SWEEP_COLUMNS = (
-    "state",
-    "shots",
-    "scored_shots",
-    "logical_failures",
-    "unscored_shots",
-    "prefix_shots",
-    "prefix_scored_shots",
-    "prefix_failures",
-    "logical_error_rate_estimate",
-    "logical_error_rate_low",
-    "logical_error_rate_high",
-)
 NO_DATA = "no data"
 
 
@@ -104,21 +91,25 @@ def _status_row(
     point_id: str,
     sweep_row,
 ) -> dict:
-    """One point's status row: its ids, its fold's columns, its seconds."""
+    """One point's status row: its ids, its sweep row, its rounds and seconds.
+
+    The sweep row is whole, every column the fold gives the point.
+    """
     row = {"point_id": point_id, "configuration_id": configuration_id}
     if sweep_row is None:
         row["state"] = NO_DATA
     else:
-        for column in SWEEP_COLUMNS:
-            row[column] = sweep_row[column]
-    row["core_seconds"] = _core_seconds(experiment_dir, point_id)
+        row.update(sweep_row)
+    folders = pieces.folders_of(experiment_dir, [point_id])
+    row["rounds"] = _summed(folders, "rounds")
+    row["core_seconds"] = _summed(folders, "core_seconds")
     return row
 
 
-def _core_seconds(experiment_dir: pathlib.Path, point_id: str) -> float:
-    """The core seconds of every saved piece of the point."""
-    core_seconds = 0.0
-    for folder in pieces.folders_of(experiment_dir, [point_id]):
+def _summed(folders: list, name: str):
+    """One piece.json line summed over the pieces."""
+    total = 0
+    for folder in folders:
         piece = pieces.read_piece(folder)
-        core_seconds += piece["core_seconds"]
-    return core_seconds
+        total += piece[name]
+    return total

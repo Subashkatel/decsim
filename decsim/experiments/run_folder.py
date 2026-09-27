@@ -198,15 +198,15 @@ def write_manifest(
     rows in the order the recorded sweep gives; they say what a folder
     holds when a Slurm array leaves a hundred of them behind.
     """
-    json_safe_config = None
+    experiment_config = None
     config_files = []
     if config is not None:
-        json_safe_config = collect.json_value(config)
+        experiment_config = collect.json_value(config)
         for path in config.config_files:
             config_files.append(str(path))
     manifest = {
         "config_files": config_files,
-        "resolved_config": json_safe_config,
+        "experiment_config": experiment_config,
         "points": point_ids,
         "shard": _shard_text(shard),
         "shots_per_unit": shots_per_unit,
@@ -219,7 +219,7 @@ def write_manifest(
 
 
 def write_combined_manifest(
-    resolved_config: dict,
+    experiment_config: dict,
     point_ids: list,
     run_dir: pathlib.Path,
     folded: list,
@@ -230,7 +230,7 @@ def write_combined_manifest(
 
     A combined folder is a run folder, so it carries a manifest like any
     other and `decsim combine` can fold it again with a shard that
-    landed later. The resolved config and the point ids are the ones
+    landed later. The experiment config and the point ids are the ones
     every folded folder recorded, and the ids are what combine reads the
     sweep order off; the folded folders' names are a fact of how this
     folder came about, and like a run's shard they order nothing.
@@ -239,7 +239,7 @@ def write_combined_manifest(
     for run_folder_path in folded:
         folded_names.append(str(run_folder_path))
     manifest = {
-        "resolved_config": resolved_config,
+        "experiment_config": experiment_config,
         "points": point_ids,
         "folded": folded_names,
     }

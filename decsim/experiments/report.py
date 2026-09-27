@@ -574,7 +574,7 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     run_folder.copy_point_records(folders, out_dir)
     finished_utc = run_folder.utc_now()
     run_folder.write_combined_manifest(
-        manifest["resolved_config"],
+        manifest["experiment_config"],
         point_ids,
         out_dir,
         run_dirs,
@@ -1112,7 +1112,7 @@ def _one_sweeps_manifest(run_dirs: list) -> dict:
     for run_dir in run_dirs:
         manifest = _manifest_of(run_dir)
         manifests.append(manifest)
-        recorded_configs.append(manifest["resolved_config"])
+        recorded_configs.append(manifest["experiment_config"])
     _refuse_folders_of_different_sweeps(run_dirs, recorded_configs)
     return manifests[0]
 
@@ -1142,7 +1142,7 @@ def _refuse_folders_of_different_sweeps(
         raise refusal.RefusalError(
             f"{run_dir} ran a different experiment from {first_dir}; combine "
             "folds the shards of one sweep, and every shard of a sweep "
-            "records the same resolved config"
+            "records the same experiment config"
         )
 
 

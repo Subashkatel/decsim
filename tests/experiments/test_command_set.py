@@ -1157,7 +1157,7 @@ def test_a_manifest_records_the_shard_and_the_unit_size_it_ran(tmp_path):
     assert sharded["shard"] == "0/2"
     assert sharded["shots_per_unit"] == 1
     assert combined["folded"] == [str(whole_dir)]
-    assert combined["resolved_config"] == whole["resolved_config"]
+    assert combined["experiment_config"] == whole["experiment_config"]
 
 
 def test_a_manifest_names_the_commit_of_the_tree_it_imported(

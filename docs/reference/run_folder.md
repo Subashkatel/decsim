@@ -304,7 +304,7 @@ One object. Its keys, from `write_manifest` in
 | Key | What it is |
 | --- | --- |
 | `config_files` | the yaml chain, in the order it was read |
-| `resolved_config` | the whole config after every `extends` was folded in, as json |
+| `experiment_config` | the config as its files write it, as json: its sections after every `extends` was folded in, with each `${...}` reference as written, their folders, the sweep blocks and the files; what each point resolves to is in its `resolved/` record |
 | `points` | the sweep's point ids in task order, a point two blocks name listed once: the order `decsim combine` writes a fold's rows in |
 | `shard`, `shots_per_unit` | the `--shard` and `--shots-per-unit` this process ran with, or null |
 | `git` | the commit and whether the checkout was dirty, read once when the process started |
@@ -316,7 +316,7 @@ One object. Its keys, from `write_manifest` in
 | `started_utc`, `finished_utc` | when |
 
 `decsim combine` writes the same shape through `write_combined_manifest`,
-with the resolved config and the point ids of the folders it folded.
+with the experiment config and the point ids of the folders it folded.
 
 The manifest is written twice, once when the run starts and once when
 it ends with `finished_utc` filled in, and both writes name the same

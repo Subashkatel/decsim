@@ -1026,10 +1026,9 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     manifest_text = manifest_path.read_text()
     manifest = json.loads(manifest_text)
     assert manifest["versions"]["packages"]["stim"]
-    assert (
-        manifest["resolved_config"]["sections"]["escalation"]["kind"]
-        == "weak_baseline"
-    )
+    sections = manifest["experiment_config"]["sections"]
+    assert sections["escalation"]["kind"] == "weak_baseline"
+    assert sections["workload"]["arguments"]["distance"] == "${qpu.distance}"
     assert manifest["started_utc"] and manifest["finished_utc"]
 
     shots_csv_path = run_dir / "shots.csv"

@@ -175,18 +175,28 @@ chain says what you meant.
 
 ## The shipped configs
 
+`configs/` holds three kinds of file, and `configs/reference.yaml`
+beside them. A base under `bases/` is the defaults a study starts from
+and is read through `extends`; an example under `examples/` teaches one
+feature at small cost; an experiment under `experiments/` answers one
+question, one folder per question, its file named for the study, since
+the run folder is named for the file. An experiment extends a base,
+never an example or another experiment, and it holds its grid whole:
+no copy per distance and no preview copy. A run too long for one job is
+cut into pieces by `collect`, not by more files.
+
 | File | What it is for |
 | --- | --- |
 | `configs/reference.yaml` | every key, commented, with a two-shot sweep so it runs in seconds |
 | `configs/bases/weak_decoder_baseline.yaml` | the defaults a weak-tier study starts from |
 | `configs/bases/strong_decoder_baseline.yaml` | the same for a strong-tier study |
-| `configs/experiments/switching/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
+| `configs/examples/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
 | `configs/examples/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
 | `configs/examples/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
-| `configs/examples/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
+| `configs/experiments/switching/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
 | `configs/experiments/switching/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
 | `configs/experiments/burst_detection/burst_detection.yaml` | four burst detectors on one burst at d = 5 and on quiet shots, the detector and the burst its only axes ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
-| `configs/experiments/data_movement/data_movement.yaml` | the data-movement study: every copy, reference and move counted per hop, in four blocks: every hop copying, the weak input read in place, the boundary folded in place, and the switching escalation |
+| `configs/experiments/data_movement/data_movement.yaml` | every copy, reference and move of the data path counted per hop, in four blocks: every hop copying, the weak input read in place, the boundary folded in place, and the switching escalation |
 
 ## Read next
 

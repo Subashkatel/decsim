@@ -209,14 +209,18 @@ def _counts(section: Mapping, section_name: str) -> dict:
 
 
 def _gamma_interval(section: Mapping, section_name: str) -> tuple:
-    """[low, high], two finite real numbers, low at most high."""
+    """[low, high], two finite real numbers, low below high.
+
+    relay-bp draws each later leg's memory strengths uniformly from the
+    interval and panics on an empty one (rand's Uniform::new, low >= high).
+    """
     interval = section.get("gamma_interval", _DEFAULTS.gamma_interval)
     if _is_ordered_pair(interval):
         low, high = interval
         return (float(low), float(high))
     raise ValueError(
         f"{section_name}.gamma_interval must be [low, high], two finite "
-        f"real numbers with low at most high (got {interval!r})"
+        f"real numbers with low below high (got {interval!r})"
     )
 
 
@@ -226,7 +230,7 @@ def _is_ordered_pair(interval) -> bool:
     low, high = interval
     if not _is_finite_number(low) or not _is_finite_number(high):
         return False
-    return low <= high
+    return low < high
 
 
 def _is_finite_number(value) -> bool:

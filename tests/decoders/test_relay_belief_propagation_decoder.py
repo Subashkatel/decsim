@@ -282,14 +282,28 @@ def test_the_first_relay_leg_must_run_at_least_once():
     assert accepted.pre_iterations == 1
 
 
-def test_a_reversed_gamma_interval_is_refused():
+@pytest.mark.parametrize(
+    "interval",
+    [
+        [0.985, -0.254],
+        [0.1, 0.1],
+        [0.1],
+        [0.1, 0.2, 0.3],
+        "[-0.254, 0.985]",
+        [-0.254, float("inf")],
+        [float("nan"), 0.985],
+        [False, True],
+    ],
+)
+def test_a_gamma_interval_that_is_not_low_below_high_is_refused(interval):
+    # relay-bp panics on an empty interval, [0.1, 0.1] among them
     with pytest.raises(ValueError) as caught:
         relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
-            {"gamma_interval": [0.985, -0.254]}, None, "strong_decoder"
+            {"gamma_interval": interval}, None, "strong_decoder"
         )
     assert str(caught.value) == (
         "strong_decoder.gamma_interval must be [low, high], two finite real "
-        "numbers with low at most high (got [0.985, -0.254])"
+        f"numbers with low below high (got {interval!r})"
     )
 
 

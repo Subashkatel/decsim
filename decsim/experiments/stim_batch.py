@@ -12,10 +12,9 @@ one window naive_online lays over the operation, built by the machine's
 own build, so a batch point answers every shot as the machine does.
 What differs is how the shots are drawn, and that a piece keeps counts
 only, as sinter's AnonTaskStats does (sinter/_data/_anon_task_stats.py:
-27-31): no latency, no per-shot rows. decsim's offline lane, removed at
-408f22c5, decoded window by window one shot at a time and ran within
-3x of the machine; this mode samples whole blocks and decodes the
-whole circuit.
+27-31): no latency, no per-shot rows. A shot at a time, window by
+window, runs within 3x of the machine (the offline lane, 408f22c5), so
+this mode samples whole blocks and decodes the whole circuit.
 """
 
 import hashlib
@@ -190,7 +189,7 @@ def block_samples(circuit: stim.Circuit, block: int) -> tuple:
 def samples_of_seeds(
     circuit: stim.Circuit, first_seed: int, count: int
 ) -> tuple:
-    """The detection events and observables of count seeds from first_seed."""
+    """Slices of whole blocks, so a seed's shot is the same in any span."""
     event_parts = []
     observable_parts = []
     for block, low, high in _block_spans(first_seed, count):

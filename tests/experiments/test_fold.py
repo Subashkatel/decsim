@@ -354,22 +354,22 @@ def test_a_file_whose_rows_go_backwards_is_refused(tmp_path):
     assert "holds a row at 1 after a row at 3" in str(refused.value)
 
 
-def test_a_row_file_takes_its_header_from_the_first_row(tmp_path):
-    """Which is where write_csv takes it from, so the two agree."""
+def test_a_row_file_leaves_a_column_its_row_lacks_empty(tmp_path):
+    """Which is write_csv's rule, so the two agree."""
     path = tmp_path / "written.csv"
     first = _row(1, "a")
-    second = _row(2, "b")
-    with fold.RowFile(path) as out_file:
+    second = {"place": "2"}
+    with fold.RowFile(path, ["place", "value"]) as out_file:
         out_file.write(first)
         out_file.write(second)
     written = path.read_bytes()
-    assert written == b"place,value\r\n1,a\r\n2,b\r\n"
+    assert written == b"place,value\r\n1,a\r\n2,\r\n"
 
 
 def test_a_row_file_that_got_no_row_is_not_written(tmp_path):
     """A run folder's file with nothing in it is not a file of zeros."""
     path = tmp_path / "never.csv"
-    with fold.RowFile(path):
+    with fold.RowFile(path, ["place", "value"]):
         pass
     assert not path.exists()
 
@@ -541,10 +541,12 @@ def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
     assert not out_dir.exists()
 
 
-def test_folders_that_hold_different_columns_are_refused(tmp_path):
-    """A folded file has one header, so its folders record one set.
+def test_pieces_of_one_point_that_hold_different_columns_are_refused(
+    tmp_path,
+):
+    """A point's pieces were measured by one tree, so they hold one set.
 
-    Folding them would write the older folder's shots with that column
+    Folding them would write the older piece's shots with that column
     empty, which reads as a measurement of nothing. The sentence names
     the folder that lacks the columns whichever order the folders were
     given, because the folder the walk reaches second is not always the
@@ -568,6 +570,31 @@ def test_folders_that_hold_different_columns_are_refused(tmp_path):
     said_backwards = str(refused_backwards.value)
     assert said_backwards.startswith(f"{lacking} does not hold the columns")
     assert not out_dir.exists()
+
+
+def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
+    """A quiet point and a burst point of one grid fold into one run folder.
+
+    A burst shot measures whether it was caught in time and a quiet shot
+    has no burst to catch, so their pieces hold different columns. The
+    folded file takes every column any point holds, first seen first, as
+    write_csv does for a run's own rows, and a point's cell for a column
+    it did not measure is empty.
+    """
+    experiment_dir = _burst_and_quiet_pieces(tmp_path)
+
+    run_dir = yaml_configs.run_folder_of(experiment_dir)
+    shots_path = run_dir / "shots.csv"
+    sweep_path = run_dir / "sweep.csv"
+    shots = _rows_of(shots_path)
+    sweep = _rows_of(sweep_path)
+
+    quiet_shots = _rows_with_qpu_kind(shots, sweep, "stim_device")
+    burst_shots = _rows_with_qpu_kind(shots, sweep, "burst_stim")
+    assert [row["burst_caught_in_time"] for row in quiet_shots] == [""]
+    assert [row["burst_caught_in_time"] for row in burst_shots] != [""]
+    quiet_points = _rows_with_qpu_kind(sweep, sweep, "stim_device")
+    assert [row["caught_in_time_share"] for row in quiet_points] == [""]
 
 
 def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
@@ -658,3 +685,55 @@ def _seeds_of_the_one_point(run_dir) -> list:
     resolved_text = resolved_path.read_text()
     resolved = json.loads(resolved_text)
     return resolved["seeds"]
+
+
+# a burst at round 5 of a shot's thirty, so a burst shot measures its catch
+BURST_QPU = {
+    "kind": "burst_stim",
+    "burst_onset_round": 5,
+    "burst_decay_rounds": 600.0,
+    "burst_radius": 3.1,
+    "burst_error_probability": 0.01,
+}
+
+
+def _burst_and_quiet_pieces(tmp_path):
+    """One shot each of a quiet and a burst point, collected in pieces."""
+    overrides = yaml_configs.online_threshold()
+    overrides["escalation"] = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "near_seam_pinned",
+    }
+    overrides["burst_detector"] = {"kind": "event_count"}
+    # the event count's windows need 22 rounds of a shot
+    overrides["workload"] = yaml_configs.memory_workload(30)
+    overrides["sweep"] = [
+        {
+            "axes": {
+                "qpu": [{"kind": "stim_device"}, BURST_QPU],
+                "workload.arguments.physical_error_probability": [0.001],
+                "qpu.distance": [3],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": 1},
+        }
+    ]
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    experiment_dir = tmp_path / "experiment"
+    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    return experiment_dir
+
+
+def _rows_with_qpu_kind(rows, sweep, kind) -> list:
+    """The rows of the points whose QPU is that kind, sweep.csv naming it."""
+    point_ids = set()
+    for point in sweep:
+        qpu = json.loads(point["qpu"])
+        if qpu["kind"] == kind:
+            point_ids.add(point["point_id"])
+    selected = []
+    for row in rows:
+        if row["point_id"] in point_ids:
+            selected.append(row)
+    return selected

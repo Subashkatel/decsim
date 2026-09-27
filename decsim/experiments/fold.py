@@ -281,21 +281,23 @@ class RowTotals:
 class RowFile:
     """One csv file written as its rows arrive, never held and then written.
 
-    The header is the first row's keys, which is where `write_csv` takes
-    it from, and a file whose first row never came is not created, which
-    is the rule a run folder's files keep for a run that had nothing to
-    put in them.
+    The header is every column the file's rows hold, known before the
+    first row comes, and a row's cell for a column it does not hold is
+    empty: `write_csv`'s rule. A file whose first row never came is not
+    created, which is the rule a run folder's files keep for a run that
+    had nothing to put in them.
     """
 
-    def __init__(self, path: pathlib.Path) -> None:
+    def __init__(self, path: pathlib.Path, field_names: list) -> None:
         self.path = path
+        self.field_names = field_names
         self.handle = None
         self.writer = None
 
     def write(self, row: dict) -> None:
         """One row; the first one opens the file and writes the header."""
         if self.writer is None:
-            self._open(row)
+            self._open()
         self.writer.writerow(row)
 
     def close(self) -> None:
@@ -310,11 +312,10 @@ class RowFile:
     def __exit__(self, *_exception) -> None:
         self.close()
 
-    def _open(self, row: dict) -> None:
-        """The file and its header, the first row naming the columns."""
-        field_names = list(row)
+    def _open(self) -> None:
+        """The file and its header."""
         self.handle = open(self.path, "w", newline="")
-        self.writer = csv.DictWriter(self.handle, fieldnames=field_names)
+        self.writer = csv.DictWriter(self.handle, fieldnames=self.field_names)
         self.writer.writeheader()
 
 

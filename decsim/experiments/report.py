@@ -142,8 +142,8 @@ BURST_SHARES = {
     "burst_first_flag_round": "flagged_share",
     "burst_caught_in_time": "caught_in_time_share",
 }
-# the files a fold reads row by row and writes back out, which one
-# header each: the folders of one fold hold the same columns in them
+# the files a fold reads row by row and writes back out, one header
+# each: every column any piece holds, the pieces of one point alike
 FOLDED_FILES = (
     "shots.csv",
     "shot_links.csv",
@@ -770,11 +770,34 @@ def _fold_one_file(
     """
     paths = _folder_files(folders, name)
     out_path = out_dir / name
-    with fold.RowFile(out_path) as out_file:
+    field_names = _folded_columns(paths, swept)
+    with fold.RowFile(out_path, field_names) as out_file:
         for row in fold.merged_rows(paths, order):
             placed = _with_swept_row(row, swept)
             out_file.write(placed)
             add_a_row(row)
+
+
+def _folded_columns(paths: list, swept: dict) -> list:
+    """Every column a folded file's rows hold, first seen first.
+
+    That is write_csv's header: point_id, the swept paths, then each
+    file's columns. Two points of one grid can measure different
+    columns, a quiet shot having no burst to catch, and a point's cell
+    for a column it did not measure is empty, as a swept path a point's
+    sections do not hold is (run_folder.swept_values).
+    """
+    columns = {"point_id": None}
+    for values in swept.values():
+        swept_columns = dict.fromkeys(values)
+        columns.update(swept_columns)
+    for path in paths:
+        if not path.is_file():
+            continue
+        header = fold.header_of(path)
+        file_columns = dict.fromkeys(header)
+        columns.update(file_columns)
+    return list(columns)
 
 
 def _no_totals(_row: dict) -> None:
@@ -1252,7 +1275,7 @@ def _manifest_of(run_dir) -> dict:
 
 
 def _refuse_folders_of_different_columns(run_dirs: list) -> None:
-    """Every folder of one fold records the same columns in a folded file."""
+    """The pieces of one point record the same columns in a folded file."""
     for name in FOLDED_FILES:
         _refuse_one_files_different_columns(run_dirs, name)
 
@@ -1316,28 +1339,39 @@ def _refuse_the_point(run_dir, names: list) -> None:
 
 
 def _refuse_one_files_different_columns(run_dirs: list, name: str) -> None:
-    """One folded file's columns, as every folder that wrote it has them.
+    """One folded file's columns, the same in every piece of one point.
 
-    A folded file has one header, so the folders' rows have to carry the
-    same columns; a folder that wrote no row of this kind has none to
-    carry. Two trees' folders differ when a column was added between
-    them, and folding them would leave that column empty for the older
-    folder's shots rather than say so.
+    A point's pieces were measured by one tree, so they carry the same
+    columns; a folder that wrote no row of this kind has none to carry.
+    Two trees' pieces differ when a column was added between them, and
+    folding them would leave that column empty for the older piece's
+    shots rather than say so. Two points may differ, since a grid's
+    points can measure different things (_folded_columns).
     """
-    first_dir = None
-    first_columns = None
+    first_by_point = {}
     for run_dir in run_dirs:
         path = Path(run_dir) / name
-        if not path.is_file():
+        point_id = _point_of_file(path)
+        if point_id is None:
             continue
         columns = fold.header_of(path)
-        if first_columns is None:
-            first_dir = run_dir
-            first_columns = columns
-            continue
+        first = first_by_point.setdefault(point_id, (run_dir, columns))
+        first_dir, first_columns = first
         if columns == first_columns:
             continue
         _refuse_the_columns(run_dir, first_dir, name, columns, first_columns)
+
+
+def _point_of_file(path: Path) -> Optional[str]:
+    """The point a piece's file holds rows of, or None for no row."""
+    if not path.is_file():
+        return None
+    rows = fold.row_stream(path)
+    first_row = next(rows, None)
+    rows.close()
+    if first_row is None:
+        return None
+    return first_row["point_id"]
 
 
 def _refuse_the_columns(
@@ -1365,9 +1399,9 @@ def _refuse_the_columns(
         extra = []
     raise refusal.RefusalError(
         f"{lacking} does not hold the columns {compared} holds in {name}: "
-        f"missing {missing}, extra {extra}; a folded file has one header, so "
-        "the folders of one fold record the same columns, and two trees' "
-        "folders differ when a column was added between them"
+        f"missing {missing}, extra {extra}; the pieces of one point record "
+        "the same columns, and two trees' pieces differ when a column was "
+        "added between them"
     )
 
 

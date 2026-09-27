@@ -92,6 +92,34 @@ def test_a_weight_step_that_is_not_finite_and_positive_is_refused(
     )
 
 
+def test_a_model_with_a_detector_hyperedge_is_refused():
+    """An undecomposed model is what sinter hands on when splitting fails."""
+    model = stim.DetectorErrorModel("error(0.1) D0 D1 D2 L0")
+    decoder = union_find_adapter.UnionFindDecoder()
+
+    with pytest.raises(ValueError) as refused:
+        decoder.compile_decoder_for_dem(dem=model)
+
+    assert str(refused.value) == (
+        "fault 0 of sinter's detector error model is a detector hyperedge "
+        "with detectors (0, 1, 2); this graphlike decoder supports one or "
+        "two detectors per fault"
+    )
+
+
+def test_a_logical_error_that_flips_no_detector_is_refused():
+    model = stim.DetectorErrorModel("error(0.1) D0 D1\nerror(0.1) L0")
+    decoder = union_find_adapter.UnionFindDecoder()
+
+    with pytest.raises(ValueError) as refused:
+        decoder.compile_decoder_for_dem(dem=model)
+
+    assert str(refused.value) == (
+        "error 1 is a detectorless logical mechanism after instruction-wide "
+        "XOR reduction: logical observables (0,)"
+    )
+
+
 def test_sinter_collects_through_the_adapter():
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z",

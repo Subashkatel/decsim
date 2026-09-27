@@ -7,6 +7,12 @@ reads (detector_error_model/stim_fault_catalog.py), builds the weighted
 graph the union_find row builds (decoders/union_find/window_decoder.py
 graph_from_model), and decodes every shot with the same compiled growth
 and peeling, so an offline run answers as the machine's row does.
+
+It decodes what the row decodes: a model whose every fault, after its
+`^` parts are split, flips one or two detectors. A fault that flips a
+logical observable and no detector, and an undecomposed hyperedge,
+which sinter hands on when decomposition fails
+(sinter/_collection/_collection_worker_state.py:28-33), are refused.
 """
 
 import numpy
@@ -15,6 +21,7 @@ import sinter
 import stim
 
 import decsim.decoders.union_find.window_decoder as window_decoder
+import decsim.detector_error_model.fault_identity_validation as fault_identities
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.records.decoder_evidence as evidence_records
@@ -82,6 +89,7 @@ def _whole_model_faults(
     detector_sets, observable_sets, priors = (
         stim_fault_catalog.detector_error_model_to_faults(detector_error_model)
     )
+    _refuse_hyperedges(detector_sets, observable_sets)
     check = _incidence(detector_sets, detector_error_model.num_detectors)
     observables = _incidence(
         observable_sets, detector_error_model.num_observables
@@ -98,6 +106,17 @@ def _whole_model_faults(
         source_fault_ids=tuple(fault_ids),
         boundary_flips={},
     )
+
+
+def _refuse_hyperedges(detector_sets: list, observable_sets: list) -> None:
+    """Every fault graphlike, by the check the machine's catalog makes."""
+    faults = zip(detector_sets, observable_sets, strict=True)
+    for fault_index, (detectors, observables) in enumerate(faults):
+        fault_identities.validate_graphlike_fault(
+            detectors,
+            observables,
+            location=f"fault {fault_index} of sinter's detector error model",
+        )
 
 
 def _incidence(member_sets: list, row_count: int) -> scipy.sparse.csc_matrix:

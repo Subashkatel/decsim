@@ -14,7 +14,6 @@ from collections.abc import Sequence
 from typing import Optional
 
 import numpy
-import scipy.special
 import scipy.stats
 
 # The 95 percent intervals put 2.5 percent on each side (NIST/SEMATECH
@@ -26,6 +25,14 @@ UPPER_QUANTILE = 0.975
 MIXTURE_EVIDENCE_LEVEL = 20.0
 LOG_MIXTURE_EVIDENCE_LEVEL = math.log(MIXTURE_EVIDENCE_LEVEL)
 LOG_HALF = math.log(0.5)
+LOG_TWO_PI = math.log(math.tau)
+# Stirling's series for log(k!) minus Stirling's approximation, the
+# coefficients of 1/k, 1/k^3, ... 1/k^9 (Loader 2000, as R's stirlerr
+# uses them past k = 15, where the next term is below 1e-16).
+STIRLING_SERIES = (1 / 12, -1 / 360, 1 / 1260, -1 / 1680, 1 / 1188)
+# Below this count the direct difference is used: its terms are small,
+# so nothing large cancels.
+STIRLING_SERIES_FLOOR = 16
 
 
 class StopKind(enum.Enum):
@@ -183,15 +190,19 @@ def is_mixture_difference(
     one. Under the null, each discordant sign a fair coin given every
     earlier seed, M is a nonnegative martingale of mean one, so it
     reaches 20 at any seed with chance at most 0.05 (Lemma 3).
+
+    B(a + 1, b + 1) = 1 / ((n + 1) C(n, a)), so log M is -log(n + 1)
+    minus the log of the fair-coin probability of the counts, taken in
+    Loader's form: at a billion seeds the log-gamma terms of the beta
+    function are near 1e10 and cancel to less than the decision needs.
     """
     discordant = first_only_failures + second_only_failures
-    first_shape = first_only_failures + 1
-    second_shape = second_only_failures + 1
-    log_mixture = scipy.special.betaln(first_shape, second_shape)
-    log_fair = discordant * LOG_HALF
-    log_evidence = log_mixture - log_fair
-    is_difference = log_evidence >= LOG_MIXTURE_EVIDENCE_LEVEL
-    return bool(is_difference)
+    log_fair_probability = _log_fair_binomial(
+        first_only_failures, second_only_failures
+    )
+    log_count_factor = math.log1p(discordant)
+    log_evidence = -log_fair_probability - log_count_factor
+    return log_evidence >= LOG_MIXTURE_EVIDENCE_LEVEL
 
 
 def empirical_bernstein_sequence(values: Sequence[float]) -> tuple:
@@ -267,3 +278,61 @@ def _upper_limit(
         first_shape = failures
     high = scipy.stats.beta.ppf(UPPER_QUANTILE, first_shape, successes)
     return float(high)
+
+
+def _log_fair_binomial(first_count: int, second_count: int) -> float:
+    """Log of Binomial(a; a + b, 1/2), exact to rounding at any count.
+
+    Loader, "Fast and accurate computation of binomial probabilities"
+    (2000), the form of R's dbinom_raw: the Stirling remainders of the
+    three factorials, less each count's deviance from half the trials,
+    plus half the log of n / (2 pi a b). Every term stays small.
+    """
+    trials = first_count + second_count
+    if first_count == 0 or second_count == 0:
+        return trials * LOG_HALF
+    half_trials = trials / 2
+    first_deviance = _deviance(first_count, half_trials)
+    second_deviance = _deviance(second_count, half_trials)
+    trials_remainder = _stirling_remainder(trials)
+    first_remainder = _stirling_remainder(first_count)
+    second_remainder = _stirling_remainder(second_count)
+    remainder = trials_remainder - first_remainder - second_remainder
+    deviance = first_deviance + second_deviance
+    counts_product = first_count * second_count
+    log_trials = math.log(trials)
+    log_product = math.log(counts_product)
+    log_spread = log_trials - LOG_TWO_PI - log_product
+    return remainder - deviance + log_spread / 2
+
+
+def _deviance(count: int, mean: float) -> float:
+    """Count log(count / mean) + mean - count, with no cancellation."""
+    difference = count - mean
+    relative_difference = difference / mean
+    log_ratio = math.log1p(relative_difference)
+    weighted = count * log_ratio
+    return weighted - difference
+
+
+def _stirling_remainder(count: int) -> float:
+    """log(count!) minus Stirling's (count + 1/2) log count - count + ..."""
+    if count < STIRLING_SERIES_FLOOR:
+        return _direct_stirling_remainder(count)
+    inverse = 1 / count
+    inverse_squared = inverse * inverse
+    power = inverse
+    remainder = 0.0
+    for coefficient in STIRLING_SERIES:
+        remainder += coefficient * power
+        power *= inverse_squared
+    return remainder
+
+
+def _direct_stirling_remainder(count: int) -> float:
+    count_plus_one = count + 1
+    log_factorial = math.lgamma(count_plus_one)
+    log_count = math.log(count)
+    power_term = (count + 0.5) * log_count
+    approximation = power_term - count + LOG_TWO_PI / 2
+    return log_factorial - approximation

@@ -1,17 +1,20 @@
-"""The failure statistics against scipy, sinter and exact sums.
+"""The failure statistics against scipy, sinter, mpmath and exact sums.
 
-Limits against scipy.stats.beta and the NIST/SEMATECH e-Handbook
-7.2.4.1 closed form; coverage and the Girshick, Mosteller and Savage
-estimator's unbiasedness by exact enumeration of one small plan, with
-scipy's nbinom and binom as the outcome probabilities; the per-round
-rate against sinter 1.16.0 shot_error_rate_to_piece_error_rate and
-against the root at 60 digits in mpmath 1.3.0 (installed with the test
-extra, through qldpc's sympy); McNemar
-against scipy.stats.binomtest; the mixture against the ratio of
-scipy's betabinom and binom probabilities, and its crossing rate under
-the null by a seeded simulation; the empirical-Bernstein sequence
-against Howard et al. (arXiv 1810.08240) eq. (24) computed at every
-prefix at once, and its coverage on seeded learning runs.
+- Limits: scipy.stats.beta and the NIST/SEMATECH e-Handbook 7.2.4.1
+  closed form.
+- Coverage and the Girshick, Mosteller and Savage estimator's
+  unbiasedness: exact enumeration of one small plan, with scipy's nbinom
+  and binom as the outcome probabilities.
+- Per-round rate: sinter 1.16.0 shot_error_rate_to_piece_error_rate, and
+  the root at 60 digits in mpmath 1.3.0 (installed with the test extra,
+  through qldpc's sympy).
+- McNemar: scipy.stats.binomtest.
+- Mixture: the ratio of scipy's betabinom and binom probabilities; at a
+  billion seeds, the beta function at 60 digits in mpmath; its crossing
+  rate under the null, by a seeded simulation.
+- Empirical-Bernstein sequence: Howard et al. (arXiv 1810.08240) eq.
+  (24) computed at every prefix at once, and its coverage on seeded
+  learning runs.
 """
 
 import mpmath
@@ -35,6 +38,9 @@ PLAN_COVERAGE_BY_MINIMUM = {0: 0.9504484671, 100: 0.9595339421}
 COVERAGE_ROUNDING = 1e-9
 # The float error of an exact sum over a few hundred outcomes.
 SUM_ROUNDING = 1e-12
+# The digits mpmath carries for a referent: log-gamma terms near 1e10
+# leave some forty digits past the decision.
+REFERENCE_DIGITS = 60
 
 
 def test_a_target_stop_takes_the_inverse_sampling_limits():
@@ -163,14 +169,14 @@ def test_the_per_round_rate_is_sinters(shot_rate, rounds):
     ],
 )
 def test_the_per_round_rate_is_the_exact_root(shot_rate, rounds):
-    """(1 - (1 - 2P)^(1/R)) / 2 at 60 digits, with mpmath."""
+    """(1 - (1 - 2P)^(1/R)) / 2 at 60 digits, in mpmath."""
     per_round = failure_statistics.per_round_rate(shot_rate, rounds)
 
-    mpmath.mp.dps = 60
-    doubled = 2 * mpmath.mpf(shot_rate)
-    survival = 1 - doubled
-    root = mpmath.root(survival, rounds)
-    exact = (1 - root) / 2
+    with mpmath.workdps(REFERENCE_DIGITS):
+        doubled = 2 * mpmath.mpf(shot_rate)
+        survival = 1 - doubled
+        root = mpmath.root(survival, rounds)
+        exact = (1 - root) / 2
     expected = float(exact)
     assert per_round == pytest.approx(expected, rel=1e-12, abs=0)
 
@@ -189,7 +195,17 @@ def test_mcnemar_is_the_exact_binomial_test(first_only, second_only):
 
 @pytest.mark.parametrize(
     ("first_only", "second_only"),
-    [(34, 66), (35, 65), (30, 10), (29, 11), (1, 9), (17, 3), (16, 4)],
+    [
+        (34, 66),
+        (35, 65),
+        (30, 10),
+        (29, 11),
+        (1, 9),
+        (17, 3),
+        (16, 4),
+        (0, 7),
+        (8, 0),
+    ],
 )
 def test_the_mixture_is_the_beta_binomial_likelihood_ratio(
     first_only, second_only
@@ -203,6 +219,34 @@ def test_the_mixture_is_the_beta_binomial_likelihood_ratio(
     fair = scipy.stats.binom.pmf(first_only, discordant, 0.5)
     evidence = mixture / fair
     assert is_difference == (evidence >= 20)
+
+
+@pytest.mark.parametrize(
+    ("first_only", "second_only"),
+    [(388_642_986, 388_500_809), (388_642_987, 388_500_808)],
+)
+def test_the_mixture_decides_at_a_billion_seeds_as_exact_arithmetic_does(
+    first_only, second_only
+):
+    """Counts whose M(1/2) is 20 less 2e-5, and one step past 20.
+
+    log M = log B(a + 1, b + 1) + n log 2, at 60 digits in mpmath.
+    """
+    is_difference = failure_statistics.is_mixture_difference(
+        first_only, second_only
+    )
+
+    discordant = first_only + second_only
+    first_shape = first_only + 1
+    second_shape = second_only + 1
+    with mpmath.workdps(REFERENCE_DIGITS):
+        beta = mpmath.beta(first_shape, second_shape)
+        log_beta = mpmath.log(beta)
+        log_two = mpmath.log(2)
+        log_level = mpmath.log(20)
+        log_evidence = log_beta + discordant * log_two
+        is_exact_difference = log_evidence >= log_level
+    assert is_difference == is_exact_difference
 
 
 def test_the_mixture_rarely_crosses_under_the_null_property():

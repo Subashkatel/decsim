@@ -568,6 +568,22 @@ sweep:
       qpu.round_period_microseconds: [1.0]
     shots: 2
 
+# How a point's shots are cut, sinter's CollectionOptions as yaml
+# (sinter/_data/_collection_options.py). A sweep block may carry its own
+# collection section, whose keys override these one by one. No key enters
+# a point's id: collecting longer is the same point run longer.
+collection:
+  piece_rounds: 20000              # QEC rounds per piece: a piece holds
+                                   # max(piece_rounds // a shot's rounds, 1)
+                                   # shots and is saved whole when it ends,
+                                   # so a killed collect loses at most the
+                                   # pieces it was running. Sized in rounds,
+                                   # a piece takes about as long at any
+                                   # history length. A point whose threshold
+                                   # is calibrated online is one piece, since
+                                   # its calibrator learns over its shots in
+                                   # order.
+
 controller:                        # controller work per round, in cycles of its
                                    # named clock domain
   clock: fridge

@@ -1012,8 +1012,9 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
 
 
 def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
-    # One tiny run end to end: a timestamped run dir with manifest.json,
-    # the config copy, shots.csv, sweep.csv and links.csv.
+    # One tiny run end to end: a timestamped experiment folder whose run
+    # folder holds manifest.json, the config copy, shots.csv, sweep.csv
+    # and links.csv.
     import csv
 
     config_path = yaml_configs.write_config(tmp_path, {})
@@ -1035,7 +1036,9 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
         shots = list(reader)
     assert len(shots) == 1 and shots[0]["seed"] == "0"
 
-    assert run_dir.name.endswith("-unit_test_config")
+    experiment_dir = run_dir.parent.parent
+    assert experiment_dir.name.endswith("-unit_test_config")
+    assert run_dir.name.startswith("unit_test_config-")
     assert (run_dir / "config" / "unit_test_config.yaml").exists()
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
 
@@ -1070,7 +1073,6 @@ def test_a_run_with_an_online_threshold_records_its_trajectory(
 
     records = run_dir.glob("online_threshold_*.csv")
     assert len(rows) == 1 and len(list(records)) == 1
-    assert (run_dir / "finished").exists()
 
 
 def test_two_config_files_of_one_name_are_both_copied(tmp_path):

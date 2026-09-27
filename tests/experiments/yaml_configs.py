@@ -199,6 +199,13 @@ def write_config(tmp_path, overrides: dict) -> pathlib.Path:
     return config_path
 
 
+def run_folder_of(experiment_dir) -> pathlib.Path:
+    """The run folder a collect of one yaml wrote: combined/<name>-<id8>/."""
+    combined = pathlib.Path(experiment_dir) / "combined"
+    (folder,) = combined.iterdir()
+    return folder
+
+
 def strong_unit(algorithm) -> dict:
     return {
         "strong_decoder": {

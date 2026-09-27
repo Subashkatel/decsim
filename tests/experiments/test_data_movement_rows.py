@@ -321,48 +321,24 @@ def test_a_counting_run_writes_both_files_and_the_terminal_lines(
     assert "off_board" in moved[0]
 
 
-def test_combining_two_shards_gives_the_whole_runs_movement_rows(tmp_path):
-    """The fold's precondition: the file adds, so shards equal one run."""
-    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
+def test_pieces_of_one_shot_fold_to_the_whole_runs_movement_rows(tmp_path):
+    """The fold's precondition: the file adds, so pieces equal one run."""
+    whole_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
+    cut_folder = tmp_path / "cut_config"
+    cut_folder.mkdir()
+    cut_card = {**COUNTING_SWEEP, "collection": {"piece_rounds": 1}}
+    cut_path = yaml_configs.write_config(cut_folder, cut_card)
     whole_dir = tmp_path / "whole"
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    combined_dir = tmp_path / "combined"
-    whole = ["collect", str(config_path), "--out", str(whole_dir)]
-    command.main(whole)
-    first = [
-        "collect",
-        str(config_path),
-        "--out",
-        str(first_dir),
-        "--shard",
-        "0/2",
-        "--shots-per-unit",
-        "1",
-    ]
-    command.main(first)
-    second = [
-        "collect",
-        str(config_path),
-        "--out",
-        str(second_dir),
-        "--shard",
-        "1/2",
-        "--shots-per-unit",
-        "1",
-    ]
-    command.main(second)
-    folding = [
-        "combine",
-        str(first_dir),
-        str(second_dir),
-        "--out",
-        str(combined_dir),
-    ]
-    command.main(folding)
-    whole_path = whole_dir / "data_movement.csv"
-    folded_path = combined_dir / "data_movement.csv"
-    whole_rows = sweep_report.read_rows(whole_path)
-    folded_rows = sweep_report.read_rows(folded_path)
+    cut_dir = tmp_path / "cut"
+    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    whole_movement_path = whole_run_dir / "data_movement.csv"
+    folded_movement_path = cut_run_dir / "data_movement.csv"
+    whole_rows = sweep_report.read_rows(whole_movement_path)
+    folded_rows = sweep_report.read_rows(folded_movement_path)
+    cut_pieces = cut_dir.glob("pieces/*/*")
 
+    assert len(list(cut_pieces)) == 2
     assert folded_rows == whole_rows

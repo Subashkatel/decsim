@@ -66,9 +66,9 @@ def test_points_apart_only_in_basis_write_their_own_log_and_trace(tmp_path):
         ],
     }
     config_path = yaml_configs.write_config(tmp_path, card)
-    run_dir = tmp_path / "run"
+    experiment_dir = tmp_path / "run"
 
-    collect_command.run_experiment(config_path, run_dir)
+    run_dir, _rows = collect_command.run_experiment(config_path, experiment_dir)
 
     log_folder = run_dir / "log"
     trace_folder = run_dir / "trace"

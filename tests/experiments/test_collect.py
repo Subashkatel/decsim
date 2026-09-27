@@ -160,7 +160,7 @@ def _without_point_id(rows: list) -> list:
 def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     config = experiment.load_experiment(REFERENCE_YAML)
     tasks = config.tasks()
-    measurements = run.run_sweep(tasks, None)
+    measurements = run.run_sweep(tasks)
     record = sweep_report.record_of(measurements)
     summary_rows = sweep_report.summarize(record.shots, record.window_samples)
     link_rows = sweep_report.link_rows(record.shot_links)
@@ -426,7 +426,7 @@ def test_a_machine_built_alone_builds_its_own_models():
     assert settings.workload.built_models is None
 
 
-def test_a_task_is_one_unit_until_a_unit_size_splits_it():
+def test_a_task_is_one_unit_of_all_its_seeds():
     config = experiment.load_experiment(REFERENCE_YAML)
     task = config.point_task(
         {
@@ -437,41 +437,32 @@ def test_a_task_is_one_unit_until_a_unit_size_splits_it():
         5,
     )
 
-    whole = collect.work_units([task])
-    split = collect.work_units([task], 2)
+    units = collect.work_units([task])
 
-    assert whole == [collect.Unit(task, 0, 5)]
-    assert split == [
-        collect.Unit(task, 0, 2),
-        collect.Unit(task, 2, 2),
-        collect.Unit(task, 4, 1),
-    ]
+    assert units == [collect.Unit(task, 0, 5)]
 
 
-def test_a_point_with_an_online_threshold_stays_one_unit(tmp_path):
-    """The calibrator learns over the point's shots in order."""
+def test_a_point_with_an_online_threshold_is_one_piece(tmp_path):
+    """The calibrator learns over the point's shots in order.
+
+    Pieces of one round would cut any other point into one piece a shot.
+    """
     raw = _reference_yaml()
     raw["escalation"] = {
         "kind": "switching",
         "gap_threshold_db": 15.0,
         "threshold_source": "online",
     }
+    raw["collection"] = {"piece_rounds": 1}
     online_path = tmp_path / "online.yaml"
     online = _written_yaml(raw, online_path)
-    config = experiment.load_experiment(online)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-        5,
-    )
+    out_dir = tmp_path / "out"
 
-    units = collect.work_units([task], 1)
+    run.run_experiment(online, out_dir)
 
-    assert task.online_threshold is not None
-    assert units == [collect.Unit(task, 0, 5)]
+    piece_folders = out_dir.glob("pieces/*/*")
+    names = [folder.name for folder in piece_folders]
+    assert names == ["0-1"]
 
 
 def test_two_points_under_one_cache_do_not_share_models():

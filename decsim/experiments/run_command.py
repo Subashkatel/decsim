@@ -36,7 +36,7 @@ def run_one_shot(
     Returns the lines the command prints. The shot writes a run folder as
     a collect does (run_folder.py): the manifest, the config, the point's
     every value and its workload, the result, the QPU's commands, and the
-    log and the trace when this run asked for them, the finished flag last.
+    log and the trace when this run asked for them.
     """
     config = experiment.load_experiment(config_path)
     task = config.first_point_task()

@@ -476,8 +476,8 @@ def test_online_source_reproduces_its_decisions(tmp_path):
 
     first_tasks = config.tasks()
     second_tasks = config.tasks()
-    first = run_sweep(first_tasks, None)
-    second = run_sweep(second_tasks, None)
+    first = run_sweep(first_tasks)
+    second = run_sweep(second_tasks)
 
     first_links = [
         measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]

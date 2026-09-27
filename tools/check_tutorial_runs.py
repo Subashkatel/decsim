@@ -1,8 +1,8 @@
 """The tutorials print what a fresh run of their own commands prints.
 
 Each tutorial page shows commands and, under them, what they print.
-This check runs the page's commands (every `decsim`, `cut` and `ls` line
-of its bash blocks, in page order) in a scratch folder, and holds each
+This check runs the page's commands (every `decsim`, `cut`, `ls` and `rm`
+line of its bash blocks, in page order) in a scratch folder, and holds each
 plain block of the page to the output it was copied from, found by the
 block's first line.
 
@@ -33,7 +33,7 @@ TOOL_PATH = TOOL_FILE.resolve()
 CHECKOUT = TOOL_PATH.parent.parent
 CONFIGS = CHECKOUT / "configs"
 FENCE = "```"
-COMMAND_WORDS = ("decsim", "cut", "ls")
+COMMAND_WORDS = ("decsim", "cut", "ls", "rm")
 CLOCK_FREE_LINE = re.compile(
     r"^(?:terminal status|execution done|operation 1|logical failures"
     r"|logical error rate among scored shots|unscored shots): "

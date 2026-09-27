@@ -2,10 +2,8 @@
 
 tools/check.sh runs three checkers over the tree, and a checker that
 misreads its arguments fails open: it exits 0 having looked at nothing,
-and the check silently stops holding. slurm/slurm_run.sh fails the same
-way, by computing a shard of the wrong count and writing a folder that
-holds the wrong share of the sweep. These tests hold each script to what
-it does with its arguments.
+and the check silently stops holding. These tests hold each script to
+what it does with its arguments.
 """
 
 import ast
@@ -21,19 +19,7 @@ TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 TOOLS = PACKAGE_ROOT / "tools"
-SLURM_RUNNER = PACKAGE_ROOT / "slurm" / "slurm_run.sh"
-EXPERIMENT_RUNNER = PACKAGE_ROOT / "slurm" / "experiment_run.sh"
 CHECK_SCRIPT = TOOLS / "check.sh"
-# What a submitting shell could hand the runner: an excuse for a dirty
-# tree, a pinned python, or the array job the suite itself runs in.
-UNSET_FOR_THE_RUNNER = (
-    "ALLOW_DIRTY",
-    "DECSIM_PYTHON",
-    "SLURM_ARRAY_TASK_ID",
-    "SLURM_ARRAY_TASK_COUNT",
-    "RUN",
-    "SHARDS",
-)
 
 
 def _tool(name: str):
@@ -210,183 +196,6 @@ def _stub_python(tmp_path, checkout=None):
     )
     stub.chmod(0o755)
     return stub, recorded
-
-
-def _run_the_runner(tmp_path, task_id, task_count, shards=None):
-    """One array task of the runner, against a stub interpreter."""
-    stub, recorded = _stub_python(tmp_path)
-    environment = dict(os.environ)
-    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
-    environment["SLURM_ARRAY_TASK_ID"] = str(task_id)
-    environment["SLURM_ARRAY_TASK_COUNT"] = str(task_count)
-    run_dir = tmp_path / "run"
-    environment["RUN"] = str(run_dir)
-    environment["DECSIM_PYTHON"] = str(stub)
-    # the stub reports a tree git says nothing about, which the runner
-    # refuses; the refusal has its own tests and is not what this one
-    # reads
-    environment["ALLOW_DIRTY"] = "1"
-    if shards is not None:
-        environment["SHARDS"] = str(shards)
-    completed = subprocess.run(
-        ["bash", str(SLURM_RUNNER), "configs/weak_ler.yaml"],
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-    assert completed.returncode == 0, completed.stderr
-    recorded_text = recorded.read_text()
-    arguments = recorded_text.splitlines()
-    return completed.stdout, arguments
-
-
-def test_the_slurm_runner_shards_by_the_count_it_is_given(tmp_path):
-    """A partial re-run of a 500 shard array is one sbatch line.
-
-    Without SHARDS the count would be the array's own, so re-running
-    tasks 447 to 499 alone would compute shard 447 of 53 and the folder
-    would hold a share of the sweep no other folder holds.
-    """
-    printed, arguments = _run_the_runner(tmp_path, 447, 53, shards=500)
-
-    assert "shard: 447 of 500" in printed
-    assert "--shard" in arguments
-    assert arguments[arguments.index("--shard") + 1] == "447/500"
-
-
-def test_the_slurm_runner_falls_back_to_the_arrays_own_count(tmp_path):
-    """The whole sweep in one array needs no count of its own."""
-    printed, arguments = _run_the_runner(tmp_path, 3, 200)
-
-    assert "shard: 3 of 200" in printed
-    assert arguments[arguments.index("--shard") + 1] == "3/200"
-
-
-def test_the_experiment_runner_runs_the_python_of_the_jobs_environment(
-    tmp_path,
-):
-    """With DECSIM_PYTHON unset, the task runs the python on PATH.
-
-    The shard is the offset plus the task id, of the experiment's count.
-    """
-    _stub, recorded = _stub_python(tmp_path)
-    environment = dict(os.environ)
-    environment.pop("DECSIM_PYTHON", None)
-    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
-    environment["SLURM_ARRAY_TASK_ID"] = "3"
-    run_dir = tmp_path / "run"
-    environment["RUN"] = str(run_dir)
-    environment["SHARDS"] = "500"
-    environment["OFFSET"] = "150"
-    path = environment.get("PATH", "")
-    environment["PATH"] = f"{tmp_path}:{path}"
-
-    completed = subprocess.run(
-        ["bash", str(EXPERIMENT_RUNNER), "configs/weak_ler.yaml"],
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-
-    recorded_text = recorded.read_text()
-    arguments = recorded_text.splitlines()
-    assert completed.returncode == 0, completed.stderr
-    assert arguments[:3] == ["-m", "decsim", "collect"]
-    assert arguments[arguments.index("--shard") + 1] == "153/500"
-
-
-def _stub_git(tmp_path, status):
-    """A git that answers about the checkout without one existing.
-
-    `status` is what `git status --porcelain` does: print a changed file,
-    print nothing, or fail the way git fails outside a repository.
-    """
-    answers = {
-        "dirty": ('  echo "?? edited.py"', "echo 264853ada3"),
-        "clean": ("  :", "echo 264853ada3"),
-        "unknown": ("  exit 128", "exit 128"),
-    }
-    porcelain, revision = answers[status]
-    stub = tmp_path / "git"
-    stub.write_text(
-        "#!/usr/bin/env bash\n"
-        'if [ "$3" = "status" ]; then\n'
-        f"{porcelain}\n"
-        "  exit 0\n"
-        "fi\n"
-        f"{revision}\n"
-    )
-    stub.chmod(0o755)
-    return stub
-
-
-def _refused_run(tmp_path, status):
-    """The runner started against a tree, with no ALLOW_DIRTY to excuse it.
-
-    No DECSIM_PYTHON is set, so the runner takes the python on PATH,
-    which is the stub.
-    """
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    _stub_python(tmp_path, checkout)
-    _stub_git(tmp_path, status)
-    environment = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in UNSET_FOR_THE_RUNNER
-    }
-    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
-    path = environment.get("PATH", "")
-    environment["PATH"] = f"{tmp_path}:{path}"
-    return subprocess.run(
-        ["bash", str(SLURM_RUNNER), "configs/weak_ler.yaml"],
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-
-
-def test_the_slurm_runner_refuses_a_tree_with_uncommitted_changes(tmp_path):
-    """A dirty tree is refused, and the message says how to proceed.
-
-    Every task imports the tree as it stands when that task starts, so a
-    sweep launched from a tree still being edited runs code no folder of
-    it can name.
-    """
-    completed = _refused_run(tmp_path, "dirty")
-
-    assert completed.returncode != 0
-    assert "has uncommitted changes" in completed.stderr
-    assert "ALLOW_DIRTY=1" in completed.stderr
-
-
-def test_the_slurm_runner_refuses_a_tree_git_cannot_read(tmp_path):
-    """A tree with no git is refused for the reason the runner states.
-
-    The job must name the code it ran; where git says nothing, nothing
-    can, so an unknown tree is as unrunnable as a dirty one.
-    """
-    completed = _refused_run(tmp_path, "unknown")
-
-    assert completed.returncode != 0
-    assert "dirty: unknown" in completed.stdout
-    assert "git says nothing about" in completed.stderr
-    assert "ALLOW_DIRTY=1" in completed.stderr
-
-
-def test_the_slurm_runner_starts_from_a_clean_tree(tmp_path):
-    """A tree git vouches for runs, on the python of the job's environment.
-
-    The refusals read only the tree, and with DECSIM_PYTHON unset the
-    collect runs on the python on PATH, as a fresh clone's job does.
-    """
-    completed = _refused_run(tmp_path, "clean")
-
-    recorded = tmp_path / "argv.txt"
-    recorded_text = recorded.read_text()
-    assert completed.returncode == 0, completed.stderr
-    assert "dirty: 0" in completed.stdout
-    assert "collect" in recorded_text
 
 
 def test_the_check_script_runs_the_active_environments_python(tmp_path):

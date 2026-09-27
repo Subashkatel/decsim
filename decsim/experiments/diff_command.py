@@ -77,8 +77,8 @@ def _refuse_a_folder_without_points(run_dir: pathlib.Path) -> None:
     if (run_dir / run_folder.RESOLVED_FOLDER).is_dir():
         return
     raise refusal.RefusalError(
-        f"{run_dir} holds no resolved/ folder; name a folder decsim collect "
-        "or decsim combine wrote"
+        f"{run_dir} holds no resolved/ folder; name a run folder decsim "
+        "collect wrote, combined/<name>-<id8>/ in its experiment folder"
     )
 
 
@@ -246,7 +246,8 @@ def _records_by_metadata(run_dir: pathlib.Path) -> dict:
 def _rows_by_metadata(run_dir: pathlib.Path) -> dict:
     """sweep.csv's rows, keyed by their point's metadata's text.
 
-    A shard records every point but holds rows of the points it ran.
+    A folder records every point of its sweep but holds rows only of
+    the points that ran a shot.
     """
     records = _records_by_metadata(run_dir)
     by_id = report.rows_by_point(run_dir)

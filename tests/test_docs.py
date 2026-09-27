@@ -174,8 +174,7 @@ def _shell_names() -> frozenset:
     """Every shell variable the scripts of the tree read.
 
     A page that shows how to launch a job names the variables that job
-    reads, and RUN is one of them: slurm/slurm_run.sh takes it as the
-    folder an array task writes its shard into.
+    reads.
     """
     named = set()
     for folder in (SLURM, TOOLS):

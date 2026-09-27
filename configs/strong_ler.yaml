@@ -3,13 +3,11 @@
 # pilot cost table: >= 100 failures where reachable, ~400 core-hours
 # total; sub-threshold points at d >= 7 plot as upper bounds.
 #
-# 1.4 M shots is a Slurm array, not one job: per array task run
-# `decsim collect configs/strong_ler.yaml --out $RUN/$ID
-# --shots-per-unit N --shard $ID/$COUNT`, then `decsim combine $RUN/*`.
-# The arithmetic: 16 h / (seconds per shot) = shots a task, so
-# N * ceil(1.4e6 / N / COUNT) must stay under that; the weak card's
-# 0.22 s at d7 makes that 262,000, and belief matching is slower, so
-# take the seconds per shot from a pilot at the sweep's largest d.
+# 1.4 M shots outlast one job: a 16 h job runs 16 h / (seconds per
+# shot), 262,000 at the weak card's 0.22 s at d7, and belief matching
+# is slower. `decsim collect` saves each piece the moment it ends, so
+# the same job submitted again runs only the pieces it lacks
+# (docs/how-to/run_a_sweep_on_slurm.md).
 
 extends: strong_decoder_baseline.yaml
 

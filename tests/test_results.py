@@ -56,7 +56,7 @@ def _collected(folder, overrides: dict):
     config_path = yaml_configs.write_config(folder, sweep)
     run_dir = folder / "run"
     command.main(["collect", str(config_path), "--out", str(run_dir)])
-    return run_dir
+    return yaml_configs.run_folder_of(run_dir)
 
 
 @pytest.fixture(scope="module")

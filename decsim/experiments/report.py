@@ -11,9 +11,9 @@ seconds and a Counter of custom counts, __add__ sums them, and every
 rate or interval is computed from the summed row); gem5 keeps its
 Distribution statistics the same way, as counts per bucket summed
 across simulations. So sweep.csv and links.csv read the same whether
-one process ran every shot or a Slurm array ran a seed range each, and
-`decsim combine` builds them through this module's own summarize and
-link_rows.
+one process ran every shot or many ran a piece each, and the fold of
+an experiment's pieces builds them through this module's own summarize
+and link_rows.
 
 What a summary needs off those rows is a count, a true count, a sum, a
 max and an exact mean per sweep point, and none of those grows with the
@@ -21,8 +21,8 @@ shots, so the rows reach them one at a time: the accumulators, the row
 streams and the merge that orders them are in experiments/fold.py, and
 this module says which field plays which role. A single run feeds the
 rows it measured through the same accumulators a fold feeds an
-experiment's shard folders through, so one code path produces both
-summaries.
+experiment's pieces and folders through, so one code path produces
+every summary.
 
 The per-value counts file stays small because every sample is a whole
 number of ticks divided by the ticks in a microsecond
@@ -42,7 +42,6 @@ import dataclasses
 import functools
 import json
 import math
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -208,7 +207,7 @@ def percentile_of_counts(multiset: dict, fraction: float) -> float:
     multiset maps a microsecond value to how many samples carry it.
     Expanding it and sorting gives the list this walks in place, so a
     point's percentile is the same however its shots were split across
-    processes or shards.
+    processes or pieces.
     """
     total = _total_count(multiset)
     if total == 0:
@@ -289,9 +288,9 @@ def summarize(shots: list, window_samples: list) -> list:
 
     The two arguments are the additive files a run folder writes: the
     per-shot rows and the per-value counts. The same code runs whether
-    they were just measured in this process or read back out of the
-    folders `decsim combine` was given, which streams them into the same
-    totals rather than holding a list of them.
+    they were just measured in this process or read back out of an
+    experiment's pieces, whose fold streams them into the same totals
+    rather than holding a list of them.
     """
     counts = _counts_of_rows(window_samples)
     totals = _shot_totals_by_point(shots)
@@ -303,7 +302,7 @@ def summary_rows(totals: dict, counts: dict) -> list:
 
     The totals hold the points in the order their first shots came,
     which is the sweep's task order for one run and for a fold alike
-    (combine merges the folders' rows in task order).
+    (a fold merges the pieces' rows in task order).
     """
     rows = []
     for point in totals:
@@ -454,7 +453,7 @@ def window_sample_rows(measurements: list) -> list:
     """One row per point, latency point and distinct value: its count.
 
     The multiset of a point's window samples, which is all its median
-    and p99 columns need and all a shard has to record for another
+    and p99 columns need and all a piece has to record for another
     process to reach the same numbers.
     """
     counts = _counts_of_samples(measurements)
@@ -533,63 +532,34 @@ def rows_by_point(run_dir: Path) -> dict:
     return rows
 
 
-def combine(run_dirs: list, out_dir: Path) -> list:
-    """Fold several run folders into one report, and return its rows.
+def fold_pieces(
+    experiment_dir: Path,
+    folders: list,
+    point_ids: list,
+    seeds_by_point: dict,
+    out_dir: Path,
+) -> list:
+    """Pieces' additive files folded into a run folder; its sweep rows.
 
-    A run folder records only additive facts, so folding is reading
-    them all back and deriving the summaries from them through the same
-    summarize and link_rows a single run uses. Serial, pooled and
-    sharded runs of one config therefore write the same rows, along
-    whatever cut `--shots-per-unit` gave the shards: a point split
-    across two shards folds exactly, because its median and p99 come
-    from the per-value counts and not from a shard's summary.
+    A piece holds a run folder's additive files for a range of one
+    point's seeds. The points' records go into the run folder with the
+    seeds their pieces hold (seeds_by_point), and every folded row takes
+    its point's swept values from them. The rows come back in the order
+    one run over every piece would write them: its points in task order,
+    then its seeds. Two pieces may not share a shot, which would be
+    counted twice.
 
-    The rows come back in the order one unsharded run would have
-    written them, read off the rows themselves and the point ids every
-    folder's manifest records in task order, so `combine b a` writes
-    what `combine a b` writes. What two folders may not share is a shot: one
-    seeded run in both of them would be counted twice.
-
-    An experiment's shard folders hold more rows than a process can:
-    500 shards of a million-shot sweep are 115 million link rows. So
-    the folders are read in a stream, one row of each folder at a time,
-    and what stands between reading and writing is the totals of
-    experiments/fold.py and not a list of the rows, whose memory would
-    grow with the shards.
-
-    The combined folder is itself a run folder: the additive files and a
-    manifest recording the sweep every folded folder shares, so a shard
-    that lands after the fold folds into it in turn, which is the shape
-    a Slurm array finishing in waves has. That manifest is the only one
-    a fold writes and it is written at the end, so the tree is read
-    here, at the start (run_folder.read_the_tree), and the folder names
-    the code the fold ran rather than whatever HEAD moved to inside it.
+    An experiment's pieces can hold more rows than a process can: 500
+    pieces of a million-shot sweep are 115 million link rows. So the
+    pieces are read in a stream, one row of each at a time, and what
+    stands between reading and writing is the totals of
+    experiments/fold.py and not a list of the rows.
     """
-    started_utc = run_folder.utc_now()
-    run_folder.read_the_tree()
-    manifest = _one_sweeps_manifest(run_dirs)
-    point_ids = manifest["points"]
-    positions = _task_positions(point_ids)
-    folders = _folders_that_ran_shots(run_dirs)
-    order = functools.partial(_row_task_and_seed, positions)
-    _refuse_folders_of_different_columns(folders)
-    _refuse_a_point_this_tree_cannot_place(folders)
-    _refuse_a_repeated_shot(folders, order)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    run_folder.copy_point_records(folders, out_dir)
-    swept = run_folder.swept_values(out_dir, point_ids)
-    rows = _fold_the_folders(folders, order, out_dir, swept)
-    finished_utc = run_folder.utc_now()
-    run_folder.write_combined_manifest(
-        manifest["experiment_config"],
-        point_ids,
-        out_dir,
-        run_dirs,
-        started_utc,
-        finished_utc=finished_utc,
+    order = _refused_or_ordered(folders, point_ids)
+    run_folder.copy_points_of(
+        experiment_dir, point_ids, seeds_by_point, out_dir
     )
-    run_folder.mark_finished(out_dir)
-    return rows
+    return _fold_into(folders, point_ids, order, out_dir)
 
 
 def write_report(rows: list, report_dir: Path, record: RunRecord) -> None:
@@ -685,6 +655,26 @@ class _PointMovement:
         return sorted(names)
 
 
+def _refused_or_ordered(folders: list, point_ids: list):
+    """The fold's row order, once the folders pass every refusal.
+
+    The refusals run before anything is written, so a refused fold
+    leaves no file behind.
+    """
+    positions = _task_positions(point_ids)
+    order = functools.partial(_row_task_and_seed, positions)
+    _refuse_folders_of_different_columns(folders)
+    _refuse_a_point_this_tree_cannot_place(folders)
+    _refuse_a_repeated_shot(folders, order)
+    return order
+
+
+def _fold_into(folders: list, point_ids: list, order, out_dir: Path) -> list:
+    """The folders' rows into out_dir, each with its point's swept values."""
+    swept = run_folder.swept_values(out_dir, point_ids)
+    return _fold_the_folders(folders, order, out_dir, swept)
+
+
 def _fold_the_folders(folders: list, order, out_dir: Path, swept: dict) -> list:
     """Every folder's additive files into one folder's, a pass per file.
 
@@ -693,7 +683,7 @@ def _fold_the_folders(folders: list, order, out_dir: Path, swept: dict) -> list:
     holds a folder's rows. The three derived files come last, off the
     totals the passes built, each point's swept values beside its rows.
     """
-    shot_totals = _fold_shots(folders, order, out_dir)
+    shot_totals = _fold_shots(folders, order, out_dir, swept)
     counts = _folded_counts(folders)
     rows = summary_rows(shot_totals, counts)
     sweep_path = out_dir / "sweep.csv"
@@ -701,61 +691,73 @@ def _fold_the_folders(folders: list, order, out_dir: Path, swept: dict) -> list:
     samples_path = out_dir / "window_samples.csv"
     samples_rows = _rows_of_counts(counts, list(shot_totals))
     _write_rows(samples_rows, samples_path, swept)
-    link_totals = _fold_shot_links(folders, order, out_dir)
+    link_totals = _fold_shot_links(folders, order, out_dir, swept)
     per_link = _link_rows_of(link_totals)
     links_path = out_dir / "links.csv"
     write_csv(per_link, links_path, swept)
-    movement_totals = _fold_shot_movement(folders, order, out_dir)
+    movement_totals = _fold_shot_movement(folders, order, out_dir, swept)
     per_movement = _movement_rows_of(movement_totals)
     movement_path = out_dir / "data_movement.csv"
     _write_rows(per_movement, movement_path, swept)
-    _fold_latency_samples(folders, order, out_dir)
+    _fold_latency_samples(folders, order, out_dir, swept)
     return rows
 
 
-def _fold_shots(folders: list, order, out_dir: Path) -> dict:
+def _fold_shots(folders: list, order, out_dir: Path, swept: dict) -> dict:
     """Every folder's shots.csv into one, and each point's shot totals."""
-    paths = _folder_files(folders, "shots.csv")
-    out_path = out_dir / "shots.csv"
     totals = {}
-    with fold.RowFile(out_path) as out_file:
-        for row in fold.merged_rows(paths, order):
-            out_file.write(row)
-            _add_a_shot(totals, row)
+    add_a_shot = functools.partial(_add_a_shot, totals)
+    _fold_one_file(folders, "shots.csv", order, out_dir, swept, add_a_shot)
     return totals
 
 
-def _fold_shot_links(folders: list, order, out_dir: Path) -> dict:
+def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> dict:
     """Every folder's shot_links.csv into one, and the per-link totals."""
-    paths = _folder_files(folders, "shot_links.csv")
-    out_path = out_dir / "shot_links.csv"
     totals = {}
-    with fold.RowFile(out_path) as out_file:
-        for row in fold.merged_rows(paths, order):
-            out_file.write(row)
-            _add_a_shot_link(totals, row)
+    add_a_link = functools.partial(_add_a_shot_link, totals)
+    name = "shot_links.csv"
+    _fold_one_file(folders, name, order, out_dir, swept, add_a_link)
     return totals
 
 
-def _fold_shot_movement(folders: list, order, out_dir: Path) -> dict:
+def _fold_shot_movement(
+    folders: list, order, out_dir: Path, swept: dict
+) -> dict:
     """Every folder's shot_data_movement.csv into one, and its totals."""
-    paths = _folder_files(folders, "shot_data_movement.csv")
-    out_path = out_dir / "shot_data_movement.csv"
     totals = {}
-    with fold.RowFile(out_path) as out_file:
-        for row in fold.merged_rows(paths, order):
-            out_file.write(row)
-            _add_a_movement_row(totals, row)
+    add_a_row = functools.partial(_add_a_movement_row, totals)
+    name = "shot_data_movement.csv"
+    _fold_one_file(folders, name, order, out_dir, swept, add_a_row)
     return totals
 
 
-def _fold_latency_samples(folders: list, order, out_dir: Path) -> None:
+def _fold_latency_samples(
+    folders: list, order, out_dir: Path, swept: dict
+) -> None:
     """Every folder's latency_samples.csv into one; no summary reads it."""
-    paths = _folder_files(folders, "latency_samples.csv")
-    out_path = out_dir / "latency_samples.csv"
+    name = "latency_samples.csv"
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
+
+
+def _fold_one_file(
+    folders: list, name: str, order, out_dir: Path, swept: dict, add_a_row
+) -> None:
+    """One additive file of every folder merged into out_dir's, row by row.
+
+    A piece holds bare rows, so each row takes its point's swept values
+    after its point_id here, as write_csv places them.
+    """
+    paths = _folder_files(folders, name)
+    out_path = out_dir / name
     with fold.RowFile(out_path) as out_file:
         for row in fold.merged_rows(paths, order):
-            out_file.write(row)
+            placed = _with_swept_row(row, swept)
+            out_file.write(placed)
+            add_a_row(row)
+
+
+def _no_totals(_row: dict) -> None:
+    """A file whose rows no summary totals."""
 
 
 def _folded_counts(folders: list) -> dict:
@@ -904,7 +906,7 @@ def _points_held(fields) -> list:
     """The latency points a shot row or its totals hold, in POINTS order.
 
     A run folder is read by the columns it holds and not by the columns
-    the reading tree would write: the 500 shard folders of one weak_ler
+    the reading tree would write: the 500 folders of one weak_ler
     sweep hold the sixteen latency points the tree that wrote them
     measured, and this tree measures twenty-two, so a summary that asked
     for its own could not read those folders at all. It is the rule that
@@ -1028,12 +1030,18 @@ def _with_swept_values(rows: list, swept: dict) -> list:
     """Each row with its point's swept values right after its point_id."""
     placed = []
     for row in rows:
-        point_id = row["point_id"]
-        with_values = {"point_id": point_id}
-        with_values.update(swept[point_id])
-        with_values.update(row)
+        with_values = _with_swept_row(row, swept)
         placed.append(with_values)
     return placed
+
+
+def _with_swept_row(row: dict, swept: dict) -> dict:
+    """One row with its point's swept values right after its point_id."""
+    point_id = row["point_id"]
+    with_values = {"point_id": point_id}
+    with_values.update(swept[point_id])
+    with_values.update(row)
+    return with_values
 
 
 def _total_count(multiset: dict) -> int:
@@ -1139,52 +1147,11 @@ def _task_positions(points: list) -> dict:
     return positions
 
 
-def _one_sweeps_manifest(run_dirs: list) -> dict:
-    """The manifest of the first folder, every folder's config the same.
-
-    A shard's rows say which point they belong to, not where that point
-    sits in the sweep, so the sweep order comes from the point ids each
-    folder's manifest records in task order, and the combined folder
-    records them again for the next fold. Folders that recorded
-    different configs are refused: they are not shards of one sweep.
-    """
-    manifests = []
-    recorded_configs = []
-    for run_dir in run_dirs:
-        manifest = _manifest_of(run_dir)
-        manifests.append(manifest)
-        recorded_configs.append(manifest["experiment_config"])
-    _refuse_folders_of_different_sweeps(run_dirs, recorded_configs)
-    return manifests[0]
-
-
 def _manifest_of(run_dir) -> dict:
     """One run folder's manifest.json."""
     manifest_path = Path(run_dir) / "manifest.json"
-    if not manifest_path.is_file():
-        raise refusal.RefusalError(
-            f"{run_dir} has no manifest.json; combine reads the sweep a run "
-            "folder records, so it can put the folded rows back in the "
-            "order one unsharded run would have written them"
-        )
     manifest_text = manifest_path.read_text()
     return json.loads(manifest_text)
-
-
-def _refuse_folders_of_different_sweeps(
-    run_dirs: list, recorded_configs: list
-) -> None:
-    """Folders that ran different experiments are not one sweep's shards."""
-    first_config = recorded_configs[0]
-    first_dir = run_dirs[0]
-    for run_dir, recorded in zip(run_dirs, recorded_configs, strict=True):
-        if recorded == first_config:
-            continue
-        raise refusal.RefusalError(
-            f"{run_dir} ran a different experiment from {first_dir}; combine "
-            "folds the shards of one sweep, and every shard of a sweep "
-            "records the same experiment config"
-        )
 
 
 def _refuse_folders_of_different_columns(run_dirs: list) -> None:
@@ -1205,8 +1172,8 @@ def _refuse_a_point_this_tree_cannot_place(run_dirs: list) -> None:
     place in that order, and the sort would fail with sweep.csv and
     shots.csv already written. It is checked here, at the boundary,
     before out_dir exists, the way the folded files' columns are, and it
-    costs one pass over the small file: a shard's window_samples.csv is
-    188 rows and 9 KB.
+    costs one pass over the small file: one folder's window_samples.csv
+    of a weak_ler sweep is 188 rows and 9 KB.
 
     Only the names are checked, not that the folders name the same set.
     A point may hold a column and no sample at all, measured:
@@ -1336,43 +1303,6 @@ def _refuse_the_folders(row: dict, run_dirs: list) -> None:
         f"the shot {shot} is in more than one of {listed}; a shot is one "
         "seeded run of one sweep point, so folding both folders would "
         "count it twice"
-    )
-
-
-def _folders_that_ran_shots(run_dirs: list) -> list:
-    """The folders with a shots.csv; one without is skipped, out loud.
-
-    A shard whose index selected no work unit writes its manifest and
-    no rows, which is not an error and is nothing to fold.
-    """
-    folders = []
-    for run_dir in run_dirs:
-        path = Path(run_dir) / "shots.csv"
-        if path.is_file():
-            folders.append(run_dir)
-            continue
-        _say_the_folder_is_skipped(run_dir)
-    if not folders:
-        _refuse_folders_without_shots(run_dirs)
-    return folders
-
-
-def _say_the_folder_is_skipped(run_dir) -> None:
-    """One line on stderr for a folder that holds no shot."""
-    print(
-        f"decsim: {run_dir} has no shots.csv, so combine skips it; "
-        "a shard whose index selected no work unit writes no rows",
-        file=sys.stderr,
-    )
-
-
-def _refuse_folders_without_shots(run_dirs: list) -> None:
-    """Nothing to fold: not one of the folders holds a shot."""
-    listed = _named(run_dirs)
-    raise refusal.RefusalError(
-        f"none of {listed} holds a shots.csv, so there is nothing to "
-        "combine; a run folder records its shots there, and a shard that "
-        "selected no work unit records none"
     )
 
 

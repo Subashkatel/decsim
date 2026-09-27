@@ -10,11 +10,23 @@ track it, which is gem5's `m5out/`. `tools/deltakit_example.py` and
 `tools/live_memory_example.py` write the same records into their
 `--output` folder.
 
+A `decsim collect` folder is an experiment folder. It holds the
+experiment's pieces, and one run folder per configuration folded from
+them:
+
+| Name | Written by | What it is |
+| --- | --- | --- |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one sweep point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`) without the swept columns, and `piece.json`. Its files are written into a hidden partial folder beside it and the folder is renamed into place last, so a piece folder exists only whole; a collect skips a piece whose folder exists |
+| `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `point_id`, `first_seed` and `count`, its `scored_shots`, `failures`, `unscored_shots` and `core_seconds` (its shots' own wall time), and the `commit`, `dirty`, `host` and `slurm_job_id` of the process that ran it |
+| `resolved/<id>.json`, `inputs/<id>/` | `decsim/experiments/run_folder.py`, `record_point` | each point's record and workload, written before any shot, as a run folder holds them below; the record also holds `rounds_per_shot`, the QEC rounds of a shot, which sizes the point's pieces |
+| `configurations.csv` | `decsim/experiments/run_folder.py`, `record_configuration` | one row per configuration: its `configuration_id` (the sha256 of its sections, the sweep and the collection left out), its `name` and its `config_chain` |
+| `combined/<name>-<id8>/` | `decsim/experiments/collect_command.py`, `run_experiment` | the configuration's run folder, named by its yaml and the first eight characters of its configuration id |
+
 A run folder holds facts that add up and nothing else. No summary is
 stored: `sweep.csv` and `links.csv` are computed from the additive files
-when they are written, and `decsim combine` recomputes them over several
-folders, so a sweep may be cut into shards and folded back together
-without any number changing (`decsim/experiments/report.py`).
+when they are written, and a collect folds them over every piece, so a
+sweep cut into pieces, stopped and picked up again, gives the numbers
+one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 
 ## What a folder holds
 
@@ -32,11 +44,10 @@ without any number changing (`decsim/experiments/report.py`).
 | `manifest.json` | `decsim/experiments/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
 | `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain, each at its place relative to the others, so every `extends` still resolves |
 | `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, and a patch creating each untracked file git does not ignore, written only when there is either |
-| `resolved/<id>.json` | `decsim/experiments/run_folder.py`, `record_point` | one per sweep point, named by the point's content id: its metadata, the seeds this folder ran of it (ranges of first and how many; a shard's own, and every shard's once combined), `sections`, the yaml the point resolved to with its axes placed and its references resolved (null for a point a Python caller built), `maker`, what the workload's row says made it for this point (the `producer` row answers its `function`, the point's own `arguments` and its package's `version`; the `files` row and a Python-built workload answer null), every setting, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
+| `resolved/<id>.json` | `decsim/experiments/run_folder.py`, `record_point` | one per sweep point, named by the point's content id: its metadata, the seeds this folder ran of it (ranges of first and how many, joined from its pieces), `sections`, the yaml the point resolved to with its axes placed and its references resolved (null for a point a Python caller built), `maker`, what the workload's row says made it for this point (the `producer` row answers its `function`, the point's own `arguments` and its package's `version`; the `files` row and a Python-built workload answer null), every setting, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
 | `inputs/<id>/` | `decsim/experiments/run_folder.py`, `record_point` | the workload the point ran, as the `files` workload row reads it (`operations.json`, and `circuit.stim` with `measurement_rounds.json` or `fragments/`), and `hashes.json`, each file's sha256 |
 | `result.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: every field of the shot's result |
 | `commands.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: when each QPU command arrived and when it started |
-| `finished` | `decsim/experiments/run_folder.py`, `mark_finished` | the time the run ended, written last; a `decsim collect` into a folder that holds it leaves the folder as it is |
 | `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file |
 | `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
 | `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |
@@ -235,7 +246,7 @@ One row per sweep point, latency point and distinct microsecond value.
 | `count` | how many windows carried it |
 
 This is the multiset of a point's window samples. A median and a p99
-need nothing more, and one shard records nothing more for another
+need nothing more, and one piece records nothing more for another
 process to reach the same numbers.
 
 ### `latency_samples.csv`
@@ -327,8 +338,7 @@ One object. Its keys, from `write_manifest` in
 | --- | --- |
 | `config_files` | the yaml chain, in the order it was read |
 | `experiment_config` | the config as its files write it, as json: its sections after every `extends` was folded in, with each `${...}` reference as written, their folders, the sweep blocks and the files; what each point resolves to is in its `resolved/` record |
-| `points` | the sweep's point ids in task order, a point two blocks name listed once: the order `decsim combine` writes a fold's rows in |
-| `shard`, `shots_per_unit` | the `--shard` and `--shots-per-unit` this process ran with, or null |
+| `points` | the sweep's point ids in task order, a point two blocks name listed once: the order a fold writes its rows in |
 | `git` | the commit and whether the checkout was dirty, read once when the process started |
 | `container` | the container image, when one was in use |
 | `versions` | the Python version, and `packages`: every installed package and its version |
@@ -336,9 +346,6 @@ One object. Its keys, from `write_manifest` in
 | `host`, `slurm_job_id` | where it ran |
 | `argv` | the command line as it was invoked |
 | `started_utc`, `finished_utc` | when |
-
-`decsim combine` writes the same shape through `write_combined_manifest`,
-with the experiment config and the point ids of the folders it folded.
 
 The manifest is written twice, once when the run starts and once when
 it ends with `finished_utc` filled in, and both writes name the same
@@ -351,4 +358,4 @@ leave every folder naming code that no part of the run read.
 
 - [How to compare two runs](../how-to/compare_two_runs.md): read two folders side by side.
 - [The commands](cli.md): the commands that write and read these files.
-- [Your first sweep](../tutorials/first_sweep.md): a sweep, its shards and its error bars.
+- [Your first sweep](../tutorials/first_sweep.md): a sweep, its pieces and its error bars.

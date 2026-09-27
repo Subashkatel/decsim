@@ -2,7 +2,7 @@
 
 A run folder records only facts that add up, so folding folders is
 reading their rows and adding them. The rows are what an experiment
-has most of: the 500 shard folders of one weak_ler sweep hold
+has most of: the 500 folders of one weak_ler sweep hold
 115 million link rows and 10.5 million shot rows, and one row as a dict
 of typed Python values costs about a kilobyte, so reading them into
 lists costs a hundred gigabytes. This module holds what the fold needs
@@ -120,7 +120,7 @@ def merged_rows(paths: list, key):
 
     `key` gives a row its place in that order. A path with no file is a
     folder that wrote no row of this kind and is skipped, which is what
-    a shard whose index selected no work unit leaves behind.
+    a folder that ran no sweep leaves behind.
     """
     streams = []
     for path in paths:
@@ -162,10 +162,10 @@ class ExactSum:
 
     `total` rounds that list once, so it is the sum math.fsum returns
     for the same values in any order, and a mean folded over an
-    experiment's shards is the mean one process would have computed, to
+    experiment's folders is the mean one process would have computed, to
     the last bit.
     A plain running float sum would not be: it would move the last bits
-    of every mean column with the order the shards came in.
+    of every mean column with the order the folders came in.
     """
 
     def __init__(self) -> None:
@@ -340,7 +340,7 @@ def _refuse_a_row_out_of_order(path: pathlib.Path, place, previous) -> None:
     if place >= previous:
         return
     raise refusal.RefusalError(
-        f"{path} holds a row at {place} after a row at {previous}; combine "
-        "merges the folders' rows, and a run folder holds its rows in the "
-        "order the sweep ran them, its task position and then its seed"
+        f"{path} holds a row at {place} after a row at {previous}; a fold "
+        "merges the pieces' rows, and a piece holds its rows in the order "
+        "the sweep ran them, its task position and then its seed"
     )

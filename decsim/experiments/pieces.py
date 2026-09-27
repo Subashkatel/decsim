@@ -1,0 +1,154 @@
+"""A piece: seeds [first, first + count) of one sweep point, kept as one folder.
+
+pieces/<point id>/<first>-<last>/ holds the piece's additive files and
+piece.json. They are written into a hidden partial folder beside it,
+piece.json last, and the folder is renamed into place last, so a piece
+folder exists only whole: a rename within one directory is atomic under
+POSIX, and GPFS keeps POSIX semantics under its distributed locking
+(Schmuck and Haskin, FAST 2002). A run skips a piece whose folder
+exists, which is how a killed collect resumes, as sinter resumes from
+the counts its save file already holds
+(sinter/_collection/_collection.py:387-397).
+"""
+
+import json
+import os
+import pathlib
+import shutil
+
+import decsim.experiments.report as report
+import decsim.experiments.run_folder as run_folder
+
+PIECES_FOLDER = "pieces"
+PIECE_FILE = "piece.json"
+
+
+def piece_dir(
+    experiment_dir: pathlib.Path, point_id: str, first_seed: int, count: int
+) -> pathlib.Path:
+    """Where the piece's folder is: its point, then its first and last seed."""
+    last_seed = first_seed + count - 1
+    point_dir = experiment_dir / PIECES_FOLDER / point_id
+    return point_dir / f"{first_seed}-{last_seed}"
+
+
+def is_written(
+    experiment_dir: pathlib.Path, point_id: str, first_seed: int, count: int
+) -> bool:
+    """Whether the piece's folder is in place, which makes it whole."""
+    folder = piece_dir(experiment_dir, point_id, first_seed, count)
+    return folder.is_dir()
+
+
+def write(
+    experiment_dir: pathlib.Path,
+    point_id: str,
+    first_seed: int,
+    measurements: list,
+    facts: dict,
+) -> pathlib.Path:
+    """One piece's files, whole or not at all, and where they went.
+
+    A partial folder a killed run left for this piece is removed first;
+    only this piece's own, since another task may be writing its piece
+    beside it. facts are the piece's own lines of piece.json, beside
+    the counts read off its shots.
+    """
+    count = len(measurements)
+    folder = piece_dir(experiment_dir, point_id, first_seed, count)
+    partial = folder.with_name(f".{folder.name}.partial")
+    shutil.rmtree(partial, ignore_errors=True)
+    partial.mkdir(parents=True)
+    record = report.record_of(measurements)
+    report.write_record(record, partial, None)
+    counts = _counts_of(record.shots)
+    identity = run_folder.piece_identity()
+    piece = {
+        "point_id": point_id,
+        "first_seed": first_seed,
+        "count": count,
+        **counts,
+        **facts,
+        **identity,
+    }
+    piece_path = partial / PIECE_FILE
+    run_folder.write_json(piece_path, piece)
+    os.replace(partial, folder)
+    return folder
+
+
+def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
+    """Every whole piece of these points, point by point, in seed order.
+
+    A partial folder is no piece and is passed over.
+    """
+    folders = []
+    for point_id in point_ids:
+        point_dir = experiment_dir / PIECES_FOLDER / point_id
+        if not point_dir.is_dir():
+            continue
+        written = _whole_pieces(point_dir)
+        folders.extend(written)
+    return folders
+
+
+def seed_ranges_of(folders: list) -> dict:
+    """Each point's seed ranges, [first, count], from its pieces' names."""
+    ranges = {}
+    for folder in folders:
+        point_id = folder.parent.name
+        first_seed, count = _range_of(folder)
+        point_ranges = ranges.setdefault(point_id, [])
+        point_ranges.append((first_seed, count))
+    joined = {}
+    for point_id, point_ranges in ranges.items():
+        joined[point_id] = run_folder.seed_ranges(point_ranges)
+    return joined
+
+
+def read_piece(folder: pathlib.Path) -> dict:
+    """One piece's piece.json."""
+    piece_path = folder / PIECE_FILE
+    text = piece_path.read_text()
+    return json.loads(text)
+
+
+def _whole_pieces(point_dir: pathlib.Path) -> list:
+    """One point's piece folders in first-seed order, partial ones left out."""
+    pieces = []
+    for folder in point_dir.iterdir():
+        if folder.name.startswith("."):
+            continue
+        pieces.append(folder)
+    return sorted(pieces, key=_range_of)
+
+
+def _range_of(folder: pathlib.Path) -> tuple:
+    """(first seed, count) from a piece folder's <first>-<last> name."""
+    first_text, last_text = folder.name.split("-")
+    first_seed = int(first_text)
+    last_seed = int(last_text)
+    count = last_seed - first_seed + 1
+    return (first_seed, count)
+
+
+def _counts_of(shots: list) -> dict:
+    """The piece's shot counts, the lines a planner reads without its rows.
+
+    core_seconds is the shots' own simulated wall time, the cost a
+    planner deals pieces by.
+    """
+    scored_shots = 0
+    failures = 0
+    core_seconds = 0.0
+    for row in shots:
+        scored_shots += row["is_scored"]
+        failures += row["logical_failure"]
+        core_seconds += row["sim_wall_seconds"]
+    unscored_shots = len(shots) - scored_shots
+    return {
+        "scored_shots": scored_shots,
+        "failures": failures,
+        "unscored_shots": unscored_shots,
+        "core_seconds": core_seconds,
+    }

@@ -78,57 +78,11 @@ def _rows_without_wall_clock(run_dir, name):
     return stripped
 
 
-def _point_and_seed_of_every_row(run_dir, name):
-    path = run_dir / name
-    rows = _rows(path)
-    order = []
-    for row in rows:
-        point_and_seed = (row["point_id"], row["seed"])
-        order.append(point_and_seed)
-    return order
-
-
-def _collect_one_shard(config_path, out_dir, shard, shots_per_unit):
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(out_dir),
-            "--shard",
-            shard,
-            "--shots-per-unit",
-            str(shots_per_unit),
-        ]
-    )
-
-
 def _rows_of_every_file(run_dir) -> dict:
     """Each file's rows without the wall clock, by file name."""
     return {
         name: _rows_without_wall_clock(run_dir, name) for name in EVERY_FILE
     }
-
-
-def _bytes_of_files(run_dir, names) -> dict:
-    contents = {}
-    for name in names:
-        path = run_dir / name
-        contents[name] = path.read_bytes()
-    return contents
-
-
-def _collect_every_shard(config_path, shard_dirs: list) -> None:
-    """Shard i of n into shard_dirs[i], one shot to a unit."""
-    shard_count = len(shard_dirs)
-    for index, shard_dir in enumerate(shard_dirs):
-        _collect_one_shard(config_path, shard_dir, f"{index}/{shard_count}", 1)
-
-
-def _combined(first_dir, second_dir, out_dir):
-    command.main(
-        ["combine", str(first_dir), str(second_dir), "--out", str(out_dir)]
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -166,12 +120,6 @@ def _commit_of_this_tree():
     while not (checkout / ".git").exists():
         checkout = checkout.parent
     return run_folder._commit_from_git_files(checkout)
-
-
-def _seeds_of_every_shot(run_dir):
-    path = run_dir / "shots.csv"
-    rows = _rows(path)
-    return [row["seed"] for row in rows]
 
 
 def test_an_unknown_verb_prints_the_verbs_and_fails():
@@ -259,7 +207,7 @@ def test_run_builds_a_point_whose_threshold_learns_online(tmp_path):
 
     run_command.run_one_shot(config_path, out_dir=out_dir)
 
-    assert (out_dir / "finished").exists()
+    assert (out_dir / "result.json").exists()
 
 
 def test_show_names_the_fabric_card_the_run_resolved_to():
@@ -556,7 +504,6 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     assert maker["function"] == "decsim.producers:memory_circuit"
     assert maker["arguments"]["rounds_per_shot"] == 15
     assert (out_dir / "result.json").exists()
-    assert (out_dir / "finished").exists()
 
 
 # A maker that answers a longer memory each time it is called, so a
@@ -641,7 +588,6 @@ def test_a_points_record_names_the_maker_in_either_of_its_forms(
     resolved_text = resolved_path.read_text()
     resolved = json.loads(resolved_text)
     assert resolved["maker"]["function"] == function
-    assert (out_dir / "finished").exists()
 
 
 def test_a_points_record_names_the_maker_its_row_answers(tmp_path, monkeypatch):
@@ -688,41 +634,92 @@ def test_a_point_recorded_again_hashes_only_its_inputs(tmp_path):
     assert sorted(hashes) == ["operation_1.stim", "operations.json"]
 
 
-def test_a_sweep_rerun_into_a_finished_folder_leaves_it_as_it_is(
-    tmp_path, capsys
-):
-    """A Slurm array rerun runs again only the shards that did not finish."""
+def test_a_collect_run_again_into_its_folder_reruns_no_saved_piece(tmp_path):
+    """A killed or finished collect run again skips every piece it saved.
+
+    A piece's folder is written whole or not at all, so one that exists
+    holds its shots, and the fold of the second run is the first's.
+    """
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
     command.main(["collect", str(config_path), "--out", str(out_dir)])
-    sweep_path = out_dir / "sweep.csv"
-    first_status = sweep_path.stat()
-    capsys.readouterr()
+    pieces_dir = out_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    first_status = piece_path.stat()
+    report_dir = yaml_configs.run_folder_of(out_dir)
+    first_rows = _rows_without_wall_clock(report_dir, "sweep.csv")
 
     command.main(["collect", str(config_path), "--out", str(out_dir)])
-    printed = capsys.readouterr()
 
-    assert (out_dir / "finished").exists()
-    second_status = sweep_path.stat()
+    second_status = piece_path.stat()
+    second_rows = _rows_without_wall_clock(report_dir, "sweep.csv")
     assert second_status.st_mtime_ns == first_status.st_mtime_ns
-    assert "holds a finished run" in printed.err
+    assert second_rows == first_rows
 
 
-def test_a_combined_folder_holds_every_shards_points(tmp_path):
-    """A point's records are named by content, so the union is every point."""
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
-    combined_dir = tmp_path / "combined"
-    _collect_one_shard(config_path, first_dir, "0/2", 1)
-    _collect_one_shard(config_path, second_dir, "1/2", 1)
-    _combined(first_dir, second_dir, combined_dir)
-    resolved_dir = combined_dir / "resolved"
-    resolved_files = resolved_dir.glob("*.json")
-    resolved = list(resolved_files)
+def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
+    """The uncut collect is the oracle for a cut one that lost a piece.
 
-    assert len(resolved) == 4
-    assert (combined_dir / "finished").exists()
+    Pieces of one shot each, one of them deleted as a killed job leaves
+    it missing, then the same collect again: it runs that piece alone
+    and every folded file is the uncut run's.
+    """
+    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    cut_folder = tmp_path / "cut_config"
+    cut_folder.mkdir()
+    cut_card = {**FOUR_POINT_SWEEP, "collection": {"piece_rounds": 1}}
+    cut_path = yaml_configs.write_config(cut_folder, cut_card)
+    whole_dir = tmp_path / "whole"
+    cut_dir = tmp_path / "cut"
+    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    second_pieces = cut_dir.glob("pieces/*/1-1")
+    cut_pieces = sorted(second_pieces)
+    lost_piece = cut_pieces[0]
+    kept_piece = cut_pieces[1]
+    kept_status = (kept_piece / "piece.json").stat()
+    shutil.rmtree(lost_piece)
+
+    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+
+    reissued_status = (kept_piece / "piece.json").stat()
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    whole_rows = _rows_of_every_file(whole_run_dir)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    cut_rows = _rows_of_every_file(cut_run_dir)
+    assert lost_piece.is_dir()
+    assert reissued_status.st_mtime_ns == kept_status.st_mtime_ns
+    assert cut_rows == whole_rows
+
+
+def test_a_partial_piece_a_killed_run_left_is_written_again(tmp_path):
+    """A partial folder is no piece: the piece runs, the partial goes."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    whole_dir = tmp_path / "whole"
+    out_dir = tmp_path / "out"
+    command.main(["collect", str(config_path), "--out", str(whole_dir)])
+    pieces_dir = whole_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    point_dir = piece_path.parent.parent
+    partial = (
+        out_dir
+        / "pieces"
+        / point_dir.name
+        / f".{piece_path.parent.name}.partial"
+    )
+    partial.mkdir(parents=True)
+    (partial / "shots.csv").write_text("half a file")
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    written = out_dir / "pieces" / point_dir.name / piece_path.parent.name
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    whole_rows = _rows_of_every_file(whole_run_dir)
+    out_run_dir = yaml_configs.run_folder_of(out_dir)
+    out_rows = _rows_of_every_file(out_run_dir)
+    assert not partial.exists()
+    assert (written / "piece.json").exists()
+    assert out_rows == whole_rows
 
 
 def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
@@ -737,9 +734,10 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
 
     command.main(["collect", str(config_path), "--out", str(out_dir)])
 
-    sweep_path = out_dir / "sweep.csv"
-    shots_path = out_dir / "shots.csv"
-    links_path = out_dir / "shot_links.csv"
+    run_dir = yaml_configs.run_folder_of(out_dir)
+    sweep_path = run_dir / "sweep.csv"
+    shots_path = run_dir / "shots.csv"
+    links_path = run_dir / "shot_links.csv"
     sweep_header = fold.header_of(sweep_path)
     shots_header = fold.header_of(shots_path)
     links_header = fold.header_of(links_path)
@@ -790,7 +788,7 @@ def test_a_point_holds_its_own_value_at_a_path_another_block_sets(tmp_path):
 
     command.main(["collect", str(config_path), "--out", str(out_dir)])
 
-    sweep_path = out_dir / "sweep.csv"
+    sweep_path = yaml_configs.run_folder_of(out_dir) / "sweep.csv"
     first, second = _csv_rows(sweep_path)
     assert first["qpu.distance"] == "5"
     assert first["windows.commit_rounds"] == "null"
@@ -821,7 +819,7 @@ def test_a_swept_reference_is_written_as_the_value_it_resolved_to(tmp_path):
 
     command.main(["collect", str(config_path), "--out", str(out_dir)])
 
-    sweep_path = out_dir / "sweep.csv"
+    sweep_path = yaml_configs.run_folder_of(out_dir) / "sweep.csv"
     rows = _csv_rows(sweep_path)
     distances = [row["qpu.distance"] for row in rows]
     assert distances == ["3", "5"]
@@ -851,7 +849,7 @@ def test_a_child_axis_under_a_swept_mapping_shows_in_the_mappings_cell(
 
     command.main(["collect", str(config_path), "--out", str(out_dir)])
 
-    sweep_path = out_dir / "sweep.csv"
+    sweep_path = yaml_configs.run_folder_of(out_dir) / "sweep.csv"
     (row,) = _csv_rows(sweep_path)
     assert row["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
     assert row["pauli_frame.write_cycles"] == "2"
@@ -871,47 +869,6 @@ def test_every_point_records_its_own_makers_arguments(tmp_path):
         for made in arguments
     }
     assert made_at == {(0.001, 3), (0.001, 5), (0.003, 3), (0.003, 5)}
-
-
-def _seeds_of_the_one_point(run_dir):
-    resolved_dir = run_dir / "resolved"
-    resolved_path = _one_file(resolved_dir, "*.json")
-    resolved_text = resolved_path.read_text()
-    resolved = json.loads(resolved_text)
-    return resolved["seeds"]
-
-
-def test_a_shards_record_holds_the_seeds_it_ran(tmp_path):
-    """Each shard records its own seeds, and the fold records all of them."""
-    four_shots = {"sweep": [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])]}
-    four_shots["sweep"][0]["shots"] = 4
-    config_path = yaml_configs.write_config(tmp_path, four_shots)
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
-    combined_dir = tmp_path / "combined"
-    _collect_one_shard(config_path, first_dir, "0/2", 2)
-    _collect_one_shard(config_path, second_dir, "1/2", 2)
-    _combined(first_dir, second_dir, combined_dir)
-
-    assert _seeds_of_every_shot(second_dir) == ["2", "3"]
-    assert _seeds_of_the_one_point(first_dir) == [[0, 2]]
-    assert _seeds_of_the_one_point(second_dir) == [[2, 2]]
-    assert _seeds_of_the_one_point(combined_dir) == [[0, 4]]
-
-
-def test_a_second_combine_into_the_same_folder_keeps_its_seeds(tmp_path):
-    four_shots = {"sweep": [dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])]}
-    four_shots["sweep"][0]["shots"] = 4
-    config_path = yaml_configs.write_config(tmp_path, four_shots)
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
-    combined_dir = tmp_path / "combined"
-    _collect_one_shard(config_path, first_dir, "0/2", 2)
-    _collect_one_shard(config_path, second_dir, "1/2", 2)
-    _combined(first_dir, second_dir, combined_dir)
-    _combined(first_dir, second_dir, combined_dir)
-
-    assert _seeds_of_the_one_point(combined_dir) == [[0, 4]]
 
 
 def test_a_manifest_names_every_installed_package(tmp_path):
@@ -1059,310 +1016,45 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
             "4",
         ]
     )
-    serial_rows = _rows_of_every_file(serial_dir)
-    pooled_rows = _rows_of_every_file(pooled_dir)
+    serial_run_dir = yaml_configs.run_folder_of(serial_dir)
+    serial_rows = _rows_of_every_file(serial_run_dir)
+    pooled_run_dir = yaml_configs.run_folder_of(pooled_dir)
+    pooled_rows = _rows_of_every_file(pooled_run_dir)
     assert pooled_rows == serial_rows
 
 
-def test_two_shards_combined_are_the_unsharded_collects_rows(tmp_path):
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    whole_dir = tmp_path / "whole"
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    combined_dir = tmp_path / "combined"
-    command.main(["collect", str(config_path), "--out", str(whole_dir)])
-    command.main(
-        ["collect", str(config_path), "--out", str(first_dir), "--shard", "0/2"]
-    )
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(second_dir),
-            "--shard",
-            "1/2",
-        ]
-    )
-    command.main(
-        [
-            "combine",
-            str(first_dir),
-            str(second_dir),
-            "--out",
-            str(combined_dir),
-        ]
-    )
-    whole_rows = _rows_of_every_file(whole_dir)
-    combined_rows = _rows_of_every_file(combined_dir)
-    assert combined_rows == whole_rows
-
-
-def test_combine_writes_the_same_rows_whichever_order_the_shards_come_in(
-    tmp_path,
-):
-    """The shards split every point's seeds, so every file is folded."""
-    wall_clock_unit = {
-        **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
-        "kind": "pymatching",
-    }
-    config_path = yaml_configs.write_config(
-        tmp_path, {**FOUR_POINT_SWEEP, "weak_decoder": wall_clock_unit}
-    )
-    serial_dir = tmp_path / "serial"
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    forwards_dir = tmp_path / "forwards"
-    backwards_dir = tmp_path / "backwards"
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(first_dir),
-            "--shots-per-unit",
-            "1",
-            "--shard",
-            "0/2",
-        ]
-    )
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(second_dir),
-            "--shots-per-unit",
-            "1",
-            "--shard",
-            "1/2",
-        ]
-    )
-    command.main(
-        [
-            "combine",
-            str(first_dir),
-            str(second_dir),
-            "--out",
-            str(forwards_dir),
-        ]
-    )
-    command.main(
-        [
-            "combine",
-            str(second_dir),
-            str(first_dir),
-            "--out",
-            str(backwards_dir),
-        ]
-    )
-
-    every_file = EVERY_FILE + ("latency_samples.csv",)
-    forwards_bytes = _bytes_of_files(forwards_dir, every_file)
-    backwards_bytes = _bytes_of_files(backwards_dir, every_file)
-    serial_shots = _point_and_seed_of_every_row(serial_dir, "shots.csv")
-    combined_shots = _point_and_seed_of_every_row(forwards_dir, "shots.csv")
-    serial_samples = _point_and_seed_of_every_row(
-        serial_dir, "latency_samples.csv"
-    )
-    combined_samples = _point_and_seed_of_every_row(
-        forwards_dir, "latency_samples.csv"
-    )
-    assert forwards_bytes == backwards_bytes
-    assert combined_shots == serial_shots
-    assert combined_samples == serial_samples
-
-
-def test_combining_folders_of_two_different_sweeps_is_refused(tmp_path, capsys):
-    first_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    second_path = tmp_path / "other.yaml"
-    other_text = first_path.read_text()
-    more_shots = other_text.replace("shots: 2", "shots: 3")
-    second_path.write_text(more_shots)
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
-    combined_dir = tmp_path / "combined"
-    command.main(
-        ["collect", str(first_path), "--out", str(first_dir), "--shard", "0/2"]
-    )
-    command.main(
-        [
-            "collect",
-            str(second_path),
-            "--out",
-            str(second_dir),
-            "--shard",
-            "1/2",
-        ]
-    )
-    capsys.readouterr()
-    with pytest.raises(SystemExit) as stopped:
-        command.main(
-            [
-                "combine",
-                str(first_dir),
-                str(second_dir),
-                "--out",
-                str(combined_dir),
-            ]
-        )
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert "ran a different experiment from" in printed.err
-
-
-def test_a_unit_size_that_splits_a_point_writes_the_serial_runs_rows(
-    tmp_path,
-):
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    serial_dir = tmp_path / "serial"
-    split_dir = tmp_path / "split"
-    pooled_dir = tmp_path / "pooled"
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(split_dir),
-            "--shots-per-unit",
-            "1",
-        ]
-    )
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(pooled_dir),
-            "--shots-per-unit",
-            "1",
-            "--processes",
-            "4",
-        ]
-    )
-
-    serial_rows = _rows_of_every_file(serial_dir)
-    split_rows = _rows_of_every_file(split_dir)
-    pooled_rows = _rows_of_every_file(pooled_dir)
-    assert split_rows == serial_rows
-    assert pooled_rows == serial_rows
-
-
-def test_shards_that_split_every_points_seeds_fold_to_the_serial_rows(
-    tmp_path,
-):
+def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_point(tmp_path):
     """The additive record's whole point: a folded point is the point.
 
-    Every point of the sweep is split, seed 0 to one shard and seed 1
-    to the other, so no shard holds a whole point and every summary
-    column has to come out of the additive files.
+    One collect saves each point as one piece; another cuts each point
+    into pieces of one shot, serially and in a pool. Every file the
+    three fold to is the same, row for row, but for the wall clock.
     """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    serial_dir = tmp_path / "serial"
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    forwards_dir = tmp_path / "forwards"
-    backwards_dir = tmp_path / "backwards"
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(first_dir),
-            "--shots-per-unit",
-            "1",
-            "--shard",
-            "0/2",
-        ]
-    )
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(second_dir),
-            "--shots-per-unit",
-            "1",
-            "--shard",
-            "1/2",
-        ]
-    )
-    command.main(
-        [
-            "combine",
-            str(first_dir),
-            str(second_dir),
-            "--out",
-            str(forwards_dir),
-        ]
-    )
-    command.main(
-        [
-            "combine",
-            str(second_dir),
-            str(first_dir),
-            "--out",
-            str(backwards_dir),
-        ]
-    )
-
-    serial_rows = _rows_of_every_file(serial_dir)
-    folded_rows = _rows_of_every_file(forwards_dir)
-    forwards_bytes = _bytes_of_files(forwards_dir, EVERY_FILE)
-    backwards_bytes = _bytes_of_files(backwards_dir, EVERY_FILE)
-    assert folded_rows == serial_rows
-    assert forwards_bytes == backwards_bytes
-
-
-def test_a_combined_folder_folds_again_with_a_later_shard(tmp_path):
-    """A Slurm array finishing in waves folds each wave as it lands.
-
-    So a combined folder is a run folder: the additive files plus a
-    manifest recording the sweep, and folding it with the last shard
-    gives the rows of the run that never sharded at all.
-    """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    serial_dir = tmp_path / "serial"
-    shard_dirs = [tmp_path / f"shard{index}" for index in (0, 1, 2)]
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
-    _collect_every_shard(config_path, shard_dirs)
-    first_two_dir = tmp_path / "first_two"
-    combined_dir = tmp_path / "combined"
-    _combined(shard_dirs[0], shard_dirs[1], first_two_dir)
-    _combined(first_two_dir, shard_dirs[2], combined_dir)
-    serial_rows = _rows_of_every_file(serial_dir)
-    combined_rows = _rows_of_every_file(combined_dir)
-    assert combined_rows == serial_rows
-
-
-def test_a_manifest_records_the_shard_and_the_unit_size_it_ran(tmp_path):
-    """How a folder ran, beside what it ran: the array's own bookkeeping.
-
-    Nothing reads these to fold the rows, which come back in the order
-    the recorded sweep gives; they say what one of a hundred folders an
-    array left behind holds.
-    """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    cut_folder = tmp_path / "cut_config"
+    cut_folder.mkdir()
+    cut_card = {**FOUR_POINT_SWEEP, "collection": {"piece_rounds": 1}}
+    cut_path = yaml_configs.write_config(cut_folder, cut_card)
     whole_dir = tmp_path / "whole"
-    shard_dir = tmp_path / "shard"
-    combined_dir = tmp_path / "combined"
-    command.main(["collect", str(config_path), "--out", str(whole_dir)])
-    _collect_one_shard(config_path, shard_dir, "0/2", 1)
-    command.main(["combine", str(whole_dir), "--out", str(combined_dir)])
-    whole = _manifest_of(whole_dir)
-    sharded = _manifest_of(shard_dir)
-    combined = _manifest_of(combined_dir)
-    assert whole["shard"] is None
-    assert whole["shots_per_unit"] is None
-    assert sharded["shard"] == "0/2"
-    assert sharded["shots_per_unit"] == 1
-    assert combined["folded"] == [str(whole_dir)]
-    assert combined["experiment_config"] == whole["experiment_config"]
+    cut_dir = tmp_path / "cut"
+    pooled_dir = tmp_path / "pooled"
+    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    pooled = ["collect", str(cut_path), "--out", str(pooled_dir)]
+    command.main([*pooled, "--processes", "4"])
+
+    whole_pieces = whole_dir.glob("pieces/*/*")
+    cut_pieces = cut_dir.glob("pieces/*/*")
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    whole_rows = _rows_of_every_file(whole_run_dir)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    cut_rows = _rows_of_every_file(cut_run_dir)
+    pooled_run_dir = yaml_configs.run_folder_of(pooled_dir)
+    pooled_rows = _rows_of_every_file(pooled_run_dir)
+    assert len(list(whole_pieces)) == 4
+    assert len(list(cut_pieces)) == 8
+    assert cut_rows == whole_rows
+    assert pooled_rows == whole_rows
 
 
 def test_a_manifest_names_the_commit_of_the_tree_it_imported(
@@ -1380,7 +1072,8 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     out_dir = tmp_path / "run"
     monkeypatch.chdir(tmp_path)
     command.main(["collect", str(config_path), "--out", str(out_dir)])
-    manifest = _manifest_of(out_dir)
+    run_dir = yaml_configs.run_folder_of(out_dir)
+    manifest = _manifest_of(run_dir)
     recorded = manifest["git"]
 
     assert recorded["commit"] == _commit_of_this_tree()
@@ -1392,10 +1085,10 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
 ):
     """The interpreter may have no git; the launcher did.
 
-    slurm/slurm_run.sh looks at the tree as the job starts and exports
-    what it saw, because the container image this runs in ships no git
-    binary and a folder that cannot say whether its code was committed
-    must say that rather than say clean.
+    A job script looks at the tree as the job starts and exports what it
+    saw, because the container image this runs in ships no git binary
+    and a folder that cannot say whether its code was committed must say
+    that rather than say clean.
 
     A process reads the tree once, so the two runs here take a reading
     each on purpose: one process launched by two different launchers is
@@ -1411,8 +1104,10 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     run_folder._tree_reading.cache_clear()
     command.main(["collect", str(config_path), "--out", str(clean_dir)])
 
-    dirty_manifest = _manifest_of(dirty_dir)
-    clean_manifest = _manifest_of(clean_dir)
+    dirty_run_dir = yaml_configs.run_folder_of(dirty_dir)
+    clean_run_dir = yaml_configs.run_folder_of(clean_dir)
+    dirty_manifest = _manifest_of(dirty_run_dir)
+    clean_manifest = _manifest_of(clean_run_dir)
     dirty = dirty_manifest["git"]
     clean = clean_manifest["git"]
     assert dirty["dirty"] is True
@@ -1453,219 +1148,25 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
     assert at_the_end["finished_utc"] is not None
 
 
-def test_a_combined_folders_manifest_names_the_tree_the_fold_ran_on(
-    tmp_path, monkeypatch
-):
-    """A fold writes one manifest, at the end, and it names the start.
-
-    The fold of one weak_ler experiment's 500 shard folders took 71
-    minutes and a commit landed five minutes into it, so the combined
-    folder named a tree whose code no part of the fold read. Here git
-    answers one commit until the first folder is opened and another
-    after, and the manifest names the first.
-    """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    combined_dir = tmp_path / "combined"
-    _collect_one_shard(config_path, first_dir, "0/2", 1)
-    _collect_one_shard(config_path, second_dir, "1/2", 1)
-    reading = ["aaaaaaa"]
-    opened_folders = []
-    rows_of_a_folder = fold.row_stream
-
-    def moving_tree(*_):
-        return reading[0]
-
-    def commit_while_the_fold_reads(path):
-        opened_folders.append(path)
-        reading[0] = "bbbbbbb"
-        return rows_of_a_folder(path)
-
-    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
-    monkeypatch.setattr(run_folder, "_git_output", moving_tree)
-    monkeypatch.setattr(fold, "row_stream", commit_while_the_fold_reads)
-    run_folder._tree_reading.cache_clear()
-
-    _combined(first_dir, second_dir, combined_dir)
-
-    manifest = _manifest_of(combined_dir)
-    assert opened_folders
-    assert manifest["git"] == {"commit": "aaaaaaa", "dirty": False}
-
-
-def test_a_shard_with_no_work_unit_says_so_and_writes_no_rows(tmp_path, capsys):
-    """A Slurm array wider than the sweep's units is a shape, not a fault."""
+def test_two_pieces_that_hold_the_same_shot_are_refused(tmp_path, capsys):
+    """A piece copied in under another range would count its shots twice."""
     config_path = yaml_configs.write_config(tmp_path, {})
-    out_dir = tmp_path / "empty"
-    capsys.readouterr()
-    command.main(
-        ["collect", str(config_path), "--out", str(out_dir), "--shard", "1/2"]
-    )
-
-    printed = capsys.readouterr()
-    manifest_path = out_dir / "manifest.json"
-    sweep_path = out_dir / "sweep.csv"
-    assert manifest_path.is_file()
-    assert not sweep_path.exists()
-    assert "wrote no rows beyond its manifest" in printed.err
-
-
-def test_combine_skips_a_folder_that_ran_no_shot(tmp_path, capsys):
-    config_path = yaml_configs.write_config(tmp_path, {})
-    whole_dir = tmp_path / "whole"
-    empty_dir = tmp_path / "empty"
-    combined_dir = tmp_path / "combined"
-    command.main(
-        ["collect", str(config_path), "--out", str(whole_dir), "--shard", "0/2"]
-    )
-    command.main(
-        ["collect", str(config_path), "--out", str(empty_dir), "--shard", "1/2"]
-    )
-    capsys.readouterr()
-    command.main(
-        [
-            "combine",
-            str(whole_dir),
-            str(empty_dir),
-            "--out",
-            str(combined_dir),
-        ]
-    )
-
-    printed = capsys.readouterr()
-    assert "has no shots.csv, so combine skips it" in printed.err
-    whole = _rows_without_wall_clock(whole_dir, "sweep.csv")
-    combined = _rows_without_wall_clock(combined_dir, "sweep.csv")
-    assert combined == whole
-
-
-def test_every_shard_of_a_sweep_runs_a_share_of_its_points(tmp_path):
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    command.main(
-        ["collect", str(config_path), "--out", str(first_dir), "--shard", "0/2"]
-    )
-    command.main(
-        [
-            "collect",
-            str(config_path),
-            "--out",
-            str(second_dir),
-            "--shard",
-            "1/2",
-        ]
-    )
-    first_path = first_dir / "sweep.csv"
-    second_path = second_dir / "sweep.csv"
-    first_rows = _rows(first_path)
-    second_rows = _rows(second_path)
-    assert len(first_rows) == 2
-    assert len(second_rows) == 2
-
-
-def test_one_points_seeds_divide_across_two_shards(tmp_path):
-    """The unit, not the point, is what a shard selects.
-
-    This is the whole reason --shots-per-unit exists: a sweep of one
-    point can still fill a Slurm array. Its law is that shard i of n
-    runs the units whose position modulo n is i, so at one shot to a
-    unit the even seeds go to shard 0 of 2 and the odd seeds to shard 1.
-    """
-    one_point = {
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": [3],
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "shots": 4,
-            }
-        ]
-    }
-    config_path = yaml_configs.write_config(tmp_path, one_point)
-    first_dir = tmp_path / "shard0"
-    second_dir = tmp_path / "shard1"
-    _collect_every_shard(config_path, [first_dir, second_dir])
-    first_seeds = _seeds_of_every_shot(first_dir)
-    second_seeds = _seeds_of_every_shot(second_dir)
-    assert first_seeds == ["0", "2"]
-    assert second_seeds == ["1", "3"]
-
-
-def test_a_shard_outside_its_count_is_refused(tmp_path, capsys):
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     out_dir = tmp_path / "out"
-    with pytest.raises(SystemExit) as stopped:
-        command.main(
-            [
-                "collect",
-                str(config_path),
-                "--out",
-                str(out_dir),
-                "--shard",
-                "5/2",
-            ]
-        )
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert printed.err.startswith("decsim: --shard 5/2 is not a shard")
-    assert not out_dir.exists()
-
-
-@pytest.mark.parametrize("given", ["0", "-1"])
-def test_a_unit_size_below_one_is_refused(tmp_path, capsys, given):
-    """Zero steps `range` by nothing; -1 would run no unit at all."""
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    out_dir = tmp_path / "out"
-    with pytest.raises(SystemExit) as stopped:
-        command.main(
-            [
-                "collect",
-                str(config_path),
-                "--out",
-                str(out_dir),
-                "--shots-per-unit",
-                given,
-            ]
-        )
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert printed.err.startswith(
-        f"decsim: --shots-per-unit {given} is not a unit size"
-    )
-    assert not out_dir.exists()
-
-
-def test_combining_two_folders_that_hold_the_same_shot_is_refused(
-    tmp_path, capsys
-):
-    config_path = yaml_configs.write_config(tmp_path, {})
-    run_dir = tmp_path / "one"
-    combined_dir = tmp_path / "combined"
-    command.main(["collect", str(config_path), "--out", str(run_dir)])
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    pieces_dir = out_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    piece_dir = piece_path.parent
+    copied_dir = piece_dir.with_name("5-5")
+    shutil.copytree(piece_dir, copied_dir)
     capsys.readouterr()
+
     with pytest.raises(SystemExit) as stopped:
-        command.main(
-            [
-                "combine",
-                str(run_dir),
-                str(run_dir),
-                "--out",
-                str(combined_dir),
-            ]
-        )
+        command.main(["collect", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
+    lines = printed.err.splitlines()
     assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert "is in more than one of" in printed.err
+    assert "is in more than one of" in lines[-1]
 
 
 def test_run_refuses_a_yaml_that_is_not_there(tmp_path, capsys):
@@ -1778,16 +1279,6 @@ def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
     assert printed.err.startswith("decsim: decsim trace has no action")
-
-
-def test_a_refused_combine_leaves_no_folder(tmp_path):
-    """The out folder is made once the fold is accepted, not before."""
-    missing = tmp_path / "never_ran"
-    out_dir = tmp_path / "combined"
-    with pytest.raises(SystemExit) as exit_info:
-        command.main(["combine", str(missing), "--out", str(out_dir)])
-    assert exit_info.value.code == 1
-    assert not out_dir.exists()
 
 
 def test_a_build_refusal_under_run_is_one_line(tmp_path, capsys):

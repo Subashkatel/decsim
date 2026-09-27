@@ -127,7 +127,7 @@ ready to frame commit: median 15.772 us, p99 22.726 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/reference/sweep.csv
+every column: results/reference/combined/reference-e2023e1f/sweep.csv
 ```
 
 Two new words:
@@ -160,8 +160,27 @@ ls results/reference
 ```
 
 ```
+combined
+configurations.csv
+inputs
+pieces
+resolved
+```
+
+`--out` names the experiment folder. `pieces/` holds each point's shots
+in pieces, each saved whole the moment it ends, and running the command
+again into the same folder runs only the pieces it has not saved.
+`combined/` holds one run folder per configuration, named by the yaml
+and the first eight characters of a hash of its settings, folded from
+the pieces. Without `--out`, `collect` writes a new folder named with
+the UTC time the run started, so no two collects share one.
+
+```bash
+ls results/reference/combined/*
+```
+
+```
 config
-finished
 inputs
 latency_samples.csv
 links.csv
@@ -175,11 +194,6 @@ timeline.png
 trace
 window_samples.csv
 ```
-
-`--out` names the folder. A run writes `finished` into it last, and
-running the command again into a finished folder leaves it as it is.
-Without `--out`, `collect` writes a new folder named with the UTC time
-the run started, so no two collects share one.
 
 The folder is written under `results/`, which is output and is not
 tracked by git. `config/` holds a verbatim copy of the yaml files that
@@ -195,7 +209,7 @@ the facts.
 columns. The distance and the first counts:
 
 ```bash
-cut -d, -f3,6,8-11 results/reference/sweep.csv
+cut -d, -f3,6,8-11 results/reference/combined/*/sweep.csv
 ```
 
 ```
@@ -221,11 +235,11 @@ of them groups by a setting with no parsing.
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/reference --figure stage_breakdown
+decsim plot results/reference/combined/* --figure stage_breakdown
 ```
 
 ```
-results/reference/stage_breakdown.png
+results/reference/combined/reference-e2023e1f/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
@@ -251,7 +265,7 @@ For one round, decsim prints the path itself:
 
 ```bash
 decsim trace follow \
-  results/reference/trace/*_seed0.trace.json \
+  results/reference/combined/*/trace/*_seed0.trace.json \
   --round 1:1
 ```
 
@@ -306,7 +320,7 @@ The same command follows a window instead of a round:
 
 ```bash
 decsim trace follow \
-  results/reference/trace/*_seed0.trace.json \
+  results/reference/combined/*/trace/*_seed0.trace.json \
   --window 1:0
 ```
 

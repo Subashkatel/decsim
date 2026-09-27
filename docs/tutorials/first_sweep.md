@@ -77,11 +77,11 @@ decsim show configs/my_first_sweep.yaml
 decsim collect configs/my_first_sweep.yaml --processes 4 --out results/first_sweep
 ```
 
-`--processes` gives each worker one work unit at a time. A work unit is
-a block of one point's shots that one process runs from start to finish;
-step 5 shows how to size it. Shots inside a
-unit stay serial, which is what keeps a shot's result a function of its
-seed alone.
+`--processes` gives each worker one piece at a time. A piece is a block
+of one point's shots that one process runs from start to finish and
+saves whole the moment it ends; step 5 shows what that buys. Shots
+inside a piece stay serial, which is what keeps a shot's result a
+function of its seed alone.
 
 The summary, from a run of it. Its counts are yours too; its ticks are
 that host's, because this config names a decoder rather than pricing
@@ -147,7 +147,7 @@ fraction of the shots is a broken machine.
 ## Step 3. Read the error bars
 
 ```bash
-cut -d, -f3,6,8-11 results/first_sweep/sweep.csv
+cut -d, -f3,6,8-11 results/first_sweep/combined/*/sweep.csv
 ```
 
 ```
@@ -196,16 +196,19 @@ or quote the point as an upper bound.
 ## Step 4. Draw it
 
 decsim writes the numbers and leaves the figure to you, since only you
-know what it should show. `decsim.results.load` reads a run folder into
+know what it should show. `decsim.results.load` reads a run folder, the
+one `collect` folded under the experiment folder's `combined/`, into
 one row per point, its `sweep.csv` columns, one of them per swept path,
 beside every setting it ran with (`settings.` and the setting's path):
 
 ```python
+import glob
+
 import matplotlib.pyplot as plt
 
 import decsim.results as results
 
-folders = ["results/first_sweep"]
+folders = glob.glob("results/first_sweep/combined/*")
 rows = results.load(*folders)
 error_rate = "workload.arguments.physical_error_probability"
 kept = [row for row in rows if row[error_rate] == 0.003]
@@ -224,27 +227,24 @@ The error bars are the Wilson columns you just read. `save_figure`
 writes `ler.png` and, beside it, the script that drew it, the rows it
 drew and the folders they came from.
 
-## Step 5. Cut it into shards and put it back together
+## Step 5. Stop it and pick it up again
 
-A sweep that takes two minutes does not need cutting up. A sweep that
-takes 350 core hours does, and the mechanism is worth seeing on
-something small.
+A sweep that takes two minutes is never stopped halfway. A sweep that
+takes 350 core hours is, by a time limit or a node going down, and the
+mechanism is worth seeing on something small.
 
-```bash
-decsim collect configs/my_first_sweep.yaml --shard 0/2 --out results/shards/0 --shots-per-unit 100
-decsim collect configs/my_first_sweep.yaml --shard 1/2 --out results/shards/1 --shots-per-unit 100
-decsim combine results/shards/0 results/shards/1 --out results/combined
-```
-
-`--shots-per-unit 100` cuts each point's 400 shots into four work units.
-`--shard i/n` runs the units whose index modulo `n` is `i`, so the two
-commands between them run every unit exactly once. `combine` reads both
-folders' additive files, adds them, and recomputes the summary.
-
-The combined report's counts:
+`collect` saves each point's shots as pieces under
+`results/first_sweep/pieces/`, one folder per point and one per piece,
+named by its first and last seed. A piece holds a set number of QEC
+rounds, 20,000 unless the yaml's `collection` section says otherwise
+(`configs/reference.yaml`), and a piece's folder appears only once the
+piece is whole. Delete each point's first piece, as a killed job would
+leave them missing, and run the same command again:
 
 ```bash
-cut -d, -f3,6,8,9 results/combined/sweep.csv
+rm -r results/first_sweep/pieces/*/0-*
+decsim collect configs/my_first_sweep.yaml --processes 4 --out results/first_sweep
+cut -d, -f3,6,8,9 results/first_sweep/combined/*/sweep.csv
 ```
 
 ```
@@ -254,17 +254,19 @@ qpu.distance,shots,logical_failures,logical_error_rate
 7,400,8,0.02
 ```
 
-The same three counts as the single run. That is not luck: a shot's seed
-is derived from the run's seed and the shot's position, so shot 173 of
-distance 5 is the same shot whichever process runs it. Cutting a sweep
-into shards changes nothing about the result.
+The second `collect` ran only the pieces that were missing, then folded
+every piece again into the run folder. The counts are the single run's.
+That is not luck: a shot's seed is derived from the run's seed and the
+shot's position, so shot 173 of distance 5 is the same shot whichever
+process runs it and whenever. Stopping a sweep and picking it up
+changes nothing about the result.
 
 The tick columns do move a little between the two, because this run is
 charged its decoder's measured wall clock. See
 [Time](../explanation/time.md).
 
-[How to run a sweep on Slurm](../how-to/run_a_sweep_on_slurm.md) is the same mechanism as a cluster
-array job.
+[How to run a sweep on Slurm](../how-to/run_a_sweep_on_slurm.md) is the same mechanism on a
+cluster.
 
 ## What you learned
 
@@ -273,7 +275,8 @@ array job.
 - A logical error rate is an estimate, and the Wilson interval is how
   much to trust it.
 - Overlapping intervals mean the runs have not been shown to differ.
-- Shards add up exactly, because no summary is stored.
+- Pieces add up exactly, because no summary is stored, so a stopped
+  sweep picks up where it stopped.
 
 ## Read next
 

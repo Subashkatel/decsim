@@ -5,16 +5,13 @@
 Two run folders can be compared several ways, and which one you want
 depends on what the two runs are.
 
-## If they are shards of one sweep, add them
+## If they are pieces of one sweep, they are already added
 
-```bash
-decsim combine results/weak_ler/*
-```
-
-`combine` reads every folder's additive files, adds them, and recomputes
-`sweep.csv` and `links.csv` from the sum. Use this only when the runs
-are the same sweep cut into pieces. Two runs of different configurations
-must not be added: the result would be a single row that is neither.
+`decsim collect` folds every piece of a configuration into its run
+folder, `combined/<name>-<id8>/` under the experiment folder: it reads
+the pieces' additive files, adds them, and recomputes `sweep.csv` and
+`links.csv` from the sum. Two runs of different configurations are
+never added: the result would be a single row that is neither.
 
 ## If they are different configurations, read the rows
 
@@ -53,7 +50,7 @@ so when you report it. [Time](../explanation/time.md) says why.
 ## Let decsim say what differs
 
 ```bash
-decsim diff results/<first> results/<second>
+decsim diff results/<first>/combined/<name>-<id8> results/<second>/combined/<name>-<id8>
 ```
 
 `diff` matches the two folders' points by their metadata, the values
@@ -82,11 +79,15 @@ a column per result, one per swept path, and one per setting
 question needs; `save_figure` keeps what made it beside it:
 
 ```python
+import glob
+
 import matplotlib.pyplot as plt
 
 import decsim.results as results
 
-folders = ["results/first", "results/second"]
+first_folders = glob.glob("results/first/combined/*")
+second_folders = glob.glob("results/second/combined/*")
+folders = first_folders + second_folders
 rows = results.load(*folders)
 distance = "qpu.distance"
 figure, ax = plt.subplots()

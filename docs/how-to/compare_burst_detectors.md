@@ -36,13 +36,13 @@ A quiet shot takes about four minutes on one core. A burst shot takes
 ten to twenty-five, most of it strong decodes: every window a flag
 meets is decoded again by belief matching. So one burst file is several
 hours on one core. [How to run a sweep on Slurm](run_a_sweep_on_slurm.md)
-runs the files side by side and splits a file's shots with `--shard`;
-`decsim combine` folds the shards back into one folder.
+runs the files side by side, each a job that picks up where it stopped
+when submitted again.
 
 ## Read the results
 
-Each run folder's `sweep.csv` has two columns for this
-([the run folder](../reference/run_folder.md)):
+Each run folder's `sweep.csv`, under `results/<file>/combined/`, has two
+columns for this ([the run folder](../reference/run_folder.md)):
 
 - `flagged_share`: the share of shots on which the detector flagged a
   round at or after the burst's onset. On a quiet file every flag is a
@@ -59,6 +59,8 @@ rate per second is the quiet file's flagged share over one shot's
 time, the shot's rounds times its round period:
 
 ```python
+import glob
+
 import decsim.results as results
 
 detectors = [
@@ -68,8 +70,10 @@ detectors = [
     "masked_regional_cusum",
 ]
 for detector in detectors:
-    burst, = results.load(f"results/{detector}_burst")
-    quiet, = results.load(f"results/{detector}_quiet")
+    burst_folders = glob.glob(f"results/{detector}_burst/combined/*")
+    quiet_folders = glob.glob(f"results/{detector}_quiet/combined/*")
+    burst, = results.load(*burst_folders)
+    quiet, = results.load(*quiet_folders)
     rounds = quiet["settings.workload.row_settings.arguments.rounds_per_shot"]
     period = quiet["settings.qpu.round_period_microseconds"]
     shot_seconds = rounds * period * 1e-6

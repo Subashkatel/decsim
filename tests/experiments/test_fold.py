@@ -1,4 +1,4 @@
-"""The rules a fold of many run folders keeps (decsim/experiments/fold.py).
+"""The rules a fold of many pieces keeps (decsim/experiments/fold.py).
 
 Four of them, each pinned here against the thing it claims to equal:
 the merged order is the stable sort of the folders' rows, a streamed sum
@@ -15,12 +15,14 @@ import csv
 import math
 import pathlib
 import random
+import shutil
 import statistics
 
 import pytest
 
 import decsim.experiments.command as command
 import decsim.experiments.fold as fold
+import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
@@ -70,8 +72,14 @@ def _place_of(row):
     return int(row["place"])
 
 
-def _one_point_config(tmp_path, shots):
-    sweep = {
+# A shot of the one point below runs fifteen QEC rounds: the reference
+# workload's rounds_per_shot, which its resolved record reads back.
+ROUNDS_PER_SHOT = 15
+
+
+def _one_point_config(folder, shots, piece_shots):
+    card = {
+        "collection": {"piece_rounds": piece_shots * ROUNDS_PER_SHOT},
         "sweep": [
             {
                 "axes": {
@@ -81,35 +89,39 @@ def _one_point_config(tmp_path, shots):
                 },
                 "shots": shots,
             }
-        ]
+        ],
     }
-    return yaml_configs.write_config(tmp_path, sweep)
+    return yaml_configs.write_config(folder, card)
 
 
-def _shards_of_one_point(tmp_path, shots, shards):
-    """One point's shots collected into `shards` folders, one seed a unit."""
-    config_path = _one_point_config(tmp_path, shots)
-    run_dirs = []
-    for index in range(shards):
-        run_dir = tmp_path / f"shard{index}_of_{shots}"
-        run_dirs.append(str(run_dir))
-        command.main(
-            [
-                "collect",
-                str(config_path),
-                "--out",
-                str(run_dir),
-                "--shots-per-unit",
-                "1",
-                "--shard",
-                f"{index}/{shards}",
-            ]
-        )
-    return run_dirs
+def _pieces_of_one_point(tmp_path, shots, piece_shots):
+    """One point's shots collected in pieces; the experiment folder."""
+    folder = tmp_path / f"of_{shots}"
+    folder.mkdir()
+    config_path = _one_point_config(folder, shots, piece_shots)
+    experiment_dir = folder / "experiment"
+    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    return experiment_dir
 
 
-def _peak_rows_alive(monkeypatch, run_dirs, out_dir):
-    """The most rows alive at once while those folders are folded."""
+def _piece_folders(experiment_dir) -> list:
+    """The experiment's piece folders, the one point's, in seed order."""
+    point_dirs = experiment_dir.glob("pieces/*")
+    point_ids = [point_dir.name for point_dir in point_dirs]
+    return pieces.folders_of(experiment_dir, point_ids)
+
+
+def _folded(experiment_dir, folders, out_dir) -> list:
+    """The pieces folded into out_dir as the collect that saved them does."""
+    point_ids = [folders[0].parent.name]
+    seeds_by_point = pieces.seed_ranges_of(folders)
+    return report.fold_pieces(
+        experiment_dir, folders, point_ids, seeds_by_point, out_dir
+    )
+
+
+def _peak_rows_alive(monkeypatch, experiment_dir, out_dir):
+    """The most rows alive at once while those pieces are folded."""
     alive = [0]
     peak = []
     reading = fold.row_stream
@@ -120,8 +132,9 @@ def _peak_rows_alive(monkeypatch, run_dirs, out_dir):
             peak.append(alive[0])
             yield watched
 
+    folders = _piece_folders(experiment_dir)
     monkeypatch.setattr(fold, "row_stream", watched_stream)
-    report.combine(run_dirs, out_dir)
+    _folded(experiment_dir, folders, out_dir)
     return max(peak)
 
 
@@ -203,7 +216,7 @@ def test_an_exact_sum_equals_math_fsum_only_on_finite_values():
 
 
 def test_an_exact_sum_is_the_same_whichever_order_the_values_arrive_in():
-    """A fold reads the shards in whatever order it was given them.
+    """A fold reads the pieces in whatever order it was given them.
 
     The values are chosen so that the thing this replaces does not have
     the property: a plain running float sum of one big value and ten
@@ -318,7 +331,7 @@ def test_merged_rows_are_the_stable_sort_of_the_files_rows(tmp_path):
 
 
 def test_a_file_with_no_rows_of_this_kind_is_skipped(tmp_path):
-    """A shard whose index selected no work unit wrote no such file."""
+    """A piece that holds no row of this kind wrote no such file."""
     path = tmp_path / "first.csv"
     only_row = _row(1, "a")
     _write_rows(path, [only_row])
@@ -365,23 +378,22 @@ def test_a_fold_holds_one_row_of_each_folder_however_many_shots_they_hold(
 ):
     """The memory rule, which is why the fold streams at all.
 
-    Three folders are folded twice: once holding one shot each and once
+    Three pieces are folded twice: once holding one shot each and once
     holding three. The most rows alive at any moment is the same both
-    times and is the folder count and the row being folded, not a
-    folder's rows, so an experiment's shard folders cost what a smoke
-    test's do.
+    times and is the piece count and the row being folded, not a
+    piece's rows, so an experiment's pieces cost what a smoke test's do.
     """
-    shards = 3
-    one_shot_dirs = _shards_of_one_point(tmp_path, 3, shards)
-    three_shot_dirs = _shards_of_one_point(tmp_path, 9, shards)
-    one_shot_out = tmp_path / "combined_of_3"
-    three_shot_out = tmp_path / "combined_of_9"
-    one_shot_peak = _peak_rows_alive(monkeypatch, one_shot_dirs, one_shot_out)
+    piece_count = 3
+    one_shot_dir = _pieces_of_one_point(tmp_path, 3, 1)
+    three_shot_dir = _pieces_of_one_point(tmp_path, 9, 3)
+    one_shot_out = tmp_path / "folded_of_3"
+    three_shot_out = tmp_path / "folded_of_9"
+    one_shot_peak = _peak_rows_alive(monkeypatch, one_shot_dir, one_shot_out)
     three_shot_peak = _peak_rows_alive(
-        monkeypatch, three_shot_dirs, three_shot_out
+        monkeypatch, three_shot_dir, three_shot_out
     )
     assert one_shot_peak == three_shot_peak
-    assert three_shot_peak <= shards + 1
+    assert three_shot_peak <= piece_count + 1
 
 
 def _rows_of(path):
@@ -408,14 +420,14 @@ def _without_a_point(run_dir, name):
     _write_rows(samples_path, kept)
 
 
-def _each_without_a_point(run_dirs, name) -> None:
-    for run_dir in run_dirs:
-        _without_a_point(run_dir, name)
+def _each_without_a_point(folders, name) -> None:
+    for folder in folders:
+        _without_a_point(folder, name)
 
 
-def _each_with_a_renamed_point(run_dirs, name, renamed) -> None:
-    for run_dir in run_dirs:
-        _with_a_renamed_point(run_dir, name, renamed)
+def _each_with_a_renamed_point(folders, name, renamed) -> None:
+    for folder in folders:
+        _with_a_renamed_point(folder, name, renamed)
 
 
 def _without_columns(row: dict, columns: tuple) -> dict:
@@ -450,16 +462,17 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     The 500 shard folders of one weak_ler experiment hold sixteen
     latency points and this tree measures twenty-two, so a summary that
     asked for its own columns could not read those folders at all. Here
-    two folders lose one point's columns, as an older tree's folders
-    lack them, and the fold reports the points they hold and every other
-    column exactly as the fold of the same folders whole does.
+    two pieces lose one point's columns, as an older tree's pieces lack
+    them, and the fold reports the points they hold and every other
+    column exactly as the fold of the same pieces whole does.
     """
-    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    folders = _piece_folders(experiment_dir)
     whole_dir = tmp_path / "whole"
     older_dir = tmp_path / "older"
-    report.combine(run_dirs, whole_dir)
-    _each_without_a_point(run_dirs, "confidence")
-    report.combine(run_dirs, older_dir)
+    _folded(experiment_dir, folders, whole_dir)
+    _each_without_a_point(folders, "confidence")
+    _folded(experiment_dir, folders, older_dir)
 
     whole_path = whole_dir / "sweep.csv"
     older_path = older_dir / "sweep.csv"
@@ -477,19 +490,24 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
 
 
 def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
-    """The terminal keeps the rule the columns keep, or combine dies.
+    """The terminal keeps the rule the columns keep, or the fold dies.
 
-    `decsim combine` writes the folder and then prints it, so a
-    terminal line that asks for a point the rows do not hold raises
-    KeyError after the folder is on disk, and command.main catches only
-    a refusal. Here two folders lack service, as an older tree's
-    folders do, and the summary prints its other lines and says nothing
-    about service.
+    A fold writes the folder and then prints it, so a terminal line
+    that asks for a point the rows do not hold raises KeyError after
+    the folder is on disk, and command.main catches only a refusal.
+    Here two pieces lack service, as an older tree's pieces do, and the
+    summary prints its other lines and says nothing about service. The
+    terminal names the points its folder's manifest lists, and the
+    collect's own run folder has that manifest.
     """
-    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
-    _each_without_a_point(run_dirs, "service")
-    out_dir = tmp_path / "combined"
-    rows = report.combine(run_dirs, out_dir)
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    folders = _piece_folders(experiment_dir)
+    _each_without_a_point(folders, "service")
+    out_dir = tmp_path / "folded"
+    rows = _folded(experiment_dir, folders, out_dir)
+    run_dir = yaml_configs.run_folder_of(experiment_dir)
+    manifest_path = run_dir / "manifest.json"
+    shutil.copy(manifest_path, out_dir)
 
     assert "service_mean_us" not in rows[0]
     lines = report.terminal_lines(rows, out_dir)
@@ -509,15 +527,16 @@ def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
     already written and a half folder left behind, so it is refused at
     the boundary, by name.
     """
-    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
-    _each_with_a_renamed_point(run_dirs, "service", "park")
-    out_dir = tmp_path / "combined"
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    folders = _piece_folders(experiment_dir)
+    _each_with_a_renamed_point(folders, "service", "park")
+    out_dir = tmp_path / "folded"
     with pytest.raises(refusal.RefusalError) as refused:
-        report.combine(run_dirs, out_dir)
+        _folded(experiment_dir, folders, out_dir)
     message = str(refused.value)
     assert "'park'" in message
     assert "this tree does not measure" in message
-    assert run_dirs[0] in message
+    assert str(folders[0]) in message
     assert not out_dir.exists()
 
 
@@ -530,20 +549,21 @@ def test_folders_that_hold_different_columns_are_refused(tmp_path):
     given, because the folder the walk reaches second is not always the
     one that lacks anything.
     """
-    run_dirs = _shards_of_one_point(tmp_path, 4, 2)
-    _without_a_point(run_dirs[0], "confidence")
-    lacking = run_dirs[0]
-    out_dir = tmp_path / "combined"
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    folders = _piece_folders(experiment_dir)
+    _without_a_point(folders[0], "confidence")
+    lacking = folders[0]
+    out_dir = tmp_path / "folded"
     with pytest.raises(refusal.RefusalError) as refused:
-        report.combine(run_dirs, out_dir)
+        _folded(experiment_dir, folders, out_dir)
     said = str(refused.value)
     assert said.startswith(f"{lacking} does not hold the columns")
     assert "confidence_mean_us" in said
     assert not out_dir.exists()
 
-    backwards = list(reversed(run_dirs))
+    backwards = list(reversed(folders))
     with pytest.raises(refusal.RefusalError) as refused_backwards:
-        report.combine(backwards, out_dir)
+        _folded(experiment_dir, backwards, out_dir)
     said_backwards = str(refused_backwards.value)
     assert said_backwards.startswith(f"{lacking} does not hold the columns")
     assert not out_dir.exists()

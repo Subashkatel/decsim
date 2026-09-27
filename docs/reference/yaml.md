@@ -122,6 +122,20 @@ resolves to (`decsim/collect.py`, `Task.strong_id`); the run folder
 names its files by the id, and each csv row carries the id and then one
 column per swept path ([The run folder](run_folder.md)).
 
+## The collection
+
+```yaml
+collection:
+  piece_rounds: 20000
+```
+
+How a point's shots are cut, sinter's `CollectionOptions` as yaml. A
+point's seeds run in pieces of `piece_rounds` QEC rounds, each saved
+whole the moment it ends, so a killed collect run again runs only the
+pieces it lacks (`decsim/experiments/collection.py`). The section goes
+at the top of a file or in a sweep block, whose keys override the top's
+one by one, and no key of it enters a point's id.
+
 ## Seeing what a file resolves to
 
 ```bash

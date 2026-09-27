@@ -33,17 +33,15 @@ escalated window builds a strong window model with its neighbour's
 committed faults excluded (window_planner.py
 strong_model_for_operation).
 
-Arrays: one sbatch line per experiment, distance and slice of at most
-150 tasks; one work unit per task, sized to about two and a half hours
-so a task fits its 04:00:00 limit with room for a slow shot and can
-backfill, and never more than 8,000 shots, since a run keeps every
-shot's samples until its csv is written; OFFSET carries the shard index
-from one line to the next and SHARDS is the distance's whole unit
-count, and every distance has its own run folder because its shard
-indices start at zero, so a task's folder is
-results/experiments_2026_09/<experiment>/d<d>/<shard>.
+Jobs: one `decsim collect` per experiment and distance, into
+results/experiments_2026_09/<experiment>/d<d>. The table's shots per
+unit is the piece size, about two and a half hours so a piece fits a
+04:00:00 limit with room for a slow shot, and never more than 8,000
+shots, since a piece keeps its shots' samples until its files are
+written; `collection.piece_rounds` is that count times a shot's rounds.
+Its tasks column counts the pieces.
 
-Memory per task: a base by distance (d 3 to 7 4G, d 9 6G, d 11 8G,
+Memory per piece: a base by distance (d 3 to 7 4G, d 9 6G, d 11 8G,
 d 13 12G, d 15 16G) plus what the unit's shots accumulate, 0.012 MB a
 shot a unit of distance (0.06 MB a shot at d 5 for pymatching, union
 find and BP-OSD, twice that for Relay-BP), with a margin of one half.
@@ -170,23 +168,17 @@ All sixteen: 272,096 core-hours, 110,040 tasks, 801 sbatch lines.
 
 ## The submit lines
 
-Every line has this shape, from the decsim checkout, with SHARDS the
-distance's unit count from the table, OFFSET stepping by 150 and the
-array running to the smaller of 149 and the remaining units:
+Every line has this shape, from the decsim checkout:
 
 ```bash
-DECSIM_PYTHON=<interpreter> RUN=results/experiments_2026_09/<experiment>/d<d> SHARDS=<tasks> OFFSET=<o> sbatch -J <experiment>_d<d> -a 0-<n> --time=04:00:00 --mem=<memory from the table> -o results/experiments_2026_09/<experiment>/logs/%x_%A_%a.out slurm/experiment_run.sh configs/experiments_2026_09/<experiment>_d<d>.yaml --shots-per-unit <shots per unit>
+sbatch -J <experiment>_d<d> -c <cores> --time=04:00:00 --mem=<memory from the table times cores> -o results/experiments_2026_09/<experiment>/logs/%x_%j.out --wrap "decsim collect configs/experiments_2026_09/<experiment>_d<d>.yaml --processes <cores> --out $PWD/results/experiments_2026_09/<experiment>/d<d>"
 ```
 
-DECSIM_PYTHON names the interpreter when the checkout has no venv of
-its own (slurm/experiment_run.sh). The library the union find rows load
-is built once on the host with tools/build_union_find.sh before the
-first line is submitted.
+The library the union find rows load is built once on the host with
+tools/build_union_find.sh before the first line is submitted.
 
-## After an array finishes
+## After a job ends
 
-```bash
-decsim combine results/experiments_2026_09/<experiment>/*/*        # all distances of one experiment into one report
-```
-
-A task that died is rerun by resubmitting its shard index alone (`-a <i>` with the same SHARDS and OFFSET); its folder is rewritten and combine reads whatever folders it is handed.
+A job that died is submitted again with the same line: it skips every
+piece already saved and runs the rest. A distance's run folder is
+results/experiments_2026_09/<experiment>/d<d>/combined/<name>-<id8>/.

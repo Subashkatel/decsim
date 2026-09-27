@@ -342,18 +342,20 @@ docstring.
 
 - `decsim/experiments/__init__.py`: The experiments layer: the yaml experiment, the sweep, the rows and figures.
 - `decsim/experiments/collect_command.py`: `decsim collect`: every shot of every sweep point of one yaml.
+- `decsim/experiments/collection.py`: The collection section: how a sweep point's shots are cut and stopped.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
 - `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
 - `decsim/experiments/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
 - `decsim/experiments/failure_statistics.py`: Estimates, exact intervals and paired tests of logical failure rates.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
+- `decsim/experiments/pieces.py`: A piece: seeds [first, first + count) of one sweep point, kept as one folder.
 - `decsim/experiments/plots.py`: The figures that read decsim's own records, not a sweep's numbers.
 - `decsim/experiments/refusal.py`: The one refusal decsim.experiments raises when it will not do what was asked.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
 - `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
 - `decsim/experiments/run_command.py`: `decsim run`: one seeded shot of one yaml, narrated.
-- `decsim/experiments/run_folder.py`: The run folder: where a run's results, config and identity land.
+- `decsim/experiments/run_folder.py`: The experiment folder and its run folders: results, config, identity.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 

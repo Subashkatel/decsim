@@ -21,6 +21,7 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
@@ -33,6 +34,8 @@ _REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 CONFIGS_DIR = _REPOSITORY_ROOT / "configs"
 REFERENCE_FILE = CONFIGS_DIR / "reference.yaml"
 SWEEP_BLOCK_KEYS = ("axes", "shots")
+# A block may also carry its own collection keys, over the file's.
+OPTIONAL_SWEEP_BLOCK_KEYS = ("collection",)
 # A value that is one whole reference to another setting, `${a.b}`:
 # OmegaConf's node interpolation, whose value "will be the value of that
 # node" (OmegaConf 2.3, "Variable interpolation"), kept to a whole value
@@ -48,11 +51,14 @@ class SweepBlock:
     is every combination of its axes, in the order they are written, as
     Hydra's multi-run makes one job per combination of `key=v1,v2`
     overrides, each override a config node's dotted path (hydra.cc,
-    "Multi-run"). A sweep's blocks are a union.
+    "Multi-run"). A sweep's blocks are a union. collection is how the
+    block's points are collected: the file's section, the block's keys
+    over it.
     """
 
     axes: Mapping  # yaml path -> tuple of values
     shots: int
+    collection: collection_module.CollectionSettings
 
     def points(self) -> list:
         """Its cartesian product, one {yaml path: value} per point."""
@@ -84,11 +90,18 @@ class ExperimentConfig:
     def tasks(self) -> list:
         """One task per sweep point, blocks in order, each block a product."""
         tasks = []
+        for task, _collection in self.point_tasks():
+            tasks.append(task)
+        return tasks
+
+    def point_tasks(self) -> list:
+        """Each point's task with its block's collection, blocks in order."""
+        pairs = []
         for block in self.sweep:
             for values in block.points():
                 task = self.point_task(values, block.shots)
-                tasks.append(task)
-        return tasks
+                pairs.append((task, block.collection))
+        return pairs
 
     def point_task(self, values: Mapping, shots: int) -> collect.Task:
         """The task of one sweep point: its settings, shots and metadata.
@@ -230,7 +243,8 @@ def load_experiment(path) -> ExperimentConfig:
             "(configs/reference.yaml)"
         )
     sweep_section = sections.pop("sweep")
-    sweep = _sweep_blocks(sweep_section)
+    top_collection = sections.pop("collection", None)
+    sweep = _sweep_blocks(sweep_section, top_collection)
     config = ExperimentConfig(
         name=path.stem,
         sections=sections,
@@ -437,22 +451,21 @@ def _yaml_sections(path: pathlib.Path) -> tuple:
     return base_sections, base_folders, files
 
 
-def _sweep_blocks(sweep_section: list) -> tuple:
+def _sweep_blocks(sweep_section: list, top_collection) -> tuple:
     """One SweepBlock per block of the yaml's sweep list, in order."""
     blocks = []
     for index, block in enumerate(sweep_section, start=1):
-        sweep_block = _sweep_block(block, index)
+        sweep_block = _sweep_block(block, index, top_collection)
         blocks.append(sweep_block)
     return tuple(blocks)
 
 
-def _sweep_block(block: dict, index: int) -> SweepBlock:
-    """One block: its axes, each a yaml path and a list of values, and shots."""
-    if not isinstance(block, Mapping) or set(block) != set(SWEEP_BLOCK_KEYS):
-        raise refusal.RefusalError(
-            f"sweep block {index} is {block!r}; a block is axes, a mapping "
-            "of yaml paths to the values the sweep sets there, and shots"
-        )
+def _sweep_block(block: dict, index: int, top_collection) -> SweepBlock:
+    """One block: its axes, each a yaml path and a list of values, and shots.
+
+    A block's own collection keys are read over the file's section.
+    """
+    _check_block_keys(block, index)
     axes = block["axes"]
     _check_axes(axes, index)
     shots = block["shots"]
@@ -460,7 +473,32 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
     values = {}
     for path, axis_values in axes.items():
         values[path] = tuple(axis_values)
-    return SweepBlock(axes=values, shots=shots)
+    block_collection = block.get("collection")
+    where = f"sweep block {index}"
+    collection = collection_module.CollectionSettings.from_yaml(
+        top_collection, block_collection, where
+    )
+    return SweepBlock(axes=values, shots=shots, collection=collection)
+
+
+def _check_block_keys(block, index: int) -> None:
+    """A block is axes and shots, and may carry its own collection keys."""
+    if not isinstance(block, Mapping):
+        _refuse_the_block(block, index)
+    keys = set(block)
+    required = set(SWEEP_BLOCK_KEYS)
+    allowed = required | set(OPTIONAL_SWEEP_BLOCK_KEYS)
+    if not required <= keys <= allowed:
+        _refuse_the_block(block, index)
+
+
+def _refuse_the_block(block, index: int) -> None:
+    """What a sweep block is, in the sentence the user reads."""
+    raise refusal.RefusalError(
+        f"sweep block {index} is {block!r}; a block is axes, a mapping "
+        "of yaml paths to the values the sweep sets there, and shots, "
+        "and may carry collection keys of its own"
+    )
 
 
 def _check_axes(axes, index: int) -> None:

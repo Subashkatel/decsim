@@ -13,17 +13,8 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | Argument | Default | What it is |
 | --- | --- | --- |
 | `config` | required | the experiment yaml to sweep |
-| `--out` | None | the run folder to write |
+| `--out` | None | the experiment folder to write |
 | `--processes` | 1 | worker processes, one task each (shots stay serial) |
-| `--shard` | None | i/n: run the work units whose index modulo n is i |
-| `--shots-per-unit` | None | split a point's seeds into work units of this many |
-
-## `decsim combine`
-
-| Argument | Default | What it is |
-| --- | --- | --- |
-| `run_dirs` | required | the folders to fold |
-| `--out` | None | the folder the combined rows go in |
 
 ## `decsim diff`
 

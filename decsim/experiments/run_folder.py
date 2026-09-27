@@ -1,10 +1,13 @@
-"""The run folder: where a run's results, config and identity land.
+"""The experiment folder and its run folders: results, config, identity.
 
-results/<utc stamp>-<name>/, or the folder --out names, holds the config
-chain, the code state as a patch, a manifest of the commit, container,
-host and packages, each sweep point's values and maker (resolved/) and
-workload (inputs/), and the finished flag last. gem5
-writes m5out/ the same way, out of the code tree and never overwritten
+results/<utc stamp>-<name>/, or the folder --out names, is an
+experiment folder: every piece of every point (pieces/), each point's
+values and maker (resolved/) and workload (inputs/), the configurations
+it ran (configurations.csv), and one run folder per configuration,
+combined/<name>-<id8>/. A run folder holds the config chain, the code
+state as a patch, a manifest of the commit, container, host and
+packages, and the rows folded from the pieces. gem5 writes m5out/ the
+same way, out of the code tree and never overwritten
 (src/python/m5/main.py --outdir).
 """
 
@@ -33,12 +36,11 @@ RESULTS_DIR = pathlib.Path("results")
 RESOLVED_FOLDER = "resolved"
 INPUTS_FOLDER = "inputs"
 HASHES_FILE = "hashes.json"
-# Written last, once a run's rows, report and manifest are all in place;
-# a folder without it is a run that stopped or is still running.
-FINISHED_FILE = "finished"
+COMBINED_FOLDER = "combined"
+CONFIGURATIONS_FILE = "configurations.csv"
 # What the launcher saw of the tree it was about to run, for a process
-# whose interpreter has no git of its own (slurm/slurm_run.sh exports
-# it): "1" dirty, "0" clean, unset means nobody looked.
+# whose interpreter has no git of its own (a job script exports it):
+# "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
 
 
@@ -47,26 +49,14 @@ def run_dir_for(config, out_dir=None) -> pathlib.Path:
 
     gem5's --outdir names the folder and makes it (src/python/m5/main.py:
     102); with no --outdir it writes m5out/. A named folder is reused as
-    the caller asked, so a Slurm array can point every shard at a folder
-    of its own.
+    the caller asked, which is how a collect run again resumes into the
+    pieces it saved.
     """
     if out_dir is None:
         return new_run_dir(config)
     run_dir = pathlib.Path(out_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
-
-
-def combined_run_dir(out_dir=None) -> pathlib.Path:
-    """Where `decsim combine` writes: the folder asked for, or a fresh one.
-
-    Only the path: the report makes the folder once the fold is accepted,
-    so a refused combine leaves nothing behind.
-    """
-    if out_dir is not None:
-        return pathlib.Path(out_dir)
-    stamp = _utc_stamp()
-    return RESULTS_DIR / f"{stamp}-combined"
 
 
 def new_run_dir(config) -> pathlib.Path:
@@ -92,9 +82,6 @@ def start_run(
     config: Optional[experiment.ExperimentConfig],
     run_dir: pathlib.Path,
     point_ids: list,
-    *,
-    shard: Optional[tuple] = None,
-    shots_per_unit: Optional[int] = None,
 ) -> str:
     """The code state and the manifest, before the first shot; the time.
 
@@ -103,8 +90,7 @@ def start_run(
     """
     snapshot_code_state(config, run_dir)
     started_utc = utc_now()
-    how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
-    write_manifest(config, run_dir, point_ids, started_utc, **how_it_ran)
+    write_manifest(config, run_dir, point_ids, started_utc)
     return started_utc
 
 
@@ -113,17 +99,75 @@ def finish_run(
     run_dir: pathlib.Path,
     point_ids: list,
     started_utc: str,
-    *,
-    shard: Optional[tuple] = None,
-    shots_per_unit: Optional[int] = None,
 ) -> None:
-    """The manifest again with the time the run ended, then the flag."""
+    """The manifest again, with the time the run ended."""
     finished_utc = utc_now()
-    how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
-    write_manifest(
-        config, run_dir, point_ids, started_utc, finished_utc, **how_it_ran
-    )
-    mark_finished(run_dir)
+    write_manifest(config, run_dir, point_ids, started_utc, finished_utc)
+
+
+def configuration_id(config: experiment.ExperimentConfig) -> str:
+    """sha256 of the configuration's sections as json.
+
+    The sweep and the collection are not sections (load_experiment pops
+    them), so collecting more points or more shots is the same
+    configuration. Two yaml files that resolve to the same sections are
+    one configuration, whatever their names, as a point is named by what
+    it resolves to (collect.Task.strong_id).
+    """
+    value = collect.json_value(config.sections)
+    text = json.dumps(value, sort_keys=True)
+    encoded = text.encode("utf8")
+    digest = hashlib.sha256(encoded)
+    return digest.hexdigest()
+
+
+def combined_folder(
+    experiment_dir: pathlib.Path, config: experiment.ExperimentConfig
+) -> pathlib.Path:
+    """The run folder of one configuration: combined/<name>-<id8>/."""
+    identity = configuration_id(config)
+    name = f"{config.name}-{identity[:8]}"
+    return experiment_dir / COMBINED_FOLDER / name
+
+
+def record_configuration(
+    experiment_dir: pathlib.Path, config: experiment.ExperimentConfig
+) -> None:
+    """The configuration's line in configurations.csv, once.
+
+    A line is its id, its name and its config chain, nearest file first,
+    so a status over the experiment finds every configuration it ran.
+    """
+    path = experiment_dir / CONFIGURATIONS_FILE
+    lines = []
+    if path.is_file():
+        text = path.read_text()
+        lines = text.splitlines()
+    identity = configuration_id(config)
+    chain = []
+    for config_file in config.config_files:
+        chain.append(str(config_file))
+    chain_text = ";".join(chain)
+    line = f"{identity},{config.name},{chain_text}"
+    if not lines:
+        lines.append("configuration_id,name,config_chain")
+    if line in lines:
+        return
+    lines.append(line)
+    text = "\n".join(lines)
+    ended = text + "\n"
+    _replace_file(path, ended)
+
+
+def piece_identity() -> dict:
+    """What a piece records of the process that ran it: code, host, job."""
+    commit, is_dirty = _tree_reading()
+    return {
+        "commit": commit,
+        "dirty": is_dirty,
+        "host": platform.node(),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+    }
 
 
 def snapshot_code_state(
@@ -156,30 +200,12 @@ def snapshot_code_state(
         patch_path.write_text(patch_lines)
 
 
-def read_the_tree() -> None:
-    """Take this process's reading of the tree, before its work starts.
-
-    A manifest carries the reading the process took at its first ask,
-    and the ask belongs before the work rather than after
-    (_tree_reading). A run needs no call here: it writes a manifest
-    before its first shot, so its own first ask is at its start.
-    `decsim combine` writes one manifest and writes it at the end, so
-    it asks here instead, beside the time it started and before the
-    first folder is opened, and a fold long enough for the tree to move
-    still names the commit its code came from.
-    """
-    _tree_reading()
-
-
 def write_manifest(
     config: Optional[experiment.ExperimentConfig],
     run_dir: pathlib.Path,
     point_ids: list,
     started_utc: str,
     finished_utc: Optional[str] = None,
-    *,
-    shard: Optional[tuple] = None,
-    shots_per_unit: Optional[int] = None,
 ) -> None:
     """Write the run's identity: enough to interpret or reproduce it.
 
@@ -188,14 +214,7 @@ def write_manifest(
     is None for a run no yaml describes (tools/deltakit_example.py),
     whose every value is in resolved/. point_ids are the sweep's points
     in task order, each the name of its resolved/ record, which is the
-    order `decsim combine` writes a fold's rows in.
-
-    `shard` and `shots_per_unit` are facts of how this run ran, the way
-    the host and the slurm job id are: which share of the sweep's work
-    units fell to it, and how its points were cut into units. Nothing
-    reads them to fold the rows, since `decsim combine` puts the folded
-    rows in the order the recorded sweep gives; they say what a folder
-    holds when a Slurm array leaves a hundred of them behind.
+    order a fold writes the rows in.
     """
     experiment_config = None
     config_files = []
@@ -207,40 +226,6 @@ def write_manifest(
         "config_files": config_files,
         "experiment_config": experiment_config,
         "points": point_ids,
-        "shard": _shard_text(shard),
-        "shots_per_unit": shots_per_unit,
-    }
-    how_it_ran = _how_it_ran()
-    manifest.update(how_it_ran)
-    manifest["started_utc"] = started_utc
-    manifest["finished_utc"] = finished_utc
-    _write_the_manifest(manifest, run_dir)
-
-
-def write_combined_manifest(
-    experiment_config: dict,
-    point_ids: list,
-    run_dir: pathlib.Path,
-    folded: list,
-    started_utc: str,
-    finished_utc: Optional[str] = None,
-) -> None:
-    """A combined folder's identity: the sweep it folds, and what it folded.
-
-    A combined folder is a run folder, so it carries a manifest like any
-    other and `decsim combine` can fold it again with a shard that
-    landed later. The experiment config and the point ids are the ones
-    every folded folder recorded, and the ids are what combine reads the
-    sweep order off; the folded folders' names are a fact of how this
-    folder came about, and like a run's shard they order nothing.
-    """
-    folded_names = []
-    for run_folder_path in folded:
-        folded_names.append(str(run_folder_path))
-    manifest = {
-        "experiment_config": experiment_config,
-        "points": point_ids,
-        "folded": folded_names,
     }
     how_it_ran = _how_it_ran()
     manifest.update(how_it_ran)
@@ -279,6 +264,7 @@ def record_point(
         "settings": collect.json_value(settings),
         "built": _built_values(shot_settings),
     }
+    resolved["rounds_per_shot"] = _rounds_per_shot(resolved["built"])
     resolved_dir = run_dir / RESOLVED_FOLDER
     resolved_dir.mkdir(parents=True, exist_ok=True)
     resolved_path = resolved_dir / f"{point_id}.json"
@@ -288,20 +274,6 @@ def record_point(
         inputs_dir = run_dir / INPUTS_FOLDER / point_id
         _write_inputs(inputs_dir, record)
     return point_id
-
-
-def mark_finished(run_dir: pathlib.Path) -> None:
-    """The finished flag, the last thing a run writes: the time it ended."""
-    finished_utc = utc_now()
-    finished_line = finished_utc + "\n"
-    finished_path = run_dir / FINISHED_FILE
-    finished_path.write_text(finished_line)
-
-
-def is_finished(run_dir: pathlib.Path) -> bool:
-    """Whether a run into this folder ended, which a rerun then skips."""
-    finished_path = pathlib.Path(run_dir) / FINISHED_FILE
-    return finished_path.exists()
 
 
 def resolved_by_point(run_dir: pathlib.Path) -> dict:
@@ -359,37 +331,37 @@ def resolved_values(record: dict, names: tuple) -> dict:
 
 
 def seed_ranges(ranges: list) -> list:
-    """Seed ranges as [first, how many], in order, touching ones joined.
-
-    A combine into a folder that already holds the fold sees the same
-    seeds again, so ranges that overlap are joined too.
-    """
+    """Seed ranges as [first, how many], in order, touching ones joined."""
     joined = []
     for first, count in sorted(ranges):
-        if joined and sum(joined[-1]) >= first:
-            last = joined[-1]
-            last_end = sum(last)
-            new_end = first + count
-            end = max(last_end, new_end)
-            last[1] = end - last[0]
+        if joined and sum(joined[-1]) == first:
+            joined[-1][1] += count
             continue
         joined.append([first, count])
     return joined
 
 
-def copy_point_records(run_dirs: list, out_dir: pathlib.Path) -> None:
-    """The folded folders' resolved/ and inputs/, in one.
+def copy_points_of(
+    experiment_dir: pathlib.Path,
+    point_ids: list,
+    seeds_by_point: dict,
+    out_dir: pathlib.Path,
+) -> None:
+    """These points' resolved/ records and inputs/ into a run folder.
 
-    A point's files are named by its content, so the same point in two
-    shards is the same file, and the union is every point's. Its record
-    holds the seeds every folder ran of it.
+    Each record's seeds are the ranges its pieces hold, so the run
+    folder says which shots its rows are.
     """
-    for run_dir_name in run_dirs:
-        run_dir = pathlib.Path(run_dir_name)
-        _fold_resolved(run_dir, out_dir)
-        source = run_dir / INPUTS_FOLDER
-        target = out_dir / INPUTS_FOLDER
-        shutil.copytree(source, target, dirs_exist_ok=True)
+    target_dir = out_dir / RESOLVED_FOLDER
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for point_id in point_ids:
+        source = experiment_dir / RESOLVED_FOLDER / f"{point_id}.json"
+        record_text = source.read_text()
+        record = json.loads(record_text)
+        record["seeds"] = seeds_by_point.get(point_id, [])
+        target = target_dir / source.name
+        write_json(target, record)
+        _copy_the_inputs(experiment_dir, point_id, out_dir)
 
 
 def write_json(path: pathlib.Path, value) -> None:
@@ -419,21 +391,15 @@ def _copy_the_config_chain(config_files: tuple, run_dir: pathlib.Path) -> None:
         shutil.copy2(source, target)
 
 
-def _fold_resolved(run_dir: pathlib.Path, out_dir: pathlib.Path) -> None:
-    """One folder's point records into the fold's, their seeds joined."""
-    target_dir = out_dir / RESOLVED_FOLDER
-    target_dir.mkdir(parents=True, exist_ok=True)
-    paths = (run_dir / RESOLVED_FOLDER).glob("*.json")
-    for path in sorted(paths):
-        record_text = path.read_text()
-        record = json.loads(record_text)
-        target = target_dir / path.name
-        if target.exists():
-            folded_text = target.read_text()
-            folded = json.loads(folded_text)
-            ranges = folded["seeds"] + record["seeds"]
-            record["seeds"] = seed_ranges(ranges)
-        write_json(target, record)
+def _copy_the_inputs(
+    experiment_dir: pathlib.Path, point_id: str, out_dir: pathlib.Path
+) -> None:
+    """One point's inputs/ folder, when its workload was written as files."""
+    source = experiment_dir / INPUTS_FOLDER / point_id
+    if not source.is_dir():
+        return
+    target = out_dir / INPUTS_FOLDER / point_id
+    shutil.copytree(source, target, dirs_exist_ok=True)
 
 
 def _chain_folder(config_files: tuple) -> pathlib.Path:
@@ -499,6 +465,19 @@ def _built_values(settings) -> dict:
         "rows": rows,
         "run_plan": collect.json_value(plan.run_plan),
     }
+
+
+def _rounds_per_shot(built: dict) -> int:
+    """A shot's QEC rounds: the most any one of its operations runs.
+
+    Patches run side by side, so the longest operation is how many
+    rounds the shot lasts; a per-round rate and a piece's size read it.
+    """
+    operations = built["run_plan"]["resolved_operations"]
+    round_counts = []
+    for operation in operations:
+        round_counts.append(operation["round_count"])
+    return max(round_counts)
 
 
 def _write_inputs(inputs_dir: pathlib.Path, record) -> None:
@@ -574,9 +553,7 @@ def _compiled_library_hashes() -> dict:
 def _untracked_files(checkout: pathlib.Path) -> Optional[list]:
     """The tree's untracked files git does not ignore, which it runs too.
 
-    None when git cannot answer (the container ships none), where
-    slurm/slurm_run.sh refuses a tree with untracked files unless told
-    to run it anyway.
+    None when git cannot answer (the container ships none).
     """
     listed = _git_output(
         "git",
@@ -606,14 +583,6 @@ def _untracked_patch(checkout: pathlib.Path, relative: str) -> str:
     ]
     completed = subprocess.run(arguments, capture_output=True, text=True)
     return completed.stdout.rstrip("\n")
-
-
-def _shard_text(shard: Optional[tuple]) -> Optional[str]:
-    """The shard as the user wrote it, i/n; None when there was none."""
-    if shard is None:
-        return None
-    index, count = shard
-    return f"{index}/{count}"
 
 
 def _utc_stamp() -> str:
@@ -707,7 +676,7 @@ def _tree_reading() -> tuple:
 
 
 def _dirty_from_the_launcher() -> Optional[bool]:
-    """What the launcher saw, when it exported it (slurm/slurm_run.sh)."""
+    """What the launcher saw, when it exported it (TREE_DIRTY_VARIABLE)."""
     said = os.environ.get(TREE_DIRTY_VARIABLE)
     if said is None or said == "":
         return None
@@ -811,3 +780,10 @@ def _versions() -> dict:
     for name in names:
         ordered[name] = packages[name]
     return {"python": python_version, "packages": ordered}
+
+
+def _replace_file(path: pathlib.Path, text: str) -> None:
+    """The file's new text, whole: written beside it and renamed over it."""
+    partial = path.with_name(f".{path.name}.partial")
+    partial.write_text(text)
+    os.replace(partial, path)

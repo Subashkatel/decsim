@@ -889,22 +889,6 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
 TWO_SHOT_PIECE_ROUNDS = 30
 
 
-def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
-    """The NOISY_AXES point collected into out_dir under this collection."""
-    folder = tmp_path / name
-    folder.mkdir()
-    keys = {**collection, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": keys}]}
-    config_path = yaml_configs.write_config(folder, card)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-    return yaml_configs.run_folder_of(out_dir)
-
-
-def _piece_names(experiment_dir) -> list:
-    folders = experiment_dir.glob("pieces/*/*")
-    return sorted(folder.name for folder in folders)
-
-
 def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
     """The referent is one collect run to the raised cap from the start.
 
@@ -955,6 +939,22 @@ def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     raised_pieces = _piece_names(raised_dir)
     assert len(first_pieces) < len(raised_pieces)
     assert raised_rows == whole_rows
+
+
+def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
+    """The NOISY_AXES point collected into out_dir under this collection."""
+    folder = tmp_path / name
+    folder.mkdir()
+    keys = {**collection, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": keys}]}
+    config_path = yaml_configs.write_config(folder, card)
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    return yaml_configs.run_folder_of(out_dir)
+
+
+def _piece_names(experiment_dir) -> list:
+    folders = experiment_dir.glob("pieces/*/*")
+    return sorted(folder.name for folder in folders)
 
 
 def test_a_resumed_collect_keeps_every_saved_shots_residence_rows(tmp_path):

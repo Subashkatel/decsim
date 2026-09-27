@@ -186,10 +186,7 @@ chain says what you meant.
 | `configs/examples/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
 | `configs/experiments/switching/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
 | `configs/experiments/burst_detection/burst_detection.yaml` | four burst detectors on one burst at d = 5 and on quiet shots, the detector and the burst its only axes ([How to compare burst detectors](../how-to/compare_burst_detectors.md)) |
-| `configs/data_movement.yaml` | the data-movement study: every copy, reference and move counted per hop |
-| `configs/data_movement_input_in_place.yaml` | the same with the weak input referenced in place instead of copied |
-| `configs/data_movement_fold_in_place.yaml` | the same with the boundary folded in place |
-| `configs/data_movement_switching.yaml` | the same under the switching escalation |
+| `configs/experiments/data_movement/data_movement.yaml` | the data-movement study: every copy, reference and move counted per hop, in four blocks: every hop copying, the weak input read in place, the boundary folded in place, and the switching escalation |
 
 ## Read next
 

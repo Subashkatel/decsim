@@ -29,12 +29,9 @@ SHIPPED_CONFIGS = (
     "examples/priced_cards_example.yaml",
     "examples/two_tiers.yaml",
     "experiments/burst_detection/burst_detection.yaml",
+    "experiments/data_movement/data_movement.yaml",
     "experiments/switching/cluster_gap_switching.yaml",
     "experiments/switching/seam_pinned_switching.yaml",
-    "data_movement.yaml",
-    "data_movement_fold_in_place.yaml",
-    "data_movement_input_in_place.yaml",
-    "data_movement_switching.yaml",
 )
 # Where a memory maker's physical error rate sits in a point's sections.
 ERROR_RATE_PATH = "workload.arguments.physical_error_probability"

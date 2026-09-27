@@ -82,6 +82,8 @@ THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
 CONFIGS = THIS_FILE.parents[2] / "configs"
 REFERENCE_YAML = CONFIGS / "reference.yaml"
+# the data-movement grid's fourth block, the one with the strong tier
+DATA_MOVEMENT_SWITCHING_BLOCK = 3
 # The sweep.csv columns that carry the decoder's measured wall clock, and
 # the release stage that starts from it and waits for a clock edge.
 WALL_CLOCK_POINTS = (
@@ -784,14 +786,16 @@ def test_two_python_built_sources_that_hold_the_same_values_are_one_task():
 
 
 def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
-    """data_movement_switching.yaml's task with its readout hop at each width.
+    """The data-movement grid's switching task, its readout hop at each width.
 
-    One file is edited in place between loads, so the tasks differ in
-    the hop's rate and in nothing else, the path included.
+    The weak base the grid extends holds the hop, and that one file is
+    edited in place between loads, so the tasks differ in the hop's rate
+    and in nothing else, the path included.
     """
     configs = tmp_path / "configs"
     shutil.copytree(CONFIGS, configs)
-    path = configs / "data_movement_switching.yaml"
+    path = configs / "bases" / "weak_decoder_baseline.yaml"
+    grid = configs / "experiments" / "data_movement" / "data_movement.yaml"
     text = path.read_text()
     unpriced = "clock: fridge, bits_per_cycle: null}"
     readout_hop = f"qpu_to_controller:  {{latency_cycles: 1, {unpriced}"
@@ -802,16 +806,19 @@ def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
         priced_hop = readout_hop.replace(unpriced, priced)
         priced_text = text.replace(readout_hop, priced_hop)
         path.write_text(priced_text)
-        config = experiment.load_experiment(path)
-        task = config.point_task(
-            {
-                "workload.arguments.physical_error_probability": 0.001,
-                "qpu.distance": 3,
-                "qpu.round_period_microseconds": 1.0,
-            },
-        )
+        config = experiment.load_experiment(grid)
+        task = _switching_task(config)
         tasks.append(task)
     return tasks
+
+
+def _switching_task(config: experiment.ExperimentConfig):
+    """The grid's switching block, its first point at p = 0.001."""
+    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
+    points = switching_block.points()
+    values = dict(points[0])
+    values[yaml_configs.ERROR_RATE_PATH] = 0.001
+    return config.point_task(values)
 
 
 def _readout_rate(shot) -> str:

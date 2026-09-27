@@ -18,8 +18,8 @@ import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
 
 
-def shots_csv_row(point_id, stage_us, stage_columns):
-    row = {"point_id": point_id, "algorithm": "pymatching"}
+def shots_csv_row(point_id, stage_us, stage_columns, algorithm):
+    row = {"point_id": point_id, "algorithm": algorithm}
     for column in stage_columns:
         row[column] = stage_us.get(column, 0.0)
     return row
@@ -46,7 +46,7 @@ def write_point_record(resolved_dir, point_id):
     record_path.write_text(record_text)
 
 
-def write_run(run_dir, rows):
+def write_run(run_dir, rows, algorithm="pymatching"):
     """rows: (point id, {stage column: us}) pairs, one per shot."""
     run_dir.mkdir()
     resolved_dir = run_dir / "resolved"
@@ -58,7 +58,7 @@ def write_run(run_dir, rows):
         writer = csv.DictWriter(handle, fieldnames=field_names)
         writer.writeheader()
         for point_id, stage_us in rows:
-            row = shots_csv_row(point_id, stage_us, stage_columns)
+            row = shots_csv_row(point_id, stage_us, stage_columns, algorithm)
             writer.writerow(row)
             write_point_record(resolved_dir, point_id)
 
@@ -124,7 +124,7 @@ def test_a_bar_is_labelled_by_its_points_values_and_decoder(
         "qpu.distance=3\n"
         "qpu.round_period_microseconds=1.0\n"
         "workload.arguments.physical_error_probability=0.001\n"
-        "pymatching"
+        "algorithm pymatching"
     )
 
 
@@ -148,13 +148,16 @@ def test_a_bar_is_labelled_by_the_value_its_point_ran_with(
     axis = drawn_axis(run_dir, figure_path, monkeypatch)
 
     (tick_label,) = axis.get_yticklabels()
-    assert tick_label.get_text() == "qpu.distance=3\npymatching"
+    assert tick_label.get_text() == "qpu.distance=3\nalgorithm pymatching"
 
 
 def test_every_label_the_legend_and_the_title_fit_a_four_point_figure(
     tmp_path, monkeypatch
 ):
-    """Nothing is cut at the figure's edge, and the key covers no bar."""
+    """Nothing is cut at the figure's edge, and the key covers no bar.
+
+    The decoder is a latency card, which the label names in its unit.
+    """
     run_dir = tmp_path / "run"
     shot_rows = [
         ("point3", flat_stages(12.0)),
@@ -162,7 +165,7 @@ def test_every_label_the_legend_and_the_title_fit_a_four_point_figure(
         ("point7", flat_stages(40.0)),
         ("point9", flat_stages(60.0)),
     ]
-    write_run(run_dir, shot_rows)
+    write_run(run_dir, shot_rows, algorithm="0.028")
     figure_path = tmp_path / "stage_breakdown.png"
 
     axis = drawn_axis(run_dir, figure_path, monkeypatch)
@@ -175,6 +178,11 @@ def test_every_label_the_legend_and_the_title_fit_a_four_point_figure(
     boxes = [text.get_window_extent(renderer) for text in texts]
     axis_box = axis.get_window_extent(renderer)
     legend_box = legend.get_window_extent(renderer)
+    tick_labels = axis.get_yticklabels()
+    first_label = tick_labels[0]
+    first_text = first_label.get_text()
+    label_lines = first_text.splitlines()
+    assert label_lines[-1] == "algorithm 0.028 us"
     assert all(_inside(box, figure.bbox) for box in boxes)
     assert not legend_box.overlaps(axis_box)
 

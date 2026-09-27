@@ -29,6 +29,7 @@ import statistics
 from typing import Optional
 
 import decsim.config as config_module
+import decsim.experiments.fold as fold
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.experiments.trace_file as trace_file
@@ -805,9 +806,18 @@ def _point_labels(run_dir, rows: list) -> dict:
     labels = {}
     for point_id, cells in swept.items():
         lines = [f"{path}={cell}" for path, cell in cells.items()]
-        lines.append(algorithms[point_id])
+        algorithm_line = _algorithm_line(algorithms[point_id])
+        lines.append(algorithm_line)
         labels[point_id] = "\n".join(lines)
     return labels
+
+
+def _algorithm_line(algorithm_cell: str) -> str:
+    """The csv's algorithm cell on a label: a latency card in microseconds."""
+    algorithm = fold.number_of(algorithm_cell)
+    if isinstance(algorithm, str):
+        return f"algorithm {algorithm}"
+    return f"algorithm {algorithm:g} us"
 
 
 def _breakdown_height(labels: dict) -> float:

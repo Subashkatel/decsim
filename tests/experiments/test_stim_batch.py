@@ -220,6 +220,14 @@ def test_the_machines_own_samples_decode_to_tesseracts_machine_answers(
     assert batch == machine
 
 
+def test_a_numbered_kind_decodes_as_the_machines_matching(tmp_path):
+    task = machine_task(tmp_path, "numbered", 3)
+
+    machine, batch = machine_and_batch_answers(task, range(5))
+
+    assert batch == machine
+
+
 def test_every_decoder_of_a_point_decodes_the_same_samples(tmp_path):
     pytest.importorskip("relay_bp")
     pytest.importorskip("tesseract_decoder")
@@ -456,13 +464,18 @@ def test_a_sampling_off_the_table_is_refused(tmp_path):
 
 
 def batch_rows() -> dict:
-    """The shipped baseline's four weak decoder rows, by kind."""
+    """The shipped baseline's four weak decoder rows, by kind.
+
+    "numbered" is its PyMatching row priced by a number in place of a
+    kind, the machine's fixed-latency matching.
+    """
     text = BASELINE.read_text()
     raw = yaml.safe_load(text)
     axes = raw["sweep"][0]["axes"]
     rows = {}
     for row in axes["weak_decoder"]:
         rows[row["kind"]] = row
+    rows["numbered"] = dict(rows["pymatching"], kind=0.028)
     return rows
 
 

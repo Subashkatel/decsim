@@ -27,8 +27,8 @@ import time
 import numpy
 import stim
 
+import decsim.build.decoders as build_decoders
 import decsim.collect as collect
-import decsim.decoders.settings as decoder_settings
 import decsim.experiments.collection as collection_module
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.pieces as pieces
@@ -41,7 +41,6 @@ import decsim.records.results as result_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
-import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 
 SAMPLING = "stim_batch"
@@ -195,14 +194,11 @@ def samples_of_seeds(
 def bound_row(task: collect.Task, root_seed: int):
     """The point's weak decoder row, bound to root_seed at the machine's path.
 
-    The row is built from its own settings alone, as the machine's root
-    builds a table row (build/decoders.py _algorithm).
+    The row is the machine's own algorithm, built by the machine's own
+    builder (build/decoders.py algorithm_of).
     """
     tier = task.settings.weak_decoder
-    row_class = tables.row(
-        decoder_settings.DECODERS, "weak_decoder.kind", tier.kind
-    )
-    row = _built_row(row_class, tier.row_settings)
+    row = build_decoders.algorithm_of(tier, "weak")
     roots = ((ROW_SEED_PATH, row),)
     seeding.bind_run_seed(root_seed, roots)
     return row
@@ -422,13 +418,6 @@ def _block_spans(first_seed: int, count: int) -> list:
         high = min(high_offset, BLOCK_SHOTS)
         spans.append((block, low, high))
     return spans
-
-
-def _built_row(row_class, row_settings):
-    """A table row from its own settings, or from none when it has no keys."""
-    if row_settings is None:
-        return row_class()
-    return row_class(settings=row_settings)
 
 
 def _row_for_the_block(task: collect.Task, row, root_seed: int):

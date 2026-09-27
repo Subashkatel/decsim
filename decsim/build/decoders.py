@@ -76,7 +76,7 @@ def build_decoder_unit(
         return tier_settings.decoder
     if tier_settings.kind is None:
         return None
-    algorithm = _algorithm(tier_settings, tier)
+    algorithm = algorithm_of(tier_settings, tier)
     is_active = tier == policy.primary_tier.value
     decides_on_a_confidence = policy.decides_on_a_confidence
     if is_active and decides_on_a_confidence:
@@ -144,6 +144,27 @@ def build_decoder_pool(
 def build_memory_round_arrivals(parts):
     """The decoders' end of the memory route."""
     return memory_rounds_module.MemoryRoundArrivals(parts.engine)
+
+
+def algorithm_of(tier_settings: decoder_settings.DecoderSettings, tier: str):
+    """A tier's algorithm: a table row, or a fixed latency on MWPM.
+
+    A table row is built from its own settings alone: with keys of its
+    own it takes the Settings record the section reader split off the
+    tier's keys (decsim/tables.py), and with none it takes nothing, so a
+    new row declares no parameter it does not read. The batch sampling
+    builds its row here too (experiments/stim_batch.py), so a batch
+    point decodes with the machine's own algorithm.
+    """
+    kind = tier_settings.kind
+    if not isinstance(kind, str):
+        latency_model = decoders.PresetLatencyDecoder(kind)
+        return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
+    row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
+    row_settings = tier_settings.row_settings
+    if row_settings is None:
+        return row()
+    return row(settings=row_settings)
 
 
 def _check_the_active_tier_decodes(
@@ -336,25 +357,6 @@ def _without_unset(value_by_pool: dict) -> dict:
             continue
         set_by_pool[pool] = value
     return set_by_pool
-
-
-def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
-    """A tier's algorithm: a table row, or a fixed latency on MWPM.
-
-    A table row is built from its own settings alone: with keys of its
-    own it takes the Settings record the section reader split off the
-    tier's keys (decsim/tables.py), and with none it takes nothing, so a
-    new row declares no parameter it does not read.
-    """
-    kind = tier_settings.kind
-    if not isinstance(kind, str):
-        latency_model = decoders.PresetLatencyDecoder(kind)
-        return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
-    row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
-    row_settings = tier_settings.row_settings
-    if row_settings is None:
-        return row()
-    return row(settings=row_settings)
 
 
 def _check_serves_the_confidence(

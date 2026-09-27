@@ -345,6 +345,7 @@ docstring.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
 - `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
 - `decsim/experiments/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
+- `decsim/experiments/failure_statistics.py`: Estimates, exact intervals and paired tests of logical failure rates.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
 - `decsim/experiments/plots.py`: The figures that read decsim's own records, not a sweep's numbers.

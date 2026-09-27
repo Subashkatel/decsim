@@ -15,6 +15,7 @@ import pymatching
 import yaml
 
 import decsim.collect as collect
+import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
 
 _THIS_FILE = pathlib.Path(__file__)
@@ -56,12 +57,12 @@ QPU_ONLY_SWEEP = [
 
 
 def point_shot(
-    config,
+    config: experiment.ExperimentConfig,
     *,
-    physical_error_probability,
-    distance,
-    round_period_microseconds,
-    seed,
+    physical_error_probability: float,
+    distance: int,
+    round_period_microseconds: float,
+    seed: int,
 ) -> collect.Shot:
     """One seeded shot at one sweep point, run."""
     shots = seed + 1
@@ -76,7 +77,9 @@ def point_shot(
     return collect.run_shot(task, seed)
 
 
-def measure_point_shot(config, **point):
+def measure_point_shot(
+    config: experiment.ExperimentConfig, **point
+) -> measure.ShotMeasurement:
     """One seeded shot at one sweep point, collected and measured."""
     shot = point_shot(config, **point)
     return measure.measure_shot(shot)

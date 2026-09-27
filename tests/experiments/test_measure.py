@@ -65,12 +65,12 @@ import decsim.records.windows as window_records
 import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
+import tests.experiments.yaml_configs as yaml_configs
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
     measure_point_shot,
     memory_workload,
-    point_shot,
     write_config,
 )
 
@@ -1808,7 +1808,7 @@ def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
     }
     config_path = write_config(tmp_path, card)
     config = experiment.load_experiment(config_path)
-    shot = point_shot(
+    shot = yaml_configs.point_shot(
         config,
         physical_error_probability=0.01,
         distance=3,

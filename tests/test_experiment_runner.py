@@ -21,6 +21,7 @@ import stim
 
 import decsim.experiment_runner as experiment_runner
 import decsim.experiments.run_folder as run_folder
+import decsim.sinter_adapters.union_find as union_find_adapter
 
 _THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
@@ -93,6 +94,68 @@ def test_a_finished_point_run_again_takes_no_new_shots(tmp_path, monkeypatch):
     experiment.main(arguments=["0", "--out", str(out)])
 
     assert (out / "points" / "0.csv").read_text() == first_text
+
+
+def test_a_point_its_shot_cap_stopped_takes_no_new_shots(tmp_path, monkeypatch):
+    write_script(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    experiment = shot_capped_experiment(300)
+    experiment.main(arguments=["0", "--out", str(out)])
+    point_path = out / "points" / "0.csv"
+    first_text = point_path.read_text()
+
+    experiment.main(arguments=["0", "--out", str(out)])
+
+    (stats,) = sinter.read_stats_from_csv_files(point_path)
+    assert point_path.read_text() == first_text
+    assert stats.shots == 300
+
+
+def test_an_unfinished_point_goes_on_from_its_saved_shots(
+    tmp_path, monkeypatch
+):
+    """A raised shot cap leaves the saved rows and adds only the rest."""
+    write_script(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    first = shot_capped_experiment(300)
+    first.main(arguments=["0", "--out", str(out)])
+    point_path = out / "points" / "0.csv"
+    first_text = point_path.read_text()
+    raised = shot_capped_experiment(700)
+
+    raised.main(arguments=["0", "--out", str(out)])
+
+    (stats,) = sinter.read_stats_from_csv_files(point_path)
+    raised_text = point_path.read_text()
+    assert raised_text.startswith(first_text)
+    assert stats.shots == 700
+
+
+def test_each_point_decodes_with_the_decoder_its_name_maps_to(
+    tmp_path, monkeypatch
+):
+    """A named decoder is handed to sinter; None names a sinter built-in."""
+    write_script(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    experiment = experiment_runner.Experiment("tiny")
+    circuit = tiny_circuit(3)
+    experiment.add_offline(
+        circuit, "union-find", {"d": 3}, max_errors=5, max_shots=2000
+    )
+    experiment.add_offline(
+        circuit, "pymatching", {"d": 3}, max_errors=5, max_shots=2000
+    )
+    decoders = {
+        "union-find": union_find_adapter.UnionFindDecoder(),
+        "pymatching": None,
+    }
+
+    experiment.main(decoders, arguments=["--out", str(out)])
+
+    stats_path = out / "stats.csv"
+    combined = sinter.read_stats_from_csv_files(stats_path)
+    decoder_names = {point_stats.decoder for point_stats in combined}
+    assert decoder_names == {"union-find", "pymatching"}
 
 
 def test_two_points_run_at_once_write_different_files(tmp_path):
@@ -301,12 +364,7 @@ def tiny_experiment() -> experiment_runner.Experiment:
     """The script's two points, built in this process."""
     experiment = experiment_runner.Experiment("tiny")
     for distance in (3, 5):
-        circuit = stim.Circuit.generated(
-            "surface_code:rotated_memory_z",
-            distance=distance,
-            rounds=3,
-            after_clifford_depolarization=0.02,
-        )
+        circuit = tiny_circuit(distance)
         experiment.add_offline(
             circuit,
             decoder="pymatching",
@@ -315,6 +373,30 @@ def tiny_experiment() -> experiment_runner.Experiment:
             max_shots=5000,
         )
     return experiment
+
+
+def shot_capped_experiment(max_shots: int) -> experiment_runner.Experiment:
+    """One point that its shot cap stops, far short of its error target."""
+    experiment = experiment_runner.Experiment("tiny")
+    circuit = tiny_circuit(3)
+    experiment.add_offline(
+        circuit,
+        decoder="pymatching",
+        labels={"d": 3},
+        max_errors=1_000_000,
+        max_shots=max_shots,
+    )
+    return experiment
+
+
+def tiny_circuit(distance: int) -> stim.Circuit:
+    """The script's circuit: memory Z, three rounds, two percent noise."""
+    return stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=distance,
+        rounds=3,
+        after_clifford_depolarization=0.02,
+    )
 
 
 def write_script(tmp_path, monkeypatch) -> pathlib.Path:

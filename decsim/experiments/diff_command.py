@@ -190,7 +190,19 @@ def _shot_column_of(column: str) -> Optional[str]:
 
 
 def _wilson_verdict(first_row: dict, second_row: dict) -> str:
-    """Overlapping Wilson intervals have not been shown to differ."""
+    """Overlapping Wilson intervals have not been shown to differ.
+
+    A point with no scored shot has no interval, and NaN compares false
+    with everything, so without this check it would read as agreeing.
+    """
+    limits = (
+        first_row["ler_wilson_low"],
+        first_row["ler_wilson_high"],
+        second_row["ler_wilson_low"],
+        second_row["ler_wilson_high"],
+    )
+    if not all(_is_finite_number(limit) for limit in limits):
+        return "no statistical comparison possible"
     first_below = first_row["ler_wilson_high"] < second_row["ler_wilson_low"]
     second_below = second_row["ler_wilson_high"] < first_row["ler_wilson_low"]
     if first_below or second_below:
@@ -220,6 +232,13 @@ def _standard_error(shot_rows: list, column: Optional[str]) -> Optional[float]:
 
 def _is_number(value) -> bool:
     return isinstance(value, (int, float))
+
+
+def _is_finite_number(value) -> bool:
+    """A number other than NaN or an infinity; an empty cell is none."""
+    if not _is_number(value):
+        return False
+    return math.isfinite(value)
 
 
 def _shot_rows_of(run_dir: pathlib.Path, point_id: str) -> list:

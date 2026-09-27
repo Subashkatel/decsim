@@ -157,6 +157,30 @@ def test_diff_judges_a_logical_error_rate_by_its_wilson_interval(
     assert len(apart_lines) == 6
 
 
+def test_diff_makes_no_comparison_of_a_rate_with_no_interval(
+    runs, tmp_path, capsys
+):
+    """No scored shot gives no interval, and so nothing to compare by.
+
+    A point whose every shot went unscored has no rate and no limits; a
+    verdict read off them would say the two runs agree on nothing.
+    """
+    unscored = _rewritten(
+        runs["first"],
+        tmp_path,
+        "unscored",
+        {
+            "logical_error_rate": "nan",
+            "ler_wilson_low": "nan",
+            "ler_wilson_high": "nan",
+        },
+    )
+
+    lines = _diff_printed(capsys, runs["first"], unscored)
+
+    assert lines[-1].endswith(", no statistical comparison possible")
+
+
 def _spread_shots(run_dir, column: str, half_width: float) -> None:
     """The first point's shots of a column pushed apart, their mean kept.
 

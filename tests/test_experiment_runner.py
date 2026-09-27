@@ -14,6 +14,7 @@ import os
 import pathlib
 import subprocess
 import sys
+from typing import Optional
 
 import pytest
 import sinter
@@ -477,7 +478,9 @@ def tiny_circuit(distance: int) -> stim.Circuit:
     )
 
 
-def write_script(tmp_path, monkeypatch) -> pathlib.Path:
+def write_script(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> pathlib.Path:
     """The script on disk, named as the running one, as python run.py is."""
     script = tmp_path / "run.py"
     script.write_text(SCRIPT_TEXT)
@@ -485,12 +488,16 @@ def write_script(tmp_path, monkeypatch) -> pathlib.Path:
     return script
 
 
-def refuse_the_link(source, destination) -> None:
+def refuse_the_link(source: pathlib.Path, destination: pathlib.Path) -> None:
     """A file system that will not publish the staged copy."""
     raise PermissionError(f"cannot link {source} to {destination}")
 
 
-def set_the_tree(monkeypatch, commit: str, is_dirty) -> None:
+def set_the_tree(
+    monkeypatch: pytest.MonkeyPatch,
+    commit: Optional[str],
+    is_dirty: Optional[bool],
+) -> None:
     """The commit and dirty flag this process reads of its tree."""
     identity = {
         "commit": commit,
@@ -501,7 +508,9 @@ def set_the_tree(monkeypatch, commit: str, is_dirty) -> None:
     monkeypatch.setattr(run_folder, "piece_identity", lambda: identity)
 
 
-def folder_of_the_run(tmp_path, script, commit: str, dirty: str):
+def folder_of_the_run(
+    tmp_path: pathlib.Path, script: pathlib.Path, commit: str, dirty: str
+) -> pathlib.Path:
     """A results folder an earlier task of the same script recorded."""
     results_folder = tmp_path / "out"
     results_folder.mkdir()
@@ -513,7 +522,12 @@ def folder_of_the_run(tmp_path, script, commit: str, dirty: str):
     return results_folder
 
 
-def run_in_background(script, point_id: str, results_folder, environment):
+def run_in_background(
+    script: pathlib.Path,
+    point_id: str,
+    results_folder: pathlib.Path,
+    environment: dict,
+) -> subprocess.Popen:
     """The script run on one point in its own process, not waited for."""
     command = [
         sys.executable,

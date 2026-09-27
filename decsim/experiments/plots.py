@@ -18,7 +18,9 @@ counts and times a figure is drawn from (docs/reference/run_folder.md);
 what a figure computes from them, such as a bar's length or a median,
 is computed when it is drawn and not stored. sinter keeps its figures in
 a separate `sinter plot` over the csv it wrote
-(sinter/_command/_main_plot.py). Every time is in microseconds.
+(sinter/_command/_main_plot.py). Both figures read times in
+microseconds, as the records hold them; the timeline draws them in
+microseconds and the stage breakdown in milliseconds.
 """
 
 import csv

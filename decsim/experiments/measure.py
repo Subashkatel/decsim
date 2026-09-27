@@ -13,6 +13,7 @@ other.
 
 import collections
 import dataclasses
+import hashlib
 import math
 import pathlib
 import statistics
@@ -227,6 +228,9 @@ class ShotMeasurement:
     # its windows' backend reasons, empty on a scored shot
     is_scored: bool
     unscored_reason: str
+    # sha256 of every operation's sampled detection events and observable
+    # truth, so two points' shots of one seed are checked to be one draw
+    sample_digest: str
 
 
 def measure_shot(
@@ -790,6 +794,7 @@ def _measurement(
     unscored_reason = _unscored_reason(observation)
     is_scored = unscored_reason == ""
     is_scored_failure = verdicts.logical_failure and is_scored
+    sample_digest = _sample_digest(observation, result)
     return ShotMeasurement(
         point_id=point_id,
         algorithm=algorithm,
@@ -833,6 +838,7 @@ def _measurement(
         window_statuses=window_statuses,
         is_scored=is_scored,
         unscored_reason=unscored_reason,
+        sample_digest=sample_digest,
     )
 
 
@@ -893,6 +899,30 @@ def _unscored_reason(observation: observation_module.Observation) -> str:
             reasons.add(reason.value)
     ordered = sorted(reasons)
     return ";".join(ordered)
+
+
+def _sample_digest(
+    observation: observation_module.Observation,
+    result: result_records.RunResult,
+) -> str:
+    """sha256 of each operation's sampled detection events and truth.
+
+    The events are the ones the source fired on shot_sampled
+    (qpu/stim_device.py) and the truth is the observable flips it drew
+    with them, one byte a bit, operation by operation in the result's
+    order. Two points that differ only in their decoder draw the same
+    shot at the same seed, so pairing their shots can be checked rather
+    than assumed.
+    """
+    digest = hashlib.sha256()
+    shots_by_operation = observation.sampled_shots.shots_by_operation
+    for operation_result in result.operation_results:
+        shot = shots_by_operation[operation_result.operation_id]
+        event_bytes = bytes(shot.detection_events)
+        truth_bytes = bytes(operation_result.observable_truth)
+        digest.update(event_bytes)
+        digest.update(truth_bytes)
+    return digest.hexdigest()
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:

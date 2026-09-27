@@ -1618,3 +1618,33 @@ def test_the_status_columns_count_the_statuses_the_decoder_returned(
     assert counted == expected
     assert record.shots[0]["nonconverged_windows"] == nonconverged
     assert rows[0]["nonconverged_windows"] == nonconverged
+
+
+def decoder_row_shot(tmp_path, kind: str, seed: int):
+    """One seeded shot of the minimal machine with its weak row named."""
+    weak_decoder = dict(MINIMAL_CONFIG["weak_decoder"], kind=kind)
+    config_path = write_config(tmp_path, {"weak_decoder": weak_decoder})
+    config = experiment.load_experiment(config_path)
+    return measure_point_shot(
+        config,
+        physical_error_probability=0.01,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=seed,
+    )
+
+
+def test_the_sample_digest_names_the_draw_and_not_the_decoder(tmp_path):
+    """Two decoder rows at one seed share a digest; two seeds do not.
+
+    The device draws a shot from the run's seed alone, so PyMatching and
+    Union-Find see the same detection events and truth at seed 0, and
+    seed 1 is another draw.
+    """
+    matching = decoder_row_shot(tmp_path, "pymatching", 0)
+    union_find = decoder_row_shot(tmp_path, "union_find", 0)
+    next_seed = decoder_row_shot(tmp_path, "pymatching", 1)
+
+    assert matching.algorithm != union_find.algorithm
+    assert matching.sample_digest == union_find.sample_digest
+    assert matching.sample_digest != next_seed.sample_digest

@@ -13,8 +13,10 @@ stage_breakdown.png  where a window's time goes, one stacked bar per
                      runs them, from shots.csv
 
 A figure of a sweep's numbers against a setting is the reader's to
-draw: the run folder holds every point's values by path beside its
-counts (docs/reference/run_folder.md), as sinter keeps its figures in
+draw: the run folder holds every point's values by path beside the
+counts and times a figure is drawn from (docs/reference/run_folder.md);
+what a figure computes from them, such as a bar's length or a median,
+is computed when it is drawn and not stored. sinter keeps its figures in
 a separate `sinter plot` over the csv it wrote
 (sinter/_command/_main_plot.py). Every time is in microseconds.
 """

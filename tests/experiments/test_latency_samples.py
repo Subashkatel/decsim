@@ -3,8 +3,9 @@
 One sample per decoded window, the algorithm stage only (the measured
 quantity; the priced stages are in shots.csv), recorded only for a
 decoder named by a table row, each sample beside its window's
-inter-arrival, the deadline a latency figure draws. decsim draws no
-latency figure; these rows are everything one needs.
+inter-arrival, the deadline a decode must beat. decsim draws no latency
+figure; these rows are what one is drawn from, and what it computes
+from them (log times, densities, medians) is not stored.
 """
 
 import collections

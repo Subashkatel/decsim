@@ -340,11 +340,12 @@ def test_load_gives_a_row_per_point_with_its_results_and_settings(runs):
     assert rows[0]["shots"] == 20
 
 
-def test_a_loaded_row_holds_every_number_an_error_rate_figure_draws(runs):
+def test_a_loaded_row_holds_what_an_error_rate_figure_is_drawn_from(runs):
     """The rate, its Wilson bounds and counts, and the point's values.
 
     decsim draws no error rate figure; a reader draws one from these
-    rows, the numbers sinter's plot_error_rate reads off its csv.
+    rows, the numbers sinter's plot_error_rate reads off its csv. The
+    bar lengths it computes from the bounds are not stored.
     """
     rows = results.load(runs["first"])
 

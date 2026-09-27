@@ -182,7 +182,7 @@ def test_the_class_rows_are_listed_cheapest_first(tmp_path):
 
 
 def test_the_class_rows_hold_every_points_copied_and_moved_bits(tmp_path):
-    """The numbers a data movement figure draws, at each swept distance.
+    """What a data movement figure is drawn from, at each swept distance.
 
     decsim draws no such figure; data_movement.csv holds one row per
     point per memory class, so the reader draws it from the file. An

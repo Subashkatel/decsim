@@ -456,10 +456,11 @@ def latency_sample_rows(measurements: list) -> list:
     Only algorithms named by a table row produce rows, and the time is
     what held the unit: the measured wall clock, or the row's own cycle
     count. A number instead of a name is a fixed latency and produces
-    none. This is the latency figure's raw data, persisted so the
-    figure, including the cross-tier combined one, rebuilds from run
-    folders alone; each row carries its window's inter-arrival, the
-    deadline the figure draws.
+    none. These are the inputs a latency figure is drawn from, so a
+    reader draws one, across tiers too, from run folders alone; each
+    row carries its window's inter-arrival, the deadline a decode must
+    beat. What such a figure computes (log times, densities, medians)
+    is computed when it is drawn, not stored.
     """
     rows = []
     for measurement in measurements:

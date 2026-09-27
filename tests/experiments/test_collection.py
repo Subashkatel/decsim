@@ -259,3 +259,83 @@ def test_the_rule_stops_where_sinters_stops_on_the_same_counts_property():
         decsim_stop = _decsim_stop_shot(outcomes, settings)
 
         assert decsim_stop == sinter_stop
+
+
+def _shot_row(seed, is_scored=True, failed=False):
+    """A shot row as shots.csv holds it, the fields a prefix reads."""
+    return {
+        "seed": str(seed),
+        "is_scored": str(is_scored),
+        "logical_failure": str(failed),
+        "sim_wall_seconds": "0.5",
+    }
+
+
+def _tracked(rule, rows) -> collection.PrefixTracker:
+    tracker = collection.PrefixTracker(rule)
+    for row in rows:
+        tracker.add(row)
+    return tracker
+
+
+def test_a_prefix_ends_at_its_stop_and_later_rows_count_nowhere():
+    settings = _settings(max_failures=1, max_shots=10)
+    rule = collection.PointRule(settings, False, 15)
+    rows = [_shot_row(0), _shot_row(1, failed=True), _shot_row(2, failed=True)]
+
+    tracker = _tracked(rule, rows)
+
+    assert tracker.state() == "target"
+    assert tracker.counts.shots == 2
+    assert tracker.counts.failures == 1
+
+
+def test_a_missing_seed_ends_the_prefix_short_of_its_stop():
+    """A gap holds the stop: the rows past it wait for the missing seed."""
+    settings = _settings(max_failures=1, max_shots=10)
+    rule = collection.PointRule(settings, False, 15)
+    rows = [_shot_row(0), _shot_row(2, failed=True)]
+
+    tracker = _tracked(rule, rows)
+
+    assert tracker.state() == "running"
+    assert tracker.counts.shots == 1
+    assert tracker.stop_kind_for_limits() is StopKind.CAP
+
+
+def test_shots_fixed_in_advance_are_a_cap_at_the_shots_run():
+    rows = [_shot_row(0), _shot_row(1, failed=True)]
+
+    fixed = collection.PointRule()
+    tracker = _tracked(fixed, rows)
+
+    assert tracker.state() == "cap"
+    assert tracker.counts.shots == 2
+
+
+def test_an_adaptive_point_says_so_whatever_its_counts():
+    settings = _settings(max_shots=2)
+    rule = collection.PointRule(settings, True, 15)
+    rows = [_shot_row(0), _shot_row(1)]
+
+    tracker = _tracked(rule, rows)
+
+    assert tracker.state() == "adaptive"
+
+
+def test_a_point_with_no_shot_has_no_data():
+    fixed = collection.PointRule()
+    tracker = collection.PrefixTracker(fixed)
+
+    assert tracker.state() == "no data"
+
+
+def test_an_unscored_shot_counts_toward_the_cap_and_not_the_failures():
+    settings = _settings(max_failures=1, max_shots=2)
+    rule = collection.PointRule(settings, False, 15)
+    rows = [_shot_row(0, is_scored=False), _shot_row(1, is_scored=False)]
+
+    tracker = _tracked(rule, rows)
+
+    assert tracker.state() == "cap"
+    assert tracker.counts.scored_shots == 0

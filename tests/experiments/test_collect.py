@@ -45,7 +45,6 @@ import dataclasses
 import decimal
 import fractions
 import json
-import math
 import pathlib
 import re
 import shutil
@@ -919,12 +918,13 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     assert rows[0]["scored_shots"] == 0
     assert rows[0]["unscored_shots"] == 2
     assert rows[0]["logical_failures"] == 0
-    assert math.isnan(rows[0]["logical_error_rate"])
-    assert math.isnan(rows[0]["ler_wilson_low"])
-    assert math.isnan(rows[0]["ler_wilson_high"])
+    assert rows[0]["state"] == "cap"
+    assert rows[0]["logical_error_rate_estimate"] is None
+    assert rows[0]["logical_error_rate_low"] is None
+    assert rows[0]["logical_error_rate_high"] is None
     assert rows[0]["logical_error_rate_unscored_as_failures"] == 1.0
     assert "logical failures: 0 of 0 scored shots" in lines
-    assert "logical error rate among scored shots: nan" in lines
+    assert "logical error rate among scored shots: none (cap)" in lines
     assert "unscored shots: 2 of 2 (1)" in lines
 
 

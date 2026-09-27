@@ -93,7 +93,7 @@ for `false_alarms_per_round`.
 ## Know what the numbers can say
 
 Twenty shots place a caught share within about 0.2 either way (its
-Wilson interval). The quiet files check that false alarms are not far
+exact 95 percent interval). The quiet files check that false alarms are not far
 above budget, and no more: at 0.03 per second a 400 us shot alarms
 about once in 80,000 shots, so a quiet run sees none unless the
 detector is badly off. To measure the rate itself, raise the quiet

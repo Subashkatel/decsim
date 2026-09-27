@@ -16,13 +16,26 @@ import decsim.experiments.run_folder as run_folder
 # The parts of a point's resolved record diff compares: every setting,
 # and the values the build derived from them (run_folder.record_point).
 RESOLVED_PARTS = ("settings", "built")
+# Each estimate column and the columns of its exact 95 percent limits
+# (report._add_estimate_columns), which its verdict reads.
+LIMITS_OF_ESTIMATE = {
+    "logical_error_rate_estimate": (
+        "logical_error_rate_low",
+        "logical_error_rate_high",
+    ),
+    "logical_error_rate_per_round": (
+        "logical_error_rate_per_round_low",
+        "logical_error_rate_per_round_high",
+    ),
+}
 # Columns diff does not compare: the host's own time per shot, which no
-# setting sets, and the Wilson bounds, which the logical error rate's
-# own verdict reads.
+# setting sets, and the limits, which their estimate's verdict reads.
 NOT_COMPARED_COLUMNS = (
     "sim_wall_seconds_per_shot",
-    "ler_wilson_low",
-    "ler_wilson_high",
+    "logical_error_rate_low",
+    "logical_error_rate_high",
+    "logical_error_rate_per_round_low",
+    "logical_error_rate_per_round_high",
 )
 # A latency point's mean over shots, beside its median, p99 and max
 # (report._add_latency_point_columns); the other means are
@@ -44,7 +57,7 @@ def diff(first: pathlib.Path, second: pathlib.Path) -> list:
     sinter's plot groups by json_metadata across files (sinter
     _command/_main_plot.py --group_func). A result that differs is said
     to agree within its error bars or not: a logical error rate by its
-    Wilson interval, a mean over shots by the standard error of its
+    exact interval, a mean over shots by the standard error of its
     shots (shots.csv), which is where a decoder's measured wall clock
     moves a tick column between two runs of one yaml. A column with no
     error bar is compared exactly.
@@ -165,8 +178,9 @@ class _Comparison:
 
     def verdict(self, column: str, first_row: dict, second_row: dict) -> str:
         """Whether two differing values agree within their error bars."""
-        if column == "logical_error_rate":
-            return _wilson_verdict(first_row, second_row)
+        if column in LIMITS_OF_ESTIMATE:
+            limit_columns = LIMITS_OF_ESTIMATE[column]
+            return _interval_verdict(first_row, second_row, limit_columns)
         shot_column = _shot_column_of(column)
         first_error = _standard_error(self.first_shots, shot_column)
         second_error = _standard_error(self.second_shots, shot_column)
@@ -189,22 +203,25 @@ def _shot_column_of(column: str) -> Optional[str]:
     return None
 
 
-def _wilson_verdict(first_row: dict, second_row: dict) -> str:
-    """Overlapping Wilson intervals have not been shown to differ.
+def _interval_verdict(
+    first_row: dict, second_row: dict, limit_columns: tuple
+) -> str:
+    """Overlapping intervals have not been shown to differ.
 
-    A point with no scored shot has no interval, and NaN compares false
-    with everything, so without this check it would read as agreeing.
+    A point with no scored shot, or a cap with no failure, has no whole
+    interval, and an empty or NaN limit compares false with everything,
+    so without this check it would read as agreeing.
     """
-    limits = (
-        first_row["ler_wilson_low"],
-        first_row["ler_wilson_high"],
-        second_row["ler_wilson_low"],
-        second_row["ler_wilson_high"],
-    )
+    low_column, high_column = limit_columns
+    first_low = first_row.get(low_column)
+    first_high = first_row.get(high_column)
+    second_low = second_row.get(low_column)
+    second_high = second_row.get(high_column)
+    limits = (first_low, first_high, second_low, second_high)
     if not all(_is_finite_number(limit) for limit in limits):
         return "no statistical comparison possible"
-    first_below = first_row["ler_wilson_high"] < second_row["ler_wilson_low"]
-    second_below = second_row["ler_wilson_high"] < first_row["ler_wilson_low"]
+    first_below = first_high < second_low
+    second_below = second_high < first_low
     if first_below or second_below:
         return "beyond error bars"
     return "within error bars"

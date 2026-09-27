@@ -98,7 +98,7 @@ workload.arguments.physical_error_probability: 0.003
 algorithm: pymatching
 load (service per window / window inter-arrival): 2.53
 logical failures: 16 of 400 scored shots
-logical error rate among scored shots: 0.04
+logical error rate among scored shots: 0.04, 95% 0.023 to 0.0641 (cap)
 unscored shots: 0 of 400 (0)
 throughput: 0.412 rounds per us
 queue wait, mean: 12.764 us
@@ -108,13 +108,13 @@ ready to frame commit: median 26.504 us, p99 55.052 us
 qpu.distance: 5
 ...
 logical failures: 12 of 400 scored shots
-logical error rate among scored shots: 0.03
+logical error rate among scored shots: 0.03, 95% 0.0156 to 0.0518 (cap)
 unscored shots: 0 of 400 (0)
 ...
 qpu.distance: 7
 ...
 logical failures: 8 of 400 scored shots
-logical error rate among scored shots: 0.02
+logical error rate among scored shots: 0.02, 95% 0.00867 to 0.039 (cap)
 unscored shots: 0 of 400 (0)
 ...
 ```
@@ -148,14 +148,14 @@ fraction of the shots is a broken machine.
 ## Step 3. Read the error bars
 
 ```bash
-cut -d, -f3,6,8-11 results/first_sweep/combined/*/sweep.csv
+cut -d, -f3,6,8,11-14 results/first_sweep/combined/*/sweep.csv
 ```
 
 ```
-qpu.distance,shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-3,400,16,0.04,0.024768847722620668,0.06398278162908555
-5,400,12,0.03,0.017242849034032177,0.05169903312966765
-7,400,8,0.02,0.010168264597915496,0.038963870377777945
+qpu.distance,shots,logical_failures,state,logical_error_rate_estimate,logical_error_rate_low,logical_error_rate_high
+3,400,16,cap,0.04,0.023033395740548884,0.06414601093905078
+5,400,12,cap,0.03,0.015595552999894341,0.05181721543058358
+7,400,8,cap,0.02,0.00867317036911831,0.03902627671162005
 ```
 
 The rows come in the sweep's order, distance 3, 5 and 7, the order the
@@ -163,36 +163,43 @@ summary printed them. Each row's first columns name its point: its id,
 then one column per yaml path the sweep sets, here the error rate, the
 distance and the round period.
 
-`logical_error_rate` is the failures divided by the scored shots. It is an
-estimate, and 16 out of 400 would have come out differently with
-different seeds. The two Wilson columns say how differently.
+`logical_error_rate_estimate` is the failures divided by the scored
+shots. It is an estimate, and 16 out of 400 would have come out
+differently with different seeds. The two limit columns say how
+differently.
 
-A **Wilson interval** is a range of true failure probabilities that
-would plausibly produce the count you saw. decsim computes it at
-`z = 1.96`, which is the conventional 95 percent (`wilson_interval` in
-`decsim/experiments/report.py`). Read the distance 3 row as: the true rate is
-somewhere between about 2.5 percent and about 6.4 percent, and 4
-percent is the middle of the evidence.
+The limits are a 95 percent **confidence interval**: a range of true
+failure probabilities that would plausibly produce the count you saw,
+built so that 95 runs in 100 bracket the true rate. decsim computes it
+exactly for the rule the point stopped by (`estimate` in
+`decsim/experiments/failure_statistics.py`). Every point here stopped
+at its shot cap, `state` `cap`, so its shot count was fixed and its
+limits are Clopper and Pearson's. Read the distance 3 row as: the true
+rate is somewhere between about 2.3 percent and about 6.4 percent, and
+4 percent is the middle of the evidence.
 
-Why Wilson and not the textbook interval you may have met, the estimate
-plus or minus 1.96 times the standard error? Because that one falls
-apart exactly where quantum error correction lives. At a low failure
-count it gives an interval that runs below zero, and at zero failures it
-gives an interval of zero width, which would say a rate is known
-exactly from having seen no failures at all. The Wilson interval stays
-inside 0 and 1 and stays sensible at zero counts, which is why it is the
-one decsim reports.
+Why not the textbook interval you may have met, the estimate plus or
+minus 1.96 times the standard error? Because that one falls apart
+exactly where quantum error correction lives. At a low failure count it
+gives an interval that runs below zero, and at zero failures it gives
+an interval of zero width, which would say a rate is known exactly from
+having seen no failures at all. The exact interval stays inside 0 and 1,
+and at zero failures it gives an upper limit alone, which is all zero
+failures can say.
 
-Now look at the rows together. Distance 5's interval runs from 1.7 to
-5.2 percent and distance 7's from 1.0 to 3.9 percent. They overlap. On
+Now look at the rows together. Distance 5's interval runs from 1.6 to
+5.2 percent and distance 7's from 0.9 to 3.9 percent. They overlap. On
 400 shots this run has **not** shown that distance 7 is better than
 distance 5, even though its estimate is lower. That is the honest
 reading, and it is the reason `configs/weak_ler.yaml` runs a million
 shots at its lowest error rates.
 
 The rule of thumb the shipped sweeps are sized by: aim for at least 100
-failures at a point you want to quote. Below that, quote the interval,
-or quote the point as an upper bound.
+failures at a point you want to quote. A point can stop there by
+itself: `collection: {max_failures: 100, max_shots: ...}` stops it at
+its hundredth failure, `state` `target`, and its limits are then the
+ones exact for a failure count fixed in advance. Below that, quote the
+interval, or quote the point as an upper bound.
 
 ## Step 4. Draw it
 
@@ -214,9 +221,10 @@ rows = results.load(*folders)
 error_rate = "workload.arguments.physical_error_probability"
 kept = [row for row in rows if row[error_rate] == 0.003]
 distances = [row["qpu.distance"] for row in kept]
-rates = [row["logical_error_rate"] for row in kept]
-below = [row["logical_error_rate"] - row["ler_wilson_low"] for row in kept]
-above = [row["ler_wilson_high"] - row["logical_error_rate"] for row in kept]
+estimate = "logical_error_rate_estimate"
+rates = [row[estimate] for row in kept]
+below = [row[estimate] - row["logical_error_rate_low"] for row in kept]
+above = [row["logical_error_rate_high"] - row[estimate] for row in kept]
 figure, ax = plt.subplots()
 ax.errorbar(distances, rates, yerr=[below, above], fmt="o-")
 ax.set_xlabel("code distance")
@@ -224,7 +232,7 @@ ax.set_ylabel("logical error rate")
 results.save_figure(figure, "ler.png", rows, folders)
 ```
 
-The error bars are the Wilson columns you just read. `save_figure`
+The error bars are the limit columns you just read. `save_figure`
 writes `ler.png` and, beside it, the script that drew it, the rows it
 drew and the folders they came from.
 
@@ -245,11 +253,11 @@ leave them missing, and run the same command again:
 ```bash
 rm -r results/first_sweep/pieces/*/0-*
 decsim collect configs/my_first_sweep.yaml --processes 4 --out results/first_sweep
-cut -d, -f3,6,8,9 results/first_sweep/combined/*/sweep.csv
+cut -d, -f3,6,8,12 results/first_sweep/combined/*/sweep.csv
 ```
 
 ```
-qpu.distance,shots,logical_failures,logical_error_rate
+qpu.distance,shots,logical_failures,logical_error_rate_estimate
 3,400,16,0.04
 5,400,12,0.03
 7,400,8,0.02
@@ -273,7 +281,7 @@ cluster.
 
 - A sweep is a set of points; a point is a machine; a shot is one run of
   it.
-- A logical error rate is an estimate, and the Wilson interval is how
+- A logical error rate is an estimate, and its exact interval is how
   much to trust it.
 - Overlapping intervals mean the runs have not been shown to differ.
 - Pieces add up exactly, because no summary is stored, so a stopped

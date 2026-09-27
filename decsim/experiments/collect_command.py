@@ -48,6 +48,7 @@ class PointCollection:
     task: collect.Task
     settings: collection_module.CollectionSettings
     piece_shots: int
+    rounds_per_shot: int
     next_seed: int = 0
     counts: collection_module.PrefixCounts = dataclasses.field(
         default_factory=collection_module.PrefixCounts
@@ -88,6 +89,13 @@ class PointCollection:
         self.pending = []
         if self.stop_kind is not None:
             _say_the_point_stopped(self)
+
+    def rule(self) -> collection_module.PointRule:
+        """What the point's summary reads its prefix by."""
+        is_adaptive = self.task.online_threshold is not None
+        return collection_module.PointRule(
+            self.settings, is_adaptive, self.rounds_per_shot
+        )
 
     def _hand_out(
         self, experiment_dir: pathlib.Path, count: int
@@ -161,7 +169,7 @@ def run_experiment(
         points, experiment_dir, measure_shot, swept, processes
     )
     folders = pieces.folders_of(experiment_dir, point_ids)
-    rows = _fold_the_pieces(experiment_dir, folders, point_ids, report_dir)
+    rows = _fold_the_pieces(experiment_dir, folders, points, report_dir)
     residence_rows = residence.rows_of(traced)
     residence.write_residence(residence_rows, report_dir)
     plots.plots(report_dir)
@@ -264,7 +272,7 @@ def _point_collections(
         settings = collections[point_id]
         rounds_per_shot = records[point_id]["rounds_per_shot"]
         piece_shots = _piece_shots_of(task, settings, rounds_per_shot)
-        point = PointCollection(task, settings, piece_shots)
+        point = PointCollection(task, settings, piece_shots, rounds_per_shot)
         points.append(point)
     return points
 
@@ -408,13 +416,19 @@ def _save_the_piece(
 def _fold_the_pieces(
     experiment_dir: pathlib.Path,
     folders: list,
-    point_ids: list,
+    points: list,
     report_dir: pathlib.Path,
 ) -> list:
     """The configuration's pieces folded into its run folder; its rows."""
     seeds_by_point = pieces.seed_ranges_of(folders)
+    point_ids = []
+    rules = {}
+    for point in points:
+        point_id = point.task.strong_id()
+        point_ids.append(point_id)
+        rules[point_id] = point.rule()
     return report.fold_pieces(
-        experiment_dir, folders, point_ids, seeds_by_point, report_dir
+        experiment_dir, folders, point_ids, seeds_by_point, report_dir, rules
     )
 
 

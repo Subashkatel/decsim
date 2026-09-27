@@ -12,8 +12,8 @@ date and worth reporting.
   folder, read a figure, and follow one round of syndrome data through
   the machine. Ten minutes.
 - [Your first sweep](first_sweep.md): run a small sweep on four
-  processes, read its Wilson error bars, cut it into shards and fold
-  them back. Fifteen minutes.
+  processes, read its exact error bars, stop it and pick it up again.
+  Fifteen minutes.
 - [Two tiers](two_tiers.md): run a machine with a fast decoder and an
   accurate one, and watch the trace of one window that was kept and one
   that was escalated. Ten minutes.

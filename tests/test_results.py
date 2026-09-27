@@ -15,6 +15,7 @@ import sys
 
 import matplotlib.figure as figure_module
 import pytest
+import scipy.stats
 
 import decsim.experiments.command as command
 import decsim.results as results
@@ -129,28 +130,35 @@ def test_diff_names_the_setting_and_the_input_that_changed(runs, capsys):
     assert f"  {point} operations.json: sha256 differs" in lines
 
 
-def test_diff_judges_a_logical_error_rate_by_its_wilson_interval(
+def test_diff_judges_a_logical_error_rate_by_its_exact_interval(
     runs, tmp_path, capsys
 ):
-    first_rows = results.load(runs["first"])
-    rate = first_rows[0]["logical_error_rate"]
-    nudged_rate = rate + 1e-9
+    """Overlapping limits agree; limits that do not overlap do not."""
+    near = {
+        "logical_error_rate_estimate": 0.1,
+        "logical_error_rate_low": 0.05,
+        "logical_error_rate_high": 0.2,
+    }
+    known = _rewritten(runs["first"], tmp_path, "known", near)
     inside = _rewritten(
-        runs["first"], tmp_path, "inside", {"logical_error_rate": nudged_rate}
+        runs["first"],
+        tmp_path,
+        "inside",
+        {**near, "logical_error_rate_estimate": 0.12},
     )
     apart = _rewritten(
         runs["first"],
         tmp_path,
         "apart",
         {
-            "logical_error_rate": 0.9,
-            "ler_wilson_low": 0.85,
-            "ler_wilson_high": 0.95,
+            "logical_error_rate_estimate": 0.9,
+            "logical_error_rate_low": 0.85,
+            "logical_error_rate_high": 0.95,
         },
     )
 
-    inside_lines = _diff_printed(capsys, runs["first"], inside)
-    apart_lines = _diff_printed(capsys, runs["first"], apart)
+    inside_lines = _diff_printed(capsys, known, inside)
+    apart_lines = _diff_printed(capsys, known, apart)
 
     assert inside_lines[-1].endswith(", within error bars")
     assert apart_lines[-1].endswith(", beyond error bars")
@@ -170,9 +178,9 @@ def test_diff_makes_no_comparison_of_a_rate_with_no_interval(
         tmp_path,
         "unscored",
         {
-            "logical_error_rate": "nan",
-            "ler_wilson_low": "nan",
-            "ler_wilson_high": "nan",
+            "logical_error_rate_estimate": 0.5,
+            "logical_error_rate_low": "",
+            "logical_error_rate_high": "",
         },
     )
 
@@ -365,20 +373,30 @@ def test_load_gives_a_row_per_point_with_its_results_and_settings(runs):
 
 
 def test_a_loaded_row_holds_what_an_error_rate_figure_is_drawn_from(runs):
-    """The rate, its Wilson bounds and counts, and the point's values.
+    """The estimate, its exact limits and counts, and the point's values.
 
     decsim draws no error rate figure; a reader draws one from these
     rows, the numbers sinter's plot_error_rate reads off its csv. The
-    bar lengths it computes from the bounds are not stored.
+    point stopped at its shot cap, so its limits are Clopper and
+    Pearson's, which scipy's exact binomial interval is.
     """
     rows = results.load(runs["first"])
 
-    first = rows[0]
-    rate = first["logical_failures"] / first["shots"]
-    assert first["logical_error_rate"] == rate
-    assert first["ler_wilson_low"] <= rate <= first["ler_wilson_high"]
-    assert first[PROBABILITY_COLUMN] == 0.003
-    assert first["algorithm"] == 0.028
+    noisier = rows[1]
+    failures = noisier["prefix_failures"]
+    scored_shots = noisier["prefix_scored_shots"]
+    test = scipy.stats.binomtest(failures, scored_shots)
+    interval = test.proportion_ci(method="exact")
+    assert noisier["state"] == "cap"
+    assert failures > 0
+    assert noisier["logical_error_rate_estimate"] == failures / scored_shots
+    assert noisier["logical_error_rate_low"] == pytest.approx(
+        interval.low, rel=1e-12
+    )
+    assert noisier["logical_error_rate_high"] == pytest.approx(
+        interval.high, rel=1e-12
+    )
+    assert noisier[PROBABILITY_COLUMN] == 0.01
 
 
 def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
@@ -387,7 +405,7 @@ def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
     figure = figure_module.Figure()
     ax = figure.subplots()
     positions = [row[PROBABILITY_COLUMN] for row in rows]
-    rates = [row["logical_error_rate"] for row in rows]
+    rates = [row["logical_error_rate_estimate"] for row in rows]
     ax.plot(positions, rates, marker="o")
     picture_path = tmp_path / "ler.png"
     results.save_figure(figure, picture_path, rows, folders)

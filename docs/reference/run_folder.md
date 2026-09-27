@@ -274,10 +274,16 @@ point the run held:
 | `point_id`, the swept paths, `algorithm` | the point |
 | `shots` | how many shots the point ran |
 | `windows_per_shot` | the mean over those shots |
-| `logical_failures`, `logical_error_rate` | the count and the fraction of the scored shots, sinter's errors over shots less discards; the fraction is NaN when no shot was scored |
-| `ler_wilson_low`, `ler_wilson_high` | the Wilson interval of that fraction at z = 1.96 over the scored shots, from `wilson_interval`; both NaN when no shot was scored |
+| `logical_failures` | the failures among every shot the point holds |
 | `scored_shots`, `unscored_shots` | how many of the point's shots were scored, and how many were not (`is_scored`) |
-| `logical_error_rate_unscored_as_failures` | the failures and the unscored shots together over every shot: the rate this sample would read if every unscored shot had failed, a bound on the sample and not a confidence bound. Beside `logical_error_rate`, which is conditional on scoring, it shows how much a backend that failed on hard syndromes could hide |
+| `state` | why the point's contiguous prefix of seeds stopped, by its collection's rule (`decsim/experiments/collection.py`): `target` (its scored failures reached `max_failures` past `min_shots`), `minimum` (the target was reached by `min_shots`, which stopped it), `cap` (a shot or time cap, before the target; incomplete), `running` (not stopped: a collect that ended early, or a missing seed that holds the stop), `adaptive` (a threshold that learns online; its shots are not independent draws), `no data`. A point a Python caller ran with its shots fixed in advance is a `cap` |
+| `logical_error_rate_estimate` | the prefix's failures over its scored shots, sinter's errors over shots less discards; empty with no scored shot, at a cap with no failure, and for an adaptive point |
+| `logical_error_rate_low`, `logical_error_rate_high` | its 95 percent limits, exact for the rule the prefix stopped by (`estimate` in `decsim/experiments/failure_statistics.py`): Clopper and Pearson's at a cap or minimum, Jennison and Turnbull's beta quantiles at a target; at a cap with no failure the upper limit alone, 1 - 0.025^(1/n) |
+| `logical_error_rate_plan_unbiased` | Girshick, Mosteller and Savage's estimate, unbiased over every outcome of a stopping plan fixed in advance in counts: (r - 1)/(n - 1) at a target stop, x/n otherwise. It is not unbiased among the outcomes that reached the target, and it is empty under a time cap, for a prefix still running and for an adaptive point |
+| `logical_error_rate_per_round`, `_per_round_low`, `_per_round_high` | the estimate and its limits as a round's rate, sinter's shot_error_rate_to_piece_error_rate over the shot's QEC rounds; empty when the rounds were not recorded |
+| `is_shot_rate_above_half` | whether the estimate is past one half, where the per-round rate goes through its complement and, for an even round count, no round-flip probability gives the shot rate |
+| `prefix_shots`, `prefix_scored_shots`, `prefix_failures` | the prefix's counts, which the estimate and its limits read; a pool may run pieces past the stop, which count in `shots` and not here |
+| `logical_error_rate_unscored_as_failures` | the failures and the unscored shots together over every shot: the rate this sample would read if every unscored shot had failed, a bound on the sample and not a confidence bound. Beside the estimate, which is conditional on scoring, it shows how much a backend that failed on hard syndromes could hide |
 | `<status>_windows`, `provisional_no_correction_windows` | the sums over the point's shots |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | the means |
 | `max_queued_windows` | the deepest queue over the point |

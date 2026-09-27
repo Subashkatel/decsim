@@ -60,8 +60,9 @@ the ones the build derived included (`resolved/`). `inputs` lists each
 workload file whose sha256 differs (`inputs/<id>/hashes.json`).
 `results` lists each `sweep.csv` column that differs, and says whether
 the two values agree within their error bars: a logical error rate by
-its Wilson interval, a mean over shots by the standard error of its
-shots in `shots.csv`. A column with no error bar (a median, a p99, a
+its exact interval (with no interval on either side, no statistical
+comparison is possible, and `diff` says that), a mean over shots by the
+standard error of its shots in `shots.csv`. A column with no error bar (a median, a p99, a
 maximum, a count) is compared exactly. `sim_wall_seconds_per_shot` is
 the host's own time and is never compared. A section with nothing to
 list says `the same`.
@@ -95,9 +96,11 @@ for folder in folders:
     kept = [row for row in rows if row["run_dir"] == folder]
     kept.sort(key=lambda row: row[distance])
     distances = [row[distance] for row in kept]
-    rates = [row["logical_error_rate"] for row in kept]
-    below = [row["logical_error_rate"] - row["ler_wilson_low"] for row in kept]
-    above = [row["ler_wilson_high"] - row["logical_error_rate"] for row in kept]
+    rates = [row["logical_error_rate_estimate"] for row in kept]
+    lows = [row["logical_error_rate_low"] for row in kept]
+    highs = [row["logical_error_rate_high"] for row in kept]
+    below = [rate - low for rate, low in zip(rates, lows)]
+    above = [high - rate for rate, high in zip(rates, highs)]
     ax.errorbar(distances, rates, yerr=[below, above], fmt="o-", label=folder)
 ax.set_yscale("log")
 ax.legend()
@@ -169,16 +172,18 @@ so check first that `escalated_windows` is equal in the two rows. Then:
   The difference between the two rows is the overload alone.
 
 A burst that leaves the weak decoder confident and wrong shows in
-neither: it raises `logical_error_rate` with no rise in
+neither: it raises `logical_error_rate_estimate` with no rise in
 `escalated_fraction`. `observation.check_windows_with: tesseract`
 counts those windows in `referee_window_disagreements`.
 
 ## What to check before you believe a difference
 
 - **The shots.** Two shots say almost nothing about a logical error
-  rate. Compare `ler_wilson_low` and `ler_wilson_high`, not just
-  `logical_error_rate`; if the two intervals overlap, the runs have not
-  been shown to differ.
+  rate. Compare `logical_error_rate_low` and `logical_error_rate_high`,
+  not just `logical_error_rate_estimate`; if the two intervals overlap,
+  the runs have not been shown to differ. A point with no interval, no
+  scored shot or a cap with no failure, has no comparison to make, and
+  `diff` says so.
 - **The manifest.** `manifest.json` in each folder carries the git
   commit, whether the checkout was dirty, the library versions and the
   command line. Two runs on different commits are two experiments.
@@ -192,5 +197,5 @@ counts those windows in `referee_window_disagreements`.
 ## Read next
 
 - [The run folder](../reference/run_folder.md): every file and column.
-- [Your first sweep](../tutorials/first_sweep.md): what a Wilson interval is.
+- [Your first sweep](../tutorials/first_sweep.md): what the exact interval is.
 - [How to run a timing study whose numbers do not depend on your computer](run_a_timing_only_study.md): making the ticks comparable.

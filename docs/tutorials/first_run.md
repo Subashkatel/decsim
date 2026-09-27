@@ -118,7 +118,7 @@ workload.arguments.physical_error_probability: 0.001
 algorithm: pymatching
 load (service per window / window inter-arrival): 2.39
 logical failures: 0 of 2 scored shots
-logical error rate among scored shots: 0
+logical error rate among scored shots: below 0.842 at 95% (cap)
 unscored shots: 0 of 2 (0)
 throughput: 0.449 rounds per us
 queue wait, mean: 2.603 us
@@ -209,20 +209,22 @@ the facts.
 columns. The distance and the first counts:
 
 ```bash
-cut -d, -f3,6,8-11 results/reference/combined/*/sweep.csv
+cut -d, -f3,6,8,11-14 results/reference/combined/*/sweep.csv
 ```
 
 ```
-qpu.distance,shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-3,2,0,0.0,0.0,0.6576280471103807
+qpu.distance,shots,logical_failures,state,logical_error_rate_estimate,logical_error_rate_low,logical_error_rate_high
+3,2,0,cap,,,0.841886116991581
 ```
 
-`logical_error_rate` is the fraction of scored shots whose decoded observable
-did not match the truth: zero out of two here. `ler_wilson_low` and
-`ler_wilson_high` bracket it. Two shots say almost nothing, which is why
-the interval runs from 0 to 0.66. The next tutorial,
-[Your first sweep](first_sweep.md), explains that interval and runs enough
-shots to make it narrow.
+`state` says why the point stopped: `cap`, at the two shots its
+`collection` allows. `logical_error_rate_estimate` is the fraction of
+scored shots whose decoded observable did not match the truth, and the
+two limits bracket the true rate with 95 percent confidence. With no
+failure in two shots there is no fraction to quote, only an upper
+limit: the true rate is below 0.84. Two shots say almost nothing. The
+next tutorial, [Your first sweep](first_sweep.md), explains the limits
+and runs enough shots to make them narrow.
 
 The row's first columns name its point. `point_id`, left out here, is a
 hash of every setting the point ran with, so two points that differ in

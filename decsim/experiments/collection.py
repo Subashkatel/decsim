@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.experiments.failure_statistics as failure_statistics
+import decsim.experiments.fold as fold
 import decsim.experiments.refusal as refusal
 
 # QEC rounds per piece: a shot's cost grows with its rounds, so a piece
@@ -143,6 +144,86 @@ class PrefixCounts:
         self.scored_shots += other.scored_shots
         self.failures += other.failures
         self.core_seconds += other.core_seconds
+
+
+@dataclasses.dataclass(frozen=True)
+class PointRule:
+    """What a point's summary reads its prefix by.
+
+    settings is its collection, None for shots a caller fixed in advance,
+    whose run is a cap at the shots it ran. is_adaptive says its
+    threshold learns online, so its shots are not independent draws
+    and have no interval here. rounds_per_shot turns a shot's rate into
+    a round's, None when nobody recorded it.
+    """
+
+    settings: Optional[CollectionSettings] = None
+    is_adaptive: bool = False
+    rounds_per_shot: Optional[int] = None
+
+
+class PrefixTracker:
+    """One point's contiguous prefix of seeds as its shot rows arrive.
+
+    The rows come in seed order, as a fold merges them. The prefix ends
+    at the shot its rule stops on, or at the first missing seed, which
+    holds the stop until the gap is filled; later rows count nowhere.
+    """
+
+    def __init__(self, rule: PointRule) -> None:
+        self.rule = rule
+        self.counts = PrefixCounts()
+        self.stop_kind = None
+        self.is_open = True
+
+    def add(self, row: Mapping) -> None:
+        """One shot row: onto the prefix while the prefix is open."""
+        if not self.is_open:
+            return
+        seed = fold.number_of(row["seed"])
+        if seed != self.counts.shots:
+            self.is_open = False
+            return
+        shot_counts = _shot_counts_of(row)
+        self.counts.add(shot_counts)
+        if self.rule.settings is None:
+            return
+        self.stop_kind = self.rule.settings.stop_kind(self.counts)
+        if self.stop_kind is not None:
+            self.is_open = False
+
+    def state(self) -> str:
+        """The row's state: the stop's kind, or why there is none."""
+        if self.counts.shots == 0:
+            return "no data"
+        if self.rule.is_adaptive:
+            return "adaptive"
+        if self.stop_kind is not None:
+            return self.stop_kind.value
+        if self.rule.settings is None:
+            return failure_statistics.StopKind.CAP.value
+        return "running"
+
+    def stop_kind_for_limits(self) -> failure_statistics.StopKind:
+        """The kind whose limits hold for the prefix as it stands.
+
+        A prefix its rule has not stopped, a gap or a stopped collect,
+        has a shot count fixed by where it ended, so its limits are the
+        cap's, and its state says it is incomplete.
+        """
+        if self.stop_kind is None:
+            return failure_statistics.StopKind.CAP
+        return self.stop_kind
+
+
+def _shot_counts_of(row: Mapping) -> PrefixCounts:
+    """One shot row's counts; a csv row's text is read as its number."""
+    is_scored = fold.number_of(row["is_scored"])
+    failed = fold.number_of(row["logical_failure"])
+    core_seconds = fold.number_of(row["sim_wall_seconds"])
+    scored_shots = int(bool(is_scored))
+    failures = int(bool(failed))
+    return PrefixCounts(1, scored_shots, failures, core_seconds)
 
 
 def _add_section(merged: dict, section: Optional[Mapping], name: str) -> None:

@@ -45,6 +45,8 @@ import math
 from pathlib import Path
 from typing import Optional
 
+import decsim.experiments.collection as collection
+import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
@@ -173,28 +175,6 @@ class RunRecord:
     latency_samples: list
 
 
-def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:
-    """Wilson 95% confidence interval for a failure fraction.
-
-    With no shot there is no fraction and so no interval: both ends are
-    NaN, as the fraction itself is (_failure_fraction).
-    """
-    if shots == 0:
-        return (math.nan, math.nan)
-    fraction = failures / shots
-    denominator = 1 + z * z / shots
-    center = fraction + z * z / (2 * shots)
-    center = center / denominator
-    variance = fraction * (1 - fraction) / shots
-    continuity = z * z / (4 * shots * shots)
-    inside_the_root = variance + continuity
-    spread = math.sqrt(inside_the_root)
-    half_width = z * spread / denominator
-    low = center - half_width
-    high = center + half_width
-    return (max(0.0, low), min(1.0, high))
-
-
 def percentile_of_counts(multiset: dict, fraction: float) -> float:
     """The value at `fraction` of the samples, numpy's nearest method.
 
@@ -244,26 +224,35 @@ def point_columns(point: tuple) -> dict:
     return {"point_id": point_id, "algorithm": algorithm}
 
 
-def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
-    """One sweep point: means over seeds of per-shot means, max of maxes."""
+def summarize_point(
+    point: tuple,
+    totals: fold.RowTotals,
+    counts: dict,
+    prefix: collection.PrefixTracker,
+) -> dict:
+    """One sweep point: means over seeds of per-shot means, max of maxes.
+
+    The counts cover every shot the point holds; the estimate and its
+    limits cover its contiguous prefix up to its stop (prefix), which is
+    what the stopping rule's intervals are exact for.
+    """
     failures = totals.true_counts["logical_failure"]
     shot_count = totals.rows
     scored_shots = totals.true_counts["is_scored"]
     unscored_shots = shot_count - scored_shots
-    failures_or_unscored = failures + unscored_shots
-    # a bound on this sample's rate, not a confidence bound
-    rate_unscored_as_failures = failures_or_unscored / shot_count
-    ler_low, ler_high = wilson_interval(failures, scored_shots)
     row = point_columns(point)
     row["shots"] = shot_count
     row["windows_per_shot"] = totals.mean("decoded_windows")
     row["logical_failures"] = failures
-    row["logical_error_rate"] = _failure_fraction(failures, scored_shots)
-    row["ler_wilson_low"] = ler_low
-    row["ler_wilson_high"] = ler_high
     row["scored_shots"] = scored_shots
     row["unscored_shots"] = unscored_shots
-    row["logical_error_rate_unscored_as_failures"] = rate_unscored_as_failures
+    _add_estimate_columns(row, prefix)
+    # a bound on this sample's rate, not a confidence bound
+    row["logical_error_rate_unscored_as_failures"] = (
+        failure_statistics.estimate_counting_unscored(
+            failures, scored_shots, unscored_shots
+        )
+    )
     _add_status_columns(row, totals)
     row["throughput_windows_per_us"] = totals.mean("throughput_windows_per_us")
     row["throughput_rounds_per_us"] = totals.mean("throughput_rounds_per_us")
@@ -283,21 +272,29 @@ def summarize_point(point: tuple, totals: fold.RowTotals, counts: dict) -> dict:
     return row
 
 
-def summarize(shots: list, window_samples: list) -> list:
+def summarize(
+    shots: list, window_samples: list, rules: Optional[dict] = None
+) -> list:
     """One row per sweep point, in a stable order.
 
     The two arguments are the additive files a run folder writes: the
     per-shot rows and the per-value counts. The same code runs whether
     they were just measured in this process or read back out of an
     experiment's pieces, whose fold streams them into the same totals
-    rather than holding a list of them.
+    rather than holding a list of them. rules maps a point id to the
+    collection.PointRule its prefix is read by; a point it does not
+    name ran a shot count fixed in advance.
     """
     counts = _counts_of_rows(window_samples)
-    totals = _shot_totals_by_point(shots)
-    return summary_rows(totals, counts)
+    totals = {}
+    prefixes = {}
+    for row in shots:
+        _add_a_shot(totals, row)
+        _add_to_the_prefix(prefixes, rules, row)
+    return summary_rows(totals, counts, prefixes)
 
 
-def summary_rows(totals: dict, counts: dict) -> list:
+def summary_rows(totals: dict, counts: dict, prefixes: dict) -> list:
     """One row per sweep point whose shots were totalled, in point order.
 
     The totals hold the points in the order their first shots came,
@@ -307,7 +304,9 @@ def summary_rows(totals: dict, counts: dict) -> list:
     rows = []
     for point in totals:
         at_point = totals[point]
-        row = summarize_point(point, at_point, counts)
+        point_id, _algorithm = point
+        prefix = prefixes[point_id]
+        row = summarize_point(point, at_point, counts, prefix)
         rows.append(row)
     return rows
 
@@ -538,6 +537,7 @@ def fold_pieces(
     point_ids: list,
     seeds_by_point: dict,
     out_dir: Path,
+    rules: Optional[dict] = None,
 ) -> list:
     """Pieces' additive files folded into a run folder; its sweep rows.
 
@@ -547,7 +547,8 @@ def fold_pieces(
     its point's swept values from them. The rows come back in the order
     one run over every piece would write them: its points in task order,
     then its seeds. Two pieces may not share a shot, which would be
-    counted twice.
+    counted twice. rules maps a point id to the collection.PointRule
+    its estimate is read by (summarize).
 
     An experiment's pieces can hold more rows than a process can: 500
     pieces of a million-shot sweep are 115 million link rows. So the
@@ -559,7 +560,7 @@ def fold_pieces(
     run_folder.copy_points_of(
         experiment_dir, point_ids, seeds_by_point, out_dir
     )
-    return _fold_into(folders, point_ids, order, out_dir)
+    return _fold_into(folders, point_ids, order, out_dir, rules)
 
 
 def write_report(rows: list, report_dir: Path, record: RunRecord) -> None:
@@ -669,13 +670,17 @@ def _refused_or_ordered(folders: list, point_ids: list):
     return order
 
 
-def _fold_into(folders: list, point_ids: list, order, out_dir: Path) -> list:
+def _fold_into(
+    folders: list, point_ids: list, order, out_dir: Path, rules
+) -> list:
     """The folders' rows into out_dir, each with its point's swept values."""
     swept = run_folder.swept_values(out_dir, point_ids)
-    return _fold_the_folders(folders, order, out_dir, swept)
+    return _fold_the_folders(folders, order, out_dir, swept, rules)
 
 
-def _fold_the_folders(folders: list, order, out_dir: Path, swept: dict) -> list:
+def _fold_the_folders(
+    folders: list, order, out_dir: Path, swept: dict, rules
+) -> list:
     """Every folder's additive files into one folder's, a pass per file.
 
     A pass reads one file of every folder at once, writes the folded
@@ -683,9 +688,9 @@ def _fold_the_folders(folders: list, order, out_dir: Path, swept: dict) -> list:
     holds a folder's rows. The three derived files come last, off the
     totals the passes built, each point's swept values beside its rows.
     """
-    shot_totals = _fold_shots(folders, order, out_dir, swept)
+    shot_totals, prefixes = _fold_shots(folders, order, out_dir, swept, rules)
     counts = _folded_counts(folders)
-    rows = summary_rows(shot_totals, counts)
+    rows = summary_rows(shot_totals, counts, prefixes)
     sweep_path = out_dir / "sweep.csv"
     write_csv(rows, sweep_path, swept)
     samples_path = out_dir / "window_samples.csv"
@@ -703,12 +708,23 @@ def _fold_the_folders(folders: list, order, out_dir: Path, swept: dict) -> list:
     return rows
 
 
-def _fold_shots(folders: list, order, out_dir: Path, swept: dict) -> dict:
-    """Every folder's shots.csv into one, and each point's shot totals."""
+def _fold_shots(
+    folders: list, order, out_dir: Path, swept: dict, rules
+) -> tuple:
+    """Every folder's shots.csv into one; each point's totals and prefix."""
     totals = {}
-    add_a_shot = functools.partial(_add_a_shot, totals)
+    prefixes = {}
+    add_a_shot = functools.partial(_add_a_folded_shot, totals, prefixes, rules)
     _fold_one_file(folders, "shots.csv", order, out_dir, swept, add_a_shot)
-    return totals
+    return totals, prefixes
+
+
+def _add_a_folded_shot(
+    totals: dict, prefixes: dict, rules: Optional[dict], row: dict
+) -> None:
+    """One folded shot row into its point's totals and its prefix."""
+    _add_a_shot(totals, row)
+    _add_to_the_prefix(prefixes, rules, row)
 
 
 def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> dict:
@@ -787,15 +803,101 @@ def _folder_files(folders: list, name: str) -> list:
     return paths
 
 
-def _failure_fraction(failures: int, scored_shots: int) -> float:
-    """Failures over scored shots, sinter's errors over shots less discards.
+def _add_to_the_prefix(
+    prefixes: dict, rules: Optional[dict], row: dict
+) -> None:
+    """One shot row onto its point's prefix, its tracker made at first."""
+    point_id = row["point_id"]
+    tracker = prefixes.get(point_id)
+    if tracker is None:
+        rule = _rule_of(rules, point_id)
+        tracker = collection.PrefixTracker(rule)
+        prefixes[point_id] = tracker
+    tracker.add(row)
 
-    sinter fits its rate to shots - discards (sinter/_plotting.py:389);
-    a point with no scored shot has no fraction, which is NaN.
+
+def _rule_of(rules: Optional[dict], point_id: str) -> collection.PointRule:
+    """The point's rule, or a shot count fixed in advance when none."""
+    if rules is None or point_id not in rules:
+        return collection.PointRule()
+    return rules[point_id]
+
+
+def _add_estimate_columns(row: dict, prefix: collection.PrefixTracker) -> None:
+    """The prefix's state, counts, estimate and exact limits.
+
+    failures over scored shots is sinter's errors over shots less
+    discards (sinter/_plotting.py:389). An adaptive point's shots are
+    not independent draws, so it shows its counts and no estimate.
     """
-    if scored_shots == 0:
-        return math.nan
-    return failures / scored_shots
+    counts = prefix.counts
+    row["state"] = prefix.state()
+    estimate = _prefix_estimate(prefix)
+    row["logical_error_rate_estimate"] = estimate.rate
+    row["logical_error_rate_low"] = estimate.low
+    row["logical_error_rate_high"] = estimate.high
+    row["logical_error_rate_plan_unbiased"] = _plan_unbiased(prefix)
+    rounds = prefix.rule.rounds_per_shot
+    row["logical_error_rate_per_round"] = _per_round(estimate.rate, rounds)
+    row["logical_error_rate_per_round_low"] = _per_round(estimate.low, rounds)
+    row["logical_error_rate_per_round_high"] = _per_round(estimate.high, rounds)
+    row["is_shot_rate_above_half"] = _is_above_half(estimate.rate)
+    row["prefix_shots"] = counts.shots
+    row["prefix_scored_shots"] = counts.scored_shots
+    row["prefix_failures"] = counts.failures
+
+
+def _prefix_estimate(
+    prefix: collection.PrefixTracker,
+) -> failure_statistics.Estimate:
+    """The prefix's estimate and limits; none for an adaptive point."""
+    if prefix.rule.is_adaptive:
+        return failure_statistics.Estimate(None, None, None)
+    counts = prefix.counts
+    stop_kind = prefix.stop_kind_for_limits()
+    return failure_statistics.estimate(
+        counts.failures, counts.scored_shots, stop_kind
+    )
+
+
+def _plan_unbiased(prefix: collection.PrefixTracker) -> Optional[float]:
+    """GMS's estimate, for a plan of counts fixed in advance that stopped.
+
+    It is unbiased over every outcome of the plan, which a time cap
+    makes depend on the host, and which a prefix still running has not
+    reached (failure_statistics.plan_unbiased_estimate).
+    """
+    if prefix.rule.is_adaptive:
+        return None
+    settings = prefix.rule.settings
+    if settings is not None and settings.max_core_seconds is not None:
+        return None
+    if settings is not None and prefix.stop_kind is None:
+        return None
+    counts = prefix.counts
+    stop_kind = prefix.stop_kind_for_limits()
+    return failure_statistics.plan_unbiased_estimate(
+        counts.failures, counts.scored_shots, stop_kind
+    )
+
+
+def _per_round(shot_rate: Optional[float], rounds: Optional[int]):
+    """A shot's rate as a round's, when both are known."""
+    if shot_rate is None or rounds is None:
+        return None
+    return failure_statistics.per_round_rate(shot_rate, rounds)
+
+
+def _is_above_half(shot_rate: Optional[float]) -> Optional[bool]:
+    """Whether the shot rate is past one half.
+
+    There the per-round map takes its complement
+    (failure_statistics.per_round_rate), and for an even round count no
+    round-flip probability gives the rate at all.
+    """
+    if shot_rate is None:
+        return None
+    return shot_rate > 0.5
 
 
 def _add_status_columns(row: dict, totals) -> None:
@@ -925,14 +1027,6 @@ def _points_held(fields) -> list:
         if column in fields:
             held.append(name)
     return held
-
-
-def _shot_totals_by_point(shots: list) -> dict:
-    """Each sweep point's shot totals, the rows read once."""
-    totals = {}
-    for row in shots:
-        _add_a_shot(totals, row)
-    return totals
 
 
 def _add_a_shot(totals: dict, row: dict) -> None:
@@ -1382,6 +1476,7 @@ def _terminal_block(row: dict, values: dict) -> str:
     algorithm = row["algorithm"]
     algorithm_text = _algorithm_text(algorithm)
     unscored_fraction = row["unscored_shots"] / row["shots"]
+    rate_text = _terminal_rate_text(row)
     lines = []
     for path, value in values.items():
         lines.append(f"{path}: {value}")
@@ -1390,8 +1485,7 @@ def _terminal_block(row: dict, values: dict) -> str:
         f"load (service per window / window inter-arrival): {row['load']:.2f}",
         f"logical failures: {row['logical_failures']} of "
         f"{row['scored_shots']} scored shots",
-        "logical error rate among scored shots: "
-        f"{row['logical_error_rate']:.3g}",
+        f"logical error rate among scored shots: {rate_text}",
         f"unscored shots: {row['unscored_shots']} of {row['shots']} "
         f"({unscored_fraction:.3g})",
         f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
@@ -1399,6 +1493,23 @@ def _terminal_block(row: dict, values: dict) -> str:
     latency_lines = _terminal_latency_lines(row)
     lines.extend(latency_lines)
     return "\n".join(lines)
+
+
+def _terminal_rate_text(row: dict) -> str:
+    """The estimate with its 95 percent limits and the prefix's state.
+
+    A cap with no failure has its upper limit alone, and a point with
+    no estimate, adaptive or unscored, says so.
+    """
+    state = row["state"]
+    rate = row["logical_error_rate_estimate"]
+    high = row["logical_error_rate_high"]
+    if rate is not None:
+        low = row["logical_error_rate_low"]
+        return f"{rate:.3g}, 95% {low:.3g} to {high:.3g} ({state})"
+    if high is not None:
+        return f"below {high:.3g} at 95% ({state})"
+    return f"none ({state})"
 
 
 def _terminal_latency_lines(row: dict) -> list:

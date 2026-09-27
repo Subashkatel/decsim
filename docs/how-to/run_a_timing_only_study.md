@@ -68,7 +68,7 @@ workload.arguments.physical_error_probability: 0.001
 algorithm: 1 us
 load (service per window / window inter-arrival): 0.36
 logical failures: 0 of 20 scored shots
-logical error rate among scored shots: 0
+logical error rate among scored shots: below 0.168 at 95% (cap)
 unscored shots: 0 of 20 (0)
 throughput: 0.997 rounds per us
 queue wait, mean: 0.000 us

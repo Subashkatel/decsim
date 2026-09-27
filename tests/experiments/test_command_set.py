@@ -16,6 +16,8 @@ import subprocess
 import sys
 
 import pytest
+import scipy.stats
+import sinter
 import stim
 import yaml
 
@@ -784,6 +786,96 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
     assert _shot_count_of(target_run_dir) == expected_shots
 
 
+def _sweep_row_of(run_dir) -> dict:
+    """The one point's sweep.csv row, its cells read as numbers."""
+    sweep_path = run_dir / "sweep.csv"
+    (row,) = fold.row_stream(sweep_path)
+    return fold.typed_row(row)
+
+
+def test_a_target_stop_reports_its_exact_limits_and_unbiased_estimate(
+    tmp_path,
+):
+    """The target row's referents: scipy's beta, GMS, and sinter.
+
+    At a target stop with r failures in n scored shots the limits are
+    the beta quantiles B(0.025; r, n - r + 1) and B(0.975; r, n - r)
+    (Jennison and Turnbull, Technometrics 25, 1983), the unbiased
+    estimate is (r - 1)/(n - 1) (Girshick, Mosteller and Savage 1946,
+    Theorem 3), and a round's rate is sinter's
+    shot_error_rate_to_piece_error_rate of the shot's.
+    """
+    collection = {"max_shots": 30, "max_failures": 3, "piece_rounds": 1}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    run_dir = yaml_configs.run_folder_of(out_dir)
+    row = _sweep_row_of(run_dir)
+    shots = row["prefix_scored_shots"]
+    low_second_shape = shots - 2
+    high_second_shape = shots - 3
+    low = scipy.stats.beta.ppf(0.025, 3, low_second_shape)
+    high = scipy.stats.beta.ppf(0.975, 3, high_second_shape)
+    rate = 3 / shots
+    per_round = sinter.shot_error_rate_to_piece_error_rate(rate, pieces=15)
+    assert row["state"] == "target"
+    assert row["prefix_failures"] == 3
+    assert row["logical_error_rate_estimate"] == rate
+    assert row["logical_error_rate_low"] == pytest.approx(low, rel=1e-12)
+    assert row["logical_error_rate_high"] == pytest.approx(high, rel=1e-12)
+    assert row["logical_error_rate_plan_unbiased"] == 2 / (shots - 1)
+    assert row["logical_error_rate_per_round"] == pytest.approx(
+        per_round, rel=1e-9
+    )
+    assert row["is_shot_rate_above_half"] is False
+
+
+def test_pieces_past_the_stop_leave_the_estimate_as_the_serial_run_has_it(
+    tmp_path,
+):
+    """A pool may end pieces past the stop; the estimate reads the prefix.
+
+    The serial collect starts no piece past its stop, so its row is the
+    referent: the pooled one counts its extra shots in shots and
+    nowhere in the prefix, the estimate or the limits.
+    """
+    collection = {"max_shots": 30, "max_failures": 2, "piece_rounds": 1}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    serial_dir = tmp_path / "serial"
+    pooled_dir = tmp_path / "pooled"
+    command.main(["collect", str(config_path), "--out", str(serial_dir)])
+    pooled = ["collect", str(config_path), "--out", str(pooled_dir)]
+
+    command.main([*pooled, "--processes", "8"])
+
+    serial_run_dir = yaml_configs.run_folder_of(serial_dir)
+    pooled_run_dir = yaml_configs.run_folder_of(pooled_dir)
+    serial = _sweep_row_of(serial_run_dir)
+    pooled_row = _sweep_row_of(pooled_run_dir)
+    assert pooled_row["shots"] > serial["shots"]
+    assert pooled_row["prefix_shots"] == serial["prefix_shots"]
+    assert pooled_row["state"] == serial["state"]
+    estimate_columns = (
+        "logical_error_rate_estimate",
+        "logical_error_rate_low",
+        "logical_error_rate_high",
+    )
+    assert _values_of(pooled_row, estimate_columns) == _values_of(
+        serial, estimate_columns
+    )
+
+
+def _values_of(row: dict, columns: tuple) -> tuple:
+    values = []
+    for column in columns:
+        values.append(row[column])
+    return tuple(values)
+
+
 def test_a_point_that_saved_its_stop_starts_no_piece_when_run_again(
     tmp_path, capsys
 ):
@@ -821,7 +913,7 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     _write_a_failing_piece(tmp_path, point_id, 0)
     _write_a_failing_piece(tmp_path, point_id, 2)
     settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
-    point = collect_command.PointCollection(task, settings, 1)
+    point = collect_command.PointCollection(task, settings, 1, 15)
 
     units = point.next_units(tmp_path, 1)
 

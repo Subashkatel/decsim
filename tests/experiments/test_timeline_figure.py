@@ -11,6 +11,8 @@ import dataclasses
 import json
 
 import matplotlib
+import matplotlib.pyplot
+import pytest
 
 import decsim.experiments.experiment as experiment
 import decsim.experiments.plots as plots
@@ -230,6 +232,31 @@ def test_the_timeline_figure_is_written_from_the_file(tmp_path):
     assert status.st_size > 0
 
 
+@pytest.mark.parametrize(
+    ("escalation_kind", "title"),
+    [
+        ("weak_baseline", "Weak baseline path timeline"),
+        ("a_row_no_table_names", "A row no table names path timeline"),
+    ],
+)
+def test_the_timeline_is_titled_by_the_escalation_kind_it_recorded(
+    tmp_path, monkeypatch, escalation_kind, title
+):
+    """The title reads the trace's recorded kind, so any row has one."""
+    trace_path = tmp_path / "point1.trace.json"
+    _traced_run(trace_path)
+    _rename_the_escalation(trace_path, escalation_kind)
+    figure_path = tmp_path / "timeline.png"
+    drawn = []
+    monkeypatch.setattr(matplotlib.pyplot, "close", drawn.append)
+
+    plots.timeline_plot(trace_path, figure_path)
+
+    (figure,) = drawn
+    (axis,) = figure.axes
+    assert axis.get_title() == title
+
+
 def test_a_last_window_reading_past_the_stream_is_drawn_to_the_last_round(
     tmp_path,
 ):
@@ -271,3 +298,19 @@ def test_the_figures_shot_is_the_first_points_lowest_traced_seed(tmp_path):
     first.write_text("[]")
 
     assert plots.first_trace_file(tmp_path) == first
+
+
+def _rename_the_escalation(trace_path, escalation_kind: str) -> None:
+    """The trace's process name with its escalation kind replaced.
+
+    The file is one JSON array of events (observe/trace_writer.py).
+    """
+    trace_text = trace_path.read_text()
+    events = json.loads(trace_text)
+    for event in events:
+        if event["name"] == "process_name":
+            words = event["args"]["name"].split()
+            words[1] = escalation_kind
+            event["args"]["name"] = " ".join(words)
+    renamed_text = json.dumps(events)
+    trace_path.write_text(renamed_text)

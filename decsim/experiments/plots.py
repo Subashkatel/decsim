@@ -47,11 +47,6 @@ WINDOW_COLORS = (
     "tab:olive",
 )
 MAX_LEGEND_WINDOWS = 8
-TIMELINE_TITLES = {
-    "weak_baseline": "Weak only path timeline",
-    "strong_only": "Strong only path timeline",
-    "switching": "Switching path timeline",
-}
 # The measured window chain from syndrome arrival to frame commit, in
 # pipeline order; each name is a per-shot mean column of shots.csv.
 STAGE_BREAKDOWN_STAGES = (
@@ -680,8 +675,7 @@ def _label_timeline(
     axis.set_yticklabels(timeline.rows, fontsize=9)
     axis.invert_yaxis()
     axis.set_xlabel("time from shot start (µs)")
-    escalation_kind = _escalation_kind(document)
-    title = TIMELINE_TITLES.get(escalation_kind, document.process_name)
+    title = _timeline_title(document)
     axis.set_title(title, pad=22)
     subtitle = _timeline_subtitle(document, shot)
     axis.text(
@@ -694,6 +688,21 @@ def _label_timeline(
         fontsize=8.5,
         color="0.35",
     )
+
+
+def _timeline_title(document) -> str:
+    """The path the trace's escalation row names, as the trace records it.
+
+    Read off the recorded kind, so a row written outside decsim is
+    titled like any other; a trace whose name carries no kind is titled
+    by its whole name.
+    """
+    escalation_kind = _escalation_kind(document)
+    if not escalation_kind:
+        return document.process_name
+    kind_words = escalation_kind.replace("_", " ")
+    kind_text = kind_words.capitalize()
+    return f"{kind_text} path timeline"
 
 
 def _escalation_kind(document) -> str:

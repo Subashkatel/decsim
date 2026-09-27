@@ -2382,13 +2382,20 @@ def test_a_point_two_configurations_reach_is_planned_once(tmp_path):
 def test_a_point_two_configurations_collect_two_ways_is_refused(
     tmp_path, capsys
 ):
-    """A point stops by one rule, so two collections for it are refused."""
+    """A point stops by one rule, so two collections for it are refused.
+
+    The first configuration has collected its points. A plan of both is
+    refused before it writes anything, so every record keeps the owner
+    and the stopping rule it had, byte for byte.
+    """
     first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
     (block,) = FOUR_POINT_SWEEP["sweep"]
     other_block = {**block, "collection": {"max_shots": 3}}
     other_sweep = {"sweep": [other_block]}
     second_path = _base_distance_config(tmp_path, 7, other_sweep)
     experiment_dir = tmp_path / "experiment"
+    command.main(["collect", str(first_path), "--out", str(experiment_dir)])
+    records_before = _record_bytes(experiment_dir)
     arguments = [str(first_path), str(second_path)]
     out = ["--out", str(experiment_dir), "--tasks", "3"]
 
@@ -2399,6 +2406,16 @@ def test_a_point_two_configurations_collect_two_ways_is_refused(
     round_dirs = pieces.round_dirs(experiment_dir)
     assert "two configurations" in printed.err
     assert round_dirs == []
+    assert _record_bytes(experiment_dir) == records_before
+
+
+def _record_bytes(experiment_dir: pathlib.Path) -> dict:
+    """Each resolved/ record's name and bytes, and configurations.csv's."""
+    paths = experiment_dir.glob("resolved/*.json")
+    recorded = {path.name: path.read_bytes() for path in paths}
+    configurations_path = experiment_dir / "configurations.csv"
+    recorded["configurations.csv"] = configurations_path.read_bytes()
+    return recorded
 
 
 def _base_distance_config(tmp_path, distance: int, card: dict):

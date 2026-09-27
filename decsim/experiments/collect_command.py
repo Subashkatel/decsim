@@ -215,14 +215,15 @@ def run_experiment(
     config = experiment.load_experiment(config_path)
     experiment_dir = run_folder.run_dir_for(config, out_dir)
     report_dir = run_folder.combined_folder(experiment_dir, config)
-    points = recorded_points([config], experiment_dir)
+    configuration_id = run_folder.configuration_id(config)
+    owned_points = recorded_points(experiment_dir, {configuration_id: [config]})
+    points = [point for _configuration_id, point in owned_points]
     unique = [point.task for point in points]
     point_ids = _point_ids(unique)
     started_utc = run_folder.start_run(config, report_dir, point_ids)
     first_task = unique[0]
     _echo_description(config, first_task.settings, report_dir)
     measure_shot = _shot_measure(unique, report_dir)
-    configuration_id = run_folder.configuration_id(config)
     _collect_until_stopped(
         points, experiment_dir, configuration_id, measure_shot, processes
     )
@@ -295,22 +296,35 @@ def run_planned(
     run_folder.finish_run(None, task_dir, point_ids, started_utc)
 
 
-def recorded_points(configs: list, experiment_dir: pathlib.Path) -> list:
-    """Every point of one configuration's yamls, recorded, with its collection.
+def recorded_points(experiment_dir: pathlib.Path, configs_by_id: dict) -> list:
+    """Every point of every configuration, recorded once all are accepted.
 
-    The yamls share one configuration id, and may split its sweep, one
-    file a distance; a point two of them name is one point. Recording
-    writes each point's resolved/ record and inputs and each yaml's
-    configuration line, and builds each point's plan, so a point the
-    build refuses stops the run before any shot.
+    configs_by_id maps a configuration id to its yamls, which may split
+    its sweep, one file a distance; a point two of them name is one
+    point. Every yaml is resolved and every point's record built first,
+    which runs its build, so a point the build refuses stops the run
+    before any shot. A point two configurations reach, when their yamls
+    differ only in a setting both sweeps set, is under the one given
+    last, and refused if they collect it two ways, since a point stops
+    by one rule. Only then are the records and the configuration lines
+    written, so a refused plan or collect leaves the experiment folder
+    as it was. Returns (configuration id, point) pairs.
     """
-    point_tasks = []
-    for config in configs:
-        config_tasks = config.point_tasks()
-        _record_the_points(experiment_dir, config, config_tasks)
-        point_tasks.extend(config_tasks)
-    unique = _unique_tasks(point_tasks)
-    return _point_collections(experiment_dir, point_tasks, unique)
+    owners = {}
+    for configuration_id, configs in configs_by_id.items():
+        for resolved in _resolved_points(configuration_id, configs):
+            point_id = resolved.record["id"]
+            earlier = owners.get(point_id, resolved)
+            _check_one_collection(earlier, resolved)
+            owners[point_id] = resolved
+    owned = owners.values()
+    accepted = list(owned)
+    _write_the_records(experiment_dir, accepted, configs_by_id)
+    owned_points = []
+    for resolved in accepted:
+        point = _point_collection(experiment_dir, resolved)
+        owned_points.append((resolved.configuration_id, point))
+    return owned_points
 
 
 def _task_as_the_piece_left_it(
@@ -545,28 +559,89 @@ def _point_ids(unique: list) -> list:
     return point_ids
 
 
-def _record_the_points(
-    experiment_dir: pathlib.Path,
-    config: experiment.ExperimentConfig,
-    point_tasks: list,
-) -> None:
-    """Every point's values, maker, workload and fold, and the configuration.
+@dataclasses.dataclass(frozen=True)
+class _ResolvedPoint:
+    """One point as its yaml resolves it, its record built and not written."""
 
-    Recording builds each point's plan, so a point the build refuses
-    stops the run before any shot. The seeds a point ran are its
-    pieces', which its run folder's record gathers when it folds. What
-    a fold needs beside the pieces is recorded too, so a status folds
-    the point whatever its yaml says later.
+    configuration_id: str
+    task: collect.Task
+    settings: collection_module.CollectionSettings
+    record: dict
+
+
+def _resolved_points(configuration_id: str, configs: list) -> list:
+    """One configuration's points, each once, checked and its record built.
+
+    A point one yaml sweeps twice, or two of them, is one point with one
+    collection, and an online point stops at max_shots alone; either is
+    refused otherwise.
     """
-    configuration_id = run_folder.configuration_id(config)
+    made = []
+    for config in configs:
+        for task, collection in config.point_tasks():
+            made.append((config, task, collection))
+    point_tasks = [(task, settings) for _config, task, settings in made]
     collections = _collection_by_point(point_tasks)
-    unique = _unique_tasks(point_tasks)
-    for task in unique:
-        sections = config.resolved_sections(task.metadata)
+    resolved = {}
+    for config, task, _collection in made:
         point_id = task.strong_id()
-        facts = _experiment_facts(task, configuration_id, collections[point_id])
-        run_folder.record_point(experiment_dir, task, None, sections, facts)
-    run_folder.record_configuration(experiment_dir, config)
+        if point_id in resolved:
+            continue
+        settings = collections[point_id]
+        _check_the_stop_of_an_online_point(task, settings)
+        sections = config.resolved_sections(task.metadata)
+        facts = _experiment_facts(task, configuration_id, settings)
+        record = run_folder.point_record(task, None, sections, facts)
+        resolved[point_id] = _ResolvedPoint(
+            configuration_id, task, settings, record
+        )
+    resolved_points = resolved.values()
+    return list(resolved_points)
+
+
+def _write_the_records(
+    experiment_dir: pathlib.Path, accepted: list, configs_by_id: dict
+) -> None:
+    """The accepted points' records, and every yaml's configuration line."""
+    for resolved in accepted:
+        run_folder.write_point_record(
+            experiment_dir, resolved.task, resolved.record
+        )
+    for configs in configs_by_id.values():
+        for config in configs:
+            run_folder.record_configuration(experiment_dir, config)
+
+
+def _check_one_collection(
+    earlier: _ResolvedPoint, later: _ResolvedPoint
+) -> None:
+    """Two configurations of one point give it one collection, or refused."""
+    if earlier.settings == later.settings:
+        return
+    metadata = collect.metadata_text(later.task.metadata)
+    earlier_text = earlier.settings.text()
+    later_text = later.settings.text()
+    earlier_id = earlier.configuration_id[:8]
+    later_id = later.configuration_id[:8]
+    raise refusal.RefusalError(
+        f"the point {metadata} is in two configurations, {earlier_id} "
+        f"and {later_id}, that collect it two ways, {earlier_text} and "
+        f"{later_text}; a point stops by one rule"
+    )
+
+
+def _point_collection(
+    experiment_dir: pathlib.Path, resolved: _ResolvedPoint
+) -> PointCollection:
+    """A recorded point's collection state, its pieces sized by its rounds."""
+    point_id = resolved.record["id"]
+    rounds_per_shot = resolved.record["rounds_per_shot"]
+    settings = resolved.settings
+    piece_shots = settings.piece_shots(rounds_per_shot)
+    saved = pieces.saved_counts(experiment_dir, point_id)
+    return PointCollection(
+        resolved.task, settings, piece_shots, rounds_per_shot, saved
+    )
 
 
 def _experiment_facts(
@@ -622,27 +697,6 @@ def _refuse_two_collections(task: collect.Task, first, second) -> None:
         f"the point {metadata} is in two sweep blocks that collect it two "
         f"ways, {first_text} and {second_text}; a point stops by one rule"
     )
-
-
-def _point_collections(
-    experiment_dir: pathlib.Path, point_tasks: list, unique: list
-) -> list:
-    """Every point's collection state, its pieces sized by its rounds."""
-    collections = _collection_by_point(point_tasks)
-    records = run_folder.resolved_by_point(experiment_dir)
-    points = []
-    for task in unique:
-        point_id = task.strong_id()
-        settings = collections[point_id]
-        rounds_per_shot = records[point_id]["rounds_per_shot"]
-        _check_the_stop_of_an_online_point(task, settings)
-        piece_shots = settings.piece_shots(rounds_per_shot)
-        saved = pieces.saved_counts(experiment_dir, point_id)
-        point = PointCollection(
-            task, settings, piece_shots, rounds_per_shot, saved
-        )
-        points.append(point)
-    return points
 
 
 def _check_the_stop_of_an_online_point(

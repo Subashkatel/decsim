@@ -38,12 +38,10 @@ import pathlib
 import sys
 from typing import Optional
 
-import decsim.collect as collect
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.collection as collection
 import decsim.experiments.experiment as experiment
 import decsim.experiments.pieces as pieces
-import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.records.round_plans as round_plans
 
@@ -110,14 +108,17 @@ def plan_round(
 
     Every configuration's points are recorded first, so the tasks that
     run the round only read them. Yamls of one configuration id, which
-    split its sweep, are planned as one configuration.
+    split its sweep, are planned as one configuration, and a point two
+    configurations reach is planned once (collect_command.recorded_points).
     """
     experiment_dir.mkdir(parents=True, exist_ok=True)
     planned = pieces.planned_pieces(experiment_dir)
     bundles = []
     costs = {}
     configs_by_id = _configs_by_id(config_paths)
-    owned_points = _experiment_points(configs_by_id, experiment_dir)
+    owned_points = collect_command.recorded_points(
+        experiment_dir, configs_by_id
+    )
     for configuration_id, point in owned_points:
         point_id = point.task.strong_id()
         point_pieces = _next_pieces(
@@ -189,43 +190,6 @@ def _configs_by_id(config_paths: list) -> dict:
         configs = configs_by_id.setdefault(configuration_id, [])
         configs.append(config)
     return configs_by_id
-
-
-def _experiment_points(configs_by_id: dict, experiment_dir) -> list:
-    """Every point of the experiment once, with the configuration it is under.
-
-    Two configurations reach one point when their yamls differ only in a
-    setting both sweeps set. Its seeds run once, under the configuration
-    that recorded it last; two collections for it are refused, since a
-    point stops by one rule. Returns (configuration id, point) pairs.
-    """
-    owners = {}
-    for configuration_id, configs in configs_by_id.items():
-        points = collect_command.recorded_points(configs, experiment_dir)
-        for point in points:
-            point_id = point.task.strong_id()
-            owner = (configuration_id, point)
-            earlier = owners.get(point_id, owner)
-            _check_one_collection(earlier, owner)
-            owners[point_id] = owner
-    owned_points = owners.values()
-    return list(owned_points)
-
-
-def _check_one_collection(earlier: tuple, later: tuple) -> None:
-    """Two configurations of one point give it one collection, or refused."""
-    earlier_id, earlier_point = earlier
-    later_id, later_point = later
-    if earlier_point.settings == later_point.settings:
-        return
-    metadata = collect.metadata_text(later_point.task.metadata)
-    earlier_text = earlier_point.settings.text()
-    later_text = later_point.settings.text()
-    raise refusal.RefusalError(
-        f"the point {metadata} is in two configurations, {earlier_id[:8]} "
-        f"and {later_id[:8]}, that collect it two ways, {earlier_text} and "
-        f"{later_text}; a point stops by one rule"
-    )
 
 
 def _next_pieces(

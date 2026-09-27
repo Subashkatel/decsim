@@ -279,27 +279,40 @@ def record_point(
     task: collect.Task,
     seeds: Optional[list] = None,
     sections: Optional[Mapping] = None,
-    experiment_facts: Optional[Mapping] = None,
 ) -> str:
     """One sweep point's values and workload, named by its strong id.
 
-    resolved/<id>.json holds the metadata, the seed ranges run, the
-    sections the point's yaml resolved to (its axes placed and its
-    references resolved, as Hydra keeps each job's composed config in
-    .hydra/config.yaml), the maker the workload's row says it called with the
-    point's own arguments, every setting and the values the build
-    derives; a point a Python caller built has no sections. An
-    experiment's point also holds experiment_facts, what its fold needs
-    besides its pieces (collect_command). inputs/<id>/ holds the
-    workload as the files row reads it, with each file's sha256 in
-    hashes.json, so a rerun needs no maker installed. Returns the id.
+    point_record says what resolved/<id>.json holds; inputs/<id>/ holds
+    the workload as the files row reads it (write_point_record).
+    Returns the id.
     """
-    point_id = task.strong_id()
+    record = point_record(task, seeds, sections)
+    return write_point_record(run_dir, task, record)
+
+
+def point_record(
+    task: collect.Task,
+    seeds: Optional[list] = None,
+    sections: Optional[Mapping] = None,
+    experiment_facts: Optional[Mapping] = None,
+) -> dict:
+    """What resolved/<id>.json holds of one sweep point, built, not written.
+
+    The metadata, the seed ranges run, the sections the point's yaml
+    resolved to (its axes placed and its references resolved, as Hydra
+    keeps each job's composed config in .hydra/config.yaml), the maker
+    the workload's row says it called with the point's own arguments,
+    every setting and the values the build derives; a point a Python
+    caller built has no sections. An experiment's point also holds
+    experiment_facts, what its fold needs besides its pieces
+    (collect_command). Building runs the point's build, so a point the
+    build refuses is refused here, before anything is written.
+    """
     settings = task.settings
     shot_settings = task.shot_settings()
     maker = settings.workload.maker()
     resolved = {
-        "id": point_id,
+        "id": task.strong_id(),
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
         "sections": collect.json_value(sections),
@@ -310,14 +323,27 @@ def record_point(
     resolved["rounds_per_shot"] = _rounds_per_shot(resolved["built"])
     if experiment_facts is not None:
         resolved["experiment"] = collect.json_value(experiment_facts)
+    return resolved
+
+
+def write_point_record(
+    run_dir: pathlib.Path, task: collect.Task, record: dict
+) -> str:
+    """A point's record in resolved/<id>.json, and its workload in inputs/.
+
+    inputs/<id>/ holds the workload as the files row reads it, with each
+    file's sha256 in hashes.json, so a rerun needs no maker installed.
+    Returns the id.
+    """
+    point_id = record["id"]
     resolved_dir = run_dir / RESOLVED_FOLDER
     resolved_dir.mkdir(parents=True, exist_ok=True)
     resolved_path = resolved_dir / f"{point_id}.json"
-    write_json(resolved_path, resolved)
-    record = settings.workload.workload_record
-    if record is not None:
+    write_json(resolved_path, record)
+    workload_record = task.settings.workload.workload_record
+    if workload_record is not None:
         inputs_dir = run_dir / INPUTS_FOLDER / point_id
-        _write_inputs(inputs_dir, record)
+        _write_inputs(inputs_dir, workload_record)
     return point_id
 
 

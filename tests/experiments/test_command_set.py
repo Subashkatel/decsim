@@ -958,6 +958,43 @@ def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     assert raised_rows == whole_rows
 
 
+def test_a_resumed_collect_keeps_every_saved_shots_residence_rows(tmp_path):
+    """The uncut collect's residence.csv is the referent of a resumed one's.
+
+    Three traced shots in pieces of one; the first piece is lost, as a
+    killed job leaves it, and the collect run again runs it alone. Its
+    residence table still holds the rows of all three traced shots.
+    """
+    card = {
+        "observation": {"trace": "chrome", "trace_shots": [0, 1, 2]},
+        "sweep": [
+            {
+                "axes": NOISY_AXES,
+                "collection": {"max_shots": 3, "piece_rounds": 15},
+            }
+        ],
+    }
+    config_path = yaml_configs.write_config(tmp_path, card)
+    whole_dir = tmp_path / "whole"
+    resumed_dir = tmp_path / "resumed"
+    command.main(["collect", str(config_path), "--out", str(whole_dir)])
+    command.main(["collect", str(config_path), "--out", str(resumed_dir)])
+    (first_piece,) = resumed_dir.glob("pieces/*/0-0")
+    shutil.rmtree(first_piece)
+
+    command.main(["collect", str(config_path), "--out", str(resumed_dir)])
+
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    whole_path = whole_run_dir / "residence.csv"
+    whole_rows = _csv_rows(whole_path)
+    resumed_run_dir = yaml_configs.run_folder_of(resumed_dir)
+    resumed_path = resumed_run_dir / "residence.csv"
+    resumed_rows = _csv_rows(resumed_path)
+    seeds = {row["seed"] for row in resumed_rows}
+    assert seeds == {"0", "1", "2"}
+    assert resumed_rows == whole_rows
+
+
 def _sweep_row_of(run_dir) -> dict:
     """The one point's sweep.csv row, its cells read as numbers."""
     sweep_path = run_dir / "sweep.csv"

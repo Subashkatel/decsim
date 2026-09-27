@@ -22,9 +22,12 @@ import pathlib
 import statistics
 
 import decsim.config as config
+import decsim.experiments.fold as fold
 import decsim.experiments.report as report
 import decsim.experiments.trace_file as trace_file
 
+# a piece's own rows of its traced shots, which a fold gathers
+PIECE_FILE = "residence.csv"
 # what a row counts: a structure's residences, or a link path's moves
 RESIDENCE = "residence"
 LINK_PATH = "link_path"
@@ -44,6 +47,22 @@ def rows_of(measurements: list) -> list:
         document = trace_file.load(measurement.trace_path)
         for row in _rows_of_one_shot(measurement, document):
             rows.append(row)
+    return rows
+
+
+def rows_in(folders: list) -> list:
+    """The rows the pieces saved of their traced shots, piece by piece.
+
+    A piece keeps its own, so a collect that ran some pieces and found
+    the rest saved still tables every traced shot. The values stay the
+    text they were written as.
+    """
+    rows = []
+    for folder in folders:
+        path = pathlib.Path(folder) / PIECE_FILE
+        if path.is_file():
+            piece_rows = fold.row_stream(path)
+            rows.extend(piece_rows)
     return rows
 
 

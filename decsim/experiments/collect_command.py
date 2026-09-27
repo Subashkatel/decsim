@@ -192,7 +192,7 @@ def run_experiment(
     measure_shot = _shot_measure(unique, report_dir)
     swept = run_folder.swept_values(experiment_dir, point_ids)
     configuration_id = run_folder.configuration_id(config)
-    traced = _collect_until_stopped(
+    _collect_until_stopped(
         points,
         experiment_dir,
         configuration_id,
@@ -202,7 +202,7 @@ def run_experiment(
     )
     folders = pieces.folders_of(experiment_dir, point_ids)
     rows = _fold_the_pieces(experiment_dir, folders, points, report_dir)
-    residence_rows = residence.rows_of(traced)
+    residence_rows = residence.rows_in(folders)
     residence.write_residence(residence_rows, report_dir)
     plots.plots(report_dir)
     run_folder.finish_run(config, report_dir, point_ids, started_utc)
@@ -351,15 +351,13 @@ def _collect_until_stopped(
     measure_shot,
     swept: dict,
     processes: int,
-) -> list:
+) -> None:
     """Every point's pieces, a round at a time, until each has stopped.
 
     A round hands the pool about as many pieces as it has processes,
     shared among the points still running, so no point runs far past
-    its stop. Each piece names its configuration. Returns the traced
-    shots' measurements.
+    its stop. Each piece names its configuration.
     """
-    traced = []
     rounds_by_point = {}
     for point in points:
         point_id = point.task.strong_id()
@@ -369,12 +367,11 @@ def _collect_until_stopped(
         experiment_dir,
         configuration_id,
         rounds_by_point,
-        traced,
     )
     while True:
         units = _next_round(points, experiment_dir, processes)
         if not units:
-            return traced
+            return
         _run_the_pieces(units, measure_shot, swept, processes, save)
         for point in points:
             point.count_the_pending(experiment_dir)
@@ -425,10 +422,9 @@ def _run_the_pieces(
 ) -> None:
     """Each unit run, then handed to save, which writes it as a piece.
 
-    save keeps a unit's traced shots, which feed the residence table;
-    the rest of its measurements are its piece's files and are not
-    held. swept is each point's swept values, which an online threshold
-    record's rows carry.
+    A unit's measurements are its piece's files and are not held. swept
+    is each point's swept values, which an online threshold record's
+    rows carry.
     """
     report_dir = measure_shot.keywords["run_dir"]
     on_task_done = functools.partial(
@@ -447,11 +443,10 @@ def _save_the_piece(
     experiment_dir: pathlib.Path,
     configuration_id: str,
     rounds_by_point: dict,
-    traced: list,
     unit: collect.Unit,
     rows: list,
 ) -> None:
-    """One unit's measurements saved as its piece; its traced shots kept.
+    """One unit's measurements saved as its piece.
 
     The piece names its configuration and counts its rounds, since a
     shot's cost grows with its rounds.
@@ -463,9 +458,6 @@ def _save_the_piece(
         "rounds": rounds_per_shot * len(rows),
     }
     pieces.write(experiment_dir, point_id, unit.first_seed, rows, facts)
-    for measurement in rows:
-        if measurement.trace_path is not None:
-            traced.append(measurement)
 
 
 def _fold_the_pieces(

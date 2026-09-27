@@ -20,6 +20,7 @@ import shutil
 import uuid
 
 import decsim.experiments.report as report
+import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
 
 PIECES_FOLDER = "pieces"
@@ -53,6 +54,10 @@ def write(
     staging.mkdir(parents=True)
     record = report.record_of(measurements)
     report.write_record(record, staging, None)
+    residence_rows = residence.rows_of(measurements)
+    if residence_rows:
+        residence_path = staging / residence.PIECE_FILE
+        report.write_csv(residence_rows, residence_path)
     counts = _counts_of(record.shots)
     identity = run_folder.piece_identity()
     piece = {

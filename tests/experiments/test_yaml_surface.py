@@ -1073,21 +1073,53 @@ def test_a_run_with_an_online_threshold_records_its_trajectory(
     assert len(rows) == 1 and len(list(records)) == 1
 
 
-def test_an_extends_chain_names_each_file_by_its_plain_path():
-    """A base in a sibling folder is named without the `..` that reached it.
+def test_show_names_each_file_of_an_extends_chain_by_its_plain_path():
+    """A base in a sibling folder is shown without the `..` that reached it.
 
-    show prints the chain and every value's source line by these paths,
-    so configs/examples/two_tiers.yaml's base reads as
+    configs/examples/two_tiers.yaml's base reads as
     configs/bases/weak_decoder_baseline.yaml.
     """
     config_path = yaml_configs.CONFIGS_DIR / "examples" / "two_tiers.yaml"
     base_path = (
         yaml_configs.CONFIGS_DIR / "bases" / "weak_decoder_baseline.yaml"
     )
-
     config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    settings = task.settings
 
-    assert config.config_files == (config_path, base_path)
+    lines = experiment.resolved_description(config, settings)
+
+    assert lines[0] == f"config: {config_path} <- {base_path}"
+
+
+def test_a_base_past_a_linked_folder_is_the_one_the_filesystem_finds(
+    tmp_path,
+):
+    """`..` after a symbolic link names the link target's parent.
+
+    POSIX path resolution walks a link before the `..` that follows it
+    (IEEE 1003.1, 4.13), so a yaml reached through a linked folder
+    extends the base beside its real folder, as open() finds it.
+    """
+    nested = tmp_path / "real" / "nested"
+    nested.mkdir(parents=True)
+    logical = tmp_path / "logical"
+    logical.mkdir()
+    real_workload = yaml_configs.memory_workload(15)
+    logical_workload = yaml_configs.memory_workload(30)
+    base_path = yaml_configs.write_config(
+        nested.parent, {"workload": real_workload}
+    )
+    yaml_configs.write_config(logical, {"workload": logical_workload})
+    child_path = nested / "run.yaml"
+    child_path.write_text(f"extends: ../{base_path.name}\n")
+    linked = logical / "linked"
+    linked.symlink_to(nested, target_is_directory=True)
+    linked_child = linked / "run.yaml"
+
+    config = experiment.load_experiment(linked_child)
+
+    assert config.sections["workload"] == real_workload
 
 
 def test_two_config_files_of_one_name_are_both_copied(tmp_path):

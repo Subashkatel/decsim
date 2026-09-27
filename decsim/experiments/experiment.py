@@ -401,7 +401,8 @@ def _files_line(config: ExperimentConfig) -> str:
     """The files this config was read from, nearest first."""
     names = []
     for path in config.config_files:
-        names.append(str(path))
+        shown_path = _plain_path(path)
+        names.append(str(shown_path))
     joined = " <- ".join(names)
     return f"config: {joined}"
 
@@ -457,8 +458,7 @@ def _yaml_sections(path: pathlib.Path) -> tuple:
     folders = dict.fromkeys(sections, path.parent)
     if base_name is None:
         return sections, folders, (path,)
-    written_path = path.parent / base_name
-    base_path = _plain_path(written_path)
+    base_path = path.parent / base_name
     base_sections, base_folders, base_paths = _yaml_sections(base_path)
     base_sections.update(sections)
     base_folders.update(folders)
@@ -467,11 +467,12 @@ def _yaml_sections(path: pathlib.Path) -> tuple:
 
 
 def _plain_path(path: pathlib.Path) -> pathlib.Path:
-    """The path with each `..` taken out against the folder before it.
+    """The path as show prints it, each `..` taken out lexically.
 
-    Lexical, as os.path.normpath is, so a relative path stays relative
-    and show prints configs/bases/x.yaml rather than
-    configs/examples/../bases/x.yaml.
+    configs/examples/../bases/x.yaml prints as configs/bases/x.yaml. It
+    names the file for a reader only: past a symbolic link the two can
+    be different files, so a file is always opened by the path as
+    written, which the filesystem resolves (_yaml_sections).
     """
     plain = os.path.normpath(path)
     return pathlib.Path(plain)
@@ -587,7 +588,8 @@ def _written_keys(config: ExperimentConfig) -> dict:
         layer = f"preset {path.name}"
         if path == your_file:
             layer = "your file"
-        file_keys = _key_lines(path, path, layer)
+        shown_path = _plain_path(path)
+        file_keys = _key_lines(path, shown_path, layer)
         _forget_the_sections_of(written, file_keys)
         written.update(file_keys)
     return written

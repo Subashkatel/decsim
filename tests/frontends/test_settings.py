@@ -43,36 +43,27 @@ def rounds_from_keywords(distance, physical_error_probability, **options):
     return workload_records.Workload((operation,), {1: rounds})
 '''
 
-
-def _outside_package(tmp_path, monkeypatch) -> None:
-    """A package outside decsim that holds two makers."""
-    package = tmp_path / "outside_makers"
-    package.mkdir()
-    init_path = package / "__init__.py"
-    init_path.write_text("")
-    module_path = package / "makers.py"
-    maker_text = textwrap.dedent(OUTSIDE_MAKER)
-    module_path.write_text(maker_text)
-    monkeypatch.syspath_prepend(str(tmp_path))
-
-
 # A point that sets the distance only, for a maker that takes no error
 # rate, and one that sets both, for Stim's memory circuit.
 AT_DISTANCE_3 = {"qpu.distance": 3}
+
 AT_DISTANCE_3_AND_P = {
     "qpu.distance": 3,
     "workload.arguments.physical_error_probability": 0.001,
 }
 
-
-def _point(config_path, values):
-    config = experiment.load_experiment(config_path)
-    task = config.point_task(values)
-    return task.settings
-
-
-def _producer(function: str, arguments: dict) -> dict:
-    return {"kind": "producer", "function": function, "arguments": arguments}
+# The audit's merge probe: two memories, their merge, a measurement, as
+# an operation list with kinds and no circuit, run on the code card's
+# timing alone. The merge's predecessors come from patch order.
+MERGE_OPERATIONS = {
+    "schema": "decsim.ops/1",
+    "operations": [
+        {"id": 1, "name": "mem0", "patches": [0], "kind": "MEMORY"},
+        {"id": 2, "name": "mem1", "patches": [1], "kind": "MEMORY"},
+        {"id": 3, "name": "merge01", "patches": [0, 1], "kind": "MERGE"},
+        {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"},
+    ],
+}
 
 
 def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
@@ -197,35 +188,6 @@ def test_a_shot_of_fewer_than_one_round_is_refused_at_the_point(
         _point(config_path, AT_DISTANCE_3_AND_P)
 
 
-# The audit's merge probe: two memories, their merge, a measurement, as
-# an operation list with kinds and no circuit, run on the code card's
-# timing alone. The merge's predecessors come from patch order.
-MERGE_OPERATIONS = {
-    "schema": "decsim.ops/1",
-    "operations": [
-        {"id": 1, "name": "mem0", "patches": [0], "kind": "MEMORY"},
-        {"id": 2, "name": "mem1", "patches": [1], "kind": "MEMORY"},
-        {"id": 3, "name": "merge01", "patches": [0, 1], "kind": "MERGE"},
-        {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"},
-    ],
-}
-
-
-def _write_json(folder, name: str, value) -> None:
-    text = json.dumps(value)
-    path = folder / name
-    path.write_text(text)
-
-
-def _files_config(tmp_path, workload: dict, qpu_kind="timing_only"):
-    card = {
-        "workload": workload,
-        "qpu": {"kind": qpu_kind},
-        "sweep": yaml_configs.QPU_ONLY_SWEEP,
-    }
-    return yaml_configs.write_config(tmp_path, card)
-
-
 def test_the_merge_probe_runs_from_an_operations_file(tmp_path):
     """Paths are read from the yaml's folder, not the working directory."""
     _write_json(tmp_path, "merge.json", MERGE_OPERATIONS)
@@ -337,6 +299,43 @@ def test_an_operations_file_of_another_schema_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match="is not a decsim.ops/1 operation"):
         _point(config_path, AT_DISTANCE_3)
+
+
+def _outside_package(tmp_path, monkeypatch) -> None:
+    """A package outside decsim that holds two makers."""
+    package = tmp_path / "outside_makers"
+    package.mkdir()
+    init_path = package / "__init__.py"
+    init_path.write_text("")
+    module_path = package / "makers.py"
+    maker_text = textwrap.dedent(OUTSIDE_MAKER)
+    module_path.write_text(maker_text)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+
+def _point(config_path, values):
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(values)
+    return task.settings
+
+
+def _producer(function: str, arguments: dict) -> dict:
+    return {"kind": "producer", "function": function, "arguments": arguments}
+
+
+def _write_json(folder, name: str, value) -> None:
+    text = json.dumps(value)
+    path = folder / name
+    path.write_text(text)
+
+
+def _files_config(tmp_path, workload: dict, qpu_kind="timing_only"):
+    card = {
+        "workload": workload,
+        "qpu": {"kind": qpu_kind},
+        "sweep": yaml_configs.QPU_ONLY_SWEEP,
+    }
+    return yaml_configs.write_config(tmp_path, card)
 
 
 def _point_id_of_the_merge_files_in(folder: pathlib.Path) -> str:

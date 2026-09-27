@@ -58,6 +58,9 @@ class Task:
     metadata: Mapping[str, Any]
     online_threshold: Optional[Any] = None
 
+    def __post_init__(self):
+        _refuse_a_key_that_is_not_text(self.metadata, "metadata")
+
     def strong_id(self) -> str:
         """sha256 of the json text of the settings and the metadata."""
         value = {
@@ -358,6 +361,28 @@ def _json_mapping(mapping: Mapping) -> dict:
     for key, item in mapping.items():
         items[str(key)] = json_value(item)
     return items
+
+
+def _refuse_a_key_that_is_not_text(value: Any, where: str) -> None:
+    """The id is json of the metadata, whose keys are text, at any depth.
+
+    A yaml point is refused by its reader; a Python caller's metadata
+    enters here, so 1 and "1" cannot name one point.
+    """
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _refuse_a_key_that_is_not_text(item, where)
+        return
+    if not isinstance(value, Mapping):
+        return
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError(
+                f"{where} holds the key {key!r}, which is not text; a "
+                "point's id is the json of its metadata, whose keys are "
+                f"text, so {key!r} and {str(key)!r} would name one point"
+            )
+        _refuse_a_key_that_is_not_text(item, f"{where}.{key}")
 
 
 def _json_list(sequence) -> list:

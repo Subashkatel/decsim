@@ -704,6 +704,30 @@ def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("metadata", "sentence_start"),
+    [
+        ({1: "value"}, "metadata holds the key 1,"),
+        ({"nested": {1: "value"}}, "metadata.nested holds the key 1,"),
+        ({"listed": [{1: "value"}]}, "metadata.listed holds the key 1,"),
+    ],
+)
+def test_a_metadata_key_that_is_not_text_is_refused_at_any_depth(
+    metadata, sentence_start
+):
+    """A Python caller's metadata, where a yaml reader cannot refuse it."""
+    config = experiment.load_experiment(REFERENCE_YAML)
+    first_point = config.first_point_task()
+    sentence = (
+        f"{sentence_start} which is not text; a point's id is the json of "
+        "its metadata, whose keys are text, so 1 and '1' would name one point"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        collect.Task(first_point.settings, 1, metadata)
+
+
 # Each number beside the json value it enters the strong id as.
 EXACT_NUMBERS = [
     (fractions.Fraction(80, 11), "80/11"),

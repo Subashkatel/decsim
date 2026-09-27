@@ -251,11 +251,14 @@ def has_feedback(plan) -> bool:
 def process_name(
     settings: machine_settings.MachineSettings, seed: Optional[int]
 ) -> str:
-    """The point the trace is of, so two files are told apart at a glance."""
+    """The machine the trace is of: its escalation, code distance and seed.
+
+    The machine knows no sweep, so the point's other values name the
+    trace's file (experiments/measure.py shot_label) and not this line.
+    """
     kind = settings.escalation.kind
     distance = settings.qpu.distance
-    probability = settings.workload.physical_error_probability
-    return f"decsim {kind} d{distance} p{probability} seed{seed}"
+    return f"decsim {kind} d{distance} seed{seed}"
 
 
 def check_strong_route(escalation_policy, router) -> None:

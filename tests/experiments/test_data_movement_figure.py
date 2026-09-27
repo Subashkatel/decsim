@@ -1,4 +1,4 @@
-"""The data-movement figure: bits per shot by memory class, against d.
+"""The data-movement figure: bits per shot by memory class, against x.
 
 The figure's contract: one panel per run folder, one line per memory
 class and per quantity that has bits, read from that folder's
@@ -29,6 +29,9 @@ COUNTING_SWEEP = {
 }
 
 
+BY_DISTANCE = plots.Selection("distance", None, {})
+
+
 def counting_run(tmp_path, out_name):
     """One small counting run, in a folder of its own."""
     config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
@@ -40,7 +43,7 @@ def counting_run(tmp_path, out_name):
 def test_a_class_series_is_that_classs_bits_at_each_swept_distance(tmp_path):
     run_dir = counting_run(tmp_path, "one")
 
-    series = plots.memory_class_series(run_dir)
+    series = plots.memory_class_series(run_dir, BY_DISTANCE)
 
     assert series["on_chip"]["copied"][0] == [3, 5]
     assert series["on_board"]["copied"][0] == [3, 5]
@@ -57,7 +60,7 @@ def test_an_off_board_hop_of_this_machine_moves_and_never_copies(tmp_path):
     """Its copied series is empty, so no zero is drawn on the log axis."""
     run_dir = counting_run(tmp_path, "one")
 
-    series = plots.memory_class_series(run_dir)
+    series = plots.memory_class_series(run_dir, BY_DISTANCE)
 
     assert series["off_board"]["copied"] == ([], [])
     assert series["off_board"]["moved"][0] == [3, 5]
@@ -66,7 +69,7 @@ def test_an_off_board_hop_of_this_machine_moves_and_never_copies(tmp_path):
 def test_the_classes_are_listed_cheapest_first(tmp_path):
     run_dir = counting_run(tmp_path, "one")
 
-    series = plots.memory_class_series(run_dir)
+    series = plots.memory_class_series(run_dir, BY_DISTANCE)
 
     assert list(series) == ["on_chip", "on_board", "off_board"]
 
@@ -75,7 +78,7 @@ def test_the_figure_is_drawn_from_one_run_folder(tmp_path):
     run_dir = counting_run(tmp_path, "one")
     figure_path = tmp_path / "data_movement.png"
 
-    plots.figure("data_movement", [run_dir], figure_path)
+    plots.figure("data_movement", [run_dir], figure_path, BY_DISTANCE)
 
     assert figure_path.exists()
 
@@ -85,7 +88,8 @@ def test_the_figure_is_drawn_from_several_study_folders(tmp_path):
     second_dir = counting_run(tmp_path, "second")
     figure_path = tmp_path / "data_movement.png"
 
-    plots.figure("data_movement", [first_dir, second_dir], figure_path)
+    run_dirs = [first_dir, second_dir]
+    plots.figure("data_movement", run_dirs, figure_path, BY_DISTANCE)
 
     assert figure_path.exists()
 
@@ -110,4 +114,4 @@ def test_a_run_that_counted_no_movement_is_refused(tmp_path):
     figure_path = tmp_path / "data_movement.png"
 
     with pytest.raises(refusal.RefusalError, match="data_movement.csv"):
-        plots.figure("data_movement", [run_dir], figure_path)
+        plots.figure("data_movement", [run_dir], figure_path, BY_DISTANCE)

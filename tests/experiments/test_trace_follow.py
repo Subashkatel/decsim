@@ -266,7 +266,7 @@ def test_the_command_prints_the_table_and_writes_the_page(trace_path, tmp_path):
 
     written = page_path.read_text()
     assert "<table>" in written
-    assert "d3 p0.003 seed0" in written
+    assert "d3 seed0" in written
 
 
 def test_a_command_line_naming_neither_a_round_nor_a_window_is_refused():

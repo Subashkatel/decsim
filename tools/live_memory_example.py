@@ -51,14 +51,15 @@ def main() -> None:
         decoder_microseconds=arguments.decoder_microseconds,
     )
     machine = machine_module.Machine.build(settings, arguments.seed)
-    started_utc = run_folder.start_run(None, arguments.output)
     metadata = {
         "physical_error_probability": parameters["physical_error_probability"],
         "distance": parameters["distance"],
         "round_period_microseconds": parameters["round_period_microseconds"],
     }
-    seeds = [(arguments.seed, 1)]
     task = collect.Task(settings, 1, metadata)
+    point_ids = [task.strong_id()]
+    started_utc = run_folder.start_run(None, arguments.output, point_ids)
+    seeds = [(arguments.seed, 1)]
     run_folder.record_point(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
@@ -70,7 +71,7 @@ def main() -> None:
     argument_path = arguments.output / "arguments.json"
     argument_json = collect.json_value(argument_values)
     run_folder.write_json(argument_path, argument_json)
-    run_folder.finish_run(None, arguments.output, started_utc)
+    run_folder.finish_run(None, arguments.output, point_ids, started_utc)
     print(f"complete: {arguments.output}")
 
 

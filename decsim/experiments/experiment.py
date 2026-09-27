@@ -17,9 +17,7 @@ from typing import Optional
 
 import yaml
 
-import decsim.build.escalation as escalation_build
 import decsim.collect as collect
-import decsim.decoders.settings as decoder_settings
 import decsim.experiments.refusal as refusal
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
@@ -184,17 +182,6 @@ class ExperimentConfig:
         with _refused_in(path):
             return self.settings.workload.at_point(sweep_values)
 
-    @property
-    def active_tier(self) -> str:
-        """The tier that decodes the plan's windows: weak or strong."""
-        return escalation_build.primary_tier(self.settings.escalation)
-
-    @property
-    def active_decoder(self) -> decoder_settings.DecoderSettings:
-        """The decoder card of the tier that decodes the plan's windows."""
-        tier = self.active_tier
-        return self.settings.decoder_settings_for(tier)
-
 
 def resolved_description(config: ExperimentConfig) -> list:
     """What one yaml really says, after its extends chain is applied.
@@ -260,24 +247,6 @@ def value_leaves(value, path: tuple) -> list:
     return leaves
 
 
-def task_positions(recorded_sweep: list) -> dict:
-    """Each sweep point's place in the task order of a recorded sweep.
-
-    A run folder's manifest records the resolved config
-    (decsim/experiments/run_folder.py write_manifest), so the sweep's own task
-    order is recoverable from the folder alone, without the yaml and
-    whatever order the folders are named in. It is the order tasks()
-    makes: the blocks in order, each block its cross product, a point
-    named twice keeping its first place (decsim/collect.py unique_tasks
-    merges the repeat away).
-    """
-    positions = {}
-    for recorded_block in recorded_sweep:
-        block = _recorded_block(recorded_block)
-        _place_a_blocks_points(positions, block)
-    return positions
-
-
 def load_experiment(path) -> ExperimentConfig:
     """Read one yaml file, its extends chain applied, into settings."""
     path = pathlib.Path(path)
@@ -336,28 +305,6 @@ def _refused_in(path: pathlib.Path):
         yield
     except ValueError as refused:
         raise refusal.RefusalError(f"{path}: {refused}") from refused
-
-
-def _place_a_blocks_points(positions: dict, block: SweepBlock) -> None:
-    """One block's points, each keeping the first place it was given."""
-    for point in block.points():
-        if point in positions:
-            continue
-        positions[point] = len(positions)
-
-
-def _recorded_block(recorded_block: dict) -> SweepBlock:
-    """One sweep block as a manifest's resolved config recorded it."""
-    return SweepBlock(
-        physical_error_probabilities=tuple(
-            recorded_block["physical_error_probabilities"]
-        ),
-        distances=tuple(recorded_block["distances"]),
-        round_periods_microseconds=tuple(
-            recorded_block["round_periods_microseconds"]
-        ),
-        shots=recorded_block["shots"],
-    )
 
 
 def _files_line(config: ExperimentConfig) -> str:

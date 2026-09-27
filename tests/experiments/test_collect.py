@@ -14,7 +14,10 @@ stores never sees, and four more when the park was split by cause: this sweep's
 one unit is always free by the time a window's boundary is in, so its
 compute_wait is zero on every window of both recorded runs. Four more came with
 the confidence step, which a weak-baseline sweep answers on its decode and
-never spends. The weak
+never spends. Its first four columns became the point's metadata and
+algorithm when a point came to be named by its id: the id hashes the
+tree's settings records, not a measured value, so it is left out of the
+comparison. The weak
 decoder of
 reference.yaml is pymatching, which prices its measured wall clock, so the
 columns that carry decode time (algorithm, service, queue wait, the park
@@ -132,6 +135,15 @@ def _stable_columns(row: dict) -> dict:
     return stable
 
 
+def _without_point_id(rows: list) -> list:
+    kept = []
+    for row in rows:
+        without = dict(row)
+        del without["point_id"]
+        kept.append(without)
+    return kept
+
+
 def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     config = experiment.load_experiment(REFERENCE_YAML)
     tasks = config.tasks()
@@ -145,9 +157,12 @@ def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     links_path = DATA / "reference_links.csv"
     sweep_before = _csv_rows(sweep_path)
     links_before = _csv_rows(links_path)
-    assert len(sweep_now) == 1
-    assert _stable_columns(sweep_now[0]) == _stable_columns(sweep_before[0])
-    assert links_now == links_before
+    sweep_measured = _without_point_id(sweep_now)
+    links_measured = _without_point_id(links_now)
+    assert len(sweep_measured) == 1
+    stable_now = _stable_columns(sweep_measured[0])
+    assert stable_now == _stable_columns(sweep_before[0])
+    assert links_measured == links_before
 
 
 def test_a_task_named_by_two_blocks_runs_once(tmp_path):

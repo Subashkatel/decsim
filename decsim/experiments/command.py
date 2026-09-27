@@ -11,7 +11,8 @@ loads Stim. The console script and `python -m decsim` both land here.
     decsim combine <run_dir>... [--out DIR]
     decsim show <yaml>
     decsim diff <run_dir> <run_dir>
-    decsim plot <run_dir>... [--figure NAME] [--out PATH] [--probability P]
+    decsim plot <run_dir>... [--figure NAME] [--out PATH] [--x PATH]
+        [--group PATH] [--where PATH=VALUE]...
     decsim trace follow <file> --round k:n | --window k:n [--html PATH]
 
 What the experiments layer refuses reaches the user as one sentence and
@@ -175,16 +176,47 @@ def _plot(argv: list) -> None:
     )
     parser.add_argument("--out", default=None, help="where the figure goes")
     parser.add_argument(
-        "--probability",
-        type=float,
+        "--x", default=None, help="the swept setting's yaml path on x"
+    )
+    parser.add_argument(
+        "--group",
         default=None,
-        help="the physical error rate the ler_vs_d figure is drawn at",
+        help="the swept setting's yaml path a curve is drawn per value of",
+    )
+    parser.add_argument(
+        "--where",
+        action="append",
+        default=[],
+        help="PATH=VALUE: keep the points whose sweep set PATH to VALUE",
     )
     parsed = parser.parse_args(argv)
+    where = _where_of(parsed.where)
+    selection = plots.Selection(parsed.x, parsed.group, where)
     out_path = plots.figure(
-        parsed.figure, parsed.run_dirs, parsed.out, parsed.probability
+        parsed.figure, parsed.run_dirs, parsed.out, selection
     )
     print(out_path)
+
+
+def _where_of(texts: list) -> dict:
+    """The --where arguments as {path: value}, each value read as yaml.
+
+    A value means what it means in a sweep's yaml, so 5 is a whole
+    number, 0.001 a float and X a word, and it matches the metadata the
+    yaml's axis wrote.
+    """
+    import yaml
+
+    where = {}
+    for text in texts:
+        path, separator, value_text = text.partition("=")
+        if not separator:
+            raise refusal.RefusalError(
+                f"--where {text} names no value; write --where PATH=VALUE, "
+                "as in --where qpu.distance=5"
+            )
+        where[path] = yaml.safe_load(value_text)
+    return where
 
 
 def _trace(argv: list) -> None:

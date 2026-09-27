@@ -39,7 +39,9 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | `run_dirs` | required | the folders to read |
 | `--figure` | 'timeline' | which figure to draw |
 | `--out` | None | where the figure goes |
-| `--probability` | None | the physical error rate the ler_vs_d figure is drawn at |
+| `--x` | None | the swept setting's yaml path on x |
+| `--group` | None | the swept setting's yaml path a curve is drawn per value of |
+| `--where` | [] | PATH=VALUE: keep the points whose sweep set PATH to VALUE |
 
 ## `decsim run`
 

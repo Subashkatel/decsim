@@ -75,7 +75,9 @@ def run_experiment(
         return run_dir, []
     how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
     tasks = config.tasks()
-    started_utc = _start_the_run_folder(config, run_dir, tasks, how_it_ran)
+    point_ids = _point_ids(tasks)
+    started_utc = run_folder.start_run(config, run_dir, point_ids, **how_it_ran)
+    _record_the_points(config, run_dir, tasks, **how_it_ran)
     _echo_description(config, run_dir, shard)
     measurements = run_sweep(
         tasks,
@@ -86,25 +88,28 @@ def run_experiment(
     )
     if not measurements:
         _report_no_work_unit()
-        run_folder.finish_run(config, run_dir, started_utc, **how_it_ran)
+        run_folder.finish_run(
+            config, run_dir, point_ids, started_utc, **how_it_ran
+        )
         return run_dir, []
     record = report.record_of(measurements)
     rows = report.summarize(record.shots, record.window_samples)
     report.write_report(rows, run_dir, record)
     residence_rows = residence.rows_of(measurements)
     residence.write_residence(residence_rows, run_dir)
-    plots.plots(config, rows, run_dir, measurements)
-    run_folder.finish_run(config, run_dir, started_utc, **how_it_ran)
+    plots.plots(run_dir)
+    run_folder.finish_run(config, run_dir, point_ids, started_utc, **how_it_ran)
     return run_dir, rows
 
 
-def _start_the_run_folder(
-    config, run_dir: pathlib.Path, tasks: list, how_it_ran: dict
-) -> str:
-    """Everything a run folder holds before its first shot; the start time."""
-    started_utc = run_folder.start_run(config, run_dir, **how_it_ran)
-    _record_the_points(config, run_dir, tasks, **how_it_ran)
-    return started_utc
+def _point_ids(tasks: list) -> list:
+    """The sweep's point ids in task order, a point named twice once."""
+    unique = collect.unique_tasks(tasks)
+    point_ids = []
+    for task in unique:
+        point_id = task.strong_id()
+        point_ids.append(point_id)
+    return point_ids
 
 
 def _record_the_points(
@@ -176,38 +181,22 @@ def _report_point_done(
     task: collect.Task, run_dir: Optional[pathlib.Path] = None
 ) -> None:
     """The progress line, and the online threshold's record when it ran."""
-    point = task.metadata
-    physical_error_probability = point["physical_error_probability"]
-    distance = point["distance"]
-    round_period_microseconds = point["round_period_microseconds"]
-    print(
-        f"p {physical_error_probability}, d {distance}, "
-        f"round period {round_period_microseconds} us: {task.shots} shots done",
-        file=sys.stderr,
-    )
+    metadata = collect.metadata_text(task.metadata)
+    print(f"{metadata}: {task.shots} shots done", file=sys.stderr)
     if task.online_threshold is not None:
-        _write_online_threshold_record(
-            task.online_threshold,
-            run_dir,
-            physical_error_probability=physical_error_probability,
-            distance=distance,
-            round_period_microseconds=round_period_microseconds,
-        )
+        point_id = task.strong_id()
+        _write_online_threshold_record(task.online_threshold, run_dir, point_id)
 
 
 def _write_online_threshold_record(
-    calibrator,
-    run_dir: Optional[pathlib.Path],
-    *,
-    physical_error_probability: float,
-    distance: int,
-    round_period_microseconds: float,
+    calibrator, run_dir: Optional[pathlib.Path], point_id: str
 ) -> None:
     """One csv per sweep point with the online threshold's trajectory.
 
     Every audit and target move, plus every 100th window, and a summary
     line on stderr. The gap unit inside the calibrator is nats; the csv
-    converts to the paper's decibels.
+    converts to the paper's decibels. The file is named by the point's
+    id, as its resolved/ record is.
     """
     summary = calibrator.summary()
     final_threshold_nats = summary["threshold"]
@@ -216,10 +205,7 @@ def _write_online_threshold_record(
     print(summary_line, file=sys.stderr)
     if run_dir is None:
         return
-    record_path = pathlib.Path(run_dir) / (
-        f"online_threshold_p{physical_error_probability}_d{distance}"
-        f"_round{round_period_microseconds}us.csv"
-    )
+    record_path = pathlib.Path(run_dir) / f"online_threshold_{point_id}.csv"
     with open(record_path, "w", newline="") as record_file:
         writer = csv.writer(record_file)
         writer.writerow(["window_count", "threshold_db", "event"])

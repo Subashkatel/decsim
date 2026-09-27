@@ -74,7 +74,11 @@ def main() -> None:
     machine = machine_module.Machine.build(settings, arguments.seed)
     prepared = time.perf_counter()
     setup_seconds = prepared - started
-    started_utc = _start_the_run_folder(arguments, settings)
+    task = _point_task(arguments, settings)
+    point_ids = [task.strong_id()]
+    started_utc = run_folder.start_run(None, arguments.output, point_ids)
+    seeds = [(arguments.seed, 1)]
+    run_folder.record_point(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
     run_command.write_shot(machine, settings, arguments.output, label, result)
@@ -84,7 +88,7 @@ def main() -> None:
     run_folder.write_json(argument_path, argument_values)
     setup_path = arguments.output / "setup_seconds.json"
     run_folder.write_json(setup_path, setup_seconds)
-    run_folder.finish_run(None, arguments.output, started_utc)
+    run_folder.finish_run(None, arguments.output, point_ids, started_utc)
     print(f"complete: {arguments.output}; setup {setup_seconds:.6f} seconds")
 
 
@@ -324,19 +328,14 @@ def _check_replay_parameter(input_folder, name, selected, recorded) -> None:
         raise ValueError(f"{name} differs from the exported circuit parameters")
 
 
-def _start_the_run_folder(arguments, settings) -> str:
-    """The manifest and the run's resolved values, before the shot runs."""
-    folder = arguments.output
-    started_utc = run_folder.start_run(None, folder)
+def _point_task(arguments, settings) -> collect.Task:
+    """The run's one point, its values the command line's."""
     metadata = {
         "physical_error_probability": arguments.probability,
         "distance": arguments.distance,
         "round_period_microseconds": arguments.period_microseconds,
     }
-    seeds = [(arguments.seed, 1)]
-    task = collect.Task(settings, 1, metadata)
-    run_folder.record_point(folder, task, seeds)
-    return started_utc
+    return collect.Task(settings, 1, metadata)
 
 
 if __name__ == "__main__":

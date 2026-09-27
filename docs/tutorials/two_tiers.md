@@ -169,9 +169,9 @@ it finishes, then the summary. This is the summary:
 
 ```
 distance: 3
-physical error rate: 0.008
+physical_error_probability: 0.008
+round_period_microseconds: 1.0
 algorithm: 1 us
-round period: 1 us
 load (service per window / window inter-arrival): 3.67
 logical failures: 15 of 50 shots
 mismatches vs direct PyMatching: 0
@@ -181,9 +181,9 @@ service time per window, mean: 5.941 us
 ready to frame commit: median 28.900 us, p99 79.656 us
 
 distance: 5
-physical error rate: 0.008
+physical_error_probability: 0.008
+round_period_microseconds: 1.0
 algorithm: 1 us
-round period: 1 us
 load (service per window / window inter-arrival): 2.54
 logical failures: 16 of 50 shots
 mismatches vs direct PyMatching: 0
@@ -221,7 +221,7 @@ decsim run configs/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
 
 ```
 config: two_tiers
-point: p0.008 d3 round period 1 us seed 1
+point: {"distance": 3, "physical_error_probability": 0.008, "round_period_microseconds": 1.0} seed 1
 terminal status: complete
 execution done: 30000000 ticks
 fully done: 80316000 ticks
@@ -233,12 +233,12 @@ run dir: results/two_tiers_shot
 
 ```bash
 decsim trace follow \
-  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/*_seed1.trace.json \
   --window 1:0
 ```
 
 ```
-window 1:0 of decsim switching d3 p0.008 seed1
+window 1:0 of decsim switching d3 seed1
 
 tick (us)  where                        what                                                          dur (us)  transfer  bits
 6.008      Window planner               W0 ready
@@ -289,12 +289,12 @@ costs.
 
 ```bash
 decsim trace follow \
-  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/*_seed1.trace.json \
   --window 1:3
 ```
 
 ```
-window 1:3 of decsim switching d3 p0.008 seed1
+window 1:3 of decsim switching d3 seed1
 
 tick (us)  where                            what                                                           dur (us)  transfer  bits
 15.008     Window planner                   W3 ready
@@ -391,12 +391,12 @@ The window behind it waits for that boundary. Follow window 4:
 
 ```bash
 decsim trace follow \
-  results/two_tiers_shot/trace/p0.008_d3_algo1.0_round1us_seed1.trace.json \
+  results/two_tiers_shot/trace/*_seed1.trace.json \
   --window 1:4
 ```
 
 ```
-window 1:4 of decsim switching d3 p0.008 seed1
+window 1:4 of decsim switching d3 seed1
 
 tick (us)  where                            what                                                           dur (us)  transfer  bits
 18.008     Window planner                   W4 ready

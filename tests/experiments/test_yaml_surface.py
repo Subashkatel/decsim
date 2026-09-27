@@ -7,10 +7,12 @@ and a run writes its manifest and its per-shot records.
 """
 
 import dataclasses
+import json
 
 import pytest
 import yaml
 
+import decsim.build.escalation as escalation_build
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
@@ -29,7 +31,7 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     settings = config.settings
     assert settings.weak_decoder.kind == "pymatching"
     assert settings.strong_decoder.kind == "belief_matching"
-    assert config.active_decoder is settings.weak_decoder
+    assert escalation_build.primary_tier(settings.escalation) == "weak"
     # engine cycles price on a named domain, resolved once like the links
     assert settings.weak_decoder.engine.clock == settings.clocks.clock("fridge")
     assert settings.strong_decoder.engine.clock == settings.clocks.clock("room")
@@ -54,7 +56,7 @@ def test_the_reference_controller_charges_the_traced_issue_pipeline():
 def test_every_shipped_config_loads(name):
     config_path = yaml_configs.CONFIGS_DIR / name
     config = experiment.load_experiment(config_path)
-    assert config.active_decoder is not None
+    assert config.sweep
 
 
 @pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
@@ -712,7 +714,8 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         round_period_microseconds=1.0,
         seed=0,
     )
-    assert measurement.distance == 5
+    metadata = json.loads(measurement.metadata)
+    assert metadata["distance"] == 5
     assert measurement.windows > 5
 
 
@@ -720,7 +723,6 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     # One tiny run end to end: a timestamped run dir with manifest.json,
     # the config copy, shots.csv, sweep.csv and links.csv.
     import csv
-    import json
 
     config_path = yaml_configs.write_config(tmp_path, {})
     monkeypatch.chdir(tmp_path)

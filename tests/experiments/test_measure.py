@@ -27,6 +27,7 @@ Python through the circuit_list row, on a fabric whose only priced hop
 is the decoder-to-decoder seam.
 """
 
+import dataclasses
 import math
 from typing import Optional
 
@@ -1519,8 +1520,16 @@ def test_a_shot_with_no_burst_records_no_flag_and_no_catch(tmp_path, qpu):
 
 
 def test_the_point_holds_the_shares_flagged_and_caught_in_time(tmp_path):
+    """Two shots, one caught in time, folded as one point's shots.
+
+    The two deadlines are two settings, so two points; the late shot
+    takes the caught shot's point id to be summed with it.
+    """
     caught = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
-    late = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
+    late_alone = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
+    late = dataclasses.replace(
+        late_alone, point_id=caught.point_id, metadata=caught.metadata
+    )
     quiet = burst_detector_shot(tmp_path, 0.0)
     burst_record = report.record_of([caught, late])
     quiet_record = report.record_of([quiet])

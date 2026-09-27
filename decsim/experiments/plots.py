@@ -1,27 +1,32 @@
 """The experiment figures.
 
-timeline.png   one traced shot, read from its Chrome trace file: every
-               stage of every window on its own row, in real time, the
-               weak baseline's figure style (commit reads solid, buffer
-               reads lighter, geometry in the subtitle). `decsim run
-               --trace`, or `trace: chrome` in the observation section,
-               writes the file this reads
-ler.png        logical error rate vs physical error rate, Wilson 95%
-               bars, drawn when more than one p was swept
-latency.png    decode wall clock per window vs code distance, violins,
-               drawn when a wall-clock algorithm swept more than one d;
-               the cross-tier combined figure comes from `decsim plot
-               <run_dir> <run_dir> --figure latency`, reading each run's
-               latency_samples.csv
-ler vs d       both tiers' logical error rate against code distance at
-               one physical error rate, from each run's sweep.csv:
-               `decsim plot <run_dir> <run_dir> --figure ler_vs_d
-               --probability <p>`
-data_movement  bits copied and moved per shot, by the memory class the
-               hop crosses, against code distance, one panel per study
-               config, from each run's data_movement.csv
+timeline.png          one traced shot, read from its Chrome trace file:
+                      every stage of every window on its own row, in
+                      real time, the weak baseline's figure style
+                      (commit reads solid, buffer reads lighter,
+                      geometry in the subtitle). `decsim run --trace`,
+                      or `trace: chrome` in the observation section,
+                      writes the file this reads, and `decsim collect`
+                      draws it for the first traced shot
+ler.png               logical error rate against a swept setting, Wilson
+                      95% bars, a curve per run folder and per value of
+                      another, from each run's sweep.csv
+latency_combined.png  decode wall clock per window against a swept
+                      setting, violins, from each run's
+                      latency_samples.csv
+stage_breakdown.png   where a window's time goes, a stacked bar per
+                      value of a swept setting, from shots.csv
+data_movement.png     bits copied and moved per shot, by the memory
+                      class the hop crosses, against a swept setting, a
+                      panel per run folder, from data_movement.csv
 
-Every time is in microseconds.
+Every figure but the timeline reads its points by their metadata, the
+values the sweep set, each named by its yaml path, as sinter's plot
+reads a point's json_metadata through --x_func, --group_func and
+--filter_func and names no axis itself
+(sinter/_command/_main_plot.py:21-35): `decsim plot --x qpu.distance
+--where workload.arguments.physical_error_probability=0.001`. Every
+time is in microseconds.
 """
 
 import csv
@@ -30,6 +35,7 @@ import json
 import math
 import pathlib
 import statistics
+from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config_module
@@ -77,7 +83,7 @@ FIGURES = {
     "timeline": "timeline.png",
     "stage_breakdown": "stage_breakdown.png",
     "latency": "latency_combined.png",
-    "ler_vs_d": "ler_vs_distance.png",
+    "ler": "ler.png",
     "data_movement": "data_movement.png",
 }
 # the two data-movement quantities that have bits, and the line each one
@@ -90,6 +96,25 @@ MOVEMENT_SERIES = (
 )
 # where collect_command leaves the traces of the shots it traced
 TRACE_DIR = "trace"
+# an axis whose values span this ratio or more is drawn logarithmic, as
+# an error rate's decade is; a narrower one, a distance's, is linear
+LOG_AXIS_SPAN = 10.0
+
+
+@dataclasses.dataclass(frozen=True)
+class Selection:
+    """Which points a figure draws and how: `decsim plot`'s three options.
+
+    x_path is the swept setting on the x axis, group_path the one a
+    curve is drawn per value of, and where the values the kept points'
+    metadata holds; each names a setting by its yaml path, sinter's
+    --x_func, --group_func and --filter_func on json_metadata
+    (sinter/_command/_main_plot.py:21-35).
+    """
+
+    x_path: Optional[str] = None
+    group_path: Optional[str] = None
+    where: Mapping = dataclasses.field(default_factory=dict)
 
 
 def timeline_plot(trace_path, path: pathlib.Path) -> None:
@@ -145,9 +170,9 @@ def timeline_shot(document) -> "_TimelineShot":
 def first_trace_file(run_dir) -> Optional[pathlib.Path]:
     """The first trace file of a run folder, None when nothing traced.
 
-    A sweep writes one file per traced shot under trace/, named after the
-    point (experiments/measure.py); the first in name order is the first
-    point's, which is the shot the timeline draws.
+    A sweep writes one file per traced shot under trace/, named by the
+    shot's point id and seed (experiments/measure.py shot_label); the
+    first in name order is the shot the timeline draws.
     """
     trace_dir = pathlib.Path(run_dir) / TRACE_DIR
     if not trace_dir.is_dir():
@@ -160,80 +185,17 @@ def first_trace_file(run_dir) -> Optional[pathlib.Path]:
     return None
 
 
-def ler_groups(rows: list) -> list:
-    """(distance, round time, rows sorted by p) per curve of the LER figure.
+def ler_plot(run_dirs: list, selection: Selection, path: pathlib.Path) -> None:
+    """The logical error rate against the x setting, from each sweep.csv.
 
-    One curve per distance and round time that swept more than one
-    physical error rate: the papers' convention, one LER curve per code
-    distance.
-    """
-    distances = _column_values(rows, "distance")
-    periods = _column_values(rows, "round_period_microseconds")
-    groups = []
-    for distance in distances:
-        at_distance = _curves_at_distance(rows, distance, periods)
-        groups.extend(at_distance)
-    return groups
+    One curve per run folder and per value of the group setting, the
+    points the where values keep. Measured points carry Wilson 95%
+    bars; a zero-failure point cannot sit on a log axis, so its curve
+    simply leaves it out. The x axis is logarithmic when its values span
+    a decade or more (an error rate's) and linear otherwise (a
+    distance's).
 
-
-def decoder_title(config) -> str:
-    """The figure's decoder title, tier included.
-
-    "pymatching decoder (weak)" or "belief matching decoder (strong)".
-    A numeric card reads as pymatching: the card prices latency but its
-    corrections come from the same MWPM path.
-    """
-    algorithm = config.active_decoder.kind
-    name = "pymatching"
-    if isinstance(algorithm, str):
-        name = algorithm
-    spelled = name.replace("_", " ")
-    tier = config.active_tier
-    return f"{spelled} decoder ({tier})"
-
-
-def ler_plot(
-    rows: list, path: pathlib.Path, title: str = "Logical error rate"
-) -> None:
-    """Logical error rate against physical error rate, Wilson 95% bars.
-
-    One line per card and round time that swept more than one p.
-    """
-    import matplotlib.pyplot as plt
-
-    figure, axis = plt.subplots(figsize=(4.8, 3.6))
-    groups = ler_groups(rows)
-    plotted_periods = set()
-    for _distance, period, _group in groups:
-        plotted_periods.add(period)
-    for distance, period, group in groups:
-        label = f"d={distance}"
-        if len(plotted_periods) > 1:
-            label = f"d={distance}, {period:g} µs"
-        _draw_ler_curve(axis, group, label)
-    axis.set_xscale("log")
-    axis.set_yscale("log")
-    _label_swept_probabilities(axis, rows)
-    axis.set_xlabel("Physical error rate")
-    axis.set_ylabel("Logical error rate")
-    axis.set_title(title)
-    axis.grid(alpha=0.3, which="both")
-    axis.legend(fontsize=8)
-    figure.tight_layout()
-    figure.savefig(path, dpi=150)
-    plt.close(figure)
-
-
-def ler_vs_distance_plot(
-    run_dirs: list, probability: float, path: pathlib.Path
-) -> None:
-    """Both tiers' logical error rate against code distance at one p.
-
-    Read from each run's sweep.csv. Measured points carry Wilson 95% bars;
-    a zero-failure point cannot sit on a log axis, so its curve simply
-    ends at the last distance that saw failures.
-
-        decsim plot <run_dir> <run_dir> --figure ler_vs_d --probability <p>
+        decsim plot <run_dir>... --figure ler --x <path> [--group <path>]
     """
     import matplotlib
 
@@ -241,19 +203,18 @@ def ler_vs_distance_plot(
     import matplotlib.pyplot as plt
 
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
-    swept_distances = set()
-    for run_index, run_dir in enumerate(run_dirs):
-        rows = _ler_rows_at_probability(run_dir, probability)
-        color = f"C{run_index}"
+    swept = []
+    for run_dir in run_dirs:
+        rows = _sweep_rows(run_dir, selection)
         tier_label = _run_tier_label(run_dir, rows[0]["algorithm"])
-        measured_rows = _rows_with_failures(rows, swept_distances)
-        _draw_measured_ler_points(axis, measured_rows, color, tier_label)
+        values = _draw_ler_curves(axis, rows, selection, tier_label)
+        swept.extend(values)
+    _scale_x_axis(axis, swept)
     axis.set_yscale("log")
-    axis.set_xticks(sorted(swept_distances))
-    axis.set_xlabel("Code distance")
+    axis.set_xlabel(selection.x_path)
     axis.set_ylabel("Logical error rate per shot")
-    probability_label = _power_of_ten_label(probability)
-    axis.set_title(f"Logical error rate vs distance, p={probability_label}")
+    title = _titled("Logical error rate", selection)
+    axis.set_title(title, fontsize=9)
     axis.grid(alpha=0.3, which="both")
     axis.legend(fontsize=8)
     figure.tight_layout()
@@ -261,15 +222,15 @@ def ler_vs_distance_plot(
     plt.close(figure)
 
 
-def memory_class_series(run_dir) -> dict:
+def memory_class_series(run_dir, selection: Selection) -> dict:
     """One run's bits per shot by memory class, then by copied and moved.
 
-    memory class -> word -> (distances, bits), read from that folder's
-    data_movement.csv memory-class rows. A distance whose bits are zero
-    is left out: an off-board hop of this machine moves and never
-    copies, and zero has no place on a log axis.
+    memory class -> word -> (x values, bits), read from that folder's
+    data_movement.csv memory-class rows. A value whose bits are zero is
+    left out: an off-board hop of this machine moves and never copies,
+    and zero has no place on a log axis.
     """
-    rows = _memory_class_rows(run_dir)
+    rows = _memory_class_rows(run_dir, selection)
     series = {}
     for memory_class in _classes_in_order(rows):
         at_class = _rows_of_class(rows, memory_class)
@@ -280,8 +241,10 @@ def memory_class_series(run_dir) -> dict:
     return series
 
 
-def data_movement_plot(run_dirs: list, path: pathlib.Path) -> None:
-    """Bits copied and moved per shot by memory class, against distance.
+def data_movement_plot(
+    run_dirs: list, selection: Selection, path: pathlib.Path
+) -> None:
+    """Bits copied and moved per shot by memory class, against x.
 
     One panel per study config, read from each run folder's
     data_movement.csv memory-class rows. The classes are kept apart
@@ -291,7 +254,7 @@ def data_movement_plot(run_dirs: list, path: pathlib.Path) -> None:
     232-247) and an accelerator's access costs what the memory it reads
     costs (Dally, CACM 2020 lines 231-234).
 
-        decsim plot <run_dir>... --figure data_movement
+        decsim plot <run_dir>... --figure data_movement --x <path>
     """
     import matplotlib
 
@@ -305,8 +268,8 @@ def data_movement_plot(run_dirs: list, path: pathlib.Path) -> None:
     )
     for panel_index, run_dir in enumerate(run_dirs):
         axis = axes[0][panel_index]
-        series = memory_class_series(run_dir)
-        _draw_movement_panel(axis, series)
+        series = memory_class_series(run_dir, selection)
+        _draw_movement_panel(axis, series, selection.x_path)
         title = _study_config_name(run_dir)
         axis.set_title(title, fontsize=9)
     first_axis = axes[0][0]
@@ -316,27 +279,32 @@ def data_movement_plot(run_dirs: list, path: pathlib.Path) -> None:
     plt.close(figure)
 
 
-def stage_breakdown_plot(run_dir, path: pathlib.Path) -> None:
-    """One stacked bar per distance: where a window's time goes.
+def stage_breakdown_plot(
+    run_dir, selection: Selection, path: pathlib.Path
+) -> None:
+    """One stacked bar per x value: where a window's time goes.
 
     From syndrome arrival in the buffer to the Pauli-frame commit.
 
-        decsim plot <run_dir> --figure stage_breakdown
+        decsim plot <run_dir> --figure stage_breakdown --x <path>
     """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    rows = _shot_rows(run_dir)
-    medians_by_distance = _median_stage_us_by_distance(rows)
-    distances = list(medians_by_distance)
+    rows = _shot_rows(run_dir, selection)
+    medians_by_value = _median_stage_us_by_value(rows, selection.x_path)
+    values = list(medians_by_value)
     figure, axis = plt.subplots(figsize=(6.4, 3.6))
-    bar_positions = range(len(distances))
-    stacked_left = _draw_stage_bars(axis, medians_by_distance, distances)
+    bar_positions = range(len(values))
+    stacked_left = _draw_stage_bars(axis, medians_by_value, values)
     _label_stage_totals(axis, bar_positions, stacked_left)
     axis.set_yticks(list(bar_positions))
-    axis.set_yticklabels([f"d={distance}" for distance in distances])
+    tick_labels = []
+    for value in values:
+        tick_labels.append(f"{selection.x_path}={value}")
+    axis.set_yticklabels(tick_labels)
     axis.invert_yaxis()
     widest = max(stacked_left)
     right_edge = widest * 1.12
@@ -353,65 +321,21 @@ def stage_breakdown_plot(run_dir, path: pathlib.Path) -> None:
     plt.close(figure)
 
 
-def latency_samples_by_distance(measurements: list) -> dict:
-    """Every window's algorithm-stage wall clock in us, keyed by distance.
+def combined_latency_plot(
+    sample_files: list, selection: Selection, path: pathlib.Path
+) -> None:
+    """Every run's decode wall clock per window, against x, on one axes.
 
-    Pooled over shots. The algorithm stage alone, because that is the
-    only measured quantity and the papers' comparable number (Helios
-    2301.08419 Fig. 6); fetch, release and the links are priced from
-    the config and belong to the stage-breakdown figure.
-    """
-    pooled = {}
-    for measurement in measurements:
-        samples = pooled.setdefault(measurement.distance, [])
-        samples.extend(measurement.samples["algorithm"])
-    by_distance = {}
-    items = pooled.items()
-    for distance, samples in sorted(items):
-        if samples:
-            by_distance[distance] = samples
-    return by_distance
+    One violin per x value per run (median marked, worst window
+    flagged), microsecond log axis, from each run's
+    latency_samples.csv, with the window-generation deadline drawn as
+    the throughput boundary: a new window every commit rounds times the
+    round period, the window_period_us each row carries. The violin
+    and deadline shape follows Helios 2301.08419 Fig. 7 and Google
+    2408.13687 Fig. 4d; the log axis is what makes two tiers legible,
+    decades apart.
 
-
-def latency_plot(config, measurements: list, path: pathlib.Path) -> None:
-    """Decode wall clock per window against code distance.
-
-    One violin per d (median marked, worst window flagged), microsecond
-    log axis, with the window-generation deadline drawn as the
-    throughput boundary. The violin and deadline shape follows Helios
-    2301.08419 Fig. 7 and Google 2408.13687 Fig. 4d.
-    """
-    import matplotlib.pyplot as plt
-
-    pooled = latency_samples_by_distance(measurements)
-    distances = list(pooled)
-    round_period_microseconds = measurements[0].round_period_microseconds
-    probability = measurements[0].physical_error_probability
-    algorithm = config.active_decoder.kind
-    figure, axis = plt.subplots(figsize=(4.8, 3.6))
-    _latency_violins(axis, pooled, distances, 1.4, "C0", algorithm)
-    _deadline_line(axis, distances, round_period_microseconds)
-    log_values = _log_values_of(pooled)
-    _log_decade_axis(axis, log_values)
-    axis.set_xticks(distances)
-    axis.set_xlabel("Code distance")
-    axis.set_ylabel("Decode wall clock per window (µs)")
-    axis.set_title(f"{algorithm} decode latency, p={probability:g}")
-    axis.grid(alpha=0.3, axis="y")
-    axis.legend(fontsize=8)
-    figure.tight_layout()
-    figure.savefig(path, dpi=150)
-    plt.close(figure)
-
-
-def combined_latency_plot(sample_files: list, path: pathlib.Path) -> None:
-    """Both tiers on one axes from their runs' latency_samples.csv.
-
-    One violin pair per distance. The log axis is what makes this
-    legible: the tiers sit decades apart, which is itself the figure's
-    message.
-
-        decsim plot <run_dir> <run_dir> --figure latency
+        decsim plot <run_dir>... --figure latency --x <path>
     """
     import matplotlib
 
@@ -420,24 +344,21 @@ def combined_latency_plot(sample_files: list, path: pathlib.Path) -> None:
 
     figure, axis = plt.subplots(figsize=(5.6, 3.8))
     all_log_values = []
-    round_period_microseconds = None
-    distances = []
+    deadlines = {}
     for file_index, sample_file in enumerate(sample_files):
-        rows = _csv_rows(sample_file)
-        pooled = _samples_by_distance(rows)
-        seen = set(distances) | set(pooled)
-        distances = sorted(seen)
-        round_period_microseconds = float(rows[0]["round_period_microseconds"])
+        rows = _selected_rows(sample_file, selection)
+        pooled = _samples_by_value(rows, selection.x_path)
+        _deadlines_by_value(deadlines, rows, selection.x_path)
         algorithm = rows[0]["algorithm"]
         color = f"C{file_index}"
         positions = list(pooled)
         _latency_violins(axis, pooled, positions, 1.4, color, algorithm)
         log_values = _log_values_of(pooled)
         all_log_values.extend(log_values)
-    _deadline_line(axis, distances, round_period_microseconds)
+    _deadline_line(axis, deadlines)
     _log_decade_axis(axis, all_log_values)
-    axis.set_xticks(distances)
-    axis.set_xlabel("Code distance")
+    axis.set_xticks(sorted(deadlines))
+    axis.set_xlabel(selection.x_path)
     axis.set_ylabel("Decode wall clock per window (µs)")
     axis.set_title("Decode latency, weak and strong tiers")
     axis.grid(alpha=0.3, axis="y")
@@ -447,44 +368,35 @@ def combined_latency_plot(sample_files: list, path: pathlib.Path) -> None:
     plt.close(figure)
 
 
-def plots(
-    config, rows: list, report_dir: pathlib.Path, measurements=None
-) -> None:
-    """The figures of one run folder, each one drawn when its input is there.
+def plots(report_dir: pathlib.Path) -> None:
+    """The figure `decsim collect` draws itself: the first traced shot.
 
     timeline.png needs a traced shot, so it is drawn only when the
-    observation section asked for a trace; ler.png needs more than one
-    p; latency.png needs more than one distance under a wall-clock
-    algorithm, because a numeric card is a fixed latency, flat in d, so
-    its figure would be a horizontal line.
+    observation section asked for a trace. Every other figure plots a
+    swept setting the run cannot guess, so `decsim plot` names it.
     """
     import matplotlib
 
     matplotlib.use("Agg")
     trace_path = first_trace_file(report_dir)
-    if trace_path is not None:
-        timeline_path = report_dir / "timeline.png"
-        timeline_plot(trace_path, timeline_path)
-    probabilities = _column_values(rows, "physical_error_probability")
-    if len(probabilities) > 1:
-        ler_path = report_dir / "ler.png"
-        title = decoder_title(config)
-        ler_plot(rows, ler_path, title=title)
-    measured_wall_clock = isinstance(config.active_decoder.kind, str)
-    swept_distances = set()
-    for measurement in measurements or ():
-        swept_distances.add(measurement.distance)
-    if measured_wall_clock and len(swept_distances) > 1:
-        latency_path = report_dir / "latency.png"
-        latency_plot(config, measurements, latency_path)
+    if trace_path is None:
+        return
+    timeline_path = report_dir / "timeline.png"
+    timeline_plot(trace_path, timeline_path)
 
 
-def figure(name: str, run_dirs: list, out_path=None, probability=None):
+def figure(
+    name: str,
+    run_dirs: list,
+    out_path=None,
+    selection: Optional[Selection] = None,
+):
     """Draw one named figure from run folders, and return where it went.
 
     Every figure here reads files: a run folder's csv rows, or the
     Chrome trace of one of its shots. The names are the rows of
-    FIGURES: what each one needs is what its run folders must hold.
+    FIGURES: what each one needs is what its run folders must hold, and
+    every figure but the timeline needs the x setting.
     """
     import matplotlib
 
@@ -494,11 +406,18 @@ def figure(name: str, run_dirs: list, out_path=None, probability=None):
         raise refusal.RefusalError(
             f"no figure named {name}; the figures are {listed}"
         )
+    if selection is None:
+        selection = Selection()
     first_dir = pathlib.Path(run_dirs[0])
     if out_path is None:
         out_path = first_dir / FIGURES[name]
     out_path = pathlib.Path(out_path)
-    _draw_named_figure(name, run_dirs, out_path, probability)
+    if name == "timeline":
+        trace_path = _timeline_source(first_dir)
+        timeline_plot(trace_path, out_path)
+        return out_path
+    _refuse_a_figure_without_x(name, selection)
+    _draw_named_figure(name, run_dirs, out_path, selection)
     return out_path
 
 
@@ -509,31 +428,32 @@ def _card_label(algorithm) -> str:
     return f"{algorithm:g} µs"
 
 
+def _refuse_a_figure_without_x(name: str, selection: Selection) -> None:
+    """A figure against a swept setting needs that setting named."""
+    if selection.x_path is not None:
+        return
+    raise refusal.RefusalError(
+        f"the {name} figure is drawn against a swept setting; name it "
+        "with --x and its yaml path, as in --x qpu.distance"
+    )
+
+
 def _draw_named_figure(
-    name: str, run_dirs: list, out_path: pathlib.Path, probability
+    name: str, run_dirs: list, out_path: pathlib.Path, selection: Selection
 ) -> None:
     """The one figure the name asks for, from the folders it was given."""
     first_dir = pathlib.Path(run_dirs[0])
-    if name == "timeline":
-        trace_path = _timeline_source(first_dir)
-        timeline_plot(trace_path, out_path)
-        return
     if name == "stage_breakdown":
-        stage_breakdown_plot(first_dir, out_path)
+        stage_breakdown_plot(first_dir, selection, out_path)
         return
     if name == "latency":
         sample_files = _sample_files(run_dirs)
-        combined_latency_plot(sample_files, out_path)
+        combined_latency_plot(sample_files, selection, out_path)
         return
     if name == "data_movement":
-        data_movement_plot(run_dirs, out_path)
+        data_movement_plot(run_dirs, selection, out_path)
         return
-    if probability is None:
-        raise refusal.RefusalError(
-            "the ler_vs_d figure is drawn at one physical error rate; "
-            "name it with --probability"
-        )
-    ler_vs_distance_plot(run_dirs, probability, out_path)
+    ler_plot(run_dirs, selection, out_path)
 
 
 def _timeline_source(run_dir: pathlib.Path) -> pathlib.Path:
@@ -1062,90 +982,163 @@ def _legend_label(window_ranges: list, window_id: int) -> str:
     return f"window {window_id}"
 
 
-def _column_values(rows: list, column: str) -> list:
-    """The distinct values one column takes over the rows, sorted."""
-    values = set()
+def _metadata_value(row: dict, path: str, source):
+    """The value a row's point set at a path, which it must have set.
+
+    source names the folder or file the row came from, for the refusal.
+    """
+    metadata = json.loads(row["metadata"])
+    if path in metadata:
+        return metadata[path]
+    listed = sorted(metadata)
+    raise refusal.RefusalError(
+        f"the points of {source} set no {path}; their sweep sets {listed}"
+    )
+
+
+def _selected_rows(path: pathlib.Path, selection: Selection) -> list:
+    """A csv file's rows whose points hold every value where names."""
+    rows = _csv_rows(path)
+    kept = []
     for row in rows:
-        values.add(row[column])
-    return sorted(values)
+        if _holds(row, selection.where):
+            kept.append(row)
+    if kept:
+        return kept
+    where_text = _where_text(selection.where)
+    raise refusal.RefusalError(f"{path} holds no point where {where_text}")
 
 
-def _curves_at_distance(rows: list, distance: int, periods: list) -> list:
-    """One (distance, period, rows) curve per period that swept two p."""
-    curves = []
-    for period in periods:
-        group = _rows_at(rows, distance, period)
-        if _sweeps_one_probability(group):
-            continue
-        group.sort(key=_by_probability)
-        curves.append((distance, period, group))
-    return curves
+def _holds(row: dict, where: Mapping) -> bool:
+    """Whether a row's point set every path where names to its value."""
+    metadata = json.loads(row["metadata"])
+    for path, value in where.items():
+        if metadata.get(path) != value:
+            return False
+    return True
 
 
-def _rows_at(rows: list, distance: int, period: float) -> list:
-    """The rows of one distance and round period."""
-    selected = []
+def _where_text(where: Mapping) -> str:
+    """The where values as the command line wrote them."""
+    pairs = []
+    for path, value in where.items():
+        pairs.append(f"{path}={value}")
+    return ", ".join(pairs)
+
+
+def _titled(text: str, selection: Selection) -> str:
+    """A figure's title, the values its points were kept at after it."""
+    if not selection.where:
+        return f"{text} vs {selection.x_path}"
+    where_text = _where_text(selection.where)
+    return f"{text} vs {selection.x_path}, {where_text}"
+
+
+def _sweep_rows(run_dir, selection: Selection) -> list:
+    """A run's sweep.csv rows at the where values; one without is refused."""
+    sweep_path = pathlib.Path(run_dir) / "sweep.csv"
+    if not sweep_path.is_file():
+        raise refusal.RefusalError(
+            f"{run_dir} has no sweep.csv; the ler figure reads the "
+            "logical_error_rate, ler_wilson_low and ler_wilson_high "
+            "columns of a `decsim collect` run folder"
+        )
+    return _selected_rows(sweep_path, selection)
+
+
+def _draw_ler_curves(
+    axis, rows: list, selection: Selection, tier_label: str
+) -> list:
+    """One run's curves, one per group value; returns every x value."""
+    curves = {}
+    x_values = []
     for row in rows:
-        if row["distance"] != distance:
-            continue
-        if row["round_period_microseconds"] != period:
-            continue
-        selected.append(row)
-    return selected
+        x_value = _metadata_value(row, selection.x_path, "sweep.csv")
+        x_values.append(x_value)
+        group_value = _group_value(row, selection.group_path)
+        curve = curves.setdefault(group_value, [])
+        curve.append((x_value, row))
+    for group_value, curve in curves.items():
+        label = _curve_label(tier_label, selection.group_path, group_value)
+        _draw_measured_ler_points(axis, curve, label)
+    return x_values
 
 
-def _sweeps_one_probability(group: list) -> bool:
-    """Whether the group has fewer than two physical error rates."""
-    probabilities = set()
-    for row in group:
-        probabilities.add(row["physical_error_probability"])
-    return len(probabilities) < 2
+def _group_value(row: dict, group_path: Optional[str]):
+    """The value of the group setting at a row's point; None for no group."""
+    if group_path is None:
+        return None
+    return _metadata_value(row, group_path, "sweep.csv")
 
 
-def _by_probability(row: dict) -> float:
-    return row["physical_error_probability"]
+def _curve_label(tier_label: str, group_path, group_value) -> str:
+    """A curve's legend: the run's tier, and its group value when grouped."""
+    if group_path is None:
+        return tier_label
+    return f"{tier_label}, {group_path}={group_value}"
 
 
-def _draw_ler_curve(axis, group: list, label: str) -> None:
-    """One LER curve with its Wilson 95% error bars."""
-    probabilities = []
+def _draw_measured_ler_points(axis, curve: list, label: str) -> None:
+    """A curve's failures > 0 points: a connected line with Wilson bars."""
+    curve.sort(key=_by_x_value)
+    x_values = []
     rates = []
-    lower = []
-    upper = []
-    for row in group:
-        rate = row["logical_error_rate"]
-        probabilities.append(row["physical_error_probability"])
+    bars_below = []
+    bars_above = []
+    for x_value, row in curve:
+        if int(row["logical_failures"]) == 0:
+            continue
+        rate = float(row["logical_error_rate"])
+        x_values.append(x_value)
         rates.append(rate)
-        below = rate - row["ler_wilson_low"]
-        lower.append(below)
-        above = row["ler_wilson_high"] - rate
-        upper.append(above)
+        low = float(row["ler_wilson_low"])
+        high = float(row["ler_wilson_high"])
+        below = rate - low
+        bars_below.append(below)
+        above = high - rate
+        bars_above.append(above)
     axis.errorbar(
-        probabilities,
+        x_values,
         rates,
-        yerr=[lower, upper],
+        yerr=[bars_below, bars_above],
         fmt="o-",
         capsize=3,
         label=label,
     )
 
 
-def _label_swept_probabilities(axis, rows: list) -> None:
-    """Tick every swept p, in the y axis's power-of-ten notation.
+def _by_x_value(point: tuple):
+    return point[0]
 
-    A decades-only log axis labels two of our seven p values.
+
+def _scale_x_axis(axis, values: list) -> None:
+    """Log for values spanning a decade, as an error rate's; else linear.
+
+    A log axis ticks every value in the y axis's power-of-ten notation,
+    since a decades-only axis labels two of seven swept error rates.
     """
     import matplotlib.ticker as ticker
 
-    swept = _column_values(rows, "physical_error_probability")
+    swept = sorted(set(values))
+    if not _spans_a_decade(swept):
+        axis.set_xticks(swept)
+        return
+    axis.set_xscale("log")
     axis.set_xticks(swept)
     tick_labels = []
-    for probability in swept:
-        tick_label = _power_of_ten_label(probability)
+    for value in swept:
+        tick_label = _power_of_ten_label(value)
         tick_labels.append(tick_label)
     axis.set_xticklabels(tick_labels, fontsize=8, rotation=30, ha="right")
     no_minor_labels = ticker.NullFormatter()
     axis.xaxis.set_minor_formatter(no_minor_labels)
+
+
+def _spans_a_decade(swept: list) -> bool:
+    """Whether sorted positive values reach LOG_AXIS_SPAN times their least."""
+    if swept[0] <= 0:
+        return False
+    return swept[-1] >= LOG_AXIS_SPAN * swept[0]
 
 
 def _power_of_ten_label(value: float) -> str:
@@ -1165,7 +1158,8 @@ def _run_tier_label(run_dir, algorithm_field: str) -> str:
     names the card of the tier that decodes the plan's windows, and that
     tier is the escalation row's primary tier, read from the settings
     the run's first point recorded in resolved/. A numeric card reads as
-    pymatching, the same ruling as decoder_title.
+    pymatching: the card prices latency but its corrections come from
+    the same MWPM path.
     """
     try:
         float(algorithm_field)
@@ -1184,8 +1178,8 @@ def _run_tier_label(run_dir, algorithm_field: str) -> str:
     return f"{display_name} ({tier})"
 
 
-def _memory_class_rows(run_dir) -> list:
-    """One run folder's per-class data-movement rows, by rising distance.
+def _memory_class_rows(run_dir, selection: Selection) -> list:
+    """One run folder's per-class data-movement rows, by rising x value.
 
     A folder whose run had observation.data_movement off wrote no file
     and is refused, because the figure has nothing to draw for it.
@@ -1197,23 +1191,20 @@ def _memory_class_rows(run_dir) -> list:
             "reads the copy and move bits per memory class, which a run "
             "records when its observation section says data_movement: true"
         )
-    all_rows = _csv_rows(movement_path)
+    all_rows = _selected_rows(movement_path, selection)
     class_rows = []
     for row in all_rows:
         if row["grouping"] == "memory_class":
-            class_rows.append(row)
-    return sorted(class_rows, key=_row_distance)
-
-
-def _row_distance(row: dict) -> int:
-    """One row's code distance, as the csv wrote it."""
-    return int(row["distance"])
+            x_value = _metadata_value(row, selection.x_path, run_dir)
+            class_rows.append((x_value, row))
+    class_rows.sort(key=_by_x_value)
+    return class_rows
 
 
 def _classes_in_order(rows: list) -> list:
     """The memory classes these rows carry, in the order they appear."""
     classes = []
-    for row in rows:
+    for _x_value, row in rows:
         if row["name"] not in classes:
             classes.append(row["name"])
     return classes
@@ -1222,15 +1213,15 @@ def _classes_in_order(rows: list) -> list:
 def _rows_of_class(rows: list, memory_class: str) -> list:
     """Every row of one memory class, in the order they were sorted."""
     found = []
-    for row in rows:
+    for x_value, row in rows:
         if row["name"] == memory_class:
-            found.append(row)
+            found.append((x_value, row))
     return found
 
 
-def _draw_movement_panel(axis, series: dict) -> None:
+def _draw_movement_panel(axis, series: dict, x_path: str) -> None:
     """One config's classes, copied solid and moved dashed, on a log axis."""
-    swept = _swept_distances_of(series)
+    swept = _swept_values_of(series)
     class_index = 0
     for memory_class, by_word in series.items():
         color = f"C{class_index}"
@@ -1238,7 +1229,7 @@ def _draw_movement_panel(axis, series: dict) -> None:
         class_index += 1
     axis.set_yscale("log")
     axis.set_xticks(swept)
-    axis.set_xlabel("Code distance")
+    axis.set_xlabel(x_path)
     axis.grid(alpha=0.3, which="both")
     axis.legend(fontsize=8)
 
@@ -1246,11 +1237,11 @@ def _draw_movement_panel(axis, series: dict) -> None:
 def _draw_class_series(axis, by_word: dict, memory_class: str, color) -> None:
     """One memory class's two lines; a line of only zeros is not drawn."""
     for _column, word, marker, style in MOVEMENT_SERIES:
-        drawn_distances, drawn_bits = by_word[word]
+        drawn_values, drawn_bits = by_word[word]
         if not drawn_bits:
             continue
         axis.plot(
-            drawn_distances,
+            drawn_values,
             drawn_bits,
             marker=marker,
             linestyle=style,
@@ -1259,27 +1250,26 @@ def _draw_class_series(axis, by_word: dict, memory_class: str, color) -> None:
         )
 
 
-def _swept_distances_of(series: dict) -> list:
-    """Every distance any class of one run carries, rising."""
+def _swept_values_of(series: dict) -> list:
+    """Every x value any class of one run carries, rising."""
     swept = set()
     for by_word in series.values():
-        for distances, _bits in by_word.values():
-            swept.update(distances)
+        for x_values, _bits in by_word.values():
+            swept.update(x_values)
     return sorted(swept)
 
 
 def _series_of(rows: list, column: str) -> tuple:
-    """The distances and bits of one column, zeros left off the log axis."""
-    distances = []
+    """The x values and bits of one column, zeros left off the log axis."""
+    x_values = []
     bits = []
-    for row in rows:
+    for x_value, row in rows:
         value = float(row[column])
         if value <= 0:
             continue
-        distance = _row_distance(row)
-        distances.append(distance)
+        x_values.append(x_value)
         bits.append(value)
-    return distances, bits
+    return x_values, bits
 
 
 def _study_config_name(run_dir) -> str:
@@ -1302,96 +1292,33 @@ def _csv_rows(path) -> list:
         return list(reader)
 
 
-def _ler_rows_at_probability(run_dir, probability: float) -> list:
-    """A run's sweep.csv rows at one p, sorted by distance.
-
-    A run that never swept that p is refused.
-    """
-    sweep_path = pathlib.Path(run_dir) / "sweep.csv"
-    if not sweep_path.is_file():
-        raise refusal.RefusalError(
-            f"{run_dir} has no sweep.csv; the ler_vs_d figure reads the "
-            "logical_error_rate, ler_wilson_low and ler_wilson_high "
-            "columns of a `decsim collect` run folder"
-        )
-    all_rows = _csv_rows(sweep_path)
-    selected_rows = []
-    for row in all_rows:
-        row_probability = float(row["physical_error_probability"])
-        if math.isclose(row_probability, probability):
-            selected_rows.append(row)
-    if not selected_rows:
-        raise refusal.RefusalError(
-            f"{run_dir} swept no p={probability:g} point"
-        )
-    selected_rows.sort(key=_row_distance)
-    return selected_rows
-
-
-def _rows_with_failures(rows: list, swept_distances: set) -> list:
-    """The rows that saw at least one failure; every distance recorded."""
-    measured_rows = []
-    for row in rows:
-        swept_distances.add(int(row["distance"]))
-        if int(row["logical_failures"]) > 0:
-            measured_rows.append(row)
-    return measured_rows
-
-
-def _draw_measured_ler_points(axis, rows: list, color: str, label: str) -> None:
-    """The failures > 0 rows: a connected line with Wilson 95% bars."""
-    distances = []
-    rates = []
-    bars_below = []
-    bars_above = []
-    for row in rows:
-        rate = float(row["logical_error_rate"])
-        distances.append(int(row["distance"]))
-        rates.append(rate)
-        low = float(row["ler_wilson_low"])
-        high = float(row["ler_wilson_high"])
-        below = rate - low
-        bars_below.append(below)
-        above = high - rate
-        bars_above.append(above)
-    axis.errorbar(
-        distances,
-        rates,
-        yerr=[bars_below, bars_above],
-        fmt="o-",
-        capsize=3,
-        color=color,
-        label=label,
-    )
-
-
-def _shot_rows(run_dir) -> list:
-    """Every row of the run's shots.csv; a run without one is refused."""
+def _shot_rows(run_dir, selection: Selection) -> list:
+    """The run's shots.csv rows the where values keep; none is refused."""
     shots_path = pathlib.Path(run_dir) / "shots.csv"
     if not shots_path.exists():
         raise refusal.RefusalError(
             f"{run_dir} has no shots.csv; the stage breakdown reads the "
             f"per-shot stage means a closed-loop run records"
         )
-    return _csv_rows(shots_path)
+    return _selected_rows(shots_path, selection)
 
 
-def _median_stage_us_by_distance(rows: list) -> dict:
-    """The median us per stage, in breakdown order, keyed by distance.
+def _median_stage_us_by_value(rows: list, x_path: str) -> dict:
+    """The median us per stage, in breakdown order, keyed by x value.
 
     The median is over shots of each shot's per-window mean, so one
     slow shot cannot move the bar the way a mean of means would let it.
     """
-    samples_by_distance = {}
+    samples_by_value = {}
     for row in rows:
-        distance = int(row["distance"])
+        x_value = _metadata_value(row, x_path, "shots.csv")
         empty = _empty_stage_samples()
-        per_stage = samples_by_distance.setdefault(distance, empty)
+        per_stage = samples_by_value.setdefault(x_value, empty)
         _collect_stage_samples(per_stage, row)
     medians = {}
-    items = samples_by_distance.items()
-    for distance, per_stage in sorted(items):
-        medians[distance] = _stage_medians(per_stage)
+    items = samples_by_value.items()
+    for x_value, per_stage in sorted(items):
+        medians[x_value] = _stage_medians(per_stage)
     return medians
 
 
@@ -1404,7 +1331,7 @@ def _empty_stage_samples() -> list:
 
 
 def _collect_stage_samples(per_stage: list, row: dict) -> None:
-    """One shot's per-stage means appended to the distance's samples."""
+    """One shot's per-stage means appended to its x value's samples."""
     for stage_index, stage in enumerate(STAGE_BREAKDOWN_STAGES):
         column = stage[0]
         per_stage[stage_index].append(float(row[column]))
@@ -1419,15 +1346,13 @@ def _stage_medians(per_stage: list) -> list:
     return medians
 
 
-def _draw_stage_bars(axis, medians_by_distance: dict, distances: list) -> list:
+def _draw_stage_bars(axis, medians_by_value: dict, values: list) -> list:
     """One stacked segment per stage; returns each bar's running total."""
-    stacked_left = [0.0] * len(distances)
-    bar_positions = range(len(distances))
+    stacked_left = [0.0] * len(values)
+    bar_positions = range(len(values))
     for stage_index, stage in enumerate(STAGE_BREAKDOWN_STAGES):
         stage_label = stage[1]
-        stage_widths = _stage_widths(
-            medians_by_distance, distances, stage_index
-        )
+        stage_widths = _stage_widths(medians_by_value, values, stage_index)
         axis.barh(
             bar_positions,
             stage_widths,
@@ -1440,12 +1365,12 @@ def _draw_stage_bars(axis, medians_by_distance: dict, distances: list) -> list:
 
 
 def _stage_widths(
-    medians_by_distance: dict, distances: list, stage_index: int
+    medians_by_value: dict, values: list, stage_index: int
 ) -> list:
-    """One stage's bar width per distance, in milliseconds."""
+    """One stage's bar width per x value, in milliseconds."""
     widths = []
-    for distance in distances:
-        median_us = medians_by_distance[distance][stage_index]
+    for value in values:
+        median_us = medians_by_value[value][stage_index]
         median_ms = median_us / 1000.0
         widths.append(median_ms)
     return widths
@@ -1478,7 +1403,7 @@ def _breakdown_title(algorithm) -> str:
 
 
 def _log_values_of(pooled: dict) -> list:
-    """log10 of every sample, one list per distance."""
+    """log10 of every sample, one list per x value."""
     log_values = []
     for samples in pooled.values():
         log_samples = []
@@ -1516,7 +1441,7 @@ def _log_decade_axis(axis, log_values: list) -> None:
 def _latency_violins(
     axis, pooled: dict, positions: list, width: float, color: str, label: str
 ) -> None:
-    """One violin per distance on log10(us) values, median marked."""
+    """One violin per x value on log10(us) values, median marked."""
     log_samples = _log_values_of(pooled)
     parts = axis.violinplot(
         log_samples,
@@ -1542,34 +1467,39 @@ def _latency_violins(
     )
 
 
-def _deadline_line(
-    axis, distances: list, round_period_microseconds: float
-) -> None:
-    """The deadline: a new window arrives every d rounds.
+def _deadline_line(axis, deadlines: dict) -> None:
+    """The deadline: a new window every commit rounds times the round period.
 
-    The code's default commit region is d rounds, so decode must beat
-    d times the round period.
+    Decode must beat the window's inter-arrival to keep up; each x
+    value's is its rows' window_period_us.
     """
+    x_values = sorted(deadlines)
     deadline_log_us = []
-    for distance in distances:
-        deadline_us = distance * round_period_microseconds
-        log_deadline = math.log10(deadline_us)
+    for x_value in x_values:
+        log_deadline = math.log10(deadlines[x_value])
         deadline_log_us.append(log_deadline)
     axis.plot(
-        distances,
+        x_values,
         deadline_log_us,
         "--",
         color="grey",
-        label=f"window generation ({round_period_microseconds:g} µs rounds)",
+        label="window generation",
     )
 
 
-def _samples_by_distance(rows: list) -> dict:
-    """The algorithm wall clock of every row, keyed by distance."""
+def _deadlines_by_value(deadlines: dict, rows: list, x_path: str) -> None:
+    """Each x value's window inter-arrival, off the rows that carry it."""
+    for row in rows:
+        x_value = _metadata_value(row, x_path, "latency_samples.csv")
+        deadlines[x_value] = float(row["window_period_us"])
+
+
+def _samples_by_value(rows: list, x_path: str) -> dict:
+    """The algorithm wall clock of every row, keyed by x value."""
     pooled = {}
     for row in rows:
-        distance = int(row["distance"])
-        samples = pooled.setdefault(distance, [])
+        x_value = _metadata_value(row, x_path, "latency_samples.csv")
+        samples = pooled.setdefault(x_value, [])
         samples.append(float(row["algorithm_us"]))
     items = pooled.items()
     ordered = sorted(items)

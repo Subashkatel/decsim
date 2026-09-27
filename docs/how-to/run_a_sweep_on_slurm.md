@@ -109,11 +109,11 @@ computed when it is read. That is why the shards can be added at all.
 ## 5. Plot
 
 ```bash
-decsim plot results/<combined> --figure ler_vs_d --probability 0.001
+decsim plot results/<combined> --figure ler --x distance --where physical_error_probability=0.001
 ```
 
-`ler_vs_d` reads one physical error rate out of the sweep, so it asks
-which one.
+`ler` draws the logical error rate against the swept setting `--x`
+names, and `--where` keeps the points at one physical error rate.
 
 ## If a task dies
 

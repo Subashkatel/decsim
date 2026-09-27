@@ -80,12 +80,7 @@ def _point_and_seed_of_every_row(run_dir, name):
     rows = _rows(path)
     order = []
     for row in rows:
-        point_and_seed = (
-            row["distance"],
-            row["physical_error_probability"],
-            row["round_period_microseconds"],
-            row["seed"],
-        )
+        point_and_seed = (row["point_id"], row["seed"])
         order.append(point_and_seed)
     return order
 
@@ -1230,13 +1225,13 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: "aaaaaaa")
     run_folder._tree_reading.cache_clear()
 
-    run_folder.write_manifest(config, out_dir, started_utc)
+    run_folder.write_manifest(config, out_dir, [], started_utc)
     at_the_start = _manifest_of(out_dir)
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: "bbbbbbb")
     finished_utc = run_folder.utc_now()
     run_folder.write_manifest(
-        config, out_dir, started_utc, finished_utc=finished_utc
+        config, out_dir, [], started_utc, finished_utc=finished_utc
     )
     at_the_end = _manifest_of(out_dir)
 
@@ -1551,6 +1546,35 @@ def test_plot_refuses_a_figure_it_does_not_draw(tmp_path, capsys):
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
     assert printed.err.startswith("decsim: no figure named everything")
+
+
+def test_plot_refuses_a_figure_against_no_named_setting(tmp_path, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["plot", str(tmp_path), "--figure", "ler"])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.startswith(
+        "decsim: the ler figure is drawn against a swept setting"
+    )
+
+
+def test_plot_refuses_a_where_that_names_no_value(tmp_path, capsys):
+    arguments = [
+        "plot",
+        str(tmp_path),
+        "--figure",
+        "ler",
+        "--x",
+        "qpu.distance",
+    ]
+    arguments += ["--where", "qpu.distance"]
+    with pytest.raises(SystemExit) as stopped:
+        command.main(arguments)
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.startswith("decsim: --where qpu.distance names no value")
 
 
 def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):

@@ -21,21 +21,22 @@ must not be added: the result would be a single row that is neither.
 Every folder's `sweep.csv` has one row per sweep point. Pick the point
 the two runs share and the columns the question is about.
 
-For example, the reference config at distance 3, decoded by PyMatching
-and charged its measured wall clock. Every column after `shots` is that
-host's, so yours will differ:
+For example, the reference config's point at distance 3, decoded by
+PyMatching and charged its measured wall clock. A row names its point
+in its last two columns, `point_id` and `metadata`, left out here. Every column
+after `shots` is that host's, so yours will differ:
 
 ```
-distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
-3,pymatching,2,2.387,2.6029999999999998,7.12875,15.772
+algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
+pymatching,2,2.387,2.6029999999999998,7.12875,15.772
 ```
 
 and the same point with the decoder priced at one microsecond by a
 card, which is the same on every host:
 
 ```
-distance,algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
-3,1.0,20,0.35585185185185186,0.0,1.0,1.076
+algorithm,shots,load,queue_wait_mean_us,algorithm_mean_us,buffer0_ready_to_frame_median_us
+1.0,20,0.35585185185185186,0.0,1.0,1.076
 ```
 
 Read across. The card's algorithm time is smaller, so the load falls
@@ -54,7 +55,8 @@ so when you report it. [Time](../explanation/time.md) says why.
 decsim diff results/<first> results/<second>
 ```
 
-`diff` matches the two folders' points by their sweep values and prints
+`diff` matches the two folders' points by their metadata, the values
+their sweep set, and prints
 three sections. `settings` lists every value that differs at a point,
 the ones the build derived included (`resolved/`). `inputs` lists each
 workload file whose sha256 differs (`inputs/<id>/hashes.json`).
@@ -90,9 +92,9 @@ ax = figure.subplots()
 results.plot_error_rate(
     ax=ax,
     rows=rows,
-    x="physical_error_probability",
-    group="distance",
-    where={"round_period_microseconds": 1.0},
+    x="settings.workload.physical_error_probability",
+    group="settings.qpu.distance",
+    where={"settings.qpu.round_period_microseconds": 1.0},
 )
 results.save_figure(figure, "ler.png", rows, folders)
 ```
@@ -105,18 +107,21 @@ folders they came from).
 
 ```bash
 decsim plot results/<first> results/<second> \
-  --figure ler_vs_d --probability 0.001
+  --figure ler --x distance --where physical_error_probability=0.001
 ```
 
 ```
-results/<first>/ler_vs_distance.png
+results/<first>/ler.png
 ```
 
-`ler_vs_d`, `latency` and `data_movement` read every folder given;
+`ler`, `latency` and `data_movement` read every folder given;
 `timeline` and `stage_breakdown` read only the first. The file is
-written next to the first folder unless `--out` says otherwise.
-`ler_vs_d` reads one physical error rate out of the sweep, so it asks
-which one; the other four do not.
+written next to the first folder unless `--out` says otherwise. Every
+figure but the timeline is drawn against the swept setting `--x` names,
+by the name the points' `metadata` gives it; `--group` draws a curve
+per value of another, and `--where PATH=VALUE`, given as often as
+needed, keeps the points whose sweep set that value, as sinter's plot
+reads a point's metadata (`--x_func`, `--group_func`, `--filter_func`).
 
 ## If a burst made things worse: harder windows or an overloaded strong side
 

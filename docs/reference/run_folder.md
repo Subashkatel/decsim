@@ -24,7 +24,7 @@ without any number changing (`decsim/experiments/report.py`).
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
-| `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, summarized from `shots.csv` and `window_samples.csv` |
+| `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `links.csv` | `decsim/experiments/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
 | `data_movement.csv` | `decsim/experiments/report.py`, `data_movement_rows` | one row per sweep point per path, then per memory class, averaged over the point's shots |
@@ -38,10 +38,11 @@ without any number changing (`decsim/experiments/report.py`).
 | `result.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: every field of the shot's result |
 | `commands.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: when each QPU command arrived and when it started |
 | `finished` | `decsim/experiments/run_folder.py`, `mark_finished` | the time the run ended, written last; a `decsim collect` into a folder that holds it leaves the folder as it is |
-| `trace/<shot>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot |
-| `log/<shot>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
-| `timeline.png`, `ler.png`, `latency.png` | `decsim/experiments/plots.py`, `plots` | the figures `decsim collect` draws itself, each one when its input is there: a timeline when a shot was traced, an error-rate figure when the sweep has more than one physical error rate, and a latency figure when a wall-clock decoder ran at more than one distance |
-| `timeline.png`, `stage_breakdown.png`, `latency_combined.png`, `ler_vs_distance.png`, `data_movement.png` | `decsim/experiments/plots.py`, `FIGURES` | one figure per `decsim plot --figure` name, written beside the first run folder given |
+| `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file |
+| `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
+| `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online` |
+| `timeline.png` | `decsim/experiments/plots.py`, `plots` | the figure `decsim collect` draws itself, when a shot was traced |
+| `timeline.png`, `stage_breakdown.png`, `latency_combined.png`, `ler.png`, `data_movement.png` | `decsim/experiments/plots.py`, `FIGURES` | one figure per `decsim plot --figure` name, written beside the first run folder given; every one but the timeline is drawn against the swept setting `--x` names |
 
 The manifest, the config copy and the patch together are the whole
 experiment: the commit plus the patch is the code, and the config chain
@@ -60,9 +61,18 @@ One row per shot. The first columns are the shot's own scalars, and then
 every latency point appears twice, once as that shot's mean and once as
 its maximum.
 
+A point is named by two columns, as sinter's csv names a task by its
+`strong_id` and `json_metadata` (`sinter/_data/_csv_out.py:69-77`):
+`point_id`, the point's content id, which is also the name of its
+`resolved/` record, and `metadata`, the values its sweep block set, as
+one line of json with its keys sorted. Every other file below names its
+point by the same two columns, and `algorithm` rides with them. The two
+are each file's last columns, where sinter writes them too, so the json's
+commas come after every column a reader cuts the file for.
+
 | Column | What it is |
 | --- | --- |
-| `physical_error_probability`, `distance`, `round_period_microseconds`, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
+| `point_id`, `metadata`, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
 | `windows` | how many windows this shot decoded |
 | `logical_failure` | 1 when any operation's decoded observable did not match its truth, else 0; a `memory_patches` shot fails when any patch does |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
@@ -73,6 +83,7 @@ its maximum.
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_mean_us` | the windows the strong tier committed, the rounds its decodes read, and their mean service |
 | `commit_rounds` | r_com, the rounds a window commits: `windows.commit_rounds`, or the code distance when it is null |
+| `window_period_us` | a window's inter-arrival, `commit_rounds` times the QPU's round period: what `load` divides by, and the deadline the latency figure draws |
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
 | `weak_syndrome_weight_mean`, `weak_syndrome_weight_max` | the set bits of each weak decode's input, its detection events when they are formed ahead of the decoder; only when `observation.record_switching_windows` is on |
 | `weak_service_mean_us` | each weak decode's compute, its first stage's start to its last stage's end; the same switch |
@@ -182,7 +193,7 @@ counters.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds`, `seed` | the shot |
+| `point_id`, `metadata`, `algorithm`, `seed` | the shot |
 | `link` | the link path's name, one of the values in `decsim/records/transfers.py` |
 | `transfers` | how many transfers crossed that path |
 | `payload_bits` | how many bits they carried |
@@ -198,7 +209,7 @@ One row per sweep point, latency point and distinct microsecond value.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds` | the sweep point |
+| `point_id`, `metadata`, `algorithm` | the sweep point |
 | `name` | which latency point, from the list above |
 | `value_us` | one microsecond value that occurred |
 | `count` | how many windows carried it |
@@ -216,8 +227,9 @@ with no rows writes no file.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `round_period_microseconds`, `algorithm`, `seed` | the shot |
+| `point_id`, `metadata`, `algorithm`, `seed` | the shot |
 | `algorithm_us` | the time the algorithm stage held the unit for one decode: its wall clock, or its cycle count |
+| `window_period_us` | the shot's window inter-arrival, the deadline the latency figure draws |
 
 ### `sweep.csv`
 
@@ -228,7 +240,7 @@ point the run held:
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds` | the point |
+| `point_id`, `metadata`, `algorithm` | the point |
 | `shots` | how many shots the point ran |
 | `windows_per_shot` | the mean over those shots |
 | `logical_failures`, `logical_error_rate` | the count and the fraction |
@@ -239,7 +251,7 @@ point the run held:
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
 | `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
 | `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point and their mean service |
-| `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen r_com windows / escalated windows over the point, with r_com the shots' `commit_rounds` (2510.25222 eq. (6)); infinite when nothing escalated, and absent for shots written without `commit_rounds` |
+| `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen r_com windows / escalated windows over the point, with tau_gen r_com the shots' `window_period_us` (2510.25222 eq. (6)); infinite when nothing escalated |
 | `parallel_processes_needed` | the largest over the point's shots |
 | `weak_syndrome_weight_mean`, `weak_service_mean_us`, `strong_wait_mean_us` | the means over the point's shots, when they kept the switching records |
 | `weak_syndrome_weight_max`, `strong_wait_max_us`, `strong_held_in_units_max`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |
@@ -262,7 +274,7 @@ One row per sweep point per link path, averaged over that point's shots.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds` | the point |
+| `point_id`, `metadata`, `algorithm` | the point |
 | `link` | the path's name |
 | `transfers_per_shot`, `payload_bits_per_shot` | the means |
 | `bits_per_transfer` | the payload bits divided by the transfers |
@@ -278,7 +290,7 @@ here.
 
 | Column | What it is |
 | --- | --- |
-| `distance`, `physical_error_probability`, `algorithm`, `round_period_microseconds`, `seed` | the traced shot |
+| `point_id`, `metadata`, `algorithm`, `seed` | the traced shot |
 | `counting` | what the row counts: `residence` for stays in a structure, `link_path` for a path's moves |
 | `name` | the structure (a store, a decoder unit, the controller, the frame) or the link path |
 | `samples` | how many stays or moves the shot had there |
@@ -293,6 +305,7 @@ One object. Its keys, from `write_manifest` in
 | --- | --- |
 | `config_files` | the yaml chain, in the order it was read |
 | `resolved_config` | the whole config after every `extends` was folded in, as json |
+| `points` | the sweep's point ids in task order, a point two blocks name listed once: the order `decsim combine` writes a fold's rows in |
 | `shard`, `shots_per_unit` | the `--shard` and `--shots-per-unit` this process ran with, or null |
 | `git` | the commit and whether the checkout was dirty, read once when the process started |
 | `container` | the container image, when one was in use |
@@ -303,7 +316,7 @@ One object. Its keys, from `write_manifest` in
 | `started_utc`, `finished_utc` | when |
 
 `decsim combine` writes the same shape through `write_combined_manifest`,
-with the resolved config of the folders it folded.
+with the resolved config and the point ids of the folders it folded.
 
 The manifest is written twice, once when the run starts and once when
 it ends with `finished_utc` filled in, and both writes name the same

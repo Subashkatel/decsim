@@ -46,7 +46,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
@@ -109,6 +108,7 @@ SHOT_MEANS = (
 SHOT_MAXES = (
     # one value per point, the yaml's or d, so its largest is that value
     "commit_rounds",
+    "window_period_us",
     "max_queued_windows",
     "weak_queue_max",
     "strong_queue_max",
@@ -123,6 +123,10 @@ SHOT_SUMS = (
     "strong_decoded_rounds",
 )
 SHOT_TRUE_COUNTS = ("logical_failure", "direct_failure", "direct_mismatch")
+
+# the columns write_csv puts last
+POINT_ID_COLUMNS = ("point_id", "metadata")
+
 # the burst detector's shot columns, counted true per point when a run
 # with a detector wrote them: a first flag round is true when the
 # detector flagged a round, since rounds count from 1 and 0 is none
@@ -211,84 +215,64 @@ def percentile_of_counts(multiset: dict, fraction: float) -> float:
 
 
 def sweep_point_of(row: dict) -> tuple:
-    """The point a row belongs to: distance, p, algorithm, round period.
+    """The point a row belongs to: its id, its metadata, its algorithm.
 
-    A row read back off a csv file holds text and a row this process
-    measured holds numbers, so each of the four is read as the value it
-    was written from: one streamed row and one measured row of the same
+    The id is the point's strong id, sinter's strong_id column, so two
+    points apart in any setting are two points; the metadata and the
+    algorithm ride with it so every derived row says what it is of. A
+    row read back off a csv file holds text and a row this process
+    measured holds numbers, so the algorithm is read as the value it was
+    written from: one streamed row and one measured row of the same
     shot name the same point.
     """
     return (
-        fold.number_of(row["distance"]),
-        fold.number_of(row["physical_error_probability"]),
+        row["point_id"],
+        row["metadata"],
         fold.number_of(row["algorithm"]),
-        fold.number_of(row["round_period_microseconds"]),
     )
 
 
 def measured_point(measurement) -> tuple:
     """The sweep point one measured shot belongs to."""
     return (
-        measurement.distance,
-        measurement.physical_error_probability,
+        measurement.point_id,
+        measurement.metadata,
         measurement.algorithm,
-        measurement.round_period_microseconds,
     )
 
 
 def point_columns(point: tuple) -> dict:
-    """The four columns that name a sweep point."""
-    (
-        distance,
-        physical_error_probability,
-        algorithm,
-        round_period_microseconds,
-    ) = point
-    return {
-        "distance": distance,
-        "physical_error_probability": physical_error_probability,
-        "algorithm": algorithm,
-        "round_period_microseconds": round_period_microseconds,
-    }
+    """The three columns that name a sweep point."""
+    point_id, metadata, algorithm = point
+    return {"point_id": point_id, "metadata": metadata, "algorithm": algorithm}
 
 
 def summarize_point(point: tuple, totals, counts: dict) -> dict:
     """One sweep point: means over seeds of per-shot means, max of maxes."""
-    (
-        distance,
-        physical_error_probability,
-        algorithm,
-        round_period_microseconds,
-    ) = point
     failures = totals.true_counts["logical_failure"]
     shot_count = totals.rows
     ler_low, ler_high = wilson_interval(failures, shot_count)
-    row = {
-        "distance": distance,
-        "physical_error_probability": physical_error_probability,
-        "algorithm": algorithm,
-        "round_period_microseconds": round_period_microseconds,
-        "shots": shot_count,
-        "windows_per_shot": totals.mean("windows"),
-        "logical_failures": failures,
-        "logical_error_rate": failures / shot_count,
-        "ler_wilson_low": ler_low,
-        "ler_wilson_high": ler_high,
-        "direct_pymatching_failures": totals.true_counts["direct_failure"],
-        "prediction_mismatches_vs_direct": totals.true_counts[
-            "direct_mismatch"
-        ],
-        "throughput_windows_per_us": totals.mean("throughput_windows_per_us"),
-        "throughput_rounds_per_us": totals.mean("throughput_rounds_per_us"),
-        "max_queued_windows": totals.maxes["max_queued_windows"],
-        "tesseract_windows_checked": totals.sums["tesseract_windows_checked"],
-        "tesseract_window_disagreements": totals.sums[
-            "tesseract_window_disagreements"
-        ],
-        "load": totals.mean("load"),
-        "sim_wall_seconds_per_shot": totals.mean("sim_wall_seconds"),
-    }
-    _add_pool_columns(row, totals, round_period_microseconds)
+    row = point_columns(point)
+    row["shots"] = shot_count
+    row["windows_per_shot"] = totals.mean("windows")
+    row["logical_failures"] = failures
+    row["logical_error_rate"] = failures / shot_count
+    row["ler_wilson_low"] = ler_low
+    row["ler_wilson_high"] = ler_high
+    row["direct_pymatching_failures"] = totals.true_counts["direct_failure"]
+    row["prediction_mismatches_vs_direct"] = totals.true_counts[
+        "direct_mismatch"
+    ]
+    row["throughput_windows_per_us"] = totals.mean("throughput_windows_per_us")
+    row["throughput_rounds_per_us"] = totals.mean("throughput_rounds_per_us")
+    row["max_queued_windows"] = totals.maxes["max_queued_windows"]
+    row["tesseract_windows_checked"] = totals.sums["tesseract_windows_checked"]
+    row["tesseract_window_disagreements"] = totals.sums[
+        "tesseract_window_disagreements"
+    ]
+    row["load"] = totals.mean("load")
+    row["sim_wall_seconds_per_shot"] = totals.mean("sim_wall_seconds")
+    _add_pool_columns(row, totals)
     _add_load_columns(row, totals)
     _add_burst_columns(row, totals)
     for name in _points_held(totals.means):
@@ -312,9 +296,14 @@ def summarize(shots: list, window_samples: list) -> list:
 
 
 def summary_rows(totals: dict, counts: dict) -> list:
-    """One row per sweep point whose shots were totalled, in point order."""
+    """One row per sweep point whose shots were totalled, in point order.
+
+    The totals hold the points in the order their first shots came,
+    which is the sweep's task order for one run and for a fold alike
+    (combine merges the folders' rows in task order).
+    """
     rows = []
-    for point in sorted(totals, key=_sweep_point_order):
+    for point in totals:
         at_point = totals[point]
         row = summarize_point(point, at_point, counts)
         rows.append(row)
@@ -322,11 +311,21 @@ def summary_rows(totals: dict, counts: dict) -> list:
 
 
 def write_csv(rows: list, path: Path) -> None:
-    """The rows as a csv file, every column any row holds, first seen first."""
+    """The rows as a csv file, every column any row holds, first seen first.
+
+    The point's id and metadata go last, where sinter writes a task's
+    strong_id and json_metadata (sinter/_data/_csv_out.py:69-77): the
+    metadata is json holding commas, and after it no column is left for
+    a reader cutting the file on commas to lose.
+    """
     columns = {}
     for row in rows:
         row_columns = dict.fromkeys(row)
         columns.update(row_columns)
+    for name in POINT_ID_COLUMNS:
+        if name in columns:
+            del columns[name]
+            columns[name] = None
     field_names = list(columns)
     with open(path, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=field_names)
@@ -454,7 +453,11 @@ def window_sample_rows(measurements: list) -> list:
     process to reach the same numbers.
     """
     counts = _counts_of_samples(measurements)
-    return _rows_of_counts(counts)
+    points = []
+    for point, _name in counts:
+        points.append(point)
+    unique_points = dict.fromkeys(points)
+    return _rows_of_counts(counts, list(unique_points))
 
 
 def latency_sample_rows(measurements: list) -> list:
@@ -465,25 +468,19 @@ def latency_sample_rows(measurements: list) -> list:
     count. A number instead of a name is a fixed latency and produces
     none. This is the latency figure's raw data, persisted so the
     figure, including the cross-tier combined one, rebuilds from run
-    folders alone.
+    folders alone; each row carries its window's inter-arrival, the
+    deadline the figure draws.
     """
     rows = []
     for measurement in measurements:
         if not isinstance(measurement.algorithm, str):
             continue
+        point = measured_point(measurement)
         for sample_us in measurement.samples["algorithm"]:
-            row = {
-                "distance": measurement.distance,
-                "physical_error_probability": (
-                    measurement.physical_error_probability
-                ),
-                "round_period_microseconds": (
-                    measurement.round_period_microseconds
-                ),
-                "algorithm": measurement.algorithm,
-                "seed": measurement.seed,
-                "algorithm_us": sample_us,
-            }
+            row = point_columns(point)
+            row["seed"] = measurement.seed
+            row["algorithm_us"] = sample_us
+            row["window_period_us"] = measurement.window_period_us
             rows.append(row)
     return rows
 
@@ -522,12 +519,11 @@ def read_rows(path: Path) -> list:
 
 
 def rows_by_point(run_dir: Path) -> dict:
-    """sweep.csv's rows, keyed by their sweep point."""
+    """sweep.csv's rows, keyed by their point id."""
     sweep_path = run_dir / "sweep.csv"
     rows = {}
     for row in read_rows(sweep_path):
-        point = run_folder.point_of(row)
-        rows[point] = row
+        rows[row["point_id"]] = row
     return rows
 
 
@@ -543,9 +539,9 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     from the per-value counts and not from a shard's summary.
 
     The rows come back in the order one unsharded run would have
-    written them, read off the rows themselves and the sweep every
-    folder's manifest records, so `combine b a` writes what
-    `combine a b` writes. What two folders may not share is a shot: one
+    written them, read off the rows themselves and the point ids every
+    folder's manifest records in task order, so `combine b a` writes
+    what `combine a b` writes. What two folders may not share is a shot: one
     seeded run in both of them would be counted twice.
 
     An experiment's shard folders hold more rows than a process can:
@@ -565,8 +561,9 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     """
     started_utc = run_folder.utc_now()
     run_folder.read_the_tree()
-    recorded_config = _one_sweeps_config(run_dirs)
-    positions = experiment.task_positions(recorded_config["sweep"])
+    manifest = _one_sweeps_manifest(run_dirs)
+    point_ids = manifest["points"]
+    positions = _task_positions(point_ids)
     folders = _folders_that_ran_shots(run_dirs)
     order = functools.partial(_row_task_and_seed, positions)
     _refuse_folders_of_different_columns(folders)
@@ -577,7 +574,8 @@ def combine(run_dirs: list, out_dir: Path) -> list:
     run_folder.copy_point_records(folders, out_dir)
     finished_utc = run_folder.utc_now()
     run_folder.write_combined_manifest(
-        recorded_config,
+        manifest["resolved_config"],
+        point_ids,
         out_dir,
         run_dirs,
         started_utc,
@@ -691,7 +689,7 @@ def _fold_the_folders(folders: list, order, out_dir: Path) -> list:
     sweep_path = out_dir / "sweep.csv"
     write_csv(rows, sweep_path)
     samples_path = out_dir / "window_samples.csv"
-    samples_rows = _rows_of_counts(counts)
+    samples_rows = _rows_of_counts(counts, list(shot_totals))
     _write_rows(samples_rows, samples_path)
     link_totals = _fold_shot_links(folders, order, out_dir)
     per_link = _link_rows_of(link_totals)
@@ -777,9 +775,7 @@ def _folder_files(folders: list, name: str) -> list:
     return paths
 
 
-def _add_pool_columns(
-    row: dict, totals, round_period_microseconds: float
-) -> None:
+def _add_pool_columns(row: dict, totals) -> None:
     """The pool columns and Toshio's bound."""
     row["weak_queue_max"] = totals.maxes["weak_queue_max"]
     row["strong_queue_max"] = totals.maxes["strong_queue_max"]
@@ -787,9 +783,7 @@ def _add_pool_columns(
     row["strong_busy_fraction"] = totals.mean("strong_busy_fraction")
     row["escalated_windows"] = totals.sums["escalated_windows"]
     row["strong_service_mean_us"] = totals.mean("strong_service_mean_us")
-    row["strong_service_bound_us"] = strong_service_bound_us(
-        totals, round_period_microseconds
-    )
+    row["strong_service_bound_us"] = strong_service_bound_us(totals)
     row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
 
 
@@ -825,7 +819,7 @@ def _add_burst_columns(row: dict, totals) -> None:
             row[share] = flagged / totals.rows
 
 
-def strong_service_bound_us(totals, round_period_microseconds: float) -> float:
+def strong_service_bound_us(totals) -> float:
     """Toshio's Theorem 1 bound on one strong decode's time, per point.
 
     Theorem 1 bounds the strong decoder's time per round (2510.25222
@@ -837,15 +831,14 @@ def strong_service_bound_us(totals, round_period_microseconds: float) -> float:
     escalated windows over its windows, so the bound is tau_gen r_com
     windows / escalated windows, the same unit as
     strong_service_mean_us beside it; infinite when nothing escalated.
-    r_com is the shots' commit_rounds column.
+    tau_gen r_com is the shots' window_period_us column.
     """
     escalated_windows = totals.sums["escalated_windows"]
     if escalated_windows == 0:
         return math.inf
     windows = totals.sums["windows"]
-    commit_rounds = totals.maxes["commit_rounds"]
-    committed_microseconds = round_period_microseconds * commit_rounds
-    return committed_microseconds * windows / escalated_windows
+    window_period_us = totals.maxes["window_period_us"]
+    return window_period_us * windows / escalated_windows
 
 
 def _shot_totals(row: dict) -> fold.RowTotals:
@@ -947,7 +940,7 @@ def _add_a_shot_link(totals: dict, row: dict) -> None:
 def _link_rows_of(totals: dict) -> list:
     """One row per point per link, the points and the links in order."""
     rows = []
-    for point in sorted(totals, key=_sweep_point_order):
+    for point in totals:
         at_point = totals[point]
         for path in sorted(at_point):
             row = _link_row(point, path, at_point[path])
@@ -976,7 +969,7 @@ def _add_a_movement_row(totals: dict, row: dict) -> None:
 def _movement_rows_of(totals: dict) -> list:
     """One point's paths and then its memory classes, point by point."""
     rows = []
-    for point in sorted(totals, key=_sweep_point_order):
+    for point in totals:
         at_point = totals[point]
         for row in _movement_rows_at_point(point, at_point):
             rows.append(row)
@@ -1063,10 +1056,12 @@ def _add_counts_of_rows(counts: dict, window_samples: list) -> None:
         at_this_name[value] = already + row["count"]
 
 
-def _rows_of_counts(counts: dict) -> list:
-    """The multisets as rows: point order, then point-list order, value."""
+def _rows_of_counts(counts: dict, points: list) -> list:
+    """The multisets as rows: points' order, then point-list order, value."""
+    positions = _task_positions(points)
+    order = functools.partial(_point_and_name_order, positions)
     rows = []
-    for key in sorted(counts, key=_point_and_name_order):
+    for key in sorted(counts, key=order):
         multiset = counts[key]
         for row in _rows_of_one_multiset(key, multiset):
             rows.append(row)
@@ -1087,33 +1082,43 @@ def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
     return rows
 
 
-def _point_and_name_order(key: tuple) -> tuple:
+def _point_and_name_order(positions: dict, key: tuple) -> tuple:
     """A (point, latency point) key where a single run would write it."""
     point, name = key
     place = measure.POINTS.index(name)
-    point_order = _sweep_point_order(point)
+    point_order = positions[point]
     return (point_order, place)
 
 
-def _one_sweeps_config(run_dirs: list) -> dict:
-    """The resolved config every folded folder recorded.
+def _task_positions(points: list) -> dict:
+    """Each point's place in the list, the order a single run meets them."""
+    positions = {}
+    for position, point in enumerate(points):
+        positions[point] = position
+    return positions
+
+
+def _one_sweeps_manifest(run_dirs: list) -> dict:
+    """The manifest of the first folder, every folder's config the same.
 
     A shard's rows say which point they belong to, not where that point
-    sits in the sweep, so the sweep order comes from the resolved config
-    each folder's manifest records, and the combined folder records it
-    again for the next fold. Folders that recorded different configs are
-    refused: they are not shards of one sweep.
+    sits in the sweep, so the sweep order comes from the point ids each
+    folder's manifest records in task order, and the combined folder
+    records them again for the next fold. Folders that recorded
+    different configs are refused: they are not shards of one sweep.
     """
+    manifests = []
     recorded_configs = []
     for run_dir in run_dirs:
-        recorded = _manifest_config(run_dir)
-        recorded_configs.append(recorded)
+        manifest = _manifest_of(run_dir)
+        manifests.append(manifest)
+        recorded_configs.append(manifest["resolved_config"])
     _refuse_folders_of_different_sweeps(run_dirs, recorded_configs)
-    return recorded_configs[0]
+    return manifests[0]
 
 
-def _manifest_config(run_dir) -> dict:
-    """One run folder's resolved config, as its manifest recorded it."""
+def _manifest_of(run_dir) -> dict:
+    """One run folder's manifest.json."""
     manifest_path = Path(run_dir) / "manifest.json"
     if not manifest_path.is_file():
         raise refusal.RefusalError(
@@ -1122,8 +1127,7 @@ def _manifest_config(run_dir) -> dict:
             "order one unsharded run would have written them"
         )
     manifest_text = manifest_path.read_text()
-    manifest = json.loads(manifest_text)
-    return manifest["resolved_config"]
+    return json.loads(manifest_text)
 
 
 def _refuse_folders_of_different_sweeps(
@@ -1286,12 +1290,7 @@ def _refuse_a_repeated_shot(run_dirs: list, order) -> None:
 def _refuse_the_folders(row: dict, run_dirs: list) -> None:
     """Say which shot is doubled and in which folders it was found."""
     listed = _named(run_dirs)
-    shot = (
-        f"d {row['distance']}, p {row['physical_error_probability']}, "
-        f"algorithm {row['algorithm']}, "
-        f"round period {row['round_period_microseconds']} us, "
-        f"seed {row['seed']}"
-    )
+    shot = f"{row['metadata']} seed {row['seed']}"
     raise refusal.RefusalError(
         f"the shot {shot} is in more than one of {listed}; a shot is one "
         "seeded run of one sweep point, so folding both folders would "
@@ -1352,12 +1351,7 @@ def _row_task_and_seed(positions: dict, row: dict) -> tuple:
     seed (one per decoded window, or one per link) keep the order the
     run wrote them.
     """
-    point = (
-        fold.number_of(row["physical_error_probability"]),
-        fold.number_of(row["distance"]),
-        fold.number_of(row["round_period_microseconds"]),
-    )
-    position = positions[point]
+    position = positions[row["point_id"]]
     seed = fold.number_of(row["seed"])
     return (position, seed)
 
@@ -1388,23 +1382,6 @@ def _shot_link_row(point: tuple, measurement, path: str) -> dict:
     return row
 
 
-def _sweep_point_order(point: tuple) -> tuple:
-    """distance, then p, then the algorithm's text, then the fastest round."""
-    (
-        distance,
-        physical_error_probability,
-        algorithm,
-        round_period_microseconds,
-    ) = point
-    algorithm_text = str(algorithm)
-    return (
-        distance,
-        physical_error_probability,
-        algorithm_text,
-        -round_period_microseconds,
-    )
-
-
 def _add_latency_point_columns(
     row: dict, totals, name: str, multiset: dict
 ) -> None:
@@ -1430,11 +1407,9 @@ def _terminal_block(row: dict) -> str:
     """
     algorithm = row["algorithm"]
     algorithm_text = _algorithm_text(algorithm)
-    lines = [
-        f"distance: {row['distance']}",
-        f"physical error rate: {row['physical_error_probability']:g}",
+    lines = _metadata_lines(row["metadata"])
+    lines += [
         f"algorithm: {algorithm_text}",
-        f"round period: {row['round_period_microseconds']:g} us",
         f"load (service per window / window inter-arrival): {row['load']:.2f}",
         f"logical failures: {row['logical_failures']} of {row['shots']} shots",
         f"mismatches vs direct PyMatching: "
@@ -1472,6 +1447,16 @@ def _terminal_latency_lines(row: dict) -> list:
             f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
             f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us"
         )
+    return lines
+
+
+def _metadata_lines(metadata: str) -> list:
+    """One line per setting the point's sweep set: its path and value."""
+    values = json.loads(metadata)
+    lines = []
+    for path, value in values.items():
+        value_text = json.dumps(value)
+        lines.append(f"{path}: {value_text}")
     return lines
 
 

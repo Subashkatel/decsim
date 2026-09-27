@@ -136,10 +136,9 @@ class _TracedShot:
     def __init__(self, trace_path):
         self.trace_path = trace_path
         self.seed = 0
-        self.distance = 3
-        self.physical_error_probability = 0.001
+        self.point_id = "0123abcd"
+        self.metadata = '{"qpu.distance": 3}'
         self.algorithm = 1.0
-        self.round_period_microseconds = 1.0
 
 
 def test_a_structures_residences_are_its_lanes_complete_events(tmp_path):
@@ -195,13 +194,11 @@ def test_a_row_names_the_sweep_point_its_shot_ran_at(tmp_path):
 
     rows = residence.rows_of([measurement])
 
-    distances = {row["distance"] for row in rows}
-    probabilities = {row["physical_error_probability"] for row in rows}
-    periods = {row["round_period_microseconds"] for row in rows}
+    point_ids = {row["point_id"] for row in rows}
+    metadata = {row["metadata"] for row in rows}
     seeds = {row["seed"] for row in rows}
-    assert distances == {3}
-    assert probabilities == {0.001}
-    assert periods == {1.0}
+    assert point_ids == {"0123abcd"}
+    assert metadata == {'{"qpu.distance": 3}'}
     assert seeds == {0}
 
 

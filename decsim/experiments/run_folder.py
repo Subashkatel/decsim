@@ -19,7 +19,6 @@ import platform
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.build.escalation as escalation_build
@@ -93,6 +92,7 @@ def new_run_dir(config) -> pathlib.Path:
 def start_run(
     config: Optional[experiment.ExperimentConfig],
     run_dir: pathlib.Path,
+    point_ids: list,
     *,
     shard: Optional[tuple] = None,
     shots_per_unit: Optional[int] = None,
@@ -100,17 +100,19 @@ def start_run(
     """The code state and the manifest, before the first shot; the time.
 
     config is None for a run no yaml describes (the tools/ examples).
+    point_ids are the run's points in task order (write_manifest).
     """
     snapshot_code_state(config, run_dir)
     started_utc = utc_now()
     how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
-    write_manifest(config, run_dir, started_utc, **how_it_ran)
+    write_manifest(config, run_dir, point_ids, started_utc, **how_it_ran)
     return started_utc
 
 
 def finish_run(
     config: Optional[experiment.ExperimentConfig],
     run_dir: pathlib.Path,
+    point_ids: list,
     started_utc: str,
     *,
     shard: Optional[tuple] = None,
@@ -119,7 +121,9 @@ def finish_run(
     """The manifest again with the time the run ended, then the flag."""
     finished_utc = utc_now()
     how_it_ran = {"shard": shard, "shots_per_unit": shots_per_unit}
-    write_manifest(config, run_dir, started_utc, finished_utc, **how_it_ran)
+    write_manifest(
+        config, run_dir, point_ids, started_utc, finished_utc, **how_it_ran
+    )
     mark_finished(run_dir)
 
 
@@ -171,6 +175,7 @@ def read_the_tree() -> None:
 def write_manifest(
     config: Optional[experiment.ExperimentConfig],
     run_dir: pathlib.Path,
+    point_ids: list,
     started_utc: str,
     finished_utc: Optional[str] = None,
     *,
@@ -182,7 +187,9 @@ def write_manifest(
     Sampling is deterministic from (stim version, circuit, distance,
     rounds, p, seed), so the manifest plus seeds are the raw data. config
     is None for a run no yaml describes (tools/deltakit_example.py),
-    whose every value is in resolved/.
+    whose every value is in resolved/. point_ids are the sweep's points
+    in task order, each the name of its resolved/ record, which is the
+    order `decsim combine` writes a fold's rows in.
 
     `shard` and `shots_per_unit` are facts of how this run ran, the way
     the host and the slurm job id are: which share of the sweep's work
@@ -200,6 +207,7 @@ def write_manifest(
     manifest = {
         "config_files": config_files,
         "resolved_config": json_safe_config,
+        "points": point_ids,
         "shard": _shard_text(shard),
         "shots_per_unit": shots_per_unit,
     }
@@ -212,6 +220,7 @@ def write_manifest(
 
 def write_combined_manifest(
     resolved_config: dict,
+    point_ids: list,
     run_dir: pathlib.Path,
     folded: list,
     started_utc: str,
@@ -221,16 +230,17 @@ def write_combined_manifest(
 
     A combined folder is a run folder, so it carries a manifest like any
     other and `decsim combine` can fold it again with a shard that
-    landed later. The resolved config is the one every folded folder
-    recorded, which is what combine reads the sweep order off; the
-    folded folders' names are a fact of how this folder came about, and
-    like a run's shard they order nothing.
+    landed later. The resolved config and the point ids are the ones
+    every folded folder recorded, and the ids are what combine reads the
+    sweep order off; the folded folders' names are a fact of how this
+    folder came about, and like a run's shard they order nothing.
     """
     folded_names = []
     for run_folder_path in folded:
         folded_names.append(str(run_folder_path))
     manifest = {
         "resolved_config": resolved_config,
+        "points": point_ids,
         "folded": folded_names,
     }
     how_it_ran = _how_it_ran()
@@ -307,25 +317,15 @@ def is_finished(run_dir: pathlib.Path) -> bool:
     return finished_path.exists()
 
 
-def point_of(row: Mapping) -> tuple:
-    """The sweep point a sweep.csv row or a point's metadata names."""
-    values = []
-    for axis in experiment.SWEEP_AXES:
-        value = row.get(axis)
-        values.append(value)
-    return tuple(values)
-
-
 def resolved_by_point(run_dir: pathlib.Path) -> dict:
-    """Each point's resolved/ record, keyed by its sweep point."""
+    """Each point's resolved/ record, keyed by its point id."""
     records = {}
     resolved_dir = pathlib.Path(run_dir) / RESOLVED_FOLDER
     paths = resolved_dir.glob("*.json")
     for path in sorted(paths):
         text = path.read_text()
         record = json.loads(text)
-        point = point_of(record["metadata"])
-        records[point] = record
+        records[record["id"]] = record
     return records
 
 

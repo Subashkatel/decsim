@@ -1419,14 +1419,16 @@ observation:                       # what a run records beyond its results
                                    # print shows it live on screen; file writes each
                                    # shot's full line record to the run folder,
                                    # results/<stamp>-<name>/log/, one file per shot
-                                   # named p<p>_d<d>_algo<card>_round<T>us_seed<n>.log;
+                                   # named <id>_seed<n>.log, <id> the point's id;
                                    # both does both. results/ is not tracked
   trace: chrome                    # off | chrome | <path>. The Chrome trace of the
                                    # data path: where every round and window sat, for
                                    # how long, and whether each hop copied the bits or
                                    # referenced them. chrome writes one file per traced
-                                   # shot next to the results; a path writes there
-                                   # instead (.gz compresses). Opens in Perfetto or
+                                   # shot next to the results, <id>_seed<n>.trace.json;
+                                   # a path writes there instead, with _<id>_seed<n>
+                                   # before its suffix under collect (.gz
+                                   # compresses). Opens in Perfetto or
                                    # chrome://tracing. It costs one file per traced
                                    # shot, holding every hop of every round and window
                                    # of that shot: 69 kB for this file's d3, 15-round

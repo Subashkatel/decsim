@@ -56,7 +56,7 @@ The output:
 
 ```
 config: reference
-point: p0.001 d3 round period 1 us seed 0
+point: {"distance": 3, "physical_error_probability": 0.001, "round_period_microseconds": 1.0} seed 0
 terminal status: complete
 execution done: 15000000 ticks
 fully done: 37356000 ticks
@@ -66,11 +66,12 @@ run dir: results/first_shot
 
 Line by line:
 
-- `point: p0.001 d3 round period 1 us seed 0`. One point of a sweep is
-  one machine. `p0.001` is the physical error probability: each physical
-  operation on the QPU fails with probability one in a thousand. `d3` is
-  the code distance, the size of the error correcting code: distance 3
-  corrects one error. `round period 1 us` is how long one round of
+- `point: {...} seed 0`. One point of a sweep is one machine, and the
+  braces hold the settings its sweep block set, each by its name.
+  `physical_error_probability` 0.001 says each physical operation on the
+  QPU fails with probability one in a thousand. `distance` is the code
+  distance, the size of the error correcting code: distance 3 corrects
+  one error. `round_period_microseconds` is how long one round of
   measurement takes on the QPU, one microsecond here.
 - `execution done: 15000000 ticks`. A **tick** is the engine's integer
   unit of time, and one microsecond is a million ticks
@@ -108,11 +109,11 @@ It first prints what the yaml resolved to, one line per component, then
 the summary of each point:
 
 ```
-p 0.001, d 3, round period 1.0 us: 2 shots done
+{"distance": 3, "physical_error_probability": 0.001, "round_period_microseconds": 1.0}: 2 shots done
 distance: 3
-physical error rate: 0.001
+physical_error_probability: 0.001
+round_period_microseconds: 1.0
 algorithm: pymatching
-round period: 1 us
 load (service per window / window inter-arrival): 2.39
 logical failures: 0 of 2 shots
 mismatches vs direct PyMatching: 0
@@ -192,12 +193,12 @@ the facts.
 columns. The first few:
 
 ```bash
-cut -d, -f1-10 results/reference/sweep.csv
+cut -d, -f1-7 results/reference/sweep.csv
 ```
 
 ```
-distance,physical_error_probability,algorithm,round_period_microseconds,shots,windows_per_shot,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-3,0.001,pymatching,1.0,2,4.0,0,0.0,0.0,0.6576280471103807
+algorithm,shots,windows_per_shot,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
+pymatching,2,4.0,0,0.0,0.0,0.6576280471103807
 ```
 
 `logical_error_rate` is the fraction of shots whose decoded observable
@@ -207,10 +208,15 @@ the interval runs from 0 to 0.66. The next tutorial,
 [Your first sweep](first_sweep.md), explains that interval and runs enough
 shots to make it narrow.
 
+The row's last two columns name its point. `point_id` is a hash of
+every setting the point ran with, so two points that differ in any
+setting have two ids, and `metadata` is the values its sweep set, the
+braces the terminal printed.
+
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/reference --figure stage_breakdown
+decsim plot results/reference --figure stage_breakdown --x distance
 ```
 
 ```
@@ -220,10 +226,10 @@ results/reference/stage_breakdown.png
 `stage_breakdown.png` shows where a window's time went, stage by stage:
 the buffer filling, the queue, the link into the decoder unit, the
 fetch, the algorithm, the release, the boundary handed to the next
-window, the link out and the frame commit. `collect` draws a figure only when its input is there,
-which is why this run has the `timeline.png` it drew for you and no
-others: it traced a shot, but its sweep has one physical error rate and
-one distance.
+window, the link out and the frame commit, one bar per value of the
+swept setting `--x` names. `collect` draws only the `timeline.png` of a
+traced shot itself; every other figure is drawn against a setting the
+sweep varied, and only you know which one to put on the axis.
 
 ## Step 6. Follow one round
 
@@ -238,12 +244,12 @@ For one round, decsim prints the path itself:
 
 ```bash
 decsim trace follow \
-  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/trace/*_seed0.trace.json \
   --round 1:1
 ```
 
 ```
-round 1:1 of decsim weak_baseline d3 p0.001 seed0
+round 1:1 of decsim weak_baseline d3 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
 0.000      weak syndrome buffer         hold registered                                                                reference
@@ -293,7 +299,7 @@ The same command follows a window instead of a round:
 
 ```bash
 decsim trace follow \
-  results/reference/trace/p0.001_d3_algopymatching_round1us_seed0.trace.json \
+  results/reference/trace/*_seed0.trace.json \
   --window 1:0
 ```
 

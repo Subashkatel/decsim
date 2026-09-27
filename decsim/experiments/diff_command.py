@@ -7,6 +7,7 @@ import pathlib
 import statistics
 from typing import Optional
 
+import decsim.collect as collect
 import decsim.experiments.fold as fold
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
@@ -38,7 +39,10 @@ AGREEMENT_STANDARD_ERRORS = 1.96
 def diff(first: pathlib.Path, second: pathlib.Path) -> list:
     """How two run folders differ: settings, inputs by hash, then results.
 
-    A point is matched by its sweep values. A result that differs is said
+    A point is matched by its metadata, the values its sweep set, so two
+    runs of different configs over one grid pair point by point, as
+    sinter's plot groups by json_metadata across files (sinter
+    _command/_main_plot.py --group_func). A result that differs is said
     to agree within its error bars or not: a logical error rate by its
     Wilson interval, a mean over shots by the standard error of its
     shots (shots.csv), which is where a decoder's measured wall clock
@@ -80,8 +84,8 @@ def _refuse_a_folder_without_points(run_dir: pathlib.Path) -> None:
 
 def _settings_lines(first: pathlib.Path, second: pathlib.Path) -> list:
     """Each point's settings and built values that differ, path by path."""
-    first_points = run_folder.resolved_by_point(first)
-    second_points = run_folder.resolved_by_point(second)
+    first_points = _records_by_metadata(first)
+    second_points = _records_by_metadata(second)
     lines = ["settings:"]
     unmatched = _unmatched_lines(first_points, second_points)
     lines.extend(unmatched)
@@ -104,8 +108,8 @@ def _settings_lines(first: pathlib.Path, second: pathlib.Path) -> list:
 
 def _input_lines(first: pathlib.Path, second: pathlib.Path) -> list:
     """Each point's input files whose sha256 differs, or that one lacks."""
-    first_points = run_folder.resolved_by_point(first)
-    second_points = run_folder.resolved_by_point(second)
+    first_points = _records_by_metadata(first)
+    second_points = _records_by_metadata(second)
     lines = ["inputs:"]
     for point in _shared(first_points, second_points):
         first_hashes = _hashes(first, first_points[point]["id"])
@@ -118,8 +122,8 @@ def _input_lines(first: pathlib.Path, second: pathlib.Path) -> list:
 
 def _result_lines(first: pathlib.Path, second: pathlib.Path) -> list:
     """Each point's sweep.csv columns that differ, with their verdict."""
-    first_rows = report.rows_by_point(first)
-    second_rows = report.rows_by_point(second)
+    first_rows = _rows_by_metadata(first)
+    second_rows = _rows_by_metadata(second)
     lines = ["results:"]
     unmatched = _unmatched_lines(first_rows, second_rows)
     lines.extend(unmatched)
@@ -134,7 +138,7 @@ class _Comparison:
     """One point's results in two folders, and the error bars of each."""
 
     def __init__(
-        self, first: pathlib.Path, second: pathlib.Path, point: tuple
+        self, first: pathlib.Path, second: pathlib.Path, point: str
     ) -> None:
         self.point_text = _point_text(point)
         self.first_shots = _shot_rows_of(first, point)
@@ -214,15 +218,33 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float))
 
 
-def _shot_rows_of(run_dir: pathlib.Path, point: tuple) -> list:
+def _shot_rows_of(run_dir: pathlib.Path, point: str) -> list:
     """One point's rows of shots.csv, the per-shot values of its means."""
     path = run_dir / "shots.csv"
     rows = []
     for row in fold.row_stream(path):
-        typed = fold.typed_row(row)
-        row_point = run_folder.point_of(typed)
-        if row_point == point:
+        if row["metadata"] == point:
+            typed = fold.typed_row(row)
             rows.append(typed)
+    return rows
+
+
+def _records_by_metadata(run_dir: pathlib.Path) -> dict:
+    """Each point's resolved/ record, keyed by its metadata's text."""
+    by_id = run_folder.resolved_by_point(run_dir)
+    records = {}
+    for record in by_id.values():
+        point = collect.metadata_text(record["metadata"])
+        records[point] = record
+    return records
+
+
+def _rows_by_metadata(run_dir: pathlib.Path) -> dict:
+    """sweep.csv's rows, keyed by their metadata's text."""
+    by_id = report.rows_by_point(run_dir)
+    rows = {}
+    for row in by_id.values():
+        rows[row["metadata"]] = row
     return rows
 
 
@@ -235,9 +257,8 @@ def _hashes(run_dir: pathlib.Path, point_id: str) -> dict:
     return json.loads(text)
 
 
-def _point_text(point: tuple) -> str:
-    probability, distance, period = point
-    return f"p {probability} d {distance} round period {period} us:"
+def _point_text(point: str) -> str:
+    return f"{point}:"
 
 
 def _shared(first: dict, second: dict) -> list:

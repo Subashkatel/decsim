@@ -60,11 +60,11 @@ decsim collect configs/priced_cards_example.yaml
 ```
 
 ```
-p 0.001, d 3, round period 1.0 us: 20 shots done
+{"distance": 3, "physical_error_probability": 0.001, "round_period_microseconds": 1.0}: 20 shots done
 distance: 3
-physical error rate: 0.001
+physical_error_probability: 0.001
+round_period_microseconds: 1.0
 algorithm: 1 us
-round period: 1 us
 load (service per window / window inter-arrival): 0.36
 logical failures: 0 of 20 shots
 mismatches vs direct PyMatching: 0

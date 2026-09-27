@@ -251,6 +251,17 @@ def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
     return Shot(task, seed, machine, result, wall_seconds)
 
 
+def metadata_text(metadata: Mapping[str, Any]) -> str:
+    """A point's metadata as one line of json, its keys sorted.
+
+    The form a row carries it in, sinter's json_metadata column
+    (sinter/_data/_csv_out.py:69-77), so the same point's rows and its
+    resolved record name it with the same text.
+    """
+    value = json_value(metadata)
+    return json.dumps(value, sort_keys=True)
+
+
 def json_value(value: Any) -> Any:
     """A settings record as plain json: every value by its content.
 

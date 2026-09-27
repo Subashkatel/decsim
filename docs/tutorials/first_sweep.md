@@ -82,13 +82,13 @@ that host's, because this config names a decoder rather than pricing
 one:
 
 ```
-p 0.003, d 3, round period 1.0 us: 400 shots done
-p 0.003, d 5, round period 1.0 us: 400 shots done
-p 0.003, d 7, round period 1.0 us: 400 shots done
+{"distance": 3, "physical_error_probability": 0.003, "round_period_microseconds": 1.0}: 400 shots done
+{"distance": 5, "physical_error_probability": 0.003, "round_period_microseconds": 1.0}: 400 shots done
+{"distance": 7, "physical_error_probability": 0.003, "round_period_microseconds": 1.0}: 400 shots done
 distance: 3
-physical error rate: 0.003
+physical_error_probability: 0.003
+round_period_microseconds: 1.0
 algorithm: pymatching
-round period: 1 us
 load (service per window / window inter-arrival): 2.53
 logical failures: 16 of 400 shots
 mismatches vs direct PyMatching: 0
@@ -136,15 +136,19 @@ fraction of the shots is a broken machine.
 ## Step 3. Read the error bars
 
 ```bash
-cut -d, -f1,2,5,7,8,9,10 results/first_sweep/sweep.csv
+cut -d, -f2,4-7 results/first_sweep/sweep.csv
 ```
 
 ```
-distance,physical_error_probability,shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
-3,0.003,400,16,0.04,0.024768847722620668,0.06398278162908555
-5,0.003,400,12,0.03,0.017242849034032177,0.05169903312966765
-7,0.003,400,8,0.02,0.010168264597915496,0.038963870377777945
+shots,logical_failures,logical_error_rate,ler_wilson_low,ler_wilson_high
+400,16,0.04,0.024768847722620668,0.06398278162908555
+400,12,0.03,0.017242849034032177,0.05169903312966765
+400,8,0.02,0.010168264597915496,0.038963870377777945
 ```
+
+The rows come in the sweep's order, distance 3, 5 and 7, the order the
+summary printed them; each row's last column, `metadata`, names its
+point.
 
 `logical_error_rate` is the failures divided by the shots. It is an
 estimate, and 16 out of 400 would have come out differently with
@@ -180,16 +184,18 @@ or quote the point as an upper bound.
 ## Step 4. Draw it
 
 ```bash
-decsim plot results/first_sweep --figure ler_vs_d --probability 0.003
+decsim plot results/first_sweep --figure ler --x distance --where physical_error_probability=0.003
 ```
 
 ```
-results/first_sweep/ler_vs_distance.png
+results/first_sweep/ler.png
 ```
 
-`ler_vs_d` plots the logical error rate against the code distance at one
-physical error rate, so it asks which rate to read out of the sweep. The
-error bars on it are the Wilson columns you just read.
+`ler` plots the logical error rate against the swept setting `--x`
+names, here the code distance, and `--where` keeps the points at one
+physical error rate. Both name a setting the way the point's metadata
+names it, which is the `metadata` column of `sweep.csv`. The error bars
+on it are the Wilson columns you just read.
 
 ## Step 5. Cut it into shards and put it back together
 
@@ -211,14 +217,14 @@ folders' additive files, adds them, and recomputes the summary.
 The combined report's counts:
 
 ```bash
-cut -d, -f1,5,7,8 results/combined/sweep.csv
+cut -d, -f2,4,5 results/combined/sweep.csv
 ```
 
 ```
-distance,shots,logical_failures,logical_error_rate
-3,400,16,0.04
-5,400,12,0.03
-7,400,8,0.02
+shots,logical_failures,logical_error_rate
+400,16,0.04
+400,12,0.03
+400,8,0.02
 ```
 
 The same three counts as the single run. That is not luck: a shot's seed

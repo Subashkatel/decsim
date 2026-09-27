@@ -30,6 +30,18 @@ TWO_POINT_SWEEP = [
 ]
 
 ROUNDS_COLUMN = "settings.workload.row_settings.arguments.rounds_per_shot"
+PROBABILITY_COLUMN = "settings.workload.physical_error_probability"
+
+
+def _point_text(probability: float) -> str:
+    """How diff names a point: its metadata's json text."""
+    metadata = {
+        "distance": 3,
+        "physical_error_probability": probability,
+        "round_period_microseconds": 1.0,
+    }
+    text = json.dumps(metadata, sort_keys=True)
+    return f"{text}:"
 
 
 def _collected(folder, overrides: dict):
@@ -104,7 +116,7 @@ def test_two_runs_of_one_yaml_are_the_same(runs, capsys):
 def test_diff_names_the_setting_and_the_input_that_changed(runs, capsys):
     lines = _diff_printed(capsys, runs["first"], runs["shorter"])
 
-    point = "p 0.003 d 3 round period 1.0 us:"
+    point = _point_text(0.003)
     assert (
         f"  {point} settings.workload.row_settings.arguments."
         "rounds_per_shot: 15 -> 12"
@@ -150,10 +162,10 @@ def _spread_shots(run_dir, column: str, half_width: float) -> None:
     """
     shots_path = run_dir / "shots.csv"
     rows = _csv_rows(shots_path)
-    first_point = rows[0]["physical_error_probability"]
+    first_point = rows[0]["point_id"]
     sign = 1
     for row in rows:
-        if row["physical_error_probability"] != first_point:
+        if row["point_id"] != first_point:
             continue
         value = float(row[column])
         row[column] = value + sign * half_width
@@ -218,11 +230,11 @@ def _first_shot_only(runs, tmp_path, name: str, values: dict):
     """A copy whose first point kept one shot and whose row holds values."""
     changed = _rewritten(runs["first"], tmp_path, name, values)
     first_rows = results.load(runs["first"])
-    first_point = str(first_rows[0]["physical_error_probability"])
+    first_point = first_rows[0]["point_id"]
     seen = []
 
     def keep(row) -> bool:
-        if row["physical_error_probability"] != first_point:
+        if row["point_id"] != first_point:
             return True
         seen.append(row)
         return len(seen) == 1
@@ -273,7 +285,7 @@ def test_diff_names_a_column_only_the_second_folder_holds(
 
     lines = _diff_printed(capsys, runs["first"], changed)
 
-    point = "p 0.003 d 3 round period 1.0 us:"
+    point = _point_text(0.003)
     assert (
         f"  {point} extra: None -> 5, no error bar: compared exactly" in lines
     )
@@ -291,7 +303,7 @@ def test_diff_names_a_point_only_one_folder_holds(runs, tmp_path, capsys):
     first_lines = _diff_printed(capsys, runs["first"], fewer)
     second_lines = _diff_printed(capsys, fewer, runs["first"])
 
-    point = "p 0.01 d 3 round period 1.0 us:"
+    point = _point_text(0.01)
     assert f"  {point} only in the first folder" in first_lines
     assert f"  {point} only in the second folder" in second_lines
 
@@ -338,9 +350,9 @@ def test_the_plot_draws_a_labelled_curve_per_group_of_the_kept_rows(runs):
     results.plot_error_rate(
         ax=ax,
         rows=rows,
-        x="physical_error_probability",
+        x=PROBABILITY_COLUMN,
         group=ROUNDS_COLUMN,
-        where={"physical_error_probability": 0.003},
+        where={PROBABILITY_COLUMN: 0.003},
     )
 
     labels = [line.get_label() for line in ax.lines]
@@ -361,7 +373,7 @@ def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
     results.plot_error_rate(
         ax=ax,
         rows=rows,
-        x="physical_error_probability",
+        x=PROBABILITY_COLUMN,
         group=ROUNDS_COLUMN,
     )
     picture_path = tmp_path / "ler.png"

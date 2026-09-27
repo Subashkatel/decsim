@@ -125,9 +125,11 @@ INPUT_LINK_BY_TIER = {
 class ShotMeasurement:
     """One shot's numbers; the field names are the csv columns."""
 
-    physical_error_probability: float
-    distance: int
-    round_period_microseconds: float
+    # the point's strong id and its {setting path: value} as one line of
+    # json, sinter's strong_id and json_metadata columns
+    # (sinter/_data/_csv_out.py:69-77)
+    point_id: str
+    metadata: str
     algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
     windows: int
@@ -158,6 +160,9 @@ class ShotMeasurement:
     strong_decoded_rounds: int
     strong_service_mean_us: float
     commit_rounds: int
+    # tau_gen r_com: a window's inter-arrival, commit rounds times the
+    # round period, which the chain's load divides by
+    window_period_us: float
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
@@ -213,23 +218,21 @@ def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
     None writes nothing beyond the returned measurement.
     """
     settings = shot.task.settings
-    physical_error_probability = settings.workload.physical_error_probability
-    distance = settings.qpu.distance
-    round_period_microseconds = settings.qpu.round_period_microseconds
-    label = shot_label(settings, shot.seed)
+    point_id = shot.task.strong_id()
+    label = shot_label(point_id, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
         _write_log(observation, run_dir, label)
     trace_path = None
     if run_dir is not None:
         trace_path = _write_trace(shot, run_dir, label)
+    metadata = collect.metadata_text(shot.task.metadata)
     return _measurement(
         settings,
         observation,
         shot.result,
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_microseconds=round_period_microseconds,
+        point_id=point_id,
+        metadata=metadata,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
         trace_path=trace_path,
@@ -651,12 +654,7 @@ def direct_prediction(
     return tuple(bits)
 
 
-def chain_load(
-    samples: dict,
-    settings: machine_settings.MachineSettings,
-    distance: int,
-    round_period_microseconds: float,
-) -> float:
+def chain_load(samples: dict, window_period_us: float) -> float:
     """rho: the serial chain's service per window over the window period.
 
     Service is the unit's occupancy per window plus the DD boundary
@@ -676,10 +674,8 @@ def chain_load(
     service_us = _mean_or_zero(samples["service"])
     confidence_us = _mean_or_zero(samples["confidence"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
-    commit_rounds = commit_round_count(settings, distance)
-    inter_arrival_us = commit_rounds * round_period_microseconds
     chain_us = service_us + confidence_us + handoff_us
-    return chain_us / inter_arrival_us
+    return chain_us / window_period_us
 
 
 def commit_round_count(
@@ -699,39 +695,34 @@ def active_decoder_kind(settings: machine_settings.MachineSettings):
     return tier_settings.kind
 
 
-def trace_path_for_shot(path: str, seed: int, trace_shots) -> str:
-    """The path one shot writes to; the seed joins it when several trace.
+def trace_path_for_shot(path: str, label: str) -> str:
+    """The path a swept shot writes to: the label joins the yaml's path.
 
-    One traced shot keeps the path the yaml gave. Several would all
-    write the same file, so each takes the seed before its suffixes:
-    run.trace.json becomes run_seed3.trace.json, and run.trace.json.gz
-    becomes run_seed3.trace.json.gz.
+    A sweep traces the shots trace_shots names at every point, so each
+    file takes the shot's label, its point id and seed, before its
+    suffixes: run.trace.json becomes run_<label>.trace.json, and
+    run.trace.json.gz becomes run_<label>.trace.json.gz. Two points
+    that differ only in a setting no file name spells, a basis or a
+    window size, then never write one file (gem5's multisim names each
+    simulation's output folder by its id,
+    src/python/gem5/utils/multisim/multisim.py).
     """
-    if len(trace_shots) < 2:
-        return path
     name = pathlib.Path(path)
     directory = name.parent
     stem = name.name
     first_dot = stem.find(".")
     if first_dot < 0:
-        seeded = directory / f"{stem}_seed{seed}"
-        return str(seeded)
+        labelled = directory / f"{stem}_{label}"
+        return str(labelled)
     head = stem[:first_dot]
     suffixes = stem[first_dot:]
-    seeded = directory / f"{head}_seed{seed}{suffixes}"
-    return str(seeded)
+    labelled = directory / f"{head}_{label}{suffixes}"
+    return str(labelled)
 
 
-def shot_label(settings: machine_settings.MachineSettings, seed: int) -> str:
-    """The name a shot's log and trace files carry: its point and seed."""
-    physical_error_probability = settings.workload.physical_error_probability
-    distance = settings.qpu.distance
-    round_period_microseconds = settings.qpu.round_period_microseconds
-    algorithm = active_decoder_kind(settings)
-    return (
-        f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
-        f"_round{round_period_microseconds:g}us_seed{seed}"
-    )
+def shot_label(point_id: str, seed: int) -> str:
+    """The name a shot's log and trace files carry: its point id and seed."""
+    return f"{point_id}_seed{seed}"
 
 
 def _measurement(
@@ -739,9 +730,8 @@ def _measurement(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
-    physical_error_probability: float,
-    distance: int,
-    round_period_microseconds: float,
+    point_id: str,
+    metadata: str,
     seed: int,
     wall_seconds: float,
     trace_path: Optional[str],
@@ -757,8 +747,11 @@ def _measurement(
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
-    load = chain_load(samples, settings, distance, round_period_microseconds)
+    distance = settings.qpu.distance
+    round_period_microseconds = settings.qpu.round_period_microseconds
     commit_rounds = commit_round_count(settings, distance)
+    window_period_us = commit_rounds * round_period_microseconds
+    load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
     primary_tier = escalation_build.primary_tier(settings.escalation)
@@ -774,9 +767,8 @@ def _measurement(
     maxes = _maxes(samples)
     first_flag_round, is_caught = _burst_catch(settings, observation)
     return ShotMeasurement(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_microseconds=round_period_microseconds,
+        point_id=point_id,
+        metadata=metadata,
         algorithm=algorithm,
         seed=seed,
         windows=decoded_windows,
@@ -798,6 +790,7 @@ def _measurement(
         strong_decoded_rounds=strong.rounds,
         strong_service_mean_us=strong.service_mean_us,
         commit_rounds=commit_rounds,
+        window_period_us=window_period_us,
         parallel_processes_needed=processes,
         weak_syndrome_weight_mean=tiers.weak_syndrome_weight_mean,
         weak_syndrome_weight_max=tiers.weak_syndrome_weight_max,
@@ -1526,11 +1519,11 @@ def _maxes(samples: dict) -> dict:
 def _write_trace(shot, run_dir, label: str) -> Optional[str]:
     """The shot's Chrome trace, when the section asked and named it.
 
-    trace: chrome names the file after the point, under trace/; a path
-    of its own is written where it says, with the shot's seed in the
-    name when trace_shots asks for more than one, so no shot overwrites
-    another's file. Only the shots trace_shots names are written, so a
-    sweep point of two thousand shots writes one file. The file it wrote
+    trace: chrome names the file by the shot's label, its point id and
+    seed, under trace/; a path of its own is written where it says with
+    that label in the name, so no shot overwrites another's file. Only
+    the shots trace_shots names are written, so a sweep point of two
+    thousand shots writes one file. The file it wrote
     comes back, so the shot's measurement can say where its trace is; a
     shot that was not traced returns None.
     """
@@ -1546,7 +1539,7 @@ def _write_trace(shot, run_dir, label: str) -> Optional[str]:
         trace_dir.mkdir(parents=True, exist_ok=True)
         path = trace_dir / f"{label}.trace.json"
     else:
-        path = trace_path_for_shot(path, shot.seed, observation.trace_shots)
+        path = trace_path_for_shot(path, label)
     written = str(path)
     writer.write(written)
     return written

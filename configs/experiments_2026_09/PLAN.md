@@ -187,7 +187,7 @@ first line is submitted.
 
 ```bash
 decsim combine results/experiments_2026_09/<experiment>/*/*        # all distances of one experiment into one report
-decsim plot results/experiments_2026_09/<experiment>/combined --figure ler_vs_d --probability 0.003
+decsim plot results/experiments_2026_09/<experiment>/combined --figure ler --x distance --where physical_error_probability=0.003
 ```
 
 A task that died is rerun by resubmitting its shard index alone (`-a <i>` with the same SHARDS and OFFSET); its folder is rewritten and combine reads whatever folders it is handed.

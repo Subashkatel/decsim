@@ -223,7 +223,7 @@ def run_experiment(
     experiment_dir = run_folder.run_dir_for(config, out_dir)
     report_dir = run_folder.combined_folder(experiment_dir, config)
     points = recorded_points([config], experiment_dir)
-    unique = _tasks_of(points)
+    unique = [point.task for point in points]
     point_ids = _point_ids(unique)
     started_utc = run_folder.start_run(config, report_dir, point_ids)
     first_task = unique[0]
@@ -497,14 +497,6 @@ def _point_tasks_of(configs: list) -> list:
         config_tasks = config.point_tasks()
         point_tasks.extend(config_tasks)
     return point_tasks
-
-
-def _tasks_of(points: list) -> list:
-    """The points' tasks, in point order."""
-    tasks = []
-    for point in points:
-        tasks.append(point.task)
-    return tasks
 
 
 def _shot_measure(tasks: list, run_dir):

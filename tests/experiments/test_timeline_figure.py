@@ -8,6 +8,7 @@ carry the figure.
 """
 
 import dataclasses
+import json
 
 import matplotlib
 
@@ -251,11 +252,22 @@ def test_a_run_folder_without_a_trace_has_no_file_to_draw_from(tmp_path):
     assert plots.first_trace_file(tmp_path) is None
 
 
-def test_the_first_traced_shot_of_a_run_folder_is_the_figures_shot(tmp_path):
+def test_the_figures_shot_is_the_first_points_lowest_traced_seed(tmp_path):
+    """The sweep's order, from the manifest, not the ids' name order.
+
+    Point ids are hashes, so the first point's file can sort last.
+    """
+    manifest = {"points": ["ffff", "0000"]}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_text = json.dumps(manifest)
+    manifest_path.write_text(manifest_text)
     trace_dir = tmp_path / "trace"
     trace_dir.mkdir()
-    second = trace_dir / "p0.005_d5_seed0.trace.json"
-    second.write_text("[]")
-    first = trace_dir / "p0.003_d3_seed0.trace.json"
+    second_point = trace_dir / "0000_seed0.trace.json"
+    second_point.write_text("[]")
+    later_seed = trace_dir / "ffff_seed10.trace.json"
+    later_seed.write_text("[]")
+    first = trace_dir / "ffff_seed2.trace.json"
     first.write_text("[]")
+
     assert plots.first_trace_file(tmp_path) == first

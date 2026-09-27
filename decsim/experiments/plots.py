@@ -168,20 +168,21 @@ def timeline_shot(document) -> "_TimelineShot":
 
 
 def first_trace_file(run_dir) -> Optional[pathlib.Path]:
-    """The first trace file of a run folder, None when nothing traced.
+    """The first traced shot of a run folder, None when nothing traced.
 
     A sweep writes one file per traced shot under trace/, named by the
-    shot's point id and seed (experiments/measure.py shot_label); the
-    first in name order is the shot the timeline draws.
+    shot's point id and seed (experiments/measure.py shot_label). The
+    ids are hashes, so their name order is no order of the sweep's; the
+    manifest lists the points in task order, and the figure draws the
+    lowest traced seed of the first point that traced one.
     """
     trace_dir = pathlib.Path(run_dir) / TRACE_DIR
     if not trace_dir.is_dir():
         return None
-    entries = trace_dir.iterdir()
-    found = sorted(entries)
-    for path in found:
-        if path.is_file():
-            return path
+    for point_id in _recorded_points(run_dir):
+        traced = _traced_shots_of(trace_dir, point_id)
+        if traced:
+            return traced[0]
     return None
 
 
@@ -980,6 +981,27 @@ def _legend_label(window_ranges: list, window_id: int) -> str:
     if window_id < len(window_ranges):
         return window_ranges[window_id]
     return f"window {window_id}"
+
+
+def _recorded_points(run_dir) -> list:
+    """The point ids a run folder's manifest lists, in task order."""
+    manifest_path = pathlib.Path(run_dir) / "manifest.json"
+    manifest_text = manifest_path.read_text()
+    manifest = json.loads(manifest_text)
+    return manifest["points"]
+
+
+def _traced_shots_of(trace_dir: pathlib.Path, point_id: str) -> list:
+    """One point's trace files, lowest seed first."""
+    found = trace_dir.glob(f"{point_id}_seed*.trace.json")
+    return sorted(found, key=_seed_of_trace)
+
+
+def _seed_of_trace(path: pathlib.Path) -> int:
+    """The seed a trace file's name carries: <id>_seed<seed>.trace.json."""
+    label, _, _suffixes = path.name.partition(".")
+    _point_id, _, seed_text = label.rpartition("_seed")
+    return int(seed_text)
 
 
 def _metadata_value(row: dict, path: str, source):

@@ -4,7 +4,7 @@ And what a collect unit's runs return together, its rows and memory.
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional, Protocol
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,16 +42,28 @@ class RunResult:
     data_movement: Optional[dict]
 
 
+class UnitTask(Protocol):
+    """The task a unit ran, as an outcome carries it: the point it is.
+
+    decsim.collect.Task is one. Records import no component, so the
+    task is typed by what it offers and not by its class.
+    """
+
+    def strong_id(self) -> str:
+        """The point's id, a hash of the settings it resolved to."""
+
+
 @dataclasses.dataclass(frozen=True)
 class UnitOutcome:
     """What one unit ran: its measured rows, its task, its memory.
 
-    task is the decsim.collect.Task the unit ran. peak_memory_mb is the
-    peak resident memory of the process that ran the unit, read when the
-    unit ended. A worker runs units one after another, so it bounds the
-    unit's own peak from above, which is the side a memory request needs.
+    task is the task as the unit left it, its online calibrator after
+    the unit's shots. peak_memory_mb is the peak resident memory of the
+    process that ran the unit, read when the unit ended. A worker runs
+    units one after another, so it bounds the unit's own peak from
+    above, which is the side a memory request needs.
     """
 
     rows: list
-    task: Any
+    task: UnitTask
     peak_memory_mb: float

@@ -2,10 +2,16 @@
 
 The reference is relay-bp 0.2.2 called directly, outside decsim, on the
 window's physical check matrix and priors with the row's Settings as its
-arguments and the gamma table the row draws from its seed. The wheel is
+arguments and the gamma table the row draws from its seed. Decoding
+apart, the reference decodes the window's X part and Z part alone, the
+parts basis_split cuts (checked against Stim's own decomposition in
+tests/detector_error_model/test_basis_split.py), and the strong
+backend's split of the same window is the second referent. The wheel is
 the bb-decoders extra; the reference tests skip until it is installed.
 The yaml refusals need no wheel.
 """
+
+import dataclasses
 
 import numpy
 import pytest
@@ -14,12 +20,18 @@ import scipy.sparse
 import decsim.config as config
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.strong_backend as strong_backend
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 from tests.decoders import windows
 
 ROUNDS = 3
 SEED = 5
 PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
+SPLIT_REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED.joined(
+    fault_models.DETECTOR_BASES_REQUIRED
+)
 # the paper's surface code values, Relay-BP-5 (Mueller et al. 2506.01779
 # lines 307, 332 and 343), with fewer legs so the test is quick
 SURFACE = relay.RelayBeliefPropagationDecoder.Settings(
@@ -28,6 +40,7 @@ SURFACE = relay.RelayBeliefPropagationDecoder.Settings(
     relay_set_count=20,
     converged_solution_count=5,
 )
+SURFACE_APART = dataclasses.replace(SURFACE, bases="apart")
 
 
 def _seeded_row(settings):
@@ -64,6 +77,28 @@ def _reference_decoder(relay_bp, faults, settings):
         logging=False,
         seed=SEED,
     )
+
+
+class _RelayDevice:
+    """A strong backend that answers at once with the row decoding together."""
+
+    def __init__(self) -> None:
+        self.decoder = _seeded_row(SURFACE)
+
+    def capacities(self) -> dict:
+        return {strong_backend.DISPATCHER: 1}
+
+    def submit(self, request, running: int):
+        del running
+        return self.decoder.decode(request)
+
+    def steps(self, ticket) -> tuple:
+        del ticket
+        decode = decoding_records.Step("decode", 1, strong_backend.DISPATCHER)
+        return (decode,)
+
+    def result(self, ticket):
+        return ticket
 
 
 def test_the_row_returns_relay_bps_own_correction_property():
@@ -109,6 +144,64 @@ def test_the_row_reports_relay_bps_own_iteration_count_property():
         assert result.iterations == detailed.iterations
 
 
+def test_bases_apart_equals_relay_bp_decoding_the_x_and_z_parts_alone():
+    """Each part's correction is relay-bp's; the observables XOR."""
+    relay_bp = pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(circuit, ROUNDS, SPLIT_REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 10, 3)
+    row = _seeded_row(SURFACE_APART)
+    part_by_basis = basis_split.split_by_basis(model)
+    x_faults = part_by_basis["X"].require_faults(PHYSICAL)
+    z_faults = part_by_basis["Z"].require_faults(PHYSICAL)
+    x_reference = _reference_decoder(relay_bp, x_faults, SURFACE_APART)
+    z_reference = _reference_decoder(relay_bp, z_faults, SURFACE_APART)
+    x_rows = basis_split.rows_of_basis(model, "X")
+    z_rows = basis_split.rows_of_basis(model, "Z")
+    for shot in detection_events:
+        syndrome = windows.row_syndrome(model, shot)
+        x_answer = x_reference.decode_detailed(syndrome[x_rows])
+        z_answer = z_reference.decode_detailed(syndrome[z_rows])
+        x_correction = numpy.asarray(x_answer.decoding, dtype=numpy.uint8)
+        z_correction = numpy.asarray(z_answer.decoding, dtype=numpy.uint8)
+        x_flips = x_faults.observables @ x_correction
+        z_flips = z_faults.observables @ z_correction
+        observables = (x_flips + z_flips) % 2
+        job = windows.job_for(model, shot)
+        result = row.decode(job)
+        expected = numpy.concatenate([x_correction, z_correction])
+        assert result.correction.tolist() == expected.tolist()
+        assert result.logical_observables == windows.bit_tuple(observables)
+
+
+def test_bases_apart_equals_the_strong_backends_split_of_the_same_window():
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(circuit, ROUNDS, SPLIT_REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 10, 3)
+    row = _seeded_row(SURFACE_APART)
+    device = _RelayDevice()
+    strong = strong_backend.StrongBackendDecoder(device, "apart")
+    for shot in detection_events:
+        job = windows.job_for(model, shot)
+        weak_answer = row.decode(job)
+        strong_answer = strong.decode(job)
+        weak_residual = weak_answer.boundary_data.detector_ids
+        strong_residual = strong_answer.boundary_data.detector_ids
+        weak_correction = weak_answer.correction.tolist()
+        assert weak_correction == strong_answer.correction.tolist()
+        assert weak_answer.logical_observables == (
+            strong_answer.logical_observables
+        )
+        assert weak_residual == strong_residual
+        assert weak_answer.iterations == strong_answer.iterations
+
+
+def test_bases_apart_asks_the_window_model_for_detector_types():
+    row = relay.RelayBeliefPropagationDecoder(settings=SURFACE_APART)
+    assert row.fault_model_requirement.detector_bases
+
+
 def test_the_tier_sections_keys_reach_the_rows_settings():
     section = {
         "kind": "relay_bp",
@@ -129,6 +222,7 @@ def test_the_tier_sections_keys_reach_the_rows_settings():
         "iterations_per_set": 50,
         "gamma_interval": [-0.254, 0.985],
         "converged_solution_count": 5,
+        "bases": "apart",
     }
     clocks = config.ClockSettings({"decoder": 250.0})
     tier = decoder_settings.DecoderSettings.from_yaml(
@@ -143,6 +237,7 @@ def test_the_tier_sections_keys_reach_the_rows_settings():
         iterations_per_set=50,
         gamma_interval=(-0.254, 0.985),
         converged_solution_count=5,
+        bases="apart",
     )
 
 
@@ -160,6 +255,7 @@ def test_a_section_with_no_keys_keeps_the_rows_old_profile():
         iterations_per_set=60,
         gamma_interval=(-0.24, 0.66),
         converged_solution_count=1,
+        bases="together",
     )
 
 
@@ -204,4 +300,15 @@ def test_a_memory_strength_that_is_not_a_number_is_refused():
         )
     assert str(caught.value) == (
         "weak_decoder.gamma0 must be a finite real number (got '0.35')"
+    )
+
+
+def test_a_bases_value_off_its_table_is_refused():
+    with pytest.raises(ValueError) as caught:
+        relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
+            {"bases": "xz"}, None, "weak_decoder"
+        )
+    assert str(caught.value) == (
+        "weak_decoder.bases 'xz' is not a row of its table; the rows are "
+        "['apart', 'together']"
     )

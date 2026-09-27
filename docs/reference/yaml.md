@@ -54,9 +54,9 @@ Three conventions are worth knowing before you read:
   `weight_step` and `cycle_count` in a decoder tier, `relay_bp`'s
   `alpha`, `alpha_iteration_scaling_factor`, `gamma0`,
   `pre_iterations`, `relay_set_count`, `iterations_per_set`,
-  `gamma_interval` and `converged_solution_count` there too (relay-bp's
-  own arguments, with the Relay-BP paper's surface code values shown
-  beside them), `tesseract`'s `detector_beam`, `beam_climbing`,
+  `gamma_interval`, `converged_solution_count` and `bases` there too
+  (relay-bp's own arguments, with the Relay-BP paper's surface code
+  values shown beside them, and whether X and Z are decoded apart), `tesseract`'s `detector_beam`, `beam_climbing`,
   `no_revisit_detectors`, `priority_queue_limit`,
   `detector_order_method` and `detector_order_count` there too,
   `measured_table`'s

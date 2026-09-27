@@ -9,8 +9,11 @@ import decsim.config as config
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.window_decoder as window_decoder
+import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
+import decsim.tables as tables
 
 
 class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
@@ -23,9 +26,8 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
     class Settings:
         """The row's own keys in its tier section.
 
-        Each key is one argument of relay-bp 0.2.2's RelayDecoderF32,
-        and its default is that argument's default there: alpha (null
-        leaves relay-bp its own choice) and
+        Eight keys are relay-bp 0.2.2's RelayDecoderF32 arguments: alpha
+        (null leaves relay-bp its own choice) and
         alpha_iteration_scaling_factor; gamma0, the first leg's memory
         strength; pre_iterations, pre_iter, the first leg's iteration
         limit T0; relay_set_count, num_sets, the legs after the first,
@@ -34,14 +36,22 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         gamma_interval, gamma_dist_interval, the range each later leg's
         memory strengths are drawn from; converged_solution_count,
         stop_nconv, the solutions S sought before stopping (Mueller et
-        al. 2506.01779 lines 255-260). T0 80 and Tr 60 are the paper's
-        (lines 304-305); gamma0 0.1 and [-0.24, 0.66] are relay-bp's
-        SinterDecoder_RelayBP defaults (relay_bp/stim/sinter/decoders.py),
-        the interval the paper's gross-code choice (line 332). The
-        paper's surface code values are gamma0 0.35 (line 307), the
-        interval [-0.254, 0.985] (line 332), and Relay-BP-1, R 301 and
-        S 1, or Relay-BP-5, R 601 and S 5 (line 343). The gamma table is
-        drawn from the run seed (decsim/seeding.py), so no key sets it.
+        al. 2506.01779 lines 255-260). Their defaults are RelayDecoderF32's
+        own, and the interval SinterDecoder_RelayBP's
+        (relay_bp/stim/sinter/decoders.py), the paper's gross-code
+        interval (line 332); T0 80 and Tr 60 are the paper's (lines
+        304-305). The paper's surface code values are gamma0 0.35 (line
+        307), the interval [-0.254, 0.985] (line 332), and Relay-BP-1,
+        R 301 and S 1, or Relay-BP-5, R 601 and S 5 (line 343). The
+        gamma table is drawn from the run seed (decsim/seeding.py), so
+        no key sets it.
+
+        bases names a row of strong_backend.BASIS_DECODES, read as the
+        measured_table row reads it: together decodes the window's X and
+        Z detectors as one problem, the paper's XYZ-decoding; apart
+        decodes them as two, the paper's default XZ-decoding (lines
+        289-298), cut and joined by the strong backend's own split
+        (strong_backend.part_jobs and joined_result).
         """
 
         alpha: Optional[float] = None
@@ -52,6 +62,7 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         iterations_per_set: int = 60
         gamma_interval: tuple[float, float] = (-0.24, 0.66)
         converged_solution_count: int = 1
+        bases: str = "together"
 
         @classmethod
         def from_yaml(
@@ -72,11 +83,15 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
             gamma0 = _real(section, section_name, "gamma0")
             gamma_interval = _gamma_interval(section, section_name)
             counts = _counts(section, section_name)
+            bases = section.get("bases", cls.bases)
+            bases_key = f"{section_name}.bases"
+            tables.row(strong_backend.BASIS_DECODES, bases_key, bases)
             return cls(
                 alpha=alpha,
                 alpha_iteration_scaling_factor=scaling,
                 gamma0=gamma0,
                 gamma_interval=gamma_interval,
+                bases=bases,
                 **counts,
             )
 
@@ -91,6 +106,14 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         self.window_decoder = (
             window_decoder.RelayBeliefPropagationWindowDecoder(settings)
         )
+        self.splits_by_basis = strong_backend.BASIS_DECODES[settings.bases]
+        if self.splits_by_basis:
+            row_requirement = (
+                RelayBeliefPropagationDecoder.fault_model_requirement
+            )
+            self.fault_model_requirement = row_requirement.joined(
+                fault_models.DETECTOR_BASES_REQUIRED
+            )
 
     def run_seed_children(self) -> tuple:
         """The timing and fixed-gamma owners at stable semantic paths."""
@@ -104,6 +127,27 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
             seed_records.RunSeedChild(latency_path, self.latency_model),
             seed_records.RunSeedChild(decoder_path, self.window_decoder),
         )
+
+    def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
+        """(result, nanoseconds of the backend calls), apart or together.
+
+        Apart, the window's X part and Z part are each decoded as a
+        window of their own and the answers joined; one weak unit runs
+        the two calls one after the other, so its time is their sum.
+        """
+        if not self.splits_by_basis:
+            return decoder_module.WindowDecoderBase.decode_timed(self, job)
+        parts = strong_backend.part_jobs(job)
+        results = {}
+        elapsed_nanoseconds = 0
+        for basis, part in parts.items():
+            result, part_nanoseconds = (
+                decoder_module.WindowDecoderBase.decode_timed(self, part)
+            )
+            results[basis] = result
+            elapsed_nanoseconds += part_nanoseconds
+        joined = strong_backend.joined_result(job, results)
+        return joined, elapsed_nanoseconds
 
     def compile(self, faults, model):
         """The window decoder, which compiles the backend per model itself."""

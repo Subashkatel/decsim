@@ -11,6 +11,7 @@ point, shared by every shot, so the controller learns over the point's
 whole window stream.
 """
 
+import csv
 import math
 import random
 import re
@@ -20,6 +21,7 @@ import yaml
 
 import decsim.build.escalation as escalation_build
 import decsim.escalation.settings as escalation_settings
+import decsim.experiments.collect_command as collect_command
 import tests.experiments.yaml_configs as yaml_configs
 from decsim.experiments.collect_command import run_sweep
 from decsim.experiments.experiment import load_experiment
@@ -396,7 +398,8 @@ def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
     """One calibrator serves every shot of the point.
 
     Its window count spans all shots, every audit resolves, and the
-    trajectory csv lands in the run dir.
+    trajectory csv lands in the run dir, its rows named by the point's
+    id, swept values and algorithm as every other csv's are.
     """
     online_card = {
         "threshold_source": "online",
@@ -409,31 +412,49 @@ def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
     }
     config_path = source_config(tmp_path, online_card, shots=2)
     config = load_experiment(config_path)
-    run_dir = tmp_path / "results"
-    run_dir.mkdir()
+    out_dir = tmp_path / "results"
 
-    tasks = config.tasks()
-    measurements = run_sweep(tasks, run_dir)
+    run_dir, _rows = collect_command.run_experiment(config_path, out_dir)
 
-    assert len(measurements) == 2
-    windows_per_shot = measurements[0].windows
+    shots_path = run_dir / "shots.csv"
+    shots = _csv_rows(shots_path)
+    windows_per_shot = int(shots[0]["windows"])
     calibrator = online_threshold_calibrator(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
     )
     summary = calibrator.summary()
+    assert len(shots) == 2
     assert summary["windows"] == 0  # a fresh one is fresh
     trajectory_paths = run_dir.glob("online_threshold_*.csv")
-    trajectory_files = list(trajectory_paths)
-    assert len(trajectory_files) == 1
-    trajectory_text = trajectory_files[0].read_text()
-    trajectory_rows = trajectory_text.splitlines()
-    header, first_row = trajectory_rows[:2]
-    assert header == "window_count,threshold_db,event"
-    assert first_row == "0,15.0,start"
-    last_row = trajectory_rows[-1]
-    last_fields = last_row.split(",")
-    last_window_count = int(last_fields[0])
-    assert last_window_count > windows_per_shot  # learned across shots
+    (trajectory_path,) = list(trajectory_paths)
+    trajectory = _csv_rows(trajectory_path)
+    first_row = trajectory[0]
+    last_row = trajectory[-1]
+    assert list(first_row) == [
+        "point_id",
+        "qpu.distance",
+        "qpu.round_period_microseconds",
+        yaml_configs.ERROR_RATE_PATH,
+        "algorithm",
+        "window_count",
+        "threshold_db",
+        "event",
+    ]
+    assert first_row["point_id"] == shots[0]["point_id"]
+    assert first_row["qpu.distance"] == "3"
+    assert first_row["algorithm"] == shots[0]["algorithm"]
+    assert (first_row["window_count"], first_row["threshold_db"]) == (
+        "0",
+        "15.0",
+    )
+    assert first_row["event"] == "start"
+    assert int(last_row["window_count"]) > windows_per_shot
+
+
+def _csv_rows(path) -> list:
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)
 
 
 def test_online_source_reproduces_its_decisions(tmp_path):

@@ -11,7 +11,6 @@ does running it with a process pool or in shards that `decsim combine`
 folds back together.
 """
 
-import csv
 import functools
 import pathlib
 import sys
@@ -206,20 +205,21 @@ def _report_point_done(
     metadata = collect.metadata_text(task.metadata)
     print(f"{metadata}: {task.shots} shots done", file=sys.stderr)
     if task.online_threshold is not None:
-        point_id = task.strong_id()
-        _write_online_threshold_record(task.online_threshold, run_dir, point_id)
+        _write_online_threshold_record(task, run_dir)
 
 
 def _write_online_threshold_record(
-    calibrator, run_dir: Optional[pathlib.Path], point_id: str
+    task: collect.Task, run_dir: Optional[pathlib.Path]
 ) -> None:
     """One csv per sweep point with the online threshold's trajectory.
 
     Every audit and target move, plus every 100th window, and a summary
     line on stderr. The gap unit inside the calibrator is nats; the csv
     converts to the paper's decibels. The file is named by the point's
-    id, as its resolved/ record is.
+    id, as its resolved/ record is, and its rows carry the point's id,
+    swept values and algorithm, as every other csv's rows do.
     """
+    calibrator = task.online_threshold
     summary = calibrator.summary()
     final_threshold_nats = summary["threshold"]
     threshold_db = escalation_settings.nats_to_decibels(final_threshold_nats)
@@ -227,14 +227,23 @@ def _write_online_threshold_record(
     print(summary_line, file=sys.stderr)
     if run_dir is None:
         return
+    point_id = task.strong_id()
+    algorithm = measure.active_decoder_kind(task.settings)
+    point = report.point_columns((point_id, algorithm))
+    rows = []
+    for window_count, threshold_nats, event in calibrator.trajectory:
+        row_db = escalation_settings.nats_to_decibels(threshold_nats)
+        row = {**point, "window_count": window_count}
+        row["threshold_db"] = row_db
+        row["event"] = event
+        rows.append(row)
+    end_row = {**point, "window_count": summary["windows"]}
+    end_row["threshold_db"] = threshold_db
+    end_row["event"] = "end"
+    rows.append(end_row)
     record_path = pathlib.Path(run_dir) / f"online_threshold_{point_id}.csv"
-    with open(record_path, "w", newline="") as record_file:
-        writer = csv.writer(record_file)
-        writer.writerow(["window_count", "threshold_db", "event"])
-        for window_count, threshold_nats, event in calibrator.trajectory:
-            row_db = escalation_settings.nats_to_decibels(threshold_nats)
-            writer.writerow([window_count, row_db, event])
-        writer.writerow([summary["windows"], threshold_db, "end"])
+    swept = report.swept_values_of(run_dir)
+    report.write_csv(rows, record_path, swept)
 
 
 def _threshold_summary_line(summary: dict, threshold_db: float) -> str:

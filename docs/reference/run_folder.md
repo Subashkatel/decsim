@@ -39,7 +39,7 @@ without any number changing (`decsim/experiments/report.py`).
 | `finished` | `decsim/experiments/run_folder.py`, `mark_finished` | the time the run ended, written last; a `decsim collect` into a folder that holds it leaves the folder as it is |
 | `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file |
 | `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
-| `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online` |
+| `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |
 | `timeline.png` | `decsim/experiments/plots.py`, `plots` | the figure `decsim collect` draws itself, when a shot was traced: the lowest traced seed of the first point, in the sweep's order |
 | `timeline.png`, `stage_breakdown.png` | `decsim/experiments/plots.py`, `FIGURES` | one figure per `decsim plot --figure` name, the two that read decsim's own records: a trace, and the stage columns in pipeline order, one bar per point. A figure of the sweep's numbers is the reader's to draw from the files above |
 

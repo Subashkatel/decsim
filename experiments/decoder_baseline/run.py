@@ -31,8 +31,15 @@ DECODERS = {
     "union-find": union_find_adapter.UnionFindDecoder(),
     # built into sinter
     "pymatching": None,
-    # Relay-BP-1, Mueller et al. 2506.01779 surface code values: gamma0
-    # (line 307), the interval (line 332), R 301 legs and S 1 (line 343)
+    # Relay-BP-1: the relay_bp package's own sinter adapter with the
+    # surface code values of Mueller et al. 2506.01779 (lines 307, 332,
+    # 343). It decodes one combined problem on sinter's decomposed model
+    # in 64-bit, gammas drawn by the package; decsim's relay_bp row
+    # decodes X and Z apart on the full fault model (the paper's
+    # XZ-decoding) with seeded gammas, so the two are different
+    # decoders. On the same 2000 shots at d 5, p 0.005, 100 rounds,
+    # basis X, measured 2026-09-27, the adapter failed 696 (34.8%) and
+    # the row 625 (31.3%) (tmp/job_1f7e5d61/relay_compare/compare.py).
     "relay-bp-1": relay_bp_sinter.SinterDecoder_RelayBP(
         gamma0=0.35,
         gamma_dist_interval=(-0.254, 0.985),

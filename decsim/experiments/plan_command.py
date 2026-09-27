@@ -269,14 +269,14 @@ def _extension(
     shot, so a round's last piece may be short.
     """
     settings = point.settings
-    wanted = _wanted_shots(settings, counts, point.piece_shots)
-    wanted = max(wanted, settings.min_shots)
-    shots = wanted - highest_seed
-    shots = max(shots, point.piece_shots)
-    end_seed = highest_seed + shots
+    wanted_shot_count = _wanted_shots(settings, counts, point.piece_shots)
+    wanted_shot_count = max(wanted_shot_count, settings.min_shots)
+    shot_count = wanted_shot_count - highest_seed
+    shot_count = max(shot_count, point.piece_shots)
+    end_seed = highest_seed + shot_count
     capped_end_seed = _capped_end_seed(settings, counts, end_seed)
-    shots = capped_end_seed - highest_seed
-    return max(shots, 0)
+    shot_count = capped_end_seed - highest_seed
+    return max(shot_count, 0)
 
 
 def _capped_end_seed(
@@ -326,13 +326,13 @@ def _shots_in_the_time_cap(
     return math.ceil(allowed)
 
 
-def _cut(first_seed: int, shots: int, piece_shots: int) -> list:
-    """Seeds [first_seed, first_seed + shots) as (first, count) pieces."""
+def _cut(first_seed: int, shot_count: int, piece_shots: int) -> list:
+    """Seeds [first_seed, first_seed + shot_count) as (first, count) pieces."""
     ranges = []
-    end = first_seed + shots
+    end = first_seed + shot_count
     for piece_first in range(first_seed, end, piece_shots):
-        shots_left = end - piece_first
-        count = min(piece_shots, shots_left)
+        remaining_shot_count = end - piece_first
+        count = min(piece_shots, remaining_shot_count)
         ranges.append((piece_first, count))
     return ranges
 
@@ -352,20 +352,20 @@ def _cost_of(experiment_dir: pathlib.Path, point) -> PointCost:
     """The point's measured seconds a shot and peak memory, if any."""
     point_id = point.task.strong_id()
     folders = pieces.folders_of(experiment_dir, [point_id])
-    shots = 0
+    shot_count = 0
     core_seconds = 0.0
     peaks = []
     for folder in folders:
         piece = pieces.read_piece(folder)
-        shots += piece["count"]
+        shot_count += piece["count"]
         core_seconds += piece["core_seconds"]
         peaks.append(piece["peak_memory_mb"])
     peak_memory_mb = None
     if peaks:
         peak_memory_mb = max(peaks)
     seconds_per_shot = None
-    if shots > 0 and core_seconds > 0:
-        seconds_per_shot = core_seconds / shots
+    if shot_count > 0 and core_seconds > 0:
+        seconds_per_shot = core_seconds / shot_count
     return PointCost(point.rounds_per_shot, seconds_per_shot, peak_memory_mb)
 
 
@@ -397,9 +397,9 @@ def _dealt(bundles: list, costs: dict, task_count: int) -> list:
         cost = _bundle_cost(bundle, costs, seconds_per_round)
         priced.append((-cost, position, bundle))
     priced.sort()
-    used_tasks = min(task_count, len(bundles))
-    tasks = [[] for _ in range(used_tasks)]
-    loads = [0.0] * used_tasks
+    used_task_count = min(task_count, len(bundles))
+    tasks = [[] for _ in range(used_task_count)]
+    loads = [0.0] * used_task_count
     for negative_cost, _position, bundle in priced:
         lightest = loads.index(min(loads))
         tasks[lightest].extend(bundle)
@@ -420,15 +420,15 @@ def _bundle_cost(
 def _measured_seconds_per_round(costs: dict) -> Optional[float]:
     """Seconds a QEC round over every measured point, None if none is."""
     seconds = 0.0
-    rounds = 0
+    round_count = 0
     for cost in costs.values():
         if cost.seconds_per_shot is None:
             continue
         seconds += cost.seconds_per_shot
-        rounds += cost.rounds_per_shot
-    if rounds == 0:
+        round_count += cost.rounds_per_shot
+    if round_count == 0:
         return None
-    return seconds / rounds
+    return seconds / round_count
 
 
 def _piece_cost(
@@ -438,10 +438,10 @@ def _piece_cost(
     cost = costs[piece.point_id]
     if cost.seconds_per_shot is not None:
         return cost.seconds_per_shot * piece.count
-    rounds = cost.rounds_per_shot * piece.count
+    round_count = cost.rounds_per_shot * piece.count
     if seconds_per_round is None:
-        return rounds
-    return seconds_per_round * rounds
+        return round_count
+    return seconds_per_round * round_count
 
 
 def _new_round_dir(experiment_dir: pathlib.Path) -> pathlib.Path:

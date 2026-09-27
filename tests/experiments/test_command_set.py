@@ -2054,6 +2054,86 @@ def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
     assert cut_rows == whole_rows
 
 
+def _rounds_planned_without_running(
+    config_path: pathlib.Path, experiment_dir: pathlib.Path, rounds: int
+) -> list:
+    """Each round's sorted pieces, for rounds planned with none run."""
+    planned_rounds = []
+    for _round in range(rounds):
+        round_dir = _plan([config_path], experiment_dir, 2)
+        round_ranges = _planned_ranges(round_dir)
+        planned_rounds.append(sorted(round_ranges))
+    return planned_rounds
+
+
+def _rounds_of_saved_pieces(experiment_dir: pathlib.Path) -> set:
+    """The rounds whose tasks saved the experiment's pieces."""
+    rounds = set()
+    for folder in experiment_dir.glob("pieces/*/*"):
+        piece = pieces.read_piece(folder)
+        rounds.add(piece["round"])
+    return rounds
+
+
+def test_a_piece_no_round_ran_is_planned_once_a_round(tmp_path):
+    """A piece every earlier round listed and none ran is planned once.
+
+    Rounds whose arrays never started leave each of their pieces listed
+    in several plans; the next plan still names each seed range once,
+    and the same pieces every round.
+    """
+    config_path = _cut_four_point_sweep(tmp_path)
+    experiment_dir = tmp_path / "experiment"
+
+    planned_rounds = _rounds_planned_without_running(
+        config_path, experiment_dir, 4
+    )
+
+    first_round = planned_rounds[0]
+    assert len(set(first_round)) == len(first_round)
+    assert planned_rounds == [first_round] * 4
+
+
+def _targeted_sweep(tmp_path) -> pathlib.Path:
+    """The four-point sweep with a failure target, in one-shot pieces.
+
+    The target is out of reach, so every round extends each point.
+    """
+    (block,) = FOUR_POINT_SWEEP["sweep"]
+    targeted_block = {
+        **block,
+        "collection": {"max_failures": 1000, "max_shots": 8},
+    }
+    card = {"sweep": [targeted_block], "collection": {"piece_rounds": 1}}
+    return yaml_configs.write_config(tmp_path, card)
+
+
+def test_a_piece_saved_by_an_earlier_round_is_not_run_or_planned_again(
+    tmp_path,
+):
+    """A piece planned again, then saved by its first round, is done.
+
+    Round two plans round one's pieces again while none is saved; once
+    round one saves them, round two's tasks skip them and round three
+    plans only new seeds.
+    """
+    config_path = _targeted_sweep(tmp_path)
+    experiment_dir = tmp_path / "experiment"
+    first_round = _plan([config_path], experiment_dir, 2)
+    second_round = _plan([config_path], experiment_dir, 2)
+
+    _run_the_round(first_round)
+    _run_the_round(second_round)
+    third_round = _plan([config_path], experiment_dir, 2)
+
+    first_ranges = _planned_ranges(first_round)
+    second_ranges = _planned_ranges(second_round)
+    third_ranges = _planned_ranges(third_round)
+    assert second_ranges == first_ranges
+    assert _rounds_of_saved_pieces(experiment_dir) == {1}
+    assert not set(first_ranges) & set(third_ranges)
+
+
 def _one_distance_config(tmp_path, distance: int) -> pathlib.Path:
     """The four-point sweep at one distance, in a folder of its own."""
     folder = tmp_path / f"d{distance}"

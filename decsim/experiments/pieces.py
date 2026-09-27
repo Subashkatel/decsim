@@ -216,14 +216,20 @@ def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:
 
 
 def planned_pieces(experiment_dir: pathlib.Path) -> dict:
-    """Every round's planned pieces, by point id, as (first seed, count)."""
+    """Every round's planned pieces, by point id, as (first seed, count).
+
+    Each seed range once, in seed order, however many rounds planned it.
+    """
     planned = {}
     for round_dir in round_dirs(experiment_dir):
         plan_path = round_dir / PLAN_FILE
         for _task, piece in read_plan(plan_path):
-            point_pieces = planned.setdefault(piece.point_id, [])
-            point_pieces.append((piece.first_seed, piece.count))
-    return planned
+            point_pieces = planned.setdefault(piece.point_id, set())
+            point_pieces.add((piece.first_seed, piece.count))
+    return {
+        point_id: sorted(point_pieces)
+        for point_id, point_pieces in planned.items()
+    }
 
 
 def read_plan(plan_path: pathlib.Path) -> list:

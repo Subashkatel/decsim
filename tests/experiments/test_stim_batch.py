@@ -479,7 +479,7 @@ def test_the_batch_baseline_runs_the_machine_baselines_points():
     machine_ids = identities(machine)
     unkeyed_ids = point_ids_without_the_key(batch)
 
-    assert unkeyed_ids == machine_ids[1:]
+    assert sorted(unkeyed_ids) == sorted(machine_ids[1:])
 
 
 def test_a_window_scheme_other_than_naive_online_is_refused(tmp_path):

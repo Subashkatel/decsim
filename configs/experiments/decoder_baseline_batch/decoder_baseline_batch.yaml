@@ -32,6 +32,10 @@ windows:
 
 # Seeds 0, 1, 2 and on at every point, so each decoder decodes the same
 # samples at the same seed; piece.json's sample_sha256 checks the pairing.
+# One block a decoder, so each carries a piece that one task finishes in
+# hours: a piece is piece_rounds / 100 shots, sized from the measured
+# batch seconds a shot at d 15 (PyMatching about 3 ms, Union-Find about
+# 0.1 s, Relay-BP and Tesseract up to about 90 s).
 sweep:
   - axes:
       workload.arguments.code_task: [surface_code:rotated_memory_x, surface_code:rotated_memory_z]
@@ -43,10 +47,26 @@ sweep:
         - {kind: union_find, units: 1, unit_memory: {bits: null},
            engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
                     release_cycles_per_job: 10, release_cycles_per_round: 0}}
+    collection:
+      piece_rounds: 10000000
+  - axes:
+      workload.arguments.code_task: [surface_code:rotated_memory_x, surface_code:rotated_memory_z]
+      qpu.distance: [5, 7, 9, 11, 13, 15]
+      workload.arguments.physical_error_probability: [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
+      qpu.round_period_microseconds: [1.0]
+      weak_decoder:
         # MWPM: pymatching
         - {kind: pymatching, units: 1, unit_memory: {bits: null},
            engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
                     release_cycles_per_job: 10, release_cycles_per_round: 0}}
+    collection:
+      piece_rounds: 100000000
+  - axes:
+      workload.arguments.code_task: [surface_code:rotated_memory_x, surface_code:rotated_memory_z]
+      qpu.distance: [5, 7, 9, 11, 13, 15]
+      workload.arguments.physical_error_probability: [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
+      qpu.round_period_microseconds: [1.0]
+      weak_decoder:
         # Relay-BP-1: Mueller et al. 2506.01779 surface values (lines 307,
         # 332, 343); relay_set_count 300 is R 301; X and Z decoded apart
         - {kind: relay_bp, units: 1, unit_memory: {bits: null},
@@ -55,6 +75,14 @@ sweep:
            pre_iterations: 80, iterations_per_set: 60, bases: apart,
            engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
                     release_cycles_per_job: 10, release_cycles_per_round: 0}}
+    collection:
+      piece_rounds: 20000
+  - axes:
+      workload.arguments.code_task: [surface_code:rotated_memory_x, surface_code:rotated_memory_z]
+      qpu.distance: [5, 7, 9, 11, 13, 15]
+      workload.arguments.physical_error_probability: [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
+      qpu.round_period_microseconds: [1.0]
+      weak_decoder:
         # Tesseract: the package's tesseract-short-beam profile
         # (src/tesseract_sinter_compat.pybind.h:466-472), merging on and
         # the order seed fixed
@@ -64,18 +92,19 @@ sweep:
            detector_order_count: 16, merge_errors: true, detector_order_seed: 2384753,
            engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
                     release_cycles_per_job: 10, release_cycles_per_round: 0}}
+    collection:
+      piece_rounds: 20000
 
 # A unit builds its window model once, and a row that reads no run seed
 # (Union-Find, PyMatching, Tesseract with its order seed fixed) is
 # compiled once a unit; Relay-BP's row is built and compiled again for
 # every block of 1024 shots, since its gamma table is drawn from the
-# block's seed. 10^7 rounds is a piece of 10^5 shots of 100 rounds.
+# block's seed. Each sweep block sets its own piece_rounds.
 collection:
   max_failures: 100
   max_shots: 1000000000
   max_core_seconds: 86400
   min_shots: 0
-  piece_rounds: 10000000
 
 controller:
   clock: fridge

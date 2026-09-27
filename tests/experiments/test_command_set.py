@@ -2621,3 +2621,38 @@ def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(
     assert second_plan == first_plan
     assert _piece_names(cut_dir) == ["0-0", "1-1", "2-2", "3-3"]
     assert _shot_decisions(cut_run_dir) == _shot_decisions(whole_run_dir)
+
+
+def test_a_point_that_changed_configuration_is_in_one_run_folder(tmp_path):
+    """Status rebuilds every configuration's run folder, emptied ones too.
+
+    A base setting changed between collects moves every point to the
+    second configuration. After status, the first configuration's run
+    folder holds none of them, so reading every run folder counts each
+    saved shot once; the pieces themselves are untouched.
+    """
+    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
+    experiment_dir = tmp_path / "experiment"
+    command.main(["collect", str(first_path), "--out", str(experiment_dir)])
+    qpu = {"kind": "stim_device", "distance": 7}
+    changed_card = {**FOUR_POINT_SWEEP, "qpu": qpu}
+    first_folder = first_path.parent
+    second_path = yaml_configs.write_config(first_folder, changed_card)
+    command.main(["collect", str(second_path), "--out", str(experiment_dir)])
+    pieces_before = _piece_names(experiment_dir)
+
+    command.main(["status", str(experiment_dir)])
+
+    sweep_rows = _rows_of_every_run_folder(experiment_dir)
+    assert _total_shots(sweep_rows) == 8
+    assert len(sweep_rows) == 4
+    assert _piece_names(experiment_dir) == pieces_before
+
+
+def _rows_of_every_run_folder(experiment_dir: pathlib.Path) -> list:
+    """Every combined/*/sweep.csv's rows, typed."""
+    rows = []
+    for sweep_path in experiment_dir.glob("combined/*/sweep.csv"):
+        folder_rows = report.read_rows(sweep_path)
+        rows.extend(folder_rows)
+    return rows

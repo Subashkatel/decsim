@@ -2,7 +2,9 @@
 
 Every point the experiment recorded is folded from its saved pieces
 into its configuration's run folder, combined/<name>-<id8>/, as a
-collect of it folds them. What a fold reads is the points' resolved/
+collect of it folds them. Every configuration's folder is rebuilt, one
+left with no point too, so a point that moved to another configuration
+is in one run folder. What a fold reads is the points' resolved/
 records and the pieces, never the yamls, so a point a yaml no longer
 sweeps is still counted, and a point two configurations recorded is
 counted once, under the one that recorded it last. status.csv gets one
@@ -52,8 +54,8 @@ def fold_the_experiment(experiment_dir: pathlib.Path) -> list:
     combined_folders = run_folder.recorded_combined_folders(experiment_dir)
     rows = []
     swept = {}
-    for configuration_id, point_ids in point_ids_by_configuration.items():
-        report_dir = combined_folders[configuration_id]
+    for configuration_id, report_dir in combined_folders.items():
+        point_ids = point_ids_by_configuration.get(configuration_id, [])
         started_utc = run_folder.start_run(None, report_dir, point_ids)
         sweep_rows = collect_command.write_the_run_folder(
             experiment_dir, point_ids, report_dir

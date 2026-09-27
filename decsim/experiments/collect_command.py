@@ -242,12 +242,15 @@ def write_the_run_folder(
     Every file comes from what the experiment folder recorded, not from
     what this collect ran or what a yaml makes now: each point's
     collection and rounds from its resolved/ record, the rest from its
-    pieces. So a collect that found its pieces saved, or a status after
-    a yaml changed, writes the folder whole: the online thresholds'
+    pieces. What an earlier fold wrote is removed first, so nothing of a
+    point the folder no longer holds stays. So a collect that found its
+    pieces saved, or a status after a yaml changed, writes the folder
+    whole: the online thresholds'
     trajectories from their prefixes' last states, the residence table
     from the pieces' traced shots, and the figures. Returns the summary
     rows.
     """
+    run_folder.remove_the_fold(report_dir)
     records = run_folder.resolved_by_point(experiment_dir)
     swept = run_folder.swept_values(experiment_dir, point_ids)
     rules = {}

@@ -442,6 +442,21 @@ def write_json(path: pathlib.Path, value) -> None:
     path.write_text(lines)
 
 
+def remove_the_fold(run_dir: pathlib.Path) -> None:
+    """What a fold writes into a run folder, removed; the rest kept.
+
+    A fold writes the folder's csv files and its points' resolved/ and
+    inputs/ copies, all derived from the experiment folder, so a fold
+    run again writes them whole. The manifest, the code state and the
+    traced shots' files are not a fold's and stay.
+    """
+    for csv_path in run_dir.glob("*.csv"):
+        csv_path.unlink()
+    for folder_name in (RESOLVED_FOLDER, INPUTS_FOLDER):
+        folder = run_dir / folder_name
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def staging_path(path: pathlib.Path) -> pathlib.Path:
     """A hidden name beside path that only this writer uses.
 

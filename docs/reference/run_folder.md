@@ -211,10 +211,12 @@ One run is outside that sum, and knowingly: under
 overlap rather than follow each other, so adding both would count the
 same wall time twice. `tests/experiments/test_measure.py` asserts the
 identity window by window on `configs/bases/weak_decoder_baseline.yaml`,
-`configs/examples/two_tiers.yaml`, `configs/experiments/switching/seam_pinned_switching.yaml` and
-`configs/experiments/switching/cluster_gap_switching.yaml`, which are a run with no signal to
-compute, a run whose signal is a second forced-class solve, the same on
-a host-clock strong tier, and a run whose signal is a priced walk.
+`configs/examples/two_tiers.yaml`,
+`configs/experiments/switching/seam_pinned_switching.yaml` and
+`configs/experiments/switching/cluster_gap_switching.yaml`, which are a
+run with no signal to compute, a run whose signal is a second
+forced-class solve, the same on a host-clock strong tier, and a run
+whose signal is a priced walk.
 
 `escalation_link_per_window` is a hop that is measured and not summed,
 like `dd_per_window`: one span from the selection's send to the landing

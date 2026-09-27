@@ -13,9 +13,9 @@ It takes about fifteen minutes, two of which are the machine running.
 ## Step 1. Copy a shipped config and make a sweep of it
 
 Every shipped config is a starting point.
-`configs/bases/weak_decoder_baseline.yaml` is the defaults a
-single-tier study begins from, with every key
-documented in `configs/reference.yaml`.
+`configs/bases/weak_decoder_baseline.yaml` is the defaults a single-tier
+study begins from, with every key documented in
+`configs/reference.yaml`.
 
 This lesson's config ships with decsim, as
 `configs/examples/my_first_sweep.yaml`, so you can read it here rather than
@@ -48,10 +48,11 @@ sweep:
 Three things are happening here.
 
 `extends` reads `../bases/weak_decoder_baseline.yaml` first, its path
-taken from this file's folder, and applies this file's keys over it. A section written here replaces
-the base's section **whole**, which is why the `weak_decoder` block
-repeats `units`, `unit_memory` and `engine` even though the base
-already had them. Leave `engine` out and the load fails.
+taken from this file's folder, and applies this file's keys over it. A
+section written here replaces the base's section **whole**, which is why
+the `weak_decoder` block repeats `units`, `unit_memory` and `engine`
+even though the base already had them. Leave `engine` out and the load
+fails.
 
 The `weak_decoder` block names `pymatching`, so decsim decodes every
 window for real. The baseline prices its decoder with a number instead,

@@ -84,8 +84,8 @@ weak_decoder:
   kind: 0.028                       # LILLIPUT card
 ```
 
-`configs/bases/weak_decoder_baseline.yaml` does exactly this, and its comment
-says where the number came from.
+`configs/bases/weak_decoder_baseline.yaml` does exactly this, and its
+comment says where the number came from.
 
 ## The wall-clock decoder, and what it costs you
 

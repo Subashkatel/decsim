@@ -11,8 +11,8 @@ For a timing study, price the decoder with a **card** instead.
 
 A tier's `kind` may be a number instead of a name. The number is the
 decode's core latency in microseconds, charged on the
-minimum-weight-perfect-matching path. `configs/examples/priced_cards_example.yaml`
-is a worked one:
+minimum-weight-perfect-matching path.
+`configs/examples/priced_cards_example.yaml` is a worked one:
 
 ```yaml configs/examples/priced_cards_example.yaml
 # Priced cards: the decoder costs a stated number, not a measured one.

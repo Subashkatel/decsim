@@ -28,9 +28,10 @@ the signals and the shapes behind the knobs.
 
 ## Step 1. Read the config
 
-This lesson's config ships with decsim, as `configs/examples/two_tiers.yaml`.
-Both tiers are priced by cards rather than measured, so every tick
-below is the same on your machine as on this page's.
+This lesson's config ships with decsim, as
+`configs/examples/two_tiers.yaml`. Both tiers are priced by cards rather
+than measured, so every tick below is the same on your machine as on
+this page's.
 
 ```yaml configs/examples/two_tiers.yaml
 # Two tiers on priced cards, so the whole switching loop is

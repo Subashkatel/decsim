@@ -126,9 +126,15 @@ def configuration_id(config: experiment.ExperimentConfig) -> str:
 def combined_folder(
     experiment_dir: pathlib.Path, config: experiment.ExperimentConfig
 ) -> pathlib.Path:
-    """The run folder of one configuration: combined/<name>-<id8>/."""
+    """The run folder of one recorded configuration: combined/<name>-<id8>/.
+
+    The name is that of the id's first line in configurations.csv
+    (recorded_combined_folders), so every yaml of one configuration id,
+    whatever its name, folds into one folder.
+    """
     identity = configuration_id(config)
-    return _combined_folder_named(experiment_dir, config.name, identity)
+    folders = recorded_combined_folders(experiment_dir)
+    return folders[identity]
 
 
 def recorded_combined_folders(experiment_dir: pathlib.Path) -> dict:
@@ -449,16 +455,20 @@ def publish_the_fold(staging: pathlib.Path, run_dir: pathlib.Path) -> None:
     inputs/ copies, all derived from the experiment folder, so the last
     fold's are removed and the new ones moved in. The manifest, the
     code state and the traced shots' files are not a fold's and stay.
+    Another folder of the same configuration id, which a collect of a
+    second yaml name wrote before one folder was kept per id, holds the
+    same points, so its fold is removed too and each point is counted in
+    one folder.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
-    for csv_path in run_dir.glob("*.csv"):
-        csv_path.unlink()
-    for folder_name in (RESOLVED_FOLDER, INPUTS_FOLDER):
-        folder = run_dir / folder_name
-        shutil.rmtree(folder, ignore_errors=True)
+    _remove_the_fold(run_dir)
     for path in staging.iterdir():
         target = run_dir / path.name
         path.rename(target)
+    _name, identity8 = run_dir.name.rsplit("-", 1)
+    for folder in run_dir.parent.glob(f"*-{identity8}"):
+        if folder != run_dir:
+            _remove_the_fold(folder)
 
 
 def staging_path(path: pathlib.Path) -> pathlib.Path:
@@ -483,6 +493,15 @@ def _combined_folder_named(
 ) -> pathlib.Path:
     folder_name = f"{name}-{identity[:8]}"
     return experiment_dir / COMBINED_FOLDER / folder_name
+
+
+def _remove_the_fold(run_dir: pathlib.Path) -> None:
+    """A run folder's csv files, resolved/ and inputs/, removed."""
+    for csv_path in run_dir.glob("*.csv"):
+        csv_path.unlink()
+    for folder_name in (RESOLVED_FOLDER, INPUTS_FOLDER):
+        folder = run_dir / folder_name
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def _configuration_lines(experiment_dir: pathlib.Path) -> list:

@@ -2890,3 +2890,56 @@ def _run_the_unit_and_note(ran_seeds: list, run_unit, unit, measure):
     end_seed = unit.first_seed + unit.seeds
     ran_seeds.extend(range(unit.first_seed, end_seed))
     return run_unit(unit, measure)
+
+
+def test_two_yaml_names_of_one_configuration_fold_into_one_run_folder(
+    tmp_path,
+):
+    """A configuration's run folder is named by the first yaml recorded.
+
+    t2.yaml and t6.yaml say the same thing, so they are one
+    configuration id. Collected in that order, then folded by status,
+    they write one run folder, t2's, holding the point once.
+    """
+    config_path = _capped_noisy_config(tmp_path, 1, 15)
+    out_dir = tmp_path / "out"
+    first_path = tmp_path / "t2.yaml"
+    second_path = tmp_path / "t6.yaml"
+    shutil.copyfile(config_path, first_path)
+    shutil.copyfile(config_path, second_path)
+    command.main(["collect", str(first_path), "--out", str(out_dir)])
+    command.main(["collect", str(second_path), "--out", str(out_dir)])
+
+    command.main(["status", str(out_dir)])
+
+    run_folder_dir = yaml_configs.run_folder_of(out_dir)
+    swept_rows = _rows_of_every_run_folder(out_dir)
+    assert run_folder_dir.name.startswith("t2-")
+    assert [row["shots"] for row in swept_rows] == [1]
+
+
+def test_status_retires_the_fold_of_a_second_folder_of_one_configuration(
+    tmp_path,
+):
+    """A folder an older collect named by another yaml loses its fold.
+
+    The run folder is copied to a second name with the same id, as a
+    collect of a second yaml name wrote it before one folder per id.
+    Status leaves the point in one sweep.csv, and the second folder keeps
+    what is not a fold's, its manifest.
+    """
+    config_path = _capped_noisy_config(tmp_path, 1, 15)
+    out_dir = tmp_path / "out"
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    run_folder_dir = yaml_configs.run_folder_of(out_dir)
+    _name, identity8 = run_folder_dir.name.rsplit("-", 1)
+    second_dir = run_folder_dir.with_name(f"t6-{identity8}")
+    shutil.copytree(run_folder_dir, second_dir)
+
+    command.main(["status", str(out_dir)])
+
+    swept_rows = _rows_of_every_run_folder(out_dir)
+    second_files = sorted(path.name for path in second_dir.iterdir())
+    assert [row["shots"] for row in swept_rows] == [1]
+    assert "manifest.json" in second_files
+    assert not {"sweep.csv", "resolved", "inputs"} & set(second_files)

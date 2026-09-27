@@ -225,9 +225,9 @@ def run_experiment(
     """
     config = experiment.load_experiment(config_path)
     experiment_dir = run_folder.run_dir_for(config, out_dir)
-    report_dir = run_folder.combined_folder(experiment_dir, config)
     configuration_id = run_folder.configuration_id(config)
     owned_points = recorded_points(experiment_dir, {configuration_id: [config]})
+    report_dir = run_folder.combined_folder(experiment_dir, config)
     points = [point for _configuration_id, point in owned_points]
     unique = [point.task for point in points]
     point_ids = _point_ids(unique)

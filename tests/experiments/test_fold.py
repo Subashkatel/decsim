@@ -12,6 +12,7 @@ latency points that tree measured, and this tree measures twenty-two.
 """
 
 import csv
+import json
 import math
 import pathlib
 import random
@@ -567,3 +568,93 @@ def test_folders_that_hold_different_columns_are_refused(tmp_path):
     said_backwards = str(refused_backwards.value)
     assert said_backwards.startswith(f"{lacking} does not hold the columns")
     assert not out_dir.exists()
+
+
+def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
+    """The fold orders the pieces itself, so their order is no input.
+
+    Four pieces of one shot, folded as listed and again reversed, write
+    every file byte for byte alike.
+    """
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 1)
+    folders = _piece_folders(experiment_dir)
+    backwards = list(reversed(folders))
+    forwards_dir = tmp_path / "forwards"
+    backwards_dir = tmp_path / "backwards"
+
+    _folded(experiment_dir, folders, forwards_dir)
+    _folded(experiment_dir, backwards, backwards_dir)
+
+    forwards_bytes = _bytes_of_files(forwards_dir)
+    backwards_bytes = _bytes_of_files(backwards_dir)
+    assert forwards_bytes == backwards_bytes
+
+
+def test_a_fold_records_the_seeds_of_the_pieces_it_folded(tmp_path):
+    """A run folder's record names the seeds its rows hold, and no others.
+
+    The last two of four pieces folded alone hold and record seeds 2
+    and 3; all four record 0 to 3, and a second fold into that same
+    folder records them once.
+    """
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 1)
+    folders = _piece_folders(experiment_dir)
+    second_half_dir = tmp_path / "second_half"
+    whole_dir = tmp_path / "whole"
+
+    _folded(experiment_dir, folders[2:], second_half_dir)
+    _folded(experiment_dir, folders, whole_dir)
+    _folded(experiment_dir, folders, whole_dir)
+
+    assert _seeds_of_every_shot(second_half_dir) == ["2", "3"]
+    assert _seeds_of_the_one_point(second_half_dir) == [[2, 2]]
+    assert _seeds_of_the_one_point(whole_dir) == [[0, 4]]
+
+
+def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
+    """A resumed collect's record holds the saved seeds and the new ones."""
+    config_path = _one_point_config(tmp_path, 2, 1)
+    experiment_dir = tmp_path / "experiment"
+    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    run_dir = yaml_configs.run_folder_of(experiment_dir)
+    first_seeds = _seeds_of_the_one_point(run_dir)
+    _one_point_config(tmp_path, 4, 1)
+
+    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+
+    assert first_seeds == [[0, 2]]
+    assert _seeds_of_the_one_point(run_dir) == [[0, 4]]
+    assert _seeds_of_every_shot(run_dir) == ["0", "1", "2", "3"]
+
+
+# every file a fold writes from the pieces' rows
+FOLDED_FILES = (
+    "sweep.csv",
+    "links.csv",
+    "shots.csv",
+    "shot_links.csv",
+    "window_samples.csv",
+)
+
+
+def _bytes_of_files(run_dir) -> dict:
+    contents = {}
+    for name in FOLDED_FILES:
+        path = run_dir / name
+        contents[name] = path.read_bytes()
+    return contents
+
+
+def _seeds_of_every_shot(run_dir) -> list:
+    shots_path = run_dir / "shots.csv"
+    rows = _rows_of(shots_path)
+    return [row["seed"] for row in rows]
+
+
+def _seeds_of_the_one_point(run_dir) -> list:
+    """The seed ranges the run folder's one resolved record names."""
+    resolved_dir = run_dir / "resolved"
+    (resolved_path,) = resolved_dir.glob("*.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    return resolved["seeds"]

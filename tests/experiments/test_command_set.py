@@ -2564,3 +2564,43 @@ def test_a_plan_asking_for_no_task_core_hour_or_memory_is_refused(
     round_dirs = pieces.round_dirs(experiment_dir)
     assert f"{flag} must be at least 1" in printed.err
     assert round_dirs == []
+
+
+def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(
+    tmp_path,
+):
+    """Two rounds that may run at once hold one online point's same pieces.
+
+    Round two is planned before round one runs, as when round one's
+    array is still queued: it deals the point's four pieces again to one
+    task, in seed order, cut where round one cut them. Run in either
+    order, the rounds save each piece once and the fold is the uncut
+    run's.
+    """
+    whole_dir = tmp_path / "whole"
+    cut_dir = tmp_path / "cut"
+    whole_config = _online_config(tmp_path, 60)
+    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
+    cut_config = _online_config(tmp_path, 15)
+    first_round = _plan([cut_config], cut_dir, 3)
+    second_round = _plan([cut_config], cut_dir, 3)
+
+    _run_the_round(second_round)
+    _run_the_round(first_round)
+    command.main(["status", str(cut_dir)])
+
+    first_plan_path = first_round / "plan.csv"
+    second_plan_path = second_round / "plan.csv"
+    first_plan = _csv_rows(first_plan_path)
+    second_plan = _csv_rows(second_plan_path)
+    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
+    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
+    assert _values_of_rows(second_plan, ("task", "first_seed", "count")) == [
+        ("0", "0", "1"),
+        ("0", "1", "1"),
+        ("0", "2", "1"),
+        ("0", "3", "1"),
+    ]
+    assert second_plan == first_plan
+    assert _piece_names(cut_dir) == ["0-0", "1-1", "2-2", "3-3"]
+    assert _shot_decisions(cut_run_dir) == _shot_decisions(whole_run_dir)

@@ -136,19 +136,26 @@ def _counts_of(shots: list) -> dict:
     """The piece's shot counts, the lines a planner reads without its rows.
 
     core_seconds is the shots' own simulated wall time, the cost a
-    planner deals pieces by.
+    planner deals pieces by. The window status counts are the summary's
+    own sums (report.STATUS_SUMS), so a status reads without the rows
+    why a piece's shots went unscored, as sinter keeps its discards
+    beside its shots (sinter/_data/_task_stats.py:71).
     """
-    scored_shots = 0
-    failures = 0
-    core_seconds = 0.0
-    for row in shots:
-        scored_shots += row["is_scored"]
-        failures += row["logical_failure"]
-        core_seconds += row["sim_wall_seconds"]
-    unscored_shots = len(shots) - scored_shots
-    return {
+    scored_shots = _sum_of(shots, "is_scored")
+    counts = {
         "scored_shots": scored_shots,
-        "failures": failures,
-        "unscored_shots": unscored_shots,
-        "core_seconds": core_seconds,
+        "failures": _sum_of(shots, "logical_failure"),
+        "unscored_shots": len(shots) - scored_shots,
+        "core_seconds": _sum_of(shots, "sim_wall_seconds"),
     }
+    for name in report.STATUS_SUMS:
+        counts[name] = _sum_of(shots, name)
+    return counts
+
+
+def _sum_of(shots: list, column: str):
+    """One column summed over the piece's shot rows."""
+    values = []
+    for row in shots:
+        values.append(row[column])
+    return sum(values)

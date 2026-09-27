@@ -117,14 +117,19 @@ SHOT_MAXES = (
     "parallel_processes_needed",
     *LOAD_MAXES,
 )
+# the windows by final status and the replaced provisional ones left
+# uncorrected, summed per point and per piece (pieces.write)
+STATUS_SUMS = (
+    *measure.WINDOW_STATUS_COLUMNS,
+    "provisional_no_correction_windows",
+)
 SHOT_SUMS = (
     "referee_windows_checked",
     "referee_window_disagreements",
     "decoded_windows",
     "escalated_windows",
     "strong_decoded_rounds",
-    *measure.WINDOW_STATUS_COLUMNS,
-    "provisional_no_correction_windows",
+    *STATUS_SUMS,
 )
 SHOT_TRUE_COUNTS = (
     "logical_failure",
@@ -902,10 +907,8 @@ def _is_above_half(shot_rate: Optional[float]) -> Optional[bool]:
 
 def _add_status_columns(row: dict, totals) -> None:
     """Windows by final status, and replaced provisional ones uncorrected."""
-    for name in measure.WINDOW_STATUS_COLUMNS:
+    for name in STATUS_SUMS:
         row[name] = totals.sums[name]
-    provisional = totals.sums["provisional_no_correction_windows"]
-    row["provisional_no_correction_windows"] = provisional
 
 
 def _add_pool_columns(row: dict, totals) -> None:

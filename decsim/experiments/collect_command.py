@@ -165,8 +165,14 @@ def run_experiment(
     points = _point_collections(experiment_dir, point_tasks, unique)
     measure_shot = _shot_measure(unique, report_dir)
     swept = run_folder.swept_values(experiment_dir, point_ids)
+    configuration_id = run_folder.configuration_id(config)
     traced = _collect_until_stopped(
-        points, experiment_dir, measure_shot, swept, processes
+        points,
+        experiment_dir,
+        configuration_id,
+        measure_shot,
+        swept,
+        processes,
     )
     folders = pieces.folders_of(experiment_dir, point_ids)
     rows = _fold_the_pieces(experiment_dir, folders, points, report_dir)
@@ -312,6 +318,7 @@ def _refuse_an_online_stop(task: collect.Task) -> None:
 def _collect_until_stopped(
     points: list,
     experiment_dir: pathlib.Path,
+    configuration_id: str,
     measure_shot,
     swept: dict,
     processes: int,
@@ -320,16 +327,26 @@ def _collect_until_stopped(
 
     A round hands the pool about as many pieces as it has processes,
     shared among the points still running, so no point runs far past
-    its stop. Returns the traced shots' measurements.
+    its stop. Each piece names its configuration. Returns the traced
+    shots' measurements.
     """
     traced = []
+    rounds_by_point = {}
+    for point in points:
+        point_id = point.task.strong_id()
+        rounds_by_point[point_id] = point.rounds_per_shot
+    save = functools.partial(
+        _save_the_piece,
+        experiment_dir,
+        configuration_id,
+        rounds_by_point,
+        traced,
+    )
     while True:
         units = _next_round(points, experiment_dir, processes)
         if not units:
             return traced
-        _run_the_pieces(
-            units, experiment_dir, measure_shot, swept, processes, traced
-        )
+        _run_the_pieces(units, measure_shot, swept, processes, save)
         for point in points:
             point.count_the_pending(experiment_dir)
 
@@ -376,23 +393,22 @@ def _say_the_point_stopped(point: PointCollection) -> None:
 
 def _run_the_pieces(
     units: list,
-    experiment_dir: pathlib.Path,
     measure_shot,
     swept: dict,
     processes: int,
-    traced: list,
+    save,
 ) -> None:
-    """Each unit run and saved as a piece; its traced shots kept in traced.
+    """Each unit run, then handed to save, which writes it as a piece.
 
-    The traced shots feed the residence table; the rest of a unit's
-    measurements are its piece's files and are not held. swept is each
-    point's swept values, which an online threshold record's rows carry.
+    save keeps a unit's traced shots, which feed the residence table;
+    the rest of its measurements are its piece's files and are not
+    held. swept is each point's swept values, which an online threshold
+    record's rows carry.
     """
     report_dir = measure_shot.keywords["run_dir"]
     on_task_done = functools.partial(
         _write_online_threshold_record, run_dir=report_dir, swept=swept
     )
-    save = functools.partial(_save_the_piece, experiment_dir, traced)
     collect.run_units(
         units,
         measure_shot,
@@ -403,11 +419,25 @@ def _run_the_pieces(
 
 
 def _save_the_piece(
-    experiment_dir: pathlib.Path, traced: list, unit: collect.Unit, rows: list
+    experiment_dir: pathlib.Path,
+    configuration_id: str,
+    rounds_by_point: dict,
+    traced: list,
+    unit: collect.Unit,
+    rows: list,
 ) -> None:
-    """One unit's measurements saved as its piece; its traced shots kept."""
+    """One unit's measurements saved as its piece; its traced shots kept.
+
+    The piece names its configuration and counts its rounds, since a
+    shot's cost grows with its rounds.
+    """
     point_id = unit.task.strong_id()
-    pieces.write(experiment_dir, point_id, unit.first_seed, rows, {})
+    rounds_per_shot = rounds_by_point[point_id]
+    facts = {
+        "configuration_id": configuration_id,
+        "rounds": rounds_per_shot * len(rows),
+    }
+    pieces.write(experiment_dir, point_id, unit.first_seed, rows, facts)
     for measurement in rows:
         if measurement.trace_path is not None:
             traced.append(measurement)

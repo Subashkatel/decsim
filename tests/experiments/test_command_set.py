@@ -29,6 +29,7 @@ import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
 import decsim.experiments.pieces as pieces
+import decsim.experiments.report as report
 import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
@@ -735,6 +736,74 @@ NOISY_AXES = {
     "qpu.distance": [3],
     "qpu.round_period_microseconds": [1.0],
 }
+
+
+def _piece_counts_read_by_csv(folder: pathlib.Path) -> dict:
+    """A piece's counts summed straight from its own shots.csv."""
+    counts_names = (
+        "is_scored",
+        "logical_failure",
+        "sim_wall_seconds",
+        *report.STATUS_SUMS,
+    )
+    sums = dict.fromkeys(counts_names, 0)
+    shots_path = folder / "shots.csv"
+    shot_rows = _csv_rows(shots_path)
+    for row in shot_rows:
+        typed = fold.typed_row(row)
+        for name in counts_names:
+            sums[name] += typed[name]
+    shots = len(shot_rows)
+    scored_shots = sums.pop("is_scored")
+    core_seconds = sums.pop("sim_wall_seconds")
+    counts = {
+        "count": shots,
+        "scored_shots": scored_shots,
+        "failures": sums.pop("logical_failure"),
+        "unscored_shots": shots - scored_shots,
+        "core_seconds": pytest.approx(core_seconds),
+    }
+    return {**counts, **sums}
+
+
+def _piece_facts_and_references(experiment_dir: pathlib.Path) -> list:
+    """Each piece's piece.json lines, beside what its own files give."""
+    configurations_path = experiment_dir / "configurations.csv"
+    (configuration,) = _csv_rows(configurations_path)
+    records = run_folder.resolved_by_point(experiment_dir)
+    pairs = []
+    folders = experiment_dir.glob("pieces/*/*")
+    for folder in sorted(folders):
+        piece = pieces.read_piece(folder)
+        reference = _piece_counts_read_by_csv(folder)
+        rounds_per_shot = records[folder.parent.name]["rounds_per_shot"]
+        reference["configuration_id"] = configuration["configuration_id"]
+        reference["rounds"] = rounds_per_shot * reference["count"]
+        written = {name: piece[name] for name in reference}
+        pairs.append((written, reference))
+    return pairs
+
+
+def test_a_piece_records_its_counts_rounds_and_configuration(tmp_path):
+    """piece.json's lines against the piece's own shots.csv, summed by csv.
+
+    A planner or a status reads piece.json without the shot rows, so
+    each count there is the sum of its column over the piece's shots,
+    its rounds are its shots times the point's rounds per shot, and its
+    configuration is the one configurations.csv names.
+    """
+    collection = {"max_shots": 12, "piece_rounds": 45}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    pairs = _piece_facts_and_references(out_dir)
+    written = [pair[0] for pair in pairs]
+    references = [pair[1] for pair in pairs]
+    assert len(pairs) > 1
+    assert written == references
 
 
 def _shots_to_the_target(shots_path, target: int) -> int:

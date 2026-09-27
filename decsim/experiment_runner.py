@@ -84,6 +84,7 @@ class Experiment:
         if parsed.list:
             self._print_points()
             return
+        _refuse_no_workers(parsed.workers)
         folder = _results_folder(self.name, parsed.out)
         _record_the_run(folder)
         if parsed.target == COMBINE:
@@ -184,6 +185,16 @@ def _parser() -> argparse.ArgumentParser:
         "--out", help="the results folder; a dated one when absent"
     )
     return parser
+
+
+def _refuse_no_workers(worker_count: int) -> None:
+    """Sinter waits for its workers to answer, so none would hang it."""
+    if worker_count < 1:
+        message = (
+            f"--workers is {worker_count}; sinter needs at least one worker "
+            "process"
+        )
+        raise ValueError(message)
 
 
 def _results_folder(name: str, out: Optional[str]) -> pathlib.Path:

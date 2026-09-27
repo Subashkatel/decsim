@@ -196,6 +196,22 @@ def test_a_task_on_another_node_with_the_same_process_id_keeps_its_file(
     assert other_text == "the other node's staged copy\n"
 
 
+@pytest.mark.parametrize("worker_count", ["0", "-2"])
+def test_fewer_than_one_worker_is_refused(tmp_path, monkeypatch, worker_count):
+    write_script(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    experiment = tiny_experiment()
+    arguments = ["0", "--workers", worker_count, "--out", str(out)]
+
+    with pytest.raises(ValueError) as refused:
+        experiment.main(arguments=arguments)
+
+    assert str(refused.value) == (
+        f"--workers is {worker_count}; sinter needs at least one worker process"
+    )
+    assert not out.exists()
+
+
 def test_an_id_past_the_last_point_is_refused(tmp_path, monkeypatch):
     write_script(tmp_path, monkeypatch)
     experiment = tiny_experiment()

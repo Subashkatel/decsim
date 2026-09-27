@@ -205,7 +205,9 @@ def is_mixture_difference(
     return log_evidence >= LOG_MIXTURE_EVIDENCE_LEVEL
 
 
-def empirical_bernstein_sequence(values: Sequence[float]) -> tuple:
+def empirical_bernstein_sequence(
+    values: Sequence[float],
+) -> Optional[tuple]:
     """The 95 percent confidence sequence for the mean of values in [0, 1].
 
     Howard et al. (arXiv 1810.08240) eq. (24), Theorem 4 with the
@@ -215,10 +217,13 @@ def empirical_bernstein_sequence(values: Sequence[float]) -> tuple:
     average of each value's expectation given every earlier value
     (section 2), with no common mean assumed, at every t and so at any
     stop. On a learning run's failure bits it bounds the average
-    conditional failure probability. Returns (low, high).
+    conditional failure probability. Returns (low, high), or None with
+    no value, as estimate gives nothing with no scored shot.
     """
     outcomes = numpy.asarray(values, dtype=float)
     count = len(outcomes)
+    if count == 0:
+        return None
     indexes = numpy.arange(count)
     positions = indexes + 1
     running_sums = numpy.cumsum(outcomes)
@@ -245,14 +250,14 @@ def empirical_bernstein_sequence(values: Sequence[float]) -> tuple:
 
 def difference_sequence(
     first_failures: Sequence[bool], second_failures: Sequence[bool]
-) -> tuple:
+) -> Optional[tuple]:
     """The 95 percent sequence for the average difference of two rates.
 
     Howard et al. Theorem 4 on X_s = fail_first - fail_second in [-1, 1],
     as eq. (24) on (X + 1) / 2 in [0, 1]. It covers the average over the
     seeds of p_first(s | past) - p_second(s | past), the seeds being
     those both points scored, with no common mean assumed. Returns
-    (low, high).
+    (low, high), or None with no seed.
 
     Raises:
         ValueError: the two lists do not pair seed by seed.
@@ -264,6 +269,8 @@ def difference_sequence(
             "the two points' failures pair seed by seed, but the first "
             f"has {len(first)} seeds and the second {len(second)}"
         )
+    if len(first) == 0:
+        return None
     differences = first - second
     shifted = differences + 1
     rescaled = shifted / 2

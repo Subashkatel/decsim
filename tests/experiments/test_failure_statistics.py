@@ -302,6 +302,14 @@ def test_the_difference_sequence_is_equation_24_on_the_shifted_differences():
     assert high == pytest.approx(expected_high, rel=1e-12)
 
 
+def test_no_value_gives_no_sequence():
+    single = failure_statistics.empirical_bernstein_sequence([])
+    paired = failure_statistics.difference_sequence([], [])
+
+    assert single is None
+    assert paired is None
+
+
 def test_the_difference_sequence_refuses_failures_that_do_not_pair():
     with pytest.raises(ValueError) as refusal:
         failure_statistics.difference_sequence([True, False], [True])

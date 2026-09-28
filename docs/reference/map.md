@@ -298,6 +298,7 @@ docstring.
 ### sinter_adapters
 
 - `decsim/sinter_adapters/__init__.py`: decsim's decoders as sinter decoders, for offline runs in sinter.
+- `decsim/sinter_adapters/relay_bp.py`: decsim's Relay-BP as a sinter decoder, built from the point's circuit.
 - `decsim/sinter_adapters/union_find.py`: decsim's Union-Find as a sinter decoder.
 
 ## Level 5: producers, settings

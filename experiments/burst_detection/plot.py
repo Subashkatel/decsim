@@ -70,14 +70,15 @@ def draw_rounds_to_share(
     A class the rows lack is drawn as never reaching SHARE.
     """
     distances = sorted({key[1] for key in rounds_by_class})
-    figure, axis_by_distance = plots.panels("d", distances)
+    figure, axis_by_distance = plots.panels("distance", distances)
     for distance, axis in axis_by_distance.items():
         for strength in run.MULTIPLE_BY_STRENGTH:
             keys = [(error_rate, distance, strength, size) for size in SIZES]
             rounds = [rounds_by_class.get(key, math.nan) for key in keys]
             _draw_strength(axis, strength, rounds)
         _name_round_axes(axis)
-    figure.suptitle(f"p = {error_rate:g}, 1 false alarm per second")
+    title = f"error rate {error_rate:g}, alarm line at 1 false alarm per second"
+    figure.suptitle(title)
     path = folder / f"rounds_to_90_p{error_rate:g}.png"
     plots.save(figure, path)
 
@@ -106,6 +107,7 @@ def draw_false_alarms(quiet_rows: list, folder: pathlib.Path) -> None:
     for line, axis in axis_by_line.items():
         line_rows = plots.chosen(rows, alarm_line=line)
         plots.values(axis, line_rows, "p", "measured", "d", "low", "high")
+        axis.legend(title="distance")
         axis.axhline(line, color="grey", linestyle="--")
         axis.set_xscale("log")
         axis.set_yscale("log")
@@ -113,7 +115,7 @@ def draw_false_alarms(quiet_rows: list, folder: pathlib.Path) -> None:
         axis.set_xticks([], minor=True)
         # six rates in one decade: slanted, their labels do not meet
         axis.tick_params(axis="x", labelrotation=45)
-        axis.set_xlabel("physical error rate p")
+        axis.set_xlabel("physical error rate")
         axis.set_ylabel("false alarms per second")
     path = folder / "false_alarms.png"
     plots.save(figure, path)

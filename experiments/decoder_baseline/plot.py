@@ -21,6 +21,8 @@ import decsim.plots as plots
 LOWEST_RATE = min(run.ERROR_RATES)
 HIGHEST_RATE = max(run.ERROR_RATES)
 X_LIMITS = (LOWEST_RATE * 0.8, HIGHEST_RATE * 1.25)
+# a label at every swept rate, since a log axis over one decade shows one
+RATE_LABELS = [f"{rate:g}" for rate in run.ERROR_RATES]
 
 
 def main(folder: pathlib.Path) -> None:
@@ -59,6 +61,7 @@ def draw(
         axis, points, x="p", curve=curve, rounds=run.ROUNDS, order=order
     )
     axis.set_xlim(X_LIMITS)
+    axis.set_xticks(run.ERROR_RATES, RATE_LABELS, rotation=45)
     axis.set_xlabel("physical error rate p")
 
 

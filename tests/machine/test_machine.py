@@ -166,8 +166,9 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     code = code_geometry.SurfaceCodeModel(distance=3)
     device = syndrome_devices.TimingOnlyDevice(code)
     cycle_clock_domain = config.Clock(CYCLE_TICKS)
-    qpu = cycle_clock.QPUDevice(engine, device, cycle_clock_domain, code)
+    qpu = cycle_clock.QPUDevice(engine, cycle_clock_domain, code)
     runtime = FinishingRuntime(qpu)
+    qpu.syndrome_source = device
     qpu.readout_receiver = receiver
     qpu.runtime = runtime
     operation = program_records.Operation(

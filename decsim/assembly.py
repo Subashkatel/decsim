@@ -341,6 +341,7 @@ WIRES = (
     ("assembler.syndrome_round_sender", "syndrome_round_sender"),
     ("controller.assembler", "assembler"),
     # the QPU and the control loop
+    ("qpu.syndrome_source", "syndrome_source"),
     ("qpu.readout_receiver", "controller"),
     ("qpu.runtime", "execution_runtime"),
     ("qpu.idle_rounds", "idle_rounds"),

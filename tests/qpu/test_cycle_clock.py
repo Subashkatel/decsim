@@ -138,7 +138,8 @@ def clocked_qpu(cycle_ticks, source=None):
     if source is None:
         source = syndrome_devices.TimingOnlyDevice(CODE)
     clock = config.Clock(cycle_ticks)
-    qpu = cycle_clock.QPUDevice(engine, source, clock, CODE)
+    qpu = cycle_clock.QPUDevice(engine, clock, CODE)
+    qpu.syndrome_source = source
     qpu.readout_receiver = log
     qpu.runtime = log
     qpu.idle_rounds = log

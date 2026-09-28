@@ -43,8 +43,9 @@ class QPUDevice:
     """Runs issued operation bodies on one QEC cycle clock.
 
     Every cycle emits one syndrome round per running operation and per
-    idle patch, and the three ends that output reaches are ports. A
-    readout leaves at the tick its syndrome source names
+    idle patch; the source that produces its bits and the three ends
+    that output reaches are ports. A readout leaves at the tick its
+    syndrome source names
     (SyndromeSource.readout_departure_tick), never before an earlier
     readout of one of its patches: it waits behind that one, as gem5's
     packet queue with forceOrder schedules a packet after the last one
@@ -61,6 +62,9 @@ class QPUDevice:
     (gem5 src/base/stats/group.hh:60-92).
     """
 
+    # the device model that produces each round's bits, shared with the
+    # detection event former and the window models
+    syndrome_source = ports.Port(ports.SyndromeSource)
     readout_receiver = ports.Port(ports.ReadoutReceiver)
     # the end that owns an operation's life: it hears the body's last
     # round on this clock
@@ -72,12 +76,10 @@ class QPUDevice:
     def __init__(
         self,
         engine: decsim.engine.Engine,
-        syndrome_source: ports.SyndromeSource,
         clock: config.Clock,
         code: ports.CodeModel,
     ):
         self.engine = engine
-        self.syndrome_source = syndrome_source
         self.clock = clock
         self.code = code
         self.trace = _TraceSources()

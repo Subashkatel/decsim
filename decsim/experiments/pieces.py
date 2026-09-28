@@ -94,7 +94,7 @@ def write(
         piece["state_sha256"] = _write_state(staging, state)
     piece_path = staging / PIECE_FILE
     run_folder.write_json(piece_path, piece)
-    publish(staging, folder)
+    _publish(staging, folder)
     return folder
 
 
@@ -260,7 +260,19 @@ def round_number_of(round_dir: pathlib.Path) -> int:
     return int(number_text)
 
 
-def publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
+def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
+    """A hidden folder beside the piece that only this writer uses.
+
+    Two tasks handed the same piece may write it at once, so each
+    stages its own copy under a random name and neither touches the
+    other's files.
+    """
+    identifier = uuid.uuid4()
+    token = identifier.hex
+    return folder.with_name(f".{folder.name}.{token}.partial")
+
+
+def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
     """The staged piece renamed into place, or dropped when one is there.
 
     A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
@@ -274,18 +286,6 @@ def publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
         if not folder.is_dir():
             raise
         shutil.rmtree(staging)
-
-
-def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
-    """A hidden folder beside the piece that only this writer uses.
-
-    Two tasks handed the same piece may write it at once, so each
-    stages its own copy under a random name and neither touches the
-    other's files.
-    """
-    identifier = uuid.uuid4()
-    token = identifier.hex
-    return folder.with_name(f".{folder.name}.{token}.partial")
 
 
 def _write_residence(staging: pathlib.Path, measurements: list) -> None:

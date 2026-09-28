@@ -199,21 +199,8 @@ def run_unit(
         shot = run_shot(unit.task, seed, built_models=built_models)
         row = measure(shot)
         rows.append(row)
-    peak_memory = peak_memory_mb()
-    return result_records.UnitOutcome(rows, unit.task, peak_memory)
-
-
-def peak_memory_mb() -> float:
-    """This process's peak resident memory so far, in megabytes.
-
-    getrusage's ru_maxrss is in kilobytes on Linux and in bytes on macOS
-    (getrusage(2) on each).
-    """
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    kilobytes = usage.ru_maxrss
-    if sys.platform == "darwin":
-        kilobytes = usage.ru_maxrss / 1024
-    return kilobytes / 1024
+    peak_memory_mb = _peak_memory_mb()
+    return result_records.UnitOutcome(rows, unit.task, peak_memory_mb)
 
 
 def unique_tasks(tasks: Iterable[Task]) -> list:
@@ -292,6 +279,19 @@ def _keep_rows(
     rows_by_task[task_id] = outcome.rows
     if on_task_done is not None:
         on_task_done(unit.task)
+
+
+def _peak_memory_mb() -> float:
+    """This process's peak resident memory so far, in megabytes.
+
+    getrusage's ru_maxrss is in kilobytes on Linux and in bytes on macOS
+    (getrusage(2) on each).
+    """
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    kilobytes = usage.ru_maxrss
+    if sys.platform == "darwin":
+        kilobytes = usage.ru_maxrss / 1024
+    return kilobytes / 1024
 
 
 def _unit_outcomes(units: list, measure: Callable[[Shot], Any], processes: int):

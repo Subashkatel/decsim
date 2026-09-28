@@ -13,6 +13,7 @@ import pathlib
 import pytest
 
 import decsim.producers as producers
+import decsim.sinter_adapters.relay_bp as relay_bp_adapter
 
 pytest.importorskip("relay_bp")
 pytest.importorskip("tesseract_decoder")
@@ -53,6 +54,22 @@ def test_every_point_stops_at_100_errors_or_a_billion_shots():
         options = task.collection_options
         limits.add((options.max_errors, options.max_shots))
     assert limits == {(100, 1_000_000_000)}
+
+
+def test_a_relay_bp_point_decodes_with_decsims_row_built_on_its_circuit():
+    run = script_module()
+
+    experiment = run.baseline()
+
+    for task, decoder in zip(
+        experiment.tasks, experiment.decoders, strict=True
+    ):
+        if task.decoder != run.RELAY_BP:
+            continue
+        assert isinstance(
+            decoder, relay_bp_adapter.RelayBeliefPropagationDecoder
+        )
+        assert decoder.circuit is task.circuit
 
 
 def script_module():

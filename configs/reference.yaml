@@ -314,9 +314,9 @@ burst_detector:
 #                                  # column burst_caught_in_time and the
 #                                  # sweep.csv caught_in_time_share. 300 is
 #                                  # half the 600-round decay of Willow's
-#                                  # large bursts, the deadline
-#                                  # experiments/burst_detection/run.py
-#                                  # counts a catch by
+#                                  # large bursts (2408.13687), so a burst
+#                                  # counts as caught while it is still
+#                                  # strong
 #
 # burst_detector:
 #   kind: event_count              # the simple count baseline: the patch's

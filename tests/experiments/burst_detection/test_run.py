@@ -1,61 +1,35 @@
-"""The burst detection script against decsim's workload and Stim's sampler.
+"""The burst detection script, run whole on a tiny grid."""
 
-The circuit's referent is decsim.frontends.settings.memory_circuit, the
-maker the decoder baseline samples. A strength's firing is read off the
-detector error model, so Stim's own shots of the same burst are its
-referent.
-"""
-
+import dataclasses
 import importlib.util
 import pathlib
+import sys
 
-import numpy
 import pytest
-
-import decsim.detector_error_model.detector_formation as detector_formation
-import decsim.frontends.settings as workload_settings
-import decsim.qpu.stim_device as stim_device
 
 _THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
 REPOSITORY_ROOT = _TEST_FILE.parents[3]
-SCRIPT = REPOSITORY_ROOT / "experiments" / "burst_detection" / "run.py"
+SCRIPT_FOLDER = REPOSITORY_ROOT / "experiments" / "burst_detection"
+SCRIPT = SCRIPT_FOLDER / "run.py"
 
 
-def test_the_circuit_is_decsims_z_memory():
-    run = script_module()
+def test_a_hit_qubit_runs_at_2_5_p_6_p_or_saturated(monkeypatch):
+    run = script_module(monkeypatch, "run")
 
-    circuit = run.circuit(5, 0.003, 2000)
+    weak = run.added_probability("weak", 0.002)
+    strong = run.added_probability("strong", 0.002)
+    saturating = run.added_probability("saturating", 0.002)
 
-    reference = workload_settings.memory_circuit(
-        "surface_code:rotated_memory_z", 2000, 5, 0.003
-    )
-    assert circuit == reference
-
-
-def test_the_calibrations_come_first_then_each_rates_eighteen_points():
-    """36 calibrations; then 12 bursts, 4 quiet parts, levels, traces."""
-    run = script_module()
-
-    experiment = run.burst_detection()
-
-    files = [point.results_file for point in experiment.function_points]
-    calibration_labels = experiment.function_points[3].labels
-    burst_labels = experiment.function_points[94].labels
-    rate_files = ["trials.csv"] * 12 + ["quiet.csv"] * 4
-    rate_files += ["levels.csv", "traces.csv"]
-    assert files == ["alarm_levels.csv"] * 36 + rate_files * 36
-    assert calibration_labels == {"d": 5, "p": 0.003}
-    assert burst_labels == {
-        "d": 5,
-        "p": 0.003,
-        "size": "medium",
-        "strength": "strong",
-    }
+    assert weak == pytest.approx(0.003)
+    assert strong == pytest.approx(0.01)
+    assert saturating == 0.75
 
 
-def test_a_point_whose_calibration_is_not_saved_is_refused(tmp_path):
-    run = script_module()
+def test_a_point_whose_calibration_is_not_saved_is_refused(
+    tmp_path, monkeypatch
+):
+    run = script_module(monkeypatch, "run")
     labels = {"d": 5, "p": 0.003, "part": 0}
 
     with pytest.raises(ValueError) as refused:
@@ -63,70 +37,53 @@ def test_a_point_whose_calibration_is_not_saved_is_refused(tmp_path):
 
     path = tmp_path / "points" / "3.csv"
     assert str(refused.value) == (
-        f"no alarm levels for d = 5, p = 0.003 at {path}; run calibration "
-        "point 3 first (on Slurm, submit this point with "
-        "--dependency=afterok on its job)"
+        f"no alarm levels at {path}: run calibration point 3 first (on "
+        "Slurm, --dependency=afterok)"
     )
 
 
-def test_quiet_time_is_whole_shots_of_2000_rounds_of_1_us():
-    """The calibration's block, not the 1,999 rounds a shot scores."""
-    run = script_module()
-
-    seconds = run.quiet_seconds(1000)
-
-    assert seconds == 2.0
-
-
-def test_a_strength_reaches_its_multiple_of_the_quiet_firing():
-    run = script_module()
-
-    weak = run.burst_level(5, 0.003, "weak")
-    strong = run.burst_level(5, 0.003, "strong")
-    saturating = run.burst_level(5, 0.003, "saturating")
-
-    quiet_firing = weak["quiet_firing"]
-    weak_target = 2.5 * quiet_firing
-    strong_target = 6 * quiet_firing
-    assert weak["firing"] == pytest.approx(weak_target, rel=1e-6)
-    assert strong["firing"] == pytest.approx(strong_target, rel=1e-6)
-    assert saturating["level"] == 0.75
-    assert saturating["firing"] == pytest.approx(0.5, abs=1e-3)
-
-
-def test_the_firing_read_off_the_model_is_stims_sampled_firing():
-    """20,000 shots of the strong whole-patch burst, its peak round."""
-    run = script_module()
-    strong = run.burst_level(5, 0.003, "strong")
-    circuit = run.circuit(5, 0.003, run.SEARCH_ROUNDS)
-    table = detector_formation.build_formation_table(circuit, run.SEARCH_ROUNDS)
-    settings = stim_device.BurstStimDevice.Settings(
-        burst_onset_round=run.SEARCH_ONSET_ROUND,
-        burst_rise_rounds=run.RISE_ROUNDS,
-        burst_decay_rounds=run.DECAY_ROUNDS,
-        burst_error_probability=strong["level"],
+def test_a_tiny_grid_runs_combines_and_plots(tmp_path, monkeypatch):
+    """Only d = 5 and p = 0.003: 40 rounds, 2 trials a class, 4 streams."""
+    run = script_module(monkeypatch, "run")
+    one_shot_calibration = dataclasses.replace(
+        run.DETECTOR_SETTINGS, calibration_shot_count=1000
     )
-    burst = stim_device.burst_circuit(circuit, table, settings)
-    sampler = burst.compile_detector_sampler(seed=3)
+    monkeypatch.setattr(run, "DETECTOR_SETTINGS", one_shot_calibration)
+    monkeypatch.setattr(run, "RATE_POINTS", [(5, 0.003)])
+    monkeypatch.setattr(run, "ROUNDS", 40)
+    monkeypatch.setattr(run, "ONSET_ROUND", 20)
+    monkeypatch.setattr(run, "TRIALS", 2)
+    monkeypatch.setattr(run, "QUIET_PARTS", 1)
+    monkeypatch.setattr(run, "QUIET_BATCHES", 1)
+    monkeypatch.setattr(run, "QUIET_STREAMS", 4)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT)])
+    monkeypatch.setitem(sys.modules, "run", run)
+    plot = script_module(monkeypatch, "plot")
+    folder = tmp_path / "out"
+    experiment = run.burst_detection()
 
-    events = sampler.sample(20_000)
+    experiment.main(arguments=["--out", str(folder)])
+    plot.main(folder)
 
-    coordinates = burst.get_detector_coordinates()
-    time_list = [coordinates[index][2] for index in coordinates]
-    times = numpy.array(time_list, dtype=int)
-    firing = events.mean(axis=0)
-    firing_sums = numpy.bincount(times, weights=firing)
-    check_counts = numpy.bincount(times)
-    round_firing = firing_sums / check_counts
-    bulk_firing = round_firing[1:-1]
-    sampled_peak = bulk_firing.max()
-    # 24 checks of 20,000 shots a round: a standard error near 0.0007
-    assert sampled_peak == pytest.approx(strong["firing"], abs=0.003)
+    trials_text = (folder / "trials.csv").read_text()
+    quiet_text = (folder / "quiet.csv").read_text()
+    plot_names = {path.name for path in (folder / "plots").iterdir()}
+    assert trials_text.count("\n") == 1 + 12 * 2 * 3
+    quiet_lines = quiet_text.splitlines()
+    assert len(quiet_lines) == 1 + 3
+    assert quiet_lines[1].startswith("5,0.003,0,1.0,0.00016,")
+    assert plot_names == {"rounds_to_90_p0.003.png", "false_alarms.png"}
 
 
-def script_module():
-    """experiments/burst_detection/run.py, imported, its main not run."""
-    spec = importlib.util.spec_from_file_location("burst_detection", SCRIPT)
+def script_module(monkeypatch: pytest.MonkeyPatch, name: str):
+    """experiments/burst_detection/<name>.py, imported, its main not run.
+
+    plot.py imports run.py by the name run, which another experiment's
+    test may have imported first, so the folder comes first on the path.
+    """
+    monkeypatch.syspath_prepend(str(SCRIPT_FOLDER))
+    path = SCRIPT_FOLDER / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"burst_{name}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

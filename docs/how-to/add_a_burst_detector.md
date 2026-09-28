@@ -87,7 +87,7 @@ give each of your modules its own test file, and add your row to
 
 `experiments/burst_detection/run.py` measures `masked_regional_cusum`
 offline: its catches of bursts of four sizes and three strengths, and
-its false alarms on 100 s of quiet stream, at three alarm lines
+its false alarms on 104 s of quiet stream, at three alarm lines
 ([How to run an experiment](run_an_experiment.md)). It scores whole
 shots through `AlarmLines` in
 `decsim/burst_detectors/masked_regional_cusum/detector.py`; a row

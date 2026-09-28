@@ -126,6 +126,30 @@ def test_count_rate_draws_the_share_of_two_custom_counts():
     pyplot.close(figure)
 
 
+def test_count_rate_draws_a_share_on_linear_axes_from_zero_to_one():
+    stats = [
+        stat("union-find", d=5, counts={"caught": 150, "bursts": 200}),
+        stat("union-find", d=7, counts={"caught": 190, "bursts": 200}),
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.count_rate(
+        axis,
+        stats,
+        x="d",
+        hits="caught",
+        total="bursts",
+        curve="decoder",
+        is_x_log_scale=False,
+        is_y_log_scale=False,
+    )
+
+    assert axis.get_xscale() == "linear"
+    assert axis.get_yscale() == "linear"
+    assert axis.get_ylim() == (0.0, 1.0)
+    pyplot.close(figure)
+
+
 def test_values_draw_error_bars_from_the_low_and_high_columns():
     rows = [
         {"d": 5, "p": 0.001, "rate": 0.2, "low": 0.1, "high": 0.4},

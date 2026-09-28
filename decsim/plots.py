@@ -132,7 +132,7 @@ def error_rate(
     legend_title = curve
     if marker is not None:
         legend_title = f"{curve}, {marker}"
-    _log_axes(axis)
+    _scale_axes(axis, is_x_log_scale=True, is_y_log_scale=True)
     _style(axis, x, f"logical error rate per {unit}", legend_title)
 
 
@@ -144,11 +144,15 @@ def count_rate(
     total: str,
     curve: str,
     order: Optional[list] = None,
+    is_x_log_scale: bool = True,
+    is_y_log_scale: bool = True,
 ) -> None:
     """The share hits of total against x, both custom counts, with a band.
 
     The band is the one error_rate draws, from sinter.fit_binomial over
-    the two counts (sinter/_probability_util.py:327).
+    the two counts (sinter/_probability_util.py:327). A share spans
+    decades when it is rare, so both axes are log by default; a linear
+    share axis runs from 0 to 1, the whole range a share can take.
     """
     x_of = functools.partial(_value, key=x)
     share_of = functools.partial(_count_share, hits=hits, total=total)
@@ -162,7 +166,9 @@ def count_rate(
         group_func=group_of,
         plot_args_func=style_of,
     )
-    _log_axes(axis)
+    _scale_axes(axis, is_x_log_scale, is_y_log_scale)
+    if not is_y_log_scale:
+        axis.set_ylim(0.0, 1.0)
     _style(axis, x, f"{hits} / {total}", curve)
 
 
@@ -454,18 +460,22 @@ def _panel_figure(row_count: int, column_count: int) -> tuple:
     )
 
 
-def _log_axes(axis: pyplot.Axes) -> None:
-    """A rate spans decades on both axes, labelled at the decades only.
+def _scale_axes(
+    axis: pyplot.Axes, is_x_log_scale: bool, is_y_log_scale: bool
+) -> None:
+    """A rate spans decades, so a log axis is labelled at decades only.
 
     Matplotlib labels minor ticks on an axis that spans few decades
     (LogFormatter's minor_thresholds), and at 3 and 4 times a decade
     those labels run into each other.
     """
-    axis.set_xscale("log")
-    axis.set_yscale("log")
     no_labels = matplotlib.ticker.NullFormatter()
-    axis.xaxis.set_minor_formatter(no_labels)
-    axis.yaxis.set_minor_formatter(no_labels)
+    if is_x_log_scale:
+        axis.set_xscale("log")
+        axis.xaxis.set_minor_formatter(no_labels)
+    if is_y_log_scale:
+        axis.set_yscale("log")
+        axis.yaxis.set_minor_formatter(no_labels)
 
 
 def _style(

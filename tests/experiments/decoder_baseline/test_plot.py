@@ -3,6 +3,7 @@
 import importlib.util
 import itertools
 import pathlib
+import sys
 
 import pytest
 import sinter
@@ -25,8 +26,7 @@ EXPECTED_PLOTS = {
 
 
 def test_every_decoder_and_basis_gets_its_figure(tmp_path, monkeypatch):
-    monkeypatch.syspath_prepend(str(SCRIPT_FOLDER))
-    plot = script_module()
+    plot = script_module(monkeypatch)
     write_stats(tmp_path)
 
     plot.main(tmp_path)
@@ -58,10 +58,21 @@ def write_stats(folder: pathlib.Path) -> None:
     stats_path.write_text(text)
 
 
-def script_module():
-    """experiments/decoder_baseline/plot.py, imported, its main not run."""
-    path = SCRIPT_FOLDER / "plot.py"
-    spec = importlib.util.spec_from_file_location("decoder_baseline_plot", path)
+def script_module(monkeypatch: pytest.MonkeyPatch):
+    """experiments/decoder_baseline/plot.py, imported beside its own run.py.
+
+    plot.py imports run.py by the name run, and every experiment has one,
+    so this test's run is pinned in sys.modules until the test ends.
+    """
+    run_path = SCRIPT_FOLDER / "run.py"
+    plot_path = SCRIPT_FOLDER / "plot.py"
+    run = _loaded(run_path, "decoder_baseline_run")
+    monkeypatch.setitem(sys.modules, "run", run)
+    return _loaded(plot_path, "decoder_baseline_plot")
+
+
+def _loaded(path: pathlib.Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

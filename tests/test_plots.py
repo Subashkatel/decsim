@@ -203,6 +203,29 @@ def test_a_linear_heatmap_colours_a_zero_and_leaves_a_missing_cell_blank():
     pyplot.close(figure)
 
 
+def test_heatmap_limits_fix_the_colour_scale_past_the_values_drawn():
+    rows = [
+        {"d": 5, "p": 0.001, "share": 0.2},
+        {"d": 5, "p": 0.002, "share": 0.5},
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.heatmap(
+        axis,
+        rows,
+        x="p",
+        y="d",
+        value="share",
+        label="share",
+        is_log_scale=False,
+        limits=(0.0, 1.0),
+    )
+
+    norm = axis.collections[0].norm
+    assert (norm.vmin, norm.vmax) == (0.0, 1.0)
+    pyplot.close(figure)
+
+
 def test_share_below_counts_each_value_strictly_below_a_threshold():
     shares = plots.share_below([3, 1, 2], [1, 2, 3], [1, 2, 2.5, 4])
 

@@ -216,11 +216,14 @@ def heatmap(
     value: str,
     label: str,
     is_log_scale: bool = True,
+    limits: Optional[tuple] = None,
 ) -> None:
     """The value column on an x by y grid, cells no row fills white.
 
     On the log scale a zero cell is white too; the linear scale, for a
     share, colours a zero like any value, and a NaN value is white.
+    limits, (low, high), fixes the colour scale, so panels drawn apart
+    give one value one colour; None spans the cells drawn.
     """
     xs = sorted({row[x] for row in rows})
     ys = sorted({row[y] for row in rows})
@@ -234,6 +237,8 @@ def heatmap(
     if is_log_scale:
         masked = numpy.ma.masked_equal(masked, 0)
         norm = matplotlib.colors.LogNorm()
+    if limits is not None:
+        norm.vmin, norm.vmax = limits
     colormap = matplotlib.colormaps["viridis"]
     white_blanks = colormap.with_extremes(bad="white")
     mesh = axis.pcolormesh(

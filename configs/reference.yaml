@@ -313,10 +313,10 @@ burst_detector:
 #                                  # catches it in time, the shots.csv
 #                                  # column burst_caught_in_time and the
 #                                  # sweep.csv caught_in_time_share. 300 is
-#                                  # half the 600-round decay of the
-#                                  # burst the comparison grid draws
-#                                  # (configs/experiments/burst_detection/
-#                                  # burst_detection.yaml)
+#                                  # half the 600-round decay of Willow's
+#                                  # large bursts, the deadline
+#                                  # experiments/burst_detection/run.py
+#                                  # counts a catch by
 #
 # burst_detector:
 #   kind: event_count              # the simple count baseline: the patch's

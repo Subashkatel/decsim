@@ -20,6 +20,7 @@ import scipy.sparse
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay
+import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.basis_split as basis_split
@@ -119,6 +120,29 @@ def test_the_row_returns_relay_bps_own_correction_property():
         job = windows.job_for(model, shot)
         result = row.decode(job)
         assert result.correction.tolist() == expected
+
+
+def test_two_windows_with_one_model_share_one_backend(monkeypatch):
+    """A shot builds each window afresh; equal models build relay-bp once."""
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    detection_events, _ = windows.sampled_shots(circuit, 1, 3)
+    row = _seeded_row(SURFACE)
+    builds = []
+    build = relay_window._construct_backend
+
+    def counted_build(*arguments):
+        builds.append(arguments)
+        return build(*arguments)
+
+    monkeypatch.setattr(relay_window, "_construct_backend", counted_build)
+    for _ in range(2):
+        model = windows.whole_circuit_window(
+            circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+        )
+        job = windows.job_for(model, detection_events[0])
+        row.decode(job)
+    assert len(builds) == 1
 
 
 def test_the_row_reports_relay_bps_own_iteration_count_property():

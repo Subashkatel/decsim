@@ -58,7 +58,7 @@ def test_the_time_is_the_measured_line_at_relay_bps_own_iterations():
     settings = measured_table.MeasuredTableSettings("a100", "whole")
     table = measured_table.MeasuredTable(settings)
     physical = model.require_faults(PHYSICAL)
-    compiled = table.decoder.window_decoder._compiled_model(physical)
+    compiled = table.decoder.window_decoder.compiled_model(physical)
     syndrome = windows.row_syndrome(model, detection_events[0])
     detailed = compiled.backend.decode_detailed(syndrome)
     ticket = table.submit(job, 0)

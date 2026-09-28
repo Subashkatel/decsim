@@ -59,6 +59,42 @@ def test_error_rate_draws_sinter_per_round_rate_and_band_per_curve():
     pyplot.close(figure)
 
 
+def test_error_rate_styles_a_curve_by_its_place_in_order():
+    """The panel lacks d = 5, and d = 7 keeps its second style."""
+    stats = [
+        stat("pymatching", d=7, p=0.001, errors=5),
+        stat("pymatching", d=7, p=0.002, errors=20),
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.error_rate(axis, stats, x="p", curve="d", order=[5, 7])
+
+    (line,) = axis.lines
+    assert line.get_color() == "C1"
+    assert line.get_marker() == "v"
+    pyplot.close(figure)
+
+
+def test_error_rate_draws_nothing_for_a_point_with_no_errors():
+    stats = [
+        stat("pymatching", d=5, p=0.001, errors=0),
+        stat("pymatching", d=5, p=0.002, errors=10),
+        stat("pymatching", d=5, p=0.003, errors=30),
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.error_rate(axis, stats, x="p", curve="d")
+
+    (line,) = axis.lines
+    band = axis.collections[0]
+    (band_path,) = band.get_paths()
+    band_xs = band_path.vertices[:, 0]
+    drawn_rates = line.get_xdata()
+    assert list(drawn_rates) == [0.002, 0.003]
+    assert min(band_xs) == 0.002
+    pyplot.close(figure)
+
+
 def test_count_rate_draws_the_share_of_two_custom_counts():
     stats = [
         stat("union-find", p=0.001, counts={"escalated": 3, "windows": 60}),

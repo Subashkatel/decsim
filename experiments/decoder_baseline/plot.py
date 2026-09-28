@@ -33,7 +33,7 @@ def main(folder: pathlib.Path) -> None:
         figure, axis_by_basis = plots.panels("basis", run.BASES)
         for basis, axis in axis_by_basis.items():
             points = plots.chosen(stats, decoder=decoder, basis=basis)
-            draw(axis, points, curve="d")
+            draw(axis, points, "d", run.DISTANCES)
         figure.suptitle(decoder)
         path = plots_folder / f"{decoder}.png"
         plots.save(figure, path)
@@ -41,15 +41,23 @@ def main(folder: pathlib.Path) -> None:
         figure, axis_by_distance = plots.panels("d", run.DISTANCES)
         for distance, axis in axis_by_distance.items():
             points = plots.chosen(stats, basis=basis, d=distance)
-            draw(axis, points, curve="decoder")
+            draw(axis, points, "decoder", run.DECODERS)
         figure.suptitle(f"memory {basis}, decoders compared")
         path = plots_folder / f"decoders_{basis}.png"
         plots.save(figure, path)
 
 
-def draw(axis: matplotlib.axes.Axes, points: list, curve: str) -> None:
-    """One panel: the rate per round against p, on the swept rates."""
-    plots.error_rate(axis, points, x="p", curve=curve, rounds=run.ROUNDS)
+def draw(
+    axis: matplotlib.axes.Axes, points: list, curve: str, order: list
+) -> None:
+    """One panel: the rate per round against p, on the swept rates.
+
+    order lists every value of curve, so a curve keeps its colour in a
+    panel another has not reached yet.
+    """
+    plots.error_rate(
+        axis, points, x="p", curve=curve, rounds=run.ROUNDS, order=order
+    )
     axis.set_xlim(X_LIMITS)
     axis.set_xlabel("physical error rate p")
 

@@ -6,6 +6,11 @@ within a likelihood factor of it (sinter/_plotting.py:317-419). The
 other kinds read plain rows, one dict per row, as decsim.results.load
 returns them. A key names a column of a row; on a sinter.TaskStats it
 names a json_metadata field, except "decoder", which is the stat's own.
+
+A curve's colour and marker come from its value's place in `order`, the
+list of every value the curve key takes across a figure, so a value
+keeps its style in a panel that lacks another; without `order` the
+place is among the values the call draws, sorted.
 """
 
 import collections
@@ -19,6 +24,7 @@ from typing import Optional, Union
 import matplotlib
 import matplotlib.colors
 import matplotlib.pyplot as pyplot
+import matplotlib.ticker
 import numpy
 import sinter
 
@@ -30,6 +36,9 @@ PANEL_HEIGHT_INCHES = 4.2
 LIKELIHOOD_FACTOR = 1e3
 HISTOGRAM_BINS = 30
 MINOR_GRID_ALPHA = 0.3
+# sinter's marker order (sinter/_plotting.py:15), so a curve reads the
+# same here as in a figure sinter draws itself
+MARKERS = "ov*sp^<>8PhH+xXDd"
 
 
 def panels(key: str, values: list, columns: int = 3) -> tuple:
@@ -79,6 +88,7 @@ def error_rate(
     curve: str,
     marker: Optional[str] = None,
     rounds: int = 1,
+    order: Optional[list] = None,
 ) -> None:
     """The logical error rate against x, a curve per value of curve.
 
@@ -87,15 +97,22 @@ def error_rate(
     the call holds; above one the rate is per round, sinter's
     failure_units_per_shot_func (sinter/_plotting.py:338-342), and one is
     sinter's own default, a rate per shot.
+
+    A point with no errors is left out: it has no likeliest rate, only a
+    bound, and sinter draws it as a band from zero with no marker
+    (sinter/_plotting.py:399-400), which on a log axis runs to the floor.
     """
     x_of = functools.partial(_value, key=x)
     group_of = functools.partial(_group, curve=curve, marker=marker)
+    style_of = _sinter_style(stats, curve, marker, order)
     sinter.plot_error_rate(
         ax=axis,
         stats=stats,
         x_func=x_of,
         failure_units_per_shot_func=lambda _stat: rounds,
         group_func=group_of,
+        filter_func=_has_errors,
+        plot_args_func=style_of,
     )
     unit = "shot"
     if rounds > 1:
@@ -108,7 +125,13 @@ def error_rate(
 
 
 def count_rate(
-    axis: pyplot.Axes, stats: list, x: str, hits: str, total: str, curve: str
+    axis: pyplot.Axes,
+    stats: list,
+    x: str,
+    hits: str,
+    total: str,
+    curve: str,
+    order: Optional[list] = None,
 ) -> None:
     """The share hits of total against x, both custom counts, with a band.
 
@@ -118,8 +141,14 @@ def count_rate(
     x_of = functools.partial(_value, key=x)
     share_of = functools.partial(_count_share, hits=hits, total=total)
     group_of = functools.partial(_group, curve=curve, marker=None)
+    style_of = _sinter_style(stats, curve, None, order)
     sinter.plot_custom(
-        ax=axis, stats=stats, x_func=x_of, y_func=share_of, group_func=group_of
+        ax=axis,
+        stats=stats,
+        x_func=x_of,
+        y_func=share_of,
+        group_func=group_of,
+        plot_args_func=style_of,
     )
     _log_axes(axis)
     _style(axis, x, f"{hits} / {total}", curve)
@@ -133,12 +162,14 @@ def values(
     curve: str,
     low: Optional[str] = None,
     high: Optional[str] = None,
+    order: Optional[list] = None,
 ) -> None:
     """The y column against x, a curve per curve value; low, high as bars."""
     curves = _curves(rows, curve, x)
     for curve_value, curve_rows in curves.items():
-        label = str(curve_value)
-        _draw_values(axis, curve_rows, x, y, low, high, label)
+        style = _curve_style(curve_value, curves, order)
+        style["label"] = str(curve_value)
+        _draw_values(axis, curve_rows, (x, y, low, high), style)
     _style(axis, x, y, curve)
 
 
@@ -148,6 +179,7 @@ def distribution(
     value: str,
     curve: str,
     count: Optional[str] = None,
+    order: Optional[list] = None,
 ) -> None:
     """A histogram of value per curve, each summing to one, its median dashed.
 
@@ -157,11 +189,11 @@ def distribution(
     all_values = [row[value] for row in rows]
     edges = numpy.histogram_bin_edges(all_values, bins=HISTOGRAM_BINS)
     curves = _curves(rows, curve, value)
-    for index, curve_value in enumerate(curves):
-        curve_rows = curves[curve_value]
+    for curve_value, curve_rows in curves.items():
         seen_values, counts = _seen_values(curve_rows, value, count)
         weights = counts / counts.sum()
-        color = f"C{index}"
+        style = _curve_style(curve_value, curves, order)
+        color = style["color"]
         label = str(curve_value)
         axis.hist(
             seen_values,
@@ -241,18 +273,15 @@ def _holds(item, wanted: dict) -> bool:
 def _group(stat: sinter.TaskStats, curve: str, marker: Optional[str]) -> dict:
     """A stat's curve, in the keys sinter.plot_custom reads off a dict.
 
-    sinter gives one colour per "color" value and one marker and line
-    style per "marker" and "linestyle" value, and orders the curves by
-    "sort" (sinter/_plotting.py:350-357).
+    sinter orders the curves by "sort" and gives one marker and line
+    style per "marker" and "linestyle" value (sinter/_plotting.py:350-357);
+    the colour, and the marker when no second key is given, come from
+    _sinter_style instead, since sinter ranks them among the curves of
+    one call only.
     """
     curve_value = _value(stat, curve)
     label = str(curve_value)
-    group = {
-        "label": label,
-        "color": curve_value,
-        "marker": curve_value,
-        "sort": curve_value,
-    }
+    group = {"label": label, "sort": curve_value}
     if marker is None:
         return group
     marker_value = _value(stat, marker)
@@ -289,26 +318,25 @@ def _curves(rows: list, curve: str, order: str) -> dict:
 
 
 def _draw_values(
-    axis: pyplot.Axes,
-    rows: list,
-    x: str,
-    y: str,
-    low: Optional[str],
-    high: Optional[str],
-    label: str,
+    axis: pyplot.Axes, rows: list, columns: tuple, style: dict
 ) -> None:
-    """One curve of values, with error bars when low and high are named."""
+    """One curve of values, with error bars when low and high are named.
+
+    columns is (x, y, low, high); style holds the curve's colour, marker
+    and label.
+    """
+    x, y, low, high = columns
     xs = [row[x] for row in rows]
     ys = numpy.array([row[y] for row in rows])
     if low is None:
-        axis.plot(xs, ys, marker="o", label=label)
+        axis.plot(xs, ys, **style)
         return
     lows = numpy.array([row[low] for row in rows])
     highs = numpy.array([row[high] for row in rows])
     below = ys - lows
     above = highs - ys
     bars = numpy.array([below, above])
-    axis.errorbar(xs, ys, yerr=bars, marker="o", capsize=3, label=label)
+    axis.errorbar(xs, ys, yerr=bars, capsize=3, **style)
 
 
 def _seen_values(rows: list, value: str, count: Optional[str]) -> tuple:
@@ -331,10 +359,68 @@ def _median(seen_values: numpy.ndarray, counts: numpy.ndarray) -> float:
     return sorted_values[position]
 
 
+def _has_errors(stat: sinter.TaskStats) -> bool:
+    """Whether a point saw an error, so it has a likeliest rate."""
+    return stat.errors > 0
+
+
+def _sinter_style(
+    stats: list, curve: str, marker: Optional[str], order: Optional[list]
+) -> functools.partial:
+    """The plot_args_func sinter calls: a curve's colour and marker by place."""
+    curve_values = {_value(stat, curve) for stat in stats}
+    places = order
+    if places is None:
+        places = sorted(curve_values)
+    return functools.partial(
+        _place_style, curve=curve, marker=marker, places=places
+    )
+
+
+def _place_style(
+    _index: int,
+    _group_key: dict,
+    group_stats: list,
+    curve: str,
+    marker: Optional[str],
+    places: list,
+) -> dict:
+    """One sinter curve's colour, and its marker when marker is None."""
+    first_stat = group_stats[0]
+    curve_value = _value(first_stat, curve)
+    style = _place(curve_value, places)
+    if marker is not None:
+        del style["marker"]
+    return style
+
+
+def _curve_style(curve_value, curves: dict, order: Optional[list]) -> dict:
+    """A row curve's colour and marker, by its value's place."""
+    places = order
+    if places is None:
+        places = list(curves)
+    return _place(curve_value, places)
+
+
+def _place(curve_value, places: list) -> dict:
+    """The colour and marker of the value at its place in places."""
+    index = places.index(curve_value)
+    marker_index = index % len(MARKERS)
+    return {"color": f"C{index}", "marker": MARKERS[marker_index]}
+
+
 def _log_axes(axis: pyplot.Axes) -> None:
-    """A rate spans decades on both axes."""
+    """A rate spans decades on both axes, labelled at the decades only.
+
+    Matplotlib labels minor ticks on an axis that spans few decades
+    (LogFormatter's minor_thresholds), and at 3 and 4 times a decade
+    those labels run into each other.
+    """
     axis.set_xscale("log")
     axis.set_yscale("log")
+    no_labels = matplotlib.ticker.NullFormatter()
+    axis.xaxis.set_minor_formatter(no_labels)
+    axis.yaxis.set_minor_formatter(no_labels)
 
 
 def _style(

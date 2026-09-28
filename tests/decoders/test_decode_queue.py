@@ -48,15 +48,14 @@ def _manager(engine, units, scheduler=None):
         scheduler = schedulers.FifoScheduler()
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
     router = decoders.CodeRouter(decoder)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": units},
-        escalation_policy=None,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    return manager
 
 
 def _start_ticks(arrivals, units, scheduler=None):
@@ -197,15 +196,12 @@ def test_bulk_strong_is_refused_beside_a_pool_it_does_not_mean():
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
-    strong_requests = strong_requests_module.StrongRequests()
     build = functools.partial(
         decoder_manager.DecoderManager,
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         bulk_strong=True,
-        escalation_policy=None,
     )
     pools = {"default": 1, "strong": 1, "referee": 1}
     with pytest.raises(ValueError, match="referee"):

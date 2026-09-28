@@ -24,8 +24,8 @@ class Parts:
     compiles from them; the detection event placement is the one seat the
     pool is compiled from, so the root builds it with them, and the
     burst detector before it, since the placement's former reports to
-    it. seats holds the rows built so far, and only the magic state
-    factory's row and the primary output's row read it.
+    it. seats holds the rows built so far, and only the primary output's
+    row reads it.
     """
 
     settings: machine_settings.MachineSettings

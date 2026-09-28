@@ -5,6 +5,8 @@ for its strong re-decode; SimPy's callback on the event (simpy/core.py)
 is the shape of on_decoded.
 """
 
+import types
+
 import decsim.decoders.decode_outcomes as decode_outcomes
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_unit as decoder_unit
@@ -35,7 +37,10 @@ def _outcomes(verdict):
     engine = engine_module.Engine()
     requests = strong_requests_module.StrongRequests()
     policy = _Policy(verdict)
-    outcomes = decode_outcomes.DecodeOutcomes(engine, policy, requests)
+    manager = types.SimpleNamespace(
+        strong_requests=requests, escalation_policy=policy
+    )
+    outcomes = decode_outcomes.DecodeOutcomes(engine, manager)
     return outcomes, requests, policy
 
 

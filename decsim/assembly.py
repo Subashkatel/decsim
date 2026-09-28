@@ -20,12 +20,9 @@ A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
 the six conditions that decide that, once.
 
-Two rows name a seat another row built, because the class takes that
-neighbour at construction and cannot take it as a port: the primary
-store output, which is one of the two store ends rather than a third
-one; and the two decoder managers, which share the ledger of strong
-requests that the chip's side opens and the host's side serves. Each
-such row therefore sits after the rows it reads.
+One row names a seat another row built: the primary store output,
+which is one of the two store ends rather than a third one, so it sits
+after the rows it reads.
 
 The public functions read the tables only when called, so they come
 first; the member readers come before the tables because a tuple is
@@ -323,6 +320,11 @@ WIRES = (
     ("window_manager.results", "results"),
     ("window_manager.strong_redecode", "strong_redecode"),
     ("window_manager.window_interaction", "window_interaction"),
+    # the decoder managers
+    ("decoder_manager.strong_requests", "strong_requests"),
+    ("decoder_manager.escalation_policy", "escalation_policy"),
+    ("strong_decoder_manager.strong_requests", "strong_requests"),
+    ("strong_decoder_manager.escalation_policy", "escalation_policy"),
     # the readout path back through the controller
     ("memory_arrivals.windows", "window_manager"),
     ("transmitter.memory_arrivals", "memory_arrivals"),

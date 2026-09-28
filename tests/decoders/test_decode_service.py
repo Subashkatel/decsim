@@ -102,17 +102,17 @@ def _manager(engine, decoder, dispatch_cycles=0):
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": 1},
-        escalation_policy=policy,
         clock=DISPATCH_CLOCK,
         dispatch_cycles=dispatch_cycles,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
+    return manager
 
 
 def _input_landing_ticks(dispatch_cycles: int) -> list:

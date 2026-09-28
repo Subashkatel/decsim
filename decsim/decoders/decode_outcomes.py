@@ -15,11 +15,14 @@ request_ended and service_ended; the record ledger listens.
 """
 
 import dataclasses
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
+
+if TYPE_CHECKING:
+    import decsim.decoders.decoder_manager as decoder_manager_module
 
 
 class DecodeOutcomes:
@@ -38,12 +41,10 @@ class DecodeOutcomes:
     def __init__(
         self,
         engine,
-        escalation_policy,
-        strong_requests: strong_requests_module.StrongRequests,
+        manager: "decoder_manager_module.DecoderManager",
     ) -> None:
         self.engine = engine
-        self.escalation_policy = escalation_policy
-        self.strong_requests = strong_requests
+        self.manager = manager
         self.trace = _TraceSources()
 
     def deliver_weak(
@@ -81,7 +82,7 @@ class DecodeOutcomes:
         """
         key = (job.operation_id, job.window_id)
         self.trace.verdict_given.fire(key, job.request_key, verdict)
-        self.strong_requests.resolve_weak(key)
+        self.manager.strong_requests.resolve_weak(key)
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
         outcomes = decoding_records.RequestProcessingOutcome
         processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
@@ -115,8 +116,8 @@ class DecodeOutcomes:
         job left its slot; each reaches its destination now or waits
         in the output slot of the unit that produced it.
         """
-        self.strong_requests.finish_service(job)
-        self.escalation_policy.learn_from_strong_result(
+        self.manager.strong_requests.finish_service(job)
+        self.manager.escalation_policy.learn_from_strong_result(
             job.strong_decode_for, result
         )
         for held in deliveries:
@@ -133,7 +134,7 @@ class DecodeOutcomes:
         a sender keeps the packet until the far side accepts it (gem5
         port.hh:244-255).
         """
-        if not self.strong_requests.complete(completion):
+        if not self.manager.strong_requests.complete(completion):
             self._hold_at_the_unit(completion)
             return
         request_job = completion.request_job

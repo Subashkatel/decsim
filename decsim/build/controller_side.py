@@ -57,7 +57,7 @@ def build_decoder_manager(
     """The chip's decoder manager: every pool but the strong one.
 
     The strong pool is the host's manager's, so this one never holds a
-    strong job; the ledger is the seat both take at construction.
+    strong job; the ledger is the seat both managers are wired to.
     """
     unit_pools = {}
     for name, units in parts.pool.unit_pools.items():
@@ -307,11 +307,9 @@ def _decoder_manager(
         parts.engine,
         router=pool.router,
         scheduler=scheduler,
-        strong_requests=parts.seats["strong_requests"],
         unit_pools=unit_pools,
         bulk_strong=settings.bulk_strong,
         decoder_memory=pool.decoder_memory,
-        escalation_policy=parts.escalation_policy,
         clock=settings.clock,
         dispatch_cycles=settings.dispatch_cycles,
         copies_input_by_pool=pool.copies_input_by_pool,

@@ -132,12 +132,15 @@ def test_each_side_has_its_own_manager_over_its_own_pool_and_one_ledger():
     settings = _switching_settings()
     parts = _parts_of(settings)
     seats = assembly.build_seats(parts)
+    wires = assembly.wires_for(parts)
+    assembly.bind(wires, seats)
     chip = seats["decoder_manager"]
     host = seats["strong_decoder_manager"]
     assert sorted(chip.pool.units_by_pool) == ["default"]
     assert sorted(host.pool.units_by_pool) == ["strong"]
     assert chip.strong_requests is seats["strong_requests"]
     assert host.strong_requests is seats["strong_requests"]
+    assert host.escalation_policy is seats["escalation_policy"]
     assert chip.queue is not host.queue
     assert chip.queue.scheduler is not host.queue.scheduler
     assert chip.service.staging is not host.service.staging

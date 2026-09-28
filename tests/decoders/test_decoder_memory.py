@@ -333,16 +333,15 @@ def window_completion_ticks(
         {"default": capacity_bits}
     )
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
     manager = decoder_manager_module.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": 1},
         decoder_memory=memory_config,
-        escalation_policy=policy,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
     transfer_ticks = config.microseconds_to_ticks(transfer_microseconds)
     send_input = landing_after(engine, transfer_ticks)
     completion_ticks = {}

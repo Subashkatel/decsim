@@ -123,15 +123,15 @@ def _manager(engine, unit_count):
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": unit_count},
-        escalation_policy=policy,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
+    return manager
 
 
 def _ignore(_job, _result):

@@ -23,7 +23,7 @@ instances of this class in the assembly file, which is LATTE's shape
 (2509.03954 lines 24-25 and 705-720: the local decoder on the control
 FPGA has no scheduler, the host's Global Dynamic Scheduler owns the
 decode queue and the thread pool). The StrongRequests ledger is one
-seat both take, since a strong request is opened by the chip side and
+seat both bind, since a strong request is opened by the chip side and
 served by the host side.
 """
 
@@ -39,6 +39,7 @@ import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.seeds as seed_records
@@ -48,10 +49,18 @@ import decsim.records.windows as window_records
 class DecoderManager:
     """Admits, cancels, withdraws, releases and settles every decode.
 
-    Six attributes: the five one-job components the module docstring
-    names, and the engine it logs and reads the clock on. The ledger
-    arrives built, shared with the other side's manager.
+    Five attributes: four of the one-job components the module
+    docstring names, and the engine it logs and reads the clock on. The
+    ledger and the escalation policy are ports the root binds, and the
+    parts read them through the manager, as a gem5 cache's packet queue
+    holds the cache that owns it
+    (gem5 src/mem/cache/base.hh:185-189).
     """
+
+    # one ledger for both sides: the chip's side opens a strong request
+    # and the host's side serves it
+    strong_requests = ports.Port(strong_requests_module.StrongRequests)
+    escalation_policy = ports.Port(ports.EscalationPolicy)
 
     def __init__(
         self,
@@ -59,13 +68,11 @@ class DecoderManager:
         *,
         router,
         scheduler,
-        strong_requests: strong_requests_module.StrongRequests,
         unit_pools: dict,
         bulk_strong: bool = False,
         decoder_memory: Optional[
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
-        escalation_policy,
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
         copies_input_by_pool: Optional[dict] = None,
@@ -76,12 +83,11 @@ class DecoderManager:
         pool = decoder_pool_module.DecoderPool(
             router, unit_pools, decoder_memory, blocks_unit_by_pool
         )
-        self.strong_requests = strong_requests
         self.queue = decode_queue.WaitingJobs(
             engine,
             scheduler,
             pool.units_by_pool,
-            self.strong_requests,
+            self,
             is_bulk_strong=bulk_strong,
         )
         transport = staging_module.CancellableDecoderMemoryTransfer(engine)
@@ -92,18 +98,14 @@ class DecoderManager:
             engine,
             pool,
             staging,
-            self.strong_requests,
-            on_completed=self.decode_completed,
-            dispatch=self.dispatch,
+            self,
             clock=clock,
             dispatch_cycles=dispatch_cycles,
         )
         self.dispatcher = decode_dispatch.DecodeDispatcher(
             self.queue, pool, self.service
         )
-        self.outcomes = decode_outcomes.DecodeOutcomes(
-            engine, escalation_policy, self.strong_requests
-        )
+        self.outcomes = decode_outcomes.DecodeOutcomes(engine, self)
         # the forced solves are the plan's windows', which the default
         # pool decodes, so its manager narrates a model that pins none
         rows = ()

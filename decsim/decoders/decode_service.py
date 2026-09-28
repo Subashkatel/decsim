@@ -16,8 +16,7 @@ and keeps at most its depth in flight (Hennessy and Patterson App. C).
 
 import dataclasses
 import functools
-from collections.abc import Callable
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy
 
@@ -30,6 +29,9 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
+
+if TYPE_CHECKING:
+    import decsim.decoders.decoder_manager as decoder_manager_module
 
 # the job kinds a pipelined unit serves; every other kind holds its unit
 # for the whole decode until it gets its own design pass
@@ -45,12 +47,13 @@ class DecodeService:
     """Stages, starts, prices and frees every decode on its unit.
 
     Six attributes: the engine, the pool that routes and holds the
-    units, the staging, the strong requests (a merged batch's members
-    are the ledger's knowledge), and the two calls back to the manager:
-    on_completed(job, result) at every decode's end, and dispatch()
-    wherever compute frees inside an engine event, so the non-reentrant
-    dispatch loop runs from the same points it always did. Four trace
-    sources, each carrying (job, unit):
+    units, the staging, the manager that owns the service, the
+    manager's dispatch cost, and the trace. Through the manager it reads
+    the strong requests (a merged batch's members are the ledger's
+    knowledge), hands every decode's end to decode_completed, and calls
+    dispatch wherever compute frees inside an engine event, so the
+    non-reentrant dispatch loop runs from the same points it always did.
+    Four trace sources, each carrying (job, unit):
     job_dispatched when the job takes its slot, input_landed when every
     transfer of its input has landed, job_started when its decode
     begins, job_finished when its compute ends.
@@ -61,19 +64,15 @@ class DecodeService:
         engine,
         pool: decoder_pool_module.DecoderPool,
         staging: staging_module.DecoderInputStaging,
-        strong_requests: strong_requests_module.StrongRequests,
-        on_completed: Callable[[decoding_records.DecodeJob, object], None],
-        dispatch: Callable[[], None],
+        manager: "decoder_manager_module.DecoderManager",
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
     ) -> None:
         self.engine = engine
         self.pool = pool
         self.staging = staging
-        self.strong_requests = strong_requests
-        self.manager = _ManagerSide(
-            on_completed, dispatch, clock, dispatch_cycles
-        )
+        self.manager = manager
+        self.dispatch_cost = _DispatchCost(clock, dispatch_cycles)
         self.trace = _TraceSources()
 
     # ------------------------------------------ what the dispatcher asks
@@ -145,7 +144,7 @@ class DecodeService:
         if job.on_done is not None:
             return []
         if strong_requests_module.is_merged_batch(job):
-            return self.strong_requests.members_of(job)
+            return self.manager.strong_requests.members_of(job)
         return [job]
 
     def _input_round_count(self, job: decoding_records.DecodeJob) -> int:
@@ -199,12 +198,12 @@ class DecodeService:
         decode's arrival and its dispatch;
         decoder_manager.dispatch_cycles prices that, zero by default.
         """
-        cycles = self.manager.dispatch_cycles
+        cycles = self.dispatch_cost.cycles
         if cycles == 0:
             self._ask_for_input(job, unit, claim_compute)
             return
         now = self.engine.now
-        edge = self.manager.clock.edge(cycles, now)
+        edge = self.dispatch_cost.clock.edge(cycles, now)
         delay = edge - now
         ask = functools.partial(self._ask_for_input, job, unit, claim_compute)
         label = f"dispatch_cost({job.label})"
@@ -424,7 +423,7 @@ class DecodeService:
         decoder.start(
             job,
             self.engine,
-            lambda result: self.manager.on_completed(job, result),
+            lambda result: self.manager.decode_completed(job, result),
         )
         if pipeline is None:
             return
@@ -445,7 +444,7 @@ class DecodeService:
         first_sequence = min(run_sequences)
         job.service_key = decoding_records.DecoderServiceKey(first_sequence)
         job.service_dispatch_ticks = self.engine.now
-        for member in self.strong_requests.members_of(job):
+        for member in self.manager.strong_requests.members_of(job):
             member.service_key = job.service_key
             member.service_dispatch_ticks = self.engine.now
 
@@ -500,7 +499,7 @@ class DecodeService:
 
     def _transfer_members(self, job: decoding_records.DecodeJob) -> list:
         members = []
-        for member in self.strong_requests.members_of(job):
+        for member in self.manager.strong_requests.members_of(job):
             if member is not job:
                 members.append(member)
         if not members:
@@ -824,17 +823,12 @@ class _TraceSources:
 
 
 @dataclasses.dataclass(frozen=True)
-class _ManagerSide:
-    """The service's two calls back to the manager, and the manager's cost.
+class _DispatchCost:
+    """The manager's own work per dispatch, in cycles of its clock.
 
-    on_completed(job, result) at every decode's end; dispatch() wherever
-    compute frees inside an engine event, so the non-reentrant dispatch
-    loop runs from the same points it always did; dispatch_cycles is the
-    manager's own work per dispatch, charged on clock before the input is
-    asked for (decoder_manager.dispatch_cycles).
+    Charged before the job's input is asked for
+    (decoder_manager.dispatch_cycles).
     """
 
-    on_completed: Callable
-    dispatch: Callable
     clock: Optional[config.Clock]
-    dispatch_cycles: int
+    cycles: int

@@ -108,16 +108,16 @@ def _manager(engine, row, formation_by_pool=None, unit_count=1):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": unit_count},
-        escalation_policy=policy,
         formation_by_pool=formation_by_pool,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
+    return manager
 
 
 def _window_job():
@@ -318,15 +318,14 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     router = decoders.SwitchingRouter(weak=weak, strong=strong)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
     manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": 1, "strong": 1},
-        escalation_policy=policy,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
     job = _window_job()
     job.kind = decoding_records.DecodeJobKind.STRONG_REDECODE
     job.strong_decode_for = (1, 0)
@@ -390,16 +389,16 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": 1},
-        escalation_policy=policy,
         blocks_unit_by_pool={"default": blocks_unit},
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
+    return manager
 
 
 def test_a_tier_that_does_not_block_frees_its_unit_at_the_decodes_end():
@@ -569,16 +568,16 @@ def _staging_manager(engine, row, *, copies_input: bool):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
+    manager = decoder_manager.DecoderManager(
         engine,
         router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
         unit_pools={"default": 1},
-        escalation_policy=policy,
         copies_input_by_pool={"default": copies_input},
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
+    return manager
 
 
 class RoundsRow(decoder_module.DecoderBase):

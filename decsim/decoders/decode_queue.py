@@ -19,12 +19,15 @@ for the switching study.
 """
 
 import dataclasses
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
+
+if TYPE_CHECKING:
+    import decsim.decoders.decoder_manager as decoder_manager_module
 
 # The decoder manager component's name in the narrator (docs/
 # architecture.md's component table). It lives here because every part of
@@ -59,7 +62,7 @@ class WaitingJobs:
         engine,
         scheduler,
         pools,
-        strong_requests: strong_requests_module.StrongRequests,
+        manager: "decoder_manager_module.DecoderManager",
         is_bulk_strong: bool = False,
     ) -> None:
         self.engine = engine
@@ -69,7 +72,7 @@ class WaitingJobs:
             self.waiting_by_pool[pool] = []
         if is_bulk_strong:
             _check_pools_bulk_strong_means(self.waiting_by_pool)
-        self.strong_requests = strong_requests
+        self.manager = manager
         self.is_bulk_strong = is_bulk_strong
         self.trace = _TraceSources()
 
@@ -184,7 +187,7 @@ class WaitingJobs:
             return jobs[0]
         batch = _batch_job(jobs, window_keys)
         batch.service_original_request_keys = request_keys
-        self.strong_requests.register_batch(window_keys, jobs, batch)
+        self.manager.strong_requests.register_batch(window_keys, jobs, batch)
         return batch
 
     def _open_queued_strong_jobs(self, queue: list) -> list:
@@ -192,7 +195,7 @@ class WaitingJobs:
         for _ in range(len(queue)):
             queued = self.scheduler.pop(queue)
             if strong_requests_module.is_merged_batch(queued):
-                members = self.strong_requests.members_of(queued)
+                members = self.manager.strong_requests.members_of(queued)
                 jobs.extend(members)
             else:
                 jobs.append(queued)

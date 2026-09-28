@@ -50,17 +50,7 @@ def panels(key: str, values: list, columns: int = 3) -> tuple:
     column_count = min(columns, panel_count)
     exact_rows = panel_count / column_count
     row_count = math.ceil(exact_rows)
-    width = PANEL_WIDTH_INCHES * column_count
-    height = PANEL_HEIGHT_INCHES * row_count
-    figure, axes = pyplot.subplots(
-        row_count,
-        column_count,
-        sharex=True,
-        sharey=True,
-        squeeze=False,
-        figsize=(width, height),
-        layout="constrained",
-    )
+    figure, axes = _panel_figure(row_count, column_count)
     flat_axes = list(axes.flat)
     shown_axes = flat_axes[:panel_count]
     axis_by_value = {}
@@ -70,6 +60,28 @@ def panels(key: str, values: list, columns: int = 3) -> tuple:
     for axis in flat_axes[panel_count:]:
         axis.set_visible(False)
     return figure, axis_by_value
+
+
+def panel_grid(
+    row_key: str, row_values: list, column_key: str, column_values: list
+) -> tuple:
+    """A figure with one axis per row value and column value, axes shared.
+
+    Each axis is titled "row_key = row, column_key = column". Returns the
+    figure and a dict from each (row value, column value) to its axis.
+    """
+    row_count = len(row_values)
+    column_count = len(column_values)
+    figure, axes = _panel_figure(row_count, column_count)
+    axis_by_pair = {}
+    for row_index, row_value in enumerate(row_values):
+        for column_index, column_value in enumerate(column_values):
+            axis = axes[row_index, column_index]
+            axis.set_title(
+                f"{row_key} = {row_value}, {column_key} = {column_value}"
+            )
+            axis_by_pair[(row_value, column_value)] = axis
+    return figure, axis_by_pair
 
 
 def chosen(items: list, **wanted) -> list:
@@ -425,6 +437,21 @@ def _place(curve_value, places: list) -> dict:
     index = places.index(curve_value)
     marker_index = index % len(MARKERS)
     return {"color": f"C{index}", "marker": MARKERS[marker_index]}
+
+
+def _panel_figure(row_count: int, column_count: int) -> tuple:
+    """A figure of row_count by column_count axes, shared, panel sized."""
+    width = PANEL_WIDTH_INCHES * column_count
+    height = PANEL_HEIGHT_INCHES * row_count
+    return pyplot.subplots(
+        row_count,
+        column_count,
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+        figsize=(width, height),
+        layout="constrained",
+    )
 
 
 def _log_axes(axis: pyplot.Axes) -> None:

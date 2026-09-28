@@ -25,6 +25,18 @@ def test_panels_title_one_axis_per_value_and_hide_the_rest():
     pyplot.close(figure)
 
 
+def test_panel_grid_titles_one_axis_per_row_and_column_value():
+    figure, axis_by_pair = plots.panel_grid(
+        "strength", ["weak", "strong"], "p", [0.001, 0.003, 0.005]
+    )
+
+    corner_axis = axis_by_pair[("strong", 0.005)]
+    assert len(axis_by_pair) == 6
+    assert len(figure.axes) == 6
+    assert corner_axis.get_title() == "strength = strong, p = 0.005"
+    pyplot.close(figure)
+
+
 def test_chosen_reads_a_stat_decoder_its_metadata_and_a_row_column():
     kept_stat = stat("pymatching", basis="x", d=5)
     other_stat = stat("pymatching", basis="z", d=5)

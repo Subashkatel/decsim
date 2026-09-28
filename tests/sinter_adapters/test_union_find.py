@@ -1,11 +1,13 @@
-"""The Union-Find sinter adapter against decsim's union_find weak row.
+"""The Union-Find sinter adapter against the machine's union_find weak row.
 
-The referent is the row itself on the same Stim samples: the batch
-path (decsim/experiments/stim_batch.py) builds the machine's one
-whole-circuit window and decodes each shot through the row's Decoder
-port. The adapter decodes the model sinter hands a decoder
-(sinter/_collection/_collection_worker_state.py:28), so the two agree
-shot for shot only if the adapter builds the row's graph.
+The referent is the machine itself: each seed's shot runs through the
+whole machine (collect.run_shot) under the decoder baseline, whose
+naive_online scheme decodes the operation as one window, and the row's
+answer is the observables the shot's result carries. The adapter decodes
+the events the machine's device drew (observe/sampled_shots.py) with the
+model sinter hands a decoder (sinter/_collection/
+_collection_worker_state.py:28), so the two agree shot for shot only if
+the adapter builds the row's graph.
 """
 
 import math
@@ -16,9 +18,10 @@ import sinter
 import stim
 import yaml
 
+import decsim.collect as collect
 import decsim.experiments.experiment as experiment
-import decsim.experiments.stim_batch as stim_batch
 import decsim.sinter_adapters.union_find as union_find_adapter
+import decsim.windows.built_window_models as built_window_models
 import tests.experiments.yaml_configs as yaml_configs
 
 BASELINE = (
@@ -28,9 +31,12 @@ BASELINE = (
     / "decoder_baseline.yaml"
 )
 CODE_TASKS = ["surface_code:rotated_memory_x", "surface_code:rotated_memory_z"]
-SHOT_COUNT = 2048
+# At this rate a shot holds enough defects that the graph's weights
+# decide many answers: the adapter on a coarser weight_step (2.0) answers
+# 25 to 44 of these 150 shots otherwise in each case.
+SHOT_COUNT = 150
 ROUNDS = 5
-ERROR_RATE = 0.005
+ERROR_RATE = 0.02
 # the baseline's union_find row (decoder_baseline.yaml)
 UNION_FIND_ROW = {
     "kind": "union_find",
@@ -48,15 +54,14 @@ UNION_FIND_ROW = {
 
 @pytest.mark.parametrize("distance", [3, 5])
 @pytest.mark.parametrize("code_task", CODE_TASKS)
-def test_the_adapter_answers_as_the_union_find_row_shot_for_shot(
+def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
     tmp_path, distance, code_task
 ):
     task = union_find_task(tmp_path, distance, code_task)
-    circuit = stim_batch.circuit_of(task)
-    events, _observables = stim_batch.samples_of_seeds(circuit, 0, SHOT_COUNT)
-    window = stim_batch.WholeCircuitWindow(task)
-    row = stim_batch.bound_row(task, 0)
-    row_answers = row_predictions(window, row, events)
+    seeds = range(SHOT_COUNT)
+    events, machine_answers = machine_shots(task, seeds)
+    (operation,) = task.settings.workload.operations
+    circuit = operation.circuit
     model = circuit.detector_error_model(
         decompose_errors=True, approximate_disjoint_errors=True
     )
@@ -71,7 +76,7 @@ def test_the_adapter_answers_as_the_union_find_row_shot_for_shot(
     adapter_answers = numpy.unpackbits(
         packed_answers, axis=1, count=circuit.num_observables, bitorder="little"
     )
-    numpy.testing.assert_array_equal(adapter_answers, row_answers)
+    numpy.testing.assert_array_equal(adapter_answers, machine_answers)
 
 
 def test_the_adapter_is_a_sinter_decoder():
@@ -142,10 +147,9 @@ def test_sinter_collects_through_the_adapter():
 
 
 def union_find_task(tmp_path, distance: int, code_task: str):
-    """The one batch point of a union_find row, short shots."""
+    """The one machine point of a union_find row, short shots."""
     raw = {
         "extends": str(BASELINE),
-        "sampling": "stim_batch",
         "workload": {
             "kind": "producer",
             "function": "decsim.producers:memory_circuit",
@@ -173,10 +177,24 @@ def union_find_task(tmp_path, distance: int, code_task: str):
     return config.first_point_task()
 
 
-def row_predictions(window, row, events) -> numpy.ndarray:
-    """Each shot's predicted observables from the row's Decoder port."""
-    predictions = []
-    for shot_events in events:
-        result = window.result_of(row, shot_events)
-        predictions.append(result.logical_observables)
-    return numpy.asarray(predictions, dtype=numpy.uint8)
+def machine_shots(task, seeds) -> tuple:
+    """Each seed's machine shot: the events drawn, the observables predicted.
+
+    The events are the ones the device drew for the point's one
+    operation, and the prediction is the correction the machine
+    committed for it.
+    """
+    built_models = built_window_models.BuiltWindowModels()
+    (operation,) = task.settings.workload.operations
+    events = []
+    answers = []
+    for seed in seeds:
+        shot = collect.run_shot(task, seed, built_models=built_models)
+        sampled_shots = shot.machine.observation.sampled_shots
+        sampled = sampled_shots.shots_by_operation[operation.id]
+        events.append(sampled.detection_events)
+        (operation_result,) = shot.result.operation_results
+        answers.append(operation_result.logical_observables)
+    event_array = numpy.asarray(events, dtype=numpy.uint8)
+    answer_array = numpy.asarray(answers, dtype=numpy.uint8)
+    return event_array, answer_array

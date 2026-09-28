@@ -52,15 +52,12 @@ class Task:
     metadata is the json the caller wants to see beside every row (the
     sweep point). online_threshold is the point's online threshold
     source when the escalation asks for one, built once here and
-    installed on every shot's settings. sampling names the row of
-    collect_command.SAMPLINGS that runs the point's shots in place of
-    the machine; None runs the machine.
+    installed on every shot's settings.
     """
 
     settings: machine_settings.MachineSettings
     metadata: Mapping[str, Any]
     online_threshold: Optional[Any] = None
-    sampling: Optional[str] = None
 
     def __post_init__(self):
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
@@ -78,10 +75,6 @@ class Task:
             "settings": json_value(self.settings, keep_labels=False),
             "metadata": json_value(self.metadata),
         }
-        # Only a set sampling enters the json, so every machine point
-        # keeps the id it had before the key existed.
-        if self.sampling is not None:
-            value["sampling"] = self.sampling
         text = json.dumps(value, sort_keys=True)
         encoded = text.encode("utf8")
         digest = hashlib.sha256(encoded)
@@ -163,7 +156,6 @@ def run_units(
     *,
     on_unit_done: Callable[[Unit, result_records.UnitOutcome], None],
     processes: int = 1,
-    unit_runner: Optional[Callable] = None,
 ) -> None:
     """Every unit run, each handed on the moment it ends.
 
@@ -173,12 +165,8 @@ def run_units(
     task as it ran, whose online calibrator learned over the unit's
     shots, in a worker process when there is a pool. With processes
     above one, whole units run in a worker pool, `processes` at a time.
-    unit_runner runs one unit, run_unit when None: a sampling row runs
-    its units its own way (collect_command.SAMPLINGS), in the same pool.
     """
-    if unit_runner is None:
-        unit_runner = run_unit
-    outcomes = _unit_outcomes(units, measure, processes, unit_runner)
+    outcomes = _unit_outcomes(units, measure, processes)
     for position, outcome in outcomes:
         unit = units[position]
         ran_unit = dataclasses.replace(unit, task=outcome.task)
@@ -211,21 +199,8 @@ def run_unit(
         shot = run_shot(unit.task, seed, built_models=built_models)
         row = measure(shot)
         rows.append(row)
-    peak_memory = peak_memory_mb()
-    return result_records.UnitOutcome(rows, unit.task, peak_memory)
-
-
-def peak_memory_mb() -> float:
-    """This process's peak resident memory so far, in megabytes.
-
-    getrusage's ru_maxrss is in kilobytes on Linux and in bytes on macOS
-    (getrusage(2) on each).
-    """
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    kilobytes = usage.ru_maxrss
-    if sys.platform == "darwin":
-        kilobytes = usage.ru_maxrss / 1024
-    return kilobytes / 1024
+    peak_memory_mb = _peak_memory_mb()
+    return result_records.UnitOutcome(rows, unit.task, peak_memory_mb)
 
 
 def unique_tasks(tasks: Iterable[Task]) -> list:
@@ -306,26 +281,31 @@ def _keep_rows(
         on_task_done(unit.task)
 
 
-def _unit_outcomes(
-    units: list,
-    measure: Callable[[Shot], Any],
-    processes: int,
-    unit_runner: Callable,
-):
+def _peak_memory_mb() -> float:
+    """This process's peak resident memory so far, in megabytes.
+
+    getrusage's ru_maxrss is in kilobytes on Linux and in bytes on macOS
+    (getrusage(2) on each).
+    """
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    kilobytes = usage.ru_maxrss
+    if sys.platform == "darwin":
+        kilobytes = usage.ru_maxrss / 1024
+    return kilobytes / 1024
+
+
+def _unit_outcomes(units: list, measure: Callable[[Shot], Any], processes: int):
     """Each unit's position and outcome as it ends, run here or in a pool."""
     if processes <= 1:
         for position, unit in enumerate(units):
-            outcome = unit_runner(unit, measure)
+            outcome = run_unit(unit, measure)
             yield position, outcome
         return
-    yield from _pooled_outcomes(units, measure, processes, unit_runner)
+    yield from _pooled_outcomes(units, measure, processes)
 
 
 def _pooled_outcomes(
-    units: list,
-    measure: Callable[[Shot], Any],
-    processes: int,
-    unit_runner: Callable,
+    units: list, measure: Callable[[Shot], Any], processes: int
 ):
     """Each unit's position and outcome as it ends, `processes` at a time.
 
@@ -338,12 +318,10 @@ def _pooled_outcomes(
     running = {}
     pool = concurrent.futures.ProcessPoolExecutor(processes)
     try:
-        _submit_up_to(pool, running, queued, measure, unit_runner, processes)
+        _submit_up_to(pool, running, queued, measure, processes)
         while running:
             yield from _ended_outcomes(running)
-            _submit_up_to(
-                pool, running, queued, measure, unit_runner, processes
-            )
+            _submit_up_to(pool, running, queued, measure, processes)
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
@@ -363,12 +341,7 @@ def _ended_outcomes(running: dict):
 
 
 def _submit_up_to(
-    pool,
-    running: dict,
-    queued,
-    measure: Callable[[Shot], Any],
-    unit_runner: Callable,
-    limit: int,
+    pool, running: dict, queued, measure: Callable[[Shot], Any], limit: int
 ) -> None:
     """Queued units handed to the pool until `limit` of them run."""
     while len(running) < limit:
@@ -376,7 +349,7 @@ def _submit_up_to(
         if queued_unit is None:
             return
         position, unit = queued_unit
-        future = pool.submit(unit_runner, unit, measure)
+        future = pool.submit(run_unit, unit, measure)
         running[future] = position
 
 

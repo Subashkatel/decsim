@@ -94,7 +94,7 @@ def write(
         piece["state_sha256"] = _write_state(staging, state)
     piece_path = staging / PIECE_FILE
     run_folder.write_json(piece_path, piece)
-    publish(staging, folder)
+    _publish(staging, folder)
     return folder
 
 
@@ -260,23 +260,6 @@ def round_number_of(round_dir: pathlib.Path) -> int:
     return int(number_text)
 
 
-def publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
-    """The staged piece renamed into place, or dropped when one is there.
-
-    A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
-    so of two writers of one piece the first to rename wins. The other's
-    copy holds the same seeds of the same point, the same piece, and is
-    dropped. A batch piece is published the same way
-    (experiments/stim_batch.py).
-    """
-    try:
-        os.replace(staging, folder)
-    except OSError:
-        if not folder.is_dir():
-            raise
-        shutil.rmtree(staging)
-
-
 def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
     """A hidden folder beside the piece that only this writer uses.
 
@@ -287,6 +270,22 @@ def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
     identifier = uuid.uuid4()
     token = identifier.hex
     return folder.with_name(f".{folder.name}.{token}.partial")
+
+
+def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
+    """The staged piece renamed into place, or dropped when one is there.
+
+    A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
+    so of two writers of one piece the first to rename wins. The other's
+    copy holds the same seeds of the same point, the same piece, and is
+    dropped.
+    """
+    try:
+        os.replace(staging, folder)
+    except OSError:
+        if not folder.is_dir():
+            raise
+        shutil.rmtree(staging)
 
 
 def _write_residence(staging: pathlib.Path, measurements: list) -> None:

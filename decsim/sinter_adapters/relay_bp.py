@@ -147,7 +147,7 @@ def _whole_circuit_window(
     The row reads no round, so the circuit is declared one round and the
     window that round: its rows are the detectors in id order and its
     columns the physical catalog in order, every one owned, as in the
-    naive_online window the machine lays (experiments/stim_batch.py).
+    naive_online window the machine lays (windows/schemes/naive_online.py).
     """
     one_round = dict.fromkeys(range(circuit.num_detectors), 1)
     whole_window = (1, 1, 1, 1)

@@ -365,7 +365,6 @@ docstring.
 - `decsim/experiments/run_command.py`: `decsim run`: one seeded shot of one yaml, narrated.
 - `decsim/experiments/run_folder.py`: The experiment folder and its run folders: results, config, identity.
 - `decsim/experiments/status_command.py`: `decsim status`: an experiment's pieces folded, and where each point stands.
-- `decsim/experiments/stim_batch.py`: Batch sampling: a point's shots drawn in blocks and decoded with no machine.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 

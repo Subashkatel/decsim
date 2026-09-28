@@ -30,18 +30,19 @@ MAX_SHOTS = 1_000_000_000
 # the package's own profiles (src/tesseract_sinter_compat.pybind.h:466-472)
 TESSERACT_PROFILES = tesseract_decoder.make_tesseract_sinter_decoders_dict()
 
-# Relay-BP-1 with the surface code values of Mueller et al. 2506.01779
-# (lines 307, 332, 343), X and Z decoded apart as the paper's
-# XZ-decoding, in the machine's relay_bp row's own keys.
-RELAY_BP = "relay-bp-1"
+# XYZ-Relay-BP-5 with the surface code values of Mueller et al.
+# 2506.01779 (lines 307, 332, 343), the variant the paper finds
+# comparable to matching on the surface code (lines 356-358), in the
+# machine's relay_bp row's own keys.
+RELAY_BP = "xyz-relay-bp-5"
 RELAY_BP_SETTINGS = {
     "gamma0": 0.35,
     "gamma_interval": [-0.254, 0.985],
     "pre_iterations": 80,
-    "relay_set_count": 300,
+    "relay_set_count": 600,
     "iterations_per_set": 60,
-    "converged_solution_count": 1,
-    "bases": "apart",
+    "converged_solution_count": 5,
+    "bases": "together",
 }
 # the seed each point's gamma table is drawn from, so a rerun repeats it
 RELAY_BP_SEED = 20260927

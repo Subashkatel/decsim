@@ -18,7 +18,7 @@ SCRIPT_FOLDER = REPOSITORY_ROOT / "experiments" / "decoder_baseline"
 EXPECTED_PLOTS = {
     "union-find.png",
     "pymatching.png",
-    "relay-bp-1.png",
+    "xyz-relay-bp-5.png",
     "tesseract-short-beam.png",
     "decoders_x.png",
     "decoders_z.png",
@@ -38,7 +38,7 @@ def test_every_decoder_and_basis_gets_its_figure(tmp_path, monkeypatch):
 def write_stats(folder: pathlib.Path) -> None:
     """Two rates of one distance for each decoder and basis."""
     lines = [sinter.CSV_HEADER]
-    decoders = ("union-find", "pymatching", "relay-bp-1")
+    decoders = ("union-find", "pymatching", "xyz-relay-bp-5")
     rates = ((0.003, 20), (0.005, 60))
     points = itertools.product(decoders, ("x", "z"), rates)
     for decoder, basis, (rate, errors) in points:

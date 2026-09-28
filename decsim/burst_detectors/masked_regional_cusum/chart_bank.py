@@ -123,7 +123,7 @@ class ChartBank:
         update_cycles = math.ceil(updates_per_datapath)
         return update_cycles + settings.pipeline_cycles
 
-    def new_state(self, stream_count: int, first_round: int) -> "_BankState":
+    def new_state(self, stream_count: int, first_round: int) -> "BankState":
         """Every chart at zero before first_round, every mu its usual rate."""
         check_count, region_count = self.incidence.shape
         pair_count = self.pair_incidence.shape[0]
@@ -144,7 +144,7 @@ class ChartBank:
         usual_counts = numpy.tile(self.region_rates, (stream_count, 1))
         scores = numpy.zeros(chart_shape)
         last_zero_round = numpy.full(chart_shape, before_first_round)
-        return _BankState(
+        return BankState(
             previous_row=previous_row,
             repeat_ring=repeat_ring,
             joint_ring=joint_ring,
@@ -157,7 +157,7 @@ class ChartBank:
         )
 
     def score_round(
-        self, state: "_BankState", rows: numpy.ndarray, round_index: int
+        self, state: "BankState", rows: numpy.ndarray, round_index: int
     ) -> numpy.ndarray:
         """One round of every stream: mask, then score; the group scores.
 
@@ -170,7 +170,7 @@ class ChartBank:
         return self._group_scores(state)
 
     def block_maxima(
-        self, state: "_BankState", rows: numpy.ndarray, first_round: int
+        self, state: "BankState", rows: numpy.ndarray, first_round: int
     ) -> numpy.ndarray:
         """Each stream's largest group scores over the rows' rounds.
 
@@ -189,7 +189,7 @@ class ChartBank:
         return maxima
 
     def leading_chart(
-        self, state: "_BankState", thresholds: numpy.ndarray
+        self, state: "BankState", thresholds: numpy.ndarray
     ) -> tuple:
         """The first stream's chart with the largest score over its level."""
         design_count = len(self.settings.fault_rate_multipliers)
@@ -200,7 +200,7 @@ class ChartBank:
         flat_index = numpy.argmax(ratios)
         return numpy.unravel_index(flat_index, ratios.shape)
 
-    def _unmasked(self, state: "_BankState", rows, round_index: int):
+    def _unmasked(self, state: "BankState", rows, round_index: int):
         """Which checks count this round: none flagged in the hold.
 
         A repeat is a firing now and in the round before; a pair's joint
@@ -230,7 +230,7 @@ class ChartBank:
         rounds_since_flag = round_index - state.last_flagged_round
         return rounds_since_flag > settings.mask_hold_rounds
 
-    def _score(self, state: "_BankState", rows, is_unmasked, round_index):
+    def _score(self, state: "BankState", rows, is_unmasked, round_index):
         """Every chart's CUSUM step, then each region's usual count.
 
         c counts the region's unmasked firings and f is the unmasked
@@ -253,7 +253,7 @@ class ChartBank:
         self._track(state, counts, unmasked_shares)
         state.scored_rounds += 1
 
-    def _track(self, state: "_BankState", counts, unmasked_shares) -> None:
+    def _track(self, state: "BankState", counts, unmasked_shares) -> None:
         """Move mu toward c / f by 1 / rate_tracking_rounds, when f > floor.
 
         The count is scaled back to the whole region; with too little of
@@ -269,7 +269,7 @@ class ChartBank:
         tracked_steps = steps * is_tracked
         state.usual_counts += tracked_steps
 
-    def _group_scores(self, state: "_BankState"):
+    def _group_scores(self, state: "BankState"):
         """(streams, groups): each design's largest score at each radius."""
         stream_count, design_count, _ = state.scores.shape
         scale_count = len(self.settings.region_radii) + 1
@@ -284,7 +284,7 @@ class ChartBank:
 
 
 @dataclasses.dataclass
-class _BankState:
+class BankState:
     """The chart bank's state, one row per stream it scores.
 
     The rings hold the last mask_window_rounds rounds of each check's

@@ -240,16 +240,17 @@ class AlarmLines:
         bank = chart_bank.ChartBank.for_layout(layout, settings)
         return cls(layout, bank, levels)
 
-    def new_state(self, stream_count: int) -> Any:
+    def new_state(self, stream_count: int) -> chart_bank.BankState:
         """Every stream's charts at zero, as the row's before its first round.
 
-        The state is the bank's own; Any names it, since its record is
-        the bank's private one.
+        The state is the bank's own, which score_ratios carries on.
         """
         first_round = self.layout.first_bulk_round
         return self.bank.new_state(stream_count, first_round)
 
-    def score_ratios(self, state: Any, events: numpy.ndarray) -> numpy.ndarray:
+    def score_ratios(
+        self, state: chart_bank.BankState, events: numpy.ndarray
+    ) -> numpy.ndarray:
         """(streams, bulk rounds, lines): each round's top score over level.
 
         events is (streams, detectors), one shot of the circuit per

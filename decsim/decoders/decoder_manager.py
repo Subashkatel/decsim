@@ -41,6 +41,7 @@ import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
+import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 
 
@@ -153,6 +154,13 @@ class DecoderManager:
         writing that memory itself (decisions.md D11).
         """
         return self.service.staging
+
+    def run_seed_children(self) -> tuple:
+        """The manager's own scheduler, whose rule may draw from the seed."""
+        path = (seed_records.RunSeedPathSegment("field", "scheduler"),)
+        scheduler = self.queue.scheduler
+        child = seed_records.RunSeedChild(path, scheduler)
+        return (child,)
 
     def input_transport(self):
         """The transport that moves an input into a unit's memory.

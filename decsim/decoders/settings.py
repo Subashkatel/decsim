@@ -19,6 +19,7 @@ import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.dispatch_steps.decoder as dispatch_steps
 import decsim.decoders.measured_table.decoder as measured_table
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
@@ -296,15 +297,19 @@ class DecoderManagerSettings:
     run that does not model that work is unchanged. The rest are Python
     objects. A router picks the decoder for each job
     (CodeRouter by code name, SwitchingRouter by tier); given, it
-    replaces the one the root builds from the two tier sections. The
-    scheduler orders the ready queue (FifoScheduler by default),
+    replaces the one the root builds from the two tier sections.
+    scheduler is the class of the rule that orders a ready queue
+    (FifoScheduler by default); each manager builds its own, since the
+    chip's and the host's queues are separate hardware (LATTE 2509.03954
+    lines 20-25 and 718-722), as gem5 gives every object its own copy of
+    a SimObject parameter (src/python/m5/SimObject.py:775-782).
     unit_pools names each pool's unit count (built from the tiers' units
     by default) and decoder_memory bounds each pool's input memory in
     bits (built from the active tier's unit_memory by default).
     """
 
     router: Optional[Any] = None
-    scheduler: Optional[Any] = None
+    scheduler: type = schedulers.FifoScheduler
     unit_pools: Optional[Mapping[str, int]] = None
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
     bulk_strong: bool = False

@@ -139,6 +139,7 @@ def test_each_side_has_its_own_manager_over_its_own_pool_and_one_ledger():
     assert chip.strong_requests is seats["strong_requests"]
     assert host.strong_requests is seats["strong_requests"]
     assert chip.queue is not host.queue
+    assert chip.queue.scheduler is not host.queue.scheduler
     assert chip.service.staging is not host.service.staging
 
 

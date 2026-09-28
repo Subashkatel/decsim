@@ -16,7 +16,6 @@ import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.detection_events as detection_events_module
 import decsim.decoders.memory_rounds as memory_rounds_module
-import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.escalation.settings as escalation_settings
@@ -41,7 +40,6 @@ class DecoderPool:
     active: Any
     unit_pools: dict
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig]
-    scheduler: Any
     # pool name -> whether that tier's unit is given a copy of the
     # rounds it decodes (weak_decoder.input, strong_decoder.input)
     copies_input_by_pool: dict
@@ -108,9 +106,6 @@ def build_decoder_pool(
     logic, so a round both tiers read is formed and charged by each.
     """
     manager = settings.decoder_manager
-    scheduler = manager.scheduler
-    if scheduler is None:
-        scheduler = schedulers.FifoScheduler()
     weak_formation = _tier_formation(detection_events, "weak_decoder")
     strong_formation = _tier_formation(detection_events, "strong_decoder")
     weak = build_decoder_unit(settings, "weak", policy, weak_formation)
@@ -134,7 +129,6 @@ def build_decoder_pool(
         active=active,
         unit_pools=dict(unit_pools),
         decoder_memory=decoder_memory,
-        scheduler=scheduler,
         copies_input_by_pool=copies_input_by_pool,
         blocks_unit_by_pool=blocks_unit_by_pool,
         formation_by_pool=formation_by_pool,

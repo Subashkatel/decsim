@@ -302,10 +302,11 @@ def _decoder_manager(
     """One manager over the named pools, on the run's one manager card."""
     pool = parts.pool
     settings = parts.settings.decoder_manager
+    scheduler = settings.scheduler()
     return decoder_manager_module.DecoderManager(
         parts.engine,
         router=pool.router,
-        scheduler=pool.scheduler,
+        scheduler=scheduler,
         strong_requests=parts.seats["strong_requests"],
         unit_pools=unit_pools,
         bulk_strong=settings.bulk_strong,

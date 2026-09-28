@@ -458,7 +458,7 @@ def _paired_events(
     level: float,
     radius: Optional[float],
     centres: numpy.ndarray,
-) -> tuple:
+) -> dict:
     """Copies A and B, (trials, detectors) each, B = A XOR the burst's.
 
     Every trial draws its own quiet shot and its own burst shot, and

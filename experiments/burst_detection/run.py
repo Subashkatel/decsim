@@ -226,9 +226,10 @@ def quiet_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
 
     QUIET_STREAMS streams run side by side, each a run of quiet shots
     scored one after another on one state, so a chart keeps its score
-    and its usual rate across the join; the join drops each shot's first
-    and last rounds, which hold no bulk detector, so it is a missing
-    round, not a restart. The first WARM_UP_SHOTS shots are not counted.
+    and its usual rate across the join. The join drops each shot's first
+    round, which compares against the prepared state, and its closing
+    layer, rebuilt from the data-qubit readout; so one round is missing
+    there, not a restart. The first WARM_UP_SHOTS shots are not counted.
     An alarm is a shot of one stream on which a line fires, and the
     quiet time is quiet_seconds' whole shots: both are the units the
     calibration counts in.

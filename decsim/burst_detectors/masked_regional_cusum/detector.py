@@ -255,10 +255,11 @@ class AlarmLines:
         events is (streams, detectors), one shot of the circuit per
         stream, in Stim's detector order. Its bulk rounds continue the
         state's streams, so shots scored one after another on one state
-        are one long stream per row, joined where each shot's first and
-        last rounds, which hold no bulk detector, are left out. A line
-        fires on a round where its ratio is at least one, the round the
-        row flags at that line's rate.
+        are one long stream per row. The join leaves out two detector
+        layers that are not bulk: each shot's first round, which compares
+        against the prepared state, and its closing layer, rebuilt from
+        the data-qubit readout. A line fires on a round where its ratio
+        is at least one, the round the row flags at that line's rate.
         """
         rows = _bulk_rows(self.layout, events)
         stream_count, round_count, _ = rows.shape

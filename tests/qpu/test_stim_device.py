@@ -818,6 +818,67 @@ def test_a_rising_burst_climbs_linearly_then_decays_from_its_peak():
     assert burst.approx_equals(reference, atol=1e-12)
 
 
+def test_the_burst_noise_alone_is_the_burst_circuits_copies_alone():
+    """What it adds to the noiseless circuit, burst_circuit adds to its own."""
+    circuit = memory_circuit(3, 4)
+    table = detector_formation.build_formation_table(circuit, 4)
+    settings = stim_device.BurstStimDevice.Settings(
+        burst_onset_round=2,
+        burst_rise_rounds=2,
+        burst_radius=3.0,
+        burst_center=(2.0, 2.0),
+        burst_error_probability=0.2,
+    )
+    with_background = stim_device.burst_circuit(circuit, table, settings)
+
+    alone = stim_device.burst_noise(circuit, table, settings)
+
+    noiseless = circuit.without_noise()
+    alone_lines = inserted_lines(noiseless, alone)
+    background_lines = inserted_lines(circuit, with_background)
+    assert alone_lines == background_lines
+    assert alone.without_noise() == noiseless.flattened()
+
+
+def test_quiet_events_xor_the_burst_alone_fire_as_the_burst_circuit():
+    """Each detector's firing, 20,000 shots a side, within five sigma.
+
+    Detection events are linear in Pauli errors and the copies are
+    independent channels, so the two draws share one distribution.
+    """
+    circuit = memory_circuit(3, 6)
+    table = detector_formation.build_formation_table(circuit, 6)
+    settings = stim_device.BurstStimDevice.Settings(
+        burst_onset_round=3,
+        burst_rise_rounds=2,
+        burst_radius=3.0,
+        burst_center=(3.0, 3.0),
+        burst_error_probability=0.1,
+    )
+    combined = stim_device.burst_circuit(circuit, table, settings)
+    alone = stim_device.burst_noise(circuit, table, settings)
+    quiet_sampler = circuit.compile_detector_sampler(seed=1)
+    alone_sampler = alone.compile_detector_sampler(seed=2)
+    combined_sampler = combined.compile_detector_sampler(seed=3)
+
+    quiet_events = quiet_sampler.sample(20_000)
+    alone_events = alone_sampler.sample(20_000)
+    combined_events = combined_sampler.sample(20_000)
+
+    paired_events = quiet_events ^ alone_events
+    paired_firing = paired_events.mean(axis=0)
+    combined_firing = combined_events.mean(axis=0)
+    pooled = (paired_firing + combined_firing) / 2
+    variance = pooled * (1 - pooled) * 2 / 20_000
+    standard_error = numpy.sqrt(variance) + 1e-12
+    signed_difference = paired_firing - combined_firing
+    difference = numpy.abs(signed_difference)
+    bound = 5 * standard_error
+    is_within = difference < bound
+    assert is_within.all()
+    assert combined_firing.max() > 0.2
+
+
 def test_each_channel_raises_the_noise_stim_places_there():
     """Gate after a unitary, idle after TICK, flips beside measure and reset.
 

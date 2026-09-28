@@ -742,6 +742,36 @@ def burst_circuit(
             region covers the patch and finds no noise of its channels,
             so no shot would run with the burst the settings name.
     """
+    return _with_burst(circuit, table, burst, is_background_kept=True)
+
+
+def burst_noise(
+    circuit: stim.Circuit,
+    table: detector_formation.FormationTable,
+    burst: BurstStimDevice.Settings,
+) -> stim.Circuit:
+    """burst_circuit's extra noise alone: the circuit's own noise removed.
+
+    The copies land where burst_circuit puts them, found from the same
+    noise, and Stim's without_noise strips the rest, measurement flip
+    arguments included. Detection events are the XOR of every Pauli
+    error's flips, and the burst's copies are channels independent of
+    the circuit's own, so a shot of the circuit XOR a shot of this one is
+    a shot of burst_circuit: one quiet shot serves as its own control.
+
+    Raises:
+        ValueError: as burst_circuit.
+    """
+    return _with_burst(circuit, table, burst, is_background_kept=False)
+
+
+def _with_burst(
+    circuit: stim.Circuit,
+    table: detector_formation.FormationTable,
+    burst: BurstStimDevice.Settings,
+    is_background_kept: bool,
+) -> stim.Circuit:
+    """The burst's copies placed, with or without the circuit's own noise."""
     if burst.burst_onset_round > table.round_count:
         _refuse_a_late_onset(burst, table.round_count)
     region = _burst_region(circuit, burst)
@@ -762,16 +792,27 @@ def burst_circuit(
         # A slice joins the circuit in Stim's own code; appending each
         # instruction from Python costs ten times as long on a
         # 2,000-round memory.
-        sampled += flattened[segment_start:index]
+        segment = flattened[segment_start:index]
+        sampled += _background(segment, is_background_kept)
         sampled.append(copy)
         inserted_count += 1
         segment_start = index
     if inserted_count > 0:
-        sampled += flattened[segment_start:]
+        tail = flattened[segment_start:]
+        sampled += _background(tail, is_background_kept)
         return sampled
     if region:
         _refuse_a_burst_with_no_noise_to_raise(burst)
-    return circuit
+    return _background(circuit, is_background_kept)
+
+
+def _background(
+    segment: stim.Circuit, is_background_kept: bool
+) -> stim.Circuit:
+    """The segment as it is, or with its own noise removed."""
+    if is_background_kept:
+        return segment
+    return segment.without_noise()
 
 
 @dataclasses.dataclass(frozen=True)

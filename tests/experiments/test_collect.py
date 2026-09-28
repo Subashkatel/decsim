@@ -236,7 +236,8 @@ def test_a_swept_section_keeps_its_column_beside_every_measured_one(
     block = dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])
     block["axes"] = dict(block["axes"], windows=[windows])
     config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
-    run_dir, _ = run.run_experiment(config_path)
+    out_dir = tmp_path / "out"
+    run_dir, _ = run.run_experiment(config_path, out_dir)
     shots_path = run_dir / "shots.csv"
     shot, *_ = _csv_rows(shots_path)
     columns = _columns_of_every_csv(run_dir)
@@ -787,7 +788,8 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     config_path = yaml_configs.write_config(
         tmp_path, {"weak_decoder": weak_decoder, "sweep": sweep}
     )
-    run_dir, rows = run.run_experiment(config_path)
+    out_dir = tmp_path / "out"
+    run_dir, rows = run.run_experiment(config_path, out_dir)
     lines = sweep_report.terminal_lines(rows, run_dir)
     shots_path = run_dir / "shots.csv"
     first, second = _csv_rows(shots_path)

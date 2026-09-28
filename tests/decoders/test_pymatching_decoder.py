@@ -322,3 +322,19 @@ def test_a_model_whose_observable_rides_a_two_detector_fault_says_so_once():
     assert len(reported) == 1
     assert reported[0][0] is model
     assert "2312.04522" in reported[0][1]
+
+
+def test_rows_of_one_kind_and_settings_share_a_models_backend():
+    """A task's shots build their rows afresh but share window models."""
+    _, model, _, _ = _window_and_shots()
+    faults = model.require_faults(GRAPHLIKE)
+    first_shot_row = adapter.PyMatchingDecoder()
+    later_shot_row = adapter.PyMatchingDecoder()
+    first_shot_row.compile_key = ("pymatching", None)
+    later_shot_row.compile_key = ("pymatching", None)
+    keyless_row = adapter.PyMatchingDecoder()
+
+    graphs = first_shot_row.compiled_for(faults, model)
+
+    assert later_shot_row.compiled_for(faults, model) is graphs
+    assert keyless_row.compiled_for(faults, model) is not graphs

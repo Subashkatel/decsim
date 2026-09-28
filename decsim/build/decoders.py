@@ -353,8 +353,11 @@ def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
     row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
     row_settings = tier_settings.row_settings
     if row_settings is None:
-        return row()
-    return row(settings=row_settings)
+        algorithm = row()
+    else:
+        algorithm = row(settings=row_settings)
+    algorithm.compile_key = (row, row_settings)
+    return algorithm
 
 
 def _check_serves_the_confidence(

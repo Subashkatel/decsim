@@ -22,6 +22,7 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.PHYSICAL
+    backend_is_seeded = True
 
     @dataclasses.dataclass(frozen=True)
     class Settings:

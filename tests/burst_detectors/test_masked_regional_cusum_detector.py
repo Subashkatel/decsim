@@ -233,6 +233,27 @@ def test_lines_with_no_warm_up_and_one_shot_a_stream_are_cold_thresholds():
     assert list(lines.levels[1]) == list(second_calibration.thresholds)
 
 
+@pytest.mark.parametrize("rate", [0.0, -1.0])
+def test_lines_at_a_rate_of_zero_or_below_are_refused(rate):
+    """Refused before any quiet shot is drawn or any level is read."""
+    circuit = long_circuit()
+
+    with pytest.raises(ValueError) as refused:
+        detector_module.AlarmLines.calibrated(
+            circuit,
+            burst_rounds.LONG_ROUNDS,
+            LINE_SETTINGS,
+            1.0,
+            [125.0, rate],
+            warm_up_shots=0,
+        )
+
+    assert str(refused.value) == (
+        "burst_detector.false_alarms_per_second must be a rate above zero "
+        f"(got {rate!r})"
+    )
+
+
 def test_two_shots_on_one_state_score_as_one_stream_of_the_written_rules():
     """A quiet shot, then a burst shot; the rules read their rows joined."""
     lines = long_alarm_lines()

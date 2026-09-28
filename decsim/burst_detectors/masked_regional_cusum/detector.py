@@ -408,8 +408,14 @@ def _shot_target(false_alarms_per_second: float, shot_seconds: float) -> float:
     """The share of quiet shots that may alarm: the rate times a shot's time.
 
     A shot is one calibration block: the bank alarms in a shot when any
-    group reaches its level on any of its rounds.
+    group reaches its level on any of its rounds. A rate of zero or
+    below has no level to read, since the thresholds divide by it.
     """
+    if false_alarms_per_second <= 0:
+        raise ValueError(
+            "burst_detector.false_alarms_per_second must be a rate above "
+            f"zero (got {false_alarms_per_second!r})"
+        )
     target_share = false_alarms_per_second * shot_seconds
     if target_share < 1.0:
         return target_share

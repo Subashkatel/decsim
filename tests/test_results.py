@@ -10,10 +10,7 @@ import csv
 import json
 import pathlib
 import shutil
-import subprocess
-import sys
 
-import matplotlib.figure as figure_module
 import pytest
 import scipy.stats
 
@@ -397,54 +394,3 @@ def test_a_loaded_row_holds_what_an_error_rate_figure_is_drawn_from(runs):
         interval.high, rel=1e-12
     )
     assert noisier[PROBABILITY_COLUMN] == 0.01
-
-
-def test_a_saved_figure_keeps_its_script_numbers_and_folders(runs, tmp_path):
-    folders = [runs["first"], runs["shorter"]]
-    rows = results.load(*folders)
-    figure = figure_module.Figure()
-    ax = figure.subplots()
-    positions = [row[PROBABILITY_COLUMN] for row in rows]
-    rates = [row["logical_error_rate_estimate"] for row in rows]
-    ax.plot(positions, rates, marker="o")
-    picture_path = tmp_path / "ler.png"
-    results.save_figure(figure, picture_path, rows, folders)
-
-    script_copy = tmp_path / "ler.py"
-    numbers_path = tmp_path / "ler.csv"
-    with open(numbers_path, newline="") as handle:
-        reader = csv.DictReader(handle)
-        drawn_rows = list(reader)
-    record_path = tmp_path / "ler.json"
-    record_text = record_path.read_text()
-    record = json.loads(record_text)
-    this_file = pathlib.Path(__file__)
-    this_text = this_file.read_text()
-    assert picture_path.is_file()
-    assert script_copy.read_text() == this_text
-    assert len(drawn_rows) == 4
-    assert record["input_folders"] == [str(folder) for folder in folders]
-
-
-FIGURE_SCRIPT = """
-import matplotlib.figure
-
-import decsim.results as results
-
-figure = matplotlib.figure.Figure()
-figure.subplots()
-results.save_figure(figure, "plot.png", [{"distance": 3}], ["run"])
-"""
-
-
-def test_a_figure_named_after_its_script_keeps_the_script(tmp_path):
-    """plot.py drawing plot.png is already the copy of its script."""
-    script_path = tmp_path / "plot.py"
-    script_path.write_text(FIGURE_SCRIPT)
-    command_line = [sys.executable, str(script_path)]
-
-    subprocess.run(command_line, cwd=tmp_path, check=True)
-
-    numbers_path = tmp_path / "plot.csv"
-    assert script_path.read_text() == FIGURE_SCRIPT
-    assert numbers_path.read_text() == "distance\n3\n"

@@ -73,6 +73,11 @@ def measure_point_shot(
     return measure.measure_shot(shot)
 
 
+def run_sweep(tasks: list, shots: int) -> list:
+    """Seeds 0 to shots - 1 of every task of a sweep, measured, unsaved."""
+    return collect.collect(tasks, shots, measure.measure_shot)
+
+
 def whole_circuit_predictions(shot: collect.Shot) -> list:
     """Each operation's observables, PyMatching on its whole circuit.
 

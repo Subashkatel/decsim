@@ -24,7 +24,6 @@ import decsim.build.escalation as escalation_build
 import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collect_command as collect_command
 import tests.experiments.yaml_configs as yaml_configs
-from decsim.experiments.collect_command import run_sweep
 from decsim.experiments.experiment import load_experiment
 from tests.escalation.test_switching_mode import (
     NEAR_THRESHOLD_P,
@@ -514,8 +513,8 @@ def test_online_source_reproduces_its_decisions(tmp_path):
 
     first_tasks = config.tasks()
     second_tasks = config.tasks()
-    first = run_sweep(first_tasks, 2)
-    second = run_sweep(second_tasks, 2)
+    first = yaml_configs.run_sweep(first_tasks, 2)
+    second = yaml_configs.run_sweep(second_tasks, 2)
 
     first_links = [
         measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]

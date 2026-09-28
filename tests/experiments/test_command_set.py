@@ -768,7 +768,7 @@ def test_two_writers_of_one_piece_both_leave_it_whole(tmp_path, monkeypatch):
     config_path = yaml_configs.write_config(tmp_path, {})
     config = experiment.load_experiment(config_path)
     ((task, _collection),) = config.point_tasks()
-    measurements = collect_command.run_sweep([task], 1)
+    measurements = yaml_configs.run_sweep([task], 1)
     experiment_dir = tmp_path / "experiment"
     point_id = task.strong_id()
     write_json = run_folder.write_json
@@ -1322,7 +1322,7 @@ def test_a_saved_calibrator_whose_bytes_changed_is_refused(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, overrides)
     config = experiment.load_experiment(config_path)
     task = config.first_point_task()
-    measurements = collect_command.run_sweep([task], 1)
+    measurements = yaml_configs.run_sweep([task], 1)
     experiment_dir = tmp_path / "experiment"
     point_id = task.strong_id()
     calibrator = task.online_threshold

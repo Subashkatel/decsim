@@ -29,19 +29,19 @@ cut off and what is left still runs (Parnas 1972 lines 505-529;
 Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
 what tools/check_uses_graph.py prints and check.sh enforces:
 
-    0  compiled_libraries, config, records, tables, trace_source
+    0  compiled_libraries, config, plots, records, tables, trace_source
     1  engine, ports, seeding
-    2  detector_error_model, links, pauli_frame, syndrome_buffer,
-       windows
-    3  controller, decoders, escalation, qpu
+    2  controller, detector_error_model, escalation, links, pauli_frame,
+       syndrome_buffer, windows
+    3  burst_detectors, decoders, qpu
     4  confidence, frontends, observe, sinter_adapters
-    5  settings
+    5  producers, settings
     6  build
     7  assembly
     8  machine (this file)
     9  collect
     10 experiments
-    11 __main__, experiment_runner
+    11 __main__, experiment_runner, results
 
 Level 3 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.

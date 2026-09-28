@@ -192,23 +192,6 @@ class PointCollection:
         return min(self.piece_shots, remaining)
 
 
-def run_sweep(tasks: list, shots: int, *, processes: int = 1) -> list:
-    """Seeds 0 to shots - 1 of every task of a sweep, measured.
-
-    A point named by more than one block runs once, and nothing is
-    written. The measure handed to the pool is a partial of a
-    module-level function, so a worker process can unpickle it.
-    """
-    measure_shot = _shot_measure(tasks, None)
-    return collect.collect(
-        tasks,
-        shots,
-        measure_shot,
-        _say_the_online_threshold,
-        processes=processes,
-    )
-
-
 def run_experiment(
     config_path,
     out_dir: Optional[pathlib.Path] = None,
@@ -885,14 +868,6 @@ def _echo_description(config, settings, run_dir: pathlib.Path) -> None:
     description.append(f"run dir: {run_dir}\n")
     description_text = "\n".join(description)
     print(description_text, file=sys.stderr)
-
-
-def _say_the_online_threshold(task: collect.Task) -> None:
-    """A finished point's online threshold summary, when it learns one."""
-    calibrator = task.online_threshold
-    if calibrator is None:
-        return
-    _say_the_threshold(calibrator)
 
 
 def _say_the_threshold(calibrator) -> None:

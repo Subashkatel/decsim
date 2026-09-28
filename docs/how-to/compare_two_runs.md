@@ -77,13 +77,14 @@ whether the move is within its error bars.
 `decsim.results` reads run folders into one table, a row per point with
 a column per result, one per swept path, and one per setting
 (`settings.` and the setting's dotted path). The figure is yours to draw, in whatever form the
-question needs; `save_figure` keeps what made it beside it:
+question needs, and `decsim.plots` saves it:
 
 ```python
 import glob
 
 import matplotlib.pyplot as plt
 
+import decsim.plots as plots
 import decsim.results as results
 
 first_folders = glob.glob("results/first/combined/*")
@@ -104,12 +105,10 @@ for folder in folders:
     ax.errorbar(distances, rates, yerr=[below, above], fmt="o-", label=folder)
 ax.set_yscale("log")
 ax.legend()
-results.save_figure(figure, "ler.png", rows, folders)
+plots.save(figure, "ler.png")
 ```
 
-`save_figure` writes `ler.png` and, beside it, `ler.py` (a copy of the
-script that drew it), `ler.csv` (the rows drawn) and `ler.json` (the
-folders they came from).
+`plots.save` writes `ler.png` and closes the figure.
 
 ## If a burst made things worse: harder windows or an overloaded strong side
 

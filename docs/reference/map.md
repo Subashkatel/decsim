@@ -18,7 +18,7 @@ docstring.
 
 - `decsim/__init__.py`: decsim, a discrete-event simulator of the QEC reaction path.
 
-## Level 0: compiled_libraries, config, records, tables, trace_source
+## Level 0: compiled_libraries, config, plots, records, tables, trace_source
 
 ### compiled_libraries
 
@@ -27,6 +27,10 @@ docstring.
 ### config
 
 - `decsim/config.py`: The tick, the clock domains a yaml prices its cycles on, and yaml paths.
+
+### plots
+
+- `decsim/plots.py`: The figure kinds an experiment's plot.py draws, styled in one place.
 
 ### records
 
@@ -380,4 +384,4 @@ docstring.
 
 ### results
 
-- `decsim/results.py`: Run folders read back as one table, and a figure saved with its source.
+- `decsim/results.py`: Run folders read back as one table.

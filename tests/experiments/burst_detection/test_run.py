@@ -14,8 +14,8 @@ SCRIPT_FOLDER = REPOSITORY_ROOT / "experiments" / "burst_detection"
 SCRIPT = SCRIPT_FOLDER / "run.py"
 
 
-def test_a_hit_qubit_runs_at_2_5_p_6_p_or_saturated(monkeypatch):
-    run = script_module(monkeypatch, "run")
+def test_a_hit_qubit_runs_at_2_5_p_6_p_or_saturated():
+    run = script_module("run")
 
     weak = run.added_probability("weak", 0.002)
     strong = run.added_probability("strong", 0.002)
@@ -26,10 +26,8 @@ def test_a_hit_qubit_runs_at_2_5_p_6_p_or_saturated(monkeypatch):
     assert saturating == 0.75
 
 
-def test_a_point_whose_calibration_is_not_saved_is_refused(
-    tmp_path, monkeypatch
-):
-    run = script_module(monkeypatch, "run")
+def test_a_point_whose_calibration_is_not_saved_is_refused(tmp_path):
+    run = script_module("run")
     labels = {"d": 5, "p": 0.003, "part": 0}
 
     with pytest.raises(ValueError) as refused:
@@ -44,7 +42,7 @@ def test_a_point_whose_calibration_is_not_saved_is_refused(
 
 def test_a_tiny_grid_runs_combines_and_plots(tmp_path, monkeypatch):
     """Only d = 5 and p = 0.003: 40 rounds, 2 trials a class, 4 streams."""
-    run = script_module(monkeypatch, "run")
+    run = script_module("run")
     one_shot_calibration = dataclasses.replace(
         run.DETECTOR_SETTINGS, calibration_shot_count=1000
     )
@@ -58,7 +56,7 @@ def test_a_tiny_grid_runs_combines_and_plots(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "QUIET_STREAMS", 4)
     monkeypatch.setattr(sys, "argv", [str(SCRIPT)])
     monkeypatch.setitem(sys.modules, "run", run)
-    plot = script_module(monkeypatch, "plot")
+    plot = script_module("plot")
     folder = tmp_path / "out"
     experiment = run.burst_detection()
 
@@ -75,13 +73,12 @@ def test_a_tiny_grid_runs_combines_and_plots(tmp_path, monkeypatch):
     assert plot_names == {"rounds_to_90_p0.003.png", "false_alarms.png"}
 
 
-def script_module(monkeypatch: pytest.MonkeyPatch, name: str):
+def script_module(name: str):
     """experiments/burst_detection/<name>.py, imported, its main not run.
 
-    plot.py imports run.py by the name run, which another experiment's
-    test may have imported first, so the folder comes first on the path.
+    plot.py imports run.py by the name run, so a caller that imports plot
+    pins this experiment's run in sys.modules first.
     """
-    monkeypatch.syspath_prepend(str(SCRIPT_FOLDER))
     path = SCRIPT_FOLDER / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"burst_{name}", path)
     module = importlib.util.module_from_spec(spec)

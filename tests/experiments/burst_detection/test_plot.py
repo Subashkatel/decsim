@@ -25,11 +25,20 @@ def test_rounds_to_90_percent_is_the_ninth_of_ten_sorted_delays(
 
 
 def plot_module(monkeypatch: pytest.MonkeyPatch):
-    """experiments/burst_detection/plot.py, beside its own run.py."""
-    monkeypatch.syspath_prepend(str(SCRIPT_FOLDER))
-    monkeypatch.delitem(sys.modules, "run", raising=False)
-    path = SCRIPT_FOLDER / "plot.py"
-    spec = importlib.util.spec_from_file_location("burst_plot", path)
+    """experiments/burst_detection/plot.py, imported beside its own run.py.
+
+    plot.py imports run.py by the name run, and every experiment has one,
+    so this test's run is pinned in sys.modules until the test ends.
+    """
+    run_path = SCRIPT_FOLDER / "run.py"
+    plot_path = SCRIPT_FOLDER / "plot.py"
+    run = _loaded(run_path, "burst_run")
+    monkeypatch.setitem(sys.modules, "run", run)
+    return _loaded(plot_path, "burst_plot")
+
+
+def _loaded(path: pathlib.Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

@@ -40,6 +40,9 @@ MINOR_GRID_ALPHA = 0.3
 # sinter's marker order (sinter/_plotting.py:15), so a curve reads the
 # same here as in a figure sinter draws itself
 MARKERS = "ov*sp^<>8PhH+xXDd"
+# a share of exactly 0 or 1 sits on the axis edge, where its marker and
+# line are cut in half; the margin shows them whole
+SHARE_MARGIN = 0.03
 # viridis is dark below about half its range, where black text is lost
 DARK_SHADE_LIMIT = 0.5
 
@@ -155,7 +158,8 @@ def count_rate(
     The band is the one error_rate draws, from sinter.fit_binomial over
     the two counts (sinter/_probability_util.py:327). A share spans
     decades when it is rare, so both axes are log by default; a linear
-    share axis runs from 0 to 1, the whole range a share can take.
+    share axis spans 0 to 1, the whole range a share can take, and a
+    SHARE_MARGIN either side.
     """
     x_of = functools.partial(_value, key=x)
     share_of = functools.partial(_count_share, hits=hits, total=total)
@@ -171,7 +175,8 @@ def count_rate(
     )
     _scale_axes(axis, is_x_log_scale, is_y_log_scale)
     if not is_y_log_scale:
-        axis.set_ylim(0.0, 1.0)
+        share_limits = (-SHARE_MARGIN, 1.0 + SHARE_MARGIN)
+        axis.set_ylim(share_limits)
     _style(axis, x, f"{hits} / {total}", curve)
 
 

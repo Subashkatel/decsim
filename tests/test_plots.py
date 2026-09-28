@@ -126,7 +126,7 @@ def test_count_rate_draws_the_share_of_two_custom_counts():
     pyplot.close(figure)
 
 
-def test_count_rate_draws_a_share_on_linear_axes_from_zero_to_one():
+def test_count_rate_draws_a_share_on_linear_axes_over_zero_to_one():
     stats = [
         stat("union-find", d=5, counts={"caught": 150, "bursts": 200}),
         stat("union-find", d=7, counts={"caught": 190, "bursts": 200}),
@@ -146,7 +146,7 @@ def test_count_rate_draws_a_share_on_linear_axes_from_zero_to_one():
 
     assert axis.get_xscale() == "linear"
     assert axis.get_yscale() == "linear"
-    assert axis.get_ylim() == (0.0, 1.0)
+    assert axis.get_ylim() == (-plots.SHARE_MARGIN, 1.0 + plots.SHARE_MARGIN)
     pyplot.close(figure)
 
 

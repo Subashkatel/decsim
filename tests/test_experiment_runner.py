@@ -242,7 +242,12 @@ def test_combine_writes_every_points_stats_into_one_csv(tmp_path, monkeypatch):
     combined = sinter.read_stats_from_csv_files(stats_path)
     points = sinter.read_stats_from_csv_files(first_path, second_path)
     stats_text = stats_path.read_text()
-    assert combined == points
+    combined_counts = [stats.with_edits(seconds=0) for stats in combined]
+    point_counts = [stats.with_edits(seconds=0) for stats in points]
+    combined_seconds = [stats.seconds for stats in combined]
+    point_seconds = [stats.seconds for stats in points]
+    assert combined_counts == point_counts
+    assert combined_seconds == pytest.approx(point_seconds)
     assert stats_text.startswith(sinter.CSV_HEADER)
 
 

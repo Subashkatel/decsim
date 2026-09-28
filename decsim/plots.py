@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from typing import Optional, Union
 
 import matplotlib
+import matplotlib.collections
 import matplotlib.colors
 import matplotlib.pyplot as pyplot
 import matplotlib.ticker
@@ -39,6 +40,8 @@ MINOR_GRID_ALPHA = 0.3
 # sinter's marker order (sinter/_plotting.py:15), so a curve reads the
 # same here as in a figure sinter draws itself
 MARKERS = "ov*sp^<>8PhH+xXDd"
+# viridis is dark below about half its range, where black text is lost
+DARK_SHADE_LIMIT = 0.5
 
 
 def panels(key: str, values: list, columns: int = 3) -> tuple:
@@ -232,24 +235,21 @@ def heatmap(
     x: str,
     y: str,
     value: str,
-    label: str,
     is_log_scale: bool = True,
     limits: Optional[tuple] = None,
-) -> None:
+    cell_format: Optional[str] = None,
+) -> matplotlib.collections.QuadMesh:
     """The value column on an x by y grid, cells no row fills white.
 
     On the log scale a zero cell is white too; the linear scale, for a
     share, colours a zero like any value, and a NaN value is white.
     limits, (low, high), fixes the colour scale, so panels drawn apart
-    give one value one colour; None spans the cells drawn.
+    give one value one colour; None spans the cells drawn. cell_format,
+    a str.format pattern, writes each coloured cell's value in it.
+    Returns the mesh, from which the caller draws one colour bar for a
+    figure's panels.
     """
-    xs = sorted({row[x] for row in rows})
-    ys = sorted({row[y] for row in rows})
-    grid = numpy.full((len(ys), len(xs)), numpy.nan)
-    for row in rows:
-        column = xs.index(row[x])
-        line = ys.index(row[y])
-        grid[line, column] = row[value]
+    xs, ys, grid = _grid(rows, x, y, value)
     masked = numpy.ma.masked_invalid(grid)
     norm = matplotlib.colors.Normalize()
     if is_log_scale:
@@ -262,10 +262,12 @@ def heatmap(
     mesh = axis.pcolormesh(
         xs, ys, masked, shading="nearest", cmap=white_blanks, norm=norm
     )
-    figure = axis.figure
-    figure.colorbar(mesh, ax=axis, label=label)
     axis.set_xlabel(x)
     axis.set_ylabel(y)
+    if cell_format is not None:
+        cell_centres = (xs, ys)
+        _write_cells(axis, cell_centres, masked, norm, cell_format)
+    return mesh
 
 
 def share_below(values: list, counts: list, thresholds: list) -> numpy.ndarray:
@@ -458,6 +460,50 @@ def _panel_figure(row_count: int, column_count: int) -> tuple:
         figsize=(width, height),
         layout="constrained",
     )
+
+
+def _grid(rows: list, x: str, y: str, value: str) -> tuple:
+    """The sorted xs, the sorted ys and the value grid, NaN where no row."""
+    xs = sorted({row[x] for row in rows})
+    ys = sorted({row[y] for row in rows})
+    grid = numpy.full((len(ys), len(xs)), numpy.nan)
+    for row in rows:
+        column = xs.index(row[x])
+        line = ys.index(row[y])
+        grid[line, column] = row[value]
+    return xs, ys, grid
+
+
+def _write_cells(
+    axis: pyplot.Axes,
+    cell_centres: tuple,
+    masked: numpy.ma.MaskedArray,
+    norm: matplotlib.colors.Normalize,
+    cell_format: str,
+) -> None:
+    """Each coloured cell's value, black on a light colour, white on dark.
+
+    cell_centres is (xs, ys), the grid's column and line centres. A white
+    blank cell holds no value, so nothing is written on it.
+    """
+    xs, ys = cell_centres
+    is_blank = numpy.ma.getmaskarray(masked)
+    for (line, column), cell_value in numpy.ndenumerate(masked.data):
+        if is_blank[line, column]:
+            continue
+        shade = norm(cell_value)
+        text_colour = "white"
+        if shade > DARK_SHADE_LIMIT:
+            text_colour = "black"
+        text = cell_format.format(cell_value)
+        axis.text(
+            xs[column],
+            ys[line],
+            text,
+            ha="center",
+            va="center",
+            color=text_colour,
+        )
 
 
 def _scale_axes(

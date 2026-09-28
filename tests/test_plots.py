@@ -193,7 +193,7 @@ def test_distribution_dashes_each_curve_at_its_count_weighted_median():
     pyplot.close(figure)
 
 
-def test_heatmap_leaves_a_zero_cell_blank_and_labels_its_colour_bar():
+def test_heatmap_leaves_a_zero_cell_blank_and_leaves_the_colour_bar():
     rows = [
         {"d": 5, "p": 0.001, "count": 3},
         {"d": 5, "p": 0.002, "count": 0},
@@ -202,13 +202,39 @@ def test_heatmap_leaves_a_zero_cell_blank_and_labels_its_colour_bar():
     ]
     figure, axis = pyplot.subplots()
 
-    plots.heatmap(axis, rows, x="p", y="d", value="count", label="windows")
+    mesh = plots.heatmap(axis, rows, x="p", y="d", value="count")
 
-    mesh = axis.collections[0]
     grid = mesh.get_array()
-    colour_bar_axis = figure.axes[1]
+    assert mesh is axis.collections[0]
     assert grid.mask.tolist() == [[False, True], [False, False]]
-    assert colour_bar_axis.get_ylabel() == "windows"
+    assert len(figure.axes) == 1
+    pyplot.close(figure)
+
+
+def test_heatmap_writes_each_coloured_cells_value_light_on_dark():
+    """The missing cell is blank and holds no text."""
+    rows = [
+        {"d": 5, "p": 0.001, "share": 0.0},
+        {"d": 5, "p": 0.002, "share": 0.995},
+        {"d": 7, "p": 0.001, "share": float("nan")},
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.heatmap(
+        axis,
+        rows,
+        x="p",
+        y="d",
+        value="share",
+        is_log_scale=False,
+        limits=(0.0, 1.0),
+        cell_format="{:.1%}",
+    )
+
+    written = [text.get_text() for text in axis.texts]
+    colours = [text.get_color() for text in axis.texts]
+    assert written == ["0.0%", "99.5%"]
+    assert colours == ["white", "black"]
     pyplot.close(figure)
 
 
@@ -227,7 +253,6 @@ def test_a_linear_heatmap_colours_a_zero_and_leaves_a_missing_cell_blank():
         x="p",
         y="d",
         value="share",
-        label="share",
         is_log_scale=False,
     )
 
@@ -252,7 +277,6 @@ def test_heatmap_limits_fix_the_colour_scale_past_the_values_drawn():
         x="p",
         y="d",
         value="share",
-        label="share",
         is_log_scale=False,
         limits=(0.0, 1.0),
     )

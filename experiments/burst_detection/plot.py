@@ -114,28 +114,39 @@ def quiet_totals(quiet_parts: list) -> list:
 
 
 def draw_heatmaps(class_rows: list, folder: pathlib.Path, suffix: str) -> None:
-    """The share caught in time, then the median delay, size by strength."""
+    """The share caught in time, then the median delay, size by strength.
+
+    Each cell holds its value. One colour bar serves a figure's panels,
+    so its limits span them all: a share 0 to 1, a delay the figure's
+    shortest to longest median.
+    """
     caught_label = f"share caught within {CATCH_DEADLINE_ROUNDS} rounds"
-    # a share spans 0 to 1 in every panel, so a colour is one share
+    delays = [row["median_delay"] for row in class_rows]
+    shortest_delay = numpy.nanmin(delays)
+    longest_delay = numpy.nanmax(delays)
+    delay_label = "median rounds to the first alarm"
     kinds = [
-        ("caught_share", caught_label, (0.0, 1.0)),
-        ("median_delay", "median rounds to the first alarm", None),
+        ("caught_share", caught_label, (0.0, 1.0), "{:.1%}"),
+        ("median_delay", delay_label, (shortest_delay, longest_delay), "{:g}"),
     ]
-    for value, label, limits in kinds:
+    for value, label, limits, cell_format in kinds:
         figure, axis_by_line = plots.panels("false alarms per s", LINES)
         for line, axis in axis_by_line.items():
             line_rows = plots.chosen(class_rows, alarm_line=line)
-            plots.heatmap(
+            mesh = plots.heatmap(
                 axis,
                 line_rows,
                 x="size_place",
                 y="strength_place",
                 value=value,
-                label=label,
                 is_log_scale=False,
                 limits=limits,
+                cell_format=cell_format,
             )
             _name_places(axis)
+        panel_axes = axis_by_line.values()
+        panel_list = list(panel_axes)
+        figure.colorbar(mesh, ax=panel_list, label=label)
         figure.suptitle(f"{label}, {suffix}")
         path = folder / f"{value}_{suffix}.png"
         plots.save(figure, path)

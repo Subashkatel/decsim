@@ -165,7 +165,7 @@ EXACT_NUMBERS = [
 def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     config = experiment.load_experiment(REFERENCE_YAML)
     tasks = config.tasks()
-    measurements = run.run_sweep(tasks, 2)
+    measurements = yaml_configs.run_sweep(tasks, 2)
     record = sweep_report.record_of(measurements)
     summary_rows = sweep_report.summarize(record.shots, record.window_samples)
     link_rows = sweep_report.link_rows(record.shot_links)
@@ -1094,7 +1094,7 @@ def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:
 
 def _shot_rows_without_wall_clock(task: collect.Task) -> list:
     """Two shots' rows, the host's time to simulate each left out."""
-    measurements = run.run_sweep([task], 2)
+    measurements = yaml_configs.run_sweep([task], 2)
     record = sweep_report.record_of(measurements)
     rows = []
     for row in record.shots:

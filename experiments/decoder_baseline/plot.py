@@ -26,6 +26,8 @@ BASIS_TITLES = {"x": "memory X", "z": "memory Z"}
 COMPARISON_ROWS = 2
 COMPARISON_COLUMNS = 3
 DOTS_PER_INCH = 150
+X_MARGIN_BELOW = 0.8
+X_MARGIN_ABOVE = 1.25
 
 
 def main(folder: pathlib.Path) -> None:
@@ -105,6 +107,13 @@ def draw(axis: pyplot.Axes, points: list, curve_of) -> None:
     )
     axis.set_xscale("log")
     axis.set_yscale("log")
+    # every panel spans the swept rates, so a panel still filling reads
+    # on the same axis as a full one
+    lowest_rate = min(run.ERROR_RATES)
+    highest_rate = max(run.ERROR_RATES)
+    left = lowest_rate * X_MARGIN_BELOW
+    right = highest_rate * X_MARGIN_ABOVE
+    axis.set_xlim(left, right)
     axis.set_xlabel("physical error rate p")
     axis.set_ylabel("logical error rate per round")
     axis.grid(which="major")

@@ -216,6 +216,7 @@ import glob
 
 import matplotlib.pyplot as plt
 
+import decsim.plots as plots
 import decsim.results as results
 
 folders = glob.glob("results/first_sweep/combined/*")
@@ -231,12 +232,11 @@ figure, ax = plt.subplots()
 ax.errorbar(distances, rates, yerr=[below, above], fmt="o-")
 ax.set_xlabel("code distance")
 ax.set_ylabel("logical error rate")
-results.save_figure(figure, "ler.png", rows, folders)
+plots.save(figure, "ler.png")
 ```
 
-The error bars are the limit columns you just read. `save_figure`
-writes `ler.png` and, beside it, the script that drew it, the rows it
-drew and the folders they came from.
+The error bars are the limit columns you just read. `plots.save`
+writes `ler.png` and closes the figure.
 
 ## Step 5. Stop it and pick it up again
 

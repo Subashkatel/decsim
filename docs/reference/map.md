@@ -384,4 +384,4 @@ docstring.
 
 ### results
 
-- `decsim/results.py`: Run folders read back as one table, and a figure saved with its source.
+- `decsim/results.py`: Run folders read back as one table.

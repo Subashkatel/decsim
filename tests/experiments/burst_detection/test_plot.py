@@ -42,6 +42,26 @@ def test_a_class_counts_catches_by_300_rounds_and_its_median_delay(
     assert summary["median_delay"] == 300.0
 
 
+def test_the_quiet_parts_sum_to_one_row_per_line(monkeypatch):
+    plot = script_module(monkeypatch)
+    parts = [
+        {"d": 5, "p": 0.003, "part": 0, "alarm_line": 0.1},
+        {"d": 5, "p": 0.003, "part": 1, "alarm_line": 0.1},
+    ]
+    parts[0] |= {"quiet_seconds": 25.0, "alarms": 2}
+    parts[1] |= {"quiet_seconds": 25.5, "alarms": 3}
+
+    (total,) = plot.quiet_totals(parts)
+
+    assert total == {
+        "d": 5,
+        "p": 0.003,
+        "alarm_line": 0.1,
+        "quiet_seconds": 50.5,
+        "alarms": 5,
+    }
+
+
 def test_every_figure_is_drawn_for_each_rate(tmp_path, monkeypatch):
     plot = script_module(monkeypatch)
     write_rows(tmp_path, plot.run)
@@ -69,7 +89,7 @@ def write_rows(folder: pathlib.Path, run) -> None:
     """Two trials a class and line, a quiet row a line, two trace rounds."""
     trials = ["d,p,size,strength,trial,alarm_line,first_alarm_a,first_alarm_b"]
     traces = ["d,p,size,strength,copy,round,alarm_line,score_over_level"]
-    quiet = ["d,p,alarm_line,quiet_seconds,alarms"]
+    quiet = ["d,p,part,alarm_line,quiet_seconds,alarms"]
     classes = itertools.product(
         run.RADIUS_BY_SIZE, run.FIRING_MULTIPLE_BY_STRENGTH
     )
@@ -83,7 +103,8 @@ def write_rows(folder: pathlib.Path, run) -> None:
     for line in run.FALSE_ALARMS_PER_SECOND:
         expected_alarms = line * 100
         alarms = round(expected_alarms)
-        quiet.append(f"5,0.003,{line},100.0,{alarms}")
+        quiet.append(f"5,0.003,0,{line},50.0,{alarms}")
+        quiet.append(f"5,0.003,1,{line},50.0,0")
     write_lines(folder, "trials.csv", trials)
     write_lines(folder, "traces.csv", traces)
     write_lines(folder, "quiet.csv", quiet)

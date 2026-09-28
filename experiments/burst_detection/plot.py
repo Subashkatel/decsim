@@ -41,7 +41,8 @@ def main(folder: pathlib.Path) -> None:
     quiet_path = folder / "quiet.csv"
     traces_path = folder / "traces.csv"
     trials = _read(trials_path)
-    quiet = _read(quiet_path)
+    quiet_parts = _read(quiet_path)
+    quiet = quiet_totals(quiet_parts)
     traces = _read(traces_path)
     plots_folder = folder / "plots"
     plots_folder.mkdir(exist_ok=True)
@@ -96,13 +97,31 @@ def class_summaries(trials: list) -> list:
     return rows
 
 
+def quiet_totals(quiet_parts: list) -> list:
+    """Each (d, p, line)'s quiet seconds and alarms, summed over parts."""
+    totals = {}
+    for row in quiet_parts:
+        key = (row["d"], row["p"], row["alarm_line"])
+        total = totals.setdefault(key, {"quiet_seconds": 0.0, "alarms": 0})
+        total["quiet_seconds"] += row["quiet_seconds"]
+        total["alarms"] += row["alarms"]
+    rows = []
+    for (distance, error_rate, line), total in totals.items():
+        labels = {"d": distance, "p": error_rate, "alarm_line": line}
+        row = labels | total
+        rows.append(row)
+    return rows
+
+
 def draw_heatmaps(class_rows: list, folder: pathlib.Path, suffix: str) -> None:
     """The share caught in time, then the median delay, size by strength."""
+    caught_label = f"share caught within {CATCH_DEADLINE_ROUNDS} rounds"
+    # a share spans 0 to 1 in every panel, so a colour is one share
     kinds = [
-        ("caught_share", f"share caught within {CATCH_DEADLINE_ROUNDS} rounds"),
-        ("median_delay", "median rounds to the first alarm"),
+        ("caught_share", caught_label, (0.0, 1.0)),
+        ("median_delay", "median rounds to the first alarm", None),
     ]
-    for value, label in kinds:
+    for value, label, limits in kinds:
         figure, axis_by_line = plots.panels("false alarms per s", LINES)
         for line, axis in axis_by_line.items():
             line_rows = plots.chosen(class_rows, alarm_line=line)
@@ -114,6 +133,7 @@ def draw_heatmaps(class_rows: list, folder: pathlib.Path, suffix: str) -> None:
                 value=value,
                 label=label,
                 is_log_scale=False,
+                limits=limits,
             )
             _name_places(axis)
         figure.suptitle(f"{label}, {suffix}")

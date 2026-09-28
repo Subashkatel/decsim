@@ -33,24 +33,40 @@ def test_the_circuit_is_decsims_z_memory():
     assert circuit == reference
 
 
-def test_each_rate_has_twelve_burst_points_then_quiet_levels_and_traces():
+def test_the_calibrations_come_first_then_each_rates_eighteen_points():
+    """36 calibrations; then 12 bursts, 4 quiet parts, levels, traces."""
     run = script_module()
 
     experiment = run.burst_detection()
 
     files = [point.results_file for point in experiment.function_points]
-    burst_labels = experiment.function_points[4].labels
-    assert files == ["trials.csv"] * 12 + [
-        "quiet.csv",
-        "levels.csv",
-        "traces.csv",
-    ]
+    calibration_labels = experiment.function_points[3].labels
+    burst_labels = experiment.function_points[94].labels
+    rate_files = ["trials.csv"] * 12 + ["quiet.csv"] * 4
+    rate_files += ["levels.csv", "traces.csv"]
+    assert files == ["alarm_levels.csv"] * 36 + rate_files * 36
+    assert calibration_labels == {"d": 5, "p": 0.003}
     assert burst_labels == {
         "d": 5,
         "p": 0.003,
         "size": "medium",
         "strength": "strong",
     }
+
+
+def test_a_point_whose_calibration_is_not_saved_is_refused(tmp_path):
+    run = script_module()
+    labels = {"d": 5, "p": 0.003, "part": 0}
+
+    with pytest.raises(ValueError) as refused:
+        run.quiet_point(labels, 1, tmp_path)
+
+    path = tmp_path / "points" / "3.csv"
+    assert str(refused.value) == (
+        f"no alarm levels for d = 5, p = 0.003 at {path}; run calibration "
+        "point 3 first (on Slurm, submit this point with "
+        "--dependency=afterok on its job)"
+    )
 
 
 def test_a_strength_reaches_its_multiple_of_the_quiet_firing():

@@ -10,18 +10,22 @@ the burst's flips. The burst starts at round 1,000, climbs over 3
 rounds and decays over 600, the shape of Willow's large bursts,
 centred anywhere on the patch. decsim's
 masked regional CUSUM at its defaults scores both copies at three
-false alarm rates, its lines read off its own quiet calibration shots,
-which take seed 0; every point's seed is a hash of its labels.
+false alarm rates. The detector runs on from shot to shot, so every
+stream it scores, and every quiet stream its lines are calibrated on,
+first scores WARM_UP_SHOTS quiet shots whose alarms are not counted;
+a trial's two copies share theirs. The calibration's quiet shots take
+seed 0; every point's seed is a hash of its labels.
 
-Each (d, p) has 12 burst points, a size by a strength, a quiet point
-that streams 100 s of chip time through the lines, a levels point and
-an example traces point. `python run.py --list` prints them and
-`python run.py <id>` runs one (docs/how-to/run_an_experiment.md).
-Stage 1a is d = 5 at p = 0.003; stage 1b sets DISTANCES to 5, 7, 9, 11,
-13 and 15 and ERROR_RATES to 0.0005, 0.001, 0.002, 0.003, 0.004 and
-0.005.
+The calibration points come first, one per (d, p), each saving its
+lines; the other points of that (d, p) read them, so they run after it
+(on Slurm, --dependency=afterok). Each (d, p) then has 12 burst points,
+a size by a strength, QUIET_PARTS quiet points that together stream
+100 s of chip time through the lines, a levels point and an example
+traces point. `python run.py --list` prints them and `python run.py
+<id>` runs one (docs/how-to/run_an_experiment.md).
 """
 
+import csv
 import itertools
 import pathlib
 from typing import Optional
@@ -35,8 +39,13 @@ import decsim.experiment_runner as experiment_runner
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.stim_device as stim_device
 
-DISTANCES = [5]
-ERROR_RATES = [0.003]
+DISTANCES = [5, 7, 9, 11, 13, 15]
+ERROR_RATES = [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
+RATE_POINTS = [
+    (distance, error_rate)
+    for distance in DISTANCES
+    for error_rate in ERROR_RATES
+]
 CODE_TASK = "surface_code:rotated_memory_z"
 ROUNDS = 2000
 ROUND_PERIOD_MICROSECONDS = 1.0
@@ -67,7 +76,12 @@ SEARCH_ROUNDS = 12
 SEARCH_ONSET_ROUND = 4
 SEARCH_STEPS = 30
 QUIET_SECONDS = 100.0
+QUIET_PARTS = 4
 QUIET_STREAMS = 1000
+# The quiet shots a stream scores before its alarms count: a carried
+# state's shot maxima are stationary after it (the warm-up study, shots
+# 2 to 5 against 6 to 10 at d = 5 and d = 11).
+WARM_UP_SHOTS = 1
 MICROSECONDS_PER_SECOND = 1e6
 STIM_SEED_BOUND = 2**63
 # The example traces' rounds: the onset and the 300 rounds a catch is
@@ -84,14 +98,47 @@ def circuit(distance: int, error_rate: float, rounds: int) -> stim.Circuit:
     )
 
 
-def alarm_lines(quiet_circuit: stim.Circuit) -> cusum.AlarmLines:
-    """The detector's lines at every rate, from its own calibration."""
-    return cusum.AlarmLines.calibrated(
+def calibration_point(labels: dict, _seed: int, _folder: pathlib.Path) -> list:
+    """The detector's lines at every rate, read off warm quiet streams.
+
+    One row per line and group, in line then group order.
+    """
+    quiet_circuit = circuit(labels["d"], labels["p"], ROUNDS)
+    lines = cusum.AlarmLines.calibrated(
         quiet_circuit,
         ROUNDS,
         DETECTOR_SETTINGS,
         ROUND_PERIOD_MICROSECONDS,
         FALSE_ALARMS_PER_SECOND,
+        WARM_UP_SHOTS,
+    )
+    rows = []
+    for rate, line_levels in zip(
+        FALSE_ALARMS_PER_SECOND, lines.levels, strict=True
+    ):
+        for group, level in enumerate(line_levels):
+            row = {"alarm_line": rate, "group": group, "level": float(level)}
+            rows.append(row)
+    return rows
+
+
+def saved_lines(
+    folder: pathlib.Path, distance: int, error_rate: float
+) -> cusum.AlarmLines:
+    """The lines the (d, p) calibration point saved in the folder."""
+    calibration_id = RATE_POINTS.index((distance, error_rate))
+    path = experiment_runner.point_path(folder, calibration_id)
+    if not path.exists():
+        message = (
+            f"no alarm levels for d = {distance}, p = {error_rate} at "
+            f"{path}; run calibration point {calibration_id} first (on "
+            "Slurm, submit this point with --dependency=afterok on its job)"
+        )
+        raise ValueError(message)
+    levels = _read_levels(path)
+    quiet_circuit = circuit(distance, error_rate, ROUNDS)
+    return cusum.AlarmLines.with_levels(
+        quiet_circuit, ROUNDS, DETECTOR_SETTINGS, levels
     )
 
 
@@ -146,47 +193,52 @@ def levels_point(labels: dict, _seed: int, _folder: pathlib.Path) -> list:
     return rows
 
 
-def burst_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
+def burst_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
     """TRIALS paired trials: each line's first alarm in copy A and in B.
 
-    first_alarm_a is copy A's first alarm anywhere in the shot, a false
-    alarm; first_alarm_b is copy B's first at or after the onset, since
-    before it B is A. None is no alarm.
+    first_alarm_a is copy A's first alarm anywhere in the trial shot, a
+    false alarm; first_alarm_b is copy B's first at or after the onset,
+    since before it B is A. None is no alarm.
     """
     distance = labels["d"]
+    lines = saved_lines(folder, distance, labels["p"])
     quiet_circuit = circuit(distance, labels["p"], ROUNDS)
-    lines = alarm_lines(quiet_circuit)
     found = burst_level(distance, labels["p"], labels["strength"])
     generator = numpy.random.default_rng(seed)
     centres = _centres(generator, quiet_circuit, TRIALS)
     radius = _stim_radius(labels["size"])
-    events_a, events_b = _paired_events(
+    copies = _paired_events(
         quiet_circuit, generator, found["level"], radius, centres
     )
-    ratios = _paired_ratios(lines, events_a, events_b)
+    ratios = _paired_ratios(lines, copies)
     first_bulk_round = lines.layout.first_bulk_round
     firsts_a = lines.first_alarm_rounds(ratios["a"], first_bulk_round)
     firsts_b = lines.first_alarm_rounds(ratios["b"], ONSET_ROUND)
     return _trial_rows(centres, radius, firsts_a, firsts_b)
 
 
-def quiet_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
-    """QUIET_SECONDS of quiet chip time through the lines, alarms per line.
+def quiet_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
+    """One part's share of QUIET_SECONDS through the lines, alarms per line.
 
     QUIET_STREAMS streams run side by side, each a run of quiet shots
     scored one after another on one state, so a chart keeps its score
     and its usual rate across the join; the join drops each shot's first
     and last rounds, which hold no bulk detector, so it is a missing
-    round, not a restart. An alarm is a shot of one stream on which a
-    line fires, the unit the calibration counts in.
+    round, not a restart. The first WARM_UP_SHOTS shots are not counted.
+    An alarm is a shot of one stream on which a line fires, the unit the
+    calibration counts in.
     """
+    lines = saved_lines(folder, labels["d"], labels["p"])
     quiet_circuit = circuit(labels["d"], labels["p"], ROUNDS)
-    lines = alarm_lines(quiet_circuit)
     sampler = quiet_circuit.compile_detector_sampler(seed=seed)
     state = lines.new_state(QUIET_STREAMS)
+    for _ in range(WARM_UP_SHOTS):
+        warm_up_events = sampler.sample(QUIET_STREAMS)
+        lines.score_ratios(state, warm_up_events)
+    part_seconds = QUIET_SECONDS / QUIET_PARTS
     alarm_counts = numpy.zeros(len(FALSE_ALARMS_PER_SECOND), dtype=int)
     scored_rounds = 0
-    while _seconds(scored_rounds) < QUIET_SECONDS:
+    while _seconds(scored_rounds) < part_seconds:
         events = sampler.sample(QUIET_STREAMS)
         ratios = lines.score_ratios(state, events)
         is_firing = ratios >= 1.0
@@ -205,7 +257,7 @@ def quiet_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
     return rows
 
 
-def traces_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
+def traces_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
     """One example trial per class: each line's score over level by round.
 
     The score is the largest group score over its level, so a line
@@ -213,8 +265,8 @@ def traces_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
     TRACE_FIRST_ROUND to TRACE_LAST_ROUND.
     """
     distance = labels["d"]
+    lines = saved_lines(folder, distance, labels["p"])
     quiet_circuit = circuit(distance, labels["p"], ROUNDS)
-    lines = alarm_lines(quiet_circuit)
     generator = numpy.random.default_rng(seed)
     rows = []
     for size, strength in itertools.product(
@@ -223,10 +275,10 @@ def traces_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
         found = burst_level(distance, labels["p"], strength)
         centres = _centres(generator, quiet_circuit, 1)
         radius = _stim_radius(size)
-        events_a, events_b = _paired_events(
+        copies = _paired_events(
             quiet_circuit, generator, found["level"], radius, centres
         )
-        ratios = _paired_ratios(lines, events_a, events_b)
+        ratios = _paired_ratios(lines, copies)
         class_labels = {"size": size, "strength": strength}
         class_rows = _trace_rows(lines, ratios, class_labels)
         rows.extend(class_rows)
@@ -234,20 +286,45 @@ def traces_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
 
 
 def burst_detection() -> experiment_runner.Experiment:
-    """Every point, distance by rate: the bursts, then quiet, levels, traces."""
+    """The calibrations in RATE_POINTS order, then each (d, p)'s points.
+
+    A calibration's id is its (d, p)'s place in RATE_POINTS, which
+    saved_lines reads it by.
+    """
     experiment = experiment_runner.Experiment("burst_detection")
-    for distance, error_rate in itertools.product(DISTANCES, ERROR_RATES):
+    for distance, error_rate in RATE_POINTS:
         rate_labels = {"d": distance, "p": error_rate}
-        for size, strength in itertools.product(
-            RADIUS_BY_SIZE, FIRING_MULTIPLE_BY_STRENGTH
-        ):
-            class_labels = {"size": size, "strength": strength}
-            labels = rate_labels | class_labels
-            experiment.add_point(burst_point, labels, "trials.csv")
-        experiment.add_point(quiet_point, rate_labels, "quiet.csv")
-        experiment.add_point(levels_point, rate_labels, "levels.csv")
-        experiment.add_point(traces_point, rate_labels, "traces.csv")
+        experiment.add_point(calibration_point, rate_labels, "alarm_levels.csv")
+    for distance, error_rate in RATE_POINTS:
+        rate_labels = {"d": distance, "p": error_rate}
+        _add_rate_points(experiment, rate_labels)
     return experiment
+
+
+def _add_rate_points(
+    experiment: experiment_runner.Experiment, rate_labels: dict
+) -> None:
+    """One (d, p)'s bursts, quiet parts, levels and traces."""
+    for size, strength in itertools.product(
+        RADIUS_BY_SIZE, FIRING_MULTIPLE_BY_STRENGTH
+    ):
+        class_labels = {"size": size, "strength": strength}
+        labels = rate_labels | class_labels
+        experiment.add_point(burst_point, labels, "trials.csv")
+    for part in range(QUIET_PARTS):
+        labels = rate_labels | {"part": part}
+        experiment.add_point(quiet_point, labels, "quiet.csv")
+    experiment.add_point(levels_point, rate_labels, "levels.csv")
+    experiment.add_point(traces_point, rate_labels, "traces.csv")
+
+
+def _read_levels(path: pathlib.Path) -> numpy.ndarray:
+    """(lines, groups): a calibration's saved rows, in the order written."""
+    with path.open(newline="") as levels_file:
+        reader = csv.DictReader(levels_file)
+        levels = [float(row["level"]) for row in reader]
+    line_count = len(FALSE_ALARMS_PER_SECOND)
+    return numpy.reshape(levels, (line_count, -1))
 
 
 def _round_firing(noisy_circuit: stim.Circuit) -> numpy.ndarray:
@@ -366,11 +443,16 @@ def _paired_events(
 ) -> tuple:
     """Copies A and B, (trials, detectors) each, B = A XOR the burst's.
 
-    Every trial draws its own quiet shot and its own burst shot.
+    Every trial draws its own quiet shot and its own burst shot, and
+    WARM_UP_SHOTS quiet shots the two copies score first, under "warm_up".
     """
     trial_count = len(centres)
     quiet_seed = _stim_seed(generator)
     sampler = quiet_circuit.compile_detector_sampler(seed=quiet_seed)
+    warm_up = []
+    for _ in range(WARM_UP_SHOTS):
+        warm_up_events = sampler.sample(trial_count)
+        warm_up.append(warm_up_events)
     events_a = sampler.sample(trial_count)
     table = detector_formation.build_formation_table(quiet_circuit, ROUNDS)
     flips = numpy.zeros_like(events_a)
@@ -382,7 +464,7 @@ def _paired_events(
         burst_sampler = noise.compile_detector_sampler(seed=burst_seed)
         (flips[trial],) = burst_sampler.sample(1)
     events_b = events_a ^ flips
-    return events_a, events_b
+    return {"warm_up": warm_up, "a": events_a, "b": events_b}
 
 
 def _stim_seed(generator: numpy.random.Generator) -> int:
@@ -391,16 +473,19 @@ def _stim_seed(generator: numpy.random.Generator) -> int:
     return int(seed)
 
 
-def _paired_ratios(
-    lines: cusum.AlarmLines,
-    events_a: numpy.ndarray,
-    events_b: numpy.ndarray,
-) -> dict:
-    """Both copies scored side by side from new charts, split by copy."""
-    trial_count = len(events_a)
-    both_copies = numpy.concatenate([events_a, events_b])
-    stream_count = len(both_copies)
+def _paired_ratios(lines: cusum.AlarmLines, copies: dict) -> dict:
+    """Both copies' trial shot scored side by side after one warm-up.
+
+    The copies score the same warm-up shots, so their charts meet the
+    trial shot in the same state; the ratios are the trial shot's.
+    """
+    trial_count = len(copies["a"])
+    stream_count = 2 * trial_count
     state = lines.new_state(stream_count)
+    for warm_up_events in copies["warm_up"]:
+        both_warm_ups = numpy.concatenate([warm_up_events, warm_up_events])
+        lines.score_ratios(state, both_warm_ups)
+    both_copies = numpy.concatenate([copies["a"], copies["b"]])
     ratios = lines.score_ratios(state, both_copies)
     return {"a": ratios[:trial_count], "b": ratios[trial_count:]}
 

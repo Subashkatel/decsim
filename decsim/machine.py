@@ -29,7 +29,7 @@ cut off and what is left still runs (Parnas 1972 lines 505-529;
 Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
 what tools/check_uses_graph.py prints and check.sh enforces:
 
-    0  compiled_libraries, config, records, tables, trace_source
+    0  compiled_libraries, config, plots, records, tables, trace_source
     1  engine, ports, seeding
     2  controller, detector_error_model, escalation, links, pauli_frame,
        syndrome_buffer, windows

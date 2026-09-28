@@ -7,18 +7,26 @@ id, `run.py <id>` runs one, and `run.py` runs them all, so one Slurm
 array task runs one point (slurm/run.sbatch). An offline point is one
 sinter task that sinter.collect runs to its stop rule, each point into
 its own resume CSV, so array tasks running at once never write one
-file and a resubmitted task continues where it stopped. The folder
-keeps the script and the commit that ran, as gem5 keeps config.ini and
-ns-3 SEM the commit with every run.
+file and a resubmitted task continues where it stopped. A function
+point is a Python function whose rows the runner saves whole, once it
+returns, so a resubmitted task runs only the points with no CSV yet.
+An experiment's points are all of one kind. The folder keeps the
+script and the commit that ran, as gem5 keeps config.ini and ns-3 SEM
+the commit with every run.
 """
 
 import argparse
+import csv
+import dataclasses
 import datetime
+import hashlib
+import json
 import os
 import pathlib
 import secrets
 import sys
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from typing import Optional
 
 import sinter
@@ -26,11 +34,16 @@ import stim
 
 import decsim.experiments.run_folder as run_folder
 
-# `run.py combine` folds every point's CSV into stats.csv.
+# `run.py combine` folds every point's CSV into stats.csv, or a function
+# point's into the results file it names.
 COMBINE = "combine"
 POINTS_FOLDER = "points"
 STATS_FILE = "stats.csv"
 COMMIT_FILE = "commit.txt"
+ONE_KIND_PER_EXPERIMENT = (
+    "an experiment's points are all sinter tasks or all function points, "
+    "so its folder holds one kind of results"
+)
 ONE_RUN_PER_FOLDER = (
     "a results folder belongs to one script and one commit, so give --out "
     "a new folder"
@@ -49,6 +62,7 @@ class Experiment:
         self.name = name
         self.tasks = []
         self.decoders = []
+        self.function_points = []
 
     def add_offline(
         self,
@@ -69,6 +83,7 @@ class Experiment:
         into sinter's json_metadata, so stats.csv carries them beside
         every point's counts.
         """
+        _refuse_a_second_kind(self.function_points)
         options = sinter.CollectionOptions(
             max_shots=max_shots, max_errors=max_errors
         )
@@ -81,6 +96,23 @@ class Experiment:
         )
         self.tasks.append(task)
         self.decoders.append(custom_decoder)
+
+    def add_point(
+        self, function: Callable, labels: Mapping, results_file: str
+    ) -> None:
+        """One point that function(labels, seed) runs, its rows labelled.
+
+        function returns a list of rows, each a dict from column to
+        value; the runner writes them after the labels' columns into
+        the point's CSV, and combine gathers every point's rows naming
+        the same results_file into that file. The seed is a hash of the
+        labels, so a point draws the same shots whatever other points
+        the grid holds. A function point runs in one process and leaves
+        --workers to sinter's points.
+        """
+        _refuse_a_second_kind(self.tasks)
+        point = _FunctionPoint(function, dict(labels), results_file)
+        self.function_points.append(point)
 
     def main(self, arguments: Optional[list] = None) -> None:
         """Run what the command line asks: list, one point, all, or combine.
@@ -105,7 +137,13 @@ class Experiment:
             self.combine(folder)
 
     def combine(self, folder: pathlib.Path) -> None:
-        """Every saved point's stats into stats.csv, sinter's combine."""
+        """Every saved point's stats into stats.csv, sinter's combine.
+
+        Function points' rows go into the results files they name.
+        """
+        if self.function_points:
+            _combine_rows(folder, self.function_points)
+            return
         paths = []
         for point_id in range(len(self.tasks)):
             path = _point_path(folder, point_id)
@@ -123,15 +161,17 @@ class Experiment:
 
     def _print_points(self) -> None:
         for point_id, task in enumerate(self.tasks):
-            label_pairs = []
-            for key, value in task.json_metadata.items():
-                label_pairs.append(f"{key}={value}")
-            labels_text = " ".join(label_pairs)
+            labels_text = _labels_text(task.json_metadata)
             print(f"{point_id} decoder={task.decoder} {labels_text}")
+        for point_id, point in enumerate(self.function_points):
+            labels_text = _labels_text(point.labels)
+            print(f"{point_id} {point.results_file} {labels_text}")
 
     def _point_ids(self, target: Optional[str]) -> list:
         """Every point for no target, else the one target names."""
-        point_count = len(self.tasks)
+        task_count = len(self.tasks)
+        function_point_count = len(self.function_points)
+        point_count = task_count + function_point_count
         if target is None:
             return list(range(point_count))
         if not target.isdigit():
@@ -157,6 +197,10 @@ class Experiment:
         worker_count: int,
     ) -> None:
         """One point collected to its stop rule, resumed from its own CSV."""
+        if self.function_points:
+            point = self.function_points[point_id]
+            _run_function_point(point, point_id, folder)
+            return
         task = self.tasks[point_id]
         decoders = {}
         custom_decoder = self.decoders[point_id]
@@ -190,12 +234,115 @@ def _parser() -> argparse.ArgumentParser:
         "--list", action="store_true", help="print every point's id"
     )
     parser.add_argument(
-        "--workers", type=int, default=1, help="sinter's worker processes"
+        "--workers",
+        type=int,
+        default=1,
+        help="sinter's worker processes; a function point runs in one",
     )
     parser.add_argument(
         "--out", help="the results folder; a dated one when absent"
     )
     return parser
+
+
+@dataclasses.dataclass(frozen=True)
+class _FunctionPoint:
+    """A point add_point names: its function, labels and results file."""
+
+    function: Callable
+    labels: dict
+    results_file: str
+
+
+def _refuse_a_second_kind(other_kind_points: list) -> None:
+    if other_kind_points:
+        raise ValueError(ONE_KIND_PER_EXPERIMENT)
+
+
+def _labels_text(labels: Mapping) -> str:
+    label_pairs = []
+    for key, value in labels.items():
+        label_pairs.append(f"{key}={value}")
+    return " ".join(label_pairs)
+
+
+def _run_function_point(
+    point: _FunctionPoint, point_id: int, folder: pathlib.Path
+) -> None:
+    """The point's rows, labelled, written once its function returns.
+
+    A point whose CSV exists is done: it is written whole or not at
+    all, so a task the time limit stopped leaves no CSV to trust.
+    """
+    path = _point_path(folder, point_id)
+    if path.exists():
+        print(f"point {point_id}: saved already")
+        return
+    seed = _point_seed(point.labels)
+    start = time.perf_counter()
+    rows = point.function(point.labels, seed)
+    end = time.perf_counter()
+    if not rows:
+        _refuse_no_rows(point_id)
+    elapsed_seconds = end - start
+    labelled_rows = []
+    for row in rows:
+        labelled_row = point.labels | row
+        labelled_rows.append(labelled_row)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_rows_once(path, labelled_rows)
+    row_count = len(labelled_rows)
+    print(f"point {point_id}: {row_count} rows, {elapsed_seconds:.0f} seconds")
+
+
+def _refuse_no_rows(point_id: int) -> None:
+    message = (
+        f"point {point_id}'s function returned no rows; a function point "
+        "saves at least one, so that its CSV says it ran"
+    )
+    raise ValueError(message)
+
+
+def _point_seed(labels: Mapping) -> int:
+    """A 64-bit seed read off the labels, the same on every machine."""
+    labels_json = json.dumps(labels, sort_keys=True)
+    labels_bytes = labels_json.encode()
+    hasher = hashlib.sha256(labels_bytes)
+    digest = hasher.digest()
+    seed_bytes = digest[:8]
+    return int.from_bytes(seed_bytes, "big")
+
+
+def _write_rows_once(path: pathlib.Path, rows: list) -> None:
+    """The rows as CSV, staged beside path and renamed over it."""
+    random_suffix = secrets.token_hex(8)
+    staging = path.with_name(f".{path.name}.{random_suffix}")
+    columns = list(rows[0])
+    with staging.open("w", newline="") as staging_file:
+        writer = csv.DictWriter(
+            staging_file, fieldnames=columns, lineterminator="\n"
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(staging, path)
+
+
+def _combine_rows(folder: pathlib.Path, points: list) -> None:
+    """Each results file: its saved points' rows, in point order."""
+    lines_by_file = {}
+    for point_id, point in enumerate(points):
+        path = _point_path(folder, point_id)
+        if not path.exists():
+            continue
+        point_text = path.read_text()
+        point_lines = point_text.splitlines(keepends=True)
+        header, *rows = point_lines
+        file_lines = lines_by_file.setdefault(point.results_file, [header])
+        file_lines.extend(rows)
+    for results_file, file_lines in lines_by_file.items():
+        results_path = folder / results_file
+        text = "".join(file_lines)
+        results_path.write_text(text)
 
 
 def _refuse_no_workers(worker_count: int) -> None:

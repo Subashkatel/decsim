@@ -6,10 +6,13 @@ runs one) and sinter 1.16.0 itself: a point's CSV is sinter's own
 save_resume_filepath, which a rerun reads back and extends
 (sinter/_collection/_collection.py), and stats.csv is sinter's combine,
 read_stats_from_csv_files with its CSV_HEADER
-(sinter/_command/_main_combine.py).
+(sinter/_command/_main_combine.py). A function point's CSV is the rows
+its function returns under its labels' columns, and its combine is the
+rows concatenated under one header.
 """
 
 import datetime
+import functools
 import os
 import pathlib
 import subprocess
@@ -481,6 +484,156 @@ def test_without_out_the_folder_is_dated_under_the_results_root(
     date_text = today.isoformat()
     folder = results_root / f"{date_text}_tiny"
     assert (folder / "points" / "0.csv").exists()
+
+
+def test_a_function_points_rows_are_saved_after_its_labels(
+    tmp_path, monkeypatch
+):
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    experiment = experiment_runner.Experiment("tiny")
+    labels = {"d": 3, "size": "small"}
+    experiment.add_point(two_trials, labels, "trials.csv")
+
+    experiment.main(arguments=["0", "--out", str(results_folder)])
+
+    point_path = results_folder / "points" / "0.csv"
+    point_text = point_path.read_text()
+    assert point_text == (
+        "d,size,trial,first_alarm\n3,small,0,1004\n3,small,1,\n"
+    )
+
+
+def test_a_saved_function_point_is_not_run_again(tmp_path, monkeypatch):
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    calls = []
+    experiment = experiment_runner.Experiment("tiny")
+    recorder = functools.partial(recorded_trial, calls=calls)
+    experiment.add_point(recorder, {"d": 3}, "trials.csv")
+    arguments = ["0", "--out", str(results_folder)]
+    experiment.main(arguments=arguments)
+
+    experiment.main(arguments=arguments)
+
+    assert len(calls) == 1
+
+
+def test_a_function_points_seed_depends_on_its_labels_alone(
+    tmp_path, monkeypatch
+):
+    """The d = 5 point draws one seed whatever point comes before it."""
+    write_script(tmp_path, monkeypatch)
+    calls = []
+    recorder = functools.partial(recorded_trial, calls=calls)
+    grid = experiment_runner.Experiment("tiny")
+    grid.add_point(recorder, {"d": 3}, "trials.csv")
+    grid.add_point(recorder, {"d": 5}, "trials.csv")
+    alone = experiment_runner.Experiment("tiny")
+    alone.add_point(recorder, {"d": 5}, "trials.csv")
+    grid_folder = tmp_path / "grid"
+    alone_folder = tmp_path / "alone"
+
+    grid.main(arguments=["--out", str(grid_folder)])
+    alone.main(arguments=["--out", str(alone_folder)])
+
+    (_, first_seed), (_, grid_seed), (_, alone_seed) = calls
+    assert grid_seed == alone_seed
+    assert first_seed != grid_seed
+    assert 0 <= grid_seed < 2**64
+
+
+def test_combine_gathers_each_results_files_rows_under_one_header(
+    tmp_path, monkeypatch
+):
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    experiment = experiment_runner.Experiment("tiny")
+    experiment.add_point(two_trials, {"d": 3}, "trials.csv")
+    experiment.add_point(one_quiet_count, {"d": 3}, "quiet.csv")
+    experiment.add_point(two_trials, {"d": 5}, "trials.csv")
+
+    experiment.main(arguments=["--out", str(results_folder)])
+
+    trials_path = results_folder / "trials.csv"
+    quiet_path = results_folder / "quiet.csv"
+    trials_text = trials_path.read_text()
+    quiet_text = quiet_path.read_text()
+    assert trials_text == (
+        "d,trial,first_alarm\n3,0,1004\n3,1,\n5,0,1004\n5,1,\n"
+    )
+    assert quiet_text == "d,alarms\n3,7\n"
+
+
+def test_list_prints_each_function_points_file_and_labels(capsys):
+    experiment = experiment_runner.Experiment("tiny")
+    experiment.add_point(two_trials, {"d": 3, "p": 0.003}, "trials.csv")
+
+    experiment.main(arguments=["--list"])
+
+    printed = capsys.readouterr()
+    assert printed.out == "0 trials.csv d=3 p=0.003\n"
+
+
+def test_an_experiment_mixing_sinter_and_function_points_is_refused():
+    offline_first = tiny_experiment()
+    function_first = experiment_runner.Experiment("tiny")
+    function_first.add_point(two_trials, {"d": 3}, "trials.csv")
+    circuit = tiny_circuit(3)
+    sentence = (
+        "an experiment's points are all sinter tasks or all function "
+        "points, so its folder holds one kind of results"
+    )
+
+    with pytest.raises(ValueError) as refused_point:
+        offline_first.add_point(two_trials, {"d": 3}, "trials.csv")
+    with pytest.raises(ValueError) as refused_task:
+        function_first.add_offline(
+            circuit, "pymatching", {"d": 3}, max_errors=1, max_shots=1
+        )
+
+    assert str(refused_point.value) == sentence
+    assert str(refused_task.value) == sentence
+
+
+def test_a_function_point_that_returns_no_rows_is_refused(
+    tmp_path, monkeypatch
+):
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    experiment = experiment_runner.Experiment("tiny")
+    experiment.add_point(no_rows, {"d": 3}, "trials.csv")
+
+    with pytest.raises(ValueError) as refused:
+        experiment.main(arguments=["0", "--out", str(results_folder)])
+
+    assert str(refused.value) == (
+        "point 0's function returned no rows; a function point saves at "
+        "least one, so that its CSV says it ran"
+    )
+    assert not (results_folder / "points" / "0.csv").exists()
+
+
+def two_trials(_labels: dict, _seed: int) -> list:
+    """A caught trial and a missed one, None written as an empty cell."""
+    return [
+        {"trial": 0, "first_alarm": 1004},
+        {"trial": 1, "first_alarm": None},
+    ]
+
+
+def one_quiet_count(_labels: dict, _seed: int) -> list:
+    return [{"alarms": 7}]
+
+
+def no_rows(_labels: dict, _seed: int) -> list:
+    return []
+
+
+def recorded_trial(labels: dict, seed: int, calls: list) -> list:
+    """One trial row, the call's labels and seed kept in calls."""
+    calls.append((labels, seed))
+    return [{"trial": 0}]
 
 
 def tiny_experiment() -> experiment_runner.Experiment:

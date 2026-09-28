@@ -783,6 +783,41 @@ def test_an_idle_burst_is_qec_burst_scalings_decaying_burst():
     assert burst.approx_equals(reference, atol=1e-12)
 
 
+def test_a_rising_burst_climbs_linearly_then_decays_from_its_peak():
+    """A third, two thirds, the peak, then exp(-k / tau) of it k rounds on.
+
+    Willow's shape, a climb over three rounds and an exponential decay,
+    drawn as qec-burst-scaling draws its idle burst, one round at a time.
+    """
+    circuit = data_depolarizing_circuit(3, 8, 0.001)
+    peak = 0.06
+    one_round_decay = math.exp(-0.2)
+    extras = [
+        peak / 3,
+        peak * 2 / 3,
+        peak,
+        peak * one_round_decay,
+        peak * one_round_decay**2,
+        peak * one_round_decay**3,
+    ]
+    reference = qec_burst_scaling_circuit(
+        circuit, (3, 8, 10, 12, 17), 2, extras
+    )
+
+    burst = burst_of(
+        circuit,
+        8,
+        burst_onset_round=3,
+        burst_rise_rounds=3,
+        burst_decay_rounds=5.0,
+        burst_radius=2.0,
+        burst_error_probability=peak,
+        burst_channels=("idle",),
+    )
+
+    assert burst.approx_equals(reference, atol=1e-12)
+
+
 def test_each_channel_raises_the_noise_stim_places_there():
     """Gate after a unitary, idle after TICK, flips beside measure and reset.
 
@@ -1017,6 +1052,7 @@ def test_a_patch_the_burst_region_misses_is_not_refused_without_noise():
     ("key", "value", "sentence"),
     [
         ("burst_onset_round", True, "burst_onset_round is a one-based round"),
+        ("burst_rise_rounds", 0, "burst_rise_rounds is a whole number"),
         ("burst_decay_rounds", 0, "burst_decay_rounds is a number of rounds"),
         ("burst_radius", -1.0, "burst_radius is a distance of 0 or more"),
         ("burst_center", [1.0], "burst_center is \\[x, y\\]"),

@@ -612,16 +612,21 @@ class BurstStimDevice(StimDevice):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The burst: when, how it decays, where, how strong, which noise.
+        """The burst: its rise and decay, where, how strong, which noise.
 
         burst_onset_round is the first one-based round with extra noise.
-        The extra probability in round r at or after it is
-        burst_error_probability times exp(-(r - onset) /
+        It climbs to burst_error_probability over burst_rise_rounds,
+        (i + 1) / rise of it in the i-th round from the onset, then
+        decays from that peak as exp(-(rounds since the peak) /
         burst_decay_rounds), the exponential recovery McEwen measures ("a
         typical ~25 ms exponential decay", 2104.05219) and
         qec-burst-scaling samples (qecburst/circuit.py
         exponential_decay_profile); a burst_decay_rounds of None holds the
-        onset's probability to the shot's end. The region is every qubit
+        peak's probability to the shot's end. A rise of 1 is a step,
+        McEwen's and qec-burst-scaling's shape; the six largest bursts in
+        the repetition-code data released with 2408.13687 peak about 3
+        rounds after their onset, as Kurilovich's T1 transient of about
+        10 us would (2506.18228 lines 312-315). The region is every qubit
         whose first two Stim coordinates lie within burst_radius of
         burst_center, the midpoint of the qubits' coordinates when None;
         a burst_radius of None is every qubit. burst_channels names the
@@ -630,6 +635,7 @@ class BurstStimDevice(StimDevice):
         """
 
         burst_onset_round: int = 1
+        burst_rise_rounds: int = 1
         burst_decay_rounds: Optional[float] = None
         burst_radius: Optional[float] = None
         burst_center: Optional[tuple] = None
@@ -638,6 +644,7 @@ class BurstStimDevice(StimDevice):
 
         def __post_init__(self) -> None:
             _check_onset_round(self.burst_onset_round)
+            _check_rise_rounds(self.burst_rise_rounds)
             _check_decay_rounds(self.burst_decay_rounds)
             _check_radius(self.burst_radius)
             _check_center(self.burst_center)
@@ -933,6 +940,16 @@ def _check_onset_round(value) -> None:
     )
 
 
+def _check_rise_rounds(value) -> None:
+    is_count = isinstance(value, int) and not isinstance(value, bool)
+    if is_count and value >= 1:
+        return
+    raise ValueError(
+        f"qpu.burst_rise_rounds is a whole number of rounds, at least 1 "
+        f"(1 is a step); got {value!r}"
+    )
+
+
 def _check_decay_rounds(value) -> None:
     if value is None:
         return
@@ -1060,10 +1077,15 @@ def _burst_probability(burst: BurstStimDevice.Settings, round_index) -> float:
     rounds_since_onset = round_index - burst.burst_onset_round
     if rounds_since_onset < 0:
         return 0.0
-    amplitude = burst.burst_error_probability
+    rounds_climbed = rounds_since_onset + 1
+    climbed_share = rounds_climbed / burst.burst_rise_rounds
+    rise_share = min(climbed_share, 1.0)
+    amplitude = burst.burst_error_probability * rise_share
     if burst.burst_decay_rounds is None:
         return amplitude
-    exponent = -rounds_since_onset / burst.burst_decay_rounds
+    rounds_past_peak = rounds_climbed - burst.burst_rise_rounds
+    rounds_since_peak = max(rounds_past_peak, 0)
+    exponent = -rounds_since_peak / burst.burst_decay_rounds
     decay = math.exp(exponent)
     return amplitude * decay
 

@@ -22,7 +22,6 @@ from collections.abc import Mapping
 from typing import Optional, Union
 
 import matplotlib
-import matplotlib.collections
 import matplotlib.colors
 import matplotlib.pyplot as pyplot
 import matplotlib.ticker
@@ -40,11 +39,6 @@ MINOR_GRID_ALPHA = 0.3
 # sinter's marker order (sinter/_plotting.py:15), so a curve reads the
 # same here as in a figure sinter draws itself
 MARKERS = "ov*sp^<>8PhH+xXDd"
-# a share of exactly 0 or 1 sits on the axis edge, where its marker and
-# line are cut in half; the margin shows them whole
-SHARE_MARGIN = 0.03
-# viridis is dark below about half its range, where black text is lost
-DARK_SHADE_LIMIT = 0.5
 
 
 def panels(key: str, values: list, columns: int = 3) -> tuple:
@@ -56,7 +50,17 @@ def panels(key: str, values: list, columns: int = 3) -> tuple:
     column_count = min(columns, panel_count)
     exact_rows = panel_count / column_count
     row_count = math.ceil(exact_rows)
-    figure, axes = _panel_figure(row_count, column_count)
+    width = PANEL_WIDTH_INCHES * column_count
+    height = PANEL_HEIGHT_INCHES * row_count
+    figure, axes = pyplot.subplots(
+        row_count,
+        column_count,
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+        figsize=(width, height),
+        layout="constrained",
+    )
     flat_axes = list(axes.flat)
     shown_axes = flat_axes[:panel_count]
     axis_by_value = {}
@@ -66,28 +70,6 @@ def panels(key: str, values: list, columns: int = 3) -> tuple:
     for axis in flat_axes[panel_count:]:
         axis.set_visible(False)
     return figure, axis_by_value
-
-
-def panel_grid(
-    row_key: str, row_values: list, column_key: str, column_values: list
-) -> tuple:
-    """A figure with one axis per row value and column value, axes shared.
-
-    Each axis is titled "row_key = row, column_key = column". Returns the
-    figure and a dict from each (row value, column value) to its axis.
-    """
-    row_count = len(row_values)
-    column_count = len(column_values)
-    figure, axes = _panel_figure(row_count, column_count)
-    axis_by_pair = {}
-    for row_index, row_value in enumerate(row_values):
-        for column_index, column_value in enumerate(column_values):
-            axis = axes[row_index, column_index]
-            axis.set_title(
-                f"{row_key} = {row_value}, {column_key} = {column_value}"
-            )
-            axis_by_pair[(row_value, column_value)] = axis
-    return figure, axis_by_pair
 
 
 def chosen(items: list, **wanted) -> list:
@@ -138,7 +120,7 @@ def error_rate(
     legend_title = curve
     if marker is not None:
         legend_title = f"{curve}, {marker}"
-    _scale_axes(axis, is_x_log_scale=True, is_y_log_scale=True)
+    _log_axes(axis)
     _style(axis, x, f"logical error rate per {unit}", legend_title)
 
 
@@ -150,16 +132,11 @@ def count_rate(
     total: str,
     curve: str,
     order: Optional[list] = None,
-    is_x_log_scale: bool = True,
-    is_y_log_scale: bool = True,
 ) -> None:
     """The share hits of total against x, both custom counts, with a band.
 
     The band is the one error_rate draws, from sinter.fit_binomial over
-    the two counts (sinter/_probability_util.py:327). A share spans
-    decades when it is rare, so both axes are log by default; a linear
-    share axis spans 0 to 1, the whole range a share can take, and a
-    SHARE_MARGIN either side.
+    the two counts (sinter/_probability_util.py:327).
     """
     x_of = functools.partial(_value, key=x)
     share_of = functools.partial(_count_share, hits=hits, total=total)
@@ -173,10 +150,7 @@ def count_rate(
         group_func=group_of,
         plot_args_func=style_of,
     )
-    _scale_axes(axis, is_x_log_scale, is_y_log_scale)
-    if not is_y_log_scale:
-        share_limits = (-SHARE_MARGIN, 1.0 + SHARE_MARGIN)
-        axis.set_ylim(share_limits)
+    _log_axes(axis)
     _style(axis, x, f"{hits} / {total}", curve)
 
 
@@ -235,44 +209,27 @@ def distribution(
 
 
 def heatmap(
-    axis: pyplot.Axes,
-    rows: list,
-    x: str,
-    y: str,
-    value: str,
-    is_log_scale: bool = True,
-    limits: Optional[tuple] = None,
-    cell_format: Optional[str] = None,
-) -> matplotlib.collections.QuadMesh:
-    """The value column on an x by y grid, cells no row fills white.
-
-    On the log scale a zero cell is white too; the linear scale, for a
-    share, colours a zero like any value, and a NaN value is white.
-    limits, (low, high), fixes the colour scale, so panels drawn apart
-    give one value one colour; None spans the cells drawn. cell_format,
-    a str.format pattern, writes each coloured cell's value in it.
-    Returns the mesh, from which the caller draws one colour bar for a
-    figure's panels.
-    """
-    xs, ys, grid = _grid(rows, x, y, value)
-    masked = numpy.ma.masked_invalid(grid)
-    norm = matplotlib.colors.Normalize()
-    if is_log_scale:
-        masked = numpy.ma.masked_equal(masked, 0)
-        norm = matplotlib.colors.LogNorm()
-    if limits is not None:
-        norm.vmin, norm.vmax = limits
+    axis: pyplot.Axes, rows: list, x: str, y: str, value: str, label: str
+) -> None:
+    """The value column on an x by y grid, log colours, zero cells white."""
+    xs = sorted({row[x] for row in rows})
+    ys = sorted({row[y] for row in rows})
+    grid = numpy.zeros((len(ys), len(xs)))
+    for row in rows:
+        column = xs.index(row[x])
+        line = ys.index(row[y])
+        grid[line, column] = row[value]
+    masked = numpy.ma.masked_equal(grid, 0)
     colormap = matplotlib.colormaps["viridis"]
-    white_blanks = colormap.with_extremes(bad="white")
+    white_zeros = colormap.with_extremes(bad="white")
+    norm = matplotlib.colors.LogNorm()
     mesh = axis.pcolormesh(
-        xs, ys, masked, shading="nearest", cmap=white_blanks, norm=norm
+        xs, ys, masked, shading="nearest", cmap=white_zeros, norm=norm
     )
+    figure = axis.figure
+    figure.colorbar(mesh, ax=axis, label=label)
     axis.set_xlabel(x)
     axis.set_ylabel(y)
-    if cell_format is not None:
-        cell_centres = (xs, ys)
-        _write_cells(axis, cell_centres, masked, norm, cell_format)
-    return mesh
 
 
 def share_below(values: list, counts: list, thresholds: list) -> numpy.ndarray:
@@ -452,81 +409,18 @@ def _place(curve_value, places: list) -> dict:
     return {"color": f"C{index}", "marker": MARKERS[marker_index]}
 
 
-def _panel_figure(row_count: int, column_count: int) -> tuple:
-    """A figure of row_count by column_count axes, shared, panel sized."""
-    width = PANEL_WIDTH_INCHES * column_count
-    height = PANEL_HEIGHT_INCHES * row_count
-    return pyplot.subplots(
-        row_count,
-        column_count,
-        sharex=True,
-        sharey=True,
-        squeeze=False,
-        figsize=(width, height),
-        layout="constrained",
-    )
-
-
-def _grid(rows: list, x: str, y: str, value: str) -> tuple:
-    """The sorted xs, the sorted ys and the value grid, NaN where no row."""
-    xs = sorted({row[x] for row in rows})
-    ys = sorted({row[y] for row in rows})
-    grid = numpy.full((len(ys), len(xs)), numpy.nan)
-    for row in rows:
-        column = xs.index(row[x])
-        line = ys.index(row[y])
-        grid[line, column] = row[value]
-    return xs, ys, grid
-
-
-def _write_cells(
-    axis: pyplot.Axes,
-    cell_centres: tuple,
-    masked: numpy.ma.MaskedArray,
-    norm: matplotlib.colors.Normalize,
-    cell_format: str,
-) -> None:
-    """Each coloured cell's value, black on a light colour, white on dark.
-
-    cell_centres is (xs, ys), the grid's column and line centres. A white
-    blank cell holds no value, so nothing is written on it.
-    """
-    xs, ys = cell_centres
-    is_blank = numpy.ma.getmaskarray(masked)
-    for (line, column), cell_value in numpy.ndenumerate(masked.data):
-        if is_blank[line, column]:
-            continue
-        shade = norm(cell_value)
-        text_colour = "white"
-        if shade > DARK_SHADE_LIMIT:
-            text_colour = "black"
-        text = cell_format.format(cell_value)
-        axis.text(
-            xs[column],
-            ys[line],
-            text,
-            ha="center",
-            va="center",
-            color=text_colour,
-        )
-
-
-def _scale_axes(
-    axis: pyplot.Axes, is_x_log_scale: bool, is_y_log_scale: bool
-) -> None:
-    """A rate spans decades, so a log axis is labelled at decades only.
+def _log_axes(axis: pyplot.Axes) -> None:
+    """A rate spans decades on both axes, labelled at the decades only.
 
     Matplotlib labels minor ticks on an axis that spans few decades
     (LogFormatter's minor_thresholds), and at 3 and 4 times a decade
     those labels run into each other.
     """
+    axis.set_xscale("log")
+    axis.set_yscale("log")
     no_labels = matplotlib.ticker.NullFormatter()
-    if is_x_log_scale:
-        axis.set_xscale("log")
-        axis.xaxis.set_minor_formatter(no_labels)
-    if is_y_log_scale:
-        axis.set_yscale("log")
-        axis.yaxis.set_minor_formatter(no_labels)
+    axis.xaxis.set_minor_formatter(no_labels)
+    axis.yaxis.set_minor_formatter(no_labels)
 
 
 def _style(

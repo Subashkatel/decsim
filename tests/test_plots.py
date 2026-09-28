@@ -25,18 +25,6 @@ def test_panels_title_one_axis_per_value_and_hide_the_rest():
     pyplot.close(figure)
 
 
-def test_panel_grid_titles_one_axis_per_row_and_column_value():
-    figure, axis_by_pair = plots.panel_grid(
-        "strength", ["weak", "strong"], "p", [0.001, 0.003, 0.005]
-    )
-
-    corner_axis = axis_by_pair[("strong", 0.005)]
-    assert len(axis_by_pair) == 6
-    assert len(figure.axes) == 6
-    assert corner_axis.get_title() == "strength = strong, p = 0.005"
-    pyplot.close(figure)
-
-
 def test_chosen_reads_a_stat_decoder_its_metadata_and_a_row_column():
     kept_stat = stat("pymatching", basis="x", d=5)
     other_stat = stat("pymatching", basis="z", d=5)
@@ -126,30 +114,6 @@ def test_count_rate_draws_the_share_of_two_custom_counts():
     pyplot.close(figure)
 
 
-def test_count_rate_draws_a_share_on_linear_axes_over_zero_to_one():
-    stats = [
-        stat("union-find", d=5, counts={"caught": 150, "bursts": 200}),
-        stat("union-find", d=7, counts={"caught": 190, "bursts": 200}),
-    ]
-    figure, axis = pyplot.subplots()
-
-    plots.count_rate(
-        axis,
-        stats,
-        x="d",
-        hits="caught",
-        total="bursts",
-        curve="decoder",
-        is_x_log_scale=False,
-        is_y_log_scale=False,
-    )
-
-    assert axis.get_xscale() == "linear"
-    assert axis.get_yscale() == "linear"
-    assert axis.get_ylim() == (-plots.SHARE_MARGIN, 1.0 + plots.SHARE_MARGIN)
-    pyplot.close(figure)
-
-
 def test_values_draw_error_bars_from_the_low_and_high_columns():
     rows = [
         {"d": 5, "p": 0.001, "rate": 0.2, "low": 0.1, "high": 0.4},
@@ -193,7 +157,7 @@ def test_distribution_dashes_each_curve_at_its_count_weighted_median():
     pyplot.close(figure)
 
 
-def test_heatmap_leaves_a_zero_cell_blank_and_leaves_the_colour_bar():
+def test_heatmap_leaves_a_zero_cell_blank_and_labels_its_colour_bar():
     rows = [
         {"d": 5, "p": 0.001, "count": 3},
         {"d": 5, "p": 0.002, "count": 0},
@@ -202,87 +166,13 @@ def test_heatmap_leaves_a_zero_cell_blank_and_leaves_the_colour_bar():
     ]
     figure, axis = pyplot.subplots()
 
-    mesh = plots.heatmap(axis, rows, x="p", y="d", value="count")
-
-    grid = mesh.get_array()
-    assert mesh is axis.collections[0]
-    assert grid.mask.tolist() == [[False, True], [False, False]]
-    assert len(figure.axes) == 1
-    pyplot.close(figure)
-
-
-def test_heatmap_writes_each_coloured_cells_value_light_on_dark():
-    """The missing cell is blank and holds no text."""
-    rows = [
-        {"d": 5, "p": 0.001, "share": 0.0},
-        {"d": 5, "p": 0.002, "share": 0.995},
-        {"d": 7, "p": 0.001, "share": float("nan")},
-    ]
-    figure, axis = pyplot.subplots()
-
-    plots.heatmap(
-        axis,
-        rows,
-        x="p",
-        y="d",
-        value="share",
-        is_log_scale=False,
-        limits=(0.0, 1.0),
-        cell_format="{:.1%}",
-    )
-
-    written = [text.get_text() for text in axis.texts]
-    colours = [text.get_color() for text in axis.texts]
-    assert written == ["0.0%", "99.5%"]
-    assert colours == ["white", "black"]
-    pyplot.close(figure)
-
-
-def test_a_linear_heatmap_colours_a_zero_and_leaves_a_missing_cell_blank():
-    rows = [
-        {"d": 5, "p": 0.001, "share": 0.0},
-        {"d": 5, "p": 0.002, "share": 0.5},
-        {"d": 7, "p": 0.001, "share": float("nan")},
-        {"d": 7, "p": 0.002, "share": 1.0},
-    ]
-    figure, axis = pyplot.subplots()
-
-    plots.heatmap(
-        axis,
-        rows,
-        x="p",
-        y="d",
-        value="share",
-        is_log_scale=False,
-    )
+    plots.heatmap(axis, rows, x="p", y="d", value="count", label="windows")
 
     mesh = axis.collections[0]
     grid = mesh.get_array()
-    norm = mesh.norm
-    assert grid.mask.tolist() == [[False, False], [True, False]]
-    assert (norm.vmin, norm.vmax) == (0.0, 1.0)
-    pyplot.close(figure)
-
-
-def test_heatmap_limits_fix_the_colour_scale_past_the_values_drawn():
-    rows = [
-        {"d": 5, "p": 0.001, "share": 0.2},
-        {"d": 5, "p": 0.002, "share": 0.5},
-    ]
-    figure, axis = pyplot.subplots()
-
-    plots.heatmap(
-        axis,
-        rows,
-        x="p",
-        y="d",
-        value="share",
-        is_log_scale=False,
-        limits=(0.0, 1.0),
-    )
-
-    norm = axis.collections[0].norm
-    assert (norm.vmin, norm.vmax) == (0.0, 1.0)
+    colour_bar_axis = figure.axes[1]
+    assert grid.mask.tolist() == [[False, True], [False, False]]
+    assert colour_bar_axis.get_ylabel() == "windows"
     pyplot.close(figure)
 
 

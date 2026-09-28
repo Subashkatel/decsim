@@ -1,10 +1,11 @@
 """The decoder baseline, offline: Stim circuits, sinter, each decoder's adapter.
 
 Rotated surface code memory in X and Z, d 5 to 15, six error rates, 100
-rounds, four decoders; a point stops at 100 errors or at the shots 24
-core-hours buy. `python run.py --list` prints the points, `python run.py
-<id>` runs one, and slurm/run.sbatch runs one per array task
-(docs/how-to/run_an_experiment.md).
+rounds, four decoders; a point stops at 100 errors. The Slurm time limit
+is the budget: a task stopped by it keeps what it saved, and the same
+submission run again goes on from there. `python run.py --list` prints
+the points, `python run.py <id>` runs one, and slurm/run.sbatch runs one
+per array task (docs/how-to/run_an_experiment.md).
 """
 
 import itertools
@@ -21,9 +22,9 @@ ERROR_RATES = [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
 BASES = ["x", "z"]
 ROUNDS = 100
 MAX_ERRORS = 100
-# the owner's cap: 24 core-hours a point
-CORE_SECONDS_PER_POINT = 86400
-SHOT_CAP = 1_000_000_000
+# sinter needs a shot limit to stop a point that never reaches its
+# errors; one far past what a time limit buys leaves the stop to Slurm.
+MAX_SHOTS = 1_000_000_000
 # the package's own profiles (src/tesseract_sinter_compat.pybind.h:466-472)
 TESSERACT_PROFILES = tesseract_decoder.make_tesseract_sinter_decoders_dict()
 
@@ -51,48 +52,6 @@ DECODERS = {
     "tesseract-short-beam": TESSERACT_PROFILES["tesseract-short-beam"],
 }
 
-# Decode seconds a shot through each adapter above, from its
-# decode_shots_bit_packed at p 0.005, the slowest rate here, 100 rounds,
-# memory Z, one core of della-vis1, measured 2026-09-27 in process time
-# with the sample and the compile left out. The shots behind each
-# number: PyMatching 1000 to 4000, Union-Find 100 to 400, Relay-BP and
-# Tesseract 3 to 20, so the slow two are rough. The slowest rate makes
-# the cap safe at every rate and tight only at p 0.005.
-SECONDS_PER_SHOT = {
-    "union-find": {
-        5: 0.00671,
-        7: 0.0152,
-        9: 0.0298,
-        11: 0.0486,
-        13: 0.0741,
-        15: 0.102,
-    },
-    "pymatching": {
-        5: 0.0000730,
-        7: 0.000179,
-        9: 0.000351,
-        11: 0.000608,
-        13: 0.000993,
-        15: 0.00138,
-    },
-    "relay-bp-1": {
-        5: 0.0486,
-        7: 1.88,
-        9: 18.5,
-        11: 34.5,
-        13: 49.0,
-        15: 66.0,
-    },
-    "tesseract-short-beam": {
-        5: 0.311,
-        7: 1.64,
-        9: 5.00,
-        11: 16.6,
-        13: 34.0,
-        15: 40.5,
-    },
-}
-
 
 def circuit(basis: str, distance: int, error_rate: float) -> stim.Circuit:
     """Stim's rotated memory circuit, one rate on all four noise channels.
@@ -111,14 +70,6 @@ def circuit(basis: str, distance: int, error_rate: float) -> stim.Circuit:
     )
 
 
-def max_shots(decoder: str, distance: int) -> int:
-    """The shots 24 core-hours buy at the decoder's speed, at most SHOT_CAP."""
-    seconds_per_shot = SECONDS_PER_SHOT[decoder][distance]
-    shot_count = CORE_SECONDS_PER_POINT / seconds_per_shot
-    affordable = int(shot_count)
-    return min(affordable, SHOT_CAP)
-
-
 def baseline() -> experiment_runner.Experiment:
     """Every point, basis by distance by rate by decoder."""
     experiment = experiment_runner.Experiment("decoder_baseline")
@@ -126,13 +77,12 @@ def baseline() -> experiment_runner.Experiment:
     for basis, distance, error_rate, decoder in points:
         point_circuit = circuit(basis, distance, error_rate)
         labels = {"basis": basis, "d": distance, "p": error_rate}
-        shot_cap = max_shots(decoder, distance)
         experiment.add_offline(
             point_circuit,
             decoder=decoder,
             labels=labels,
             max_errors=MAX_ERRORS,
-            max_shots=shot_cap,
+            max_shots=MAX_SHOTS,
         )
     return experiment
 

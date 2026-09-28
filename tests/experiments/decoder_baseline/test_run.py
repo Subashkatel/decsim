@@ -2,9 +2,9 @@
 
 The referent for the circuit is decsim.producers.memory_circuit, the
 producer the machine's baseline yaml names, so the offline and the
-machine baselines sample one circuit. The rest pins the owner's cap:
-24 core-hours a point at its decoder's measured speed, and never more
-than a billion shots.
+machine baselines sample one circuit. The rest pins the stop rule: 100
+errors a point, and a shot limit no time limit reaches, so Slurm's time
+limit is the budget.
 """
 
 import importlib.util
@@ -43,23 +43,16 @@ def test_the_baseline_has_a_point_per_basis_distance_rate_and_decoder():
     assert len(experiment.tasks) == 2 * 6 * 6 * 4
 
 
-def test_a_points_shot_cap_is_a_day_of_its_decoders_shots():
+def test_every_point_stops_at_100_errors_or_a_billion_shots():
     run = script_module()
 
-    shot_cap = run.max_shots("relay-bp-1", 15)
+    experiment = run.baseline()
 
-    seconds_per_shot = run.SECONDS_PER_SHOT["relay-bp-1"][15]
-    day_of_shots = 86400 / seconds_per_shot
-    assert shot_cap == int(day_of_shots)
-
-
-def test_no_point_is_capped_past_a_billion_shots(monkeypatch):
-    run = script_module()
-    monkeypatch.setitem(run.SECONDS_PER_SHOT["pymatching"], 5, 1e-6)
-
-    shot_cap = run.max_shots("pymatching", 5)
-
-    assert shot_cap == 1_000_000_000
+    limits = set()
+    for task in experiment.tasks:
+        options = task.collection_options
+        limits.add((options.max_errors, options.max_shots))
+    assert limits == {(100, 1_000_000_000)}
 
 
 def script_module():

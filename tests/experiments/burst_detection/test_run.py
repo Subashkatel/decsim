@@ -69,6 +69,15 @@ def test_a_point_whose_calibration_is_not_saved_is_refused(tmp_path):
     )
 
 
+def test_quiet_time_is_whole_shots_of_2000_rounds_of_1_us():
+    """The calibration's block, not the 1,999 rounds a shot scores."""
+    run = script_module()
+
+    seconds = run.quiet_seconds(1000)
+
+    assert seconds == 2.0
+
+
 def test_a_strength_reaches_its_multiple_of_the_quiet_firing():
     run = script_module()
 

@@ -225,7 +225,8 @@ def quiet_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
     and its usual rate across the join; the join drops each shot's first
     and last rounds, which hold no bulk detector, so it is a missing
     round, not a restart. The first WARM_UP_SHOTS shots are not counted.
-    An alarm is a shot of one stream on which a line fires, the unit the
+    An alarm is a shot of one stream on which a line fires, and the
+    quiet time is quiet_seconds' whole shots: both are the units the
     calibration counts in.
     """
     lines = saved_lines(folder, labels["d"], labels["p"])
@@ -237,24 +238,36 @@ def quiet_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
         lines.score_ratios(state, warm_up_events)
     part_seconds = QUIET_SECONDS / QUIET_PARTS
     alarm_counts = numpy.zeros(len(FALSE_ALARMS_PER_SECOND), dtype=int)
-    scored_rounds = 0
-    while _seconds(scored_rounds) < part_seconds:
+    scored_shots = 0
+    while quiet_seconds(scored_shots) < part_seconds:
         events = sampler.sample(QUIET_STREAMS)
         ratios = lines.score_ratios(state, events)
         is_firing = ratios >= 1.0
         is_alarmed = numpy.any(is_firing, axis=1)
         alarm_counts += numpy.sum(is_alarmed, axis=0)
-        scored_rounds += ratios.shape[0] * ratios.shape[1]
-    quiet_seconds = _seconds(scored_rounds)
+        scored_shots += QUIET_STREAMS
+    part_quiet_seconds = quiet_seconds(scored_shots)
     rows = []
     for rate, alarms in zip(FALSE_ALARMS_PER_SECOND, alarm_counts, strict=True):
         row = {
             "alarm_line": rate,
-            "quiet_seconds": quiet_seconds,
+            "quiet_seconds": part_quiet_seconds,
             "alarms": int(alarms),
         }
         rows.append(row)
     return rows
+
+
+def quiet_seconds(shot_count: int) -> float:
+    """The quiet time of shot_count shots: whole shots of ROUNDS rounds.
+
+    The calibration's target share is a rate times one shot's ROUNDS
+    rounds, so a quiet rate counted in the same whole shots is read
+    against the same block length.
+    """
+    round_count = shot_count * ROUNDS
+    microseconds = round_count * ROUND_PERIOD_MICROSECONDS
+    return microseconds / MICROSECONDS_PER_SECOND
 
 
 def traces_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
@@ -552,11 +565,6 @@ def _line_cells(copy_labels: dict, line_ratios: numpy.ndarray) -> list:
         row = copy_labels | cells
         rows.append(row)
     return rows
-
-
-def _seconds(scored_rounds: int) -> float:
-    microseconds = scored_rounds * ROUND_PERIOD_MICROSECONDS
-    return microseconds / MICROSECONDS_PER_SECOND
 
 
 if __name__ == "__main__":

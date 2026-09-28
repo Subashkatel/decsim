@@ -3,8 +3,8 @@
 # How to run an experiment
 
 An experiment is one Python script, `experiments/<name>/run.py`. It
-lists its points, and each point runs until it has enough errors or
-reaches its shot cap. The commands below use the decoder baseline,
+lists its points, and each point runs until it has enough errors, reaches
+its shot limit, or its job's time runs out. The commands below use the decoder baseline,
 `experiments/decoder_baseline/run.py`.
 
 ## Before you start
@@ -72,14 +72,22 @@ Each task imports the checkout the script sits in, two folders above
 has, so the job may be submitted from anywhere. A script outside a
 decsim checkout is refused.
 
-Each task has 16 cores and 24 hours (`slurm/run.sbatch`). Add the
-account, partition or QOS your cluster needs on the `sbatch` line.
+Each task has 16 cores and 24 hours (`slurm/run.sbatch`). The time
+limit is the budget: `-t 3:00:00` on the `sbatch` line gives each point
+3 hours, 48 core-hours. Add the account, partition or QOS your cluster
+needs on the `sbatch` line too.
 
 ## Resume
 
 Submit the same command again, with the same folder. A point reads its
 own CSV and goes on from there; a point that already stopped takes no
-new shots. On a later day, `--out` or the sbatch folder must name the
+new shots. A task its time limit stopped loses at most its workers'
+last two minutes, since sinter saves each worker's counts at least that
+often (`worker_flush_period`, sinter/_collection/_collection.py), and
+sinter's collect is made to be killed and restarted
+(sinter/_command/_main_collect.py, `--save_resume_filepath`). To spend
+more on the points that have not reached their errors, submit again
+with those ids. On a later day, `--out` or the sbatch folder must name the
 original folder: the dated default would be a new, empty one.
 
 ## Combine

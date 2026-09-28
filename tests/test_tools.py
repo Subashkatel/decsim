@@ -80,6 +80,21 @@ def test_the_uses_graph_check_reports_the_levels_of_the_package(capsys):
     assert "level 0:" in captured.out
 
 
+def test_the_uses_graph_puts_a_package_importing_none_at_level_zero(
+    tmp_path,
+):
+    tool = _tool("check_uses_graph")
+    root_module = tmp_path / "__init__.py"
+    root_module.write_text('"""The package."""\n')
+    leaf = tmp_path / "leaf.py"
+    leaf.write_text('"""Imports nothing of the package."""\n')
+
+    edges = tool.read_edges(tmp_path)
+    nodes = tool.nodes_of(edges)
+
+    assert tool.levels_of(edges, nodes) == {"leaf": 0}
+
+
 def test_the_recognition_check_passes_on_the_tree(capsys):
     """The tree recognises no class off the tool's list."""
     tool = _tool("check_row_recognition")

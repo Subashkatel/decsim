@@ -52,13 +52,17 @@ def imports_of(path: pathlib.Path, source: str) -> set:
 
 
 def read_edges(root: pathlib.Path) -> dict:
-    """Every package's imports of other packages."""
+    """Every package's imports of other packages, none for a leaf.
+
+    The root's __init__.py is the package itself, on no level.
+    """
     edges = collections.defaultdict(set)
     for path in source_paths(root):
         source = package_of(path, root)
+        if source == "__init__":
+            continue
         targets = imports_of(path, source)
-        if targets:
-            edges[source] |= targets
+        edges[source] |= targets
     return edges
 
 

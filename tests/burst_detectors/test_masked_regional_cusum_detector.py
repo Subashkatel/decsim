@@ -64,7 +64,8 @@ def test_quiet_shots_alarm_at_the_calibrated_rate():
     calibration = detector.charts_by_operation[1].calibration
     rows = _quiet_rows(4000, 11, calibration.layout.positions)
 
-    maxima = calibration.bank.block_maxima(rows, 2)
+    state = calibration.bank.new_state(4000, 2)
+    maxima = calibration.bank.block_maxima(state, rows, 2)
 
     reaches = maxima >= calibration.thresholds
     is_alarmed = reaches.any(axis=1)
@@ -198,13 +199,25 @@ LINE_RATES = (625.0, 125.0)
 LINE_SETTINGS = burst_rounds.CUSUM.Settings(calibration_shot_count=2000)
 
 
-def test_each_line_holds_the_rows_own_thresholds_at_its_rate():
-    lines = long_alarm_lines()
+def test_lines_with_no_warm_up_and_one_shot_a_stream_are_cold_thresholds():
+    """1,000 streams of one shot from cold are the row's 1,000 cold shots."""
+    one_shot_settings = dataclasses.replace(
+        LINE_SETTINGS, calibration_shot_count=1000
+    )
+    circuit = long_circuit()
+    lines = detector_module.AlarmLines.calibrated(
+        circuit,
+        burst_rounds.LONG_ROUNDS,
+        one_shot_settings,
+        1.0,
+        LINE_RATES,
+        warm_up_shots=0,
+    )
     first_settings = dataclasses.replace(
-        LINE_SETTINGS, false_alarms_per_second=625.0
+        one_shot_settings, false_alarms_per_second=625.0
     )
     second_settings = dataclasses.replace(
-        LINE_SETTINGS, false_alarms_per_second=125.0
+        one_shot_settings, false_alarms_per_second=125.0
     )
 
     first_row = burst_rounds.cusum_detector(
@@ -266,14 +279,23 @@ def test_a_first_alarm_is_the_first_round_a_line_fires_from_the_earliest():
 @functools.lru_cache(maxsize=1)
 def long_alarm_lines() -> detector_module.AlarmLines:
     """The 160-round d = 5 memory's lines at LINE_RATES, built once."""
-    circuit = workload_settings.memory_circuit(
+    circuit = long_circuit()
+    return detector_module.AlarmLines.calibrated(
+        circuit,
+        burst_rounds.LONG_ROUNDS,
+        LINE_SETTINGS,
+        1.0,
+        LINE_RATES,
+        warm_up_shots=1,
+    )
+
+
+def long_circuit():
+    return workload_settings.memory_circuit(
         burst_rounds.CODE_TASK,
         burst_rounds.LONG_ROUNDS,
         burst_rounds.DISTANCE,
         burst_rounds.PHYSICAL_ERROR_PROBABILITY,
-    )
-    return detector_module.AlarmLines.calibrated(
-        circuit, burst_rounds.LONG_ROUNDS, LINE_SETTINGS, 1.0, LINE_RATES
     )
 
 

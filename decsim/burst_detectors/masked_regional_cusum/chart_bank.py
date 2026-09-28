@@ -170,19 +170,19 @@ class ChartBank:
         return self._group_scores(state)
 
     def block_maxima(
-        self, rows: numpy.ndarray, first_round: int
+        self, state: "_BankState", rows: numpy.ndarray, first_round: int
     ) -> numpy.ndarray:
-        """Each stream's largest group scores over its rounds, from cold.
+        """Each stream's largest group scores over the rows' rounds.
 
-        rows is (streams, rounds, checks); the streams start together
-        at first_round.
+        rows is (streams, rounds, checks) and continues the state's
+        streams: a new state scores them from cold, one that scored
+        earlier rows scores them warm. first_round is the state's.
         """
         stream_count, round_count, _ = rows.shape
-        state = self.new_state(stream_count, first_round)
         group_count = self.group_count()
         maxima = numpy.zeros((stream_count, group_count))
         for offset in range(round_count):
-            round_index = first_round + offset
+            round_index = first_round + state.scored_rounds
             round_rows = rows[:, offset]
             group_scores = self.score_round(state, round_rows, round_index)
             numpy.maximum(maxima, group_scores, out=maxima)

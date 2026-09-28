@@ -27,10 +27,11 @@ __pycache__/
 # under results/<run>/logs/
 /slurm-*.out
 
-# Run output. gem5 never tracks m5out and sinter writes its csv where the
-# user points it: a run folder is evidence, not code. The five folders
-# this repository used to track are archived outside it.
-/results/
+# Run output. A results folder's stats.csv, commit record, script copy
+# and plots are tracked, so every experiment's evidence has one place;
+# each point's working CSV and the Slurm logs stay with the run.
+/results/*/points/
+/results/*/logs/
 
 # Core dumps
 core.[0-9]*

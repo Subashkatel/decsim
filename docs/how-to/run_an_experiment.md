@@ -99,3 +99,16 @@ PYTHONPATH=. python experiments/decoder_baseline/run.py combine --out results/20
 This writes `stats.csv` from every point's CSV, with sinter's own
 columns: shots, errors, discards, seconds, decoder, strong id and the
 labels. A run of every point in one process writes it at the end.
+
+## Plot and keep the results
+
+```bash
+PYTHONPATH=. python experiments/decoder_baseline/plot.py results/2026-09-27_decoder_baseline
+```
+
+This draws the folder's `plots/` from its `stats.csv`: the logical
+error rate per round against the physical error rate, a figure per
+decoder and one comparing the decoders for each basis. The repository
+tracks a results folder's `stats.csv`, `commit.txt`, script copy and
+`plots/`, so every experiment's results live beside the code that made
+them; `points/` and `logs/` stay with the run (`.gitignore`).

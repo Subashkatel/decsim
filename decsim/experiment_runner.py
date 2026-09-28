@@ -48,6 +48,7 @@ class Experiment:
     def __init__(self, name: str) -> None:
         self.name = name
         self.tasks = []
+        self.decoders = []
 
     def add_offline(
         self,
@@ -56,11 +57,17 @@ class Experiment:
         labels: Mapping,
         max_errors: int,
         max_shots: int,
+        custom_decoder: Optional[sinter.Decoder] = None,
     ) -> None:
         """One point sinter samples and decodes; its id is its place.
 
-        The labels go into sinter's json_metadata, so stats.csv carries
-        them beside every point's counts.
+        decoder is the name stats.csv shows. custom_decoder decodes the
+        point; None leaves the name to sinter's built-ins. It is kept per
+        point because a decoder may be built from its point's circuit,
+        which sinter's compile step never sees (sinter.Decoder,
+        compile_decoder_for_dem takes the model only). The labels go
+        into sinter's json_metadata, so stats.csv carries them beside
+        every point's counts.
         """
         options = sinter.CollectionOptions(
             max_shots=max_shots, max_errors=max_errors
@@ -73,17 +80,12 @@ class Experiment:
             collection_options=options,
         )
         self.tasks.append(task)
+        self.decoders.append(custom_decoder)
 
-    def main(
-        self,
-        custom_decoders: Optional[Mapping] = None,
-        arguments: Optional[list] = None,
-    ) -> None:
+    def main(self, arguments: Optional[list] = None) -> None:
         """Run what the command line asks: list, one point, all, or combine.
 
-        custom_decoders maps a decoder name to its sinter.Decoder, None
-        for a decoder built into sinter. arguments are the command
-        line's, sys.argv's when None.
+        arguments are the command line's, sys.argv's when None.
         """
         parser = _parser()
         parsed = parser.parse_args(arguments)
@@ -97,9 +99,8 @@ class Experiment:
             self.combine(folder)
             return
         point_ids = self._point_ids(parsed.target)
-        decoders = _sinter_decoders(custom_decoders)
         for point_id in point_ids:
-            self._run_point(point_id, folder, parsed.workers, decoders)
+            self._run_point(point_id, folder, parsed.workers)
         if parsed.target is None:
             self.combine(folder)
 
@@ -154,10 +155,13 @@ class Experiment:
         point_id: int,
         folder: pathlib.Path,
         worker_count: int,
-        decoders: dict,
     ) -> None:
         """One point collected to its stop rule, resumed from its own CSV."""
         task = self.tasks[point_id]
+        decoders = {}
+        custom_decoder = self.decoders[point_id]
+        if custom_decoder is not None:
+            decoders[task.decoder] = custom_decoder
         path = _point_path(folder, point_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         (point_statistics,) = sinter.collect(
@@ -314,17 +318,6 @@ def _refuse_another_tree(path: pathlib.Path, commit: str, dirty: str) -> None:
         f"is commit {commit} dirty {dirty}; {ONE_RUN_PER_FOLDER}"
     )
     raise ValueError(message)
-
-
-def _sinter_decoders(custom_decoders: Optional[Mapping]) -> dict:
-    """The decoders sinter is handed: every named one but its built-ins."""
-    decoders = {}
-    if custom_decoders is None:
-        return decoders
-    for name, decoder in custom_decoders.items():
-        if decoder is not None:
-            decoders[name] = decoder
-    return decoders
 
 
 def _point_path(folder: pathlib.Path, point_id: int) -> pathlib.Path:

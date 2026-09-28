@@ -132,31 +132,75 @@ def test_an_unfinished_point_goes_on_from_its_saved_shots(
     assert point_statistics.shots == 700
 
 
-def test_each_point_decodes_with_the_decoder_its_name_maps_to(
+def test_each_point_decodes_with_its_own_decoder_or_a_built_in(
     tmp_path, monkeypatch
 ):
-    """A named decoder is handed to sinter; None names a sinter built-in."""
+    """A point's decoder is handed to sinter; None names a built-in."""
     write_script(tmp_path, monkeypatch)
     results_folder = tmp_path / "out"
     experiment = experiment_runner.Experiment("tiny")
     circuit = tiny_circuit(3)
+    union_find = union_find_adapter.UnionFindDecoder()
     experiment.add_offline(
-        circuit, "union-find", {"d": 3}, max_errors=5, max_shots=2000
+        circuit,
+        "union-find",
+        {"d": 3},
+        max_errors=5,
+        max_shots=2000,
+        custom_decoder=union_find,
     )
     experiment.add_offline(
         circuit, "pymatching", {"d": 3}, max_errors=5, max_shots=2000
     )
-    decoders = {
-        "union-find": union_find_adapter.UnionFindDecoder(),
-        "pymatching": None,
-    }
 
-    experiment.main(decoders, arguments=["--out", str(results_folder)])
+    experiment.main(arguments=["--out", str(results_folder)])
 
     stats_path = results_folder / "stats.csv"
     combined = sinter.read_stats_from_csv_files(stats_path)
     decoder_names = {point_statistics.decoder for point_statistics in combined}
     assert decoder_names == {"union-find", "pymatching"}
+
+
+def test_points_sharing_a_name_each_decode_with_their_own_decoder(
+    tmp_path, monkeypatch
+):
+    """Each point's decoder is compiled for that point's circuit only."""
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    experiment = experiment_runner.Experiment("tiny")
+    for distance in (3, 5):
+        circuit = tiny_circuit(distance)
+        decoder = OneCircuitDecoder(circuit)
+        experiment.add_offline(
+            circuit,
+            "one-circuit",
+            {"d": distance},
+            max_errors=5,
+            max_shots=200,
+            custom_decoder=decoder,
+        )
+
+    experiment.main(arguments=["--out", str(results_folder)])
+
+    stats_path = results_folder / "stats.csv"
+    combined = sinter.read_stats_from_csv_files(stats_path)
+    assert len(combined) == 2
+
+
+class OneCircuitDecoder(sinter.Decoder):
+    """PyMatching for one circuit; any other circuit's model is refused."""
+
+    def __init__(self, circuit: stim.Circuit) -> None:
+        self.model = circuit.detector_error_model(decompose_errors=True)
+
+    def compile_decoder_for_dem(
+        self, *, dem: stim.DetectorErrorModel
+    ) -> sinter.CompiledDecoder:
+        """The model, checked; sinter names the keyword dem."""
+        if dem != self.model:
+            raise ValueError("compiled for another point's circuit")
+        matching = sinter.BUILT_IN_DECODERS["pymatching"]
+        return matching.compile_decoder_for_dem(dem=dem)
 
 
 def test_two_points_run_at_once_write_different_files(tmp_path):

@@ -1,10 +1,12 @@
-"""The Relay-BP sinter adapter against decsim's relay_bp weak row.
+"""The Relay-BP sinter adapter against the machine's relay_bp weak row.
 
-The referent is the row itself on the same Stim samples: the batch
-path (decsim/experiments/stim_batch.py) builds the machine's one
-whole-circuit window and decodes each shot through the row's Decoder
-port, bound to a run seed at the machine's path. The adapter, given the
-gamma seed that binding draws, must answer every shot as the row does.
+The referent is the machine itself: each seed's shot runs through the
+whole machine (collect.run_shot) under the decoder baseline, whose
+naive_online scheme decodes the operation as one window, and the row's
+answer is the observables the shot's result carries. The machine binds
+shot s's row to root seed s, so the adapter decoding the events the
+machine's device drew (observe/sampled_shots.py), given the gamma seed
+that binding draws, must answer every shot as the row does.
 """
 
 import numpy
@@ -13,11 +15,12 @@ import sinter
 import stim
 import yaml
 
+import decsim.collect as collect
 import decsim.experiments.experiment as experiment
-import decsim.experiments.stim_batch as stim_batch
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 import decsim.sinter_adapters.relay_bp as relay_bp_adapter
+import decsim.windows.built_window_models as built_window_models
 import tests.experiments.yaml_configs as yaml_configs
 
 BASELINE = (
@@ -43,53 +46,65 @@ ENGINE = {
     "release_cycles_per_job": 10,
     "release_cycles_per_round": 0,
 }
+# The machine's seed path to its weak row's gamma table: the router's
+# seed root (assembly.SEED_ROOTS, decoder_router), its default row, the
+# row's algorithm decoder, and the window decoder that draws the table
+# (decoders/relay_belief_propagation/window_decoder.py).
+GAMMA_TABLE_SEED_PATH = (
+    seed_records.RunSeedPathSegment("field", "decoder_router"),
+    seed_records.RunSeedPathSegment("field", "default"),
+    seed_records.RunSeedPathSegment("field", "decoder"),
+    seed_records.RunSeedPathSegment("field", "window_decoder"),
+)
 ROUNDS = 5
-# At this rate the first leg often fails, so the drawn gamma table
-# decides some shots (at d 5, 11 of these 300 in X and 4 in Z change
-# under another seed), and a wrong table or column order shows.
+# At this rate the first leg sometimes fails, so the gamma table decides
+# some shots and a wrong seed, table or column order shows.
 ERROR_RATE = 0.01
-# 300 seeds from 900 cross the sampler's block of 1024 seeds, and
-# sinter's batches of 128 shots cross each other
-FIRST_SEED = 900
-SHOT_COUNT = 300
-BATCH_SHOT_COUNT = 128
-ROOT_SEED = 7
+FIRST_SEEDS = tuple(range(10))
 
 
+# Each case's table seeds are the shots whose answer the gamma table
+# decides, where the adapter given another seed answers otherwise: every
+# one in seeds 0 to 399, and to 1199 at d 3 with bases apart, where they
+# are rarer. Another Stim version may draw other samples for a seed,
+# which moves the shots the table decides, never the equality.
 @pytest.mark.parametrize(
-    ("distance", "code_task", "bases"),
+    ("distance", "code_task", "bases", "table_seeds"),
     [
-        (3, "surface_code:rotated_memory_x", "apart"),
-        (3, "surface_code:rotated_memory_z", "apart"),
-        (5, "surface_code:rotated_memory_x", "apart"),
-        (5, "surface_code:rotated_memory_z", "apart"),
-        (3, "surface_code:rotated_memory_z", "together"),
+        (3, "surface_code:rotated_memory_x", "apart", (2, 633)),
+        (
+            3,
+            "surface_code:rotated_memory_z",
+            "apart",
+            (266, 406, 474, 621, 1000),
+        ),
+        (
+            5,
+            "surface_code:rotated_memory_x",
+            "apart",
+            (81, 99, 123, 275, 376, 386),
+        ),
+        (
+            5,
+            "surface_code:rotated_memory_z",
+            "apart",
+            (41, 95, 135, 162, 278, 335),
+        ),
+        (3, "surface_code:rotated_memory_z", "together", (54, 152, 251, 290)),
     ],
 )
-def test_the_adapter_answers_as_the_relay_bp_row_shot_for_shot(
-    tmp_path, distance, code_task, bases
+def test_the_adapter_answers_as_the_machines_relay_bp_row_shot_for_shot(
+    tmp_path, distance, code_task, bases, table_seeds
 ):
     settings = {**RELAY_SETTINGS, "bases": bases}
     task = relay_bp_task(tmp_path, distance, code_task, settings)
-    circuit = stim_batch.circuit_of(task)
-    events, _observables = stim_batch.samples_of_seeds(
-        circuit, FIRST_SEED, SHOT_COUNT
-    )
-    window = stim_batch.WholeCircuitWindow(task)
-    row = stim_batch.bound_row(task, ROOT_SEED)
-    row_answers = row_predictions(window, row, events)
-    seed = gamma_seed(ROOT_SEED)
-    decoder = relay_bp_adapter.RelayBeliefPropagationDecoder(
-        circuit, settings, seed
-    )
-    model = circuit.detector_error_model(
-        decompose_errors=True, approximate_disjoint_errors=True
-    )
-    compiled = decoder.compile_decoder_for_dem(dem=model)
+    seeds = (*FIRST_SEEDS, *table_seeds)
+    events, machine_answers = machine_shots(task, seeds)
+    (operation,) = task.settings.workload.operations
 
-    adapter_answers = batched_predictions(compiled, circuit, events)
+    adapter_answers = seeded_answers(operation.circuit, settings, seeds, events)
 
-    numpy.testing.assert_array_equal(adapter_answers, row_answers)
+    numpy.testing.assert_array_equal(adapter_answers, machine_answers)
 
 
 @pytest.mark.parametrize(
@@ -145,7 +160,7 @@ def test_sinter_collects_through_the_adapter():
 
 
 def relay_bp_task(tmp_path, distance: int, code_task: str, settings: dict):
-    """The one batch point of a relay_bp row, short shots."""
+    """The one machine point of a relay_bp row, short shots."""
     row = {
         "kind": "relay_bp",
         "units": 1,
@@ -155,7 +170,6 @@ def relay_bp_task(tmp_path, distance: int, code_task: str, settings: dict):
     }
     raw = {
         "extends": str(BASELINE),
-        "sampling": "stim_batch",
         "workload": {
             "kind": "producer",
             "function": "decsim.producers:memory_circuit",
@@ -183,35 +197,52 @@ def relay_bp_task(tmp_path, distance: int, code_task: str, settings: dict):
     return config.first_point_task()
 
 
-def gamma_seed(root_seed: int) -> int:
-    """The seed the row's gamma table draws under the machine's path."""
-    window_decoder_field = seed_records.RunSeedPathSegment(
-        "field", "window_decoder"
+def machine_shots(task, seeds) -> tuple:
+    """Each seed's machine shot: the events drawn, the observables predicted.
+
+    The events are the ones the device drew for the point's one
+    operation, and the prediction is the correction the machine
+    committed for it.
+    """
+    built_models = built_window_models.BuiltWindowModels()
+    (operation,) = task.settings.workload.operations
+    events = []
+    answers = []
+    for seed in seeds:
+        shot = collect.run_shot(task, seed, built_models=built_models)
+        sampled_shots = shot.machine.observation.sampled_shots
+        sampled = sampled_shots.shots_by_operation[operation.id]
+        events.append(sampled.detection_events)
+        (operation_result,) = shot.result.operation_results
+        answers.append(operation_result.logical_observables)
+    event_array = numpy.asarray(events, dtype=numpy.uint8)
+    answer_array = numpy.asarray(answers, dtype=numpy.uint8)
+    return event_array, answer_array
+
+
+def seeded_answers(circuit, settings: dict, seeds, events) -> numpy.ndarray:
+    """Each shot decoded by an adapter given the gamma seed of its own seed.
+
+    The machine draws each shot's gamma table afresh, so each shot has
+    an adapter of its own, handed that one shot as a sinter batch.
+    """
+    model = circuit.detector_error_model(
+        decompose_errors=True, approximate_disjoint_errors=True
     )
-    path = (*stim_batch.ROW_SEED_PATH, window_decoder_field)
-    return seeding.derive_component_seed(root_seed, path)
-
-
-def row_predictions(window, row, events) -> numpy.ndarray:
-    """Each shot's predicted observables from the row's Decoder port."""
-    predictions = []
-    for shot_events in events:
-        result = window.result_of(row, shot_events)
-        predictions.append(result.logical_observables)
-    return numpy.asarray(predictions, dtype=numpy.uint8)
-
-
-def batched_predictions(compiled, circuit, events) -> numpy.ndarray:
-    """The adapter's answers, handed the shots in sinter-sized batches."""
     packed_events = numpy.packbits(events, axis=1, bitorder="little")
     answers = []
-    for start in range(0, SHOT_COUNT, BATCH_SHOT_COUNT):
-        batch = packed_events[start : start + BATCH_SHOT_COUNT]
-        packed_answers = compiled.decode_shots_bit_packed(
+    for seed, shot_events in zip(seeds, packed_events, strict=True):
+        table_seed = seeding.derive_component_seed(seed, GAMMA_TABLE_SEED_PATH)
+        decoder = relay_bp_adapter.RelayBeliefPropagationDecoder(
+            circuit, settings, table_seed
+        )
+        compiled = decoder.compile_decoder_for_dem(dem=model)
+        batch = numpy.expand_dims(shot_events, 0)
+        (packed_answer,) = compiled.decode_shots_bit_packed(
             bit_packed_detection_event_data=batch
         )
-        answers.append(packed_answers)
-    packed = numpy.concatenate(answers)
+        answers.append(packed_answer)
+    packed_answers = numpy.asarray(answers)
     return numpy.unpackbits(
-        packed, axis=1, count=circuit.num_observables, bitorder="little"
+        packed_answers, axis=1, count=circuit.num_observables, bitorder="little"
     )

@@ -106,14 +106,17 @@ def draw_false_alarms(quiet_rows: list, folder: pathlib.Path) -> None:
     error_rates = sorted({row["p"] for row in rows})
     rate_labels = [f"{rate:g}" for rate in error_rates]
     lines = run.FALSE_ALARMS_PER_SECOND
-    figure, axis_by_line = plots.panels("target per second", lines)
+    figure, axis_by_line = plots.panels("target false alarms per second", lines)
     for line, axis in axis_by_line.items():
         line_rows = plots.chosen(rows, alarm_line=line)
         plots.values(axis, line_rows, "p", "measured", "d", "low", "high")
         axis.axhline(line, color="grey", linestyle="--")
         axis.set_xscale("log")
         axis.set_yscale("log")
-        axis.set_xticks(error_rates, rate_labels, minor=False)
+        axis.set_xticks(error_rates, rate_labels)
+        axis.set_xticks([], minor=True)
+        # six rates in one decade: slanted, their labels do not meet
+        axis.tick_params(axis="x", labelrotation=45)
         axis.set_xlabel("physical error rate p")
         axis.set_ylabel("false alarms per second")
     path = folder / "false_alarms.png"

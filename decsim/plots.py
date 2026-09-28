@@ -209,22 +209,35 @@ def distribution(
 
 
 def heatmap(
-    axis: pyplot.Axes, rows: list, x: str, y: str, value: str, label: str
+    axis: pyplot.Axes,
+    rows: list,
+    x: str,
+    y: str,
+    value: str,
+    label: str,
+    is_log_scale: bool = True,
 ) -> None:
-    """The value column on an x by y grid, log colours, zero cells white."""
+    """The value column on an x by y grid, cells no row fills white.
+
+    On the log scale a zero cell is white too; the linear scale, for a
+    share, colours a zero like any value, and a NaN value is white.
+    """
     xs = sorted({row[x] for row in rows})
     ys = sorted({row[y] for row in rows})
-    grid = numpy.zeros((len(ys), len(xs)))
+    grid = numpy.full((len(ys), len(xs)), numpy.nan)
     for row in rows:
         column = xs.index(row[x])
         line = ys.index(row[y])
         grid[line, column] = row[value]
-    masked = numpy.ma.masked_equal(grid, 0)
+    masked = numpy.ma.masked_invalid(grid)
+    norm = matplotlib.colors.Normalize()
+    if is_log_scale:
+        masked = numpy.ma.masked_equal(masked, 0)
+        norm = matplotlib.colors.LogNorm()
     colormap = matplotlib.colormaps["viridis"]
-    white_zeros = colormap.with_extremes(bad="white")
-    norm = matplotlib.colors.LogNorm()
+    white_blanks = colormap.with_extremes(bad="white")
     mesh = axis.pcolormesh(
-        xs, ys, masked, shading="nearest", cmap=white_zeros, norm=norm
+        xs, ys, masked, shading="nearest", cmap=white_blanks, norm=norm
     )
     figure = axis.figure
     figure.colorbar(mesh, ax=axis, label=label)

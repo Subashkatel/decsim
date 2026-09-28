@@ -176,6 +176,33 @@ def test_heatmap_leaves_a_zero_cell_blank_and_labels_its_colour_bar():
     pyplot.close(figure)
 
 
+def test_a_linear_heatmap_colours_a_zero_and_leaves_a_missing_cell_blank():
+    rows = [
+        {"d": 5, "p": 0.001, "share": 0.0},
+        {"d": 5, "p": 0.002, "share": 0.5},
+        {"d": 7, "p": 0.001, "share": float("nan")},
+        {"d": 7, "p": 0.002, "share": 1.0},
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.heatmap(
+        axis,
+        rows,
+        x="p",
+        y="d",
+        value="share",
+        label="share",
+        is_log_scale=False,
+    )
+
+    mesh = axis.collections[0]
+    grid = mesh.get_array()
+    norm = mesh.norm
+    assert grid.mask.tolist() == [[False, False], [True, False]]
+    assert (norm.vmin, norm.vmax) == (0.0, 1.0)
+    pyplot.close(figure)
+
+
 def test_share_below_counts_each_value_strictly_below_a_threshold():
     shares = plots.share_below([3, 1, 2], [1, 2, 3], [1, 2, 2.5, 4])
 

@@ -11,7 +11,7 @@ _THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
 REPOSITORY_ROOT = _TEST_FILE.parents[3]
 SCRIPT_FOLDER = REPOSITORY_ROOT / "experiments" / "burst_detection"
-EXPECTED_PLOTS = {
+EXPECTED_POINT_PLOTS = {
     "caught_share_d5_p0.003.png",
     "median_delay_d5_p0.003.png",
     "catch_against_false_alarms_d5_p0.003.png",
@@ -19,6 +19,19 @@ EXPECTED_PLOTS = {
     "traces_1_d5_p0.003.png",
     "traces_0.1_d5_p0.003.png",
     "traces_0.03_d5_p0.003.png",
+}
+EXPECTED_CROSS_PLOTS = {
+    "d5_p0.003",
+    "false_alarm_check.png",
+    "caught_share_against_d_1.png",
+    "caught_share_against_d_0.1.png",
+    "caught_share_against_d_0.03.png",
+    "caught_share_against_p_1.png",
+    "caught_share_against_p_0.1.png",
+    "caught_share_against_p_0.03.png",
+    "median_delay_against_d_1.png",
+    "median_delay_against_d_0.1.png",
+    "median_delay_against_d_0.03.png",
 }
 
 
@@ -62,14 +75,20 @@ def test_the_quiet_parts_sum_to_one_row_per_line(monkeypatch):
     }
 
 
-def test_every_figure_is_drawn_for_each_rate(tmp_path, monkeypatch):
+def test_each_rate_gets_a_folder_of_figures_beside_the_cross_ones(
+    tmp_path, monkeypatch
+):
     plot = script_module(monkeypatch)
     write_rows(tmp_path, plot.run)
 
     plot.main(tmp_path)
 
-    written = {path.name for path in (tmp_path / "plots").iterdir()}
-    assert written == EXPECTED_PLOTS
+    plots_folder = tmp_path / "plots"
+    point_folder = plots_folder / "d5_p0.003"
+    written = {path.name for path in plots_folder.iterdir()}
+    point_written = {path.name for path in point_folder.iterdir()}
+    assert written == EXPECTED_CROSS_PLOTS
+    assert point_written == EXPECTED_POINT_PLOTS
 
 
 def trial_row(trial: int, first_alarm_b) -> dict:

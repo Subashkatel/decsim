@@ -335,8 +335,14 @@ def _write_rows_once(path: pathlib.Path, rows: list) -> None:
 
 
 def _combine_rows(folder: pathlib.Path, points: list) -> None:
-    """Each results file: its saved points' rows, in point order."""
+    """Each results file: its saved points' rows, in point order.
+
+    The rows are joined as text under the first point's header, so a
+    point whose header differs is refused rather than read under the
+    wrong columns.
+    """
     lines_by_file = {}
+    first_path_by_file = {}
     for point_id, point in enumerate(points):
         path = point_path(folder, point_id)
         if not path.exists():
@@ -345,11 +351,34 @@ def _combine_rows(folder: pathlib.Path, points: list) -> None:
         point_lines = point_text.splitlines(keepends=True)
         header, *rows = point_lines
         file_lines = lines_by_file.setdefault(point.results_file, [header])
+        first_path = first_path_by_file.setdefault(point.results_file, path)
+        if header != file_lines[0]:
+            _refuse_a_different_header(first_path, path)
         file_lines.extend(rows)
     for results_file, file_lines in lines_by_file.items():
         results_path = folder / results_file
         text = "".join(file_lines)
         results_path.write_text(text)
+
+
+def _refuse_a_different_header(
+    first_path: pathlib.Path, path: pathlib.Path
+) -> None:
+    first_header = _header(first_path)
+    header = _header(path)
+    message = (
+        f"{path} has the columns {header} but {first_path} has {first_header}; "
+        "the rows of one results file are joined under one header, so its "
+        "points must save the same columns in the same order"
+    )
+    raise ValueError(message)
+
+
+def _header(path: pathlib.Path) -> str:
+    """A saved CSV's first line, without its line end."""
+    with path.open() as saved_file:
+        first_line = saved_file.readline()
+    return first_line.rstrip("\n")
 
 
 def _refuse_no_workers(worker_count: int) -> None:

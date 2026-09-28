@@ -583,6 +583,30 @@ def test_combine_gathers_each_results_files_rows_under_one_header(
     assert quiet_text == "d,alarms\n3,7\n"
 
 
+def test_combine_refuses_a_point_whose_columns_come_in_another_order(
+    tmp_path, monkeypatch
+):
+    """Joined as text, the second point's alarm would read as a trial."""
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    experiment = experiment_runner.Experiment("tiny")
+    experiment.add_point(two_trials, {"d": 3}, "trials.csv")
+    experiment.add_point(two_trials_other_order, {"d": 5}, "trials.csv")
+    first_path = experiment_runner.point_path(results_folder, 0)
+    second_path = experiment_runner.point_path(results_folder, 1)
+
+    with pytest.raises(ValueError) as refused:
+        experiment.main(arguments=["--out", str(results_folder)])
+
+    assert str(refused.value) == (
+        f"{second_path} has the columns d,first_alarm,trial but "
+        f"{first_path} has d,trial,first_alarm; the rows of one results "
+        "file are joined under one header, so its points must save the "
+        "same columns in the same order"
+    )
+    assert not (results_folder / "trials.csv").exists()
+
+
 def test_list_prints_each_function_points_file_and_labels(capsys):
     experiment = experiment_runner.Experiment("tiny")
     experiment.add_point(two_trials, {"d": 3, "p": 0.003}, "trials.csv")
@@ -630,6 +654,16 @@ def test_a_function_point_that_returns_no_rows_is_refused(
         "least one, so that its CSV says it ran"
     )
     assert not (results_folder / "points" / "0.csv").exists()
+
+
+def two_trials_other_order(
+    _labels: dict, _seed: int, _folder: pathlib.Path
+) -> list:
+    """two_trials' rows with their two columns the other way round."""
+    return [
+        {"first_alarm": 1004, "trial": 0},
+        {"first_alarm": None, "trial": 1},
+    ]
 
 
 def two_trials(_labels: dict, _seed: int, _folder: pathlib.Path) -> list:

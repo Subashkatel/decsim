@@ -3,11 +3,17 @@
 The row alarms on the rounds written_rules.py's transcription of the
 multichart rule (Zhang et al. 1410.8765 lines 338-350) alarms on, and
 its calibrated thresholds hold Stim's quiet shots to the target rate.
+Its offline form, AlarmLines, scores a stream as the written rules do
+and holds the row's own thresholds at each of its rates.
 """
+
+import dataclasses
+import functools
 
 import numpy
 import pytest
 
+import decsim.burst_detectors.masked_regional_cusum.detector as detector_module
 import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
@@ -58,7 +64,8 @@ def test_quiet_shots_alarm_at_the_calibrated_rate():
     calibration = detector.charts_by_operation[1].calibration
     rows = _quiet_rows(4000, 11, calibration.layout.positions)
 
-    maxima = calibration.bank.block_maxima(rows, 2)
+    state = calibration.bank.new_state(4000, 2)
+    maxima = calibration.bank.block_maxima(state, rows, 2)
 
     reaches = maxima >= calibration.thresholds
     is_alarmed = reaches.any(axis=1)
@@ -185,6 +192,141 @@ def test_the_cusum_keys_reach_the_rows_settings():
     assert settings.fault_rate_multipliers == (3.0,)
     assert settings.datapath_count == 2
     assert settings.clock == burst_rounds.CLOCKS.clock("fridge")
+
+
+# Shares 0.1 and 0.02 of the 160-round shots of 1 us each.
+LINE_RATES = (625.0, 125.0)
+LINE_SETTINGS = burst_rounds.CUSUM.Settings(calibration_shot_count=2000)
+
+
+def test_lines_with_no_warm_up_and_one_shot_a_stream_are_cold_thresholds():
+    """1,000 streams of one shot from cold are the row's 1,000 cold shots."""
+    one_shot_settings = dataclasses.replace(
+        LINE_SETTINGS, calibration_shot_count=1000
+    )
+    circuit = long_circuit()
+    lines = detector_module.AlarmLines.calibrated(
+        circuit,
+        burst_rounds.LONG_ROUNDS,
+        one_shot_settings,
+        1.0,
+        LINE_RATES,
+        warm_up_shots=0,
+    )
+    first_settings = dataclasses.replace(
+        one_shot_settings, false_alarms_per_second=625.0
+    )
+    second_settings = dataclasses.replace(
+        one_shot_settings, false_alarms_per_second=125.0
+    )
+
+    first_row = burst_rounds.cusum_detector(
+        first_settings, rounds=burst_rounds.LONG_ROUNDS
+    )
+    second_row = burst_rounds.cusum_detector(
+        second_settings, rounds=burst_rounds.LONG_ROUNDS
+    )
+
+    first_calibration = first_row.charts_by_operation[1].calibration
+    second_calibration = second_row.charts_by_operation[1].calibration
+    assert list(lines.levels[0]) == list(first_calibration.thresholds)
+    assert list(lines.levels[1]) == list(second_calibration.thresholds)
+
+
+@pytest.mark.parametrize("rate", [0.0, -1.0])
+def test_lines_at_a_rate_of_zero_or_below_are_refused(rate):
+    """Refused before any quiet shot is drawn or any level is read."""
+    circuit = long_circuit()
+
+    with pytest.raises(ValueError) as refused:
+        detector_module.AlarmLines.calibrated(
+            circuit,
+            burst_rounds.LONG_ROUNDS,
+            LINE_SETTINGS,
+            1.0,
+            [125.0, rate],
+            warm_up_shots=0,
+        )
+
+    assert str(refused.value) == (
+        "burst_detector.false_alarms_per_second must be a rate above zero "
+        f"(got {rate!r})"
+    )
+
+
+def test_two_shots_on_one_state_score_as_one_stream_of_the_written_rules():
+    """A quiet shot, then a burst shot; the rules read their rows joined."""
+    lines = long_alarm_lines()
+    circuit, burst_shot = burst_rounds.long_burst_shot(seed=4)
+    sampler = circuit.compile_detector_sampler(seed=5)
+    quiet_shots = sampler.sample(1)
+    state = lines.new_state(1)
+
+    quiet_ratios = lines.score_ratios(state, quiet_shots)
+    burst_shots = burst_shot[None, :]
+    burst_ratios = lines.score_ratios(state, burst_shots)
+
+    positions, pairs, usual_rates = line_inputs(lines)
+    quiet_rows = burst_rounds.bulk_rows(circuit, quiet_shots[0], positions)
+    burst_rows = burst_rounds.bulk_rows(circuit, burst_shot, positions)
+    rows = numpy.concatenate([quiet_rows, burst_rows])
+    reference, _ = written_rules.reference_scores(
+        rows, positions, pairs, usual_rates
+    )
+    reference_scores = reference[:, None, :]
+    reference_ratios = reference_scores / lines.levels
+    expected = numpy.max(reference_ratios, axis=2)
+    scored = numpy.concatenate([quiet_ratios[0], burst_ratios[0]])
+    assert numpy.allclose(scored, expected)
+    assert expected.max() >= 1.0
+
+
+def test_a_first_alarm_is_the_first_round_a_line_fires_from_the_earliest():
+    """Offset i is round 2 + i on d = 5; a firing before round 3 is unread."""
+    lines = long_alarm_lines()
+    ratios = numpy.zeros((2, 5, 2))
+    ratios[0, 1, 0] = 1.0
+    ratios[0, 3, 0] = 2.0
+    ratios[1, 4, 0] = 1.5
+    ratios[1, 0, 1] = 3.0
+    ratios[1, 2, 1] = 0.99
+
+    first_rounds = lines.first_alarm_rounds(ratios, earliest_round=3)
+
+    no_alarm = detector_module.NO_ALARM
+    assert first_rounds.tolist() == [[3, no_alarm], [6, no_alarm]]
+
+
+@functools.lru_cache(maxsize=1)
+def long_alarm_lines() -> detector_module.AlarmLines:
+    """The 160-round d = 5 memory's lines at LINE_RATES, built once."""
+    circuit = long_circuit()
+    return detector_module.AlarmLines.calibrated(
+        circuit,
+        burst_rounds.LONG_ROUNDS,
+        LINE_SETTINGS,
+        1.0,
+        LINE_RATES,
+        warm_up_shots=1,
+    )
+
+
+def long_circuit():
+    return workload_settings.memory_circuit(
+        burst_rounds.CODE_TASK,
+        burst_rounds.LONG_ROUNDS,
+        burst_rounds.DISTANCE,
+        burst_rounds.PHYSICAL_ERROR_PROBABILITY,
+    )
+
+
+def line_inputs(lines: detector_module.AlarmLines) -> tuple:
+    """The bank's positions, pairs and floored usual rates."""
+    pairs = []
+    for row in lines.bank.pair_incidence:
+        checks = numpy.flatnonzero(row)
+        pairs.append(tuple(checks))
+    return lines.layout.positions, pairs, lines.bank.usual_rates
 
 
 def _fired_rounds(flags):

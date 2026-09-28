@@ -53,9 +53,13 @@ qpu:
                                    # defaults (a probability of 0 is no
                                    # burst, and the shot is stim_device's):
   # burst_onset_round: 1           # the first one-based round with extra noise
-  # burst_decay_rounds: null       # the extra probability in round r is
-                                   # burst_error_probability x exp(-(r -
-                                   # onset) / burst_decay_rounds), McEwen's
+  # burst_rise_rounds: 1           # rounds to climb to the peak, linearly:
+                                   # (i + 1) / rise of it in the onset's
+                                   # i-th round; 1 is a step, 3 Willow's
+                                   # large bursts (2408.13687 data)
+  # burst_decay_rounds: null       # from the peak, the extra probability
+                                   # r rounds on is burst_error_probability
+                                   # x exp(-r / burst_decay_rounds), McEwen's
                                    # exponential recovery (2104.05219: about
                                    # 25 ms on Sycamore; 400-700 us on Willow,
                                    # 2408.13687); null holds it to the end
@@ -63,7 +67,7 @@ qpu:
                                    # burst_center; null is every qubit
   # burst_center: null             # [x, y]; null is the middle of the
                                    # qubits' coordinates
-  # burst_error_probability: 0.0   # the extra probability at onset, 0 to 0.75
+  # burst_error_probability: 0.0   # the extra probability at the peak, 0 to 0.75
   # burst_channels: [gate, idle, measurement, reset]
                                    # the noise it raises, named for where
                                    # Stim's generator puts each parameter
@@ -309,10 +313,10 @@ burst_detector:
 #                                  # catches it in time, the shots.csv
 #                                  # column burst_caught_in_time and the
 #                                  # sweep.csv caught_in_time_share. 300 is
-#                                  # half the 600-round decay of the
-#                                  # burst the comparison grid draws
-#                                  # (configs/experiments/burst_detection/
-#                                  # burst_detection.yaml)
+#                                  # half the 600-round decay of Willow's
+#                                  # large bursts (2408.13687), so a burst
+#                                  # counts as caught while it is still
+#                                  # strong
 #
 # burst_detector:
 #   kind: event_count              # the simple count baseline: the patch's

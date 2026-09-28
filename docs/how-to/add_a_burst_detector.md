@@ -83,11 +83,15 @@ give each of your modules its own test file, and add your row to
 `test_each_row_reports_every_round_it_fires_on` in
 `tests/burst_detectors/test_settings.py`.
 
-## 5. Compare it
+## 5. Measure it
 
-Add your row's `burst_detector` value to the `burst_detector` axis of
-`configs/experiments/burst_detection/burst_detection.yaml`, then follow
-[How to compare burst detectors](compare_burst_detectors.md).
+`experiments/burst_detection/run.py` measures `masked_regional_cusum`
+offline: its catches of bursts of four sizes and three strengths, and
+its false alarms on 104 s of quiet stream, at three alarm lines
+([How to run an experiment](run_an_experiment.md)). It scores whole
+shots through `AlarmLines` in
+`decsim/burst_detectors/masked_regional_cusum/detector.py`; a row
+that scores a stream of shots the same way can take its place there.
 
 ## Read next
 

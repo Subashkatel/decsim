@@ -55,6 +55,33 @@ def test_a_null_mask_count_scores_the_unmasked_regional_cusum():
     numpy.testing.assert_allclose(scores, reference, rtol=1e-9, atol=1e-9)
 
 
+def test_block_maxima_on_a_carried_state_are_the_rules_later_maxima():
+    """The burst shot's rows cut in two; the second part scored warm."""
+    settings = burst_rounds.CUSUM.Settings(calibration_shot_count=200)
+    detector = burst_rounds.cusum_detector(
+        settings, rounds=burst_rounds.LONG_ROUNDS
+    )
+    positions, pairs, usual_rates = burst_rounds.bank_inputs(detector)
+    circuit, sampled = burst_rounds.long_burst_shot(seed=4)
+    rows = burst_rounds.bulk_rows(circuit, sampled, positions)
+    bank = detector.charts_by_operation[1].calibration.bank
+    state = bank.new_state(1, 2)
+    earlier_rows = rows[None, :60]
+    later_rows = rows[None, 60:]
+
+    bank.block_maxima(state, earlier_rows, 2)
+    later_maxima = bank.block_maxima(state, later_rows, 2)
+
+    reference, _ = written_rules.reference_scores(
+        rows, positions, pairs, usual_rates
+    )
+    reference_later = reference[60:]
+    expected = reference_later.max(axis=0)
+    numpy.testing.assert_allclose(
+        later_maxima[0], expected, rtol=1e-9, atol=1e-9
+    )
+
+
 def test_no_radii_leave_the_whole_patch_the_only_region():
     settings = burst_rounds.CUSUM.Settings(
         region_radii=(), calibration_shot_count=200

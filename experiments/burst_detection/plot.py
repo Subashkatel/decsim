@@ -4,8 +4,8 @@
 and p gets its own folder, plots/d<d>_p<p>/, holding: the share of
 bursts caught within 300 rounds of onset and the median delay of the
 caught ones, size by strength, a panel per alarm line, each cell
-holding its value; the share caught against the false alarms measured
-on the quiet stream, a curve per strength, a panel per size; the false
+holding its value; the share caught against the false alarm rate each
+line asks for, a curve per strength, a panel per size; the false
 alarms measured against those asked for; and each class's example
 trace, a figure per alarm line. plots/ itself holds the figures across
 d and p, one per alarm line: the share caught against d and the median
@@ -40,6 +40,7 @@ LINES = list(run.FALSE_ALARMS_PER_SECOND)
 TRACE_CEILING = 2.0
 CAUGHT_LABEL = f"share caught within {CATCH_DEADLINE_ROUNDS} rounds"
 DELAY_LABEL = "median rounds to the first alarm"
+ASKED_LABEL = "false alarms per s asked"
 
 
 def main(folder: pathlib.Path) -> None:
@@ -55,7 +56,7 @@ def main(folder: pathlib.Path) -> None:
     plots_folder.mkdir(exist_ok=True)
     class_rows = class_summaries(trials)
     checked_rows = false_alarm_rows(quiet)
-    stats = catch_stats(class_rows, checked_rows)
+    stats = catch_stats(class_rows)
     rate_points = sorted({(row["d"], row["p"]) for row in quiet})
     for distance, error_rate in rate_points:
         point = {"d": distance, "p": error_rate}
@@ -132,20 +133,11 @@ def false_alarm_rows(quiet: list) -> list:
     return rows
 
 
-def catch_stats(class_rows: list, checked_rows: list) -> list:
-    """Each class summary as the counts count_rate reads.
-
-    A stat also holds the false alarms measured at its d, p and line.
-    """
-    measured_by_key = {}
-    for row in checked_rows:
-        key = (row["d"], row["p"], row["asked"])
-        measured_by_key[key] = row["measured"]
+def catch_stats(class_rows: list) -> list:
+    """Each class summary as the counts count_rate reads."""
     stats = []
     for row in class_rows:
-        key = (row["d"], row["p"], row["alarm_line"])
-        measured = measured_by_key[key]
-        stat = _catch_stat(row, measured)
+        stat = _catch_stat(row)
         stats.append(stat)
     return stats
 
@@ -192,7 +184,13 @@ def draw_heatmaps(class_rows: list, folder: pathlib.Path, point: dict) -> None:
 def draw_catch_against_false_alarms(
     stats: list, folder: pathlib.Path, point: dict
 ) -> None:
-    """The share caught in time against false alarms measured, per size."""
+    """The share caught in time against the rate each line asks for.
+
+    The asked rate, not the measured one, places a line: a line whose
+    quiet stream saw no false alarm measures zero, which a log axis
+    cannot show, and the false alarm check already sets measured
+    against asked.
+    """
     suffix = _suffix(point)
     title = _title(point)
     figure, axis_by_size = plots.panels("size", SIZES, columns=2)
@@ -201,7 +199,7 @@ def draw_catch_against_false_alarms(
         plots.count_rate(
             axis,
             size_stats,
-            x="false alarms per s",
+            x=ASKED_LABEL,
             hits="caught",
             total="bursts",
             curve="strength",
@@ -383,7 +381,7 @@ def _name_false_alarm_axes(axis: matplotlib.axes.Axes) -> None:
     axis.plot(LINES, LINES, color="grey", linestyle="--", label="asked")
     axis.set_xscale("log")
     axis.set_yscale("log")
-    axis.set_xlabel("false alarms per s asked")
+    axis.set_xlabel(ASKED_LABEL)
     axis.set_ylabel("false alarms per s measured, 95% Poisson")
 
 
@@ -467,7 +465,7 @@ def _measured_rate(quiet_row: dict) -> float:
     return quiet_row["alarms"] / quiet_row["quiet_seconds"]
 
 
-def _catch_stat(row: dict, measured: float) -> sinter.TaskStats:
+def _catch_stat(row: dict) -> sinter.TaskStats:
     """A class's catches at one line, as the counts count_rate reads."""
     metadata = {
         "d": row["d"],
@@ -475,7 +473,7 @@ def _catch_stat(row: dict, measured: float) -> sinter.TaskStats:
         "size": row["size"],
         "strength": row["strength"],
         "alarm_line": row["alarm_line"],
-        "false alarms per s": measured,
+        ASKED_LABEL: row["alarm_line"],
     }
     counts = collections.Counter(
         {"caught": row["caught"], "bursts": row["bursts"]}

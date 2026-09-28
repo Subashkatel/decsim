@@ -55,6 +55,18 @@ def test_a_class_counts_catches_by_300_rounds_and_its_median_delay(
     assert summary["median_delay"] == 300.0
 
 
+def test_a_classs_catches_sit_at_its_lines_asked_rate(monkeypatch):
+    """No quiet row is read, so a line that saw no quiet alarm still shows."""
+    plot = script_module(monkeypatch)
+    trials = [trial_row(0, 1000), trial_row(1, None)]
+    (summary,) = plot.class_summaries(trials)
+
+    (stat,) = plot.catch_stats([summary])
+
+    assert stat.json_metadata["false alarms per s asked"] == 0.1
+    assert stat.custom_counts == {"caught": 1, "bursts": 2}
+
+
 def test_the_quiet_parts_sum_to_one_row_per_line(monkeypatch):
     plot = script_module(monkeypatch)
     parts = [

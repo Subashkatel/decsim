@@ -96,6 +96,7 @@ FIRST_SEEDS = tuple(range(10))
 def test_the_adapter_answers_as_the_machines_relay_bp_row_shot_for_shot(
     tmp_path, distance, code_task, bases, table_seeds
 ):
+    pytest.importorskip("relay_bp")
     settings = {**RELAY_SETTINGS, "bases": bases}
     task = relay_bp_task(tmp_path, distance, code_task, settings)
     seeds = (*FIRST_SEEDS, *table_seeds)
@@ -136,6 +137,7 @@ def test_settings_the_row_does_not_accept_are_refused(settings, refusal):
 
 
 def test_sinter_collects_through_the_adapter():
+    pytest.importorskip("relay_bp")
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z",
         distance=3,

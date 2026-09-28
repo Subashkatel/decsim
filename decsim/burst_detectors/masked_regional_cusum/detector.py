@@ -5,7 +5,9 @@ chart reaches its group's threshold, the multichart CUSUM rule (Zhang
 et al. 1410.8765 lines 338-350). The thresholds are read off quiet
 shots of the operation's own circuit (thresholds.py). A flag's onset is
 the CUSUM's own change point, the round after the leading chart was
-last zero (Xie et al. 2104.04186 lines 323-325).
+last zero (Xie et al. 2104.04186 lines 323-325). AlarmLines is the same
+bank offline: whole shots of detection events scored at once, at
+several false alarm rates.
 """
 
 import dataclasses
@@ -36,6 +38,8 @@ CALIBRATION_SEED = 0
 # calibration holds.
 CALIBRATION_BATCH_SHOTS = 1000
 MICROSECONDS_PER_SECOND = 1e6
+# AlarmLines.first_alarm_rounds' round for a line that never fires
+NO_ALARM = -1
 # Operation ids are opaque identities chosen by the workload; Any names
 # them in the port's signatures.
 
@@ -169,6 +173,99 @@ class MaskedRegionalCusumBurstDetector:
 
 
 @dataclasses.dataclass(frozen=True)
+class AlarmLines:
+    """One circuit's chart bank, read at several false alarm rates at once.
+
+    The row's own bank and calibration, offline: a line is one rate's
+    group levels, all read off the same quiet shots the row calibrates
+    on, and a whole stream of detection events is scored at once rather
+    than round by round through observe_round.
+    """
+
+    layout: layout_module.Layout
+    bank: chart_bank.ChartBank
+    # (lines, groups): each line's level for every group
+    levels: numpy.ndarray
+
+    @classmethod
+    def calibrated(
+        cls,
+        circuit: stim.Circuit,
+        round_count: int,
+        settings: MaskedRegionalCusumBurstDetector.Settings,
+        round_period_microseconds: float,
+        false_alarms_per_second: Sequence[float],
+    ) -> "AlarmLines":
+        """The bank and one line per rate; settings' own rate is unread."""
+        shot_seconds = _shot_seconds(round_count, round_period_microseconds)
+        target_shares = []
+        for rate in false_alarms_per_second:
+            target_share = _shot_target(rate, shot_seconds)
+            target_shares.append(target_share)
+        layout, bank, maxima = _calibration_maxima(
+            circuit, round_count, settings
+        )
+        line_levels = []
+        for target_share in target_shares:
+            levels = thresholds.bank_thresholds(maxima, target_share)
+            line_levels.append(levels)
+        stacked = numpy.stack(line_levels)
+        is_positive = stacked > 0
+        assert is_positive.all(), "a level is a score a quiet shot passes"
+        return cls(layout, bank, stacked)
+
+    def new_state(self, stream_count: int) -> Any:
+        """Every stream's charts at zero, as the row's before its first round.
+
+        The state is the bank's own; Any names it, since its record is
+        the bank's private one.
+        """
+        first_round = self.layout.first_bulk_round
+        return self.bank.new_state(stream_count, first_round)
+
+    def score_ratios(self, state: Any, events: numpy.ndarray) -> numpy.ndarray:
+        """(streams, bulk rounds, lines): each round's top score over level.
+
+        events is (streams, detectors), one shot of the circuit per
+        stream, in Stim's detector order. Its bulk rounds continue the
+        state's streams, so shots scored one after another on one state
+        are one long stream per row, joined where each shot's first and
+        last rounds, which hold no bulk detector, are left out. A line
+        fires on a round where its ratio is at least one, the round the
+        row flags at that line's rate.
+        """
+        rows = _bulk_rows(self.layout, events)
+        stream_count, round_count, _ = rows.shape
+        line_count = len(self.levels)
+        shape = (stream_count, round_count, line_count)
+        ratios = numpy.zeros(shape)
+        for offset in range(round_count):
+            round_index = self.layout.first_bulk_round + state.scored_rounds
+            round_rows = rows[:, offset]
+            group_scores = self.bank.score_round(state, round_rows, round_index)
+            stream_scores = group_scores[:, None, :]
+            group_ratios = stream_scores / self.levels
+            ratios[:, offset] = numpy.max(group_ratios, axis=2)
+        return ratios
+
+    def first_alarm_rounds(
+        self, ratios: numpy.ndarray, earliest_round: int
+    ) -> numpy.ndarray:
+        """(streams, lines): each line's first firing round from earliest on.
+
+        ratios are one shot's from a new state, so its offset i is round
+        first_bulk_round + i; NO_ALARM marks a line that never fires.
+        """
+        is_firing = ratios >= 1.0
+        first_offset = earliest_round - self.layout.first_bulk_round
+        watched = is_firing[:, first_offset:]
+        has_alarm = numpy.any(watched, axis=1)
+        first_watched = numpy.argmax(watched, axis=1)
+        first_rounds = first_watched + earliest_round
+        return numpy.where(has_alarm, first_rounds, NO_ALARM)
+
+
+@dataclasses.dataclass(frozen=True)
 class _TraceSources:
     """Every event the masked_regional_cusum row reports, as one member."""
 
@@ -250,8 +347,7 @@ def _charts_by_operation(
     charts_by_operation = {}
     for operation_id, (circuit, round_count) in circuits.items():
         circuit_text = str(circuit)
-        shot_microseconds = round_count * round_period_microseconds
-        shot_seconds = shot_microseconds / MICROSECONDS_PER_SECOND
+        shot_seconds = _shot_seconds(round_count, round_period_microseconds)
         calibration = _chart_calibration(
             circuit_text, round_count, settings, shot_seconds
         )
@@ -270,21 +366,25 @@ def _chart_calibration(
     the cache lives in memory only.
     """
     circuit = stim.Circuit(circuit_text)
-    layout = layout_module.Layout.from_circuit(circuit, round_count)
-    bank = chart_bank.ChartBank.for_layout(layout, settings)
-    target_share = _shot_target(settings, shot_seconds)
-    maxima = _quiet_block_maxima(circuit, layout, bank, settings)
+    rate = settings.false_alarms_per_second
+    target_share = _shot_target(rate, shot_seconds)
+    layout, bank, maxima = _calibration_maxima(circuit, round_count, settings)
     levels = thresholds.bank_thresholds(maxima, target_share)
     return _ChartCalibration(layout, bank, levels)
 
 
-def _shot_target(settings, shot_seconds: float) -> float:
+def _shot_seconds(round_count: int, round_period_microseconds: float) -> float:
+    shot_microseconds = round_count * round_period_microseconds
+    return shot_microseconds / MICROSECONDS_PER_SECOND
+
+
+def _shot_target(false_alarms_per_second: float, shot_seconds: float) -> float:
     """The share of quiet shots that may alarm: the rate times a shot's time.
 
     A shot is one calibration block: the bank alarms in a shot when any
     group reaches its level on any of its rounds.
     """
-    target_share = settings.false_alarms_per_second * shot_seconds
+    target_share = false_alarms_per_second * shot_seconds
     if target_share < 1.0:
         return target_share
     raise ValueError(
@@ -292,6 +392,16 @@ def _shot_target(settings, shot_seconds: float) -> float:
         f"{shot_seconds} s, is {target_share}: at least one false alarm a "
         "shot, which no threshold can promise; ask for a lower rate"
     )
+
+
+def _calibration_maxima(
+    circuit: stim.Circuit, round_count: int, settings
+) -> tuple:
+    """The circuit's layout, its bank, and the quiet shots' block maxima."""
+    layout = layout_module.Layout.from_circuit(circuit, round_count)
+    bank = chart_bank.ChartBank.for_layout(layout, settings)
+    maxima = _quiet_block_maxima(circuit, layout, bank, settings)
+    return layout, bank, maxima
 
 
 def _quiet_block_maxima(circuit, layout, bank, settings):
@@ -302,21 +412,28 @@ def _quiet_block_maxima(circuit, layout, bank, settings):
     by Monte Carlo replicas (1997, section 5).
     """
     sampler = circuit.compile_detector_sampler(seed=CALIBRATION_SEED)
-    detectors, rows_at, checks_at = _slot_columns(layout)
-    shot_rounds = max(rows_at) + 1
-    check_count = len(layout.positions)
     batches = []
     remaining = settings.calibration_shot_count
     while remaining > 0:
         shot_count = min(remaining, CALIBRATION_BATCH_SHOTS)
         samples = sampler.sample(shot_count)
-        shape = (shot_count, shot_rounds, check_count)
-        rows = numpy.zeros(shape, dtype=numpy.uint8)
-        rows[:, rows_at, checks_at] = samples[:, detectors]
+        rows = _bulk_rows(layout, samples)
         maxima = bank.block_maxima(rows, layout.first_bulk_round)
         batches.append(maxima)
         remaining -= shot_count
     return numpy.concatenate(batches)
+
+
+def _bulk_rows(layout: layout_module.Layout, samples) -> numpy.ndarray:
+    """(shots, bulk rounds, checks): each bulk detector's event in its slot."""
+    detectors, rows_at, checks_at = _slot_columns(layout)
+    shot_rounds = max(rows_at) + 1
+    check_count = len(layout.positions)
+    shot_count = len(samples)
+    shape = (shot_count, shot_rounds, check_count)
+    rows = numpy.zeros(shape, dtype=numpy.uint8)
+    rows[:, rows_at, checks_at] = samples[:, detectors]
+    return rows
 
 
 def _slot_columns(layout: layout_module.Layout) -> tuple:

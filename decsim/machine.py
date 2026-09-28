@@ -34,14 +34,14 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     2  detector_error_model, links, pauli_frame, syndrome_buffer,
        windows
     3  controller, decoders, escalation, qpu
-    4  confidence, frontends, observe
+    4  confidence, frontends, observe, sinter_adapters
     5  settings
     6  build
     7  assembly
     8  machine (this file)
     9  collect
     10 experiments
-    11 __main__
+    11 __main__, experiment_runner
 
 Level 3 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.

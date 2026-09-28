@@ -69,6 +69,7 @@ and one table row. These guides are the recipe and its variants.
 **Run and read an experiment.** Getting a sweep through a cluster,
 and reading what it wrote.
 
+- [How to run an experiment](how-to/run_an_experiment.md)
 - [How to run a sweep on Slurm](how-to/run_a_sweep_on_slurm.md)
 - [How to read a trace and follow one round or one window](how-to/read_a_trace.md)
 - [How to compare two runs](how-to/compare_two_runs.md)

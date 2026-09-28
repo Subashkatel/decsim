@@ -246,7 +246,7 @@ docstring.
 - `decsim/qpu/streaming_stim_device.py`: Execute a repeated Stim memory only when the QPU requests a round.
 - `decsim/qpu/syndrome_devices.py`: Syndrome sources without a circuit: timing-only and fake-bit readout.
 
-## Level 4: confidence, frontends, observe
+## Level 4: confidence, frontends, observe, sinter_adapters
 
 ### confidence
 
@@ -294,6 +294,11 @@ docstring.
 - `decsim/observe/trace_writer.py`: One shot's Chrome trace: where every round and window sat and moved.
 - `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.
+
+### sinter_adapters
+
+- `decsim/sinter_adapters/__init__.py`: decsim's decoders as sinter decoders, for offline runs in sinter.
+- `decsim/sinter_adapters/union_find.py`: decsim's Union-Find as a sinter decoder.
 
 ## Level 5: producers, settings
 
@@ -363,11 +368,15 @@ docstring.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
-## Level 11: __main__, results
+## Level 11: __main__, experiment_runner, results
 
 ### __main__
 
 - `decsim/__main__.py`: `python -m decsim <verb>`: the same command set as the console script.
+
+### experiment_runner
+
+- `decsim/experiment_runner.py`: One experiment script's points, its command line and its results folder.
 
 ### results
 

@@ -33,11 +33,13 @@ from typing import Optional
 import numpy
 import stim
 
-import decsim.burst_detectors.masked_regional_cusum.detector as cusum
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.experiment_runner as experiment_runner
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.stim_device as stim_device
+from decsim.burst_detectors.masked_regional_cusum import (
+    detector as masked_regional_cusum,
+)
 
 DISTANCES = [5, 7, 9, 11, 13, 15]
 ERROR_RATES = [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
@@ -88,7 +90,9 @@ STIM_SEED_BOUND = 2**63
 # counted in, with a margin on each side.
 TRACE_FIRST_ROUND = 900
 TRACE_LAST_ROUND = 1400
-DETECTOR_SETTINGS = cusum.MaskedRegionalCusumBurstDetector.Settings()
+DETECTOR_SETTINGS = (
+    masked_regional_cusum.MaskedRegionalCusumBurstDetector.Settings()
+)
 
 
 def circuit(distance: int, error_rate: float, rounds: int) -> stim.Circuit:
@@ -104,7 +108,7 @@ def calibration_point(labels: dict, _seed: int, _folder: pathlib.Path) -> list:
     One row per line and group, in line then group order.
     """
     quiet_circuit = circuit(labels["d"], labels["p"], ROUNDS)
-    lines = cusum.AlarmLines.calibrated(
+    lines = masked_regional_cusum.AlarmLines.calibrated(
         quiet_circuit,
         ROUNDS,
         DETECTOR_SETTINGS,
@@ -124,7 +128,7 @@ def calibration_point(labels: dict, _seed: int, _folder: pathlib.Path) -> list:
 
 def saved_lines(
     folder: pathlib.Path, distance: int, error_rate: float
-) -> cusum.AlarmLines:
+) -> masked_regional_cusum.AlarmLines:
     """The lines the (d, p) calibration point saved in the folder."""
     calibration_id = RATE_POINTS.index((distance, error_rate))
     path = experiment_runner.point_path(folder, calibration_id)
@@ -137,7 +141,7 @@ def saved_lines(
         raise ValueError(message)
     levels = _read_levels(path)
     quiet_circuit = circuit(distance, error_rate, ROUNDS)
-    return cusum.AlarmLines.with_levels(
+    return masked_regional_cusum.AlarmLines.with_levels(
         quiet_circuit, ROUNDS, DETECTOR_SETTINGS, levels
     )
 
@@ -486,7 +490,9 @@ def _stim_seed(generator: numpy.random.Generator) -> int:
     return int(seed)
 
 
-def _paired_ratios(lines: cusum.AlarmLines, copies: dict) -> dict:
+def _paired_ratios(
+    lines: masked_regional_cusum.AlarmLines, copies: dict
+) -> dict:
     """Both copies' trial shot scored side by side after one warm-up.
 
     The copies score the same warm-up shots, so their charts meet the
@@ -535,13 +541,13 @@ def _centre_cells(centre: numpy.ndarray, radius: Optional[float]) -> tuple:
 
 
 def _alarm_cell(first_round: int) -> Optional[int]:
-    if first_round == cusum.NO_ALARM:
+    if first_round == masked_regional_cusum.NO_ALARM:
         return None
     return int(first_round)
 
 
 def _trace_rows(
-    lines: cusum.AlarmLines, ratios: dict, class_labels: dict
+    lines: masked_regional_cusum.AlarmLines, ratios: dict, class_labels: dict
 ) -> list:
     """The kept rounds' score over level, per copy and line."""
     first_offset = TRACE_FIRST_ROUND - lines.layout.first_bulk_round

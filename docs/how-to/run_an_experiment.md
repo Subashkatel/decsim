@@ -106,11 +106,15 @@ A point can be a Python function instead of a sinter task, for an
 experiment that is not a decode, such as
 `experiments/burst_detection/run.py`. The script adds it with
 `experiment.add_point(function, labels, "trials.csv")`. The runner
-calls `function(labels, seed)`, the seed a hash of the labels so a
-point draws the same shots in any grid, and writes the rows it returns,
-a list of dicts, after the labels' columns into `points/<id>.csv`. The
-CSV is written once the function returns, so a point with a CSV is
-done and a resubmitted job runs only the rest. `combine` writes each
+calls `function(labels, seed, folder)`, the seed a hash of the labels
+so a point draws the same shots in any grid, and writes the rows it
+returns, a list of dicts, after the labels' columns into
+`points/<id>.csv`. The CSV is written once the function returns, so a
+point with a CSV is done and a resubmitted job runs only the rest. A
+point that needs another's rows reads them from the results folder at
+`experiment_runner.point_path(folder, id)`, and fails when they are not
+there yet; on Slurm, submit that point with
+`--dependency=afterok:<job>` on the job that runs the other. `combine` writes each
 results file from the rows of the points that name it. A function
 point runs in one process and ignores `--workers`. An experiment's
 points are all sinter tasks or all function points.

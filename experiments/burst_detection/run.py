@@ -23,6 +23,7 @@ Stage 1a is d = 5 at p = 0.003; stage 1b sets DISTANCES to 5, 7, 9, 11,
 """
 
 import itertools
+import pathlib
 from typing import Optional
 
 import numpy
@@ -130,7 +131,7 @@ def burst_level(distance: int, error_rate: float, strength: str) -> dict:
     return {"level": level, "firing": firing, "quiet_firing": usual_firing}
 
 
-def levels_point(labels: dict, _seed: int) -> list:
+def levels_point(labels: dict, _seed: int, _folder: pathlib.Path) -> list:
     """Each strength's level at the point's d and p."""
     rows = []
     for strength in FIRING_MULTIPLE_BY_STRENGTH:
@@ -145,7 +146,7 @@ def levels_point(labels: dict, _seed: int) -> list:
     return rows
 
 
-def burst_point(labels: dict, seed: int) -> list:
+def burst_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
     """TRIALS paired trials: each line's first alarm in copy A and in B.
 
     first_alarm_a is copy A's first alarm anywhere in the shot, a false
@@ -169,7 +170,7 @@ def burst_point(labels: dict, seed: int) -> list:
     return _trial_rows(centres, radius, firsts_a, firsts_b)
 
 
-def quiet_point(labels: dict, seed: int) -> list:
+def quiet_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
     """QUIET_SECONDS of quiet chip time through the lines, alarms per line.
 
     QUIET_STREAMS streams run side by side, each a run of quiet shots
@@ -204,7 +205,7 @@ def quiet_point(labels: dict, seed: int) -> list:
     return rows
 
 
-def traces_point(labels: dict, seed: int) -> list:
+def traces_point(labels: dict, seed: int, _folder: pathlib.Path) -> list:
     """One example trial per class: each line's score over level by round.
 
     The score is the largest group score over its level, so a line

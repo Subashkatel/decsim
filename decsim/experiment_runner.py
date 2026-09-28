@@ -100,15 +100,17 @@ class Experiment:
     def add_point(
         self, function: Callable, labels: Mapping, results_file: str
     ) -> None:
-        """One point that function(labels, seed) runs, its rows labelled.
+        """One point that function(labels, seed, folder) runs, rows labelled.
 
         function returns a list of rows, each a dict from column to
         value; the runner writes them after the labels' columns into
         the point's CSV, and combine gathers every point's rows naming
         the same results_file into that file. The seed is a hash of the
         labels, so a point draws the same shots whatever other points
-        the grid holds. A function point runs in one process and leaves
-        --workers to sinter's points.
+        the grid holds. folder is the results folder, where a point
+        reads the saved rows of a point it depends on (point_path). A
+        function point runs in one process and leaves --workers to
+        sinter's points.
         """
         _refuse_a_second_kind(self.tasks)
         point = _FunctionPoint(function, dict(labels), results_file)
@@ -146,7 +148,7 @@ class Experiment:
             return
         paths = []
         for point_id in range(len(self.tasks)):
-            path = _point_path(folder, point_id)
+            path = point_path(folder, point_id)
             if path.exists():
                 paths.append(path)
         saved_statistics = sinter.read_stats_from_csv_files(*paths)
@@ -206,7 +208,7 @@ class Experiment:
         custom_decoder = self.decoders[point_id]
         if custom_decoder is not None:
             decoders[task.decoder] = custom_decoder
-        path = _point_path(folder, point_id)
+        path = point_path(folder, point_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         (point_statistics,) = sinter.collect(
             num_workers=worker_count,
@@ -219,6 +221,11 @@ class Experiment:
             f"{point_statistics.errors} errors, "
             f"{point_statistics.seconds:.0f} core seconds"
         )
+
+
+def point_path(folder: pathlib.Path, point_id: int) -> pathlib.Path:
+    """Where a point's rows are saved; the file exists once it is done."""
+    return folder / POINTS_FOLDER / f"{point_id}.csv"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -274,13 +281,13 @@ def _run_function_point(
     A point whose CSV exists is done: it is written whole or not at
     all, so a task the time limit stopped leaves no CSV to trust.
     """
-    path = _point_path(folder, point_id)
+    path = point_path(folder, point_id)
     if path.exists():
         print(f"point {point_id}: saved already")
         return
     seed = _point_seed(point.labels)
     start = time.perf_counter()
-    rows = point.function(point.labels, seed)
+    rows = point.function(point.labels, seed, folder)
     end = time.perf_counter()
     if not rows:
         _refuse_no_rows(point_id)
@@ -331,7 +338,7 @@ def _combine_rows(folder: pathlib.Path, points: list) -> None:
     """Each results file: its saved points' rows, in point order."""
     lines_by_file = {}
     for point_id, point in enumerate(points):
-        path = _point_path(folder, point_id)
+        path = point_path(folder, point_id)
         if not path.exists():
             continue
         point_text = path.read_text()
@@ -465,7 +472,3 @@ def _refuse_another_tree(path: pathlib.Path, commit: str, dirty: str) -> None:
         f"is commit {commit} dirty {dirty}; {ONE_RUN_PER_FOLDER}"
     )
     raise ValueError(message)
-
-
-def _point_path(folder: pathlib.Path, point_id: int) -> pathlib.Path:
-    return folder / POINTS_FOLDER / f"{point_id}.csv"

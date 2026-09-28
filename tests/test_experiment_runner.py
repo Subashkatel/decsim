@@ -543,6 +543,24 @@ def test_a_function_points_seed_depends_on_its_labels_alone(
     assert 0 <= grid_seed < 2**64
 
 
+def test_a_function_point_reads_the_saved_rows_of_one_before_it(
+    tmp_path, monkeypatch
+):
+    """The results folder and point_path find a finished point's CSV."""
+    write_script(tmp_path, monkeypatch)
+    results_folder = tmp_path / "out"
+    experiment = experiment_runner.Experiment("tiny")
+    experiment.add_point(one_quiet_count, {"d": 3}, "quiet.csv")
+    experiment.add_point(first_point_text, {"d": 3}, "copies.csv")
+    experiment.main(arguments=["0", "--out", str(results_folder)])
+
+    experiment.main(arguments=["1", "--out", str(results_folder)])
+
+    copy_path = experiment_runner.point_path(results_folder, 1)
+    copy_text = copy_path.read_text()
+    assert copy_text == "d,first_point\n3,d|alarms 3|7\n"
+
+
 def test_combine_gathers_each_results_files_rows_under_one_header(
     tmp_path, monkeypatch
 ):
@@ -614,7 +632,7 @@ def test_a_function_point_that_returns_no_rows_is_refused(
     assert not (results_folder / "points" / "0.csv").exists()
 
 
-def two_trials(_labels: dict, _seed: int) -> list:
+def two_trials(_labels: dict, _seed: int, _folder: pathlib.Path) -> list:
     """A caught trial and a missed one, None written as an empty cell."""
     return [
         {"trial": 0, "first_alarm": 1004},
@@ -622,15 +640,27 @@ def two_trials(_labels: dict, _seed: int) -> list:
     ]
 
 
-def one_quiet_count(_labels: dict, _seed: int) -> list:
+def one_quiet_count(_labels: dict, _seed: int, _folder: pathlib.Path) -> list:
     return [{"alarms": 7}]
 
 
-def no_rows(_labels: dict, _seed: int) -> list:
+def no_rows(_labels: dict, _seed: int, _folder: pathlib.Path) -> list:
     return []
 
 
-def recorded_trial(labels: dict, seed: int, calls: list) -> list:
+def first_point_text(_labels: dict, _seed: int, folder: pathlib.Path) -> list:
+    """Point 0's saved CSV, its lines joined by spaces, commas by bars."""
+    path = experiment_runner.point_path(folder, 0)
+    text = path.read_text()
+    lines = text.splitlines()
+    joined = " ".join(lines)
+    barred = joined.replace(",", "|")
+    return [{"first_point": barred}]
+
+
+def recorded_trial(
+    labels: dict, seed: int, _folder: pathlib.Path, calls: list
+) -> list:
     """One trial row, the call's labels and seed kept in calls."""
     calls.append((labels, seed))
     return [{"trial": 0}]

@@ -152,9 +152,7 @@ def algorithm_of(tier_settings: decoder_settings.DecoderSettings, tier: str):
     A table row is built from its own settings alone: with keys of its
     own it takes the Settings record the section reader split off the
     tier's keys (decsim/tables.py), and with none it takes nothing, so a
-    new row declares no parameter it does not read. The batch sampling
-    builds its row here too (experiments/stim_batch.py), so a batch
-    point decodes with the machine's own algorithm.
+    new row declares no parameter it does not read.
     """
     kind = tier_settings.kind
     if not isinstance(kind, str):

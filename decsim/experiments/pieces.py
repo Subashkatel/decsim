@@ -266,8 +266,7 @@ def publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
     A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
     so of two writers of one piece the first to rename wins. The other's
     copy holds the same seeds of the same point, the same piece, and is
-    dropped. A batch piece is published the same way
-    (experiments/stim_batch.py).
+    dropped.
     """
     try:
         os.replace(staging, folder)

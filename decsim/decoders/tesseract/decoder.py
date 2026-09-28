@@ -98,8 +98,7 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
 
         A fixed detector_order_seed draws the orders from itself and
         never from the run seed, so the window decoder owns no run seed
-        then, and a caller that binds seeds per block (the batch
-        sampling) keeps the row and its compiled backend.
+        then.
         """
         latency_path = (
             seed_records.RunSeedPathSegment("field", "latency_model"),

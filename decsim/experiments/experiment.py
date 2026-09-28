@@ -87,9 +87,6 @@ class ExperimentConfig:
     # the yaml files this config was read from, nearest first (an extends
     # chain)
     config_files: tuple
-    # the top-level `sampling` key: the row of collect_command.SAMPLINGS
-    # that runs the points' shots, None for the machine
-    sampling: Optional[str] = None
 
     def tasks(self) -> list:
         """One task per sweep point, blocks in order, each block a product."""
@@ -123,7 +120,7 @@ class ExperimentConfig:
         path = self.config_files[0]
         with _refused_in(path):
             resolved, settings = self._read_point(values)
-            return _point_task_of(settings, resolved, values, self.sampling)
+            return _point_task_of(settings, resolved, values)
 
     def first_point_task(self) -> collect.Task:
         """The task of the first point of the first sweep block."""
@@ -248,8 +245,6 @@ def load_experiment(path) -> ExperimentConfig:
         )
     sweep_section = sections.pop("sweep")
     top_collection = sections.pop("collection", None)
-    sampling = sections.pop("sampling", None)
-    _check_the_sampling_key(path, sampling)
     sweep = _sweep_blocks(sweep_section, top_collection)
     config = ExperimentConfig(
         name=path.stem,
@@ -257,7 +252,6 @@ def load_experiment(path) -> ExperimentConfig:
         section_folders=section_folders,
         sweep=sweep,
         config_files=config_files,
-        sampling=sampling,
     )
     first_block = sweep[0]
     first_points = first_block.points()
@@ -274,20 +268,6 @@ def _refuse_a_path_that_is_not_a_file(path: pathlib.Path) -> None:
     listed = ", ".join(names)
     raise refusal.RefusalError(
         f"{path} is not a file; the shipped experiments are {listed}"
-    )
-
-
-def _check_the_sampling_key(path: pathlib.Path, sampling) -> None:
-    """The sampling key names a sampling as text, or is left out.
-
-    Which names exist is collect_command.SAMPLINGS's to say, where the
-    point's collect looks the name up.
-    """
-    if sampling is None or isinstance(sampling, str):
-        return
-    raise refusal.RefusalError(
-        f"{path}: sampling is {sampling!r}; it names a sampling as text, "
-        "such as stim_batch, or is left out for the machine"
     )
 
 
@@ -311,7 +291,6 @@ def _point_task_of(
     settings: machine_settings.MachineSettings,
     resolved: dict,
     values: Mapping,
-    sampling: Optional[str],
 ) -> collect.Task:
     """A point's task: its workload made, its escalation's threshold set.
 
@@ -329,7 +308,7 @@ def _point_task_of(
         settings, workload=workload, escalation=escalation
     )
     metadata = copy.deepcopy(dict(values))
-    return collect.Task(point_settings, metadata, online_threshold, sampling)
+    return collect.Task(point_settings, metadata, online_threshold)
 
 
 def _place(sections: dict, path: str, value) -> None:

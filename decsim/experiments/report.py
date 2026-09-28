@@ -667,26 +667,6 @@ def fold_pieces(
     return _fold_into(folders, point_ids, order, out_dir, rules)
 
 
-def write_report(rows: list, report_dir: Path, record: RunRecord) -> None:
-    """sweep.csv per point, and the additive files of the record.
-
-    links.csv and data_movement.csv are derived from the record's
-    per-shot rows, so a single run's folder and a folded folder hold
-    files built by the same code. Every row takes its point's swept
-    values from the points the folder recorded before its first shot.
-    """
-    swept = swept_values_of(report_dir)
-    sweep_path = report_dir / "sweep.csv"
-    write_csv(rows, sweep_path, swept)
-    write_record(record, report_dir, swept)
-    per_link = link_rows(record.shot_links)
-    links_path = report_dir / "links.csv"
-    write_csv(per_link, links_path, swept)
-    per_movement = data_movement_rows(record.shot_data_movement)
-    movement_path = report_dir / "data_movement.csv"
-    _write_rows(per_movement, movement_path, swept)
-
-
 def swept_values_of(report_dir: Path) -> dict:
     """The swept values of every point a run folder's manifest lists."""
     manifest = _manifest_of(report_dir)

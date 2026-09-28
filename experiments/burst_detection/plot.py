@@ -60,7 +60,8 @@ def main(folder: pathlib.Path) -> None:
     rate_points = sorted({(row["d"], row["p"]) for row in quiet})
     for distance, error_rate in rate_points:
         point = {"d": distance, "p": error_rate}
-        point_folder = plots_folder / _suffix(point)
+        suffix = _suffix(point)
+        point_folder = plots_folder / suffix
         point_folder.mkdir(exist_ok=True)
         point_classes = plots.chosen(class_rows, **point)
         point_stats = plots.chosen(stats, **point)
@@ -337,21 +338,21 @@ def _draw_share_across(
     keys is (x key, column key): a row of panels per strength, a column
     per value of the column key, a curve per size.
     """
-    x, column = keys
-    x_values = sorted({stat.json_metadata[x] for stat in stats})
-    column_values = sorted({stat.json_metadata[column] for stat in stats})
+    x_key, column_key = keys
+    x_values = sorted({stat.json_metadata[x_key] for stat in stats})
+    column_values = sorted({stat.json_metadata[column_key] for stat in stats})
     for line in LINES:
         figure, axis_by_pair = plots.panel_grid(
-            "strength", STRENGTHS, column, column_values
+            "strength", STRENGTHS, column_key, column_values
         )
         for (strength, column_value), axis in axis_by_pair.items():
             wanted = {"alarm_line": line, "strength": strength}
-            wanted[column] = column_value
+            wanted[column_key] = column_value
             panel_stats = plots.chosen(stats, **wanted)
             plots.count_rate(
                 axis,
                 panel_stats,
-                x=x,
+                x=x_key,
                 hits="caught",
                 total="bursts",
                 curve="size",
@@ -361,7 +362,7 @@ def _draw_share_across(
             )
             _tick_each(axis, x_values)
         figure.suptitle(f"{CAUGHT_LABEL} at {line:g} false alarms per s")
-        path = folder / f"caught_share_against_{x}_{line:g}.png"
+        path = folder / f"caught_share_against_{x_key}_{line:g}.png"
         plots.save(figure, path)
 
 
@@ -494,15 +495,17 @@ def _catch_stat(row: dict) -> sinter.TaskStats:
 
 def _poisson_interval(alarms: int, seconds: float) -> tuple:
     """The exact 95 percent interval of a Poisson rate (Garwood 1936)."""
+    alarm_degrees = 2 * alarms
     low_count = 0.0
     if alarms > 0:
-        low_degrees = 2 * alarms
-        low_quantile = scipy.stats.chi2.ppf(LOWER_TAIL, low_degrees)
+        low_quantile = scipy.stats.chi2.ppf(LOWER_TAIL, alarm_degrees)
         low_count = low_quantile / 2
-    high_degrees = 2 * alarms + 2
+    high_degrees = alarm_degrees + 2
     high_quantile = scipy.stats.chi2.ppf(UPPER_TAIL, high_degrees)
     high_count = high_quantile / 2
-    return low_count / seconds, high_count / seconds
+    low_rate = low_count / seconds
+    high_rate = high_count / seconds
+    return low_rate, high_rate
 
 
 if __name__ == "__main__":

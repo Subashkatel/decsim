@@ -1,22 +1,22 @@
 """Relay-BP over one placed physical window model.
 
 The official relay-bp package (Maurer et al. 2510.21600, the qLDPC
-real-time baseline; the bb-decoders extra) is compiled once per live
-model with a
-fixed gamma table drawn from the run seed, and decode_detailed is called
-once per syndrome. The paper assumes 0 < p < 1/2; this adapter also
-accepts exactly p = 1/2 as a tested software-profile extension with a
-zero prior log ratio. Decided, majority-one and non-finite priors are
-refused instead of silently transformed. Backend wall time is
-diagnostic only and never becomes simulated time.
+real-time baseline; the bb-decoders extra) is compiled once per
+distinct model with a fixed gamma table drawn from the run seed, and
+decode_detailed is called once per syndrome. The paper assumes
+0 < p < 1/2; this adapter also accepts exactly p = 1/2 as a tested
+software-profile extension with a zero prior log ratio. Decided,
+majority-one and non-finite priors are refused instead of silently
+transformed. Backend wall time is diagnostic only and never becomes
+simulated time.
 """
 
 import dataclasses
+import hashlib
 import math
 import os
 import secrets
 import threading
-import weakref
 from typing import TYPE_CHECKING
 
 import numpy
@@ -60,7 +60,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         )
         detector_count = faults.check.shape[0]
         syndrome = _validated_syndrome(syndrome, detector_count)
-        compiled = self._compiled_model(faults)
+        compiled = self.compiled_model(faults)
         if faults.check.shape[1] == 0:
             return backend_outcome.empty_fault_model_outcome(syndrome)
         if compiled.backend_construction_failed:
@@ -73,24 +73,23 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
     def _install_run_seed_state(self, prepared_state) -> None:
         self._effective_gamma_table_seed = prepared_state
 
-    def _compiled_model(self, faults) -> "_CompiledRelayModel":
-        """The backend compiled for one model, kept while the model lives."""
+    def compiled_model(self, faults) -> "_CompiledRelayModel":
+        """The backend for one check matrix and priors, built once.
+
+        A shot builds each window afresh, but its windows repeat a few
+        shapes, so the backend is kept by the model's content, not by
+        the object. With the fixed gamma table a kept backend answers
+        each syndrome as a fresh one does.
+        """
         cache = self._thread_cache()
-        identity = id(faults)
-        entry = cache.get(identity)
-        if entry is not None:
-            reference, compiled = entry
-            if reference() is faults:
-                return compiled
-        compiled = self._compile(faults)
-
-        def discard(reference) -> None:
-            current = cache.get(identity)
-            if current is not None and current[0] is reference:
-                del cache[identity]
-
-        reference = weakref.ref(faults, discard)
-        cache[identity] = (reference, compiled)
+        key = _model_key(faults)
+        compiled = cache.get(key)
+        if compiled is None:
+            compiled = self._compile(faults)
+            if len(cache) == _KEPT_MODELS:
+                oldest = next(iter(cache))
+                del cache[oldest]
+            cache[key] = compiled
         return compiled
 
     def _compile(self, faults) -> "_CompiledRelayModel":
@@ -130,6 +129,23 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
             self._thread_state.process_id = process_id
             self._thread_state.compiled_models = {}
         return self._thread_state.compiled_models
+
+
+# the backends one thread keeps; a run's windows take a few shapes, and
+# strong regions that each differ are let go oldest first
+_KEPT_MODELS = 64
+
+
+def _model_key(faults) -> bytes:
+    """A digest of the check matrix and priors a backend is built from."""
+    check = scipy.sparse.csr_matrix(faults.check)
+    priors = numpy.asarray(faults.priors, dtype=float)
+    digest = hashlib.sha256()
+    shape = numpy.asarray(check.shape)
+    for array in (shape, check.indptr, check.indices, priors):
+        array_bytes = array.tobytes()
+        digest.update(array_bytes)
+    return digest.digest()
 
 
 def _decode_once(backend, faults, syndrome):

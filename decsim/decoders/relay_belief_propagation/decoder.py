@@ -152,9 +152,9 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         return joined, elapsed_nanoseconds
 
     def compile(self, faults, model):
-        """The window decoder, which compiles the backend per model itself."""
-        del faults
+        """The window decoder, its backend for this model built untimed."""
         del model
+        self.window_decoder.compiled_model(faults)
         return self.window_decoder
 
     def decode_window(self, backend, model, faults, syndrome):

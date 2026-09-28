@@ -108,7 +108,11 @@ PYTHONPATH=. python experiments/decoder_baseline/plot.py results/2026-09-27_deco
 
 This draws the folder's `plots/` from its `stats.csv`: the logical
 error rate per round against the physical error rate, a figure per
-decoder and one comparing the decoders for each basis. The repository
+decoder and one comparing the decoders for each basis. The script is a
+few lines because `decsim/plots.py` holds the figure kinds (an error
+rate, a share of two counts, plain values, a distribution, a heat map)
+and their one axis style; another experiment's plot.py draws with the
+same calls. The repository
 tracks a results folder's `stats.csv`, `commit.txt`, script copy and
 `plots/`, so every experiment's results live beside the code that made
 them; `points/` and `logs/` stay with the run (`.gitignore`).

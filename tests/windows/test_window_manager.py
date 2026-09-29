@@ -201,7 +201,7 @@ def _stream_planner() -> window_planner.WindowPlanner:
     )
     cache = built_window_models.BuiltWindowModels()
     built = window_planner.WindowModels(cache)
-    built.router = _Router()
+    built.decoder = _Decoder()
     scheme = sliding_scheme.SlidingWindowScheme()
     planner = window_planner.WindowPlanner([resolved], plan, ())
     planner.scheme = scheme
@@ -210,13 +210,11 @@ def _stream_planner() -> window_planner.WindowPlanner:
     return planner
 
 
-class _Router:
-    """The routing table, as the models ask it for a code's requirement."""
+class _Decoder:
+    """The decoder, as the models ask it what a model must offer."""
 
-    def fault_model_requirement_for(self, code):
-        """No unit of this table asks a window model for anything."""
-        del code
-        return None
+    # this decoder asks a window model for nothing
+    fault_model_requirement = None
 
 
 def _tan_memory_circuit():

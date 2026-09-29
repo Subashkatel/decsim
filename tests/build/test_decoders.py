@@ -3,9 +3,9 @@
 A tier's kind names a row of decoders/settings.py's DECODERS and the
 unit is that algorithm between its fetch and release stages. Which pools
 the manager gets is the escalation policy's declared fact, not its name:
-a policy that may escalate puts two units behind one router with a
-strong pool, and every other policy routes every job to the tier that
-decodes the plan's windows.
+a policy that may escalate gives the strong tier a unit and a pool of
+its own, and every other policy has one pool, of the tier that decodes
+the plan's windows.
 """
 
 import dataclasses
@@ -149,17 +149,17 @@ def test_a_tier_that_names_no_decoder_builds_none():
     assert unit is None
 
 
-def test_a_weak_only_run_routes_every_job_to_the_one_tier():
+def test_a_weak_only_run_has_one_pool_and_no_strong_unit():
     weak = _preset(10.0)
     settings = _settings(weak=weak)
 
     pool = _pool(settings)
 
-    assert isinstance(pool.router, decoders.CodeRouter)
+    assert pool.strong is None
     assert sorted(pool.unit_pools) == ["default"]
 
 
-def test_a_run_that_may_escalate_gets_a_strong_pool_behind_one_router():
+def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
@@ -172,7 +172,8 @@ def test_a_run_that_may_escalate_gets_a_strong_pool_behind_one_router():
 
     pool = _pool(settings)
 
-    assert isinstance(pool.router, decoders.SwitchingRouter)
+    assert pool.strong is not None
+    assert pool.strong is not pool.active
     assert decode_queue.STRONG_POOL in pool.unit_pools
 
 

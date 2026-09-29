@@ -327,7 +327,6 @@ def window_completion_ticks(
     """
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(compute_microseconds)
-    router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     memory_config = decoder_memory.DecoderMemoryConfig(
         {"default": capacity_bits}
@@ -335,12 +334,12 @@ def window_completion_ticks(
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     manager = decoder_manager_module.DecoderManager(
         engine,
-        router=router,
         scheduler=scheduler,
         unit_pools={"default": 1},
         decoder_memory=memory_config,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = decoder
     manager.escalation_policy = policy
     transfer_ticks = config.microseconds_to_ticks(transfer_microseconds)
     send_input = landing_after(engine, transfer_ticks)

@@ -13,6 +13,8 @@ manager). The textbook treatment is Harchol-Balter, Performance
 Modeling and Design of Computer Systems, Cambridge 2013.
 """
 
+import types
+
 import pytest
 
 import decsim.config as config
@@ -26,8 +28,8 @@ DECODE_TICKS = config.microseconds_to_ticks(1.0)
 
 def _pool(unit_count):
     decoder = decoders.PresetLatencyDecoder(1.0)
-    router = decoders.CodeRouter(decoder)
-    return decoder_pool.DecoderPool(router, {"default": unit_count})
+    manager = types.SimpleNamespace(decoder=decoder)
+    return decoder_pool.DecoderPool(manager, {"default": unit_count})
 
 
 def _job(label):
@@ -221,8 +223,8 @@ def test_a_blocked_job_takes_the_rounds_in_place_when_the_work_is_equal():
 
 def test_where_no_cost_is_declared_the_unit_with_the_fewest_jobs_is_taken():
     decoder = _MeasuredDecoder()
-    router = decoders.CodeRouter(decoder)
-    pool = decoder_pool.DecoderPool(router, {"default": 2})
+    manager = types.SimpleNamespace(decoder=decoder)
+    pool = decoder_pool.DecoderPool(manager, {"default": 2})
     first, second = pool.units_by_pool["default"]
     first_waiting = _job("first waiting")
     first.admit(first_waiting)

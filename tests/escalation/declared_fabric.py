@@ -114,7 +114,8 @@ def switching_machine(
         weak_latency, 0.0, probability_for=probability
     )
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    router = decoders.SwitchingRouter(weak=weak, strong=strong)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -145,9 +146,6 @@ def switching_machine(
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )
-    decoder_manager = decoder_settings.DecoderManagerSettings(
-        router=router, unit_pools={"default": 1, "strong": 1}
-    )
     if escalation is None:
         escalation = escalation_settings.EscalationSettings(
             policy=policy, strong_window=strong_window
@@ -175,7 +173,8 @@ def switching_machine(
         workload=workload,
         qpu=qpu,
         windows=windows,
-        decoder_manager=decoder_manager,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
         escalation=escalation,
         links=links,
         controller=controller,

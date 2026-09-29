@@ -228,7 +228,7 @@ class DecoderSettings:
     outside DECODER_KEYS (union_find's weight_step and cycle_count), or
     None for a row that declares none; the tier never reads it.
     kind None is no decoder at all, right for a run that plans no
-    windows. A Python-built decoder is routed as it is, with no engine
+    windows. A Python-built decoder is used as it is, with no engine
     stages around it.
     """
 
@@ -295,22 +295,16 @@ class DecoderManagerSettings:
     lines 519-526 and 636-641 measure 250 to 370 control cycles per
     decode on the control system's own clock. It is zero by default, so a
     run that does not model that work is unchanged. The rest are Python
-    objects. A router picks the decoder for each job
-    (CodeRouter by code name, SwitchingRouter by tier); given, it
-    replaces the one the root builds from the two tier sections.
-    scheduler is the class of the rule that orders a ready queue
+    objects. scheduler is the class of the rule that orders a ready queue
     (FifoScheduler by default); each manager builds its own, since the
     chip's and the host's queues are separate hardware (LATTE 2509.03954
     lines 20-25 and 718-722), as gem5 gives every object its own copy of
     a SimObject parameter (src/python/m5/SimObject.py:775-782).
-    unit_pools names each pool's unit count (built from the tiers' units
-    by default) and decoder_memory bounds each pool's input memory in
-    bits (built from the active tier's unit_memory by default).
+    decoder_memory bounds each pool's input memory in bits (built from
+    the tiers' unit_memory by default).
     """
 
-    router: Optional[Any] = None
     scheduler: type = schedulers.FifoScheduler
-    unit_pools: Optional[Mapping[str, int]] = None
     decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
     bulk_strong: bool = False
     dispatch_cycles: int = 0

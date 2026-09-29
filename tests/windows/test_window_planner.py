@@ -112,13 +112,11 @@ class _FiniteSource:
         return None
 
 
-class _Router:
-    """The routing table, as the models ask it for a code's requirement."""
+class _Decoder:
+    """The decoder, as the models ask it what a model must offer."""
 
-    def fault_model_requirement_for(self, code):
-        """No unit of this table asks a window model for anything."""
-        del code
-        return None
+    # this decoder asks a window model for nothing
+    fault_model_requirement = None
 
 
 def test_the_packages_own_test_provider_fills_the_window_model_port():
@@ -132,7 +130,7 @@ def _planner(source=None) -> window_planner.WindowPlanner:
     models = window_planner.WindowModels(built)
     if source is not None:
         models.provider = source
-    models.router = _Router()
+    models.decoder = _Decoder()
     scheme = sliding_scheme.SlidingWindowScheme()
     resolved = [_resolved("stream", 9)]
     plan = _empty_plan()
@@ -466,7 +464,7 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan.batch_preceding_idle_rounds_by_operation[7] = True
     built = built_window_models.BuiltWindowModels()
     models = window_planner.WindowModels(built)
-    models.router = _Router()
+    models.decoder = _Decoder()
     scheme = naive_online_scheme.NaiveOnlineScheme()
     resolved = [_resolved(7, 6)]
     planner = window_planner.WindowPlanner(resolved, plan, ())

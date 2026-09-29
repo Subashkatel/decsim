@@ -263,14 +263,14 @@ def strong_only_run(
     return run_machine(settings, seed)
 
 
-def switching_decoder(escalation_probability, probability_for):
+def switching_decoders(escalation_probability, probability_for):
     """The weak tier that reports a sampled confidence, and its strong."""
     latency = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
     weak = decoders.SampledConfidenceDecoder(
         latency, escalation_probability, probability_for=probability_for
     )
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    return decoders.SwitchingRouter(weak=weak, strong=strong)
+    return weak, strong
 
 
 def switching_run(
@@ -280,7 +280,7 @@ def switching_run(
     operations=None,
     run_both_at_once=False,
     strong_window="near_seam_pinned",
-    unit_pools=None,
+    weak_units=1,
     seed=0,
     io_trace=False,
     probability_for=None,
@@ -299,7 +299,11 @@ def switching_run(
     one of the two, keeps the run deterministic: the sampled gap is 1.0
     (keep the weak result) or 0.0 (escalate) against the threshold.
     """
-    router = switching_decoder(escalation_probability, probability_for)
+    weak, strong = switching_decoders(escalation_probability, probability_for)
+    weak_decoder = decoder_settings.DecoderSettings(
+        decoder=weak, units=weak_units
+    )
+    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
     threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -317,17 +321,12 @@ def switching_run(
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )
-    pools = unit_pools
-    if pools is None:
-        pools = {"default": 1, "strong": 1}
     memory = None
     if weak_memory_bits is not None:
         memory = decoder_memory.DecoderMemoryConfig(
             {"default": weak_memory_bits}
         )
     decoder_manager = decoder_settings.DecoderManagerSettings(
-        router=router,
-        unit_pools=pools,
         decoder_memory=memory,
         bulk_strong=bulk_strong,
     )
@@ -349,6 +348,8 @@ def switching_run(
         workload=workload,
         qpu=qpu,
         windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
         decoder_manager=decoder_manager,
         escalation=escalation,
         links=links,

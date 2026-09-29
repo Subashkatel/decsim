@@ -2,8 +2,8 @@
 
 A job waits in the WaitingJobs of its pool, the DecodeDispatcher places
 it on the DecoderUnit the DecoderPool offers, the DecodeService stages
-its input into that unit's memory and starts the routed decoder once the
-input landed and the window owes no boundary, the StrongRequests say
+its input into that unit's memory and starts the manager's decoder once
+the input landed and the window owes no boundary, the StrongRequests say
 which destination waits for which strong result, and the DecodeOutcomes
 deliver a finished decode through the job's on_decoded and close the
 request when the window side answers. The manager schedules, says when
@@ -51,12 +51,17 @@ class DecoderManager:
 
     Five attributes: four of the one-job components the module
     docstring names, and the engine it logs and reads the clock on. The
-    ledger and the escalation policy are ports the root binds, and the
-    parts read them through the manager, as a gem5 cache's packet queue
-    holds the cache that owns it
+    decoder, the ledger and the escalation policy are ports the root
+    binds, and the parts read them through the manager, as a gem5
+    cache's packet queue holds the cache that owns it
     (gem5 src/mem/cache/base.hh:185-189).
     """
 
+    # the one decoder this side's units run, bound straight to it as a
+    # gem5 cache's port is bound to its one peer
+    # (configs/learning_gem5/part1/caches.py:86-88); None on a run that
+    # plans no windows and names no decoder
+    decoder = ports.Port(ports.Decoder, optional=True)
     # one ledger for both sides: the chip's side opens a strong request
     # and the host's side serves it
     strong_requests = ports.Port(strong_requests_module.StrongRequests)
@@ -66,7 +71,6 @@ class DecoderManager:
         self,
         engine,
         *,
-        router,
         scheduler,
         unit_pools: dict,
         bulk_strong: bool = False,
@@ -81,7 +85,7 @@ class DecoderManager:
     ):
         self.engine = engine
         pool = decoder_pool_module.DecoderPool(
-            router, unit_pools, decoder_memory, blocks_unit_by_pool
+            self, unit_pools, decoder_memory, blocks_unit_by_pool
         )
         self.queue = decode_queue.WaitingJobs(
             engine,
@@ -106,12 +110,15 @@ class DecoderManager:
             self.queue, pool, self.service
         )
         self.outcomes = decode_outcomes.DecodeOutcomes(engine, self)
-        # the forced solves are the plan's windows', which the default
-        # pool decodes, so its manager narrates a model that pins none
-        rows = ()
-        if decoder_pool_module.DEFAULT_POOL in unit_pools:
-            rows = decoder_pool_module.routed_decoders(router)
-        for row in rows:
+
+    def start(self) -> None:
+        """Hear every row of the decoder say a model pins no class.
+
+        The decoder is a port, so its rows are known once the root has
+        bound it, which is gem5's init (src/sim/sim_object.hh:186-194).
+        """
+        decoders = (self.decoder,)
+        for row in decoder_pool_module.decoder_rows(decoders):
             row.forced_solve_unavailable.connect(self.report_unpinnable_model)
 
     def report_unpinnable_model(self, model, reason: str) -> None:

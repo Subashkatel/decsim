@@ -1050,24 +1050,6 @@ class DecodeQueue(Protocol):
         """
 
 
-@runtime_checkable
-class DecoderRouter(Protocol):
-    """The routing table over the tiers' units, as a caller outside sees it.
-
-    A job goes to one unit and the caller never learns which class that
-    is, which is the port API's promise (arXiv 2007.03152 lines 489-491).
-    The window side asks the second question rather than the first: what
-    a window model must offer for whichever unit would take that code,
-    which the planner needs before any job exists.
-    """
-
-    def route(self, job: decoding_records.DecodeJob):
-        """The decoder this job goes to."""
-
-    def fault_model_requirement_for(self, code: Optional[str]):
-        """What a window model must offer for the unit that takes this code."""
-
-
 # ------------------------------------------- the decoder returns a result
 
 
@@ -1113,14 +1095,13 @@ class Decoder(Protocol):
     without asking what the row is; DecoderBase gives a row that fires
     none of them the silent source.
 
-    A row that routes to other rows or wraps one is asked for those rows
-    under the seeding protocol, not under this port: decoder_pool's
-    routed_decoders walks run_seed_children (decsim/seeding.py
-    RunSeedComposite) from the router down, so a routing or wrapping row
-    that does not answer it hides the rows inside it from the trace, the
-    stage ledger and the referee audit. SwitchingRouter, CodeRouter,
-    StagedDecoder, SampledConfidenceDecoder and TesseractCheckedDecoder
-    are the shipped rows that answer it.
+    A row that wraps another is asked for it under the seeding protocol,
+    not under this port: decoder_pool's decoder_rows walks
+    run_seed_children (decsim/seeding.py RunSeedComposite) down from each
+    decoder seat, so a wrapping row that does not answer it hides the
+    row inside it from the trace, the stage ledger and the referee
+    audit. StagedDecoder, SampledConfidenceDecoder and
+    TesseractCheckedDecoder are the shipped rows that answer it.
     """
 
     fault_model_requirement: Any

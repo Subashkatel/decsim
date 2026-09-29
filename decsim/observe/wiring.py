@@ -53,7 +53,6 @@ def observe(
     operations: tuple,
     traffic_ledger: link_traffic.TrafficLedger,
     syndrome_source,
-    pool,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
@@ -61,12 +60,11 @@ def observe(
     file gave that seat. The seats a run may have none of are read with
     get, and the listeners that hear them take None; the decoder
     managers, one per side, are heard as one tuple by every listener of
-    the decode path. The syndrome source, the decoder pool and the
-    operations are the run's fixtures rather than seats, so they arrive
-    on their own. It stays whole past the size prompt: it is the run's
-    one list of listeners, in pipeline order, one built or connected per
-    line, and a split would only hand the list from one half to the
-    other.
+    the decode path. The syndrome source and the operations are the run's
+    fixtures rather than seats, so they arrive on their own. It stays
+    whole past the size prompt: it is the run's one list of listeners, in
+    pipeline order, one built or connected per line, and a split would
+    only hand the list from one half to the other.
     """
     strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
     strong_syndrome_round_receiver = seats.get("strong_syndrome_round_receiver")
@@ -98,8 +96,8 @@ def observe(
     queue_depth = _connect_queue_depth(decoder_managers)
     controller_counters = _connect_controller_counters(seats["idle_rounds"])
     command_events = _connect_command_events(seats["qpu"])
-    stages = _connect_stage_records(pool)
-    referee_audit = _connect_referee_audit(pool)
+    stages = _connect_stage_records(seats)
+    referee_audit = _connect_referee_audit(seats)
     sampled_shots = _connect_sampled_shots(syndrome_source)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
@@ -108,7 +106,7 @@ def observe(
     )
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
-    _connect_data_path(trace_writer, data_movement, seats, pool)
+    _connect_data_path(trace_writer, data_movement, seats)
     decode_backlog = _decode_backlog(
         observation, engine, seats["window_manager"], decoder_managers
     )
@@ -185,6 +183,13 @@ def _decoder_managers(seats: Mapping[str, Any]) -> tuple:
     return tuple(managers)
 
 
+def _decoder_rows(seats: Mapping[str, Any]) -> list:
+    """Every decoder row of the run's two decoder seats, either absent."""
+    primary = seats.get("primary_decoder")
+    strong = seats.get("strong_decoder")
+    return decoder_pool.decoder_rows((primary, strong))
+
+
 def _connect_queue_depth(decoder_managers) -> queue_depth_module.QueueDepthLog:
     """The waiting jobs, sampled at every change of either queue's depth."""
     depth_log = queue_depth_module.QueueDepthLog()
@@ -250,7 +255,6 @@ def _connect_data_path(
     trace_writer: Optional[trace_writer_module.TraceWriter],
     data_movement: Optional[data_movement_module.DataMovement],
     seats: Mapping[str, Any],
-    pool,
 ) -> None:
     """Hand the trace and the counters every source of the data path.
 
@@ -261,7 +265,7 @@ def _connect_data_path(
     if data_movement is not None:
         _connect_data_movement(data_movement, seats)
     if trace_writer is not None:
-        _connect_trace_writer(trace_writer, seats, pool)
+        _connect_trace_writer(trace_writer, seats)
 
 
 def _connect_data_movement(
@@ -288,7 +292,6 @@ def _connect_data_movement(
 def _connect_trace_writer(
     trace_writer: trace_writer_module.TraceWriter,
     seats: Mapping[str, Any],
-    pool,
 ) -> None:
     """The trace hears every hop and residence, in the order of the path."""
     qpu = seats["qpu"]
@@ -318,7 +321,8 @@ def _connect_trace_writer(
     decoder_managers = _decoder_managers(seats)
     for index, manager in enumerate(decoder_managers):
         _connect_decoder_trace(trace_writer, index, manager)
-    for decoder in decoder_pool.routed_decoders(pool.router):
+    decoder_rows = _decoder_rows(seats)
+    for decoder in decoder_rows:
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
     _connect_window_trace(
         trace_writer, seats["window_manager"], decoder_managers
@@ -528,19 +532,23 @@ def _connect_round_events(
 
 
 def _connect_stage_records(
-    pool,
+    seats: Mapping[str, Any],
 ) -> stage_records_module.StageLedger:
-    """The run's stage history, heard from every routed decoder."""
+    """The run's stage history, heard from every decoder row."""
     stages = stage_records_module.StageLedger()
-    for decoder in decoder_pool.routed_decoders(pool.router):
+    decoder_rows = _decoder_rows(seats)
+    for decoder in decoder_rows:
         decoder.stage_recorded.connect(stages.stage_recorded)
     return stages
 
 
-def _connect_referee_audit(pool) -> referee_audit_module.RefereeAudit:
-    """The referee's checks, heard from every routed decoder row."""
+def _connect_referee_audit(
+    seats: Mapping[str, Any],
+) -> referee_audit_module.RefereeAudit:
+    """The referee's checks, heard from every decoder row."""
     audit = referee_audit_module.RefereeAudit()
-    for decoder in decoder_pool.routed_decoders(pool.router):
+    decoder_rows = _decoder_rows(seats)
+    for decoder in decoder_rows:
         decoder.window_checked.connect(audit.window_checked)
     return audit
 

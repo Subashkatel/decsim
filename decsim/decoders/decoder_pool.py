@@ -1,9 +1,9 @@
 """The decoder pools: their units, the free ones, the unit a job is offered.
 
 gem5's FUPool (src/cpu/o3/fu_pool.hh:64-75): the pool keeps the units and
-knows which are free; the issue logic decides what runs. The router
-names the algorithm each job runs (a Decoder row, ports.py): by code, or
-by tier under switching (decoders.py).
+knows which are free; the issue logic decides what runs. The manager's
+decoder port names the one algorithm every job of its pools runs (a
+Decoder row, ports.py).
 
 A job that may start is offered a free unit with a free slot first.
 Among those, a unit that already holds this job's rounds, or is
@@ -54,7 +54,7 @@ import dataclasses
 import functools
 import math
 from collections.abc import Callable
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_unit as decoder_unit_module
@@ -62,6 +62,9 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
 import decsim.trace_source as trace_source
+
+if TYPE_CHECKING:
+    import decsim.decoders.decoder_manager as decoder_manager_module
 
 DEFAULT_POOL = "default"
 
@@ -81,7 +84,7 @@ class DecoderPool:
 
     def __init__(
         self,
-        router,
+        manager: "decoder_manager_module.DecoderManager",
         unit_pools: dict,
         decoder_memory: Optional[
             decoder_memory_module.DecoderMemoryConfig
@@ -89,7 +92,7 @@ class DecoderPool:
         blocks_unit_by_pool: Optional[dict] = None,
     ) -> None:
         _check_unit_pools(unit_pools)
-        self.router = router
+        self.manager = manager
         # pool name -> whether a finished decode holds its unit until
         # the window side reads the result (<tier>.result_blocks_unit)
         self.blocks_unit_by_pool = blocks_unit_by_pool or {}
@@ -114,10 +117,6 @@ class DecoderPool:
     def blocks_unit(self, job: decoding_records.DecodeJob) -> bool:
         """Whether this job's tier holds its unit until the result is read."""
         return self.blocks_unit_by_pool.get(job.pool, False)
-
-    def decoder_for(self, job: decoding_records.DecodeJob):
-        """The decoder the job runs on, by the router's rule."""
-        return self.router.route(job)
 
     def units(self) -> list:
         """Every unit of every pool, pool by pool."""
@@ -242,28 +241,27 @@ class DecoderPool:
 
         The staging rank totals these to find a unit's work left.
         """
-        decoder = self.decoder_for(job)
+        decoder = self.manager.decoder
         occupancy = decoder.occupancy(job)
         if occupancy is None:
             return math.inf
         return occupancy
 
 
-def routed_decoders(router) -> list:
-    """Every decoder row the router can reach, in the order the walk finds.
+def decoder_rows(decoders: tuple) -> list:
+    """Every decoder row inside these decoders, in the order the walk finds.
 
     A row is anything that answers the runtime-checkable Decoder port,
     which every row of DECODERS does and a row written outside decsim
     does too without inheriting decsim's base class; the port declares
     the sources a row reports on, so the walk asks nothing further about
     what a row has. The recursion asks the seeding protocol whether a
-    value names children of its own: the routers name the tiers and the
-    per-code rows, and a row that wraps another (the confidence, staged
-    and check wrappers) names its inner decoder the same way.
+    value names children of its own: a row that wraps another (the
+    confidence, staged and check wrappers) names its inner decoder.
     """
     found = []
     seen = set()
-    pending = [router]
+    pending = list(decoders)
     while pending:
         decoder = pending.pop()
         identity = id(decoder)

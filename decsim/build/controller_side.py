@@ -29,7 +29,6 @@ import decsim.ports as ports
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
-import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
@@ -261,33 +260,6 @@ def process_name(
     return f"decsim {kind} d{distance} seed{seed}"
 
 
-def check_strong_route(escalation_policy, router) -> None:
-    """A run that may escalate routes a strong job away from the weak one.
-
-    Run once on probe jobs: one decoder for both job kinds is the
-    user's mistake.
-    """
-    if not escalation_policy.requires_strong_context:
-        return
-    weak_probe = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=0
-    )
-    strong_probe = decoding_records.DecodeJob(
-        operation_id=-1,
-        window_id=0,
-        round_count=0,
-        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-    )
-    strong_decoder = router.route(strong_probe)
-    weak_decoder = router.route(weak_probe)
-    if strong_decoder is weak_decoder:
-        raise ValueError(
-            "the strong tier routes to the same decoder as the weak tier; "
-            "give strong_decoder its own kind, or a router that sends a "
-            "strong re-decode to a distinct decoder"
-        )
-
-
 def resolved_patches_by_identity(plan) -> dict:
     """The resolved patches by identity, for the idle accounting."""
     patch_by_identity = {}
@@ -305,7 +277,6 @@ def _decoder_manager(
     scheduler = settings.scheduler()
     return decoder_manager_module.DecoderManager(
         parts.engine,
-        router=pool.router,
         scheduler=scheduler,
         unit_pools=unit_pools,
         bulk_strong=settings.bulk_strong,

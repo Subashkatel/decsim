@@ -177,9 +177,9 @@ class DecoderServiceKey:
 class DecodeJobKind(Enum):
     """What one decode job is, declared once and read by everyone.
 
-    The manager, the queue, the router and the request ledger all need
-    to know what a job is before they read it, and a declared kind is
-    how a heterogeneous runtime says so: StarPU declares one codelet per
+    The manager, the queue and the request ledger all need to know what
+    a job is before they read it, and a declared kind is how a
+    heterogeneous runtime says so: StarPU declares one codelet per
     architecture and Legion one processor kind per task, and the
     scheduler reads the declaration rather than inferring it. WINDOW is
     one window's decode on the tier that owns it, forced-class solves
@@ -290,7 +290,7 @@ class DecodeJob:
     spatial_nodes: Optional[int] = (
         None  # decoding-graph nodes per round (latency models)
     )
-    code: Optional[str] = None  # code name, drives CodeRouter routing
+    code: Optional[str] = None  # code name, a latency function may read it
     attempt: int = 0  # 0 = first (weak) decode, 1 = strong redo
     kind: DecodeJobKind = DecodeJobKind.WINDOW  # what this job is
     # the logical class this decode is pinned to, or None to decode

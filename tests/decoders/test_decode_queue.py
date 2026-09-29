@@ -47,14 +47,13 @@ def _manager(engine, units, scheduler=None):
     if scheduler is None:
         scheduler = schedulers.FifoScheduler()
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
-    router = decoders.CodeRouter(decoder)
     manager = decoder_manager.DecoderManager(
         engine,
-        router=router,
         scheduler=scheduler,
         unit_pools={"default": units},
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = decoder
     return manager
 
 
@@ -193,13 +192,10 @@ def test_bulk_strong_is_refused_beside_a_pool_it_does_not_mean():
     rule not written for it.
     """
     engine = engine_module.Engine()
-    decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
-    router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     build = functools.partial(
         decoder_manager.DecoderManager,
         engine,
-        router=router,
         scheduler=scheduler,
         bulk_strong=True,
     )
@@ -225,12 +221,11 @@ def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
     operations = [
         declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
     ]
-    unit_pools = {"default": 4, "strong": 1}
     machine = declared_run.switching_run(
         rounds=6,
         operations=operations,
         escalation_probability=1.0,
-        unit_pools=unit_pools,
+        weak_units=4,
         bulk_strong=True,
     )
     every_batch = declared_run.log_lines_containing(

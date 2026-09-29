@@ -321,15 +321,6 @@ The decoder manager, as the window manager sees it.
 | `cancel_strong` | A kept weak result: the window's strong request ends where it is. |
 | `close_companion_request` | This forced solve lost; its window is answered by the other. |
 
-### `DecoderRouter`
-
-The routing table over the tiers' units, as a caller outside sees it.
-
-| Method | What it does |
-| --- | --- |
-| `route` | The decoder this job goes to. |
-| `fault_model_requirement_for` | What a window model must offer for the unit that takes this code. |
-
 ## the decoder returns a result
 
 ### `Decoder`

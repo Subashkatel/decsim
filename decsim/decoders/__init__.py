@@ -17,7 +17,7 @@ The algorithm is one row of DECODERS in settings.py, one folder per
 row: minimum_weight_perfect_matching/, belief_matching/, union_find/,
 relay_belief_propagation/, tesseract/ and belief_propagation_osd/.
 decoder.py holds the defaults every row shares, decoders.py the
-timing-only rows and the routers, detection_events.py the formation a
-tier does for itself, and verify_windows.py the referee that decodes
-every window a second time and compares.
+timing-only rows, detection_events.py the formation a tier does for
+itself, and verify_windows.py the referee that decodes every window a
+second time and compares.
 """

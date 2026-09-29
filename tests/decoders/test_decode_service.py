@@ -99,18 +99,17 @@ def _send_after(engine, ticks):
 
 
 def _manager(engine, decoder, dispatch_cycles=0):
-    router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     manager = decoder_manager.DecoderManager(
         engine,
-        router=router,
         scheduler=scheduler,
         unit_pools={"default": 1},
         clock=DISPATCH_CLOCK,
         dispatch_cycles=dispatch_cycles,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = decoder
     manager.escalation_policy = policy
     return manager
 

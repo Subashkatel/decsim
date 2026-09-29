@@ -13,6 +13,8 @@ silently bound, which is gem5's PortRef.connect refusing by name
 (gem5 src/python/m5/params/port_params.py:109-114).
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.assembly as assembly
@@ -24,12 +26,16 @@ import decsim.build.plan as plan_build
 import decsim.controller.controller as controller_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.decoder_manager as decoder_manager_module
+import decsim.decoders.schedulers as schedulers
+import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.frontends.execution_runtime as execution_runtime_module
+import decsim.machine as machine_module
 import decsim.qpu.cycle_clock as cycle_clock
+import decsim.records.seeds as seed_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.window_manager as window_manager_module
 import tests.declared_run as declared_run
@@ -128,7 +134,7 @@ def test_an_escalating_run_builds_the_room_side():
     assert isinstance(redecode, strong_redecode_module.StrongRedecode)
 
 
-def test_each_side_has_its_own_manager_over_its_own_pool_and_one_ledger():
+def test_each_side_has_its_own_manager_decoder_pool_and_one_ledger():
     settings = _switching_settings()
     parts = _parts_of(settings)
     seats = assembly.build_seats(parts)
@@ -141,9 +147,51 @@ def test_each_side_has_its_own_manager_over_its_own_pool_and_one_ledger():
     assert chip.strong_requests is seats["strong_requests"]
     assert host.strong_requests is seats["strong_requests"]
     assert host.escalation_policy is seats["escalation_policy"]
+    assert chip.decoder is seats["primary_decoder"]
+    assert host.decoder is seats["strong_decoder"]
+    assert seats["models"].strong_decoder is seats["strong_decoder"]
     assert chip.queue is not host.queue
     assert chip.queue.scheduler is not host.queue.scheduler
     assert chip.service.staging is not host.service.staging
+
+
+class _SeedRecordingScheduler(schedulers.FifoScheduler):
+    """A FIFO that keeps the seed the run hands it."""
+
+    def __init__(self):
+        self.reserved_seeds = []
+
+    def reserve_run_seed(self, seed):
+        self.reserved_seeds.append(seed)
+        return seed_records.RunSeedReservation("derived", seed, None)
+
+    def commit_run_seed(self, reservation):
+        del reservation
+
+    def cancel_run_seed(self, reservation):
+        del reservation
+
+
+def test_each_managers_scheduler_is_seeded_on_its_own_path():
+    weak, strong = declared_run.switching_decoders(0.0, None)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
+    manager_settings = decoder_settings.DecoderManagerSettings(
+        scheduler=_SeedRecordingScheduler
+    )
+    switching = _switching_settings()
+    settings = dataclasses.replace(
+        switching,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        decoder_manager=manager_settings,
+    )
+    machine = machine_module.Machine.build(settings, 7)
+    chip_seeds = machine.decoder_manager.queue.scheduler.reserved_seeds
+    host_seeds = machine.strong_decoder_manager.queue.scheduler.reserved_seeds
+    assert len(chip_seeds) == 1
+    assert len(host_seeds) == 1
+    assert chip_seeds != host_seeds
 
 
 def test_the_strong_side_submits_to_the_hosts_manager():

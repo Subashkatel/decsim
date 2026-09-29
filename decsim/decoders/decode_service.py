@@ -5,7 +5,7 @@ issued and writes the result back; here the service takes the unit the
 dispatcher chose, moves the job's rounds into that unit's memory (the
 accelerator pattern: invoke the unit, then DMA its input into the
 unit's memory, then compute; gem5-Aladdin aladdin_sys_connection.h and
-dma_interface.h), starts the routed decoder when every transfer landed
+dma_interface.h), starts the manager's decoder when every transfer landed
 and the window owes no boundary, and frees the unit at the decode's end.
 A landed job whose window still owes a boundary parks in its slot and
 releases its compute claim (Tomasulo's rule at the boundary hazard), so
@@ -46,9 +46,9 @@ PIPELINED_JOB_KINDS = frozenset(
 class DecodeService:
     """Stages, starts, prices and frees every decode on its unit.
 
-    Six attributes: the engine, the pool that routes and holds the
-    units, the staging, the manager that owns the service, the
-    manager's dispatch cost, and the trace. Through the manager it reads
+    Six attributes: the engine, the pool that holds the units, the
+    staging, the manager that owns the service, the manager's dispatch
+    cost, and the trace. Through the manager it reads the decoder and
     the strong requests (a merged batch's members are the ledger's
     knowledge), hands every decode's end to decode_completed, and calls
     dispatch wherever compute frees inside an engine event, so the
@@ -78,15 +78,15 @@ class DecodeService:
     # ------------------------------------------ what the dispatcher asks
 
     def resident_capacity(self, job: decoding_records.DecodeJob) -> int:
-        """Residents a unit holds for this job's route.
+        """Residents a unit holds for this job.
 
-        Two (the depth-1 access-execute machine) unless the routed decoder
+        Two (the depth-1 access-execute machine) unless the decoder
         pipelines: then every in-flight decode stays resident (its input
         lives in the unit's memory until its result emerges) plus one
         landing next. Memory admission still gates every resident, so a
         deep pipeline pays its SRAM price visibly or refuses loudly.
         """
-        decoder = self.pool.decoder_for(job)
+        decoder = self.manager.decoder
         depth = decoder.pipeline_depth(job)
         return depth + 1
 
@@ -298,7 +298,7 @@ class DecodeService:
 
     def abort(self, job: decoding_records.DecodeJob) -> None:
         """Stop a running decode: the decoder, its input, its slot."""
-        decoder = self.pool.decoder_for(job)
+        decoder = self.manager.decoder
         decoder.cancel(job)
         self.staging.cancel(job)
         self.free(job)
@@ -409,8 +409,8 @@ class DecodeService:
     # ------------------------------------------------- dispatch, private
 
     def _start_decoder(self, job: decoding_records.DecodeJob) -> None:
-        """Hand the started job to its routed decoder on this unit."""
-        decoder = self.pool.decoder_for(job)
+        """Hand the started job to the decoder on this unit."""
+        decoder = self.manager.decoder
         self.engine.log(
             log_sources.DECODER_MANAGER, f"START DECODE {job.label}"
         )
@@ -620,7 +620,7 @@ class DecodeService:
         unit stays unpredicted.
         """
         unit = job.unit
-        decoder = self.pool.decoder_for(job)
+        decoder = self.manager.decoder
         occupancy = decoder.occupancy(job)
         if occupancy is None:
             unit.expect_compute_free(None)
@@ -648,7 +648,7 @@ class DecodeService:
         on every row: a depth above one needs an interval shorter than
         the latency, which the assert below says. The pipelined model
         serves the job kinds in PIPELINED_JOB_KINDS; the strong tier and
-        merged batches are not pipelined yet, and a pipelined route
+        merged batches are not pipelined yet, and a pipelined decoder
         there refuses loudly rather than silently serializing.
         """
         occupancy = decoder.occupancy(job)

@@ -1,4 +1,4 @@
-"""Timing-only decoders, the routers and the sampled-confidence wrapper.
+"""Timing-only decoders and the sampled-confidence wrapper.
 
 Every decoder here is a row on the Decoder port (ports.py, the defaults
 in decoder.py): latency(job) prices one window job's compute as a
@@ -12,7 +12,6 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
@@ -26,74 +25,6 @@ SAMPLED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
     weight_step_natural_log=None,
     references=("controlled Bernoulli experimental input",),
 )
-
-
-class CodeRouter:
-    """Route each job by code name, with a default decoder fallback."""
-
-    def __init__(self, default, by_code: Optional[dict] = None):
-        self.default = default
-        self.by_code = {}
-        if by_code:
-            self.by_code = dict(by_code)
-
-    def run_seed_children(self) -> tuple:
-        """The routed decoders under stable semantic paths."""
-        default_path = (seed_records.RunSeedPathSegment("field", "default"),)
-        children = [seed_records.RunSeedChild(default_path, self.default)]
-        for key, decoder in self.by_code.items():
-            path = _by_code_path(key)
-            child = seed_records.RunSeedChild(path, decoder)
-            children.append(child)
-        return tuple(children)
-
-    def route(self, job: decoding_records.DecodeJob):
-        """The decoder for this job: by code, the default when unmapped."""
-        return self.by_code.get(job.code, self.default)
-
-    def fault_model_requirement_for(
-        self, code: Optional[str]
-    ) -> fault_models.DecoderFaultModelRequirement:
-        """Only the requirement of the decoder selected for ``code``."""
-        decoder = self.by_code.get(code, self.default)
-        if decoder is None:
-            return fault_models.NO_FAULT_MODEL_REQUIRED
-        return decoder.fault_model_requirement
-
-
-class SwitchingRouter:
-    """Route strong side jobs to the strong decoder and every other to weak."""
-
-    def __init__(self, weak, strong):
-        self.weak = weak
-        self.strong = strong
-        kinds = decoding_records.DecodeJobKind
-        self.by_job_kind = {
-            kinds.STRONG_REDECODE: strong,
-            kinds.STRONG_BATCH: strong,
-        }
-
-    def run_seed_children(self) -> tuple:
-        """Every routed decoder tier under its own path."""
-        weak_path = (seed_records.RunSeedPathSegment("field", "weak"),)
-        strong_path = (seed_records.RunSeedPathSegment("field", "strong"),)
-        children = [
-            seed_records.RunSeedChild(weak_path, self.weak),
-            seed_records.RunSeedChild(strong_path, self.strong),
-        ]
-        return tuple(children)
-
-    def route(self, job: decoding_records.DecodeJob):
-        """Strong decoder for escalated jobs, weak for everything else."""
-        return self.by_job_kind.get(job.kind, self.weak)
-
-    def fault_model_requirement_for(
-        self, code: Optional[str]
-    ) -> fault_models.DecoderFaultModelRequirement:
-        """Join the weak and strong views that may own this code's window."""
-        weak_requirement = _fault_model_requirement_for(self.weak, code)
-        strong_requirement = _fault_model_requirement_for(self.strong, code)
-        return weak_requirement.joined(strong_requirement)
 
 
 class FunctionLatencyDecoder(decoder_module.DecoderBase):
@@ -265,22 +196,3 @@ def _check_probability(value, field_name: str) -> float:
     if not math.isfinite(normalized) or not 0 <= normalized <= 1:
         raise ValueError(f"{field_name} must be finite and in [0, 1]")
     return normalized
-
-
-def _by_code_path(key) -> tuple:
-    """The seed path of one by-code route: the field, then its key."""
-    if key is None:
-        key_segment = seed_records.RunSeedPathSegment("none_key", None)
-    else:
-        key_segment = seed_records.RunSeedPathSegment("string_key", key)
-    return (seed_records.RunSeedPathSegment("field", "by_code"), key_segment)
-
-
-def _fault_model_requirement_for(
-    decoder_or_router, code: Optional[str]
-) -> fault_models.DecoderFaultModelRequirement:
-    """A leaf's declaration, or a code-aware router's."""
-    resolver = getattr(decoder_or_router, "fault_model_requirement_for", None)
-    if resolver is not None:
-        return resolver(code)
-    return decoder_or_router.fault_model_requirement

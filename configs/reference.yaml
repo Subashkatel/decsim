@@ -11,8 +11,8 @@
 # settings.py). tests/experiments/test_yaml_surface.py loads this file, so
 # a key its section no longer knows fails there; a key a reader gained is
 # added here by hand, in the same commit. Knobs the yaml
-# cannot reach are Python objects on the settings records: routers,
-# escalation families, schedulers, devices, policies.
+# cannot reach are Python objects on the settings records: escalation
+# families, schedulers, devices, policies.
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits

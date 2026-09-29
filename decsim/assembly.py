@@ -18,7 +18,7 @@ takes None and binds nothing.
 
 A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
-the six conditions that decide that, once.
+the seven conditions that decide that, once.
 
 One row names a seat another row built: the primary store output,
 which is one of the two store ends rather than a third one, so it sits
@@ -89,7 +89,8 @@ def bind(wires: tuple, seats: dict) -> None:
 def start_wired_seats(seats: dict) -> None:
     """Let every seat whose first work needs its ports do that work."""
     for name in STARTS_WHEN_WIRED:
-        seats[name].start()
+        if name in seats:
+            seats[name].start()
 
 
 def seed_roots(parts: build_parts.Parts, seats: dict) -> tuple:
@@ -124,8 +125,12 @@ def _syndrome_source(parts):
     return parts.plan.device
 
 
-def _router(parts):
-    return parts.pool.router
+def _primary_decoder(parts):
+    return parts.pool.active
+
+
+def _strong_decoder(parts):
+    return parts.pool.strong
 
 
 def _detection_events(parts):
@@ -143,7 +148,8 @@ SEATS = (
     ("boundary_policy", _boundary_policy),
     ("error_model_provider", _error_model_provider),
     ("syndrome_source", _syndrome_source),
-    ("router", _router),
+    ("primary_decoder", _primary_decoder),
+    ("strong_decoder", _strong_decoder),
     ("detection_events", _detection_events),
     ("burst_detector", _burst_detector),
     ("conditional_release", controller_side.build_conditional_release),
@@ -237,7 +243,8 @@ WIRES = (
     ("strong_syndrome_round_receiver.detection_events", "detection_events"),
     # the window side
     ("models.provider", "error_model_provider"),
-    ("models.router", "router"),
+    ("models.decoder", "primary_decoder"),
+    ("models.strong_decoder", "strong_decoder"),
     ("planner.scheme", "scheme"),
     ("planner.models", "models"),
     ("tracker.scheme", "scheme"),
@@ -321,6 +328,8 @@ WIRES = (
     ("window_manager.strong_redecode", "strong_redecode"),
     ("window_manager.window_interaction", "window_interaction"),
     # the decoder managers
+    ("decoder_manager.decoder", "primary_decoder"),
+    ("strong_decoder_manager.decoder", "strong_decoder"),
     ("decoder_manager.strong_requests", "strong_requests"),
     ("decoder_manager.escalation_policy", "escalation_policy"),
     ("strong_decoder_manager.strong_requests", "strong_requests"),
@@ -369,8 +378,15 @@ WIRES = (
 # The seats whose first work needs a port and happens once the graph is
 # wired, which is gem5's init; the factory and the execution runtime
 # queue the run's first events instead and start when the run does,
-# which is gem5's startup (sim_object.hh lines 194 and 280).
-STARTS_WHEN_WIRED = ("planner", "window_manager", "syndrome_round_sender")
+# which is gem5's startup (sim_object.hh lines 194 and 280). A run
+# without a seat skips it.
+STARTS_WHEN_WIRED = (
+    "decoder_manager",
+    "strong_decoder_manager",
+    "planner",
+    "window_manager",
+    "syndrome_round_sender",
+)
 
 # The seed path of every stochastic owner, in the order the run seed
 # hashes them: a seat by name, what one of a seat's readers answers, or
@@ -380,7 +396,8 @@ SEED_ROOTS = (
     ("scheme", "scheme"),
     ("device", "plan.device"),
     ("error_model_provider", "error_model_provider"),
-    ("decoder_router", "router"),
+    ("primary_decoder", "primary_decoder"),
+    ("strong_decoder", "strong_decoder"),
     ("factory", "factory"),
     ("escalation_policy", "escalation_policy"),
     ("decoder_manager", "decoder_manager"),
@@ -433,6 +450,7 @@ def _absent_strong_seats(escalation_policy) -> set:
                 "shape",
                 "pending_strong_windows",
                 "strong_redecode",
+                "strong_decoder",
                 "strong_decoder_manager",
             )
         )
@@ -450,6 +468,8 @@ def _absent_named_seats(parts: build_parts.Parts) -> set:
         absent.add("error_model_provider")
     if parts.burst_detector is None:
         absent.add("burst_detector")
+    if parts.pool.active is None:
+        absent.add("primary_decoder")
     return absent
 
 

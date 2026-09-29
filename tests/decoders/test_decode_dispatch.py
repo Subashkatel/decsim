@@ -120,16 +120,15 @@ def _job(index, label, deps_remaining, gate=None, input_key=None, window=None):
 def _manager(engine, unit_count):
     """The manager these tests dispatch on, at that many units."""
     decoder = decoders.PresetLatencyDecoder(DECODE_MICROSECONDS)
-    router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     manager = decoder_manager.DecoderManager(
         engine,
-        router=router,
         scheduler=scheduler,
         unit_pools={"default": unit_count},
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = decoder
     manager.escalation_policy = policy
     return manager
 

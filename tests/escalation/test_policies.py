@@ -500,7 +500,7 @@ class _ConfidentEscalation(policies.EscalationPolicyBase):
 
 
 def _confident_config(tmp_path):
-    """A yaml naming the fourth row, with no router, boundary or scheme."""
+    """A yaml naming the fourth row, with no boundary policy or scheme."""
     return _switching_config(tmp_path, kind="confident")
 
 
@@ -513,7 +513,7 @@ def _switching_config(
     terminal_policy=None,
     boundaries=None,
 ):
-    """A yaml with no router, no boundary policy and no windowing scheme."""
+    """A yaml with no boundary policy and no windowing scheme."""
     escalation = {"kind": kind, "gap_threshold_db": 20.0}
     if threshold_source is not None:
         escalation["threshold_source"] = threshold_source
@@ -571,14 +571,14 @@ def _windows_section(windows_kind, terminal_policy, boundaries) -> dict:
     return windows
 
 
-def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
+def test_a_fourth_escalation_row_gets_the_boundaries_pools_and_join(
     monkeypatch, tmp_path
 ):
     """The wiring reads the row's declared facts, not the kind's name.
 
     A row that escalates and decides on a confidence, named from a yaml
-    that gives no router, no boundary policy and no windowing scheme,
-    gets held boundaries, the two-pool router and the confidence join.
+    that gives no boundary policy and no windowing scheme, gets held
+    boundaries, a strong pool of its own and the confidence join.
     """
     monkeypatch.setitem(
         escalation_settings.ESCALATIONS, "confident", _ConfidentEscalation
@@ -600,17 +600,8 @@ def test_a_fourth_escalation_row_gets_the_boundaries_router_and_join(
     assert sorted(machine.decoder_manager.pool.units_by_pool) == ["default"]
     strong_pool = machine.strong_decoder_manager.pool
     assert sorted(strong_pool.units_by_pool) == ["strong"]
-    strong_probe = decoding_records.DecodeJob(
-        operation_id=-1,
-        window_id=0,
-        round_count=0,
-        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-    )
-    weak_probe = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=0
-    )
-    router = machine.decoder_manager.pool.router
-    assert router.route(strong_probe) is not router.route(weak_probe)
+    chip_decoder = machine.decoder_manager.decoder
+    assert machine.strong_decoder_manager.decoder is not chip_decoder
     assert machine.window_manager.planner.scheme.has_trailing_tail_context
     result = machine.run()
     assert result.terminal_status == "complete"

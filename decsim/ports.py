@@ -139,15 +139,16 @@ class IdleRoundReceiver(Protocol):
     def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
         """Take one idle cycle of a patch nobody is operating on."""
 
-    def bind_at_start(
+    def start_command(
         self, command: program_records.RunOperationBody
     ) -> program_records.RunOperationBody:
         """The command as it starts after its patches' idle rounds.
 
-        A segment that declares no stream offset continues its stream
-        after every round the stream has had, idle ones included, and a
-        feedback source on a protected stream reads it from there. Any
-        other command comes back as it is.
+        The operation claims every idle round its patches emitted before
+        it started. A segment that declares no stream offset continues
+        its stream after every round the stream has had, idle ones
+        included, and a feedback source on a protected stream reads it
+        from there. Any other command comes back unbound.
         """
 
 
@@ -2189,7 +2190,7 @@ class IdlePolicy(Protocol):
     Table rows: separate_decode_jobs, ignore (controller/policies.py,
     beside the accounting they serve). relay carries one idle round
     through the idle accounting it is given (controller/idle_rounds.py);
-    end_idle_period runs when an operation claims the patch and, for
+    end_idle_period runs when an operation starts on the patch and, for
     every idle patch, when the workload completes, so rounds the policy
     has not charged yet can be settled.
     """

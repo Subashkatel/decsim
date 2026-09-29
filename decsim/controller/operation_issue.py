@@ -2,8 +2,8 @@
 
 The execution runtime admits an operation when its predecessors are done
 and its release has arrived; the issuer then opens its protected
-regions, settles the idle rounds of its patches, prepends the idle rounds
-the windows must plan for, and hands the command to the output. A
+regions and hands the command to the output. The operation claims its
+patches' idle rounds when it starts (controller/idle_rounds.py). A
 program root or an ordinary successor is preloaded and starts at the
 next boundary; a feedback-blocked operation is dynamic and pays the
 output path first. The runtime hears the start boundary through
@@ -28,7 +28,6 @@ class OperationIssuer:
 
     streams = ports.Port(feedback_streams.Streams)
     idle_rounds = ports.Port(idle_rounds_module.IdleRoundAccounting)
-    windows = ports.Port(ports.WindowInput)
     output = ports.Port(ports.InstructionReceiver)
 
     def __init__(
@@ -60,12 +59,6 @@ class OperationIssuer:
     ) -> None:
         """Prepare one QPU command; on_started hears its start boundary."""
         self.streams.begin(operation)
-        patches = program_records.patches_of(operation)
-        for patch in patches:
-            self.idle_rounds.end_idle_period(operation, patch)
-        idle_round_count = self.idle_rounds.claim(operation)
-        if idle_round_count:
-            self.windows.prepend_idle_rounds(operation.id, idle_round_count)
         self._log_start(operation)
         command = self._command(operation)
         if operation.blocked_by is None:

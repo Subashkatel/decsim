@@ -56,7 +56,7 @@ class ReadoutLog:
         del operation_id
         self.idle_ticks.append((self.engine.now, patch, round_index))
 
-    def bind_at_start(self, command):
+    def start_command(self, command):
         return command
 
     def body_done(self, operation):

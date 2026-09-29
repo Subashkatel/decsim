@@ -1438,7 +1438,7 @@ idle_policy:
                                    # 2303.00054 line 144), so the default costs one
                                    # load-only decode job per idle commit region
                                    # and one shorter job for the rounds left when
-                                   # an operation claims the patch or the
+                                   # an operation starts on the patch or the
                                    # workload completes.
                                    # ignore is the optimistic card for active-path
                                    # latency studies. Inert while the workload is a

@@ -39,6 +39,17 @@ class RecordingStreams:
         del patch
         return False
 
+    def bind_at_start(self, command):
+        return command
+
+
+class RecordingWindows:
+    def __init__(self):
+        self.prepended = []
+
+    def prepend_idle_rounds(self, operation_id, count):
+        self.prepended.append((operation_id, count))
+
 
 class RecordingDecodeQueue:
     def __init__(self):
@@ -77,6 +88,7 @@ def accounting_with(policy, streams=None):
     accounting.decode_queue = demand
     accounting.streams = streams
     accounting.qpu = qpu
+    accounting.windows = RecordingWindows()
     memory = program_records.Operation(
         7, "memory", ("patch-a",), patches=("patch-a",)
     )
@@ -86,6 +98,14 @@ def accounting_with(policy, streams=None):
     program = program_records.ExecutionProgram((memory, other))
     accounting.load(program)
     return accounting, qpu, demand
+
+
+def started(accounting, operation):
+    """The QPU starts the operation's command on its patches."""
+    command = program_records.RunOperationBody(
+        operation, round_ticks=1000, round_count=3, source_round_count=3
+    )
+    return accounting.start_command(command)
 
 
 def counters_on(accounting):
@@ -149,6 +169,26 @@ def test_patches_idle_through_the_same_cycles_claim_each_cycle_once():
     assert accounting.claim(both) == 3
 
 
+def test_an_operation_claims_its_idle_rounds_when_it_starts():
+    """The windows hear every idle cycle before the start, and no more.
+
+    A waiting patch keeps measuring until the operation starts on it, and
+    those rounds must be decoded too (Quantum Machines 2412.00289 lines
+    524-531).
+    """
+    ignore = policies.Ignore()
+    accounting, _qpu, _demand = accounting_with(ignore)
+    operation = accounting.operation_by_id[7]
+
+    for round_index in (1, 2, 3, 4):
+        accounting.emit_idle_round(7, "patch-a", round_index)
+    command = started(accounting, operation)
+
+    assert command.operation is operation
+    assert accounting.windows.prepended == [(7, 4)]
+    assert accounting.claim(operation) == 0
+
+
 def test_a_patch_on_a_live_protected_stream_emits_through_the_stream():
     streams = RecordingStreams(live_patches=("patch-a",))
     ignore = policies.Ignore()
@@ -168,7 +208,7 @@ def test_the_charged_policy_costs_one_job_per_region_and_the_remainder():
 
     for round_index in (1, 2, 3, 4, 5):
         accounting.emit_idle_round(7, "patch-a", round_index)
-    accounting.end_idle_period(operation, "patch-a")
+    started(accounting, operation)
 
     rounds_and_labels = [
         (job["rounds"], job["label"]) for job in demand.demands

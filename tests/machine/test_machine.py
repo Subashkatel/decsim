@@ -78,6 +78,7 @@ import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.schemes.naive_online as naive_online
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
@@ -139,7 +140,7 @@ class StreamlessIdleRounds:
     def emit_idle_round(self, operation_id, patch, round_index) -> None:
         del operation_id, patch, round_index
 
-    def bind_at_start(self, command):
+    def start_command(self, command):
         return command
 
 
@@ -2697,6 +2698,62 @@ def test_a_released_feedback_source_binds_to_the_round_it_starts_at():
     binding = machine.issuer.stream_binding_for(3)
     assert starts[("STARTED", 3)] == 8_800_000
     assert (binding.stream_id, binding.stream_offset) == (100, 7)
+
+
+def test_an_operation_claims_every_idle_cycle_before_it_starts():
+    """The rounds its patches measure until it starts are its history.
+
+    Two memories on patches 1 and 2 end and their patches idle. The
+    operation on both is released by the first memory's decision, sent
+    at 32 us and started on the 34 us boundary. A waiting patch keeps
+    measuring and those rounds must be decoded too (Quantum Machines
+    2412.00289 lines 524-531), so the operation's one window batches
+    every idle cycle through its start boundary, 31 of them.
+    """
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(2)
+    both = program_records.Operation(
+        3,
+        "both",
+        (1, 2),
+        patches=(1, 2),
+        predecessors=(1, 2),
+        blocked_by=1,
+    )
+    workload = declared_run.declared_workload([first, second, both], 3)
+    scheme = naive_online.NaiveOnlineScheme()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    decoder = decoders.PresetLatencyDecoder(10.0)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    ignore = idle_policies.Ignore()
+    idle = controller_settings.IdlePolicySettings(policy=ignore)
+    qpu = declared_run.declared_qpu()
+    links = declared_run.declared_profile()
+    controller = declared_run.declared_controller()
+    frame = declared_run.declared_frame()
+    settings = machine_settings.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        links=links,
+        controller=controller,
+        pauli_frame=frame,
+        windows=windows,
+        idle_policy=idle,
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    idle_patches = []
+
+    def heard_idle_round(operation_id, patch, round_index):
+        del operation_id, round_index
+        idle_patches.append(patch)
+
+    machine.idle_rounds.trace.idle_round_emitted.connect(heard_idle_round)
+    machine.run()
+
+    window = machine.window_manager.planner.plan.windows[(3, 0)]
+    assert idle_patches.count(1) == idle_patches.count(2) == 31
+    assert window.batched_preceding_idle_round_count == 31
 
 
 def _protected_memory_settings(circuit, source):

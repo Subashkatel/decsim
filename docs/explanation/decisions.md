@@ -1201,8 +1201,8 @@ clipped on a segment's edge is the closed-tail case (Tan et al.
 2209.09219 lines 1052-1056).
 
 **What it cost the port file.** `IdleRoundReceiver` gained
-`bind_at_start`, which the QPU calls as a segment with no offset
-starts. `OperationIssuer.after_successor_release` lost
+`start_command`, which the QPU calls as every command starts, and which
+hands the command to the streams' `bind_at_start`. `OperationIssuer.after_successor_release` lost
 `waits_for_blocked`. The `IdlePolicy` table lost its `extend_stream`
 row.
 

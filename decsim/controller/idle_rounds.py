@@ -6,10 +6,11 @@ holds an unsealed stream sends it as that stream's next round; for any
 other patch the idle policy (controller/policies.py) decides how it
 travels (a feedback-memory round of the operation that left the patch)
 and whether it is charged as decode work (one load-only job per commit
-region of idle rounds, the last one shorter). An operation that
-claims the patch takes the rounds emitted since the last claim, so the
-window manager can prepend them to its plan; the rounds of a patch no
-operation claims again settle when the workload completes. Idle rounds
+region of idle rounds, the last one shorter). An operation claims its
+patches when it starts on them and takes every round emitted since the
+last claim, through its start boundary, so the window manager can
+prepend them to its plan; the rounds of a patch no operation claims
+again settle when the workload completes. Idle rounds
 are decoder workload: the backlog bound counts every generated syndrome
 bit against the decoder's processing rate (Terhal 1302.3428 lines
 3151-3159; Battistel et al. 2303.00054 line 144).
@@ -48,6 +49,7 @@ class IdleRoundAccounting:
     decode_queue = ports.Port(ports.DecodeQueue)
     streams = ports.Port(feedback_streams.Streams)
     qpu = ports.Port(ports.Qpu)
+    windows = ports.Port(ports.WindowInput)
 
     def __init__(self, policy: ports.IdlePolicy, geometry_by_patch) -> None:
         self.policy = policy
@@ -81,10 +83,25 @@ class IdleRoundAccounting:
         idle.unclaimed += 1
         self.trace.idle_round_emitted.fire(operation_id, patch, round_index)
 
-    def bind_at_start(
+    def start_command(
         self, command: program_records.RunOperationBody
     ) -> program_records.RunOperationBody:
-        """The streams bind the command to its stream as it starts."""
+        """The operation starts on its patches and claims their idle rounds.
+
+        A waiting patch keeps measuring until the operation starts, and
+        those rounds are history the decoder must read too (Quantum
+        Machines 2412.00289 lines 524-531; Holmes et al. 2004.04794 lines
+        506-510). The QPU emits a boundary's idle rounds before it starts
+        the commands on it (qpu/cycle_clock.py _cross_boundary), so the
+        claim here takes every one of them. The streams then bind the
+        command to its stream.
+        """
+        operation = command.operation
+        for patch in program_records.patches_of(operation):
+            self.policy.end_idle_period(self, operation, patch)
+        idle_round_count = self.claim(operation)
+        if idle_round_count:
+            self.windows.prepend_idle_rounds(operation.id, idle_round_count)
         return self.streams.bind_at_start(command)
 
     def claim(self, operation) -> int:
@@ -107,10 +124,6 @@ class IdleRoundAccounting:
             cycle_count = max(cycle_count, idle.unclaimed)
             idle.unclaimed = 0
         return cycle_count
-
-    def end_idle_period(self, operation, patch) -> None:
-        """An operation claims the patch: the policy settles its idle rounds."""
-        self.policy.end_idle_period(self, operation, patch)
 
     def end_every_idle_period(self) -> None:
         """The workload is complete: the policy settles every idle patch.

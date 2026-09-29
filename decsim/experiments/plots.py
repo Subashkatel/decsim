@@ -281,7 +281,7 @@ class _TimelineShot:
     # window index), the operation as the trace writes it: two
     # operations share every number (records/windows.py Window.key)
     moves_by_round: dict  # (channel, round) -> _Span
-    moves_by_window: dict  # (channel, window) -> _Span
+    moves_by_window: dict  # (channel, window) -> [_Span], one per move
     windows: dict  # window -> _TimelineWindow
     stages: dict  # (window, stage name) -> [_Span], one per decode
     frame: dict  # window -> _Span, accepted to committed
@@ -366,14 +366,19 @@ def _timeline_lanes(document) -> _TimelineLanes:
 
 
 def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
-    """One link move filed under the round or the window it carried."""
+    """One link move filed under the round or the window it carried.
+
+    A window decoded twice crosses a link twice, and each move is kept,
+    the rule _timeline_stages keeps for its stages.
+    """
     channel = event["args"].get("channel")
     if channel is None:
         return
     span = _span_of(event)
     window_key = trace_file.window_key_of(event)
     if window_key is not None:
-        by_window[(channel, window_key)] = span
+        moves = by_window.setdefault((channel, window_key), [])
+        moves.append(span)
         return
     rounds = event["args"].get("rounds_by_operation")
     if rounds is None:
@@ -676,11 +681,10 @@ def _draw_transfer_bar(
     window_key: tuple,
     pen: _Pen,
 ) -> None:
-    """One link hop's bar, when the window crossed that link."""
-    span = shot.moves_by_window.get((channel, window_key))
-    if span is None:
-        return
-    timeline.window_bar(row, span.start_us, span.end_us, pen)
+    """One link hop's bar for each time the window crossed that link."""
+    spans = shot.moves_by_window.get((channel, window_key), ())
+    for span in spans:
+        timeline.window_bar(row, span.start_us, span.end_us, pen)
 
 
 def _draw_window_stages(

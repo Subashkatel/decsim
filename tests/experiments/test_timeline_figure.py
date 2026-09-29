@@ -205,7 +205,7 @@ def test_the_timeline_stages_are_the_runs_own_stage_records(tmp_path):
     document = trace_file.load(trace_path)
     shot = plots.timeline_shot(document)
     expected = _recorded_stages(machine)
-    drawn = _every_drawn_stage(shot.stages)
+    drawn = _every_drawn_span(shot.stages)
     assert drawn == expected
 
 
@@ -216,7 +216,36 @@ def test_the_timeline_keeps_every_decode_of_a_window_decoded_again(tmp_path):
     strong decode all run, so one window and stage name has several
     spans, and the figure holds every one the run recorded.
     """
-    trace_path = tmp_path / "siblings.trace.json"
+    shot_run, shot = _traced_speculative_run(tmp_path)
+    expected = _recorded_stages(shot_run.machine)
+
+    drawn = _every_drawn_span(shot.stages)
+
+    assert len(expected) > len(shot.stages)
+    assert drawn == expected
+
+
+def test_the_timeline_keeps_every_move_of_a_window_moved_twice(tmp_path):
+    """Both boundary handoffs of a window decoded twice keep their bars.
+
+    Under run_both_at_once a window's two decodes each hand a boundary
+    on, so one link and window has two moves, and the figure holds every
+    transfer the run recorded.
+    """
+    shot_run, shot = _traced_speculative_run(tmp_path)
+    transfers = shot_run.result.link_traffic["transfers"]
+    _by_round, by_window = _transfer_spans(transfers)
+    expected = sorted(by_window)
+
+    drawn = _every_drawn_span(shot.moves_by_window)
+
+    assert len(expected) > len(shot.moves_by_window)
+    assert drawn == expected
+
+
+def _traced_speculative_run(tmp_path) -> tuple:
+    """A switching shot under run_both_at_once, traced; (run, timeline)."""
+    trace_path = tmp_path / "speculative.trace.json"
     observation = {"trace": str(trace_path)}
     shot_run = measure_tests.switching_run(
         tmp_path,
@@ -224,22 +253,16 @@ def test_the_timeline_keeps_every_decode_of_a_window_decoded_again(tmp_path):
         run_both_at_once=True,
         sections={"observation": observation},
     )
-    machine = shot_run.machine
-    machine.observation.trace_writer.write(str(trace_path))
+    shot_run.machine.observation.trace_writer.write(str(trace_path))
     document = trace_file.load(trace_path)
     shot = plots.timeline_shot(document)
-    expected = _recorded_stages(machine)
-
-    drawn = _every_drawn_stage(shot.stages)
-
-    assert len(expected) > len(shot.stages)
-    assert drawn == expected
+    return shot_run, shot
 
 
-def _every_drawn_stage(stages_by_key: dict) -> list:
+def _every_drawn_span(spans_by_key: dict) -> list:
     """(key, start us, end us) for every span the figure draws, sorted."""
     rows = []
-    for key, spans in stages_by_key.items():
+    for key, spans in spans_by_key.items():
         for span in spans:
             rows.append((key, span.start_us, span.end_us))
     return sorted(rows)
@@ -265,9 +288,9 @@ def test_the_timeline_moves_are_the_results_own_transfers(tmp_path):
     transfers = result.link_traffic["transfers"]
     by_round, by_window = _transfer_spans(transfers)
     drawn_by_round = _drawn_spans(shot.moves_by_round, by_round)
-    drawn_by_window = _drawn_spans(shot.moves_by_window, by_window)
+    drawn_by_window = _every_drawn_span(shot.moves_by_window)
     assert drawn_by_round == by_round
-    assert drawn_by_window == by_window
+    assert drawn_by_window == sorted(by_window)
 
 
 def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
@@ -356,7 +379,7 @@ def test_two_streams_draw_every_window_of_both(tmp_path):
 
     assert len(expected_windows) == 18
     assert _drawn_windows(shot, expected_windows) == expected_windows
-    assert _every_drawn_stage(shot.stages) == expected_stages
+    assert _every_drawn_span(shot.stages) == expected_stages
     assert len(shot.frame) == 18
     assert _drawn_spans(shot.frame, expected_frame) == expected_frame
     figure_path = tmp_path / "timeline.png"

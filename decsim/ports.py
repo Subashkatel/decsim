@@ -1576,6 +1576,14 @@ class DetectionEventPlacement(Protocol):
         the seat for that round's detectors and never returned.
         """
 
+    def width_at(self, seat: str, fragments: tuple) -> Optional[int]:
+        """The width one round's fragments take as they leave the seat.
+
+        Forms nothing and holds nothing, so a store can weigh its room at
+        the width it will hold before the round lands. None when the
+        width is unknown.
+        """
+
     def needs_the_round_before(
         self, seat: str, operation_id: Any, round_index: int
     ) -> bool:

@@ -183,6 +183,73 @@ def test_a_circuit_less_round_keeps_its_landed_width_at_a_decoder_seat():
     assert leaving == raw
 
 
+def timing_only_round():
+    """A round with no bits, eight wide on the wire."""
+    return round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=1,
+        bits=None,
+        size_bits=8,
+        fragment_index=0,
+    )
+
+
+WIDTH_CASES = (
+    (seated(("controller",)), "weak_syndrome_buffer", rounds(1), 8),
+    (seated(("weak_syndrome_buffer",)), "weak_syndrome_buffer", rounds(1), 4),
+    (seated(("weak_decoder",)), "weak_decoder", rounds(1), 8),
+    (
+        seated(("weak_syndrome_buffer",)),
+        "weak_syndrome_buffer",
+        (timing_only_round(),),
+        8,
+    ),
+    (
+        no_recipes_at("weak_syndrome_buffer"),
+        "weak_syndrome_buffer",
+        (stated(),),
+        12,
+    ),
+    (no_recipes_at("weak_decoder"), "weak_decoder", (stated(),), 17),
+)
+
+
+@pytest.mark.parametrize(
+    ("placement", "seat", "fragments", "width"), WIDTH_CASES
+)
+def test_the_width_a_seat_answers_is_the_width_it_forms_the_round_to(
+    placement, seat, fragments, width
+):
+    """A store reserves this width before the round lands.
+
+    gem5 makes room for a block at the size its compressor will store it
+    at (src/mem/cache/base.cc:1678-1698).
+    """
+    asked = placement.width_at(seat, fragments)
+    formed = placement.form_at(seat, fragments)
+
+    assert asked == width
+    assert round_records.fragment_wire_bits(formed) == width
+
+
+def test_asking_a_width_forms_nothing_and_holds_nothing():
+    detector = CountingDetector()
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("weak_syndrome_buffer",)
+    )
+    source = CircuitSource()
+    placement = formation.SeatedFormation(
+        source, settings, "weak_syndrome_buffer", detector
+    )
+    second_round = rounds(2)
+
+    placement.width_at("weak_syndrome_buffer", second_round)
+
+    assert detector.observed == []
+    assert placement.needs_the_round_before("weak_syndrome_buffer", 1, 2)
+
+
 def test_fake_bits_formed_are_the_first_of_the_random_bits():
     """Random bits carry no parity, so the events are their first bits."""
     placement = no_recipes_at("controller")

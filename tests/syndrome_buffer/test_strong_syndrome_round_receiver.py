@@ -104,6 +104,10 @@ class RecordingFormer:
         self.formed.append((seat, fragments[0].round_index, held))
         return fragments
 
+    def width_at(self, seat, fragments):
+        del seat
+        return round_records.fragment_wire_bits(fragments)
+
 
 class FormingInCycles(RecordingFormer):
     """A seat that takes FORMING_CYCLES of a 10-tick clock to form."""
@@ -378,6 +382,71 @@ def test_a_region_formed_here_is_reported_stored_once_every_round_is():
     assert stored_at == [(50, 2)]
 
 
+def stated_event_round(round_index: int) -> round_records.PackedRound:
+    """A round whose source states its events take one bit."""
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=round_index,
+        bits=(1, 0, 1),
+        size_bits=BITS_PER_ROUND,
+        fragment_index=0,
+        event_bits=1,
+    )
+    landing = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
+    return round_records.PackedRound(
+        landing, round_records.WINDOW_INPUT_ROUTE, BITS_PER_ROUND
+    )
+
+
+def test_the_room_is_weighed_at_the_width_this_seat_stores():
+    """Rounds of three raw bits formed here into one event take one bit each.
+
+    gem5 makes room for a block at the size it will be stored at after
+    its own compressor, not the packet's (src/mem/cache/base.cc:1678-1698).
+    """
+    engine = engine_module.Engine()
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("strong_syndrome_buffer",)
+    )
+    here = formation.SeatedFormation(None, settings)
+    receiver = room_side(engine, bits=2, detection_events=here)
+    crossing = stated_event_round(1)
+    asked = stated_event_round(2)
+    receiver.reserve_write(crossing)
+
+    has_room = receiver.has_room(asked)
+
+    assert receiver.reserved_bits_by_round == {(1, 1): 1}
+    assert has_room is True
+
+
+def test_a_region_reserves_its_formed_rounds_and_its_raw_round_before():
+    """The round before lands raw; the rounds formed here take one bit."""
+    engine = engine_module.Engine()
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("strong_syndrome_buffer",)
+    )
+    here = formation.SeatedFormation(None, settings)
+    receiver = room_side(engine, bits=5, detection_events=here)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 1
+    )
+    packets = []
+    for round_index in (1, 2, 3):
+        packed = stated_event_round(round_index)
+        packets.append(packed.packet)
+    carried = round_records.EscalatedRegion.of(request_key, tuple(packets), 2)
+
+    receiver.reserve_region(carried)
+
+    assert receiver.reserved_bits_by_round == {
+        (1, 1): BITS_PER_ROUND,
+        (1, 2): 1,
+        (1, 3): 1,
+    }
+
+
 def test_a_regions_reservation_is_its_bits_and_the_refusal_names_them():
     """An escalation cannot wait, so the refusal names the yaml key."""
     engine = engine_module.Engine()
@@ -485,6 +554,7 @@ def test_a_region_asks_the_store_for_each_round_beside_the_ones_before_it():
     )
     store_settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=9)
     receiver.store = RoomAskingStore(store_settings, engine)
+    receiver.detection_events = RecordingFormer()
     carried = region(1, 2)
 
     receiver.reserve_region(carried)

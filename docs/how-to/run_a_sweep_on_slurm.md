@@ -17,8 +17,8 @@ Plan again after each round, until the plan says every point has stopped.
 A piece is one point's block of shots that one process runs from start
 to finish. The yaml's `collection` section sets its size in QEC rounds
 with `piece_rounds`, 20,000 unless it says otherwise
-(`configs/reference.yaml`). So a piece takes about as long at any
-history length.
+(`configs/reference.yaml`). A shot's rounds add up every patch's
+rounds. So a piece takes about as long at any history length.
 
 The same section says when a point stops:
 

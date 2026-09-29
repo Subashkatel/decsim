@@ -7,6 +7,7 @@ command line is never the only record of a number.
 """
 
 import csv
+import dataclasses
 import functools
 import hashlib
 import json
@@ -24,6 +25,8 @@ import stim
 import yaml
 
 import decsim.collect as collect
+import decsim.config as config
+import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.collection as collection_module
@@ -39,6 +42,10 @@ import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.qpu.round_policies as round_policies
+import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
+import decsim.settings as machine_settings
 import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
 
@@ -520,6 +527,64 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     assert (out_dir / "result.json").exists()
 
 
+def test_a_shots_rounds_add_up_every_patchs_rounds(tmp_path):
+    """Three patches of fifteen rounds are forty-five patch-rounds.
+
+    Tesseract 2503.10988 lines 287-290 count the rounds across every
+    code in the shot, so a per-round rate compares with one memory.
+    """
+    workload = yaml_configs.memory_workload(15)
+    workload["function"] = "decsim.producers:memory_patches"
+    workload["arguments"]["patch_count"] = 3
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        {
+            yaml_configs.ERROR_RATE_PATH: 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        }
+    )
+
+    record = run_folder.point_record(task)
+
+    assert record["rounds_per_shot"] == 45
+
+
+def test_a_streams_rounds_are_its_segments_counted_once():
+    """A three-round segment of a three-round stream is three rounds.
+
+    The QPU fires the workload's operations (qpu/cycle_clock.py
+    _emit_operation_rounds), and the stream's owner is how the decoder
+    reads them, so its rounds are the segment's and not more.
+    """
+    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
+    segment = dataclasses.replace(
+        owner,
+        id=1,
+        stream_id=100,
+        stream_offset=0,
+        syndrome_fragment_index=0,
+        syndrome_fragment_count=1,
+    )
+    rounds = round_policies.PerOperationRounds({100: 3, 1: 3})
+    workload = workload_settings.WorkloadSettings(
+        operations=(segment,), decode_operations=(owner,), rounds_policy=rounds
+    )
+    qpu = qpu_settings.QpuSettings(distance=3, kind="timing_only")
+    clock = config.Clock(1000)
+    engine = decoder_settings.EngineSettings(clock=clock)
+    weak_decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder
+    )
+    task = collect.Task(settings, {})
+
+    record = run_folder.point_record(task)
+
+    assert record["rounds_per_shot"] == 3
+
+
 # A maker that answers a longer memory each time it is called, so a
 # point made twice records one workload and runs another.
 GROWING_MAKER = """
@@ -558,6 +623,48 @@ def test_a_collect_makes_each_points_workload_once(tmp_path, monkeypatch):
 
     growing_maker = sys.modules["growing_maker"]
     assert growing_maker.CALLS == [3]
+
+
+WAITING_MAKER = """
+import decsim.records.program as program
+import decsim.records.workload as workload
+
+
+def wait(**_arguments):
+    operation = program.Operation(
+        1, "wait", (0,), patches=(0,), emits_detector_data=False
+    )
+    return workload.Workload((operation,), {1: 3})
+"""
+
+
+def test_a_collect_of_a_workload_with_no_detector_rounds_is_refused(
+    tmp_path, monkeypatch, capsys
+):
+    """A shot that sends no detector data has no rounds to size or score.
+
+    Its rounds per shot are zero, so collect refuses the point before it
+    sizes a piece, as its scoring would refuse the first shot.
+    """
+    maker_path = tmp_path / "waiting_maker.py"
+    maker_path.write_text(WAITING_MAKER)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "waiting_maker", raising=False)
+    workload = {"kind": "producer", "function": "waiting_maker:wait"}
+    card = {
+        "workload": workload,
+        "qpu": {"kind": "timing_only"},
+        "sweep": yaml_configs.QPU_ONLY_SWEEP,
+    }
+    config_path = yaml_configs.write_config(tmp_path, card)
+    run_dir = tmp_path / "run"
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["collect", str(config_path), "--out", str(run_dir)])
+    printed = capsys.readouterr()
+
+    assert stopped.value.code == 1
+    assert "sends detector data" in printed.err
 
 
 def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):

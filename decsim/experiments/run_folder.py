@@ -33,6 +33,7 @@ import decsim.collect as collect
 import decsim.compiled_libraries as compiled_libraries
 import decsim.experiments.experiment as experiment
 import decsim.frontends.workload_files as workload_files
+import decsim.records.program as program_records
 
 RESULTS_DIR = pathlib.Path("results")
 RESOLVED_FOLDER = "resolved"
@@ -317,6 +318,7 @@ def point_record(
     settings = task.settings
     shot_settings = task.shot_settings()
     maker = settings.workload.maker()
+    plan = _plan(shot_settings)
     resolved = {
         "id": task.strong_id(),
         "metadata": collect.json_value(task.metadata),
@@ -324,9 +326,9 @@ def point_record(
         "sections": collect.json_value(sections),
         "maker": collect.json_value(maker),
         "settings": collect.json_value(settings),
-        "built": _built_values(shot_settings),
+        "built": _built_values(plan),
     }
-    resolved["rounds_per_shot"] = _rounds_per_shot(resolved["built"])
+    resolved["rounds_per_shot"] = _rounds_per_shot(plan)
     if experiment_facts is not None:
         resolved["experiment"] = collect.json_value(experiment_facts)
     return resolved
@@ -573,7 +575,15 @@ def _how_it_ran() -> dict:
     }
 
 
-def _built_values(settings) -> dict:
+def _plan(settings) -> plan_build.Plan:
+    """The plan the build derives from the settings, before it wires."""
+    escalation_policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
+    return plan_build.build_plan(settings, escalation_policy)
+
+
+def _built_values(plan: plan_build.Plan) -> dict:
     """The values the build derives from the settings, before it wires.
 
     The code card at the point's distance with the window sizes a null
@@ -581,10 +591,6 @@ def _built_values(settings) -> dict:
     (the boundary and terminal defaults the escalation row names among
     them), and the run plan: every operation's rounds and windows.
     """
-    escalation_policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-    plan = plan_build.build_plan(settings, escalation_policy)
     code = plan.code
     rows = {
         "layout": collect.json_value(plan.layout),
@@ -602,17 +608,28 @@ def _built_values(settings) -> dict:
     }
 
 
-def _rounds_per_shot(built: dict) -> int:
-    """A shot's QEC rounds: the most any one of its operations runs.
+def _rounds_per_shot(plan: plan_build.Plan) -> int:
+    """A shot's QEC rounds: every patch's rounds, added up.
 
-    Patches run side by side, so the longest operation is how many
-    rounds the shot lasts; a per-round rate and a piece's size read it.
+    A round is one patch's syndrome extraction, whenever its operation
+    starts. Tesseract 2503.10988 lines 287-290 set a two-code shot's r
+    to the rounds across both codes, so its per-round rate compares
+    with one memory; Litinski 1808.02892 Eq. 11 (lines 1408-1414) adds
+    qubits times cycles. The QPU fires the workload's operations, and an
+    operation with no detector data sends no syndrome
+    (qpu/cycle_clock.py _emit_operation_rounds); a decode operation or a
+    stream is how the decoder reads those rounds, so it adds none.
     """
-    operations = built["run_plan"]["resolved_operations"]
-    round_counts = []
-    for operation in operations:
-        round_counts.append(operation["round_count"])
-    return max(round_counts)
+    round_counts = {}
+    for resolved in plan.run_plan.resolved_operations:
+        round_counts[resolved.operation_id] = resolved.round_count
+    patch_rounds = 0
+    for operation in plan.operations:
+        if not operation.emits_detector_data:
+            continue
+        patches = program_records.patches_of(operation)
+        patch_rounds += round_counts[operation.id] * len(patches)
+    return patch_rounds
 
 
 def _write_inputs(inputs_dir: pathlib.Path, record) -> None:

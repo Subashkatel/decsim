@@ -51,6 +51,15 @@ class HeldRounds:
     The run keeps two: one in front of the stores, one in front of the
     packing stage (round_assembly.py); a round waits whole in either,
     and the stage it waits for calls retry when it has room.
+    Neither line has a size. The QPU keeps measuring while a round waits,
+    so the rounds pile up as a backlog in the controller (Terhal
+    1302.3428 lines 3151-3159, Quantum Machines 2412.00289 lines
+    478-485), and a Ruby MessageBuffer holds any number of messages
+    unless it is given a size (gem5
+    src/mem/ruby/network/MessageBuffer.py:58-61,
+    MessageBuffer.cc:147-153). A finite line would, when full, have to
+    stall the QPU or drop a round, and no source settles either for a
+    QEC stream.
     Trace source: round_event(RoundEvent) with kind STALLED when a round
     is held for room and RELEASED when a freed slot admits it. The two
     ends are the wait itself, which is the

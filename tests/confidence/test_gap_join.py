@@ -33,12 +33,16 @@ UNJOINED_WINDOW_ID = 999
 
 
 def _switching_machine(
-    weak_units: int, weak_microseconds: float = 4.0, trace_path=None
+    weak_units: int,
+    weak_microseconds: float = 4.0,
+    trace_path=None,
+    result_blocks_unit: bool = False,
 ):
     """The gate's switching card at d=3, priced so its ticks are declared."""
     sections = copy.deepcopy(test_strong_window_shapes.GATE_SWITCHING_CARD)
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
+    sections["weak_decoder"]["result_blocks_unit"] = result_blocks_unit
     sections["strong_decoder"]["kind"] = 20.0
     sections["qpu"]["distance"] = 3
     sections["qpu"]["round_period_microseconds"] = 1.0
@@ -155,6 +159,15 @@ def test_one_unit_holds_the_window_for_the_sum_of_its_two_solves():
     assert len(weak_starts) == 2 * windows
 
 
+def test_one_unit_that_blocks_on_its_result_joins_both_solves():
+    """The held solve is read into the join, so its unit runs the other."""
+    machine = _switching_machine(1, result_blocks_unit=True)
+    machine.run()
+    windows = len(machine.observation.windows.windows)
+    committed = _committed_observables(machine)
+    assert len(committed) == windows
+
+
 def test_the_first_solve_is_held_and_the_join_names_the_windows_gap():
     """The held half and the join are named in the run's log."""
     machine = _switching_machine(1)
@@ -237,6 +250,7 @@ class _RecordingQueue:
     def __init__(self) -> None:
         self.charges = []
         self.closed = []
+        self.read = []
 
     def charge_soft_output(self, job, ticks):
         """Charge the signal's own computation on the job's unit."""
@@ -246,6 +260,10 @@ class _RecordingQueue:
     def close_companion_request(self, job, result):
         """The solve the window's answer did not come from."""
         self.closed.append((job, result))
+
+    def read_result(self, job: decoding_records.DecodeJob) -> None:
+        """The join has the solve in hand."""
+        self.read.append(job)
 
 
 def _join_with(signal_ticks: int):
@@ -333,6 +351,14 @@ def test_the_walk_is_charged_to_the_solve_that_delivered_last():
     assert queue.charges == [(second_job, 90)]
     assert second_job.soft_output_ticks == 90
     assert first_job.soft_output_ticks == 0
+
+
+def test_a_held_solve_is_read_off_its_unit_when_the_join_holds_it():
+    """The join keeps the value, as a reservation station does."""
+    engine, join, verdict, queue = _two_solve_join(0)
+    first_job, first_result = _forced_solve("first", 0, 4.0)
+    join.accept_result(first_job, first_result)
+    assert queue.read == [first_job]
 
 
 def test_the_answer_is_still_the_lightest_solve_and_still_waits():

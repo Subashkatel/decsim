@@ -373,9 +373,13 @@ class DecoderManager:
         register, where the decoder holds its output until the reader
         takes it (2410.05202 lines 1256-1259); a tier that does not
         block gave the unit back at the decode's end and has nothing to
-        give back here.
+        give back here. A result is read once: a forced-class solve the
+        confidence join held was read then, and its later close or commit
+        finds its unit already given back.
         """
         if not self.pool.blocks_unit:
+            return
+        if job.unit is None:
             return
         self.service.free(job)
         self.dispatcher.run()

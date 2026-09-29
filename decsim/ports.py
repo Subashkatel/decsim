@@ -1024,10 +1024,11 @@ class DecodeQueue(Protocol):
         """
 
     def read_result(self, job: decoding_records.DecodeJob) -> None:
-        """The window side has this job's result in hand.
+        """The window side, or the confidence join, has this result in hand.
 
         A tier whose result blocks its unit gets the unit back here; a
-        tier that gave it back at the decode's end has nothing to give.
+        tier that gave it back at the decode's end has nothing to give,
+        and nor does a result already read.
         """
 
     def cancel_strong(self, window_key: tuple) -> None:

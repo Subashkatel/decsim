@@ -219,7 +219,9 @@ class DecoderSettings:
     result_blocks_unit says when a unit's compute goes back to its pool:
     false at the decode's end, which is Chen's frame manager taking the
     correction without blocking the decoder (2605.30765 lines
-    1618-1620), or true at the window's commit, which is Riverlane's
+    1618-1620), or true when the result is read, at the window's commit
+    or, for a forced-class solve, when the confidence join holds it,
+    which is Riverlane's
     polled status register, the decoder holding its output until the
     reader takes it (2410.05202 lines 1256-1259). It is read on the tier
     that decodes the plan's windows.

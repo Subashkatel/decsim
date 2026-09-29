@@ -1105,7 +1105,9 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # manager takes the correction without
                                    # blocking the decoder (Chen 2605.30765 lines
                                    # 1618-1620). true holds the unit until the
-                                   # window commits, which is a decoder whose
+                                   # result is read: the window's commit, or
+                                   # the confidence join holding a
+                                   # forced-class solve, which is a decoder whose
                                    # output sits in a status register until the
                                    # reader polls it (Riverlane 2410.05202 lines
                                    # 1256-1259); the unit is then busy for the
@@ -1113,10 +1115,9 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the tier that decodes the plan's windows: a
                                    # strong re-decode's result waits in its unit
                                    # until the window side takes it in any case.
-                                   # A confidence that forces two class solves
-                                   # per window needs a unit per forced class
-                                   # under true, because the join reads neither
-                                   # solve until both have finished
+                                   # A forced-class solve the confidence join
+                                   # holds is read when the join takes it, so
+                                   # one unit serves both solves of a window
   unit_memory:                     # the input memory of one decoder unit: a
                                    # window's rounds are copied into it before
                                    # the unit decodes them, and freed when the

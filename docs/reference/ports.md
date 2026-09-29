@@ -317,7 +317,7 @@ The decoder manager, as the window manager sees it.
 | `accept_selection` | The selection landed: the request's result may reach the window. |
 | `charge_soft_output` | Charge the confidence's own computation on the job's unit. |
 | `resolve_weak_request` | The window side decided this weak request; close its attempt. |
-| `read_result` | The window side has this job's result in hand. |
+| `read_result` | The window side, or the confidence join, has this result in hand. |
 | `cancel_strong` | A kept weak result: the window's strong request ends where it is. |
 | `close_companion_request` | This forced solve lost; its window is answered by the other. |
 

@@ -18,6 +18,8 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.plots as plots
 import decsim.experiments.trace_file as trace_file
 import decsim.machine as machine_module
+import decsim.records.identity as identity_records
+import tests.experiments.test_measure as measure_tests
 import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
 
@@ -40,11 +42,15 @@ def _microseconds(ticks):
 
 
 def _ledger_windows(ledger: dict) -> dict:
-    """Window id -> (commit lo, commit hi, read hi, dispatch us)."""
+    """Window key -> (commit lo, commit hi, read hi, dispatch us).
+
+    A key is the operation as the trace writes it and the index.
+    """
     windows = {}
-    for (_operation_id, window_id), window in ledger.items():
+    for (operation_id, window_id), window in ledger.items():
         dispatch = _microseconds(window.t_dispatch)
-        windows[window_id] = (
+        window_key = (str(operation_id), window_id)
+        windows[window_key] = (
             window.commit_lo,
             window.commit_hi,
             window.buffer_hi,
@@ -54,11 +60,11 @@ def _ledger_windows(ledger: dict) -> dict:
 
 
 def _drawn_windows(shot, expected: dict) -> dict:
-    """The same fields of the windows the figure drew, for those ids."""
+    """The same fields of the windows the figure drew, for those keys."""
     windows = {}
-    for window_id in expected:
-        drawn = shot.windows[window_id]
-        windows[window_id] = (
+    for window_key in expected:
+        drawn = shot.windows[window_key]
+        windows[window_key] = (
             drawn.commit_lo,
             drawn.commit_hi,
             drawn.read_hi,
@@ -68,30 +74,36 @@ def _drawn_windows(shot, expected: dict) -> dict:
 
 
 def _recorded_stages(machine) -> list:
-    """(window id, stage), start us, end us: one row per stage record."""
+    """(window key, stage), start us, end us: one row per stage record."""
     stages = machine.observation.stages
     rows = []
     for operation_id, window_id in machine.observation.windows.windows:
+        window_key = (str(operation_id), window_id)
         for record in stages.records_for(operation_id, window_id):
             start = _microseconds(record.start_ticks)
             end = _microseconds(record.end_ticks)
-            rows.append(((window_id, record.stage), start, end))
+            rows.append(((window_key, record.stage), start, end))
     return rows
 
 
 def _committed_frame_spans(committed) -> list:
-    """Window id, accepted us, committed us: one row per frame record."""
+    """Window key, accepted us, committed us: one row per frame record."""
     rows = []
     for record in committed:
-        window_id = record.window_key[1]
+        operation_id, window_id = record.window_key
+        window_key = (str(operation_id), window_id)
         start = _microseconds(record.accepted_ticks)
         end = _microseconds(record.committed_ticks)
-        rows.append((window_id, start, end))
+        rows.append((window_key, start, end))
     return rows
 
 
 def _transfer_spans(transfers) -> tuple:
-    """(by round, by window): (path, key), sent us, delivered us per row."""
+    """(by round, by window): (path, key), sent us, delivered us per row.
+
+    A key is the operation as the trace writes it, and the round or the
+    window index.
+    """
     by_round = []
     by_window = []
     for transfer in transfers:
@@ -102,10 +114,20 @@ def _transfer_spans(transfers) -> tuple:
         end = _microseconds(transfer["delivery_ticks"])
         if window_id is None:
             (rounds,) = attribution["rounds_by_operation"]
-            by_round.append(((path, rounds["round_lo"]), start, end))
+            operation = _operation_text(rounds["operation_id"])
+            round_key = (operation, rounds["round_lo"])
+            by_round.append(((path, round_key), start, end))
         else:
-            by_window.append(((path, window_id), start, end))
+            operation = _operation_text(attribution["operation_id"])
+            window_key = (operation, window_id)
+            by_window.append(((path, window_key), start, end))
     return by_round, by_window
+
+
+def _operation_text(recorded: dict) -> str:
+    """A recorded operation identity as the trace writes it."""
+    operation_id = identity_records.stable_identity_from_json(recorded)
+    return str(operation_id)
 
 
 def _drawn_spans(drawn_by_key: dict, expected: list) -> list:
@@ -267,11 +289,54 @@ def test_a_last_window_reading_past_the_stream_is_drawn_to_the_last_round(
     lanes = plots._timeline_lanes(document)
     stored = plots._stored_rounds(lanes, shot)
     last_window = shot.windows[max(shot.windows)]
-    assert last_window.read_hi == max(stored)
+    _operation, last_stored_round = max(stored)
+    assert last_window.read_hi == last_stored_round
     figure_path = tmp_path / "timeline.png"
     plots.timeline_plot(trace_path, figure_path)
     status = figure_path.stat()
     assert status.st_size > 0
+
+
+def test_two_streams_draw_every_window_of_both(tmp_path):
+    """Two streams each have windows 0 to 8, and the figure keeps all 18.
+
+    A window is its operation and its index (records/windows.py
+    Window.key), the "op:index" the trace writes, so the figure files
+    each stream's window 3 apart and draws the stages and the frame
+    write its own decode made.
+    """
+    trace_path = tmp_path / "streams.trace.json"
+    machine = _traced_streams_run(trace_path)
+    document = trace_file.load(trace_path)
+    shot = plots.timeline_shot(document)
+    ledger = machine.observation.windows.windows
+    expected_windows = _ledger_windows(ledger)
+    expected_stages = _recorded_stages(machine)
+    committed = machine.observation.frame_corrections.committed
+    expected_frame = _committed_frame_spans(committed)
+
+    assert len(expected_windows) == 18
+    assert _drawn_windows(shot, expected_windows) == expected_windows
+    assert _drawn_spans(shot.stages, expected_stages) == expected_stages
+    assert len(shot.frame) == 18
+    assert _drawn_spans(shot.frame, expected_frame) == expected_frame
+    figure_path = tmp_path / "timeline.png"
+    plots.timeline_plot(trace_path, figure_path)
+    status = figure_path.stat()
+    assert status.st_size > 0
+
+
+def _traced_streams_run(trace_path):
+    """The two side-by-side streams of test_measure, traced."""
+    shipped = measure_tests.seam_streams_settings(2)
+    observation = dataclasses.replace(
+        shipped.observation, trace=str(trace_path)
+    )
+    settings = dataclasses.replace(shipped, observation=observation)
+    machine = machine_module.Machine.build(settings, gate_point.SEED)
+    machine.run()
+    machine.observation.trace_writer.write(str(trace_path))
+    return machine
 
 
 def test_a_run_folder_without_a_trace_has_no_file_to_draw_from(tmp_path):

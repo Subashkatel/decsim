@@ -1105,7 +1105,16 @@ def seam_only_fabric():
 
 
 def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
-    """One shot of those streams on that fabric.
+    """One shot of those streams on that fabric."""
+    settings = seam_streams_settings(stream_count, stagger_rounds)
+    task = collect.Task(settings, {})
+    return collect.run_shot(task, 0)
+
+
+def seam_streams_settings(
+    stream_count: int, stagger_rounds: int = 0
+) -> machine_settings.MachineSettings:
+    """The machine of those streams on that fabric.
 
     Eight one-microsecond weak units decode them, so the streams run
     side by side and each plans nine sliding windows.
@@ -1139,7 +1148,7 @@ def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
     frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=4, clock=frame_clock
     )
-    settings = machine_settings.MachineSettings(
+    return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         windows=windows,
@@ -1148,8 +1157,6 @@ def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
         pauli_frame=frame,
         links=links,
     )
-    task = collect.Task(settings, {})
-    return collect.run_shot(task, 0)
 
 
 def test_a_windows_seam_delay_is_the_same_however_many_streams_run():

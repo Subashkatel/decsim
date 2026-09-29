@@ -101,13 +101,19 @@ def range_of(text: str) -> tuple:
     return low, high
 
 
-def window_id_of(event: dict) -> Optional[int]:
-    """The window an event belongs to, by its "op:window" argument."""
+def window_key_of(event: dict) -> Optional[tuple]:
+    """The window an event belongs to: its operation's text and its index.
+
+    Read off the "op:window" argument whole, since a window is its
+    operation and its index (records/windows.py Window.key) and two
+    operations share every index. The operation stays the text the
+    trace wrote.
+    """
     key = event["args"].get("window")
     if key is None:
         return None
-    words = key.split(":")
-    return int(words[1])
+    operation, window_index = key.rsplit(":", 1)
+    return (operation, int(window_index))
 
 
 def _read_text(path) -> str:

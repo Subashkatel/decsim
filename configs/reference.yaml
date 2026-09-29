@@ -665,21 +665,8 @@ controller:                        # controller work per round, in cycles of its
                                    # conditional together: an upper bound here
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
                                    # through the packing stage, a whole count of
-                                   # at least one. null = unbounded
-  packing_overflow: stall          # stall | drop_round: what the controller does
-                                   # with a finished round the weak syndrome buffer (or the packing
-                                   # workspace) cannot take. stall holds it upstream
-                                   # and writes it in order once a slot frees, the
-                                   # backpressure real-time stacks apply to their
-                                   # source (Caune et al. 2410.05202: the sequencer
-                                   # polls the decoder's status register and stalls);
-                                   # under stall a full packing workspace stops the
-                                   # run. drop_round drops it instead, ns-3's drop
-                                   # tail (point-to-point-net-device.cc Send:
-                                   # Enqueue false, the packet is dropped).
-                                   # LILLIPUT's readout buffer overwrites the latest
-                                   # value (2108.06569), a storage choice neither
-                                   # word models
+                                   # at least one. null = unbounded. A full
+                                   # stage stops the run
 
 detection_events:                  # where a round's raw measurement outcomes
                                    # become its detection events, and what it
@@ -997,9 +984,8 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # When it is full the controller holds the
                                    # finished round and publishes it in order
                                    # once a slot frees, the backpressure real
-                                   # systems apply to their source;
-                                   # controller.packing_overflow chooses that
-                                   # hold or a drop. null = unbounded. A
+                                   # systems apply to their source, and drops
+                                   # nothing. null = unbounded. A
                                    # bounded store refuses a round that states
                                    # no size.
                                    # A store holds its widest hold's rounds

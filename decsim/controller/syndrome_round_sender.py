@@ -16,9 +16,9 @@ and re-sends it when clearBlocked schedules the retry
 blocking keeps the customer at the upstream node and releases the
 longest blocked one when the destination has capacity
 (Ciw ciw/node.py:470-473, block_individual,
-release_blocked_individual). Nothing is reordered; under the stall
-policy nothing is dropped. The written round leaves on its route at the
-write (RoundTransmitter) and takes its slot where it lands.
+release_blocked_individual). Nothing is reordered and nothing is
+dropped. The written round leaves on its route at the write
+(RoundTransmitter) and takes its slot where it lands.
 """
 
 import dataclasses
@@ -26,7 +26,6 @@ import functools
 from collections.abc import Callable
 
 import decsim.controller.round_transmission as round_transmission
-import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
@@ -35,11 +34,11 @@ import decsim.trace_source as trace_source
 
 
 class HeldRounds:
-    """The waiting line in front of the stores, and what a full store does.
+    """The waiting line in front of the stores.
 
     Trace source: round_event(RoundEvent) with kind STALLED when a round
-    is held for room, RELEASED when a freed slot admits it, DROPPED when
-    the policy drops it. The two ends are the wait itself, which is the
+    is held for room and RELEASED when a freed slot admits it. The two
+    ends are the wait itself, which is the
     back-pressure a full store applies to its sender and is measured
     nowhere else: the round waits here, before the wire is asked for, so
     its transfer carries none of it. Ruby's MessageBuffer counts that
@@ -52,15 +51,10 @@ class HeldRounds:
     and :701, the trace source described at queue-disc.h:162-167).
     """
 
-    def __init__(
-        self,
-        engine: engine_module.Engine,
-        on_full: controller_settings.PackingOverflowPolicy,
-    ) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         # (held round, the admission it retries), in completion order
         self.waiting: list = []
-        self.on_full = on_full
         self.trace = _HeldRoundsTraceSources()
 
     def refuse(
@@ -68,23 +62,12 @@ class HeldRounds:
         packed: round_records.PackedRound,
         admit: Callable[[round_records.PackedRound], bool],
     ) -> bool:
-        """A round found no room: hold it for a retry, or drop it.
+        """A round found no room: hold it for a retry.
 
-        False either way, so the admission that called reports the
-        refusal; a held round is recorded STALLED once.
+        False, so the admission that called reports the refusal; a held
+        round is recorded STALLED once.
         """
         operation_id, round_index = packed.round_key
-        drop = controller_settings.PackingOverflowPolicy.DROP_ROUND
-        if self.on_full is drop:
-            dropped = round_records.RoundEvent.of(
-                "DROPPED",
-                self.engine.now,
-                operation_id,
-                round_index,
-                packed.route,
-            )
-            self.trace.round_event.fire(dropped)
-            return False
         if self._is_holding(packed):
             return False
         self.waiting.append((packed, admit))
@@ -184,7 +167,7 @@ class SyndromeRoundSender:
         self.publishes_from_strong_store = not reads_from_buffer_zero
 
     def admit(self, packed: round_records.PackedRound) -> bool:
-        """Write the round where it belongs; False when it waits or drops.
+        """Write the round where it belongs; False when it waits.
 
         A round that finds rounds already held joins the line behind them
         without asking for room, even when its own bits would fit: gem5's

@@ -44,8 +44,7 @@ class RoundsInFlight:
     (RoundTransmitter) or crossing to the strong syndrome buffer
     (SyndromeRoundSender), and each place keeps its own count; the
     stage's count is their sum, read when a first fragment asks for
-    room, so no exit can forget a release. A dropped round leaves at
-    its drop.
+    room, so no exit can forget a release.
     """
 
     held_rounds = ports.Port(ports.HeldRounds)
@@ -83,8 +82,8 @@ class RoundsInFlight:
 class RoundAssembler:
     """Fragments in, one packed round out, after the packing time.
 
-    Trace sources: round_event(RoundEvent) with kinds BINARY_AVAILABLE,
-    PACKED and DROPPED; copy_made(round_key, bits, "controller intake",
+    Trace sources: round_event(RoundEvent) with kinds BINARY_AVAILABLE
+    and PACKED; copy_made(round_key, bits, "controller intake",
     "controller assembler") for the merged round (data_path.md hop 2).
     """
 
@@ -99,7 +98,7 @@ class RoundAssembler:
     ) -> None:
         self.engine = engine
         self.settings = settings
-        self.workspace = _Workspace(settings.packing_overflow)
+        self.workspace = _Workspace()
         self.trace = _TraceSources()
 
     def expect_round(
@@ -131,12 +130,7 @@ class RoundAssembler:
             fragment.patch_ids,
         )
         self.trace.round_event.fire(available)
-        round_key = (fragment.operation_id, fragment.round_index)
-        if self.workspace.is_dropped(round_key):
-            return
         context = self._context_for(fragment, fragment_count, route)
-        if context is None:
-            return
         context.fragments.append(fragment)
         if len(context.fragments) != context.fragment_count:
             return
@@ -159,37 +153,19 @@ class RoundAssembler:
             )
 
     def _context_for(self, fragment, fragment_count, route):
-        """The live context of the fragment's round, opened on its first.
-
-        None when the round was dropped for want of a context.
-        """
+        """The live context of the fragment's round, opened on its first."""
         round_key = (fragment.operation_id, fragment.round_index)
         identity = _round_identity(fragment, route)
         context = self.workspace.context_by_identity.get(identity)
         if context is not None:
             return context
-        if self.workspace.has_room(self.rounds_in_flight):
-            context = _PackingContext(
-                identity, round_key, route, fragment_count
+        if not self.workspace.has_room(self.rounds_in_flight):
+            self.workspace.refuse(
+                self.rounds_in_flight, round_key, self.engine.now
             )
-            self.workspace.context_by_identity[identity] = context
-            return context
-        dropped = self.workspace.refuse(
-            self.rounds_in_flight, round_key, self.engine.now
-        )
-        if dropped:
-            drop = round_records.RoundEvent.of(
-                "DROPPED",
-                self.engine.now,
-                fragment.operation_id,
-                fragment.round_index,
-                route,
-                fragment.patch_ids,
-            )
-            self.trace.round_event.fire(drop)
-            self.workspace.retire(identity)
-            self._release_ready_rounds(identity)
-        return None
+        context = _PackingContext(identity, round_key, route, fragment_count)
+        self.workspace.context_by_identity[identity] = context
+        return context
 
     def _finish_packing(self, context) -> None:
         context.is_ready = True
@@ -274,25 +250,15 @@ class _PackingContext:
 class _Workspace:
     """The rounds in assembly, admitted against the stage's bound."""
 
-    def __init__(
-        self,
-        overflow: controller_settings.PackingOverflowPolicy,
-    ) -> None:
-        self.overflow = overflow
+    def __init__(self) -> None:
         self.context_by_identity: dict = {}
         self.expected_by_stream: dict[tuple, dict] = {}
-        # rounds refused for want of a context; their later fragments
-        # are ignored
-        self.dropped_round_keys: set = set()
 
     def expect_round(
         self,
         fragment: round_records.RetainedSyndromeFragment,
         route: round_records.SyndromePacketRoute,
     ) -> None:
-        round_key = (fragment.operation_id, fragment.round_index)
-        if self.is_dropped(round_key):
-            return
         identity = _round_identity(fragment, route)
         stream = identity[:-1]
         pending = self.expected_by_stream.setdefault(stream, {})
@@ -315,17 +281,10 @@ class _Workspace:
         in_assembly = len(self.context_by_identity)
         return rounds_in_flight.has_room(in_assembly)
 
-    def is_dropped(self, round_key) -> bool:
-        return round_key in self.dropped_round_keys
-
     def refuse(
         self, rounds_in_flight: RoundsInFlight, round_key, tick: int
-    ) -> bool:
-        """A round that found no context: dropped, or the run stops."""
-        drop = controller_settings.PackingOverflowPolicy.DROP_ROUND
-        if self.overflow is drop:
-            self.dropped_round_keys.add(round_key)
-            return True
+    ) -> None:
+        """A round that found no context stops the run."""
         capacity = rounds_in_flight.capacity
         in_assembly = sorted(self.context_by_identity, key=repr)
         downstream = rounds_in_flight.downstream_text()

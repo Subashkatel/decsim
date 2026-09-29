@@ -9,8 +9,7 @@ group (RepeatedStimCircuit.readout_partitions in decsim/records/
 circuits.py). The bound counts every round in flight
 through the stage, in assembly, held for store room or on its route
 (controller.packing_rounds_in_flight); a full stage stops the run with a
-sentence naming the setting, or drops
-the new round under the drop knob.
+sentence naming the setting.
 """
 
 import dataclasses
@@ -29,7 +28,6 @@ import decsim.records.rounds as round_records
 PACKING_TICKS = config.microseconds_to_ticks(1.0)
 # a 1 MHz controller, so one packing cycle is the packing time above
 PACKING_CLOCK = config.Clock(PACKING_TICKS)
-DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
 
 
 def fragment(round_index, fragment_index=0, bits=(1, 0)):
@@ -157,35 +155,6 @@ def test_formation_retains_capacity_until_the_round_leaves() -> None:
     assert packed.packet.round_index == 1
 
 
-def test_dropping_an_earlier_round_releases_a_ready_later_round() -> None:
-    engine = engine_module.Engine()
-    packed = []
-    recorder = round_events.RoundEventRecorder(engine)
-    assembler = assembler_with(
-        engine,
-        packed,
-        recorder,
-        packing_rounds_in_flight=1,
-        packing_overflow=DROP,
-    )
-    first = fragment(1)
-    second = fragment(2)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(second, 1, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
-
-    round_indices = [round.packet.round_index for round in packed]
-    assert round_indices == [2]
-    dropped = [
-        event.round_index
-        for event in recorder.events
-        if event.kind == "DROPPED"
-    ]
-    assert dropped == [1]
-    assembler.check_settled()
-
-
 def test_the_assembler_hands_a_packed_round_to_its_round_sender() -> None:
     engine = engine_module.Engine()
     settings = controller_settings.ControllerSettings()
@@ -295,37 +264,6 @@ def test_the_bound_counts_rounds_held_and_on_their_route() -> None:
     full.capacity = 3
     assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
     assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
-    assert [round.packet.round_index for round in packed] == [1]
-
-
-def test_the_drop_knob_drops_only_the_round_that_found_no_context() -> None:
-    engine = engine_module.Engine()
-    packed = []
-    recorder = round_events.RoundEventRecorder(engine)
-    assembler = assembler_with(
-        engine,
-        packed,
-        recorder,
-        packing_rounds_in_flight=1,
-        packing_overflow=DROP,
-    )
-    first = fragment(1, fragment_index=0)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
-    second_round = fragment(2)
-    assembler.expect_round(second_round, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(second_round, 1, round_records.WINDOW_INPUT_ROUTE)
-    last = fragment(1, fragment_index=1)
-    assembler.expect_round(last, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(last, 2, round_records.WINDOW_INPUT_ROUTE)
-
-    assert recorder.packing_drops == 1
-    dropped = [
-        event.round_index
-        for event in recorder.events
-        if event.kind == "DROPPED"
-    ]
-    assert dropped == [2]
     assert [round.packet.round_index for round in packed] == [1]
 
 

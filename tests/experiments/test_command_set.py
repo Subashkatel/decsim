@@ -284,10 +284,10 @@ def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
     last_sweep_line = _line_number_of(
         reference_path, "      qpu.round_period_microseconds: [1.0]"
     )
-    overflow_line = _line_number_of(
+    bound_line = _line_number_of(
         reference_path,
-        "  packing_overflow: stall          # stall | drop_round: what the "
-        "controller does",
+        "  packing_rounds_in_flight: null   # packing assembly workspace: "
+        "rounds in flight",
     )
     assert (
         f"controller.decision_to_pulse_cycles = 3  [preset preset.yaml, "
@@ -301,8 +301,8 @@ def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
         f"{last_sweep_line}]"
     ) in lines
     assert (
-        f'controller.packing_overflow = "STALL"  '
-        f"[default, configs/reference.yaml:{overflow_line}]"
+        "controller.packing_rounds_in_flight = null  "
+        f"[default, configs/reference.yaml:{bound_line}]"
     ) in lines
 
 

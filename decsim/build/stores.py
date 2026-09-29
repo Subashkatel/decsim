@@ -37,10 +37,8 @@ def build_links(parts: build_parts.Parts) -> ports.Link:
 def build_held_rounds(
     parts: build_parts.Parts,
 ) -> syndrome_round_sender.HeldRounds:
-    """The waiting line in front of the stores, and what a full store does."""
-    return syndrome_round_sender.HeldRounds(
-        parts.engine, parts.settings.controller.packing_overflow
-    )
+    """The waiting line in front of the stores."""
+    return syndrome_round_sender.HeldRounds(parts.engine)
 
 
 def build_weak_syndrome_buffer(

@@ -5,7 +5,6 @@ workspace; the idle policy says how an idle patch's rounds are charged.
 """
 
 import dataclasses
-import enum
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -31,7 +30,6 @@ _CONTROLLER_KEYS = (
     "packing_cycles_per_round",
     "decision_to_pulse_cycles",
     "packing_rounds_in_flight",
-    "packing_overflow",
 )
 # The keys with no default: a controller card states its clock and its
 # three per-round costs.
@@ -41,26 +39,6 @@ _REQUIRED_CONTROLLER_KEYS = (
     "packing_cycles_per_round",
     "decision_to_pulse_cycles",
 )
-
-
-class PackingOverflowPolicy(enum.Enum):
-    """What the controller does with a finished round its store cannot take.
-
-    STALL holds the round upstream of the store until a slot frees and
-    writes it in order, the backpressure real-time systems apply to their
-    source: the Rigetti sequencer polls the decoder's status register and
-    stalls (Caune et al. 2410.05202), Helios's input port is valid/ready
-    and asserts ready only when it can take data, QubiC's cores block in
-    WAIT_MEAS, and credit-based flow control never loses a flit. LILLIPUT's
-    readout buffer and QubiC's measurement register instead overwrite the
-    latest value, a storage choice this policy does not model. DROP_ROUND
-    drops it, ns-3's drop tail (point-to-point-net-device.cc Send:
-    Enqueue false, the packet is dropped); it applies to the packing
-    stage's bound too, which under STALL stops the run when full.
-    """
-
-    STALL = "stall"
-    DROP_ROUND = "drop_round"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -86,10 +64,8 @@ class ControllerSettings:
     packing_rounds_in_flight bounds the rounds in flight through the
     packing stage at once, each from its first fragment until the windows
     hear of it (round_assembly.RoundsInFlight); None is unbounded.
-    packing_overflow is what happens to a finished round the store cannot
-    take: the yaml's stall or drop_round. clock is the domain all
-    three cycle counts are charged on; a cost of zero cycles is
-    uncharged rather than rounded up to the next edge.
+    clock is the domain all three cycle counts are charged on; a cost of
+    zero cycles is uncharged rather than rounded up to the next edge.
     """
 
     clock: Optional[config.Clock] = None
@@ -97,7 +73,6 @@ class ControllerSettings:
     packing_cycles_per_round: int = 0
     decision_to_pulse_cycles: int = 0
     packing_rounds_in_flight: Optional[int] = None
-    packing_overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
 
     def __post_init__(self) -> None:
         config.check_cycles(
@@ -125,14 +100,12 @@ class ControllerSettings:
         packing_cycles = section["packing_cycles_per_round"]
         decision_cycles = section["decision_to_pulse_cycles"]
         packing_rounds_in_flight = section.get("packing_rounds_in_flight")
-        packing_overflow = _packing_overflow(section)
         return cls(
             clock=clock,
             readout_to_bits_cycles=readout_cycles,
             packing_cycles_per_round=packing_cycles,
             decision_to_pulse_cycles=decision_cycles,
             packing_rounds_in_flight=packing_rounds_in_flight,
-            packing_overflow=packing_overflow,
         )
 
     def _check_rounds_in_flight(self) -> None:
@@ -235,19 +208,3 @@ def _is_round_count(value) -> bool:
     if not isinstance(value, int):
         return False
     return value >= 1
-
-
-def _packing_overflow(section: Mapping) -> PackingOverflowPolicy:
-    """The `packing_overflow` word, or the default backpressure."""
-    default = PackingOverflowPolicy.STALL.value
-    named = section.get("packing_overflow", default)
-    for policy in PackingOverflowPolicy:
-        if policy.value == named:
-            return policy
-    words = []
-    for policy in PackingOverflowPolicy:
-        words.append(policy.value)
-    raise ValueError(
-        f"controller.packing_overflow must be one of {tuple(words)}, got "
-        f"{named!r}"
-    )

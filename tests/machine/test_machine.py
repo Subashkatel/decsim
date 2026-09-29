@@ -1920,10 +1920,10 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
 
     A real-time decoder backpressures its source rather than discarding
     syndromes: the Rigetti sequencer polls the decoder's status register
-    and stalls (Caune et al. 2410.05202), and QubiC's cores block in
-    WAIT_MEAS until the readout is consumed (Fruitwala et al.
-    2404.15260); that is the STALL policy of
-    decsim/controller/settings.py. While the store has room round r is
+    and stalls (Caune et al. 2410.05202 lines 1255-1257), and a QubiC
+    core halts on its idle instruction until the measurement is in
+    (Fruitwala et al. 2404.15260 lines 297-302, 566-567). While the
+    store has room round r is
     published at r plus qpu_to_controller 2 plus readout_to_bits 3 plus
     controller_to_weak_buffer 4, so rounds 1 to 7 fill a store of
     seven at 16 us and round 8 waits past 17 us for the first window's
@@ -1944,7 +1944,6 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     eighth_publication_with_room = config.microseconds_to_ticks(17.0)
     tiers = declared_run.frame_tiers(machine)
 
-    assert machine.observation.round_events.packing_drops == 0
     assert round_indices == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     assert ticks == sorted(ticks)
     assert publication_tick_by_round[7] == seventh_publication
@@ -2078,7 +2077,6 @@ def test_a_packing_bound_of_six_clears_a_twelve_round_run():
     result = machine.run()
 
     assert result.terminal_status == "complete"
-    assert machine.observation.round_events.packing_drops == 0
     assert machine.engine.now == TWELVE_ROUND_RUN_END_TICK
 
 

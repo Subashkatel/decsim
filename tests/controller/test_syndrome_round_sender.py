@@ -11,8 +11,7 @@ A round that finds no room waits in HeldRounds and enters in completion
 order when a slot frees (gem5 src/mem/cache/base.cc:255-257 setBlocked,
 :266-271 clearBlocked and the retry; Ciw
 Ciw ciw/node.py:470-473
-release_blocked_individual), or is dropped under the drop knob (ns-3
-point-to-point-net-device.cc Send: Enqueue false, packet dropped). A
+release_blocked_individual); nothing is dropped. A
 strong-primary plan takes one hop into the strong store for both window
 input and feedback-memory rounds. A
 weak-primary plan's round goes into the weak syndrome buffer only:
@@ -29,7 +28,6 @@ profile.
 """
 
 import decsim.config as config
-import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -49,8 +47,6 @@ from decsim.syndrome_buffer import (
     weak_syndrome_round_receiver as weak_syndrome_round_receiver,
 )
 
-STALL = controller_settings.PackingOverflowPolicy.STALL
-DROP = controller_settings.PackingOverflowPolicy.DROP_ROUND
 # every round this file sends carries one fragment of two bits
 BITS_PER_ROUND = 2
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(9)
@@ -124,10 +120,9 @@ def sender_with(
     weak_bits=None,
     strong_receiver=None,
     publishes_from_strong_store=False,
-    on_full=STALL,
 ):
     recorder = round_events.RoundEventRecorder(engine)
-    held = syndrome_round_sender.HeldRounds(engine, on_full)
+    held = syndrome_round_sender.HeldRounds(engine)
     held.trace.round_event.connect(recorder.record)
     settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=weak_bits)
     weak_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
@@ -357,19 +352,3 @@ def test_a_strong_primary_round_with_no_room_on_the_room_side_is_held():
     assert weak_receiver.reserved_bits_by_round == {}
     assert transmitter.sent == []
     assert sender.held_rounds.count == 1
-
-
-def test_the_drop_knob_drops_a_round_that_found_no_room():
-    engine = engine_module.Engine()
-    sender, _weak_input, transmitter, recorder = sender_with(
-        engine, weak_bits=BITS_PER_ROUND, on_full=DROP
-    )
-    first = packed(1)
-    second = packed(2)
-
-    sender.admit(first)
-    sender.admit(second)
-
-    assert transmitter.sent == [1]
-    assert recorder.packing_drops == 1
-    assert sender.held_rounds.count == 0

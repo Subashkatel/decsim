@@ -312,8 +312,7 @@ class SyndromeRoundSender(Protocol):
     The one end a packed round leaves the assembler by. The sender
     reserves room in every syndrome buffer the round must reach and
     sends it on; a round that finds no room goes to the waiting line,
-    which holds it for a retry or drops it as the controller's overflow
-    setting says.
+    which holds it for a retry.
 
     strong_crossing_count is the strong-primary rounds sent to the
     strong syndrome buffer and not yet landed there, which the packing

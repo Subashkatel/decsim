@@ -17,6 +17,7 @@ import pytest
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
+import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.experiments.test_measure as measure_tests
 import tests.observe.gate_point as gate_point
@@ -303,6 +304,44 @@ def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
     stage_spans_by_tid = _tick_spans_by_tid(stages)
     service_lanes = {row["tid"] for row in services}
     assert len(service_lanes) > 2
+    assert set(stage_spans_by_tid) == service_lanes
+    assert _lanes_with_overlapping_spans(stage_spans_by_tid) == []
+
+
+def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
+    """A factory's two correction decodes at once run on two lanes.
+
+    A correction decode serves no request, so the window and its run
+    ordinals are the same for both. The stage record names the unit
+    that ran it, as each LLVM XRay record carries its thread, and each
+    decode's stages sit on its own service's lane.
+    """
+    factory = qpu_settings.FactorySettings.from_yaml(
+        {
+            "kind": "distillation",
+            "unit_count": 1,
+            "attempt_ticks": 100,
+            "correction_round_count": 3,
+            "correction_decode_count": 2,
+            "production_mode": "continuous",
+            "buffer_capacity": 1,
+        }
+    )
+    point = gate_point.settings(trace="chrome")
+    weak_decoder = dataclasses.replace(point.weak_decoder, units=2)
+    point = dataclasses.replace(
+        point, weak_decoder=weak_decoder, magic_state_factory=factory
+    )
+    machine = machine_module.Machine.build(point, SEED)
+    machine.run()
+
+    document = machine.observation.trace_writer.document()
+    complete_rows = _by_phase(document, "X")
+    stages = _rows_with(complete_rows, "cat", "stage")
+    services = _rows_with(complete_rows, "cat", "window,service")
+    stage_spans_by_tid = _tick_spans_by_tid(stages)
+    service_lanes = {row["tid"] for row in services}
+    assert len(service_lanes) == 2
     assert set(stage_spans_by_tid) == service_lanes
     assert _lanes_with_overlapping_spans(stage_spans_by_tid) == []
 

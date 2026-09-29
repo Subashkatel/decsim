@@ -161,6 +161,10 @@ class DecoderStageRecord:
     cycles: Optional[int]  # None for the algorithm, priced in time
     start_ticks: int
     end_ticks: int
+    # the unit the decode ran on, the lane it belongs to, as each LLVM
+    # XRay record carries the thread it ran on
+    # (tools/llvm-xray/xray-converter.cc:232-245)
+    unit_name: str
     # the (operation, round) identities a formation stage turned into
     # detection events here; empty for every stage that forms none
     round_keys: tuple = ()
@@ -372,6 +376,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             step.cycles,
             running.open_start_ticks,
             running.engine.now,
+            job.decoding_unit_name,
             step.round_keys,
             sequences,
             cancelled,

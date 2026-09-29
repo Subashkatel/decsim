@@ -198,7 +198,7 @@ ready to frame commit: median 28.368 us, p99 70.340 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/two_tiers/combined/two_tiers-ab2ef497/sweep.csv
+every column: results/two_tiers/combined/two_tiers-1bd7c0f9/sweep.csv
 ```
 
 Read `service time per window, mean` against the weak card of one
@@ -312,8 +312,8 @@ tick (us)  where                            what                                
 15.012     Decoder unit default#0           residence, unbounded, data ready 15.012, freed at decode done  2.128     copy      48
 15.036     Decoder unit default#0           stage algorithm                                                1.000
 16.036     Decoder unit default#0           stage release                                                  0.040
-16.076     Window planner                   masked view copy                                                         copy      48
 16.076     Window planner                   solve held
+16.076     Window planner                   masked view copy                                                         copy      48
 16.076     Decoder unit default#0           stage fetch                                                    0.024
 16.076     Decoder unit default#0           decode service                                                 1.064
 16.100     Decoder unit default#0           stage algorithm                                                1.000

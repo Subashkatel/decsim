@@ -1,8 +1,11 @@
 """The integrated metrics: step functions of time over one run.
 
 Each holds one quantity as a step function and integrates it, so a peak
-and a time average come out exact. DecoderUtilization and
-DecoderMemoryOccupancy step where the quantity changes, on the decoder
+and a time average come out exact. A time average runs over the whole
+run, from tick 0 to the tick it is read, as gem5's AvgStor integrates
+from its last reset to curTick() (src/base/stats/storage.hh:130-213).
+DecoderUtilization and DecoderMemoryOccupancy step where the quantity
+changes, on the decoder
 pool's and the unit memories' own sources; DecodeBacklog is the one that
 still samples, after every action, because the rounds waiting to be
 decoded are spread over the window manager and the queues.
@@ -36,7 +39,6 @@ class DecoderUtilization:
         self._per_pool: dict = {}
         for pool in self.total_by_pool:
             self._per_pool[pool] = _StepIntegral()
-        self._observe(0)
 
     def unit_busy(self, unit) -> None:
         """One unit's compute left its pool's free list."""
@@ -134,6 +136,7 @@ class DecoderMemoryOccupancy:
         """Per unit: capacity, occupancy now, peak, time average, fraction."""
         per_unit = {}
         for unit_name, occupancy in self.by_unit.items():
+            occupancy.integral.observe(self.engine.now, occupancy.held_bits)
             average = occupancy.integral.time_average()
             fraction = None
             if occupancy.capacity_bits is not None:
@@ -214,19 +217,23 @@ class _UnitMemoryOccupancy:
 
 
 class _StepIntegral:
-    """The integral of a step function sampled at every change."""
+    """The integral of a step function from tick 0, sampled at every change.
+
+    The quantity is zero when the run starts, AvgStor's reset (gem5
+    src/base/stats/storage.hh:143-146), so the span always begins at
+    tick 0; a reader observes at the tick it reads, as AvgStor's
+    prepare integrates to curTick() before a dump (:198-203). gem5
+    divides by curTick() - lastReset + 1, counting both end ticks; a
+    step here holds over [tick, next tick), so the span is the last tick.
+    """
 
     def __init__(self) -> None:
-        self.first_tick: Optional[int] = None
-        self.last_tick: Optional[int] = None
+        self.last_tick = 0
         self.last_value = 0
         self.area = 0
 
     def observe(self, tick: int, value: int) -> None:
         """The value holds from this tick until the next observation."""
-        if self.first_tick is None:
-            self.first_tick = tick
-            self.last_tick = tick
         assert tick >= self.last_tick, "metric observations run backwards"
         self.area += self.last_value * (tick - self.last_tick)
         self.last_tick = tick
@@ -234,13 +241,11 @@ class _StepIntegral:
 
     @property
     def span_ticks(self) -> int:
-        """The ticks between the first and the last observation."""
-        if self.first_tick is None:
-            return 0
-        return self.last_tick - self.first_tick
+        """The ticks from the run's start to the last observation."""
+        return self.last_tick
 
     def time_average(self) -> float:
-        """The area over the span; zero before the first observation."""
+        """The area over the span; zero at tick 0."""
         if not self.span_ticks:
             return 0.0
         return self.area / self.span_ticks

@@ -518,14 +518,16 @@ def window_confidence_rows(measurements: list) -> list:
     Toshio et al. keep each shot's gap with whether the decode was right
     (2510.25222 lines 722-731); a window has no truth of its own, so a
     row carries the shot's failure and whether the strong decode
-    revised the window's answer. Only the shots
+    revised the window's answer. Only the scored shots of those
     observation.confidence_shot_count names write rows; a run with no
     confidence signal writes none.
     """
     rows = []
     for measurement in measurements:
+        if not _has_counted_confidence(measurement):
+            continue
         confidence = measurement.confidence
-        if confidence is None or not confidence.is_sampled:
+        if not confidence.is_sampled:
             continue
         for window in confidence.windows:
             row = _window_confidence_row(measurement, confidence, window)
@@ -534,13 +536,13 @@ def window_confidence_rows(measurements: list) -> list:
 
 
 def confidence_histogram_rows(measurements: list) -> list:
-    """Every shot's window gaps and smallest gap, counted per 0.1 dB bin.
+    """Every scored shot's window gaps and smallest gap, per 0.1 dB bin.
 
     The counts add across pieces as sinter's custom_counts do
     (sinter/_data/_task_stats.py:51-71), so the histogram covers every
-    shot however many window_confidence.csv lists. From it come Toshio's
-    p(g) and P(e|g) and the brute-force cutoff (2510.25222 lines
-    807-841, 863-900).
+    scored shot however many window_confidence.csv lists. From it come
+    Toshio's p(g) and P(e|g) and the brute-force cutoff (2510.25222
+    lines 807-841, 863-900).
     """
     counts = {}
     for measurement in measurements:
@@ -1894,8 +1896,10 @@ def _count_the_shots_gaps(
     counts: dict, measurement: measure.ShotMeasurement
 ) -> None:
     """One shot's window gaps and its smallest gap into the counts."""
+    if not _has_counted_confidence(measurement):
+        return
     confidence = measurement.confidence
-    if confidence is None or not confidence.windows:
+    if not confidence.windows:
         return
     point = measured_point(measurement)
     failed = measurement.logical_failure
@@ -1911,6 +1915,22 @@ def _count_the_shots_gaps(
     )
     shot_cell = shot_key + (None, failed)
     _add_count(counts, shot_cell, 1)
+
+
+def _has_counted_confidence(measurement: measure.ShotMeasurement) -> bool:
+    """Whether the shot's gaps belong in the confidence files.
+
+    Only a scored shot's: an unscored shot is sinter's discard, whose
+    logical_failure reads False, and sinter keeps a discard out of every
+    count it conditions on failure (sinter/_decoding/_decoding.py:
+    120-128) as out of the rate (sinter/_plotting.py:389). Every row of
+    both files carries shot_failed, so a row of an unscored shot would
+    count as a success. sweep.csv's unscored_shots counts the shots
+    left out.
+    """
+    if measurement.confidence is None:
+        return False
+    return measurement.is_scored
 
 
 def _smallest_gap(windows: tuple) -> Optional[float]:

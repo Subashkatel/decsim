@@ -141,7 +141,7 @@ class ShotConfidence:
     records (records/decoding.py) in window order; is_sampled says
     whether the shot is one of the first observation.confidence_shot_count
     shots, whose windows window_confidence.csv lists, while the histogram
-    counts every shot. sampled_shot_count is that count, None for every
+    counts every scored shot. sampled_shot_count is that count, None for every
     shot, which piece.json records so a fold can tell pieces that
     sampled different shots apart.
     """

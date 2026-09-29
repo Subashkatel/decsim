@@ -917,6 +917,7 @@ def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
         algorithm="pymatching",
         confidence=confidence,
         logical_failure=False,
+        is_scored=True,
     )
 
     rows = report.confidence_histogram_rows([shot])
@@ -926,6 +927,29 @@ def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
         _one_count("window", 10.0, False),
         _one_count("shot_minimum", None, None),
     ]
+
+
+def test_an_unscored_shot_is_in_neither_confidence_file():
+    """An unscored shot is sinter's discard, and counts in no P(e|g).
+
+    Its logical_failure reads False, so a row of it would count as a
+    success beside every gap. sinter takes a discard out of every
+    failure-conditioned count (sinter/_decoding/_decoding.py:120-128),
+    and every row of both files carries shot_failed.
+    """
+    windows = (decoding_records.WindowConfidence((1, 0), 0.1, True, None),)
+    confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
+    shot = types.SimpleNamespace(
+        point_id="p",
+        algorithm="pymatching",
+        seed=0,
+        confidence=confidence,
+        logical_failure=False,
+        is_scored=False,
+    )
+
+    assert report.window_confidence_rows([shot]) == []
+    assert report.confidence_histogram_rows([shot]) == []
 
 
 def _confidence_run(

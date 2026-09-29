@@ -1546,10 +1546,12 @@ observation:                       # what a run records beyond its results
                                    # otherwise
   confidence_shot_count: 100       # a count of shots from seed 0, or all. When a
                                    # confidence signal decides the escalation
-                                   # (switching), those shots write each committed
-                                   # window's gap, escalation and strong revision to
-                                   # window_confidence.csv, and every shot's gaps are
-                                   # counted into confidence_histogram.csv. A gap is
+                                   # (switching), the scored ones among those shots
+                                   # write each committed window's gap, escalation
+                                   # and strong revision to window_confidence.csv,
+                                   # and every scored shot's gaps are counted into
+                                   # confidence_histogram.csv; an unscored shot is
+                                   # sinter's discard and writes neither. A gap is
                                    # written in nats, ln of the likelihood ratio, and
                                    # binned in decibels, 10 log10 of it, so dB = nats
                                    # x 10 / ln 10 (decsim/escalation/settings.py

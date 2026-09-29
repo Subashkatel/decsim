@@ -58,7 +58,7 @@ class ObservationSettings:
     the RunResult carries. confidence_shot_count is how many shots of each
     point, from seed 0, write their windows' confidence gaps to
     window_confidence.csv when a confidence signal decides the
-    escalation; None writes every shot's.
+    escalation; None writes every scored shot's.
 
     The keys that only record the run, the log, the trace, the two
     occupancy listeners and confidence_shot_count, are labels

@@ -74,7 +74,10 @@ def _drawn_windows(shot, expected: dict) -> dict:
 
 
 def _recorded_stages(machine) -> list:
-    """(window key, stage), start us, end us: one row per stage record."""
+    """(window key, stage), start us, end us: one row per stage record.
+
+    Sorted, since two decodes of one window may record in either order.
+    """
     stages = machine.observation.stages
     rows = []
     for operation_id, window_id in machine.observation.windows.windows:
@@ -83,7 +86,7 @@ def _recorded_stages(machine) -> list:
             start = _microseconds(record.start_ticks)
             end = _microseconds(record.end_ticks)
             rows.append(((window_key, record.stage), start, end))
-    return rows
+    return sorted(rows)
 
 
 def _committed_frame_spans(committed) -> list:
@@ -202,8 +205,44 @@ def test_the_timeline_stages_are_the_runs_own_stage_records(tmp_path):
     document = trace_file.load(trace_path)
     shot = plots.timeline_shot(document)
     expected = _recorded_stages(machine)
-    drawn = _drawn_spans(shot.stages, expected)
+    drawn = _every_drawn_stage(shot.stages)
     assert drawn == expected
+
+
+def test_the_timeline_keeps_every_decode_of_a_window_decoded_again(tmp_path):
+    """Each forced-class solve and the speculative decode keep their stages.
+
+    Under run_both_at_once a window's weak solves and its speculative
+    strong decode all run, so one window and stage name has several
+    spans, and the figure holds every one the run recorded.
+    """
+    trace_path = tmp_path / "siblings.trace.json"
+    observation = {"trace": str(trace_path)}
+    shot_run = measure_tests.switching_run(
+        tmp_path,
+        20.0,
+        run_both_at_once=True,
+        sections={"observation": observation},
+    )
+    machine = shot_run.machine
+    machine.observation.trace_writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+    shot = plots.timeline_shot(document)
+    expected = _recorded_stages(machine)
+
+    drawn = _every_drawn_stage(shot.stages)
+
+    assert len(expected) > len(shot.stages)
+    assert drawn == expected
+
+
+def _every_drawn_stage(stages_by_key: dict) -> list:
+    """(key, start us, end us) for every span the figure draws, sorted."""
+    rows = []
+    for key, spans in stages_by_key.items():
+        for span in spans:
+            rows.append((key, span.start_us, span.end_us))
+    return sorted(rows)
 
 
 def test_the_timeline_frame_bars_are_the_frames_own_corrections(tmp_path):
@@ -317,7 +356,7 @@ def test_two_streams_draw_every_window_of_both(tmp_path):
 
     assert len(expected_windows) == 18
     assert _drawn_windows(shot, expected_windows) == expected_windows
-    assert _drawn_spans(shot.stages, expected_stages) == expected_stages
+    assert _every_drawn_stage(shot.stages) == expected_stages
     assert len(shot.frame) == 18
     assert _drawn_spans(shot.frame, expected_frame) == expected_frame
     figure_path = tmp_path / "timeline.png"

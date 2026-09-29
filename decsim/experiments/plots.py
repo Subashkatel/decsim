@@ -283,7 +283,7 @@ class _TimelineShot:
     moves_by_round: dict  # (channel, round) -> _Span
     moves_by_window: dict  # (channel, window) -> _Span
     windows: dict  # window -> _TimelineWindow
-    stages: dict  # (window, stage name) -> _Span
+    stages: dict  # (window, stage name) -> [_Span], one per decode
     frame: dict  # window -> _Span, accepted to committed
 
 
@@ -438,13 +438,22 @@ def _own_read_range(args: dict, operation: str) -> tuple:
 
 
 def _timeline_stages(document) -> dict:
-    """(window, stage) -> the span the decoder engine spent in it."""
+    """(window, stage) -> every span a decode of the window spent in it.
+
+    A window is decoded more than once when its forced-class solves or
+    its speculative strong decode run, and each decode's stages are
+    drawn, as gem5's pipeline viewer prints every dynamic instance of an
+    instruction, one record each, rather than one per program address
+    (util/o3-pipeview.py queue_inst, 210-218).
+    """
     stages = {}
     for event in document.of_phase("X"):
         if event["cat"] != "stage":
             continue
         window_key = trace_file.window_key_of(event)
-        stages[(window_key, event["name"])] = _span_of(event)
+        span = _span_of(event)
+        spans = stages.setdefault((window_key, event["name"]), [])
+        spans.append(span)
     return stages
 
 
@@ -682,10 +691,9 @@ def _draw_window_stages(
 ) -> None:
     """The decoder engine's fetch, algorithm and release bars."""
     for stage in ("fetch", "algorithm", "release"):
-        span = shot.stages.get((window_key, stage))
-        if span is None:
-            continue
-        timeline.window_bar(stage, span.start_us, span.end_us, pen)
+        spans = shot.stages.get((window_key, stage), ())
+        for span in spans:
+            timeline.window_bar(stage, span.start_us, span.end_us, pen)
 
 
 def _label_timeline(

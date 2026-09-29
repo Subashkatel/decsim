@@ -1101,7 +1101,9 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # windows folds a boundary
   result_blocks_unit: false        # false | true: when a finished decode gives
                                    # its unit's compute back. false gives it
-                                   # back at the decode's end, because the frame
+                                   # back at the decode's end, or when the
+                                   # confidence walk charged on the unit ends,
+                                   # because the frame
                                    # manager takes the correction without
                                    # blocking the decoder (Chen 2605.30765 lines
                                    # 1618-1620). true holds the unit until the

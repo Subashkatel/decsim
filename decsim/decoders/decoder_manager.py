@@ -27,6 +27,7 @@ seat both bind, since a strong request is opened by the chip side and
 served by the host side.
 """
 
+import functools
 from collections.abc import Callable
 from typing import Optional
 
@@ -372,10 +373,11 @@ class DecoderManager:
         <tier>.result_blocks_unit true is Riverlane's polled status
         register, where the decoder holds its output until the reader
         takes it (2410.05202 lines 1256-1259); a tier that does not
-        block gave the unit back at the decode's end and has nothing to
-        give back here. A result is read once: a forced-class solve the
-        confidence join held was read then, and its later close or commit
-        finds its unit already given back.
+        block gave the unit back at the decode's end, or when the walk
+        charged on it ended, and has nothing to give back here. A result
+        is read once: a forced-class solve the confidence join held was
+        read then, and its later close or commit finds its unit already
+        given back.
         """
         if not self.pool.blocks_unit:
             return
@@ -500,15 +502,32 @@ class DecoderManager:
     ) -> None:
         """The decode ended; its result goes to the destination that asked.
 
-        The unit's compute goes back at this end unless the tier blocks
-        on the result, in which case it goes back when the window side
-        has read it (<tier>.result_blocks_unit).
+        The unit's compute goes back once the confidence its evidence
+        feeds is computed, since that walk runs on the unit (decision
+        D8, charge_soft_output), unless the tier blocks on the result,
+        in which case it goes back when the window side has read it
+        (<tier>.result_blocks_unit). The delivery is what charges the
+        walk, so it comes first.
         """
         job.completed = True
-        if not self.pool.blocks_unit:
-            self.service.free(job)
         self.outcomes.deliver_weak(job, result)
+        if not self.pool.blocks_unit:
+            self._free_after_the_walk(job)
         self.service.release_input(job)
+        self.dispatcher.run()
+
+    def _free_after_the_walk(self, job: decoding_records.DecodeJob) -> None:
+        """Give the unit back now, or when the walk charged on it ends."""
+        ticks = job.soft_output_ticks
+        if ticks <= 0:
+            self.service.free(job)
+            return
+        free = functools.partial(self._free_and_dispatch, job)
+        label = f"confidence_walk_done({job.label})"
+        self.engine.schedule(ticks, free, label=label)
+
+    def _free_and_dispatch(self, job: decoding_records.DecodeJob) -> None:
+        self.service.free(job)
         self.dispatcher.run()
 
     # ------------------------------------------------- cancelling strong

@@ -37,18 +37,25 @@ def _switching_machine(
     weak_microseconds: float = 4.0,
     trace_path=None,
     result_blocks_unit: bool = False,
+    walk_microseconds=None,
+    patch_count: int = 1,
 ):
     """The gate's switching card at d=3, priced so its ticks are declared."""
     sections = copy.deepcopy(test_strong_window_shapes.GATE_SWITCHING_CARD)
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
     sections["weak_decoder"]["result_blocks_unit"] = result_blocks_unit
+    escalation = sections["escalation"]
+    escalation["confidence_walk_microseconds"] = walk_microseconds
     sections["strong_decoder"]["kind"] = 20.0
     sections["qpu"]["distance"] = 3
     sections["qpu"]["round_period_microseconds"] = 1.0
     arguments = sections["workload"]["arguments"]
     arguments["distance"] = 3
     arguments["physical_error_probability"] = 0.008
+    if patch_count > 1:
+        sections["workload"]["function"] = "decsim.producers:memory_patches"
+        arguments["patch_count"] = patch_count
     base_directory = pathlib.Path(".")
     section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
@@ -166,6 +173,52 @@ def test_one_unit_that_blocks_on_its_result_joins_both_solves():
     windows = len(machine.observation.windows.windows)
     committed = _committed_observables(machine)
     assert len(committed) == windows
+
+
+def _walks_and_next_starts(machine) -> list:
+    """(walk end, next start) on the unit, for each decode that walked.
+
+    One unit, so the unit's decodes start in the order recorded here.
+    """
+    service = machine.decoder_manager.service
+    outcomes = machine.decoder_manager.outcomes
+    engine = machine.engine
+    starts = []
+    ends = {}
+
+    def started(job, _unit) -> None:
+        starts.append((engine.now, job))
+
+    def ended(job, ended_ticks) -> None:
+        ends[id(job)] = ended_ticks
+
+    service.trace.job_started.connect(started)
+    outcomes.trace.service_ended.connect(ended)
+    machine.run()
+    pairs = []
+    pair_count = len(starts) - 1
+    for index in range(pair_count):
+        (_tick, job) = starts[index]
+        (next_tick, _next_job) = starts[index + 1]
+        if job.soft_output_ticks > 0:
+            walk_end = ends[id(job)]
+            pairs.append((walk_end, next_tick))
+    return pairs
+
+
+def test_the_walk_keeps_its_unit_busy_before_the_next_decode_starts():
+    """Decision D8: the walk is the unit's time, so nothing overlaps it.
+
+    Two patches, so the other patch's window is ready while the walk runs.
+    """
+    machine = _switching_machine(1, walk_microseconds=12.0, patch_count=2)
+
+    pairs = _walks_and_next_starts(machine)
+
+    walk_count = len(pairs)
+    assert walk_count > 0
+    overlapping = [pair for pair in pairs if pair[1] < pair[0]]
+    assert overlapping == []
 
 
 def test_the_first_solve_is_held_and_the_join_names_the_windows_gap():

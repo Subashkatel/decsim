@@ -1027,7 +1027,8 @@ class DecodeQueue(Protocol):
         """The window side, or the confidence join, has this result in hand.
 
         A tier whose result blocks its unit gets the unit back here; a
-        tier that gave it back at the decode's end has nothing to give,
+        tier that gave it back at the decode's end, or when the walk
+        charged on it ended, has nothing to give,
         and nor does a result already read.
         """
 

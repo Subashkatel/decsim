@@ -6,7 +6,8 @@ dispatcher chose, moves the job's rounds into that unit's memory (the
 accelerator pattern: invoke the unit, then DMA its input into the
 unit's memory, then compute; gem5-Aladdin aladdin_sys_connection.h and
 dma_interface.h), starts the manager's decoder when every transfer landed
-and the window owes no boundary, and frees the unit at the decode's end.
+and the window owes no boundary, and frees the unit when the manager
+says the decode, and any confidence walk charged on it, has ended.
 A landed job whose window still owes a boundary parks in its slot and
 releases its compute claim (Tomasulo's rule at the boundary hazard), so
 a dependent that fills early never deadlocks the unit against its own

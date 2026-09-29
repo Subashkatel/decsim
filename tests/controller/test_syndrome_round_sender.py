@@ -144,6 +144,7 @@ def sender_with(
     if strong_receiver is not None:
         sender.strong_receiver = strong_receiver
     sender.held_rounds = held
+    sender.packing_line = syndrome_round_sender.HeldRounds(engine)
     sender.transmitter = transmitter
     sender.publishes_from_strong_store = publishes_from_strong_store
     return sender, weak_receiver, transmitter, recorder
@@ -307,6 +308,11 @@ def test_a_strong_primary_round_is_in_flight_until_it_lands():
     )
     first = packed(1)
 
+    retried_counts = []
+    sender.packing_line.retry = lambda: retried_counts.append(
+        sender.strong_crossing_count
+    )
+
     sender.admit(first)
     count_while_crossing = sender.strong_crossing_count
     engine.run()
@@ -314,6 +320,7 @@ def test_a_strong_primary_round_is_in_flight_until_it_lands():
     assert count_while_crossing == 1
     assert strong_receiver.written == [1]
     assert sender.strong_crossing_count == 0
+    assert retried_counts == [0]
 
 
 def test_a_weak_primary_round_never_leaves_for_the_strong_store():

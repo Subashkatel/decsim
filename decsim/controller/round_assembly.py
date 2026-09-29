@@ -11,9 +11,17 @@ and the conditional together, an upper bound for the packing time. The stage
 admits a bounded number of rounds at once
 (controller.packing_rounds_in_flight, RoundsInFlight): a round counts
 from its first fragment until the windows hear of it, whether it is
-still in assembly, held for store room or on its route. A full stage
-stops the run: the QPU never pauses and nothing upstream can hold a
-fragment.
+still in assembly, held for store room or on its route. A round that
+finds the stage full waits in front of it, whole, in the order its
+first fragment arrived, and enters when a round leaves the stage: the
+QPU keeps measuring (qpu/cycle_clock.py), so the wait is the
+controller's. A refused transfer waits at its sender and is offered
+again on the retry (gem5 src/mem/port.hh:244-262; garnet keeps a
+message at the head of its MessageBuffer while no virtual channel has
+a credit, NetworkInterface.cc:207-218 and :397-400; Helios pops its
+upstream FIFO only when the next one is ready,
+design/channels/pu_arbitration.sv:142-148), so it is the same waiting
+line the sender keeps in front of the stores (HeldRounds).
 """
 
 import dataclasses
@@ -44,7 +52,8 @@ class RoundsInFlight:
     (RoundTransmitter) or crossing to the strong syndrome buffer
     (SyndromeRoundSender), and each place keeps its own count; the
     stage's count is their sum, read when a first fragment asks for
-    room, so no exit can forget a release.
+    room, so no exit can forget a release. A round waiting in front of
+    the stage is not in it.
     """
 
     held_rounds = ports.Port(ports.HeldRounds)
@@ -65,14 +74,6 @@ class RoundsInFlight:
         on_route = self._on_route()
         return in_assembly + self.held_rounds.count + on_route
 
-    def downstream_text(self) -> str:
-        """The rounds in flight past assembly, for the refusal sentence."""
-        on_route = self._on_route()
-        return (
-            f"held for store room: {self.held_rounds.count}, on their "
-            f"route: {on_route}"
-        )
-
     def _on_route(self) -> int:
         """The rounds sent and not yet heard of by the windows."""
         strong_crossing_count = self.syndrome_round_sender.strong_crossing_count
@@ -90,6 +91,9 @@ class RoundAssembler:
     syndrome_round_sender = ports.Port(ports.SyndromeRoundSender)
     detection_events = ports.Port(ports.DetectionEventPlacement)
     rounds_in_flight = ports.Port(RoundsInFlight)
+    # the line a round waits in while the stage is full; the ends a
+    # round leaves the stage by retry it
+    packing_line = ports.Port(ports.HeldRounds)
 
     def __init__(
         self,
@@ -120,7 +124,13 @@ class RoundAssembler:
         fragment_count: int,
         route: round_records.SyndromePacketRoute,
     ) -> None:
-        """Take one fragment; the round is packed when its last one arrives."""
+        """Take one fragment; the round is packed when its last one arrives.
+
+        The round takes its place, or its place in the line, before its
+        arrival is reported, so a listener hears a waiting round as
+        waiting from its first fragment.
+        """
+        context = self._context_for(fragment, fragment_count, route)
         available = round_records.RoundEvent.of(
             "BINARY_AVAILABLE",
             self.engine.now,
@@ -130,18 +140,12 @@ class RoundAssembler:
             fragment.patch_ids,
         )
         self.trace.round_event.fire(available)
-        context = self._context_for(fragment, fragment_count, route)
         context.fragments.append(fragment)
+        if not self.workspace.is_in_assembly(context):
+            return
         if len(context.fragments) != context.fragment_count:
             return
-        packing_cycles = self.settings.packing_cycles_per_round
-        if packing_cycles > 0:
-            now = self.engine.now
-            delay = self.settings.clock.ticks_to_edge(packing_cycles, now)
-            finish = functools.partial(self._finish_packing, context)
-            self.engine.schedule(delay, finish, label="controller pack")
-            return
-        self._finish_packing(context)
+        self._pack(context)
 
     def check_settled(self) -> None:
         """At the end of a run no round may still be in assembly."""
@@ -153,19 +157,49 @@ class RoundAssembler:
             )
 
     def _context_for(self, fragment, fragment_count, route):
-        """The live context of the fragment's round, opened on its first."""
-        round_key = (fragment.operation_id, fragment.round_index)
+        """The context of the fragment's round, made on its first fragment.
+
+        A new round enters the stage when it has room and no round waits
+        ahead of it; otherwise it joins the line, as the sender's admit
+        does, so rounds enter in the order they arrived. A fragment of a
+        round already in the stage never waits.
+        """
         identity = _round_identity(fragment, route)
-        context = self.workspace.context_by_identity.get(identity)
+        context = self.workspace.context_of(identity)
         if context is not None:
             return context
-        if not self.workspace.has_room(self.rounds_in_flight):
-            self.workspace.refuse(
-                self.rounds_in_flight, round_key, self.engine.now
-            )
+        round_key = (fragment.operation_id, fragment.round_index)
         context = _PackingContext(identity, round_key, route, fragment_count)
-        self.workspace.context_by_identity[identity] = context
+        self.workspace.waiting_by_identity[identity] = context
+        if self.packing_line.count == 0 and self._enter(context):
+            return context
+        self.packing_line.refuse(context, self._enter)
         return context
+
+    def _enter(self, context) -> bool:
+        """A waiting round takes a place in the stage, when one is free.
+
+        A round whose fragments all arrived while it waited starts its
+        packing at this tick, after the line has let it go.
+        """
+        if not self.workspace.has_room(self.rounds_in_flight):
+            return False
+        self.workspace.enter(context)
+        if len(context.fragments) == context.fragment_count:
+            pack = functools.partial(self._pack, context)
+            self.engine.schedule(0, pack, label="controller pack")
+        return True
+
+    def _pack(self, context) -> None:
+        """Charge the packing time once for the complete round."""
+        packing_cycles = self.settings.packing_cycles_per_round
+        if packing_cycles > 0:
+            now = self.engine.now
+            delay = self.settings.clock.ticks_to_edge(packing_cycles, now)
+            finish = functools.partial(self._finish_packing, context)
+            self.engine.schedule(delay, finish, label="controller pack")
+            return
+        self._finish_packing(context)
 
     def _finish_packing(self, context) -> None:
         context.is_ready = True
@@ -253,6 +287,8 @@ class _Workspace:
     def __init__(self) -> None:
         self.context_by_identity: dict = {}
         self.expected_by_stream: dict[tuple, dict] = {}
+        # rounds in the line in front of the stage, collecting fragments
+        self.waiting_by_identity: dict = {}
 
     def expect_round(
         self,
@@ -281,20 +317,20 @@ class _Workspace:
         in_assembly = len(self.context_by_identity)
         return rounds_in_flight.has_room(in_assembly)
 
-    def refuse(
-        self, rounds_in_flight: RoundsInFlight, round_key, tick: int
-    ) -> None:
-        """A round that found no context stops the run."""
-        capacity = rounds_in_flight.capacity
-        in_assembly = sorted(self.context_by_identity, key=repr)
-        downstream = rounds_in_flight.downstream_text()
-        raise RuntimeError(
-            f"the packing workspace is full at tick {tick}: round "
-            f"{round_key!r} arrived while {capacity} rounds were in "
-            f"flight through the controller (controller."
-            f"packing_rounds_in_flight is {capacity}; in assembly: "
-            f"{in_assembly}, {downstream})"
-        )
+    def context_of(self, identity: tuple) -> Optional[_PackingContext]:
+        """The round's context, in assembly or waiting; None before both."""
+        context = self.context_by_identity.get(identity)
+        if context is not None:
+            return context
+        return self.waiting_by_identity.get(identity)
+
+    def is_in_assembly(self, context: _PackingContext) -> bool:
+        return context.identity in self.context_by_identity
+
+    def enter(self, context: _PackingContext) -> None:
+        """The waiting round moves into assembly."""
+        del self.waiting_by_identity[context.identity]
+        self.context_by_identity[context.identity] = context
 
     def forget(self, context: _PackingContext) -> None:
         self.context_by_identity.pop(context.identity, None)

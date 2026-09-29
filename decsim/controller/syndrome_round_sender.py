@@ -24,6 +24,7 @@ dropped. The written round leaves on its route at the write
 import dataclasses
 import functools
 from collections.abc import Callable
+from typing import Protocol
 
 import decsim.controller.round_transmission as round_transmission
 import decsim.engine as engine_module
@@ -33,15 +34,29 @@ import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
 
 
-class HeldRounds:
-    """The waiting line in front of the stores.
+class WaitingRound(Protocol):
+    """What a waiting line reads of a round: its key and its route.
 
+    A packed round waits in front of the stores and a round in assembly
+    in front of the packing stage; the line is this package's own seam.
+    """
+
+    round_key: tuple
+    route: round_records.SyndromePacketRoute
+
+
+class HeldRounds:
+    """The waiting line in front of one bounded stage of the readout path.
+
+    The run keeps two: one in front of the stores, one in front of the
+    packing stage (round_assembly.py); a round waits whole in either,
+    and the stage it waits for calls retry when it has room.
     Trace source: round_event(RoundEvent) with kind STALLED when a round
     is held for room and RELEASED when a freed slot admits it. The two
     ends are the wait itself, which is the
-    back-pressure a full store applies to its sender and is measured
-    nowhere else: the round waits here, before the wire is asked for, so
-    its transfer carries none of it. Ruby's MessageBuffer counts that
+    back-pressure a full stage applies to its sender and is measured
+    nowhere else: the round waits here, before the stage is asked again,
+    so the stage's own time carries none of it. Ruby's MessageBuffer counts that
     wait as the buffer's own statistic, the ticks a message was stalled
     in it (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82
     for the stall counters, :331 where the wait is summed at the
@@ -59,20 +74,20 @@ class HeldRounds:
 
     def refuse(
         self,
-        packed: round_records.PackedRound,
-        admit: Callable[[round_records.PackedRound], bool],
+        held: WaitingRound,
+        admit: Callable[[WaitingRound], bool],
     ) -> bool:
         """A round found no room: hold it for a retry.
 
         False, so the admission that called reports the refusal; a held
         round is recorded STALLED once.
         """
-        operation_id, round_index = packed.round_key
-        if self._is_holding(packed):
+        operation_id, round_index = held.round_key
+        if self._is_holding(held):
             return False
-        self.waiting.append((packed, admit))
+        self.waiting.append((held, admit))
         stalled = round_records.RoundEvent.of(
-            "STALLED", self.engine.now, operation_id, round_index, packed.route
+            "STALLED", self.engine.now, operation_id, round_index, held.route
         )
         self.trace.round_event.fire(stalled)
         return False
@@ -80,33 +95,33 @@ class HeldRounds:
     def retry(self) -> None:
         """A slot freed: admit from the head, stop at the first refused."""
         while self.waiting:
-            packed, admit = self.waiting[0]
-            admitted = admit(packed)
+            held, admit = self.waiting[0]
+            admitted = admit(held)
             if not admitted:
                 return
             self.waiting.pop(0)
-            self._released(packed)
+            self._released(held)
 
     @property
     def count(self) -> int:
         """How many rounds wait."""
         return len(self.waiting)
 
-    def _released(self, packed: round_records.PackedRound) -> None:
+    def _released(self, held: WaitingRound) -> None:
         """The round left the waiting line: its wait ends at this tick."""
-        operation_id, round_index = packed.round_key
+        operation_id, round_index = held.round_key
         released = round_records.RoundEvent.of(
             "RELEASED",
             self.engine.now,
             operation_id,
             round_index,
-            packed.route,
+            held.route,
         )
         self.trace.round_event.fire(released)
 
-    def _is_holding(self, packed: round_records.PackedRound) -> bool:
-        for held, _admit in self.waiting:
-            if held is packed:
+    def _is_holding(self, held: WaitingRound) -> bool:
+        for waiting, _admit in self.waiting:
+            if waiting is held:
                 return True
         return False
 
@@ -143,6 +158,9 @@ class SyndromeRoundSender:
         ports.StrongSyndromeRoundReceiver, optional=True
     )
     held_rounds = ports.Port(ports.HeldRounds)
+    # the line in front of the packing stage, which a landed round's
+    # place in the stage frees
+    packing_line = ports.Port(ports.HeldRounds)
     transmitter = ports.Port(round_transmission.RoundTransmitter)
     windows = ports.Port(ports.WindowInput)
 
@@ -246,7 +264,9 @@ class SyndromeRoundSender:
         )
 
     def _leave_strong_crossing(self) -> None:
+        """The round left the packing stage, so a waiting round may enter."""
         self.strong_crossing_count -= 1
+        self.packing_line.retry()
 
 
 @dataclasses.dataclass(frozen=True)

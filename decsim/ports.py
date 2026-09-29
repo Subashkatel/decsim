@@ -463,12 +463,13 @@ class MemoryRoundArrivals(Protocol):
 
 @runtime_checkable
 class HeldRounds(Protocol):
-    """The waiting line in front of a store, as the store sees it.
+    """The waiting line in front of a bounded stage, as the stage sees it.
 
-    A store that is full holds nothing back itself: the round waits at
-    the sender, and the store tells the line when a slot frees so the
-    head can try again. Ruby's MessageBuffer counts that wait as the
-    buffer's own statistic
+    A store or the packing stage that is full holds nothing back itself:
+    the round waits at the sender, and whatever frees a place in the
+    stage tells the line so the head can try again (gem5
+    src/mem/port.hh:244-262, sendRetryReq). Ruby's MessageBuffer counts
+    that wait as the buffer's own statistic
     (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82), and
     ns-3's queue disc stamps the packet at the enqueue
     (ns-3 src/traffic-control/model/queue-disc.cc:851).

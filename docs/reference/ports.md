@@ -127,7 +127,7 @@ The decoders' end for a timing-only round, as the controller sees it.
 
 ### `HeldRounds`
 
-The waiting line in front of a store, as the store sees it.
+The waiting line in front of a bounded stage, as the stage sees it.
 
 | Method | What it does |
 | --- | --- |

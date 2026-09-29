@@ -143,6 +143,13 @@ def build_syndrome_round_sender(
     return syndrome_round_sender.SyndromeRoundSender(parts.engine)
 
 
+def build_packing_line(
+    parts: build_parts.Parts,
+) -> syndrome_round_sender.HeldRounds:
+    """The waiting line in front of the packing stage."""
+    return syndrome_round_sender.HeldRounds(parts.engine)
+
+
 def build_rounds_in_flight(
     parts: build_parts.Parts,
 ) -> round_assembly.RoundsInFlight:

@@ -1888,11 +1888,13 @@ def test_every_measured_bit_crosses_the_link_exactly_once(recorded_memory):
 # The whole machine on the declared card: what only the composition of
 # the controller, the stores, the windows and the frame decides.
 
-PACKING_BOUND_STOP_TICKS = {
-    1: 7_000_000,
-    2: 8_000_000,
-    3: 9_000_000,
-    4: 10_000_000,
+# each round's publication in microseconds, rounds 1 to 12, under each
+# packing bound: publication(r) = max(5 + r, publication(r - b)) + 4
+PUBLISHED_MICROSECONDS_BY_BOUND = {
+    1: [10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54],
+    2: [10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31],
+    3: [10, 11, 12, 14, 15, 16, 18, 19, 20, 22, 23, 24],
+    4: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
 }
 TWELVE_ROUND_RUN_END_TICK = 54_000_000
 
@@ -2040,28 +2042,32 @@ def twelve_rounds_with_packing_bound(bound):
 
 
 @pytest.mark.parametrize("bound", [1, 2, 3, 4])
-def test_the_packing_bound_stops_the_run_at_the_tick_it_fills(bound):
-    """A round counts against the bound until the windows hear of it.
+def test_a_full_packing_stage_holds_each_round_until_one_leaves(bound):
+    """At most b rounds are in flight; the next enters as one is published.
 
-    controller.packing_rounds_in_flight bounds the whole packing stage,
-    not the assembly step alone: a round counts from its first fragment
-    until it is published (decsim/controller/settings.py). On the
-    declared card round r reaches assembly at r plus qpu_to_controller 2
-    plus readout_to_bits 3 and is published four microseconds later, so
-    under a bound of b round 1 + b arrives at 6 + b us while round 1 is
-    still on its route, and the run stops there naming the setting.
+    controller.packing_rounds_in_flight bounds the whole packing stage: a
+    round counts from its first fragment until it is published. On the
+    declared card round r reaches the stage at r plus qpu_to_controller 2
+    plus readout_to_bits 3 and is published four microseconds after it
+    enters, so under a bound of b it enters at max(5 + r, publication of
+    round r - b): the window law of credit flow control, b credits and a
+    four microsecond return (garnet's OutVcState credit count,
+    src/mem/ruby/network/garnet/OutVcState.hh:51-54). No round is lost.
     """
     settings = twelve_rounds_with_packing_bound(bound)
     machine = machine_module.Machine.build(settings, 0)
-    stop_tick = PACKING_BOUND_STOP_TICKS[bound]
-    sentence = f"the packing workspace is full at tick {stop_tick}: "
 
-    with pytest.raises(RuntimeError, match=sentence) as refusal:
-        machine.run()
+    result = machine.run()
 
-    named_setting = f"controller.packing_rounds_in_flight is {bound}"
-    assert named_setting in str(refusal.value)
-    assert machine.engine.now == stop_tick
+    published = published_rounds(machine)
+    ticks = publication_ticks(published)
+    expected_microseconds = PUBLISHED_MICROSECONDS_BY_BOUND[bound]
+    expected_ticks = [
+        config.microseconds_to_ticks(microseconds)
+        for microseconds in expected_microseconds
+    ]
+    assert result.terminal_status == "complete"
+    assert ticks == expected_ticks
 
 
 def test_a_packing_bound_of_six_clears_a_twelve_round_run():

@@ -112,8 +112,8 @@ class ControllerSettings:
         """The packing stage's bound is a whole count of rounds, or null.
 
         A round enters the stage whole, so the bound counts whole rounds,
-        and a bound below one admits no round and stops the run at the
-        first fragment. gem5's integer parameters refuse a value outside
+        and a bound below one admits no round, so every round would wait
+        for ever. gem5's integer parameters refuse a value outside
         their range where the configuration is read
         (src/python/m5/params/param_types.py:230-235, CheckedInt._check).
         """

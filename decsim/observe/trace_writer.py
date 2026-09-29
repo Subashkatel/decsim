@@ -63,7 +63,9 @@ PROCESS_ID = 1
 # the controller's packing workspace draws on the controller's own lane
 ASSEMBLER_THREAD = "Controller"
 ASSEMBLER_COUNTER = "controller assembler rounds"
-# and so does its waiting line for store room, beside the workspace
+# and so do its two waiting lines, one in front of the workspace and one
+# in front of the stores
+WAITING_ROUNDS_COUNTER = "controller rounds waiting for a packing place"
 HELD_ROUNDS_COUNTER = "controller rounds held for store room"
 
 
@@ -171,8 +173,8 @@ class TraceWriter:
 
         The workspace is the one bounded controller-side structure
         (controller.packing_rounds_in_flight, data_path.md's residence
-        table): a round enters at its first fragment and leaves when it
-        is packed, or when it is dropped for want of room.
+        table): a round enters at its first fragment, or when it leaves
+        the line in front of a full stage, and leaves when it is packed.
         """
         round_key = (event.operation_id, event.round_index)
         if event.kind == "BINARY_AVAILABLE":
@@ -180,9 +182,22 @@ class TraceWriter:
             return
         if event.kind == "PACKED":
             self._end_assembly(round_key, "packed")
+
+    def round_waiting_for_a_place(self, capacity, event) -> None:
+        """A round waiting in front of a full packing stage, and its entry.
+
+        The wait opens before the round's first fragment is reported
+        (controller/round_assembly.py), so the fragments that arrive while
+        it waits find the round's key open and open no place in the stage;
+        its place opens when the line lets it go.
+        """
+        round_key = (event.operation_id, event.round_index)
+        if event.kind == "STALLED":
+            self._begin_waiting_round(round_key, event)
             return
-        if event.kind == "DROPPED":
-            self._end_assembly(round_key, "dropped, workspace full")
+        if event.kind == "RELEASED":
+            self._end_waiting_round(round_key)
+            self._begin_assembly(capacity, round_key, event)
 
     def round_held_for_room(self, event) -> None:
         """A packed round waiting in front of a full store, and its release.
@@ -706,7 +721,7 @@ class TraceWriter:
         self._counter(thread, name, {series: value}, self.engine.now)
 
     def _begin_assembly(self, capacity, round_key, event) -> None:
-        """The round's first fragment opens its place in the workspace."""
+        """The round takes its place: at its first fragment, or its release."""
         if (ASSEMBLER_THREAD, round_key) in self._open.open_residence:
             return
         args = {
@@ -724,12 +739,34 @@ class TraceWriter:
         self._count(ASSEMBLER_THREAD, ASSEMBLER_COUNTER, 1)
 
     def _end_assembly(self, round_key, reason: str) -> None:
-        """The round left the workspace, packed or dropped."""
+        """The round left the workspace, packed."""
         if (ASSEMBLER_THREAD, round_key) not in self._open.open_residence:
             return
         closing = {"freed": self.engine.now, "freed_reason": reason}
         self._end_residence(ASSEMBLER_THREAD, round_key, closing)
         self._count(ASSEMBLER_THREAD, ASSEMBLER_COUNTER, -1)
+
+    def _begin_waiting_round(self, round_key, event) -> None:
+        """The stage was full: the round's wait for a place opens here."""
+        args = {
+            "round": round_text(round_key),
+            "transfer": "reference",
+            "held_from": event.tick,
+        }
+        name = f"wait round {round_key[1]} for a packing place"
+        self._begin_residence(
+            ASSEMBLER_THREAD, round_key, name, "round,residence", args
+        )
+        self._count(ASSEMBLER_THREAD, WAITING_ROUNDS_COUNTER, 1)
+
+    def _end_waiting_round(self, round_key) -> None:
+        """A round left the stage and this one took its place."""
+        closing = {
+            "freed": self.engine.now,
+            "freed_reason": "packing place freed",
+        }
+        self._end_residence(ASSEMBLER_THREAD, round_key, closing)
+        self._count(ASSEMBLER_THREAD, WAITING_ROUNDS_COUNTER, -1)
 
     def _begin_held_round(self, round_key, event) -> None:
         """The round found no room: its wait opens here."""

@@ -301,14 +301,7 @@ def _connect_trace_writer(
     links.trace.frame_landed.connect(trace_writer.frame_landed)
     for source in _copy_sources(seats):
         source.connect(trace_writer.copy_made)
-    assembler = seats["assembler"]
-    in_assembly = functools.partial(
-        trace_writer.round_in_assembly,
-        assembler.settings.packing_rounds_in_flight,
-    )
-    assembler.trace.round_event.connect(in_assembly)
-    held_rounds = seats["held_rounds"]
-    held_rounds.trace.round_event.connect(trace_writer.round_held_for_room)
+    _connect_controller_trace(trace_writer, seats)
     _connect_store_trace(
         trace_writer, seats["weak_syndrome_buffer"], "weak syndrome buffer"
     )
@@ -328,6 +321,23 @@ def _connect_trace_writer(
     )
     pauli_frame = seats.get("pauli_frame")
     _connect_frame_trace(trace_writer, pauli_frame)
+
+
+def _connect_controller_trace(
+    trace_writer: trace_writer_module.TraceWriter,
+    seats: Mapping[str, Any],
+) -> None:
+    """The packing stage, the line in front of it and the one after it."""
+    assembler = seats["assembler"]
+    capacity = assembler.settings.packing_rounds_in_flight
+    in_assembly = functools.partial(trace_writer.round_in_assembly, capacity)
+    assembler.trace.round_event.connect(in_assembly)
+    waiting = functools.partial(
+        trace_writer.round_waiting_for_a_place, capacity
+    )
+    seats["packing_line"].trace.round_event.connect(waiting)
+    held_rounds = seats["held_rounds"]
+    held_rounds.trace.round_event.connect(trace_writer.round_held_for_room)
 
 
 def _connect_frame_trace(

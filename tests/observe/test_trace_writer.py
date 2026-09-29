@@ -17,8 +17,10 @@ import pytest
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
 import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
+import tests.declared_run as declared_run
 import tests.experiments.test_measure as measure_tests
 import tests.observe.gate_point as gate_point
 
@@ -634,6 +636,33 @@ def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):
     steps = _counter_values(document, "controller assembler rounds", "rounds")
     assert max(steps) == 1
     assert steps[-1] == 0
+
+
+def test_a_round_waits_for_a_packing_place_before_it_takes_one():
+    """The stage never holds more rounds than its bound, in the trace too.
+
+    On the declared card with a bound of one, round 1 reaches the stage
+    at 6 us and is published at 10 us, and round 2 reaches it at 7 us:
+    round 2 waits in front of the stage from 7 us and takes round 1's
+    place at 10 us (controller/round_assembly.py).
+    """
+    controller = declared_run.declared_controller(packing_rounds_in_flight=1)
+    observation = observe_settings.ObservationSettings(trace="chrome")
+    machine = declared_run.weak_only_run(
+        rounds=3, controller=controller, observation=observation
+    )
+    document = machine.observation.trace_writer.document()
+
+    waiting = _one(document, "X", "wait round 2 for a packing place")
+    assembly = _one(document, "X", "assemble round 2")
+    in_stage = _counter_values(
+        document, "controller assembler rounds", "rounds"
+    )
+    assert waiting["args"]["held_from"] == 7_000_000
+    assert waiting["args"]["freed"] == 10_000_000
+    assert assembly["args"]["slot_taken"] == 10_000_000
+    assert assembly["args"]["capacity"] == 1
+    assert max(in_stage) == 1
 
 
 def _counter_values(document, name: str, series: str) -> list:

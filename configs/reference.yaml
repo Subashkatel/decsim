@@ -665,8 +665,10 @@ controller:                        # controller work per round, in cycles of its
                                    # conditional together: an upper bound here
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
                                    # through the packing stage, a whole count of
-                                   # at least one. null = unbounded. A full
-                                   # stage stops the run
+                                   # at least one. null = unbounded. A round
+                                   # that finds the stage full waits in front
+                                   # of it, in arrival order, and enters when
+                                   # a round leaves. The QPU keeps measuring
 
 detection_events:                  # where a round's raw measurement outcomes
                                    # become its detection events, and what it

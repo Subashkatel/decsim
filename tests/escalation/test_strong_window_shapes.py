@@ -157,7 +157,7 @@ def test_the_double_window_absorbs_the_windows_it_covers():
     ]
 
 
-def test_the_double_window_is_submitted_once_at_the_far_boundary_commit():
+def test_the_double_window_leaves_once_its_far_boundary_is_determined():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
@@ -165,19 +165,23 @@ def test_the_double_window_is_submitted_once_at_the_far_boundary_commit():
         round_microseconds=4.0,
     )
     machine.run()
-    lines = machine.observation.log.lines
-    deferred_lines = fabric.log_lines_containing(
-        machine, "deferred until the far-side weak boundary"
+    carried_lines = fabric.log_lines_containing(
+        machine, "rounds 4-12 of op 1 carried up with the escalation"
     )
     submitted_lines = fabric.log_lines_containing(
         machine, "far-side weak boundary determined -> strong window submitted"
     )
     restart_lines = fabric.log_lines_containing(machine, "DECODE DONE mem1 W4")
+    # the restart window W4 decodes from 74 to 84 us and is determined
+    # then; its correction reaches the frame 2 us of weak_decoder_to_frame
+    # and 1 us of frame write later, which the strong region does not wait
+    # for, and the region lands 3 us of weak_decoder_to_strong_decoder
+    # after it left
+    assert len(carried_lines) == 1
+    assert carried_lines[0].startswith("[ 84.000 us]")
     assert len(submitted_lines) == 1
-    deferred = lines.index(deferred_lines[0])
-    restart_committed = lines.index(restart_lines[0])
-    submitted = lines.index(submitted_lines[0])
-    assert deferred < restart_committed < submitted
+    assert submitted_lines[0].startswith("[ 87.000 us]")
+    assert restart_lines[0].startswith("[ 87.000 us]")
     assert not machine.window_manager.strong_redecode.has_pending()
 
 

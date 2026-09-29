@@ -212,6 +212,29 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     assert fixture.reads == [(17, job.request_key)]
 
 
+def test_a_kept_result_releases_held_strong_windows_at_its_verdict():
+    """A held strong window pins on what the weak decoder determined.
+
+    Toshio et al. 2510.25222 lines 1248-1250 start the strong decoder once
+    the boundary conditions at both ends "have been determined by the weak
+    decoder", and the boundary leaves at the verdict, so the release comes
+    at the verdict at 10 and not at the frame commit at 17.
+    """
+    fixture = _Fixture()
+    released_ticks = []
+    fixture.escalation.submit_if_commit_releases = lambda _key: (
+        released_ticks.append(fixture.engine.now)
+    )
+    job = fixture.job(window_records.DecoderTier.WEAK, 0)
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
+    fixture.engine.schedule(
+        10, lambda: fixture.verdict.accept_result(job, result)
+    )
+    fixture.engine.run()
+    assert fixture.frame.commits == [(14, (4, 1), (1, 0))]
+    assert released_ticks == [10]
+
+
 def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
     fixture = _Fixture()
     job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)

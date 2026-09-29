@@ -1183,8 +1183,8 @@ memory while it waits, so each idle cycle is the stream's next round,
 emitted on the stream (`extend_live_stream`), until the source has no
 rounds left. A segment that declares no stream offset takes the
 stream's next round when the QPU starts it, after its boundary's idle
-rounds (`bind_at_start`); a declared offset is bound at load and a
-protected feedback source at issue. One call, `_bind`, writes the
+rounds (`bind_at_start`), and so does a protected feedback source; a
+declared offset is bound at load. One call, `_bind`, writes the
 offset to the bindings and to the result ledger, and the window plan
 cuts the stream before the segment's first round and after its last,
 so the result the ledger folds over the segment's rounds is a sum of

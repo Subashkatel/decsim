@@ -84,7 +84,7 @@ class IdleRoundAccounting:
     def bind_at_start(
         self, command: program_records.RunOperationBody
     ) -> program_records.RunOperationBody:
-        """The streams bind a continuation after its patches' idle rounds."""
+        """The streams bind the command to its stream as it starts."""
         return self.streams.bind_at_start(command)
 
     def claim(self, operation) -> int:

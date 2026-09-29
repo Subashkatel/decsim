@@ -133,6 +133,16 @@ class RecordingReceiver:
         self.arrivals.append((self.engine.now, readout.round_index))
 
 
+class StreamlessIdleRounds:
+    """The idle accounting of a run with no streams and no idle patch."""
+
+    def emit_idle_round(self, operation_id, patch, round_index) -> None:
+        del operation_id, patch, round_index
+
+    def bind_at_start(self, command):
+        return command
+
+
 class FinishingRuntime:
     """A runtime whose one move is to stop the clock when a body ends."""
 
@@ -171,6 +181,7 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     qpu.syndrome_source = device
     qpu.readout_receiver = receiver
     qpu.runtime = runtime
+    qpu.idle_rounds = StreamlessIdleRounds()
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
@@ -2638,6 +2649,54 @@ def test_a_released_pulse_on_a_protected_patch_waits_for_one_boundary():
     started = commands[("STARTED", 3)]
     assert issued == decided
     assert started == machine.qpu.boundary_at_or_after(arrived) == 7_700_000
+
+
+def test_a_released_feedback_source_binds_to_the_round_it_starts_at():
+    """The source reads the protected stream from the boundary it starts on.
+
+    A released command is sent when its decision lands and starts on the
+    first boundary after it arrives, so its place in the stream is known
+    only then, as a segment's is (bind_at_start). With a one microsecond
+    controller_to_qpu the resume pulse sent at 6.872 us arrives after the
+    7.7 us boundary and starts at 8.8 us, after the prefix's three rounds
+    and the protected rounds of 4.4, 5.5, 6.6 and 7.7 us.
+    """
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 24, 3, 0.001
+    )
+    source = stim_device.StimDevice()
+    settings = _protected_memory_settings(circuit, source)
+    prefix, protect, resume, finish = settings.workload.operations
+    check = program_records.Operation(
+        5,
+        "check",
+        (0,),
+        patches=(0,),
+        predecessors=(3,),
+        blocked_by=3,
+        emits_detector_data=False,
+    )
+    finish = dataclasses.replace(finish, predecessors=(5,))
+    rounds = {100: 24, 1: 3, 2: 0, 3: 1, 5: 1, 4: 0}
+    policy = round_policies.PerOperationRounds(rounds)
+    operations = (prefix, protect, resume, check, finish)
+    workload = dataclasses.replace(
+        settings.workload, operations=operations, rounds_policy=policy
+    )
+    links = _price_path(settings.links, "controller_to_qpu", 1_000_000)
+    settings = dataclasses.replace(settings, workload=workload, links=links)
+    machine = machine_module.Machine.build(settings, 0)
+    starts = {}
+
+    def heard_command(event):
+        starts[(event.kind, event.command.operation.id)] = event.tick
+
+    machine.qpu.trace.command_event.connect(heard_command)
+    machine.run()
+
+    binding = machine.issuer.stream_binding_for(3)
+    assert starts[("STARTED", 3)] == 8_800_000
+    assert (binding.stream_id, binding.stream_offset) == (100, 7)
 
 
 def _protected_memory_settings(circuit, source):

@@ -145,7 +145,9 @@ class IdleRoundReceiver(Protocol):
         """The command as it starts after its patches' idle rounds.
 
         A segment that declares no stream offset continues its stream
-        after every round the stream has had, idle ones included.
+        after every round the stream has had, idle ones included, and a
+        feedback source on a protected stream reads it from there. Any
+        other command comes back as it is.
         """
 
 

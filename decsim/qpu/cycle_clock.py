@@ -243,11 +243,8 @@ class QPUDevice:
     def _start_command(self, command: program_records.RunOperationBody) -> None:
         event = QPUCommandEvent("STARTED", self.engine.now, command)
         self.trace.command_event.fire(event)
+        command = self.idle_rounds.bind_at_start(command)
         operation = command.operation
-        has_stream = operation.stream_id is not None
-        if has_stream and operation.stream_offset is None:
-            command = self.idle_rounds.bind_at_start(command)
-            operation = command.operation
         for patch in program_records.patches_of(operation):
             self._live.idle_by_patch.pop(patch, None)
         if command.round_count == 0:

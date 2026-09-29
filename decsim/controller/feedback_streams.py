@@ -221,9 +221,7 @@ class FeedbackStreams:
         self._activate_protected_regions(operation)
         if protected_stream_id is None:
             self._reserve_stream_rounds(operation)
-        else:
-            self._bind_protected_feedback_source(operation, protected_stream_id)
-        self._hold_patches(operation)
+        self._hold_patches(operation, protected_stream_id)
 
     def bind_at_start(
         self, command: program_records.RunOperationBody
@@ -237,9 +235,19 @@ class FeedbackStreams:
         docs/explanation/decisions.md D24), and the QPU starts the
         segment only after its boundary's idle rounds
         (qpu/cycle_clock.py _cross_boundary). The segment issued before
-        it has run, so its patches may continue the stream after it.
+        it has run, so its patches may continue the stream after it. A
+        feedback source on a protected stream reads the stream from the
+        boundary it starts on, which a released command reaches only
+        after its pulse arrives, so it is bound here too.
         """
         operation = command.operation
+        protected_stream_id = self._protected_feedback_stream(operation)
+        if protected_stream_id is not None:
+            return self._bind_protected_feedback_source(
+                command, protected_stream_id
+            )
+        if operation.stream_id is None or operation.stream_offset is not None:
+            return command
         stream_id = operation.stream_id
         stream_offset = self._next_round(stream_id)
         self._bind(operation.id, stream_id, stream_offset)
@@ -367,10 +375,11 @@ class FeedbackStreams:
         live = self._live(stream_id)
         live.is_sealed = True
 
-    def _hold_patches(self, operation) -> None:
+    def _hold_patches(self, operation, protected_stream_id) -> None:
         """Record the stream each of the operation's patches holds after it.
 
-        A segment's patches hold its stream. Any other detector-emitting
+        A segment's patches hold its stream, and so do a protected feedback
+        source's, before it is bound at its start. Any other detector-emitting
         operation clears them, since its rounds are its own detector
         history; an operation without detector data leaves them as they
         are. An operation that claims only part of a stream's patch group
@@ -380,7 +389,7 @@ class FeedbackStreams:
         """
         patches = program_records.patches_of(operation)
         self._release_split_groups(patches)
-        stream_id, _ = self._declared_stream(operation)
+        stream_id = self._held_stream(operation, protected_stream_id)
         if stream_id is not None:
             for patch in patches:
                 self.stream_by_patch[patch] = stream_id
@@ -393,6 +402,13 @@ class FeedbackStreams:
             return
         for patch in patches:
             self.stream_by_patch.pop(patch, None)
+
+    def _held_stream(self, operation, protected_stream_id):
+        """The stream the operation holds: the protected one it feeds."""
+        if protected_stream_id is not None:
+            return protected_stream_id
+        stream_id, _ = self._declared_stream(operation)
+        return stream_id
 
     def _end_pending_segment(self, patch) -> None:
         """Another operation claims the patch, so its segment has run."""
@@ -587,12 +603,23 @@ class FeedbackStreams:
         live.cycle.region = region
         self._schedule_next_boundary(region, boundary_round=1)
 
-    def _bind_protected_feedback_source(self, operation, stream_id) -> None:
+    def _bind_protected_feedback_source(
+        self, command: program_records.RunOperationBody, stream_id
+    ) -> program_records.RunOperationBody:
+        """The source at the stream round its start boundary reaches."""
+        operation = command.operation
         stream_offset = self._next_round(stream_id)
         self._bind(operation.id, stream_id, stream_offset)
         round_count = self.table.round_count_of(operation.id)
         required_stream_end = stream_offset + max(round_count, 1)
         self.windows.bind_required_stream_end(operation.id, required_stream_end)
+        bound = dataclasses.replace(
+            operation, stream_id=stream_id, stream_offset=stream_offset
+        )
+        source_round_count = self.table.round_count_of(stream_id)
+        return dataclasses.replace(
+            command, operation=bound, source_round_count=source_round_count
+        )
 
     def _reserve_stream_rounds(self, operation) -> None:
         """Give an unprotected stream segment its rounds.

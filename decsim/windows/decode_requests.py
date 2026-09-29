@@ -593,15 +593,19 @@ class DecodeRequester:
 
         Its submission bookkeeping is reset so it can be resubmitted fresh
         (a strong window that absorbs the window owns its rounds from then
-        on).
+        on). The reset comes first: taking the decode back frees its slot
+        and the manager dispatches at once, and a later window staged then
+        must not read this one as still dispatched, the order gem5's IEW
+        keeps by taking a squash before it dispatches (src/cpu/o3/iew.cc
+        1451-1452).
         """
-        cancelled = self._withdraw_submissions(window.key)
-        if not cancelled:
-            self.decode_queue.withdraw_window(window.key)
         window.queued = False
         window.t_queued = None
         window.t_dispatch = None
         window.service_began = False
+        cancelled = self._withdraw_submissions(window.key)
+        if not cancelled:
+            self.decode_queue.withdraw_window(window.key)
 
     def release_parked(self, window_key: tuple, strong_redecode) -> None:
         """The window's last boundary arrived: its parked decodes may start.

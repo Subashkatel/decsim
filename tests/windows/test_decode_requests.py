@@ -608,6 +608,25 @@ def test_decision_cycles_delay_queue_admission_and_later_reaction_points():
     assert shifts == [0, expected, expected, expected, expected, expected]
 
 
+def test_a_withdrawn_window_reads_undispatched_when_the_manager_takes_it():
+    """The manager dispatches as it takes the decode back.
+
+    A later window staged in that dispatch asks whether this one is
+    still dispatched, so the window must already say it is not.
+    """
+    fixture = _Fixture()
+    _arrive_all(fixture, (1, 2, 3, 4, 5))
+    fixture.window.t_dispatch = 7
+    seen = []
+
+    def withdraw_window(_window_key) -> None:
+        seen.append(fixture.window.t_dispatch)
+
+    fixture.queue.withdraw_window = withdraw_window
+    fixture.requester.withdraw(fixture.window)
+    assert seen == [None]
+
+
 def test_withdrawal_cancels_a_pending_decision_and_releases_its_input():
     clock = config.Clock(10)
     fixture = _Fixture(decision_cycles=3, clock=clock)

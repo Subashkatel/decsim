@@ -126,11 +126,7 @@ def build_decoder_pool(
         return DecoderPool(active=active, strong=None, chip=chip, host=None)
     _check_switching_has_a_strong(strong)
     host = _pool(
-        settings,
-        decode_queue.STRONG_POOL,
-        "strong",
-        strong_formation,
-        blocks_unit,
+        settings, decode_queue.STRONG_POOL, "strong", strong_formation, False
     )
     return DecoderPool(active=active, strong=strong, chip=chip, host=host)
 
@@ -183,12 +179,13 @@ def _pool(
 def _blocks_unit(
     settings: machine_settings.MachineSettings, active_tier: str
 ) -> bool:
-    """Both pools' blocking rule, from the tier that decodes the windows.
+    """The blocking rule of the pool that decodes the windows.
 
-    A strong re-decode holds its result in the unit that produced it
-    until the window side takes it in any case (decoder_unit.py
-    hold_output), so the row is read on the primary tier, and
-    <tier>.result_blocks_unit names it there.
+    The strong pool of a switching run never blocks: a strong re-decode
+    frees its unit's compute at its end and its result waits in the
+    unit's output slot until the window side takes it (decoder_unit.py
+    hold_output), so <tier>.result_blocks_unit is read on the primary
+    tier alone.
     """
     tier_settings = settings.decoder_settings_for(active_tier)
     return tier_settings.result_blocks_unit

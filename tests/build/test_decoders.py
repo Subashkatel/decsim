@@ -199,6 +199,25 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     assert pool.host.capacity_bits == 30
 
 
+def test_only_the_pool_that_decodes_the_windows_blocks_on_its_result():
+    """A strong decode frees its unit at its end and waits in its output."""
+    escalation = escalation_settings.EscalationSettings(
+        kind="switching",
+        threshold_source="fixed",
+        gap_threshold_nats=2.0,
+        confidence="complementary_gap",
+    )
+    weak_preset = _preset(10.0)
+    weak = dataclasses.replace(weak_preset, result_blocks_unit=True)
+    strong = _preset(30.0)
+    settings = _settings(escalation=escalation, weak=weak, strong=strong)
+
+    pool = _pool(settings)
+
+    assert pool.chip.blocks_unit
+    assert not pool.host.blocks_unit
+
+
 def test_a_plan_whose_active_tier_names_no_decoder_is_refused():
     settings = _settings()
 

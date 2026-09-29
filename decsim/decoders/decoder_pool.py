@@ -85,10 +85,10 @@ class PoolSettings:
     the plan's windows, "strong" for the strong tier of a switching run.
     unit_count is <tier>.units; capacity_bits is one unit's memory
     (<tier>.unit_memory, None unbounded); copies_input is <tier>.input;
-    blocks_unit is the primary tier's result_blocks_unit, for both
-    pools; formation is the tier's event-detection logic when
-    detection_events.formed_at seats it at the tier's decoder, else
-    None.
+    blocks_unit is the primary tier's result_blocks_unit on the default
+    pool and false on the strong one; formation is the tier's
+    event-detection logic when detection_events.formed_at seats it at
+    the tier's decoder, else None.
     """
 
     name: str

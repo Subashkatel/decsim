@@ -1404,9 +1404,10 @@ decoder_manager:                   # the manager that gives ready windows a unit
                                    # each member window's correction, so it
                                    # prices a bulk strong tier and needs
                                    # qpu.kind timing_only, whose rounds carry
-                                   # sizes and no bits; serial escalation only (it
-                                   # contradicts escalation.run_both_at_once
-                                   # and the double window)
+                                   # sizes and no bits; serial switching only
+                                   # (it contradicts escalation.run_both_at_once
+                                   # and the double window, and any other
+                                   # escalation.kind has no strong pool)
   clock: fridge                    # the domain dispatch_cycles counts in
   dispatch_cycles: 0               # the manager's own work per dispatch,
                                    # charged on its clock after a job is placed

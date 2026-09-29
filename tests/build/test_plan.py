@@ -97,6 +97,13 @@ def test_bulk_strong_is_refused_when_the_rounds_carry_bits():
         _plan(qpu=bits, escalation=escalation, decoder_manager=bulk)
 
 
+def test_bulk_strong_is_refused_where_no_strong_pool_merges():
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+
+    with pytest.raises(ValueError, match="has no strong pool"):
+        _plan(decoder_manager=bulk)
+
+
 def test_bulk_strong_is_built_beside_an_explicitly_empty_model_source():
     empty_models = syndrome_devices.NO_WINDOW_MODELS
     timing = qpu_settings.QpuSettings(error_model_provider=empty_models)

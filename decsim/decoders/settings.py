@@ -222,10 +222,12 @@ class DecoderSettings:
     correction without blocking the decoder (2605.30765 lines
     1618-1620), or true when the result is read, at the window's commit
     or, for a forced-class solve, when the confidence join holds it,
-    which is Riverlane's
-    polled status register, the decoder holding its output until the
-    reader takes it (2410.05202 lines 1256-1259). It is read on the tier
-    that decodes the plan's windows.
+    which is a unit with no output buffer, stalled by back-pressure
+    until its output is taken; Bascones et al. 2605.01035 lines 607-609
+    size FIFOs after their decoder's tiles "to avoid stalling the U, V
+    tiles outputs", and true is that decoder without them. No referent
+    found measures a whole decoder unit held this way. It is read on
+    the tier that decodes the plan's windows.
     row_settings is the row's own Settings, read from the section's keys
     outside DECODER_KEYS (union_find's weight_step and cycle_count), or
     None for a row that declares none; the tier never reads it.

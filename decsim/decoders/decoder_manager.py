@@ -370,14 +370,14 @@ class DecoderManager:
     def read_result(self, job: decoding_records.DecodeJob) -> None:
         """The window side has the result in hand: a held unit is free now.
 
-        <tier>.result_blocks_unit true is Riverlane's polled status
-        register, where the decoder holds its output until the reader
-        takes it (2410.05202 lines 1256-1259); a tier that does not
-        block gave the unit back at the decode's end, or when the walk
-        charged on it ended, and has nothing to give back here. A result
-        is read once: a forced-class solve the confidence join held was
-        read then, and its later close or commit finds its unit already
-        given back.
+        <tier>.result_blocks_unit true is a unit with no output buffer,
+        stalled by back-pressure until its output is taken (Bascones et
+        al. 2605.01035 lines 607-609 size FIFOs to avoid that stall); a
+        tier that does not block gave the unit back at the decode's end,
+        or when the walk charged on it ended, and has nothing to give back
+        here. A result is read once: a forced-class solve the confidence
+        join held was read then, and its later close or commit finds its
+        unit already given back.
         """
         if not self.pool.blocks_unit:
             return

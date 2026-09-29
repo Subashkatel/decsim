@@ -30,13 +30,16 @@ transcribed step by step:
   every PSN before its own and sends the requester back to it, unless a
   retry started by a NAK is already under way (rxe_comp.c:303-322,
   720-790);
-- the retransmit timer starts when a packet is sent and none is
-  running, restarts at every acknowledgement while packets are out, and
-  on expiry sends the requester back to the first unacknowledged PSN
-  (rxe_req.c:588-590, 684-692; rxe_comp.c:616-636), except at a NAK
-  that starts a retry, which leaves it running (rxe_comp.c:668-669);
-  it stops when every packet is acknowledged, where rxe leaves it
-  pending with a deadline a later send inherits;
+- the retransmit timer restarts at every pass of rxe's send task while
+  packets are out: a pass runs the requester, then the completer
+  (rxe_req.c:831-846), and a completer with no answer to read ends at
+  COMPST_EXIT, which resets the timer (rxe_comp.c:161-162, 742-749,
+  624-636). So every send, every message taken and every answer
+  restarts it, and on expiry it sends the requester back to the first
+  unacknowledged PSN (rxe_req.c:684-692; rxe_comp.c:115-128). A NAK
+  that starts a retry leaves it running until the resend
+  (rxe_comp.c:668-669). It stops when every packet is acknowledged,
+  where rxe leaves it pending until the next pass resets it;
 - each retry, by NAK or by timeout, spends one of retry_count, which
   every ACK that moves the first unacknowledged PSN fills again; a
   retry with none left fails the channel and the run, naming the frame
@@ -152,7 +155,11 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         return wire
 
     def _take_wire(self, request) -> None:
-        """At the ready tick: number the message's frames, then send."""
+        """At the ready tick: number the message's frames, then send.
+
+        Taking a message is a pass of rxe's send task, so it restarts
+        the timer while packets are out, sent or not (rxe_comp.c:742-749).
+        """
         sending = self._sending
         framing = self._wire.framing
         frame_bits = framing.frames(
@@ -167,6 +174,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
             packet = _Packet(psn, bits, message, frame_index, is_last)
             sending.packets.append(packet)
         self._send_next()
+        self._restart_timer_if_out()
 
     # ---- the requester
 
@@ -205,7 +213,9 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
             requests_ack,
             is_retransmission,
         )
-        self._arm_timer_if_idle()
+        # the completer pass that follows this send resets the timer
+        # (rxe_req.c:837-840, rxe_comp.c:742-749)
+        self._start_timer()
         landing_delay = timing.landed_ticks - now_ticks
         self._engine.schedule(
             landing_delay,
@@ -302,20 +312,12 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
 
     # ---- the retransmit timer
 
-    def _arm_timer_if_idle(self) -> None:
-        """rxe_req.c:588-590: a send starts the timer when none is running."""
-        if self._timer.expiry is not None:
-            return
-        self._start_timer()
-
     def _restart_timer_if_out(self) -> None:
         """rxe_comp.c:624-636: restart while packets are unacknowledged.
 
         With every packet acknowledged the timer stops. rxe leaves it
-        pending instead, so a send soon after inherits the old deadline
-        and can time out before its own round trip; stopping makes the
-        timer's deadline one full timeout after the last acknowledgement
-        or the first send, whatever order the two take at one tick.
+        pending, and the next pass with packets out resets it
+        (rxe_comp.c:742-749).
         """
         sending = self._sending
         if sending.next_psn > sending.unacked_psn:

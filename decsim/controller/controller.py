@@ -53,7 +53,7 @@ class Controller:
         The fragment reaches the assembler after the readout delay.
         """
         fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
-        self.assembler.expect_round(fragment, route)
+        self.assembler.expect_round(fragment, readout.fragment_count, route)
         round_key = (fragment.operation_id, fragment.round_index)
         self.trace.copy_made.fire(
             round_key, readout.size_bits, "readout", "controller intake"
@@ -64,7 +64,7 @@ class Controller:
         readout_cycles = self.settings.readout_to_bits_cycles
 
         def receive():
-            self.assembler.add(fragment, readout.fragment_count, route)
+            self.assembler.add(fragment, route)
 
         def at_controller(_transfer):
             if readout_cycles == 0:

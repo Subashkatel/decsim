@@ -47,8 +47,10 @@ WINDOW_COLORS = (
     "tab:olive",
 )
 MAX_LEGEND_WINDOWS = 8
-# The measured window chain from syndrome arrival to frame commit, in
-# pipeline order; each name is a per-shot mean column of shots.csv.
+# A window's hops and decoder stages from syndrome arrival to frame
+# commit, in pipeline order; each name is a per-shot mean column of
+# shots.csv. The waits that are points of their own (admission_wait,
+# dep_block, compute_wait) and the escalation's points are not drawn.
 STAGE_BREAKDOWN_STAGES = (
     ("buffer_fill_mean_us", "buffer fill"),
     ("queue_wait_mean_us", "queue wait"),
@@ -89,9 +91,9 @@ def timeline_plot(trace_path, path: pathlib.Path) -> None:
     figure, axis = plt.subplots(figsize=(11, height))
     timeline = _TimelineAxes(axis, rows, lane_count)
     _draw_rounds(timeline, lanes, shot)
-    window_ranges = _draw_windows(timeline, lanes, shot)
+    _draw_windows(timeline, lanes, shot)
     _label_timeline(timeline, document, shot)
-    _add_timeline_legend(timeline, shot.windows, window_ranges)
+    _add_timeline_legend(timeline, shot)
     figure.tight_layout()
     figure.savefig(path, dpi=200)
     plt.close(figure)
@@ -264,7 +266,7 @@ class _Span:
 class _TimelineWindow:
     """One window of the traced shot: its rounds and its two instants."""
 
-    window_id: int
+    window_key: tuple  # (operation as the trace writes it, window index)
     read_lo: int
     read_hi: int
     commit_lo: int
@@ -277,11 +279,26 @@ class _TimelineShot:
     """Everything the timeline draws, read off one trace document."""
 
     round_period_microseconds: float
-    moves_by_round: dict  # (channel, round number) -> _Span
-    moves_by_window: dict  # (channel, window id) -> _Span
-    windows: dict  # window id -> _TimelineWindow
-    stages: dict  # (window id, stage name) -> _Span
-    frame: dict  # window id -> _Span, accepted to committed
+    # a round is (operation, round number) and a window (operation,
+    # window index), the operation as the trace writes it: two
+    # operations share every number (records/windows.py Window.key)
+    moves_by_round: dict  # (channel, round) -> _Span
+    moves_by_window: dict  # (channel, window) -> [_Span], one per move
+    windows: dict  # window -> _TimelineWindow
+    stages: dict  # (window, stage name) -> [_Span], one per decode
+    frame: dict  # window -> _Span, accepted to committed
+
+
+@dataclasses.dataclass(frozen=True)
+class _Pen:
+    """How one window is drawn: its sub-lane in a row and its colour.
+
+    Both follow the window's place in window order, so every stream's
+    windows get lanes of their own.
+    """
+
+    lane: int
+    color: str
 
 
 class _TimelineAxes:
@@ -307,17 +324,16 @@ class _TimelineAxes:
         row: str,
         start: float,
         end: float,
-        window_id: int,
-        color: str,
+        pen: _Pen,
         alpha: float = 1.0,
     ) -> None:
         """One window's bar on its own sub-lane inside the row."""
-        centre_offset = window_id - (self.lane_count - 1) / 2
+        centre_offset = pen.lane - (self.lane_count - 1) / 2
         lane_pitch = 0.5 / self.lane_count
         lane = self.row_index[row] + centre_offset * lane_pitch
         width = end - start
         self.axis.barh(
-            lane, width, left=start, color=color, height=0.17, alpha=alpha
+            lane, width, left=start, color=pen.color, height=0.17, alpha=alpha
         )
 
 
@@ -352,33 +368,38 @@ def _timeline_lanes(document) -> _TimelineLanes:
 
 
 def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
-    """One link move filed under the round or the window it carried."""
+    """One link move filed under the round or the window it carried.
+
+    A window decoded twice crosses a link twice, and each move is kept,
+    the rule _timeline_stages keeps for its stages.
+    """
     channel = event["args"].get("channel")
     if channel is None:
         return
     span = _span_of(event)
-    window_id = trace_file.window_id_of(event)
-    if window_id is not None:
-        by_window[(channel, window_id)] = span
+    window_key = trace_file.window_key_of(event)
+    if window_key is not None:
+        moves = by_window.setdefault((channel, window_key), [])
+        moves.append(span)
         return
     rounds = event["args"].get("rounds_by_operation")
     if rounds is None:
         return
     # a move that names no window carries one round of one operation
-    (rounds_text,) = rounds.values()
+    ((operation, rounds_text),) = rounds.items()
     round_lo, _round_hi = trace_file.range_of(rounds_text)
-    by_round[(channel, round_lo)] = span
+    by_round[(channel, (operation, round_lo))] = span
 
 
 def _timeline_windows(document) -> dict:
-    """Window id -> the rounds it reads and the tick its unit took it."""
+    """Window -> the rounds it reads and the tick its unit took it."""
     dispatch_microseconds = {}
     for event in document.of_phase("X"):
         if not event["name"].endswith(" queued"):
             continue
-        window_id = trace_file.window_id_of(event)
+        window_key = trace_file.window_key_of(event)
         dispatch_ticks = trace_file.end_tick_of(event)
-        dispatch_microseconds[window_id] = config_module.ticks_to_microseconds(
+        dispatch_microseconds[window_key] = config_module.ticks_to_microseconds(
             dispatch_ticks
         )
     windows = {}
@@ -386,7 +407,7 @@ def _timeline_windows(document) -> dict:
         if not event["name"].endswith(" ready"):
             continue
         window = _timeline_window(event, dispatch_microseconds)
-        windows[window.window_id] = window
+        windows[window.window_key] = window
     return windows
 
 
@@ -394,14 +415,15 @@ def _timeline_window(
     event: dict, dispatch_microseconds: dict
 ) -> _TimelineWindow:
     """One window's rounds and the moment its unit was assigned."""
-    window_id = trace_file.window_id_of(event)
-    read_lo, read_hi = _own_read_range(event["args"])
+    window_key = trace_file.window_key_of(event)
+    operation, _window_index = window_key
+    read_lo, read_hi = _own_read_range(event["args"], operation)
     commit_lo, commit_hi = trace_file.range_of(event["args"]["commit"])
     ready_ticks = trace_file.tick_of(event)
     ready_microseconds = config_module.ticks_to_microseconds(ready_ticks)
-    dispatch = dispatch_microseconds.get(window_id, ready_microseconds)
+    dispatch = dispatch_microseconds.get(window_key, ready_microseconds)
     return _TimelineWindow(
-        window_id=window_id,
+        window_key=window_key,
         read_lo=read_lo,
         read_hi=read_hi,
         commit_lo=commit_lo,
@@ -410,51 +432,58 @@ def _timeline_window(
     )
 
 
-def _own_read_range(args: dict) -> tuple:
+def _own_read_range(args: dict, operation: str) -> tuple:
     """The rounds a window reads of its own operation, the figure's stream.
 
     The ready event names the rounds the stream has, so a lookahead
     window's buffer past the stream's end is not among them
     (windows/round_retention.py, read_keys_for_bounds).
     """
-    window = args["window"]
-    operation, _window_index = window.split(":")
     rounds_by_operation = args["rounds_by_operation"]
     rounds_text = rounds_by_operation[operation]
     return trace_file.range_of(rounds_text)
 
 
 def _timeline_stages(document) -> dict:
-    """(window id, stage) -> the span the decoder engine spent in it."""
+    """(window, stage) -> every span a decode of the window spent in it.
+
+    A window is decoded more than once when its forced-class solves or
+    its speculative strong decode run, and each decode's stages are
+    drawn, as gem5's pipeline viewer prints every dynamic instance of an
+    instruction, one record each, rather than one per program address
+    (util/o3-pipeview.py queue_inst, 210-218).
+    """
     stages = {}
     for event in document.of_phase("X"):
         if event["cat"] != "stage":
             continue
-        window_id = trace_file.window_id_of(event)
-        stages[(window_id, event["name"])] = _span_of(event)
+        window_key = trace_file.window_key_of(event)
+        span = _span_of(event)
+        spans = stages.setdefault((window_key, event["name"]), [])
+        spans.append(span)
     return stages
 
 
 def _frame_spans(document) -> dict:
-    """Window id -> the span from the frame accepting a write to landing."""
+    """Window -> the span from the frame accepting a write to landing."""
     accepted_microseconds = {}
     for event in document.of_phase("X"):
         if not event["name"].endswith(" correction"):
             continue
-        window_id = trace_file.window_id_of(event)
+        window_key = trace_file.window_key_of(event)
         accepted_ticks = trace_file.tick_of(event)
-        accepted_microseconds[window_id] = config_module.ticks_to_microseconds(
+        accepted_microseconds[window_key] = config_module.ticks_to_microseconds(
             accepted_ticks
         )
     spans = {}
     for event in document.of_phase("i"):
         if not event["name"].endswith(" committed"):
             continue
-        window_id = trace_file.window_id_of(event)
+        window_key = trace_file.window_key_of(event)
         committed_ticks = trace_file.tick_of(event)
         committed = config_module.ticks_to_microseconds(committed_ticks)
-        accepted = accepted_microseconds.get(window_id, committed)
-        spans[window_id] = _Span(start_us=accepted, end_us=committed)
+        accepted = accepted_microseconds.get(window_key, committed)
+        spans[window_key] = _Span(start_us=accepted, end_us=committed)
     return spans
 
 
@@ -472,21 +501,30 @@ def _round_period_microseconds(moves_by_round: dict) -> float:
 
     The trace records when each round left the QPU, not the period the
     yaml set; on a shot whose rounds are evenly spaced the two are the
-    same number, and the bar is drawn one period wide as before.
+    same number, and the bar is drawn one period wide as before. The
+    gaps are each operation's own, since operations that run side by
+    side send their rounds at the same instants.
     """
-    sends = []
-    for (channel, _round_number), span in moves_by_round.items():
+    sends_by_operation = {}
+    for (channel, (operation, _round_number)), span in moves_by_round.items():
         if channel != "qpu_to_controller":
             continue
+        sends = sends_by_operation.setdefault(operation, [])
         sends.append(span.start_us)
-    ordered = sorted(sends)
     gaps = []
-    for earlier, later in zip(ordered, ordered[1:], strict=False):
-        gap = later - earlier
-        gaps.append(gap)
+    for sends in sends_by_operation.values():
+        _add_send_gaps(gaps, sends)
     if not gaps:
         return 0.0
     return statistics.median(gaps)
+
+
+def _add_send_gaps(gaps: list, sends: list) -> None:
+    """The gaps between one operation's sends, in time order."""
+    ordered = sorted(sends)
+    for earlier, later in zip(ordered, ordered[1:], strict=False):
+        gap = later - earlier
+        gaps.append(gap)
 
 
 def _timeline_rows(lanes: _TimelineLanes, shot: _TimelineShot) -> list:
@@ -507,12 +545,12 @@ def _timeline_rows(lanes: _TimelineLanes, shot: _TimelineShot) -> list:
 
 
 def _stored_rounds(lanes: _TimelineLanes, shot: _TimelineShot) -> dict:
-    """Round number -> its move into the store, empty when none was made."""
+    """Round -> its move into the store, empty when none was made."""
     return _moves_on(shot.moves_by_round, lanes.store_path)
 
 
 def _moves_on(moves_by_key: dict, channel: str) -> dict:
-    """One channel's moves, keyed by the round or window they carried."""
+    """One channel's moves, keyed by the round or the window they carried."""
     found = {}
     for (path, key), span in moves_by_key.items():
         if path == channel:
@@ -526,20 +564,21 @@ def _draw_rounds(
     """Every round's QPU time, its QC hop, and its hop into the store."""
     qpu_link = _moves_on(shot.moves_by_round, "qpu_to_controller")
     store = _stored_rounds(lanes, shot)
-    for round_number in sorted(qpu_link):
+    for round_key in sorted(qpu_link):
+        _operation, round_number = round_key
         shade = "0.75"
         if round_number % 2:
             shade = "0.55"
-        sent = qpu_link[round_number].start_us
+        sent = qpu_link[round_key].start_us
         round_start = sent - shot.round_period_microseconds
         timeline.round_bar(
             "qpu round", round_start, shot.round_period_microseconds, shade
         )
-        link_time = qpu_link[round_number].end_us - sent
+        link_time = qpu_link[round_key].end_us - sent
         timeline.round_bar("qc link", sent, link_time, shade)
-        if round_number not in store:
+        if round_key not in store:
             continue
-        store_span = store[round_number]
+        store_span = store[round_key]
         store_time = store_span.end_us - store_span.start_us
         timeline.round_bar(
             f"{lanes.store_name} link", store_span.start_us, store_time, shade
@@ -548,33 +587,36 @@ def _draw_rounds(
 
 def _draw_windows(
     timeline: _TimelineAxes, lanes: _TimelineLanes, shot: _TimelineShot
-) -> list:
-    """Every decoded window's stages, and the legend text for each."""
+) -> None:
+    """Every decoded window's stages."""
     stored = _stored_rounds(lanes, shot)
     if not stored:
         stored = _moves_on(shot.moves_by_round, "qpu_to_controller")
-    window_ranges = []
-    windows = shot.windows.items()
-    for window_id, window in sorted(windows):
-        if window_id not in shot.frame:
+    window_keys = sorted(shot.windows)
+    for position, window_key in enumerate(window_keys):
+        if window_key not in shot.frame:
             continue
-        color = WINDOW_COLORS[window_id % len(WINDOW_COLORS)]
-        range_text = _window_range_text(window)
-        window_ranges.append(range_text)
-        _draw_store_fill(timeline, lanes, window, color, stored)
-        stored_tick = stored[window.read_hi].end_us
-        timeline.window_bar(
-            "wait", stored_tick, window.dispatch_us, window_id, color
-        )
-        _draw_window_transfers(timeline, lanes, shot, window_id, color)
-        _draw_window_stages(timeline, shot, window_id, color)
-    return window_ranges
+        window = shot.windows[window_key]
+        pen = _pen_at(position)
+        _draw_store_fill(timeline, lanes, window, pen, stored)
+        operation, _window_index = window_key
+        stored_tick = stored[(operation, window.read_hi)].end_us
+        timeline.window_bar("wait", stored_tick, window.dispatch_us, pen)
+        _draw_window_transfers(timeline, lanes, shot, window_key, pen)
+        _draw_window_stages(timeline, shot, window_key, pen)
+
+
+def _pen_at(position: int) -> _Pen:
+    """The sub-lane and colour of the window at that place in order."""
+    color_index = position % len(WINDOW_COLORS)
+    return _Pen(lane=position, color=WINDOW_COLORS[color_index])
 
 
 def _window_range_text(window: _TimelineWindow) -> str:
     """The legend line for one window: what it commits and what it reads."""
+    operation, window_index = window.window_key
     return (
-        f"window {window.window_id}: "
+        f"window {operation}:{window_index}: "
         f"commits {window.commit_lo}-{window.commit_hi}, "
         f"reads {window.read_lo}-{window.read_hi}"
     )
@@ -584,7 +626,7 @@ def _draw_store_fill(
     timeline: _TimelineAxes,
     lanes: _TimelineLanes,
     window: _TimelineWindow,
-    color: str,
+    pen: _Pen,
     stored: dict,
 ) -> None:
     """The window's rounds landing in the store it reads.
@@ -592,24 +634,22 @@ def _draw_store_fill(
     Commit rounds land solid; the trailing buffer reads land lighter.
     """
     row = f"{lanes.store_name} fill"
-    window_id = window.window_id
-    first_round = stored[window.read_lo].end_us
-    commit_stored = stored[window.commit_hi].end_us
-    timeline.window_bar(row, first_round, commit_stored, window_id, color)
+    operation, _window_index = window.window_key
+    first_round = stored[(operation, window.read_lo)].end_us
+    commit_stored = stored[(operation, window.commit_hi)].end_us
+    timeline.window_bar(row, first_round, commit_stored, pen)
     if window.read_hi <= window.commit_hi:
         return
-    stored_tick = stored[window.read_hi].end_us
-    timeline.window_bar(
-        row, commit_stored, stored_tick, window_id, color, alpha=0.45
-    )
+    stored_tick = stored[(operation, window.read_hi)].end_us
+    timeline.window_bar(row, commit_stored, stored_tick, pen, alpha=0.45)
 
 
 def _draw_window_transfers(
     timeline: _TimelineAxes,
     lanes: _TimelineLanes,
     shot: _TimelineShot,
-    window_id: int,
-    color: str,
+    window_key: tuple,
+    pen: _Pen,
 ) -> None:
     """The window's input link, boundary handoff and output link bars."""
     _draw_transfer_bar(
@@ -617,24 +657,22 @@ def _draw_window_transfers(
         f"transfer ({lanes.input_path})",
         shot,
         lanes.input_path,
-        window_id,
-        color,
+        window_key,
+        pen,
     )
     _draw_transfer_bar(
-        timeline, "dd handoff", shot, "decoder_to_decoder", window_id, color
+        timeline, "dd handoff", shot, "decoder_to_decoder", window_key, pen
     )
     _draw_transfer_bar(
         timeline,
         f"{lanes.output_path} link",
         shot,
         lanes.output_path,
-        window_id,
-        color,
+        window_key,
+        pen,
     )
-    commit = shot.frame[window_id]
-    timeline.window_bar(
-        "frame commit", commit.start_us, commit.end_us, window_id, color
-    )
+    commit = shot.frame[window_key]
+    timeline.window_bar("frame commit", commit.start_us, commit.end_us, pen)
 
 
 def _draw_transfer_bar(
@@ -642,28 +680,26 @@ def _draw_transfer_bar(
     row: str,
     shot: _TimelineShot,
     channel: str,
-    window_id: int,
-    color: str,
+    window_key: tuple,
+    pen: _Pen,
 ) -> None:
-    """One link hop's bar, when the window crossed that link."""
-    span = shot.moves_by_window.get((channel, window_id))
-    if span is None:
-        return
-    timeline.window_bar(row, span.start_us, span.end_us, window_id, color)
+    """One link hop's bar for each time the window crossed that link."""
+    spans = shot.moves_by_window.get((channel, window_key), ())
+    for span in spans:
+        timeline.window_bar(row, span.start_us, span.end_us, pen)
 
 
 def _draw_window_stages(
     timeline: _TimelineAxes,
     shot: _TimelineShot,
-    window_id: int,
-    color: str,
+    window_key: tuple,
+    pen: _Pen,
 ) -> None:
     """The decoder engine's fetch, algorithm and release bars."""
     for stage in ("fetch", "algorithm", "release"):
-        span = shot.stages.get((window_id, stage))
-        if span is None:
-            continue
-        timeline.window_bar(stage, span.start_us, span.end_us, window_id, color)
+        spans = shot.stages.get((window_key, stage), ())
+        for span in spans:
+            timeline.window_bar(stage, span.start_us, span.end_us, pen)
 
 
 def _label_timeline(
@@ -730,23 +766,21 @@ def _timeline_subtitle(document, shot: _TimelineShot) -> str:
     )
 
 
-def _add_timeline_legend(
-    timeline: _TimelineAxes, windows: dict, window_ranges: list
-) -> None:
+def _add_timeline_legend(timeline: _TimelineAxes, shot: _TimelineShot) -> None:
     """The legend: the rounds, one entry per window, and the lighter fill."""
     import matplotlib.pyplot as plt
 
     handles = [plt.Rectangle((0, 0), 1, 1, color="0.6")]
     labels = ["rounds"]
-    window_ids = sorted(windows)
-    legend_windows = window_ids[:MAX_LEGEND_WINDOWS]
-    for window_id in legend_windows:
-        color = WINDOW_COLORS[window_id % len(WINDOW_COLORS)]
-        patch = plt.Rectangle((0, 0), 1, 1, color=color)
+    window_keys = sorted(shot.windows)
+    legend_windows = window_keys[:MAX_LEGEND_WINDOWS]
+    for position, window_key in enumerate(legend_windows):
+        pen = _pen_at(position)
+        patch = plt.Rectangle((0, 0), 1, 1, color=pen.color)
         handles.append(patch)
-        label = _legend_label(window_ranges, window_id)
+        label = _legend_label(shot, window_key)
         labels.append(label)
-    if len(windows) > MAX_LEGEND_WINDOWS:
+    if len(window_keys) > MAX_LEGEND_WINDOWS:
         labels[-1] += "  (…)"
     buffer_patch = plt.Rectangle((0, 0), 1, 1, color="0.4", alpha=0.45)
     handles.append(buffer_patch)
@@ -757,11 +791,13 @@ def _add_timeline_legend(
     axis.set_axisbelow(True)
 
 
-def _legend_label(window_ranges: list, window_id: int) -> str:
-    """One window's legend text, its id alone when it never decoded."""
-    if window_id < len(window_ranges):
-        return window_ranges[window_id]
-    return f"window {window_id}"
+def _legend_label(shot: _TimelineShot, window_key: tuple) -> str:
+    """One window's legend text, its key alone when it never decoded."""
+    if window_key in shot.frame:
+        window = shot.windows[window_key]
+        return _window_range_text(window)
+    operation, window_index = window_key
+    return f"window {operation}:{window_index}"
 
 
 def _recorded_points(run_dir) -> list:

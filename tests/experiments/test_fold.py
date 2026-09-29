@@ -8,7 +8,7 @@ points its folders' rows hold. The third is the reason the module
 exists: the 500 shard folders of one weak_ler experiment hold 115
 million link rows, which do not fit in memory as lists. The fourth is
 why that experiment can be folded at all: its shards hold the sixteen
-latency points that tree measured, and this tree measures twenty-two.
+latency points that tree measured, and this tree measures twenty-three.
 
 A switching run's window_confidence.csv folds as the other per-shot
 files do, and its confidence_histogram.csv counts add as sinter's
@@ -469,7 +469,7 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     """A newer tree folds the folders an older tree wrote.
 
     The 500 shard folders of one weak_ler experiment hold sixteen
-    latency points and this tree measures twenty-two, so a summary that
+    latency points and this tree measures twenty-three, so a summary that
     asked for its own columns could not read those folders at all. Here
     two pieces lose one point's columns, as an older tree's pieces lack
     them, and the fold reports the points they hold and every other
@@ -496,6 +496,42 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     whole_without_the_point = _without_columns(whole[0], dropped)
     assert set(dropped) <= set(whole[0])
     assert older[0] == whole_without_the_point
+
+
+def test_a_fold_reports_no_strong_service_mean_for_folders_without_its_sum(
+    tmp_path,
+):
+    """A folder whose shots hold no strong service sum gets no mean.
+
+    The point's mean is the shots' summed service over their strong
+    decodes, so a folder without the sum reports no strong_service_mean_us
+    and every other column as the whole fold does, the rule a latency
+    point the folder did not measure keeps.
+    """
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    folders = _piece_folders(experiment_dir)
+    whole_dir = tmp_path / "whole"
+    older_dir = tmp_path / "older"
+    _folded(experiment_dir, folders, whole_dir)
+    _each_without_a_shot_column(folders, "strong_service_sum_us")
+    _folded(experiment_dir, folders, older_dir)
+
+    whole_path = whole_dir / "sweep.csv"
+    older_path = older_dir / "sweep.csv"
+    whole = _rows_of(whole_path)
+    older = _rows_of(older_path)
+    dropped = ("strong_service_mean_us",)
+    assert set(dropped) <= set(whole[0])
+    assert older[0] == _without_columns(whole[0], dropped)
+
+
+def _each_without_a_shot_column(folders, column) -> None:
+    for folder in folders:
+        shots_path = pathlib.Path(folder) / "shots.csv"
+        rows = _rows_of(shots_path)
+        for row in rows:
+            row.pop(column)
+        _write_rows(shots_path, rows)
 
 
 def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
@@ -711,7 +747,7 @@ def _burst_and_quiet_pieces(tmp_path):
     overrides["escalation"] = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "near_seam_pinned",
+        "strong_window": "redo_window",
     }
     overrides["burst_detector"] = {"kind": "event_count"}
     # the event count's windows need 22 rounds of a shot
@@ -881,6 +917,7 @@ def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
         algorithm="pymatching",
         confidence=confidence,
         logical_failure=False,
+        is_scored=True,
     )
 
     rows = report.confidence_histogram_rows([shot])
@@ -890,6 +927,29 @@ def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
         _one_count("window", 10.0, False),
         _one_count("shot_minimum", None, None),
     ]
+
+
+def test_an_unscored_shot_is_in_neither_confidence_file():
+    """An unscored shot is sinter's discard, and counts in no P(e|g).
+
+    Its logical_failure reads False, so a row of it would count as a
+    success beside every gap. sinter takes a discard out of every
+    failure-conditioned count (sinter/_decoding/_decoding.py:120-128),
+    and every row of both files carries shot_failed.
+    """
+    windows = (decoding_records.WindowConfidence((1, 0), 0.1, True, None),)
+    confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
+    shot = types.SimpleNamespace(
+        point_id="p",
+        algorithm="pymatching",
+        seed=0,
+        confidence=confidence,
+        logical_failure=False,
+        is_scored=False,
+    )
+
+    assert report.window_confidence_rows([shot]) == []
+    assert report.confidence_histogram_rows([shot]) == []
 
 
 def _confidence_run(

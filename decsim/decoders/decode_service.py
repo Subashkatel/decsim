@@ -5,8 +5,9 @@ issued and writes the result back; here the service takes the unit the
 dispatcher chose, moves the job's rounds into that unit's memory (the
 accelerator pattern: invoke the unit, then DMA its input into the
 unit's memory, then compute; gem5-Aladdin aladdin_sys_connection.h and
-dma_interface.h), starts the routed decoder when every transfer landed
-and the window owes no boundary, and frees the unit at the decode's end.
+dma_interface.h), starts the manager's decoder when every transfer landed
+and the window owes no boundary, and frees the unit when the manager
+says the decode, and any confidence walk charged on it, has ended.
 A landed job whose window still owes a boundary parks in its slot and
 releases its compute claim (Tomasulo's rule at the boundary hazard), so
 a dependent that fills early never deadlocks the unit against its own
@@ -16,8 +17,7 @@ and keeps at most its depth in flight (Hennessy and Patterson App. C).
 
 import dataclasses
 import functools
-from collections.abc import Callable
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy
 
@@ -30,6 +30,9 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
+
+if TYPE_CHECKING:
+    import decsim.decoders.decoder_manager as decoder_manager_module
 
 # the job kinds a pipelined unit serves; every other kind holds its unit
 # for the whole decode until it gets its own design pass
@@ -44,13 +47,14 @@ PIPELINED_JOB_KINDS = frozenset(
 class DecodeService:
     """Stages, starts, prices and frees every decode on its unit.
 
-    Six attributes: the engine, the pool that routes and holds the
-    units, the staging, the strong requests (a merged batch's members
-    are the ledger's knowledge), and the two calls back to the manager:
-    on_completed(job, result) at every decode's end, and dispatch()
-    wherever compute frees inside an engine event, so the non-reentrant
-    dispatch loop runs from the same points it always did. Four trace
-    sources, each carrying (job, unit):
+    Six attributes: the engine, the pool that holds the units, the
+    staging, the manager that owns the service, the manager's dispatch
+    cost, and the trace. Through the manager it reads the decoder and
+    the strong requests (a merged batch's members are the ledger's
+    knowledge), hands every decode's end to decode_completed, and calls
+    dispatch wherever compute frees inside an engine event, so the
+    non-reentrant dispatch loop runs from the same points it always did.
+    Four trace sources, each carrying (job, unit):
     job_dispatched when the job takes its slot, input_landed when every
     transfer of its input has landed, job_started when its decode
     begins, job_finished when its compute ends.
@@ -61,33 +65,29 @@ class DecodeService:
         engine,
         pool: decoder_pool_module.DecoderPool,
         staging: staging_module.DecoderInputStaging,
-        strong_requests: strong_requests_module.StrongRequests,
-        on_completed: Callable[[decoding_records.DecodeJob, object], None],
-        dispatch: Callable[[], None],
+        manager: "decoder_manager_module.DecoderManager",
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
     ) -> None:
         self.engine = engine
         self.pool = pool
         self.staging = staging
-        self.strong_requests = strong_requests
-        self.manager = _ManagerSide(
-            on_completed, dispatch, clock, dispatch_cycles
-        )
+        self.manager = manager
+        self.dispatch_cost = _DispatchCost(clock, dispatch_cycles)
         self.trace = _TraceSources()
 
     # ------------------------------------------ what the dispatcher asks
 
     def resident_capacity(self, job: decoding_records.DecodeJob) -> int:
-        """Residents a unit holds for this job's route.
+        """Residents a unit holds for this job.
 
-        Two (the depth-1 access-execute machine) unless the routed decoder
+        Two (the depth-1 access-execute machine) unless the decoder
         pipelines: then every in-flight decode stays resident (its input
         lives in the unit's memory until its result emerges) plus one
         landing next. Memory admission still gates every resident, so a
         deep pipeline pays its SRAM price visibly or refuses loudly.
         """
-        decoder = self.pool.decoder_for(job)
+        decoder = self.manager.decoder
         depth = decoder.pipeline_depth(job)
         return depth + 1
 
@@ -145,7 +145,7 @@ class DecodeService:
         if job.on_done is not None:
             return []
         if strong_requests_module.is_merged_batch(job):
-            return self.strong_requests.members_of(job)
+            return self.manager.strong_requests.members_of(job)
         return [job]
 
     def _input_round_count(self, job: decoding_records.DecodeJob) -> int:
@@ -160,7 +160,6 @@ class DecodeService:
 
     def dispatch_to(
         self,
-        pool: str,
         job: decoding_records.DecodeJob,
         unit: decoder_unit_module.DecoderUnit,
         claim_compute: bool,
@@ -171,7 +170,7 @@ class DecodeService:
         model: invoke the unit, then DMA its input); compute is claimed
         only when this unit's compute is actually free.
         """
-        job.pool = pool
+        job.pool = self.pool.name
         self._assign_service_key(job)
         unit.admit(job)
         # kept past the job's eviction: the confidence its evidence
@@ -182,7 +181,7 @@ class DecodeService:
         job.dispatch_ticks = self.engine.now
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
-        self._log_assignment(pool, job, claim_compute)
+        self._log_assignment(job, claim_compute)
         self.trace.job_dispatched.fire(job, unit)
         self._charge_dispatch(job, unit, claim_compute)
 
@@ -199,12 +198,12 @@ class DecodeService:
         decode's arrival and its dispatch;
         decoder_manager.dispatch_cycles prices that, zero by default.
         """
-        cycles = self.manager.dispatch_cycles
+        cycles = self.dispatch_cost.cycles
         if cycles == 0:
             self._ask_for_input(job, unit, claim_compute)
             return
         now = self.engine.now
-        edge = self.manager.clock.edge(cycles, now)
+        edge = self.dispatch_cost.clock.edge(cycles, now)
         delay = edge - now
         ask = functools.partial(self._ask_for_input, job, unit, claim_compute)
         label = f"dispatch_cost({job.label})"
@@ -299,7 +298,7 @@ class DecodeService:
 
     def abort(self, job: decoding_records.DecodeJob) -> None:
         """Stop a running decode: the decoder, its input, its slot."""
-        decoder = self.pool.decoder_for(job)
+        decoder = self.manager.decoder
         decoder.cancel(job)
         self.staging.cancel(job)
         self.free(job)
@@ -321,16 +320,16 @@ class DecodeService:
         """Return the credits of every request one decode still serves."""
         self.staging.release_service_members(members)
 
-    def free_unit_count(self, pool: str) -> int:
+    def free_unit_count(self) -> int:
         """Units of the pool with free compute now."""
-        return self.pool.free_count(pool)
+        return len(self.pool.free)
 
     # ------------------------------------------------- the units' state
 
     def parked_jobs(self) -> list:
         """Every resident landed with a boundary still owed, unit by unit."""
         parked = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             unit_parked = unit.parked_residents()
             parked.extend(unit_parked)
         return parked
@@ -338,7 +337,7 @@ class DecodeService:
     def resident_jobs(self) -> list:
         """Every job holding a slot of any unit, unit by unit."""
         residents = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             residents.extend(unit.residents)
         return residents
 
@@ -349,7 +348,7 @@ class DecodeService:
         it, and a destination has at most one, so the first unit holding
         one for this window is the one.
         """
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             completion = unit.take_output(window_key)
             if completion is not None:
                 return completion
@@ -358,7 +357,7 @@ class DecodeService:
     def windows_holding_output(self) -> list:
         """The destinations whose results are still waiting in a unit."""
         waiting = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             windows = unit.output_windows()
             waiting.extend(windows)
         return sorted(waiting)
@@ -366,7 +365,7 @@ class DecodeService:
     def units_holding_rounds(self) -> list:
         """The names of the units whose memory still holds rounds."""
         held = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             if unit.memory.resident_input_count:
                 held.append(unit.name)
         return held
@@ -391,7 +390,7 @@ class DecodeService:
         """No unit ends the run with a decode in flight or its intake open."""
         in_flight = []
         busy = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             flight_labels = unit.flight_labels()
             in_flight.extend(flight_labels)
             if unit.pipeline.intake_job is not None:
@@ -410,8 +409,8 @@ class DecodeService:
     # ------------------------------------------------- dispatch, private
 
     def _start_decoder(self, job: decoding_records.DecodeJob) -> None:
-        """Hand the started job to its routed decoder on this unit."""
-        decoder = self.pool.decoder_for(job)
+        """Hand the started job to the decoder on this unit."""
+        decoder = self.manager.decoder
         self.engine.log(
             log_sources.DECODER_MANAGER, f"START DECODE {job.label}"
         )
@@ -424,7 +423,7 @@ class DecodeService:
         decoder.start(
             job,
             self.engine,
-            lambda result: self.manager.on_completed(job, result),
+            lambda result: self.manager.decode_completed(job, result),
         )
         if pipeline is None:
             return
@@ -445,12 +444,12 @@ class DecodeService:
         first_sequence = min(run_sequences)
         job.service_key = decoding_records.DecoderServiceKey(first_sequence)
         job.service_dispatch_ticks = self.engine.now
-        for member in self.strong_requests.members_of(job):
+        for member in self.manager.strong_requests.members_of(job):
             member.service_key = job.service_key
             member.service_dispatch_ticks = self.engine.now
 
     def _log_assignment(
-        self, pool: str, job: decoding_records.DecodeJob, claim_compute: bool
+        self, job: decoding_records.DecodeJob, claim_compute: bool
     ) -> None:
         waited_ticks = self.engine.now - job.ready_time
         waited = config.format_ticks(waited_ticks)
@@ -458,8 +457,8 @@ class DecodeService:
         slot_note = ""
         if not claim_compute:
             slot_note = "staged, "
-        pool_tag = decode_queue.pool_tag_of(pool)
-        free_now = self.pool.free_count(pool)
+        pool_tag = decode_queue.pool_tag_of(self.pool.name)
+        free_now = self.free_unit_count()
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"ASSIGN UNIT {job.decoding_unit_name} to {job.label} "
@@ -500,7 +499,7 @@ class DecodeService:
 
     def _transfer_members(self, job: decoding_records.DecodeJob) -> list:
         members = []
-        for member in self.strong_requests.members_of(job):
+        for member in self.manager.strong_requests.members_of(job):
             if member is not job:
                 members.append(member)
         if not members:
@@ -621,7 +620,7 @@ class DecodeService:
         unit stays unpredicted.
         """
         unit = job.unit
-        decoder = self.pool.decoder_for(job)
+        decoder = self.manager.decoder
         occupancy = decoder.occupancy(job)
         if occupancy is None:
             unit.expect_compute_free(None)
@@ -649,7 +648,7 @@ class DecodeService:
         on every row: a depth above one needs an interval shorter than
         the latency, which the assert below says. The pipelined model
         serves the job kinds in PIPELINED_JOB_KINDS; the strong tier and
-        merged batches are not pipelined yet, and a pipelined route
+        merged batches are not pipelined yet, and a pipelined decoder
         there refuses loudly rather than silently serializing.
         """
         occupancy = decoder.occupancy(job)
@@ -726,7 +725,7 @@ class DecodeService:
         normal flow performs the compute offer unless offer_now says
         otherwise.
         """
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             if not unit.take_flight(job):
                 continue
             self._lift_pipeline_stall(unit, offer_now)
@@ -824,17 +823,12 @@ class _TraceSources:
 
 
 @dataclasses.dataclass(frozen=True)
-class _ManagerSide:
-    """The service's two calls back to the manager, and the manager's cost.
+class _DispatchCost:
+    """The manager's own work per dispatch, in cycles of its clock.
 
-    on_completed(job, result) at every decode's end; dispatch() wherever
-    compute frees inside an engine event, so the non-reentrant dispatch
-    loop runs from the same points it always did; dispatch_cycles is the
-    manager's own work per dispatch, charged on clock before the input is
-    asked for (decoder_manager.dispatch_cycles).
+    Charged before the job's input is asked for
+    (decoder_manager.dispatch_cycles).
     """
 
-    on_completed: Callable
-    dispatch: Callable
     clock: Optional[config.Clock]
-    dispatch_cycles: int
+    cycles: int

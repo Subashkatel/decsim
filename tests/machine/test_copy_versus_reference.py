@@ -44,67 +44,67 @@ STIM_GRID = (
     (
         "bases/weak_decoder_baseline.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         ("controller",),
     ),
     (
         "bases/weak_decoder_baseline.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         ("weak_syndrome_buffer",),
     ),
     (
         "bases/weak_decoder_baseline.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         WEAK_SEATS,
     ),
     (
         "bases/weak_decoder_baseline.yaml",
         "parallel",
-        "near_seam_pinned",
+        "redo_window",
         WEAK_SEATS,
     ),
     (
-        "experiments/switching/seam_pinned_switching.yaml",
+        "experiments/switching/redo_window_switching.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         ("weak_syndrome_buffer",),
     ),
     (
-        "experiments/switching/seam_pinned_switching.yaml",
+        "experiments/switching/redo_window_switching.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         BOTH_DECODERS,
     ),
     (
-        "experiments/switching/seam_pinned_switching.yaml",
+        "experiments/switching/redo_window_switching.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         CHIP_THEN_HOST_DECODER,
     ),
     (
-        "experiments/switching/seam_pinned_switching.yaml",
+        "experiments/switching/redo_window_switching.yaml",
         "sliding",
-        "forward_seam_pinned",
+        "double_window",
         BOTH_DECODERS,
     ),
     (
-        "experiments/switching/seam_pinned_switching.yaml",
+        "experiments/switching/redo_window_switching.yaml",
         "sliding",
-        "forward_seam_pinned",
+        "double_window",
         CHIP_THEN_HOST_DECODER,
     ),
     (
         "bases/strong_decoder_baseline.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         ("strong_syndrome_buffer",),
     ),
     (
         "bases/strong_decoder_baseline.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         ("strong_decoder",),
     ),
 )
@@ -281,7 +281,7 @@ def _decode_spans(machine) -> list:
 
 def _switching_machine_formed_at(where: str):
     """A switching run at d=3, where both tiers decode the same rounds."""
-    config_path = CONFIGS / "experiments/switching/seam_pinned_switching.yaml"
+    config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -296,14 +296,14 @@ def _switching_machine_formed_at(where: str):
     return machine_module.Machine.build(settings, 0)
 
 
-def _forward_switching_at_the_decoder():
+def _double_window_switching_at_the_decoder():
     """A switching run whose strong region absorbs weak windows.
 
-    The forward strong window (Toshio 2510.25222 Sec. III C) rewrites the
+    The double window (Toshio 2510.25222 Sec. III C) rewrites the
     windows ahead of the seam, so the run withdraws weak decodes that
     were already submitted.
     """
-    config_path = CONFIGS / "experiments/switching/seam_pinned_switching.yaml"
+    config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -315,7 +315,7 @@ def _forward_switching_at_the_decoder():
     settings = point.settings
     detection_events = _formed_at(settings, "decoder")
     escalation = dataclasses.replace(
-        settings.escalation, strong_window="forward_seam_pinned"
+        settings.escalation, strong_window="double_window"
     )
     settings = dataclasses.replace(
         settings, detection_events=detection_events, escalation=escalation
@@ -707,12 +707,12 @@ def test_the_second_tier_forms_the_rounds_it_reads_out_of_its_own_store():
 def test_no_round_a_tier_read_goes_uncharged_on_that_tier():
     """A withdrawn weak window leaves its rounds for whoever reads them.
 
-    The forward shape withdraws weak decodes when the strong region
+    The double window withdraws weak decodes when the strong region
     absorbs their windows, and the strong tier then reads the same
     rounds out of the strong syndrome buffer; every round a started decode read
     is charged once on the tier that read it.
     """
-    forward = _forward_switching_at_the_decoder()
+    forward = _double_window_switching_at_the_decoder()
     read = _rounds_read_by_tier(forward)
     charged = _rounds_charged_by_tier(forward)
 
@@ -774,9 +774,9 @@ def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
     again; each unit still consumes Stim's events, and the run ends.
     """
     machine = _seated_machine(
-        "experiments/switching/seam_pinned_switching.yaml",
+        "experiments/switching/redo_window_switching.yaml",
         "sliding",
-        "near_seam_pinned",
+        "redo_window",
         CHIP_THEN_HOST_DECODER,
         latency_cycles=5,
     )

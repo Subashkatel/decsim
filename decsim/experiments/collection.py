@@ -26,8 +26,9 @@ import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
 import decsim.experiments.refusal as refusal
 
-# QEC rounds per piece: a shot's cost grows with its rounds, so a piece
-# sized in rounds takes about as long at any history length.
+# QEC rounds per piece, every patch's rounds added up: a shot's cost
+# grows with its rounds, so a piece sized in rounds takes about as long
+# at any history length.
 DEFAULT_PIECE_ROUNDS = 20000
 KEYS = (
     "max_failures",

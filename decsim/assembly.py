@@ -18,14 +18,11 @@ takes None and binds nothing.
 
 A run the machine has no use for a seat in has no SEATS row for it and
 no WIRES row either, so no port is ever bound to None; seats_for reads
-the six conditions that decide that, once.
+the seven conditions that decide that, once.
 
-Two rows name a seat another row built, because the class takes that
-neighbour at construction and cannot take it as a port: the primary
-store output, which is one of the two store ends rather than a third
-one; and the two decoder managers, which share the ledger of strong
-requests that the chip's side opens and the host's side serves. Each
-such row therefore sits after the rows it reads.
+One row names a seat another row built: the primary store output,
+which is one of the two store ends rather than a third one, so it sits
+after the rows it reads.
 
 The public functions read the tables only when called, so they come
 first; the member readers come before the tables because a tuple is
@@ -92,7 +89,8 @@ def bind(wires: tuple, seats: dict) -> None:
 def start_wired_seats(seats: dict) -> None:
     """Let every seat whose first work needs its ports do that work."""
     for name in STARTS_WHEN_WIRED:
-        seats[name].start()
+        if name in seats:
+            seats[name].start()
 
 
 def seed_roots(parts: build_parts.Parts, seats: dict) -> tuple:
@@ -127,8 +125,12 @@ def _syndrome_source(parts):
     return parts.plan.device
 
 
-def _router(parts):
-    return parts.pool.router
+def _primary_decoder(parts):
+    return parts.pool.active
+
+
+def _strong_decoder(parts):
+    return parts.pool.strong
 
 
 def _detection_events(parts):
@@ -146,7 +148,8 @@ SEATS = (
     ("boundary_policy", _boundary_policy),
     ("error_model_provider", _error_model_provider),
     ("syndrome_source", _syndrome_source),
-    ("router", _router),
+    ("primary_decoder", _primary_decoder),
+    ("strong_decoder", _strong_decoder),
     ("detection_events", _detection_events),
     ("burst_detector", _burst_detector),
     ("conditional_release", controller_side.build_conditional_release),
@@ -195,6 +198,7 @@ SEATS = (
     ("memory_arrivals", decoder_build.build_memory_round_arrivals),
     ("transmitter", controller_side.build_transmitter),
     ("syndrome_round_sender", controller_side.build_syndrome_round_sender),
+    ("packing_line", controller_side.build_packing_line),
     ("rounds_in_flight", controller_side.build_rounds_in_flight),
     ("assembler", controller_side.build_assembler),
     ("qpu", controller_side.build_qpu),
@@ -240,7 +244,8 @@ WIRES = (
     ("strong_syndrome_round_receiver.detection_events", "detection_events"),
     # the window side
     ("models.provider", "error_model_provider"),
-    ("models.router", "router"),
+    ("models.decoder", "primary_decoder"),
+    ("models.strong_decoder", "strong_decoder"),
     ("planner.scheme", "scheme"),
     ("planner.models", "models"),
     ("tracker.scheme", "scheme"),
@@ -323,6 +328,13 @@ WIRES = (
     ("window_manager.results", "results"),
     ("window_manager.strong_redecode", "strong_redecode"),
     ("window_manager.window_interaction", "window_interaction"),
+    # the decoder managers
+    ("decoder_manager.decoder", "primary_decoder"),
+    ("strong_decoder_manager.decoder", "strong_decoder"),
+    ("decoder_manager.strong_requests", "strong_requests"),
+    ("decoder_manager.escalation_policy", "escalation_policy"),
+    ("strong_decoder_manager.strong_requests", "strong_requests"),
+    ("strong_decoder_manager.escalation_policy", "escalation_policy"),
     # the readout path back through the controller
     ("memory_arrivals.windows", "window_manager"),
     ("transmitter.memory_arrivals", "memory_arrivals"),
@@ -331,6 +343,8 @@ WIRES = (
     ("syndrome_round_sender.weak_store", "weak_syndrome_buffer"),
     ("syndrome_round_sender.strong_receiver", "strong_syndrome_round_receiver"),
     ("syndrome_round_sender.held_rounds", "held_rounds"),
+    ("syndrome_round_sender.packing_line", "packing_line"),
+    ("transmitter.packing_line", "packing_line"),
     ("syndrome_round_sender.transmitter", "transmitter"),
     ("syndrome_round_sender.windows", "window_manager"),
     ("rounds_in_flight.held_rounds", "held_rounds"),
@@ -338,9 +352,11 @@ WIRES = (
     ("rounds_in_flight.syndrome_round_sender", "syndrome_round_sender"),
     ("assembler.detection_events", "detection_events"),
     ("assembler.rounds_in_flight", "rounds_in_flight"),
+    ("assembler.packing_line", "packing_line"),
     ("assembler.syndrome_round_sender", "syndrome_round_sender"),
     ("controller.assembler", "assembler"),
     # the QPU and the control loop
+    ("qpu.syndrome_source", "syndrome_source"),
     ("qpu.readout_receiver", "controller"),
     ("qpu.runtime", "execution_runtime"),
     ("qpu.idle_rounds", "idle_rounds"),
@@ -352,9 +368,9 @@ WIRES = (
     ("factory.decode_queue", "decoder_manager"),
     ("idle_rounds.streams", "streams"),
     ("idle_rounds.qpu", "qpu"),
+    ("idle_rounds.windows", "window_manager"),
     ("issuer.streams", "streams"),
     ("issuer.idle_rounds", "idle_rounds"),
-    ("issuer.windows", "window_manager"),
     ("issuer.output", "instruction_output"),
     ("execution_runtime.issuer", "issuer"),
     ("execution_runtime.factory", "factory"),
@@ -366,8 +382,15 @@ WIRES = (
 # The seats whose first work needs a port and happens once the graph is
 # wired, which is gem5's init; the factory and the execution runtime
 # queue the run's first events instead and start when the run does,
-# which is gem5's startup (sim_object.hh lines 194 and 280).
-STARTS_WHEN_WIRED = ("planner", "window_manager", "syndrome_round_sender")
+# which is gem5's startup (sim_object.hh lines 194 and 280). A run
+# without a seat skips it.
+STARTS_WHEN_WIRED = (
+    "decoder_manager",
+    "strong_decoder_manager",
+    "planner",
+    "window_manager",
+    "syndrome_round_sender",
+)
 
 # The seed path of every stochastic owner, in the order the run seed
 # hashes them: a seat by name, what one of a seat's readers answers, or
@@ -377,10 +400,12 @@ SEED_ROOTS = (
     ("scheme", "scheme"),
     ("device", "plan.device"),
     ("error_model_provider", "error_model_provider"),
-    ("decoder_router", "router"),
+    ("primary_decoder", "primary_decoder"),
+    ("strong_decoder", "strong_decoder"),
     ("factory", "factory"),
     ("escalation_policy", "escalation_policy"),
-    ("scheduler", "pool.scheduler"),
+    ("decoder_manager", "decoder_manager"),
+    ("strong_decoder_manager", "strong_decoder_manager"),
     ("decoder_memory_transfer", "decoder_manager.input_transport()"),
     ("boundary_policy", "boundary_policy"),
     ("window_interaction", "window_interaction"),
@@ -429,6 +454,7 @@ def _absent_strong_seats(escalation_policy) -> set:
                 "shape",
                 "pending_strong_windows",
                 "strong_redecode",
+                "strong_decoder",
                 "strong_decoder_manager",
             )
         )
@@ -446,6 +472,8 @@ def _absent_named_seats(parts: build_parts.Parts) -> set:
         absent.add("error_model_provider")
     if parts.burst_detector is None:
         absent.add("burst_detector")
+    if parts.pool.active is None:
+        absent.add("primary_decoder")
     return absent
 
 

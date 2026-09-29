@@ -1,22 +1,21 @@
 """Build the decoder units of both tiers and the pool the manager schedules.
 
 A tier's kind names a row of decoders/settings.py's DECODERS, and the
-unit is that algorithm between its fetch and release stages. The router
-over the two tiers and the manager's pools are one record, gem5's
+unit is that algorithm between its fetch and release stages. The two
+tiers' units and the managers' pools are one record, gem5's
 CacheConfig.config_cache shape (configs/common/CacheConfig.py).
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.decoders.decode_queue as decode_queue
-import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.detection_events as detection_events_module
 import decsim.decoders.memory_rounds as memory_rounds_module
-import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.escalation.settings as escalation_settings
@@ -35,22 +34,19 @@ FORMATION_STAGE = "detection_event_formation"
 
 @dataclasses.dataclass(frozen=True)
 class DecoderPool:
-    """The router over the tiers' units and the manager's pool knobs."""
+    """The tiers' units and the managers' pool knobs.
 
-    router: Any
-    active: Any
-    unit_pools: dict
-    decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig]
-    scheduler: Any
-    # pool name -> whether that tier's unit is given a copy of the
-    # rounds it decodes (weak_decoder.input, strong_decoder.input)
-    copies_input_by_pool: dict
-    # pool name -> that tier's event-detection logic, for a run that
-    # seats the former at the tier's decoder (detection_events.formed_at)
-    formation_by_pool: dict
-    # pool name -> whether a finished decode holds its unit until the
-    # window side reads the result (<tier>.result_blocks_unit)
-    blocks_unit_by_pool: dict
+    active is the unit of the tier that decodes the plan's windows, None
+    when that tier names no decoder; strong is the strong tier's unit on
+    a run that may escalate, else None. chip is the chip's manager's
+    pool, of the tier that decodes the plan's windows; host is the host's
+    manager's, of the strong tier, on a switching run only.
+    """
+
+    active: Optional[ports.Decoder]
+    strong: Optional[ports.Decoder]
+    chip: decoder_pool_module.PoolSettings
+    host: Optional[decoder_pool_module.PoolSettings]
 
 
 def build_decoder_unit(
@@ -99,46 +95,40 @@ def build_decoder_pool(
     policy,
     detection_events: ports.DetectionEventPlacement,
 ) -> DecoderPool:
-    """The router over the tiers and the manager's pools.
+    """The tiers' units and the managers' pools.
 
-    Switching puts two units behind one router: the strong pool serves
-    escalated jobs. Any other escalation routes every job to the tier
-    that decodes the plan's windows. Each tier whose decoder is a seat
-    of the run's detection event placement gets its own event-detection
-    logic, so a round both tiers read is formed and charged by each.
+    Switching gives the strong tier a pool of its own, which serves
+    escalated jobs. Any other escalation has one pool, of the tier that
+    decodes the plan's windows. Each tier whose decoder is a seat of the
+    run's detection event placement gets its own event-detection logic,
+    so a round both tiers read is formed and charged by each.
     """
-    manager = settings.decoder_manager
-    scheduler = manager.scheduler
-    if scheduler is None:
-        scheduler = schedulers.FifoScheduler()
     weak_formation = _tier_formation(detection_events, "weak_decoder")
     strong_formation = _tier_formation(detection_events, "strong_decoder")
     weak = build_decoder_unit(settings, "weak", policy, weak_formation)
     strong = build_decoder_unit(settings, "strong", policy, strong_formation)
     active_tier = policy.primary_tier.value
     active = weak
+    active_formation = weak_formation
     if active_tier == "strong":
         active = strong
-    _check_the_active_tier_decodes(manager, active, active_tier, plan)
-    router, unit_pools = _router_and_pools(
-        settings, policy, weak, strong, active
+        active_formation = strong_formation
+    _check_the_active_tier_decodes(active, active_tier, plan)
+    blocks_unit = _blocks_unit(settings, active_tier)
+    chip = _pool(
+        settings,
+        decode_queue.DEFAULT_POOL,
+        active_tier,
+        active_formation,
+        blocks_unit,
     )
-    decoder_memory = _decoder_memory(settings, policy, unit_pools)
-    copies_input_by_pool = _copies_input_by_pool(settings, policy, unit_pools)
-    blocks_unit_by_pool = _blocks_unit_by_pool(settings, policy, unit_pools)
-    formation_by_pool = _formation_by_pool(
-        policy, unit_pools, weak_formation, strong_formation
+    if not policy.requires_strong_context:
+        return DecoderPool(active=active, strong=None, chip=chip, host=None)
+    _check_switching_has_a_strong(strong)
+    host = _pool(
+        settings, decode_queue.STRONG_POOL, "strong", strong_formation, False
     )
-    return DecoderPool(
-        router=router,
-        active=active,
-        unit_pools=dict(unit_pools),
-        decoder_memory=decoder_memory,
-        scheduler=scheduler,
-        copies_input_by_pool=copies_input_by_pool,
-        blocks_unit_by_pool=blocks_unit_by_pool,
-        formation_by_pool=formation_by_pool,
-    )
+    return DecoderPool(active=active, strong=strong, chip=chip, host=host)
 
 
 def build_memory_round_arrivals(parts):
@@ -147,14 +137,10 @@ def build_memory_round_arrivals(parts):
 
 
 def _check_the_active_tier_decodes(
-    manager: decoder_settings.DecoderManagerSettings,
-    active,
-    active_tier: str,
-    plan: plan_build.Plan,
+    active, active_tier: str, plan: plan_build.Plan
 ) -> None:
     """A plan with windows needs a decoder on the tier that decodes them."""
-    has_no_decoder = active is None and manager.router is None
-    if not has_no_decoder or not plan.planned_operations:
+    if active is not None or not plan.planned_operations:
         return
     raise ValueError(
         f"the plan decodes windows on the {active_tier} tier, which "
@@ -162,26 +148,57 @@ def _check_the_active_tier_decodes(
     )
 
 
-def _router_and_pools(
-    settings: machine_settings.MachineSettings, policy, weak, strong, active
-) -> tuple:
-    """The router over the tiers and each pool's unit count.
+def _pool(
+    settings: machine_settings.MachineSettings,
+    name: str,
+    tier: str,
+    formation: Optional[detection_events_module.TierFormation],
+    blocks_unit: bool,
+) -> decoder_pool_module.PoolSettings:
+    """One manager's pool, from the settings of the tier whose units it holds.
 
-    A router or pools given in Python are used as they are; switching
-    routes escalated jobs to a strong pool of their own, and any other
-    escalation routes every job to the active tier's one default pool.
+    A value of <tier>.input that is not a row of DECODER_INPUTS is
+    refused here, where the tier is named.
     """
-    manager = settings.decoder_manager
-    router = manager.router
-    unit_pools = manager.unit_pools
-    if policy.requires_strong_context and router is None:
-        router, unit_pools = _switching_pools(settings, weak, strong)
-    if router is None:
-        router = decoders.CodeRouter(default=active)
-    if unit_pools is None:
-        active_settings = _active_tier_settings(settings, policy)
-        unit_pools = {"default": active_settings.units}
-    return router, unit_pools
+    tier_settings = settings.decoder_settings_for(tier)
+    copies_input = tables.row(
+        decoder_settings.DECODER_INPUTS,
+        f"{tier}_decoder.input",
+        tier_settings.input,
+    )
+    return decoder_pool_module.PoolSettings(
+        name=name,
+        unit_count=tier_settings.units,
+        capacity_bits=tier_settings.unit_memory.bits,
+        copies_input=copies_input,
+        blocks_unit=blocks_unit,
+        formation=formation,
+    )
+
+
+def _blocks_unit(
+    settings: machine_settings.MachineSettings, active_tier: str
+) -> bool:
+    """The blocking rule of the pool that decodes the windows.
+
+    The strong pool of a switching run never blocks: a strong re-decode
+    frees its unit's compute at its end and its result waits in the
+    unit's output slot until the window side takes it (decoder_unit.py
+    hold_output), so <tier>.result_blocks_unit is read on the primary
+    tier alone.
+    """
+    tier_settings = settings.decoder_settings_for(active_tier)
+    return tier_settings.result_blocks_unit
+
+
+def _check_switching_has_a_strong(strong) -> None:
+    """Switching escalates to the strong tier, so the run must name one."""
+    if strong is not None:
+        return
+    raise ValueError(
+        "escalation switching escalates to the strong_decoder, which "
+        "this configuration does not define"
+    )
 
 
 def _tier_formation(
@@ -196,146 +213,6 @@ def _tier_formation(
     if not detection_events.forms_at(seat):
         return None
     return detection_events_module.TierFormation(detection_events, seat)
-
-
-def _formation_by_pool(
-    policy,
-    unit_pools: dict,
-    weak_formation: Optional[detection_events_module.TierFormation],
-    strong_formation: Optional[detection_events_module.TierFormation],
-) -> dict:
-    """Each pool's event-detection logic, from the tier whose units it holds.
-
-    The strong pool is the strong tier's; every other pool decodes the
-    plan's windows on the active tier. The map is empty when no tier
-    forms anything.
-    """
-    active_formation = weak_formation
-    if policy.primary_tier.value == "strong":
-        active_formation = strong_formation
-    formation_by_pool = {}
-    if active_formation is None:
-        return formation_by_pool
-    for pool in unit_pools:
-        formation_by_pool[pool] = active_formation
-    if decode_queue.STRONG_POOL in formation_by_pool:
-        formation_by_pool[decode_queue.STRONG_POOL] = strong_formation
-    return formation_by_pool
-
-
-def _blocks_unit_by_pool(
-    settings: machine_settings.MachineSettings, policy, unit_pools: dict
-) -> dict:
-    """Every pool's blocking rule, from the tier that decodes the windows.
-
-    A strong re-decode holds its result in the unit that produced it
-    until the window side takes it in any case (decoder_unit.py
-    hold_output), so the row is read on the primary tier, and
-    <tier>.result_blocks_unit names it there.
-    """
-    tier = policy.primary_tier.value
-    tier_settings = settings.decoder_settings_for(tier)
-    blocks_unit = tier_settings.result_blocks_unit
-    blocks_by_pool = {}
-    for pool in unit_pools:
-        blocks_by_pool[pool] = blocks_unit
-    return blocks_by_pool
-
-
-def _copies_input_by_pool(
-    settings: machine_settings.MachineSettings, policy, unit_pools: dict
-) -> dict:
-    """Each pool's input rule, from the tier whose units that pool holds.
-
-    The strong pool is the strong tier's; every other pool decodes the
-    plan's windows on the active tier. A value that is not a row of
-    DECODER_INPUTS is refused here, where the tier is named.
-    """
-    active_settings = _active_tier_settings(settings, policy)
-    active_copies = _copies_input(active_settings, policy.primary_tier.value)
-    strong_copies = _copies_input(settings.strong_decoder, "strong")
-    copies_by_pool = {}
-    for pool in unit_pools:
-        copies_by_pool[pool] = active_copies
-    if decode_queue.STRONG_POOL in copies_by_pool:
-        copies_by_pool[decode_queue.STRONG_POOL] = strong_copies
-    return copies_by_pool
-
-
-def _copies_input(
-    tier_settings: decoder_settings.DecoderSettings, tier: str
-) -> bool:
-    """Whether this tier's unit is given a copy of the rounds it reads."""
-    return tables.row(
-        decoder_settings.DECODER_INPUTS,
-        f"{tier}_decoder.input",
-        tier_settings.input,
-    )
-
-
-def _switching_pools(
-    settings: machine_settings.MachineSettings, weak, strong
-) -> tuple:
-    """The switching router and its pools: default and strong.
-
-    A window's two forced-class solves are two ordinary jobs of the
-    default pool, so weak_decoder.units alone decides whether they
-    overlap.
-    """
-    if strong is None:
-        raise ValueError(
-            "escalation switching escalates to the strong_decoder, which "
-            "this configuration does not define"
-        )
-    unit_pools = {
-        "default": settings.weak_decoder.units,
-        "strong": settings.strong_decoder.units,
-    }
-    router = decoders.SwitchingRouter(weak, strong)
-    return router, unit_pools
-
-
-def _active_tier_settings(
-    settings: machine_settings.MachineSettings, policy
-) -> decoder_settings.DecoderSettings:
-    tier = policy.primary_tier.value
-    return settings.decoder_settings_for(tier)
-
-
-def _decoder_memory(
-    settings: machine_settings.MachineSettings, policy, unit_pools: dict
-) -> Optional[decoder_memory_module.DecoderMemoryConfig]:
-    """Each pool's unit memory, from the tier whose units that pool holds.
-
-    The strong pool is the strong tier's; every other pool decodes the
-    plan's windows on the active tier. A Python-built memory is used as
-    it is. A pool whose tier sets no capacity is left out, which is an
-    unbounded memory.
-    """
-    given = settings.decoder_manager.decoder_memory
-    if given is not None:
-        return given
-    active_settings = _active_tier_settings(settings, policy)
-    bits_by_pool = {}
-    for pool in unit_pools:
-        bits_by_pool[pool] = active_settings.unit_memory.bits
-    if decode_queue.STRONG_POOL in bits_by_pool:
-        strong_bits = settings.strong_decoder.unit_memory.bits
-        bits_by_pool[decode_queue.STRONG_POOL] = strong_bits
-    bounded_pools = _without_unset(bits_by_pool)
-    if not bounded_pools:
-        return None
-    return decoder_memory_module.DecoderMemoryConfig(bounded_pools)
-
-
-def _without_unset(value_by_pool: dict) -> dict:
-    """The pools whose value is set; a None value is a key left unset."""
-    set_by_pool = {}
-    for pool, value in value_by_pool.items():
-        if value is None:
-            continue
-        set_by_pool[pool] = value
-    return set_by_pool
 
 
 def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
@@ -353,8 +230,11 @@ def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
     row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
     row_settings = tier_settings.row_settings
     if row_settings is None:
-        return row()
-    return row(settings=row_settings)
+        algorithm = row()
+    else:
+        algorithm = row(settings=row_settings)
+    algorithm.compile_key = (row, row_settings)
+    return algorithm
 
 
 def _check_serves_the_confidence(

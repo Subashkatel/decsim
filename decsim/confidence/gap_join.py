@@ -87,7 +87,20 @@ class WindowGapJoin:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """Keep the solve until the window's others report."""
+        """Keep the solve until the window's others report.
+
+        The join now has the value, so the unit that produced it has
+        been read. The complementary gap is one decode, a second decode
+        on the complementary boundary, then the difference of the two
+        weights (Toshio et al. 2510.25222 lines 482-494; Gidney et al.
+        2312.04522 lines 823-832): the first weight waits while the
+        second solve runs, as a reservation station captures a result
+        and frees its functional unit (Tomasulo 1967). On one unit the
+        other solve is already staged there and runs next, Toshio's
+        order; on two they overlap. A unit that blocks on its result
+        would otherwise hold it while the other solve waits for a unit,
+        and on one unit wait on itself.
+        """
         forced_class = job.forced_logical_class
         self.engine.log(
             log_sources.DECODER_MANAGER,
@@ -95,6 +108,7 @@ class WindowGapJoin:
             "other class",
         )
         self.trace.solve_held.fire(job, result)
+        self.decode_queue.read_result(job)
 
     def _join(self, held: list) -> None:
         """Ask the signal for the window's gap and commit its answer.

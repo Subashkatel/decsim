@@ -5,10 +5,15 @@ DecoderMemoryOccupancy hears every unit memory's deposited and taken.
 Each is checked against a fact it never sees: the busy integral against
 the spans the decode records report, the held-round count against the
 memory's own dictionary of inputs. Gate point 1 is the frozen suite's
-first strict point (weak_decoder_baseline d 3 p 0.003 seed 0).
+first strict point (weak_decoder_baseline d 3 p 0.003 seed 0). A time
+average runs from the run's start to the tick it is read, as gem5's
+AvgStor integrates to curTick() (src/base/stats/storage.hh:130-213).
 """
 
+import types
+
 import decsim.machine as machine_module
+import decsim.observe.metrics as metrics
 import tests.observe.gate_point as gate_point
 
 
@@ -62,7 +67,7 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     point = gate_point.settings(decoder_memory_occupancy=True)
     machine = machine_module.Machine.build(point, gate_point.SEED)
     occupancy = machine.observation.decoder_memory_occupancy
-    (unit,) = machine.decoder_manager.pool.units()
+    (unit,) = machine.decoder_manager.pool.units
     watcher = _MemoryWatcher(occupancy, unit)
     unit.memory.trace.deposited.connect(watcher.changed)
     unit.memory.trace.taken.connect(watcher.changed)
@@ -85,3 +90,39 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
             "unsized_admission_count": snapshot.unsized_admission_count,
         }
     ]
+
+
+class _HeldInput:
+    """A decoder input of a fixed size, as a unit memory hands it on."""
+
+    def __init__(self, bits: int) -> None:
+        self.bits = bits
+
+    def held_bits(self) -> int:
+        return self.bits
+
+    def size_bits(self) -> int:
+        return self.bits
+
+
+def test_a_memory_used_a_tenth_of_the_run_is_a_tenth_occupied():
+    """100 bits held from 10 us to 20 us of a 100 us run: 10 bits on average.
+
+    The average is the integral over the run, from tick 0 to the tick
+    it is read (gem5 AvgStor: lastReset at 0, result at curTick), not
+    over the span the memory was in use, which would read full.
+    """
+    engine = types.SimpleNamespace(now=0)
+    occupancy = metrics.DecoderMemoryOccupancy(engine, {"unit": 100})
+    held = _HeldInput(100)
+    engine.now = 10_000_000
+    occupancy.deposited("unit", None, held)
+    engine.now = 20_000_000
+    occupancy.taken("unit", None, held)
+    engine.now = 100_000_000
+
+    result = occupancy.result()
+
+    unit = result["per_unit"]["unit"]
+    assert unit["time_avg_occupied_bits"] == 10.0
+    assert unit["time_avg_occupied_fraction"] == 0.1

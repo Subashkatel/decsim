@@ -91,13 +91,13 @@ COMPLEMENTARY_GAP_SWITCHING = {
     "kind": "switching",
     "confidence": "complementary_gap",
     "gap_threshold_db": 20.0,
-    "strong_window": "near_seam_pinned",
+    "strong_window": "redo_window",
 }
 CLUSTER_GAP_SWITCHING = {
     "kind": "switching",
     "confidence": "cluster_gap",
     "gap_threshold_db": 20.0,
-    "strong_window": "near_seam_pinned",
+    "strong_window": "redo_window",
 }
 
 

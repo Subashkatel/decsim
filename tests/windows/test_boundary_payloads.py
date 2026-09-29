@@ -235,12 +235,12 @@ def _pinned_faces(result) -> list:
 
 
 def _pinned_run(strong_window: str, distance: int, seed: int = 0):
-    """One shot of the seam-pinned switching experiment's switching point.
+    """One shot of the redo window switching experiment's switching point.
 
-    The yaml names near_seam_pinned; the row under test replaces it in
+    The yaml names redo_window; the row under test replaces it in
     the escalation card, which is where the build reads it from.
     """
-    config_path = CONFIGS / "experiments/switching/seam_pinned_switching.yaml"
+    config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -266,9 +266,9 @@ def test_a_pinned_face_is_charged_the_dense_width_of_its_seam_layer():
     dense row charges the seam layer, d*d-1 detectors on a bulk layer of
     a rotated surface code, so 8 bits at d=3 and 24 at d=5.
     """
-    result = _pinned_run("near_seam_pinned", 3)
+    result = _pinned_run("redo_window", 3)
     at_three = _pinned_faces(result)
-    wider = _pinned_run("near_seam_pinned", 5)
+    wider = _pinned_run("redo_window", 5)
     at_five = _pinned_faces(wider)
     widths_at_three = {payload_bits for _window_id, payload_bits in at_three}
     widths_at_five = {payload_bits for _window_id, payload_bits in at_five}
@@ -287,7 +287,7 @@ def test_a_two_faced_window_costs_the_sum_of_its_two_one_sided_halves():
     also priced on a window whose oldest layer holds two detectors and
     whose newest holds one: 2 and 1, a sum no single layer of it gives.
     """
-    result = _pinned_run("forward_seam_pinned", 3, 1)
+    result = _pinned_run("double_window", 3, 1)
     faces = _pinned_faces(result)
     charged = _charge_by_window(faces)
     counts = _face_counts(faces)
@@ -336,14 +336,14 @@ def _one_sided_halves() -> tuple:
 def test_a_far_pin_is_charged_the_layer_its_mask_lands_on():
     """The far face lands on the strong window's newest read layer.
 
-    On forward_seam_pinned at d=3, seed 0, the escalated window (1,0)
+    On double_window at d=3, seed 0, the escalated window (1,0)
     reads rounds 1 to 9 and pins its far face on (1,3), which commits
     from round 10: the message updates round 9, a bulk layer of
     d*d-1 = 8 detectors, while round 1 carries only (d*d-1)/2 = 4.
     Bombin 2303.04846 lines 775-788 makes that update the input the
     strong task reads, and it is one layer.
     """
-    result = _pinned_run("forward_seam_pinned", 3, 0)
+    result = _pinned_run("double_window", 3, 0)
     near, far = _pins_by_direction(result)
     assert far == [8]
     assert near == [8]

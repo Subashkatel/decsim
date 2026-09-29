@@ -43,6 +43,9 @@ class RoundTransmitter:
     # The weak syndrome buffer's port toward the controller: it handles what
     # lands there and asks the store to send what leaves it
     weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver)
+    # the line in front of the packing stage, which a round that left
+    # its route frees a place for
+    packing_line = ports.Port(ports.HeldRounds)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -107,7 +110,9 @@ class RoundTransmitter:
         self.engine.schedule(0, self._leave, label="round publication complete")
 
     def _leave(self) -> None:
+        """The round left the packing stage, so a waiting round may enter."""
         self.in_flight -= 1
+        self.packing_line.retry()
 
     def _send_feedback_memory(self, packed: round_records.PackedRound) -> None:
         """Send it up to the store, which writes it and sends it on.

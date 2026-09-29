@@ -17,6 +17,7 @@ import functools
 
 import decsim.config as config
 import decsim.decoders.decoder_manager as decoder_manager
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
@@ -120,18 +121,20 @@ def _job(index, label, deps_remaining, gate=None, input_key=None, window=None):
 def _manager(engine, unit_count):
     """The manager these tests dispatch on, at that many units."""
     decoder = decoders.PresetLatencyDecoder(DECODE_MICROSECONDS)
-    router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
-        engine,
-        router=router,
-        scheduler=scheduler,
-        strong_requests=strong_requests,
-        unit_pools={"default": unit_count},
-        escalation_policy=policy,
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=unit_count
     )
+    manager = decoder_manager.DecoderManager(
+        engine,
+        scheduler=scheduler,
+        pool_settings=pool_settings,
+    )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = decoder
+    manager.escalation_policy = policy
+    return manager
 
 
 def _ignore(_job, _result):
@@ -144,9 +147,9 @@ def test_a_blocked_job_never_displaces_a_startable_one():
     dispatched = []
     original_dispatch_to = manager.service.dispatch_to
 
-    def recording_dispatch_to(pool, job, unit, claim_compute):
+    def recording_dispatch_to(job, unit, claim_compute):
         dispatched.append(job.label)
-        original_dispatch_to(pool, job, unit, claim_compute)
+        original_dispatch_to(job, unit, claim_compute)
 
     manager.service.dispatch_to = recording_dispatch_to
     # a computes and b lands in the second slot: the unit is full, so

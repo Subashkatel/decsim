@@ -36,6 +36,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
 
     operation_circuit_scope = "none"
     takes_code_card = False
+    emits_bit_values = True
 
     def __init__(
         self,

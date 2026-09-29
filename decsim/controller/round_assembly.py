@@ -7,13 +7,21 @@ it to the writer once that placement's own time is charged
 (detector_error_model/detection_event_formation.py, seated by
 detection_events.formed_at). Caune et al. 2410.05202 measure
 250 to 370 FPGA cycles for packetization, bus transfer, result return
-and the conditional together, an upper bound for the packing time. The stage
-admits a bounded number of rounds at once
+and the conditional together, an upper bound for the packing time. The
+stage admits a bounded number of rounds at once
 (controller.packing_rounds_in_flight, RoundsInFlight): a round counts
-from its first fragment until the windows hear of it, whether it is
-still in assembly, held for store room or on its route. A full stage
-stops the run: the QPU never pauses and nothing upstream can hold a
-fragment.
+from its emission until the windows hear of it, whether it is still on
+the readout link, in assembly, held for store room or on its route.
+Rounds take places in the order the QPU emitted them. A round that
+finds the stage full waits in front of it, whole, and enters when a
+round leaves the stage. The QPU keeps measuring (qpu/cycle_clock.py),
+so the wait is the controller's. A refused transfer waits at its sender
+and is offered again on the retry (gem5 src/mem/port.hh:244-262; garnet
+keeps a message at the head of its MessageBuffer while no virtual
+channel has a credit, NetworkInterface.cc:207-218 and :397-400; Helios
+pops its upstream FIFO only when the next one is ready,
+design/channels/pu_arbitration.sv:142-148), so it is the same waiting
+line the sender keeps in front of the stores (HeldRounds).
 """
 
 import dataclasses
@@ -36,16 +44,16 @@ _SEAT = "controller"
 class RoundsInFlight:
     """The rounds in flight through the packing stage, against the bound.
 
-    A round is in flight from its first fragment until the windows hear
-    of it: its publication on the window route, its delivery on the
+    A round is in flight from its emission until the windows hear of
+    it: its publication on the window route, its delivery on the
     memory route, its landing in the strong syndrome buffer on a
     strong-primary run. Until then it is in one of four places, in
-    assembly here, held for store room (HeldRounds), on its route
-    (RoundTransmitter) or crossing to the strong syndrome buffer
-    (SyndromeRoundSender), and each place keeps its own count; the
-    stage's count is their sum, read when a first fragment asks for
-    room, so no exit can forget a release. A dropped round leaves at
-    its drop.
+    assembly here (from its emission, while its readout crosses too),
+    held for store room (HeldRounds), on its route (RoundTransmitter) or
+    crossing to the strong syndrome buffer (SyndromeRoundSender), and
+    each place keeps its own count; the stage's count is their sum, read
+    when an emitted round asks for room, so no exit can forget a release.
+    A round waiting in front of the stage is not in it.
     """
 
     held_rounds = ports.Port(ports.HeldRounds)
@@ -66,14 +74,6 @@ class RoundsInFlight:
         on_route = self._on_route()
         return in_assembly + self.held_rounds.count + on_route
 
-    def downstream_text(self) -> str:
-        """The rounds in flight past assembly, for the refusal sentence."""
-        on_route = self._on_route()
-        return (
-            f"held for store room: {self.held_rounds.count}, on their "
-            f"route: {on_route}"
-        )
-
     def _on_route(self) -> int:
         """The rounds sent and not yet heard of by the windows."""
         strong_crossing_count = self.syndrome_round_sender.strong_crossing_count
@@ -83,14 +83,17 @@ class RoundsInFlight:
 class RoundAssembler:
     """Fragments in, one packed round out, after the packing time.
 
-    Trace sources: round_event(RoundEvent) with kinds BINARY_AVAILABLE,
-    PACKED and DROPPED; copy_made(round_key, bits, "controller intake",
+    Trace sources: round_event(RoundEvent) with kinds BINARY_AVAILABLE
+    and PACKED; copy_made(round_key, bits, "controller intake",
     "controller assembler") for the merged round (data_path.md hop 2).
     """
 
     syndrome_round_sender = ports.Port(ports.SyndromeRoundSender)
     detection_events = ports.Port(ports.DetectionEventPlacement)
     rounds_in_flight = ports.Port(RoundsInFlight)
+    # the line a round waits in while the stage is full; the ends a
+    # round leaves the stage by retry it
+    packing_line = ports.Port(ports.HeldRounds)
 
     def __init__(
         self,
@@ -99,29 +102,46 @@ class RoundAssembler:
     ) -> None:
         self.engine = engine
         self.settings = settings
-        self.workspace = _Workspace(settings.packing_overflow)
+        self.workspace = _Workspace()
         self.trace = _TraceSources()
 
     def expect_round(
         self,
         fragment: round_records.RetainedSyndromeFragment,
+        fragment_count: int,
         route: round_records.SyndromePacketRoute,
     ) -> None:
-        """Declare emission order before transport can reorder arrivals.
+        """The QPU emitted the round: it takes its place, or waits for one.
 
-        This reserves identity only. Packing capacity starts at arrival,
-        and a ready round retires after its predecessors, as gem5's
-        src/cpu/o3/commit.cc commitInsts retires the ready head per thread.
+        Places are taken in emission order, before transport can reorder
+        the arrivals, as gem5's O3 rename stalls in program order when the
+        reorder buffer has no free entry (src/cpu/o3/rename.cc:556-584)
+        and commit inserts in that order (src/cpu/o3/commit.cc:1295-1316).
+        A ready round retires after its predecessors, as commitInsts
+        retires the ready head per thread. A round that arrives early
+        therefore never holds the place its predecessor needs.
         """
-        self.workspace.expect_round(fragment, route)
+        identity = _round_identity(fragment, route)
+        if self.workspace.context_of(identity) is not None:
+            return
+        self.workspace.expect_round(identity)
+        round_key = (fragment.operation_id, fragment.round_index)
+        context = _PackingContext(identity, round_key, route, fragment_count)
+        self.workspace.waiting_by_identity[identity] = context
+        if self.packing_line.count == 0 and self._enter(context):
+            return
+        self.packing_line.refuse(context, self._enter)
 
     def add(
         self,
         fragment: round_records.RetainedSyndromeFragment,
-        fragment_count: int,
         route: round_records.SyndromePacketRoute,
     ) -> None:
-        """Take one fragment; the round is packed when its last one arrives."""
+        """Take one fragment; the round is packed when its last one arrives.
+
+        A fragment of a round still waiting for its place is kept with
+        the round, which packs when it takes the place.
+        """
         available = round_records.RoundEvent.of(
             "BINARY_AVAILABLE",
             self.engine.now,
@@ -131,23 +151,14 @@ class RoundAssembler:
             fragment.patch_ids,
         )
         self.trace.round_event.fire(available)
-        round_key = (fragment.operation_id, fragment.round_index)
-        if self.workspace.is_dropped(round_key):
-            return
-        context = self._context_for(fragment, fragment_count, route)
-        if context is None:
-            return
+        identity = _round_identity(fragment, route)
+        context = self.workspace.context_of(identity)
         context.fragments.append(fragment)
+        if not self.workspace.is_in_assembly(context):
+            return
         if len(context.fragments) != context.fragment_count:
             return
-        packing_cycles = self.settings.packing_cycles_per_round
-        if packing_cycles > 0:
-            now = self.engine.now
-            delay = self.settings.clock.ticks_to_edge(packing_cycles, now)
-            finish = functools.partial(self._finish_packing, context)
-            self.engine.schedule(delay, finish, label="controller pack")
-            return
-        self._finish_packing(context)
+        self._pack(context)
 
     def check_settled(self) -> None:
         """At the end of a run no round may still be in assembly."""
@@ -158,38 +169,30 @@ class RoundAssembler:
                 f"{partial}"
             )
 
-    def _context_for(self, fragment, fragment_count, route):
-        """The live context of the fragment's round, opened on its first.
+    def _enter(self, context) -> bool:
+        """A waiting round takes a place in the stage, when one is free.
 
-        None when the round was dropped for want of a context.
+        A round whose fragments all arrived while it waited starts its
+        packing at this tick, after the line has let it go.
         """
-        round_key = (fragment.operation_id, fragment.round_index)
-        identity = _round_identity(fragment, route)
-        context = self.workspace.context_by_identity.get(identity)
-        if context is not None:
-            return context
-        if self.workspace.has_room(self.rounds_in_flight):
-            context = _PackingContext(
-                identity, round_key, route, fragment_count
-            )
-            self.workspace.context_by_identity[identity] = context
-            return context
-        dropped = self.workspace.refuse(
-            self.rounds_in_flight, round_key, self.engine.now
-        )
-        if dropped:
-            drop = round_records.RoundEvent.of(
-                "DROPPED",
-                self.engine.now,
-                fragment.operation_id,
-                fragment.round_index,
-                route,
-                fragment.patch_ids,
-            )
-            self.trace.round_event.fire(drop)
-            self.workspace.retire(identity)
-            self._release_ready_rounds(identity)
-        return None
+        if not self.workspace.has_room(self.rounds_in_flight):
+            return False
+        self.workspace.enter(context)
+        if len(context.fragments) == context.fragment_count:
+            pack = functools.partial(self._pack, context)
+            self.engine.schedule(0, pack, label="controller pack")
+        return True
+
+    def _pack(self, context) -> None:
+        """Charge the packing time once for the complete round."""
+        packing_cycles = self.settings.packing_cycles_per_round
+        if packing_cycles > 0:
+            now = self.engine.now
+            delay = self.settings.clock.ticks_to_edge(packing_cycles, now)
+            finish = functools.partial(self._finish_packing, context)
+            self.engine.schedule(delay, finish, label="controller pack")
+            return
+        self._finish_packing(context)
 
     def _finish_packing(self, context) -> None:
         context.is_ready = True
@@ -274,29 +277,17 @@ class _PackingContext:
 class _Workspace:
     """The rounds in assembly, admitted against the stage's bound."""
 
-    def __init__(
-        self,
-        overflow: controller_settings.PackingOverflowPolicy,
-    ) -> None:
-        self.overflow = overflow
+    def __init__(self) -> None:
         self.context_by_identity: dict = {}
         self.expected_by_stream: dict[tuple, dict] = {}
-        # rounds refused for want of a context; their later fragments
-        # are ignored
-        self.dropped_round_keys: set = set()
+        # rounds in the line in front of the stage, collecting fragments
+        self.waiting_by_identity: dict = {}
 
-    def expect_round(
-        self,
-        fragment: round_records.RetainedSyndromeFragment,
-        route: round_records.SyndromePacketRoute,
-    ) -> None:
-        round_key = (fragment.operation_id, fragment.round_index)
-        if self.is_dropped(round_key):
-            return
-        identity = _round_identity(fragment, route)
+    def expect_round(self, identity: tuple) -> None:
+        """The round is next in its stream's retirement order."""
         stream = identity[:-1]
         pending = self.expected_by_stream.setdefault(stream, {})
-        pending.setdefault(identity, None)
+        pending[identity] = None
 
     def first_for(self, identity: tuple) -> Optional[_PackingContext]:
         stream = identity[:-1]
@@ -315,27 +306,20 @@ class _Workspace:
         in_assembly = len(self.context_by_identity)
         return rounds_in_flight.has_room(in_assembly)
 
-    def is_dropped(self, round_key) -> bool:
-        return round_key in self.dropped_round_keys
+    def context_of(self, identity: tuple) -> Optional[_PackingContext]:
+        """The round's context, in assembly or waiting for a place."""
+        context = self.context_by_identity.get(identity)
+        if context is not None:
+            return context
+        return self.waiting_by_identity.get(identity)
 
-    def refuse(
-        self, rounds_in_flight: RoundsInFlight, round_key, tick: int
-    ) -> bool:
-        """A round that found no context: dropped, or the run stops."""
-        drop = controller_settings.PackingOverflowPolicy.DROP_ROUND
-        if self.overflow is drop:
-            self.dropped_round_keys.add(round_key)
-            return True
-        capacity = rounds_in_flight.capacity
-        in_assembly = sorted(self.context_by_identity, key=repr)
-        downstream = rounds_in_flight.downstream_text()
-        raise RuntimeError(
-            f"the packing workspace is full at tick {tick}: round "
-            f"{round_key!r} arrived while {capacity} rounds were in "
-            f"flight through the controller (controller."
-            f"packing_rounds_in_flight is {capacity}; in assembly: "
-            f"{in_assembly}, {downstream})"
-        )
+    def is_in_assembly(self, context: _PackingContext) -> bool:
+        return context.identity in self.context_by_identity
+
+    def enter(self, context: _PackingContext) -> None:
+        """The waiting round moves into assembly."""
+        del self.waiting_by_identity[context.identity]
+        self.context_by_identity[context.identity] = context
 
     def forget(self, context: _PackingContext) -> None:
         self.context_by_identity.pop(context.identity, None)

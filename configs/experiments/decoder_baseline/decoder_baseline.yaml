@@ -41,12 +41,12 @@ sweep:
         - {kind: pymatching, units: 1, unit_memory: {bits: null},
            engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
                     release_cycles_per_job: 10, release_cycles_per_round: 0}}
-        # Relay-BP-1: Mueller et al. 2506.01779 surface values (lines 307,
-        # 332, 343); relay_set_count 300 is R 301; X and Z decoded apart
+        # XYZ-Relay-BP-5: Mueller et al. 2506.01779 surface values (lines
+        # 307, 332, 343); relay_set_count 600 is R 601; X and Z together
         - {kind: relay_bp, units: 1, unit_memory: {bits: null},
            gamma0: 0.35, gamma_interval: [-0.254, 0.985],
-           relay_set_count: 300, converged_solution_count: 1,
-           pre_iterations: 80, iterations_per_set: 60, bases: apart,
+           relay_set_count: 600, converged_solution_count: 5,
+           pre_iterations: 80, iterations_per_set: 60, bases: together,
            engine: {clock: fridge, fetch_cycles_per_round: 1, fetch_cycles_per_job: 0,
                     release_cycles_per_job: 10, release_cycles_per_round: 0}}
         # Tesseract: the package's tesseract-short-beam profile

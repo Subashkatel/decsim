@@ -17,7 +17,11 @@ import pytest
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
+import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
+import tests.declared_run as declared_run
+import tests.experiments.test_measure as measure_tests
 import tests.observe.gate_point as gate_point
 
 SEED = gate_point.SEED
@@ -25,6 +29,18 @@ POINT_LOG_SHA256 = gate_point.POINT_LOG_SHA256
 
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
 _METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
+# the switching run's one-microsecond weak card
+ONE_MICROSECOND_WEAK = {
+    "kind": 1.0,
+    "unit_memory": {"bits": None},
+    "engine": {
+        "clock": "fridge",
+        "fetch_cycles_per_round": 1,
+        "fetch_cycles_per_job": 0,
+        "release_cycles_per_job": 10,
+        "release_cycles_per_round": 0,
+    },
+}
 
 
 def _settings(trace_path=None, data_movement=False):
@@ -235,6 +251,17 @@ def _tick_spans_by_tid(complete_rows) -> dict:
     return spans_by_tid
 
 
+def _lanes_with_overlapping_spans(spans_by_tid: dict) -> list:
+    """The lanes on which a span starts before the one before it ends."""
+    overlapping = []
+    for thread_id in sorted(spans_by_tid):
+        ordered = sorted(spans_by_tid[thread_id])
+        pairs = zip(ordered, ordered[1:], strict=False)
+        if any(later[0] < earlier[1] for earlier, later in pairs):
+            overlapping.append(thread_id)
+    return overlapping
+
+
 def _rows_outside_every_span(rows, spans_by_tid: dict) -> list:
     """The rows whose tick no span on their own lane covers."""
     outside = []
@@ -245,6 +272,80 @@ def _rows_outside_every_span(rows, spans_by_tid: dict) -> list:
         if not covered:
             outside.append(row)
     return outside
+
+
+@pytest.mark.parametrize("run_both_at_once", [False, True])
+def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
+    tmp_path, run_both_at_once
+):
+    """Two decodes of one window on two units keep two lanes.
+
+    The forced-class pair of a complementary gap runs on both weak
+    units at once, and under run_both_at_once the speculative strong
+    decode does too. A slice's tid is its lane, and slices on one lane must nest
+    (Perfetto, "Other trace formats": overlapping, non-nested events
+    are out of spec), so every lane that served a decode carries that
+    decode's stages and no two of its stages overlap.
+    """
+    trace_path = tmp_path / "pair.trace.json"
+    observation = {"trace": str(trace_path)}
+    weak_decoder = {**ONE_MICROSECOND_WEAK, "units": 2}
+    sections = {"weak_decoder": weak_decoder, "observation": observation}
+    shot = measure_tests.switching_run(
+        tmp_path,
+        20.0,
+        run_both_at_once=run_both_at_once,
+        strong_units=2,
+        sections=sections,
+    )
+    document = shot.machine.observation.trace_writer.document()
+    complete_rows = _by_phase(document, "X")
+    stages = _rows_with(complete_rows, "cat", "stage")
+    services = _rows_with(complete_rows, "cat", "window,service")
+
+    stage_spans_by_tid = _tick_spans_by_tid(stages)
+    service_lanes = {row["tid"] for row in services}
+    assert len(service_lanes) > 2
+    assert set(stage_spans_by_tid) == service_lanes
+    assert _lanes_with_overlapping_spans(stage_spans_by_tid) == []
+
+
+def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
+    """A factory's two correction decodes at once run on two lanes.
+
+    A correction decode serves no request, so the window and its run
+    ordinals are the same for both. The stage record names the unit
+    that ran it, as each LLVM XRay record carries its thread, and each
+    decode's stages sit on its own service's lane.
+    """
+    factory = qpu_settings.FactorySettings.from_yaml(
+        {
+            "kind": "distillation",
+            "unit_count": 1,
+            "attempt_ticks": 100,
+            "correction_round_count": 3,
+            "correction_decode_count": 2,
+            "production_mode": "continuous",
+            "buffer_capacity": 1,
+        }
+    )
+    point = gate_point.settings(trace="chrome")
+    weak_decoder = dataclasses.replace(point.weak_decoder, units=2)
+    point = dataclasses.replace(
+        point, weak_decoder=weak_decoder, magic_state_factory=factory
+    )
+    machine = machine_module.Machine.build(point, SEED)
+    machine.run()
+
+    document = machine.observation.trace_writer.document()
+    complete_rows = _by_phase(document, "X")
+    stages = _rows_with(complete_rows, "cat", "stage")
+    services = _rows_with(complete_rows, "cat", "window,service")
+    stage_spans_by_tid = _tick_spans_by_tid(stages)
+    service_lanes = {row["tid"] for row in services}
+    assert len(service_lanes) == 2
+    assert set(stage_spans_by_tid) == service_lanes
+    assert _lanes_with_overlapping_spans(stage_spans_by_tid) == []
 
 
 def test_every_flow_chain_has_a_number_of_its_own(traced):
@@ -505,7 +606,7 @@ def _last_rounds_data_ready(document, ready) -> list:
 def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
     """The C track of the unit's memory is the memory's own occupancy."""
     machine, _result, document = traced
-    (unit,) = machine.decoder_manager.pool.units()
+    (unit,) = machine.decoder_manager.pool.units
     name = f"{unit.memory.name} bits"
     values = _counter_values(document, name, "bits")
 
@@ -535,6 +636,33 @@ def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):
     steps = _counter_values(document, "controller assembler rounds", "rounds")
     assert max(steps) == 1
     assert steps[-1] == 0
+
+
+def test_a_round_waits_for_a_packing_place_before_it_takes_one():
+    """The stage never holds more rounds than its bound, in the trace too.
+
+    On the declared card with a bound of one, round 1 takes the place at
+    its emission, 1 us, and is published at 10 us. Round 2 is emitted at
+    2 us, waits in front of the stage from then, and takes round 1's
+    place at 10 us (controller/round_assembly.py).
+    """
+    controller = declared_run.declared_controller(packing_rounds_in_flight=1)
+    observation = observe_settings.ObservationSettings(trace="chrome")
+    machine = declared_run.weak_only_run(
+        rounds=3, controller=controller, observation=observation
+    )
+    document = machine.observation.trace_writer.document()
+
+    waiting = _one(document, "X", "wait round 2 for a packing place")
+    assembly = _one(document, "X", "assemble round 2")
+    in_stage = _counter_values(
+        document, "controller assembler rounds", "rounds"
+    )
+    assert waiting["args"]["held_from"] == 2_000_000
+    assert waiting["args"]["freed"] == 10_000_000
+    assert assembly["args"]["slot_taken"] == 10_000_000
+    assert assembly["args"]["capacity"] == 1
+    assert max(in_stage) == 1
 
 
 def _counter_values(document, name: str, series: str) -> list:

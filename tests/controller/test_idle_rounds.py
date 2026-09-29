@@ -11,8 +11,6 @@ on a live protected stream emits through the stream, not here.
 
 import types
 
-import pytest
-
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.policies as policies
 import decsim.observe.controller_counters as controller_counters
@@ -40,6 +38,17 @@ class RecordingStreams:
         del operation
         del patch
         return False
+
+    def bind_at_start(self, command):
+        return command
+
+
+class RecordingWindows:
+    def __init__(self):
+        self.prepended = []
+
+    def prepend_idle_rounds(self, operation_id, count):
+        self.prepended.append((operation_id, count))
 
 
 class RecordingDecodeQueue:
@@ -79,6 +88,7 @@ def accounting_with(policy, streams=None):
     accounting.decode_queue = demand
     accounting.streams = streams
     accounting.qpu = qpu
+    accounting.windows = RecordingWindows()
     memory = program_records.Operation(
         7, "memory", ("patch-a",), patches=("patch-a",)
     )
@@ -88,6 +98,14 @@ def accounting_with(policy, streams=None):
     program = program_records.ExecutionProgram((memory, other))
     accounting.load(program)
     return accounting, qpu, demand
+
+
+def started(accounting, operation):
+    """The QPU starts the operation's command on its patches."""
+    command = program_records.RunOperationBody(
+        operation, round_ticks=1000, round_count=3, source_round_count=3
+    )
+    return accounting.start_command(command)
 
 
 def counters_on(accounting):
@@ -121,41 +139,54 @@ def test_the_rounds_emitted_on_a_patch_are_claimed_once_by_the_operation():
     ]
 
 
-def test_a_claim_that_fails_on_a_later_patch_keeps_the_earlier_claims():
-    """A claim is not a transaction: a patch already claimed stays claimed.
-
-    An operation whose second patch identity is unhashable fails at that
-    patch; the four rounds of its first patch are already claimed and are
-    not restored, and the other patch's round is untouched.
-    """
-    ignore = policies.Ignore()
-    accounting, _qpu, _demand = accounting_with(ignore)
-    for round_index in (1, 2, 3, 4):
-        accounting.emit_idle_round(7, "patch-a", round_index)
-    accounting.emit_idle_round(8, "patch-b", 1)
-    malformed = program_records.Operation(
-        9, "malformed", ("q",), patches=("patch-a", [])
-    )
-
-    with pytest.raises(TypeError):
-        accounting.claim(malformed)
-
-    unclaimed_by_patch = {
-        patch: idle.unclaimed
-        for patch, idle in accounting.idle_by_patch.items()
-    }
-    assert unclaimed_by_patch == {"patch-a": 0, "patch-b": 1}
-
-
 def test_an_operation_without_patches_claims_by_its_qubits():
     ignore = policies.Ignore()
     accounting, _qpu, _demand = accounting_with(ignore)
     operation = program_records.Operation(9, "bare", ("patch-a", "patch-b"))
 
     accounting.emit_idle_round(7, "patch-a", 1)
-    accounting.emit_idle_round(8, "patch-b", 1)
+    accounting.emit_idle_round(7, "patch-a", 2)
 
     assert accounting.claim(operation) == 2
+
+
+def test_patches_idle_through_the_same_cycles_claim_each_cycle_once():
+    """Two patches idle through three cycles are three rounds of history.
+
+    A code cycle measures every check of every patch once (Litinski
+    1808.02892 lines 204-206).
+    """
+    ignore = policies.Ignore()
+    accounting, _qpu, _demand = accounting_with(ignore)
+    both = program_records.Operation(
+        9, "both", ("patch-a", "patch-b"), patches=("patch-a", "patch-b")
+    )
+
+    for round_index in (1, 2, 3):
+        accounting.emit_idle_round(7, "patch-a", round_index)
+        accounting.emit_idle_round(8, "patch-b", round_index)
+
+    assert accounting.claim(both) == 3
+
+
+def test_an_operation_claims_its_idle_rounds_when_it_starts():
+    """The windows hear every idle cycle before the start, and no more.
+
+    A waiting patch keeps measuring until the operation starts on it, and
+    those rounds must be decoded too (Quantum Machines 2412.00289 lines
+    524-531).
+    """
+    ignore = policies.Ignore()
+    accounting, _qpu, _demand = accounting_with(ignore)
+    operation = accounting.operation_by_id[7]
+
+    for round_index in (1, 2, 3, 4):
+        accounting.emit_idle_round(7, "patch-a", round_index)
+    command = started(accounting, operation)
+
+    assert command.operation is operation
+    assert accounting.windows.prepended == [(7, 4)]
+    assert accounting.claim(operation) == 0
 
 
 def test_a_patch_on_a_live_protected_stream_emits_through_the_stream():
@@ -177,7 +208,7 @@ def test_the_charged_policy_costs_one_job_per_region_and_the_remainder():
 
     for round_index in (1, 2, 3, 4, 5):
         accounting.emit_idle_round(7, "patch-a", round_index)
-    accounting.end_idle_period(operation, "patch-a")
+    started(accounting, operation)
 
     rounds_and_labels = [
         (job["rounds"], job["label"]) for job in demand.demands

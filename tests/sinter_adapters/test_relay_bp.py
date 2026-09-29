@@ -46,13 +46,12 @@ ENGINE = {
     "release_cycles_per_job": 10,
     "release_cycles_per_round": 0,
 }
-# The machine's seed path to its weak row's gamma table: the router's
-# seed root (assembly.SEED_ROOTS, decoder_router), its default row, the
-# row's algorithm decoder, and the window decoder that draws the table
+# The machine's seed path to its weak row's gamma table: the decoder's
+# seed root (assembly.SEED_ROOTS, primary_decoder), the row's algorithm
+# decoder, and the window decoder that draws the table
 # (decoders/relay_belief_propagation/window_decoder.py).
 GAMMA_TABLE_SEED_PATH = (
-    seed_records.RunSeedPathSegment("field", "decoder_router"),
-    seed_records.RunSeedPathSegment("field", "default"),
+    seed_records.RunSeedPathSegment("field", "primary_decoder"),
     seed_records.RunSeedPathSegment("field", "decoder"),
     seed_records.RunSeedPathSegment("field", "window_decoder"),
 )

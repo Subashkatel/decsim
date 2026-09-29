@@ -16,6 +16,7 @@ import decsim.decoders.dispatch_steps.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
+import decsim.links.channel as channel_module
 import decsim.links.link_profiles as link_profiles
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
@@ -118,8 +119,8 @@ def test_the_host_path_hands_the_dispatcher_to_a_worker_at_launch():
     ]
 
 
-def _escalation_round_trip(profile) -> int:
-    """The link legs a strong decode's request and answer cross, in ticks."""
+def _escalation_round_trip(profile, echo_bits: int) -> int:
+    """The legs an echo of `echo_bits` crosses out and back, in ticks."""
     legs = (
         profile.weak_decoder_to_strong_decoder,
         profile.strong_buffer_to_strong_decoder,
@@ -128,20 +129,30 @@ def _escalation_round_trip(profile) -> int:
     ticks = 0
     for leg in legs:
         ticks += leg.channel.propagation_latency_ticks
+        ticks += _wire_ticks(leg.channel, echo_bits)
     return ticks
 
 
+def _wire_ticks(channel, bits: int) -> int:
+    """The bits' time on a bounded wire; an unbounded one takes none."""
+    if channel.capacity is None:
+        return 0
+    return channel_module.serialization_ticks(bits, channel.capacity)
+
+
 @pytest.mark.parametrize(
-    "card_name, echo_microseconds",
-    [("roce_v2_gpu", 4.5), ("nvqlink_gpu", 3.839)],
+    "card_name, echo_bits, echo_microseconds",
+    [("roce_v2_gpu", 128, 4.5), ("nvqlink_gpu", 256, 3.839)],
 )
 def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
-    card_name, echo_microseconds
+    card_name, echo_bits, echo_microseconds
 ):
     """Backline 2609.09270 Table III, 4.5 us; NVQLink 2510.25213, 3.839 us.
 
-    The echo's own steps add no ticks, so the link legs alone are the
-    measured round trip: nothing is counted twice.
+    Each echoed a 16- and a 32-byte payload (2609.09270 line 1611,
+    2510.25213 lines 402-403). The echo's own steps add no ticks, so the
+    link legs with that payload's wire time are the measured round trip:
+    nothing is counted twice.
     """
     pytest.importorskip("relay_bp")
     card = link_profiles.LINK_FABRICS[card_name]
@@ -153,7 +164,7 @@ def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
     steps = backend.steps(ticket)
     echo_steps = (steps[0], steps[1], steps[2], steps[5])
     echo_ticks = sum(step.ticks for step in echo_steps)
-    round_trip = _escalation_round_trip(profile) + echo_ticks
+    round_trip = _escalation_round_trip(profile, echo_bits) + echo_ticks
     assert round_trip == config.microseconds_to_ticks(echo_microseconds)
 
 

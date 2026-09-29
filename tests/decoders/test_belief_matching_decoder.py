@@ -7,7 +7,9 @@ and matches with -log(posterior) weights; when BP converges it returns
 BP's own correction instead. This test runs its matching branch on its
 own matrices for every shot and asks decsim's row for the same
 observable; the posterior clamp is the one line that may differ (1e-15
-here, 1e-14 there).
+here, 1e-14 there). Its matrices hold one column per distinct hyperedge
+(lines 104-136), and 300 shots reach a syndrome where that merging
+decides the answer (shot 238).
 """
 
 import beliefmatching
@@ -19,7 +21,7 @@ import decsim.detector_error_model.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 ROUNDS = 3
-SHOTS = 100
+SHOTS = 300
 CLAMP = 1e-14
 
 

@@ -95,6 +95,19 @@ class SeatedFormation:
         history.hold(round_before)
         return history.form(fragments)
 
+    def width_at(self, seat: str, fragments: tuple) -> Optional[int]:
+        """The width one round's fragments leave the seat at, forming nothing.
+
+        A store weighs its room at the width it will hold, as gem5 makes
+        room for a block at the size its compressor will store it at
+        (src/mem/cache/base.cc:1678-1698), so the width is asked before
+        the round lands and must not move the seat's history.
+        """
+        history = self.history_by_seat.get(seat)
+        if history is None:
+            return round_records.fragment_wire_bits(fragments)
+        return history.width(fragments)
+
     def needs_the_round_before(
         self, seat: str, operation_id: Any, round_index: int
     ) -> bool:
@@ -167,6 +180,26 @@ class _SeatHistory:
             leaving = self._form_round(round_fragments)
             formed.extend(leaving)
         return tuple(formed)
+
+    def width(self, fragments: tuple) -> Optional[int]:
+        """The width one round's fragments take once formed here.
+
+        The width form gives them: the landed width at a decoder seat or
+        for a timing-only round, the stated event width for a source with
+        no recipes, and one bit per detector of the round otherwise
+        (detector_formation.StreamingDetectorFormer.feed_packet).
+        """
+        if self.keeps_landed_width:
+            return round_records.fragment_wire_bits(fragments)
+        if self.recipes is None:
+            stated = self._at_the_stated_width(fragments)
+            return round_records.fragment_wire_bits(stated)
+        if _joined_bits(fragments) is None:
+            return round_records.fragment_wire_bits(fragments)
+        first = fragments[0]
+        table = self.recipes.formation_table(first.operation_id)
+        detectors = table.detectors_of_round(first.round_index)
+        return len(detectors)
 
     def _at_the_stated_width(self, fragments: tuple) -> tuple:
         """Each fragment at the event width its source stated.

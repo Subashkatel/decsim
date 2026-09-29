@@ -49,6 +49,14 @@ POINTS = (
     "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
+    # that last round readable -> the job entered the decode queue: the
+    # window side's decision (windows.decision_cycles) and any earlier
+    # request of the window that was withdrawn before it, as a restart
+    # window's is when a forward strong window re-slices it. Ciw keeps
+    # a customer's pre-service wait as a field of its own and writes a
+    # visit that left the queue unserved as its own record (ciw
+    # data_record.py lines 3-21, node.py write_reneging_record)
+    "admission_wait",
     # the dependency wait around the committing decode's own hop: from
     # where its path started, the dispatch or the verdict that escalated
     # the window, to the first tick it may compute, less the input hop
@@ -72,17 +80,30 @@ POINTS = (
     # window out of its own memory)
     "fetch",
     "algorithm",  # the fetch's end -> the decoding algorithm's end
+    # inside the algorithm: the ticks a strong backend's decode waited
+    # for its dispatcher or a worker (decoders/strong_backend.py), summed
+    # as Ciw writes a customer's wait (ciw node.py lines 856-862). The
+    # algorithm less this is the device's own steps: launch, copies and
+    # kernel. Zero for a decoder with no queue of its own
+    "backend_queue_wait",
     "release",  # the algorithm's end -> the correction written out
     # the compute start -> the decode's end: every stage the unit ran,
-    # and nothing the decode waited for
+    # and nothing the decode waited for outside the unit; a strong
+    # backend's queue holds the unit, so backend_queue_wait is inside
     "service",
     # the committing decode's end -> the verdict on the window's answer:
     # the confidence signal's own computation, which is the walk under
-    # cluster_gap and the sibling forced solve's remaining time under
-    # complementary_gap. Zero for an escalated window, whose committing
-    # decode is the strong one and whose weak_attempt already runs to
-    # the verdict
+    # cluster_gap and the other forced-class solve's remaining time under
+    # complementary_gap. Zero for an escalated window whose strong decode
+    # began after the verdict, since its weak_attempt already runs to it
     "confidence",
+    # the verdict, or the committing decode's end when later -> its answer
+    # leaving for the frame: a finished strong answer kept in its unit's
+    # output slot (decoders/decoder_unit.py hold_output) until the
+    # verdict's selection has crossed weak_decoder_to_strong_decoder, the
+    # wait a strong decode started with the weak one under
+    # run_both_at_once has; zero for every other window
+    "selection_wait",
     # a unit took the window's first decode -> the verdict that
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
@@ -107,6 +128,10 @@ POINTS = (
     "qpu_last_round_to_frame",  # last required round off QPU -> frame
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
 )
+
+# the points sampled once a round, not once a window, so no committing
+# tier names their samples
+ROUND_POINTS = ("cwb_per_round", "cwb_stall_per_round", "csb_stall_per_round")
 
 # One count column per status a committed window's decode may carry
 # besides success (records/decoding.py BackendDecodeStatus), so a status
@@ -141,7 +166,7 @@ class ShotConfidence:
     records (records/decoding.py) in window order; is_sampled says
     whether the shot is one of the first observation.confidence_shot_count
     shots, whose windows window_confidence.csv lists, while the histogram
-    counts every shot. sampled_shot_count is that count, None for every
+    counts every scored shot. sampled_shot_count is that count, None for every
     shot, which piece.json records so a fold can tell pieces that
     sampled different shots apart.
     """
@@ -164,6 +189,11 @@ class ShotMeasurement:
     decoded_windows: int
     logical_failure: bool
     samples: dict  # point -> us list, one per window (per round for cwb)
+    # the tier whose decode the frame committed, one per window in the
+    # samples' order: weak for a kept window, strong for an escalated one
+    # on a run the weak tier decodes, as Ciw writes each record's
+    # customer class (ciw node.py lines 856-862)
+    window_tiers: tuple
     means: dict  # point -> mean us over this shot's windows
     maxes: dict  # point -> max us
     load: float  # service per window / window inter-arrival
@@ -180,12 +210,15 @@ class ShotMeasurement:
     weak_busy_fraction: float
     strong_busy_fraction: float
     # the windows the strong tier committed, the rounds its decodes read
-    # and their mean service, and r_com, the rounds a window commits: the
-    # report forms Toshio's Theorem 1 bound on that service per sweep
-    # point from the first and the last (2510.25222 eq. (6))
+    # and their summed service, and r_com, the rounds a window commits.
+    # The report divides the summed service by the summed windows per
+    # sweep point, a ratio of two sums as gem5 forms avgMissLatency =
+    # missLatency / misses (src/mem/cache/base.cc:2188), and forms
+    # Toshio's Theorem 1 bound on that mean from the windows and r_com
+    # (2510.25222 eq. (6))
     escalated_windows: int
     strong_decoded_rounds: int
-    strong_service_mean_us: float
+    strong_service_sum_us: float
     commit_rounds: int
     # tau_gen r_com: a window's inter-arrival, commit rounds times the
     # round period, which the chain's load divides by
@@ -463,18 +496,27 @@ def strong_store_round_keys(stored_rounds: list) -> list:
 
 
 def qpu_send_ticks(transfers: list) -> dict:
-    """The tick each round left the QPU (its earliest QC request), by round."""
+    """The tick each round left the QPU, by (operation, round).
+
+    A round's index counts within its operation's stream (records/
+    windows.py Window), so two operations share every index and a round
+    is found by both, as gem5 finds an instruction by its thread and its
+    sequence number (src/cpu/o3/rob.hh:131-134). A readout carries one
+    round of one operation, and a round's send is its earliest QC
+    request.
+    """
     send = {}
     for row in transfers:
         if row["path"] != "qpu_to_controller":
             continue
-        # a readout carries one round of one operation
         (rounds,) = row["attribution"]["rounds_by_operation"]
-        round_index = rounds["round_lo"]
-        earlier = send.get(round_index)
+        operation_id = identity_records.stable_identity_from_json(
+            rounds["operation_id"]
+        )
+        round_key = (operation_id, rounds["round_lo"])
         start = _hop_start_ticks(row)
-        if earlier is None or start < earlier:
-            send[round_index] = start
+        earlier = send.get(round_key, start)
+        send[round_key] = min(earlier, start)
     return send
 
 
@@ -525,7 +567,7 @@ def window_points_us(
     rather than one number (Ciw ciw/data_record.py lines 3-21).
     """
     operation_id, window_id = window.key
-    last_emitted_round = max(qpu_send)
+    last_emitted_round = _last_emitted_round(qpu_send, operation_id)
     last_required_round = min(window.buffer_hi, last_emitted_round)
     committed = frame_record.committed_ticks
     handoff_ticks = link_delay.get(
@@ -543,11 +585,16 @@ def window_points_us(
     park = _span_microseconds(startable, input_landed)
     rounds_wait = _span_microseconds(input_sent, attempt_end)
     confidence_ticks = _confidence_ticks(window, decode)
-    last_required_send = qpu_send[last_required_round]
-    first_required_send = qpu_send[window.start_round]
+    output_sent = frame_record.accepted_ticks - output_ticks
+    answered = max(window.t_done, decode.done_ticks)
+    last_required_send = qpu_send[(operation_id, last_required_round)]
+    first_required_send = qpu_send[(operation_id, window.start_round)]
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
+        ),
+        "admission_wait": _span_microseconds(
+            window.t_queued, window.t_data_complete
         ),
         "dep_block": rounds_wait + park,
         "compute_wait": _span_microseconds(
@@ -559,11 +606,15 @@ def window_points_us(
         ),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
+        "backend_queue_wait": config_module.ticks_to_microseconds(
+            decode.backend_queue_wait_ticks
+        ),
         "release": stage_us["release"],
         "service": _span_microseconds(
             decode.done_ticks, decode.compute_start_ticks
         ),
         "confidence": config_module.ticks_to_microseconds(confidence_ticks),
+        "selection_wait": _span_microseconds(output_sent, answered),
         "weak_attempt": _span_microseconds(attempt_end, first_dispatch),
         "escalation_link_per_window": config_module.ticks_to_microseconds(
             escalation_ticks
@@ -615,8 +666,8 @@ def frame_records_by_window(
 def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
-) -> dict:
-    """Every point's microsecond samples over the shot's decoded windows.
+) -> tuple:
+    """Every point's microsecond samples, and each window's committing tier.
 
     Every point of a window describes the decode whose result the frame
     committed: the two links it rode, in from its tier's store and home
@@ -634,6 +685,7 @@ def collect_samples(
     samples = {}
     for point in POINTS:
         samples[point] = []
+    window_tiers = []
     samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
     round_events = observation.round_events
     waits = round_stall_ticks(round_events.events)
@@ -669,7 +721,8 @@ def collect_samples(
         )
         for point, value in points.items():
             samples[point].append(value)
-    return samples
+        window_tiers.append(decode.tier.value)
+    return samples, tuple(window_tiers)
 
 
 def chain_load(samples: dict, window_period_us: float) -> float:
@@ -760,7 +813,7 @@ def _measurement(
     reading and the placing of one number in two places.
     """
     sample_digest = _sample_digest(observation, result)
-    samples = collect_samples(observation, result)
+    samples, window_tiers = collect_samples(observation, result)
     logical_failure = _logical_failure(result)
     predictions = _predictions(result)
     throughput = _throughput_per_microsecond(observation, samples)
@@ -798,6 +851,7 @@ def _measurement(
         decoded_windows=decoded_windows,
         logical_failure=is_scored_failure,
         samples=samples,
+        window_tiers=window_tiers,
         means=means,
         maxes=maxes,
         load=load,
@@ -810,7 +864,7 @@ def _measurement(
         strong_busy_fraction=pools.strong_busy_fraction,
         escalated_windows=strong.windows,
         strong_decoded_rounds=strong.rounds,
-        strong_service_mean_us=strong.service_mean_us,
+        strong_service_sum_us=strong.service_sum_microseconds,
         commit_rounds=commit_rounds,
         window_period_us=window_period_us,
         parallel_processes_needed=processes,
@@ -994,13 +1048,13 @@ def _burst_onset_round(qpu_row_settings) -> Optional[int]:
 class _CommittedDecode:
     """The decode whose result the frame committed, as the points read it.
 
-    One window can be decoded several times: the two forced-class solves
-    of a complementary gap (decision D2), a strong re-decode after an
-    escalation (Toshio et al. 2510.25222 Sec. III A), and under
-    run_both_at_once a sibling that is cancelled. Every stage record of
-    all of them carries the same window key, so the decode that
-    committed is named by the frame's own record: the tier it ran on and
-    the run ordinal of its request.
+    One window can be decoded several times: the two forced-class solves of a
+    complementary gap (decision D2), a strong re-decode after an escalation
+    (Toshio et al. 2510.25222 Sec. III A), and under run_both_at_once a
+    speculative strong decode that is cancelled. Every stage record of all of
+    them carries the same window key, so the decode that committed is named by
+    the frame's own record: the tier it ran on and the run ordinal of its
+    request.
     """
 
     tier: window_records.DecoderTier
@@ -1009,6 +1063,7 @@ class _CommittedDecode:
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
     round_count: int  # the rounds it read, its job's own count
+    backend_queue_wait_ticks: int  # its waits inside a strong backend
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1043,7 +1098,7 @@ class _StrongDecodes:
 
     windows: int
     rounds: int
-    service_mean_us: float
+    service_sum_microseconds: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1158,8 +1213,8 @@ def _pool_measures(
 ) -> _PoolMeasures:
     """Each pool's own queue peak and busy fraction, by the tier's name.
 
-    The plan's windows queue in the default pool and a strong re-decode
-    in the strong pool (decode_queue.POOL_BY_JOB_KIND), so the default
+    The plan's windows queue in the chip's default pool and a strong
+    re-decode in the host's strong pool (build/decoders.py), so the default
     pool's numbers are the primary tier's: the weak tier's on a
     weak-primary run, the strong tier's under strong_only, where the
     weak columns read zero; a run without a pool reads zero for it.
@@ -1196,12 +1251,13 @@ def _strong_decodes(
     Toshio's Theorem 1 bounds one strong decode's time by the round
     time times d over the switching rate (2510.25222 eq. (6)); the
     report forms that bound per sweep point from the escalated windows,
-    and the mean service here is the time it bounds.
+    and the point's summed service over its windows is the time it
+    bounds. The sum is taken in ticks, so it is exact.
     """
     stages = observation.stages
     windows = 0
     rounds = 0
-    services = []
+    service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
         tier = window_records.DecoderTier(frame_record.tier)
         if tier is not window_records.DecoderTier.STRONG:
@@ -1209,12 +1265,11 @@ def _strong_decodes(
         decode = _committed_decode(stages, frame_record)
         windows += 1
         rounds += decode.round_count
-        service = _span_microseconds(
-            decode.done_ticks, decode.compute_start_ticks
-        )
-        services.append(service)
-    service_mean_us = _mean_or_zero(services)
-    return _StrongDecodes(windows, rounds, service_mean_us)
+        service_ticks += decode.done_ticks - decode.compute_start_ticks
+    service_sum_microseconds = config_module.ticks_to_microseconds(
+        service_ticks
+    )
+    return _StrongDecodes(windows, rounds, service_sum_microseconds)
 
 
 def _tier_records(
@@ -1403,6 +1458,14 @@ def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     return config_module.ticks_to_microseconds(span_ticks)
 
 
+def _last_emitted_round(qpu_send: dict, operation_id) -> int:
+    last_round = 0
+    for sent_operation_id, round_index in qpu_send:
+        if sent_operation_id == operation_id:
+            last_round = max(last_round, round_index)
+    return last_round
+
+
 def _hop_start_ticks(row: dict) -> int:
     """The tick a transfer was asked for, which is where its hop starts.
 
@@ -1448,7 +1511,18 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     ready = _ready_ticks(records)
     run_sequence = frame_record.run_sequence
     rounds = _rounds_read(records)
-    return _CommittedDecode(tier, first, last, ready, run_sequence, rounds)
+    waited = _backend_queue_wait_ticks(records)
+    return _CommittedDecode(
+        tier, first, last, ready, run_sequence, rounds, waited
+    )
+
+
+def _backend_queue_wait_ticks(records: list) -> int:
+    """The decode's waits inside a strong backend, whole at its last stage."""
+    waits = []
+    for record in records:
+        waits.append(record.backend_queue_wait_ticks)
+    return max(waits, default=0)
 
 
 def _rounds_read(records: list) -> int:
@@ -1551,7 +1625,7 @@ def _confidence_ticks(window, decode: _CommittedDecode) -> int:
     window", and lines 360-363, the response time running to the
     correction). What that computation is depends on the row: the walk
     under cluster_gap, charged on the weak unit (decision D8), and the
-    sibling forced-class solve's remaining time under complementary_gap,
+    other forced-class solve's remaining time under complementary_gap,
     which is that solve's own service on the same unit (decision D2).
     An escalated window has none: its committing decode is the strong
     one, which answers after the verdict, and weak_attempt already runs
@@ -1586,7 +1660,7 @@ def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:
     to the verdict is the weak_attempt point and the committing decode's
     own hop starts there. When the committing decode was already
     computing at that answer, which is a kept weak result and which is
-    run_both_at_once's parallel sibling, the attempt cost the window
+    run_both_at_once's speculative strong decode, the attempt cost the window
     nothing and both start at the dispatch.
     """
     if window.t_done >= decode.compute_start_ticks:
@@ -1597,13 +1671,13 @@ def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:
 def _stage_microseconds(stages, frame_record) -> dict:
     """The committing decode's stages, in microseconds, by stage name.
 
-    Every decode of a window records its stages under the window's key:
-    the two forced-class solves of a complementary gap, which are two
-    jobs of one window and are charged one card each (decisions D2 and
-    D7), the strong re-decode of an escalated window, and a sibling that
-    was cancelled. Keeping the last record of each name mixes them, so
-    the stages are the committing request's, which is the rule every
-    other point of the window follows.
+    Every decode of a window records its stages under the window's key: the two
+    forced-class solves of a complementary gap, which are two jobs of one window
+    and are charged one card each (decisions D2 and D7), the strong re-decode of
+    an escalated window, and a speculative strong decode that was cancelled.
+    Keeping the last record of each name mixes them, so the stages are the
+    committing request's, which is the rule every other point of the window
+    follows.
     """
     operation_id, window_id = frame_record.window_key
     records = _committing_stage_records(

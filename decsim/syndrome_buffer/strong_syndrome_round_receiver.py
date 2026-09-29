@@ -21,7 +21,7 @@ stores each round at its landing; the store's holds and lifetime are
 SyndromeBuffer's. A landing whose operation closed while its bits
 crossed is dropped at the door instead of stored, since no reader can
 ever name it (_drop_landing): a strong-primary run's last rounds, or
-the region of a parallel strong sibling that a confident weak result
+the region of a speculative strong decode that a confident weak result
 cancelled while the region was on the wire.
 
 A landed round is stored as the run's detection event placement says
@@ -89,8 +89,9 @@ class StrongSyndromeRoundReceiver:
 
     def has_room(self, packed: round_records.PackedRound) -> bool:
         """A write can land: the store weighs it against what is reserved."""
+        bits = self._stored_width(packed.packet)
         return self.store.has_room(
-            packed.round_key, packed.wire_bits, self.reserved_bits_by_round
+            packed.round_key, bits, self.reserved_bits_by_round
         )
 
     def reserve_write(self, packed: round_records.PackedRound) -> None:
@@ -98,7 +99,8 @@ class StrongSyndromeRoundReceiver:
         assert self.has_room(packed), (
             "a round was written into a full strong store"
         )
-        bits = round_records.stated_bits(packed.wire_bits)
+        width = self._stored_width(packed.packet)
+        bits = round_records.stated_bits(width)
         self.reserved_bits_by_round[packed.round_key] = bits
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
@@ -124,11 +126,11 @@ class StrongSyndromeRoundReceiver:
         The yaml sizes the store.
         """
         reserved = dict(self.reserved_bits_by_round)
-        for packet in region.packets:
+        widths = self._stored_widths(region)
+        for packet, bits in zip(region.packets, widths, strict=True):
             round_key = (packet.operation_id, packet.round_index)
-            bits = round_records.fragment_wire_bits(packet.fragments)
             if not self.store.has_room(round_key, bits, reserved):
-                self._refuse_region(region)
+                self._refuse_region(region, widths)
             reserved[round_key] = round_records.stated_bits(bits)
         self.reserved_bits_by_round = reserved
 
@@ -156,15 +158,42 @@ class StrongSyndromeRoundReceiver:
             on_stored,
         )
 
-    def _refuse_region(self, region: round_records.EscalatedRegion) -> None:
+    def _stored_widths(self, region: round_records.EscalatedRegion) -> list:
+        """Each round's width as the store will hold it.
+
+        The round before lands raw, as it came (_land_formed); every other
+        round at the width this seat forms it to.
+        """
+        packets = region.packets
+        widths = []
+        if region.carries_the_round_before:
+            round_before = packets[0]
+            raw_bits = round_records.fragment_wire_bits(round_before.fragments)
+            widths.append(raw_bits)
+            packets = packets[1:]
+        for packet in packets:
+            width = self._stored_width(packet)
+            widths.append(width)
+        return widths
+
+    def _stored_width(
+        self, packet: round_records.SyndromeRoundPacket
+    ) -> Optional[int]:
+        """The width the store will hold the round at, as this seat forms it."""
+        return self.detection_events.width_at(_SEAT, packet.fragments)
+
+    def _refuse_region(
+        self, region: round_records.EscalatedRegion, widths: list
+    ) -> None:
         """An escalated region that does not fit stops the run, by the yaml."""
         capacity = self.store.capacity_bits()
         round_count = len(region.packets)
+        region_bits = sum(widths)
         reserved_widths = self.reserved_bits_by_round.values()
         reserved_bits = sum(reserved_widths)
         raise RuntimeError(
             f"the strong syndrome buffer has no room for the "
-            f"{region.wire_bits} bits of an escalated region's {round_count} "
+            f"{region_bits} bits of an escalated region's {round_count} "
             f"rounds: {self.store.occupied_bits} bits stored and "
             f"{reserved_bits} reserved against "
             f"strong_syndrome_buffer.bits {capacity}"

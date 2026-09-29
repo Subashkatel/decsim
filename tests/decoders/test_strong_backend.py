@@ -456,3 +456,55 @@ def test_host_path_decodes_overlap_on_workers_as_the_monitor_launches(
     engine.run()
     expected = _host_monitor(arrivals, workers, 3, 10)
     assert [ended[str(index)] for index in range(len(arrivals))] == expected
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+@pytest.mark.parametrize("arrivals", [(0, 0, 0), (0, 2, 4, 6)])
+def test_a_decodes_queue_wait_is_its_time_on_the_device_less_its_steps(
+    workers, arrivals
+):
+    """Launch 3 and work 10: the rest of a decode's time is its waits.
+
+    Ciw writes a customer's wait as its service start less its arrival
+    (ciw node.py lines 856-862); a decode here waits for the monitor and
+    then for a worker, and its waits add up to its end less its arrival
+    less its 13 ticks of steps.
+    """
+    engine = engine_module.Engine()
+    device = _HostPathDevice(workers, 3, 10)
+    decoder = strong_backend.StrongBackendDecoder(device)
+    ended = {}
+    jobs = [_job(str(index), index) for index in range(len(arrivals))]
+    _schedule_starts(engine, decoder, ended, arrivals, jobs)
+    engine.run()
+    waits = [job.backend_queue_wait_ticks for job in jobs]
+    ends = _host_monitor(arrivals, workers, 3, 10)
+    assert waits == _time_beyond_steps(ends, arrivals, 13)
+
+
+def _time_beyond_steps(ends: list, arrivals: tuple, step_ticks: int) -> list:
+    """Each decode's end less its arrival and its steps: its waits."""
+    waits = []
+    for end, arrival in zip(ends, arrivals, strict=True):
+        on_the_device = end - arrival
+        waited = on_the_device - step_ticks
+        waits.append(waited)
+    return waits
+
+
+def test_a_split_regions_queue_wait_is_its_later_parts():
+    """One server, parts of 10 and 20 ticks: Z waits for X, 10 ticks.
+
+    The region ends when its Z part does, so its wait is Z's, and its
+    30 ticks on the device are those 10 of waiting and Z's 20 of steps.
+    """
+    engine = engine_module.Engine()
+    ticks_by_label = _part_ticks_by_label(((0, 10, 20),))
+    device = _FixedAnsweringDevice(1, ticks_by_label, engine)
+    decoder = strong_backend.StrongBackendDecoder(device, "apart")
+    ended = {}
+    region = _region_job("0", 0)
+    _schedule_starts(engine, decoder, ended, (0,), [region])
+    engine.run()
+    assert ended == {"0": 30}
+    assert region.backend_queue_wait_ticks == 10

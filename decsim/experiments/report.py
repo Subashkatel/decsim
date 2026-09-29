@@ -60,6 +60,7 @@ import decsim.observe.settings as observe_settings
 # path of a file rather than a fact of the shot
 NON_COLUMN_FIELDS = (
     "samples",
+    "window_tiers",
     "means",
     "maxes",
     "link_totals",
@@ -107,7 +108,6 @@ SHOT_MEANS = (
     "sim_wall_seconds",
     "weak_busy_fraction",
     "strong_busy_fraction",
-    "strong_service_mean_us",
     *LOAD_MEANS,
 )
 SHOT_MAXES = (
@@ -132,6 +132,7 @@ SHOT_SUMS = (
     "decoded_windows",
     "escalated_windows",
     "strong_decoded_rounds",
+    "strong_service_sum_us",
     *STATUS_SUMS,
 )
 SHOT_TRUE_COUNTS = (
@@ -290,7 +291,7 @@ def summarize_point(
     _add_load_columns(row, totals)
     _add_burst_columns(row, totals)
     for name in _points_held(totals.means):
-        multiset = counts.get((point, name), {})
+        multiset = _multiset_over_tiers(counts, point, name)
         _add_latency_point_columns(row, totals, name, multiset)
     return row
 
@@ -472,15 +473,17 @@ def shot_link_rows(measurements: list) -> list:
 
 
 def window_sample_rows(measurements: list) -> list:
-    """One row per point, latency point and distinct value: its count.
+    """One row per point, latency point, tier and distinct value: its count.
 
     The multiset of a point's window samples, which is all its median
     and p99 columns need and all a piece has to record for another
-    process to reach the same numbers.
+    process to reach the same numbers. Each window's samples sit under
+    the tier that committed it, so kept and escalated windows are two
+    multisets; a round's sample has no window and names no tier.
     """
     counts = _counts_of_samples(measurements)
     points = []
-    for point, _name in counts:
+    for point, _name, _tier in counts:
         points.append(point)
     unique_points = dict.fromkeys(points)
     return _rows_of_counts(counts, list(unique_points))
@@ -493,19 +496,23 @@ def latency_sample_rows(measurements: list) -> list:
     what held the unit: the measured wall clock, or the row's own cycle
     count. A number instead of a name is a fixed latency and produces
     none. These are the inputs a latency figure is drawn from, so a
-    reader draws one, across tiers too, from run folders alone; each
-    row carries its window's inter-arrival, the deadline a decode must
-    beat. What such a figure computes (log times, densities, medians)
-    is computed when it is drawn, not stored.
+    reader draws one from run folders alone; each row carries the tier
+    that decoded its window and the window's inter-arrival, the
+    deadline a decode must beat. What such a figure computes (log
+    times, densities, medians) is computed when it is drawn, not
+    stored.
     """
     rows = []
     for measurement in measurements:
         if not isinstance(measurement.algorithm, str):
             continue
         point = measured_point(measurement)
-        for sample_us in measurement.samples["algorithm"]:
+        samples = measurement.samples["algorithm"]
+        tiers = measurement.window_tiers
+        for sample_us, tier in zip(samples, tiers, strict=True):
             row = point_columns(point)
             row["seed"] = measurement.seed
+            row["tier"] = tier
             row["algorithm_us"] = sample_us
             row["window_period_us"] = measurement.window_period_us
             rows.append(row)
@@ -518,14 +525,16 @@ def window_confidence_rows(measurements: list) -> list:
     Toshio et al. keep each shot's gap with whether the decode was right
     (2510.25222 lines 722-731); a window has no truth of its own, so a
     row carries the shot's failure and whether the strong decode
-    revised the window's answer. Only the shots
+    revised the window's answer. Only the scored shots of those
     observation.confidence_shot_count names write rows; a run with no
     confidence signal writes none.
     """
     rows = []
     for measurement in measurements:
+        if not _has_counted_confidence(measurement):
+            continue
         confidence = measurement.confidence
-        if confidence is None or not confidence.is_sampled:
+        if not confidence.is_sampled:
             continue
         for window in confidence.windows:
             row = _window_confidence_row(measurement, confidence, window)
@@ -534,13 +543,13 @@ def window_confidence_rows(measurements: list) -> list:
 
 
 def confidence_histogram_rows(measurements: list) -> list:
-    """Every shot's window gaps and smallest gap, counted per 0.1 dB bin.
+    """Every scored shot's window gaps and smallest gap, per 0.1 dB bin.
 
     The counts add across pieces as sinter's custom_counts do
     (sinter/_data/_task_stats.py:51-71), so the histogram covers every
-    shot however many window_confidence.csv lists. From it come Toshio's
-    p(g) and P(e|g) and the brute-force cutoff (2510.25222 lines
-    807-841, 863-900).
+    scored shot however many window_confidence.csv lists. From it come
+    Toshio's p(g) and P(e|g) and the brute-force cutoff (2510.25222
+    lines 807-841, 863-900).
     """
     counts = {}
     for measurement in measurements:
@@ -1034,7 +1043,8 @@ def _add_pool_columns(row: dict, totals) -> None:
     row["weak_busy_fraction"] = totals.mean("weak_busy_fraction")
     row["strong_busy_fraction"] = totals.mean("strong_busy_fraction")
     row["escalated_windows"] = totals.sums["escalated_windows"]
-    row["strong_service_mean_us"] = totals.mean("strong_service_mean_us")
+    if "strong_service_sum_us" in totals.sums:
+        row["strong_service_mean_us"] = _strong_service_mean_us(totals)
     row["strong_service_bound_us"] = strong_service_bound_us(totals)
     row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
 
@@ -1069,6 +1079,23 @@ def _add_burst_columns(row: dict, totals) -> None:
         if column in totals.true_counts:
             flagged = totals.true_counts[column]
             row[share] = flagged / totals.rows
+
+
+def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
+    """The point's strong service over its strong decodes; None for none.
+
+    A ratio of two sums, gem5's Formula avgMissLatency = missLatency /
+    misses (src/mem/cache/base.cc:2187-2188), whose nonan flag prints
+    nothing for a zero count (src/base/stats/text.cc:288-290); sinter
+    likewise sums counts and divides at read time
+    (sinter/_data/_anon_task_stats.py:57-78). A mean of each shot's
+    mean would weigh a shot of one decode like a shot of ten. A folder
+    whose shots hold no sum gets no mean, the rule of _points_held.
+    """
+    escalated_windows = totals.sums["escalated_windows"]
+    if escalated_windows == 0:
+        return None
+    return totals.sums["strong_service_sum_us"] / escalated_windows
 
 
 def strong_service_bound_us(totals: fold.RowTotals) -> float:
@@ -1129,7 +1156,7 @@ def _points_held(fields) -> list:
     A run folder is read by the columns it holds and not by the columns
     the reading tree would write: the 500 folders of one weak_ler
     sweep hold the sixteen latency points the tree that wrote them
-    measured, and this tree measures twenty-two, so a summary that asked
+    measured, and this tree measures twenty-three, so a summary that asked
     for its own could not read those folders at all. It is the rule that
     lets a fold read a folder an older tree wrote, which is the same
     rule sinter's counter table keeps, where a counter a file does not
@@ -1279,21 +1306,45 @@ def _value_at_index(multiset: dict, index: int) -> float:
 
 
 def _counts_of_samples(measurements: list) -> dict:
-    """(point, latency point) -> value -> how many windows carried it."""
+    """(point, latency point, tier) -> value -> how many carried it."""
     counts = {}
     for measurement in measurements:
         point = measured_point(measurement)
         for name, values in measurement.samples.items():
-            at_this_name = counts.setdefault((point, name), {})
-            _count_the_values(at_this_name, values)
+            tiers = _tiers_of_samples(measurement, name)
+            _count_the_values(counts, (point, name), tiers, values)
     return counts
 
 
-def _count_the_values(multiset: dict, values: list) -> None:
-    """Add one shot's samples of one latency point to the multiset."""
-    for value in values:
+def _tiers_of_samples(measurement: measure.ShotMeasurement, name: str) -> tuple:
+    """The tier each sample of a latency point sits under."""
+    if name in measure.ROUND_POINTS:
+        values = measurement.samples[name]
+        return ("",) * len(values)
+    return measurement.window_tiers
+
+
+def _count_the_values(
+    counts: dict, key: tuple, tiers: tuple, values: list
+) -> None:
+    """Add one shot's samples of one latency point, each under its tier."""
+    for tier, value in zip(tiers, values, strict=True):
+        tier_key = (*key, tier)
+        multiset = counts.setdefault(tier_key, {})
         already = multiset.get(value, 0)
         multiset[value] = already + 1
+
+
+def _multiset_over_tiers(counts: dict, point: tuple, name: str) -> dict:
+    """One latency point's multiset at one sweep point, every tier's added."""
+    merged = {}
+    for (at_point, at_name, _tier), multiset in counts.items():
+        if (at_point, at_name) != (point, name):
+            continue
+        for value, count in multiset.items():
+            already = merged.get(value, 0)
+            merged[value] = already + count
+    return merged
 
 
 def _counts_of_rows(window_samples: list) -> dict:
@@ -1311,7 +1362,7 @@ def _add_counts_of_rows(counts: dict, window_samples: list) -> None:
     """
     for row in window_samples:
         point = sweep_point_of(row)
-        key = (point, row["name"])
+        key = (point, row["name"], row["tier"])
         at_this_name = counts.setdefault(key, {})
         value = row["value_us"]
         already = at_this_name.get(value, 0)
@@ -1332,12 +1383,13 @@ def _rows_of_counts(counts: dict, points: list) -> list:
 
 def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
     """One latency point's counts at one sweep point, by rising value."""
-    point, name = key
+    point, name, tier = key
     columns = point_columns(point)
     rows = []
     for value in sorted(multiset):
         row = dict(columns)
         row["name"] = name
+        row["tier"] = tier
         row["value_us"] = value
         row["count"] = multiset[value]
         rows.append(row)
@@ -1345,11 +1397,11 @@ def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
 
 
 def _point_and_name_order(positions: dict, key: tuple) -> tuple:
-    """A (point, latency point) key where a single run would write it."""
-    point, name = key
+    """A (point, latency point, tier) key where a single run writes it."""
+    point, name, tier = key
     place = measure.POINTS.index(name)
     point_order = positions[point]
-    return (point_order, place)
+    return (point_order, place, tier)
 
 
 def _task_positions(points: list) -> dict:
@@ -1876,8 +1928,10 @@ def _count_the_shots_gaps(
     counts: dict, measurement: measure.ShotMeasurement
 ) -> None:
     """One shot's window gaps and its smallest gap into the counts."""
+    if not _has_counted_confidence(measurement):
+        return
     confidence = measurement.confidence
-    if confidence is None or not confidence.windows:
+    if not confidence.windows:
         return
     point = measured_point(measurement)
     failed = measurement.logical_failure
@@ -1893,6 +1947,22 @@ def _count_the_shots_gaps(
     )
     shot_cell = shot_key + (None, failed)
     _add_count(counts, shot_cell, 1)
+
+
+def _has_counted_confidence(measurement: measure.ShotMeasurement) -> bool:
+    """Whether the shot's gaps belong in the confidence files.
+
+    Only a scored shot's: an unscored shot is sinter's discard, whose
+    logical_failure reads False, and sinter keeps a discard out of every
+    count it conditions on failure (sinter/_decoding/_decoding.py:
+    120-128) as out of the rate (sinter/_plotting.py:389). Every row of
+    both files carries shot_failed, so a row of an unscored shot would
+    count as a success. sweep.csv's unscored_shots counts the shots
+    left out.
+    """
+    if measurement.confidence is None:
+        return False
+    return measurement.is_scored
 
 
 def _smallest_gap(windows: tuple) -> Optional[float]:

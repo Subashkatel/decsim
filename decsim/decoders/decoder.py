@@ -162,10 +162,15 @@ class WindowDecoderBase(DecoderBase):
     """
 
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
+    # a row whose backend carries its shot's run seed compiles per shot
+    backend_is_seeded = False
 
     def __init__(self, latency_model: Optional[DecoderBase] = None):
         self.latency_model = latency_model
         self.compiled_by_model: dict = {}
+        # the row's kind and settings, set where the machine builds it;
+        # with the model they fix the backend
+        self.compile_key = None
 
     def run_seed_children(self) -> tuple:
         """The latency model that controls simulated service time."""
@@ -265,12 +270,18 @@ class WindowDecoderBase(DecoderBase):
     def compiled_for(self, faults, model):
         """The placed model's backend, compiled once and kept while it lives.
 
-        The cache entry lives exactly as long as the placed model: id()
-        values are recycled by CPython, and a dead entry would otherwise
-        accumulate once per distinct window model of a long run.
+        A task's shots share their window models (built_window_models.py)
+        but build their rows afresh, so a row with a compile key keeps its
+        backend for every row of that key, every shot. The cache entry
+        lives exactly as long as the placed model: id() values are
+        recycled by CPython, and a dead entry would otherwise accumulate
+        once per distinct window model of a long run.
         """
+        cache = self.compiled_by_model
+        if self.compile_key is not None and not self.backend_is_seeded:
+            cache = _SHARED_BACKENDS.setdefault(self.compile_key, {})
         model_identity = id(faults)
-        entry = self.compiled_by_model.get(model_identity)
+        entry = cache.get(model_identity)
         if entry is not None:
             reference, backend = entry
             if reference() is faults:
@@ -278,13 +289,18 @@ class WindowDecoderBase(DecoderBase):
         backend = self.compile(faults, model)
 
         def discard_dead_model(reference) -> None:
-            current = self.compiled_by_model.get(model_identity)
+            current = cache.get(model_identity)
             if current is not None and current[0] is reference:
-                del self.compiled_by_model[model_identity]
+                del cache[model_identity]
 
         reference = weakref.ref(faults, discard_dead_model)
-        self.compiled_by_model[model_identity] = (reference, backend)
+        cache[model_identity] = (reference, backend)
         return backend
+
+
+# compile key -> {model identity: (model reference, backend)}, the
+# backends every row of one kind and settings shares in this process
+_SHARED_BACKENDS: dict = {}
 
 
 def parity_product(matrix, vector):

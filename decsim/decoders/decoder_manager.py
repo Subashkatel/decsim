@@ -1,9 +1,9 @@
 """The decoder manager: the facade that gives ready windows a decoder unit.
 
-A job waits in the WaitingJobs of its pool, the DecodeDispatcher places
+A job waits in the WaitingJobs, the DecodeDispatcher places
 it on the DecoderUnit the DecoderPool offers, the DecodeService stages
-its input into that unit's memory and starts the routed decoder once the
-input landed and the window owes no boundary, the StrongRequests say
+its input into that unit's memory and starts the manager's decoder once
+the input landed and the window owes no boundary, the StrongRequests say
 which destination waits for which strong result, and the DecodeOutcomes
 deliver a finished decode through the job's on_decoded and close the
 request when the window side answers. The manager schedules, says when
@@ -23,10 +23,11 @@ instances of this class in the assembly file, which is LATTE's shape
 (2509.03954 lines 24-25 and 705-720: the local decoder on the control
 FPGA has no scheduler, the host's Global Dynamic Scheduler owns the
 decode queue and the thread pool). The StrongRequests ledger is one
-seat both take, since a strong request is opened by the chip side and
+seat both bind, since a strong request is opened by the chip side and
 served by the host side.
 """
 
+import functools
 from collections.abc import Callable
 from typing import Optional
 
@@ -35,80 +36,82 @@ import decsim.decoders.decode_dispatch as decode_dispatch
 import decsim.decoders.decode_outcomes as decode_outcomes
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decode_service as decode_service
-import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
+import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 
 
 class DecoderManager:
     """Admits, cancels, withdraws, releases and settles every decode.
 
-    Six attributes: the five one-job components the module docstring
-    names, and the engine it logs and reads the clock on. The ledger
-    arrives built, shared with the other side's manager.
+    Five attributes: four of the one-job components the module
+    docstring names, and the engine it logs and reads the clock on. The
+    decoder, the ledger and the escalation policy are ports the root
+    binds, and the parts read them through the manager, as a gem5
+    cache's packet queue holds the cache that owns it
+    (gem5 src/mem/cache/base.hh:185-189).
     """
+
+    # the one decoder this side's units run, bound straight to it as a
+    # gem5 cache's port is bound to its one peer
+    # (configs/learning_gem5/part1/caches.py:86-88); None on a run that
+    # plans no windows and names no decoder
+    decoder = ports.Port(ports.Decoder, optional=True)
+    # one ledger for both sides: the chip's side opens a strong request
+    # and the host's side serves it
+    strong_requests = ports.Port(strong_requests_module.StrongRequests)
+    escalation_policy = ports.Port(ports.EscalationPolicy)
 
     def __init__(
         self,
         engine,
         *,
-        router,
         scheduler,
-        strong_requests: strong_requests_module.StrongRequests,
-        unit_pools: dict,
+        pool_settings: decoder_pool_module.PoolSettings,
         bulk_strong: bool = False,
-        decoder_memory: Optional[
-            decoder_memory_module.DecoderMemoryConfig
-        ] = None,
-        escalation_policy,
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
-        copies_input_by_pool: Optional[dict] = None,
-        blocks_unit_by_pool: Optional[dict] = None,
-        formation_by_pool: Optional[dict] = None,
     ):
         self.engine = engine
-        pool = decoder_pool_module.DecoderPool(
-            router, unit_pools, decoder_memory, blocks_unit_by_pool
-        )
-        self.strong_requests = strong_requests
+        pool = decoder_pool_module.DecoderPool(self, pool_settings)
+        is_strong_pool = pool_settings.name == decode_queue.STRONG_POOL
+        merges_strong = bulk_strong and is_strong_pool
         self.queue = decode_queue.WaitingJobs(
-            engine,
-            scheduler,
-            pool.units_by_pool,
-            self.strong_requests,
-            is_bulk_strong=bulk_strong,
+            engine, scheduler, self, merges_strong
         )
         transport = staging_module.CancellableDecoderMemoryTransfer(engine)
         staging = staging_module.DecoderInputStaging(
-            transport, engine, copies_input_by_pool, formation_by_pool
+            transport,
+            engine,
+            pool_settings.copies_input,
+            pool_settings.formation,
         )
         self.service = decode_service.DecodeService(
             engine,
             pool,
             staging,
-            self.strong_requests,
-            on_completed=self.decode_completed,
-            dispatch=self.dispatch,
+            self,
             clock=clock,
             dispatch_cycles=dispatch_cycles,
         )
         self.dispatcher = decode_dispatch.DecodeDispatcher(
             self.queue, pool, self.service
         )
-        self.outcomes = decode_outcomes.DecodeOutcomes(
-            engine, escalation_policy, self.strong_requests
-        )
-        # the forced solves are the plan's windows', which the default
-        # pool decodes, so its manager narrates a model that pins none
-        rows = ()
-        if decoder_pool_module.DEFAULT_POOL in unit_pools:
-            rows = decoder_pool_module.routed_decoders(router)
-        for row in rows:
+        self.outcomes = decode_outcomes.DecodeOutcomes(engine, self)
+
+    def start(self) -> None:
+        """Hear every row of the decoder say a model pins no class.
+
+        The decoder is a port, so its rows are known once the root has
+        bound it, which is gem5's init (src/sim/sim_object.hh:186-194).
+        """
+        decoders = (self.decoder,)
+        for row in decoder_pool_module.decoder_rows(decoders):
             row.forced_solve_unavailable.connect(self.report_unpinnable_model)
 
     def report_unpinnable_model(self, model, reason: str) -> None:
@@ -154,6 +157,13 @@ class DecoderManager:
         """
         return self.service.staging
 
+    def run_seed_children(self) -> tuple:
+        """The manager's own scheduler, whose rule may draw from the seed."""
+        path = (seed_records.RunSeedPathSegment("field", "scheduler"),)
+        scheduler = self.queue.scheduler
+        child = seed_records.RunSeedChild(path, scheduler)
+        return (child,)
+
     def input_transport(self):
         """The transport that moves an input into a unit's memory.
 
@@ -190,6 +200,13 @@ class DecoderManager:
             self.dispatcher.run()
             return
         self.queue.add(job)
+        pool_tag = decode_queue.pool_tag_of(self.pool.name)
+        queue_length = len(self.queue.waiting)
+        self.engine.log(
+            log_sources.DECODER_MANAGER,
+            f"{job.label} READY -> enqueue "
+            f"({pool_tag}ready-queue length = {queue_length})",
+        )
         self.dispatcher.run()
 
     def enqueue_without_input(
@@ -217,7 +234,7 @@ class DecoderManager:
             spatial_nodes=spatial_nodes,
             kind=decoding_records.DecodeJobKind.SELF_CONTAINED,
         )
-        self.queue.add_quietly(job)
+        self.queue.add(job)
         self.dispatcher.run()
 
     def dispatch(self) -> None:
@@ -353,13 +370,18 @@ class DecoderManager:
     def read_result(self, job: decoding_records.DecodeJob) -> None:
         """The window side has the result in hand: a held unit is free now.
 
-        <tier>.result_blocks_unit true is Riverlane's polled status
-        register, where the decoder holds its output until the reader
-        takes it (2410.05202 lines 1256-1259); a tier that does not
-        block gave the unit back at the decode's end and has nothing to
-        give back here.
+        <tier>.result_blocks_unit true is a unit with no output buffer,
+        stalled by back-pressure until its output is taken (Bascones et
+        al. 2605.01035 lines 607-609 size FIFOs to avoid that stall); a
+        tier that does not block gave the unit back at the decode's end,
+        or when the walk charged on it ended, and has nothing to give back
+        here. A result is read once: a forced-class solve the confidence
+        join held was read then, and its later close or commit finds its
+        unit already given back.
         """
-        if not self.pool.blocks_unit(job):
+        if not self.pool.blocks_unit:
+            return
+        if job.unit is None:
             return
         self.service.free(job)
         self.dispatcher.run()
@@ -467,7 +489,7 @@ class DecoderManager:
         # no-op.
         self.service.release_input(job)
         pool_tag = decode_queue.pool_tag_of(job.pool)
-        free_now = self.service.free_unit_count(job.pool)
+        free_now = self.service.free_unit_count()
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"DECODE DONE {job.label} ({pool_tag}units free now {free_now})",
@@ -480,15 +502,32 @@ class DecoderManager:
     ) -> None:
         """The decode ended; its result goes to the destination that asked.
 
-        The unit's compute goes back at this end unless the tier blocks
-        on the result, in which case it goes back when the window side
-        has read it (<tier>.result_blocks_unit).
+        The unit's compute goes back once the confidence its evidence
+        feeds is computed, since that walk runs on the unit (decision
+        D8, charge_soft_output), unless the tier blocks on the result,
+        in which case it goes back when the window side has read it
+        (<tier>.result_blocks_unit). The delivery is what charges the
+        walk, so it comes first.
         """
         job.completed = True
-        if not self.pool.blocks_unit(job):
-            self.service.free(job)
         self.outcomes.deliver_weak(job, result)
+        if not self.pool.blocks_unit:
+            self._free_after_the_walk(job)
         self.service.release_input(job)
+        self.dispatcher.run()
+
+    def _free_after_the_walk(self, job: decoding_records.DecodeJob) -> None:
+        """Give the unit back now, or when the walk charged on it ends."""
+        ticks = job.soft_output_ticks
+        if ticks <= 0:
+            self.service.free(job)
+            return
+        free = functools.partial(self._free_and_dispatch, job)
+        label = f"confidence_walk_done({job.label})"
+        self.engine.schedule(ticks, free, label=label)
+
+    def _free_and_dispatch(self, job: decoding_records.DecodeJob) -> None:
+        self.service.free(job)
         self.dispatcher.run()
 
     # ------------------------------------------------- cancelling strong
@@ -552,7 +591,7 @@ class DecoderManager:
 
     def _find_window_jobs(self, window_key: tuple) -> list:
         """Every live weak job of the window: one attempt, one or two jobs."""
-        candidates = self.queue.jobs()
+        candidates = list(self.queue.waiting)
         residents = self.service.resident_jobs()
         candidates.extend(residents)
         found = []

@@ -18,8 +18,8 @@ import decsim.controller.operation_issue as operation_issue
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
-import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
+import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -29,7 +29,6 @@ import decsim.ports as ports
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
-import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
@@ -54,16 +53,12 @@ def build_strong_requests(
 def build_decoder_manager(
     parts: build_parts.Parts,
 ) -> decoder_manager_module.DecoderManager:
-    """The chip's decoder manager: every pool but the strong one.
+    """The chip's decoder manager, over the default pool.
 
     The strong pool is the host's manager's, so this one never holds a
-    strong job; the ledger is the seat both take at construction.
+    strong job; the ledger is the seat both managers are wired to.
     """
-    unit_pools = {}
-    for name, units in parts.pool.unit_pools.items():
-        if name != decode_queue.STRONG_POOL:
-            unit_pools[name] = units
-    return _decoder_manager(parts, unit_pools)
+    return _decoder_manager(parts, parts.pool.chip)
 
 
 def build_strong_decoder_manager(
@@ -71,14 +66,12 @@ def build_strong_decoder_manager(
 ) -> decoder_manager_module.DecoderManager:
     """The host's decoder manager: the strong pool alone.
 
-    The same class as the chip's, over the strong units, with its own
-    ready queue, staging and outcomes (LATTE 2509.03954 lines 705-720,
-    the host's scheduler owns the decode queue and the thread pool).
-    The escalation side and the requester's strong sibling submit here.
+    The same class as the chip's, over the strong units, with its own ready
+    queue, staging and outcomes (LATTE 2509.03954 lines 705-720, the host's
+    scheduler owns the decode queue and the thread pool). The escalation side
+    and the requester's speculative strong decode submit here.
     """
-    units = parts.pool.unit_pools[decode_queue.STRONG_POOL]
-    unit_pools = {decode_queue.STRONG_POOL: units}
-    return _decoder_manager(parts, unit_pools)
+    return _decoder_manager(parts, parts.pool.host)
 
 
 def build_detection_events(
@@ -150,6 +143,13 @@ def build_syndrome_round_sender(
     return syndrome_round_sender.SyndromeRoundSender(parts.engine)
 
 
+def build_packing_line(
+    parts: build_parts.Parts,
+) -> syndrome_round_sender.HeldRounds:
+    """The waiting line in front of the packing stage."""
+    return syndrome_round_sender.HeldRounds(parts.engine)
+
+
 def build_rounds_in_flight(
     parts: build_parts.Parts,
 ) -> round_assembly.RoundsInFlight:
@@ -170,7 +170,7 @@ def build_qpu(parts: build_parts.Parts) -> cycle_clock.QPUDevice:
     """The device on its cycle clock, one QEC round per cycle."""
     cycle_clock_domain = config.Clock(parts.plan.round_ticks)
     return cycle_clock.QPUDevice(
-        parts.engine, parts.plan.device, cycle_clock_domain, parts.plan.code
+        parts.engine, cycle_clock_domain, parts.plan.code
     )
 
 
@@ -261,33 +261,6 @@ def process_name(
     return f"decsim {kind} d{distance} seed{seed}"
 
 
-def check_strong_route(escalation_policy, router) -> None:
-    """A run that may escalate routes a strong job away from the weak one.
-
-    Run once on probe jobs: one decoder for both job kinds is the
-    user's mistake.
-    """
-    if not escalation_policy.requires_strong_context:
-        return
-    weak_probe = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=0
-    )
-    strong_probe = decoding_records.DecodeJob(
-        operation_id=-1,
-        window_id=0,
-        round_count=0,
-        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-    )
-    strong_decoder = router.route(strong_probe)
-    weak_decoder = router.route(weak_probe)
-    if strong_decoder is weak_decoder:
-        raise ValueError(
-            "the strong tier routes to the same decoder as the weak tier; "
-            "give strong_decoder its own kind, or a router that sends a "
-            "strong re-decode to a distinct decoder"
-        )
-
-
 def resolved_patches_by_identity(plan) -> dict:
     """The resolved patches by identity, for the idle accounting."""
     patch_by_identity = {}
@@ -297,25 +270,18 @@ def resolved_patches_by_identity(plan) -> dict:
 
 
 def _decoder_manager(
-    parts: build_parts.Parts, unit_pools: dict
+    parts: build_parts.Parts, pool_settings: decoder_pool_module.PoolSettings
 ) -> decoder_manager_module.DecoderManager:
-    """One manager over the named pools, on the run's one manager card."""
-    pool = parts.pool
+    """One manager over its pool, on the run's one manager card."""
     settings = parts.settings.decoder_manager
+    scheduler = settings.scheduler()
     return decoder_manager_module.DecoderManager(
         parts.engine,
-        router=pool.router,
-        scheduler=pool.scheduler,
-        strong_requests=parts.seats["strong_requests"],
-        unit_pools=unit_pools,
+        scheduler=scheduler,
+        pool_settings=pool_settings,
         bulk_strong=settings.bulk_strong,
-        decoder_memory=pool.decoder_memory,
-        escalation_policy=parts.escalation_policy,
         clock=settings.clock,
         dispatch_cycles=settings.dispatch_cycles,
-        copies_input_by_pool=pool.copies_input_by_pool,
-        blocks_unit_by_pool=pool.blocks_unit_by_pool,
-        formation_by_pool=pool.formation_by_pool,
     )
 
 

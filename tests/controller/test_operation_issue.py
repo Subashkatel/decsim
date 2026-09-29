@@ -4,8 +4,8 @@ A preloaded command (a program root, an ordinary successor) starts at
 the QPU's next cycle boundary and the runtime hears that boundary through
 on_started (SimPy's callback on the event, simpy/core.py step()); a
 feedback-blocked command pays the decision-to-pulse cost (17 ticks here)
-and the controller_to_qpu crossing first. The idle rounds claimed at the
-issue are prepended for the windows.
+and the controller_to_qpu crossing first. The operation claims its
+patches' idle rounds when it starts, not here (test_idle_rounds.py).
 """
 
 import types
@@ -46,27 +46,11 @@ class RecordingQpu:
 
 
 class RecordingIdleRounds:
-    def __init__(self, claimed=0):
-        self.claimed = claimed
+    def __init__(self):
         self.ended = []
-
-    def end_idle_period(self, operation, patch):
-        self.ended.append((operation.id, patch))
 
     def end_every_idle_period(self):
         self.ended.append("every idle patch")
-
-    def claim(self, operation):
-        del operation
-        return self.claimed
-
-
-class RecordingWindows:
-    def __init__(self):
-        self.prepended = []
-
-    def prepend_idle_rounds(self, operation_id, count):
-        self.prepended.append((operation_id, count))
 
 
 def resolved(operation_id, round_ticks=1000, round_count=6):
@@ -77,7 +61,7 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
     )
 
 
-def issuer_with(engine, qpu, idle_rounds, windows, recorder):
+def issuer_with(engine, qpu, idle_rounds, recorder):
     reference = link_profiles.logical_reference_profile()
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
     output.link = fabric_module.LinkFabric(
@@ -90,7 +74,6 @@ def issuer_with(engine, qpu, idle_rounds, windows, recorder):
     issuer = operation_issue.OperationIssuer(engine, resolved_operations)
     issuer.streams = feedback_streams.NoFeedbackStreams()
     issuer.idle_rounds = idle_rounds
-    issuer.windows = windows
     issuer.output = output
     return issuer
 
@@ -105,9 +88,8 @@ def test_a_preloaded_operation_starts_at_the_next_boundary_and_says_so():
     engine.line.connect(log.write)
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
-    windows = RecordingWindows()
     recorder = round_events.RoundEventRecorder(engine)
-    issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
+    issuer = issuer_with(engine, qpu, idle_rounds, recorder)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
     started = []
 
@@ -121,33 +103,17 @@ def test_a_preloaded_operation_starts_at_the_next_boundary_and_says_so():
     assert command.round_ticks == 1000
     kinds = [event.kind for event in recorder.output_events]
     assert kinds == ["PRELOADED_COMMAND"]
-    assert idle_rounds.ended == [(1, 0)]
-    assert windows.prepended == []
+    assert idle_rounds.ended == []
     (line,) = log.lines
     assert line.endswith("Controller: START memory  (Clifford, qubits (0,))")
-
-
-def test_the_idle_rounds_claimed_at_the_issue_are_prepended_for_the_windows():
-    engine = engine_module.Engine()
-    qpu = RecordingQpu()
-    idle_rounds = RecordingIdleRounds(claimed=4)
-    windows = RecordingWindows()
-    recorder = None
-    issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
-    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
-
-    issuer.issue_operation(operation, ignore_boundary)
-
-    assert windows.prepended == [(1, 4)]
 
 
 def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
     engine = engine_module.Engine()
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
-    windows = RecordingWindows()
     recorder = round_events.RoundEventRecorder(engine)
-    issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
+    issuer = issuer_with(engine, qpu, idle_rounds, recorder)
     operation = program_records.Operation(
         2, "corrected", (0,), patches=(0,), blocked_by=1
     )
@@ -175,9 +141,8 @@ def test_the_last_release_stops_the_qpu():
     engine = engine_module.Engine()
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
-    windows = RecordingWindows()
     recorder = None
-    issuer = issuer_with(engine, qpu, idle_rounds, windows, recorder)
+    issuer = issuer_with(engine, qpu, idle_rounds, recorder)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
 
     issuer.after_successor_release(operation, False)
@@ -192,8 +157,7 @@ def test_the_last_release_settles_every_idle_patch():
     engine = engine_module.Engine()
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
-    windows = RecordingWindows()
-    issuer = issuer_with(engine, qpu, idle_rounds, windows, None)
+    issuer = issuer_with(engine, qpu, idle_rounds, None)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
 
     issuer.after_successor_release(operation, False)

@@ -57,7 +57,6 @@ import stim
 import yaml
 
 import decsim.collect as collect
-import decsim.controller.settings as controller_settings
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
@@ -104,6 +103,7 @@ WALL_CLOCK_COLUMNS = (
     "strong_queue_max",
     "weak_busy_fraction",
     "strong_busy_fraction",
+    "strong_service_sum_us",
     "strong_service_mean_us",
     "parallel_processes_needed",
     "sim_wall_seconds_per_shot",
@@ -525,18 +525,20 @@ def test_two_tasks_that_run_different_circuits_are_two_tasks():
     assert len(unique) == 2
 
 
-def test_two_tasks_whose_controllers_stall_or_drop_are_two_tasks():
+def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
     """An enum setting enters the strong id as its member's name."""
-    settings = machine_settings.MachineSettings()
-    drop_round = controller_settings.PackingOverflowPolicy.DROP_ROUND
-    dropping_controller = dataclasses.replace(
-        settings.controller, packing_overflow=drop_round
+    memory = program_records.Operation(
+        1, "op", (1,), patches=(1,), kind=program_records.OpKind.MEMORY
     )
-    dropping = dataclasses.replace(settings, controller=dropping_controller)
-    stalling_task = collect.Task(settings, {"point": 1})
-    dropping_task = collect.Task(dropping, {"point": 1})
+    merge = dataclasses.replace(memory, kind=program_records.OpKind.MERGE)
+    memory_workload = workload_settings.WorkloadSettings(operations=[memory])
+    merge_workload = workload_settings.WorkloadSettings(operations=[merge])
+    memory_settings = machine_settings.MachineSettings(workload=memory_workload)
+    merge_settings = machine_settings.MachineSettings(workload=merge_workload)
+    memory_task = collect.Task(memory_settings, {"point": 1})
+    merge_task = collect.Task(merge_settings, {"point": 1})
 
-    unique = collect.unique_tasks([stalling_task, dropping_task])
+    unique = collect.unique_tasks([memory_task, merge_task])
 
     assert len(unique) == 2
 
@@ -598,6 +600,25 @@ def test_two_python_built_sources_that_hold_the_same_values_are_one_task():
     unique = collect.unique_tasks([first, same])
 
     assert len(unique) == 1
+
+
+def test_a_class_enters_the_id_by_its_name_whatever_it_holds():
+    """A class in the settings is its module and qualified name.
+
+    That is the identity pickle writes for a class (Lib/pickle.py
+    save_global), so an attribute the class gains later, as Python adds
+    __annotations__ on first read, leaves the id alone.
+    """
+
+    class Rule:
+        pass
+
+    before = collect.json_value(Rule)
+    Rule.touched = True
+    after = collect.json_value(Rule)
+
+    assert before == f"{Rule.__module__}.{Rule.__qualname__}"
+    assert after == before
 
 
 def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):

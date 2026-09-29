@@ -393,9 +393,7 @@ def test_the_near_pinned_input_is_the_syndrome_bombin_defines(monkeypatch):
     """
     nonempty_jobs = 0
     for case in NEAR_CASES:
-        capture, flip, columns = _run_case(
-            monkeypatch, case, "near_seam_pinned"
-        )
+        capture, flip, columns = _run_case(monkeypatch, case, "redo_window")
         for job, raw_input, masked_input, sources in capture.pinned_jobs():
             raw = _detector_bits(job, raw_input)
             masked = _detector_bits(job, masked_input)
@@ -427,9 +425,7 @@ def test_the_forward_pinned_input_differs_on_its_two_seam_layers(monkeypatch):
     """
     nonempty_jobs = 0
     for case in FORWARD_CASES:
-        capture, flip, columns = _run_case(
-            monkeypatch, case, "forward_seam_pinned"
-        )
+        capture, flip, columns = _run_case(monkeypatch, case, "double_window")
         for job, raw_input, masked_input, sources in capture.pinned_jobs():
             raw = _detector_bits(job, raw_input)
             masked = _detector_bits(job, masked_input)
@@ -453,7 +449,7 @@ def test_a_pinned_pair_commits_no_fault_twice(monkeypatch):
     """
     shared = []
     for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, "near_seam_pinned")
+        run = _run_case(monkeypatch, case, "redo_window")
         counts = _shared_fault_counts(run)
         shared.extend(counts)
     assert shared
@@ -486,11 +482,11 @@ def test_a_pinned_pair_leaves_its_seam_layer_clean(monkeypatch):
     """
     residuals = []
     for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, "near_seam_pinned")
+        run = _run_case(monkeypatch, case, "redo_window")
         near = _seam_residuals(run)
         residuals.extend(near)
     for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, "forward_seam_pinned")
+        run = _run_case(monkeypatch, case, "double_window")
         forward = _seam_residuals(run)
         residuals.extend(forward)
     assert residuals
@@ -542,7 +538,7 @@ def test_a_back_to_back_seam_commits_its_crossing_faults_once(monkeypatch):
     (Toshio et al. 2510.25222 lines 1248-1250, Bombin et al. 2303.04846
     lines 703-704).
     """
-    counts = _self_pinned_counts_of_the_forward_row(monkeypatch)
+    counts = _self_pinned_counts_of_the_double_window_row(monkeypatch)
     # at least one of the runs has a region at a back-to-back seam, and
     # at least one such seam has a crossing fault to commit
     assert counts
@@ -552,11 +548,11 @@ def test_a_back_to_back_seam_commits_its_crossing_faults_once(monkeypatch):
     assert set(shared_counts) == {0}
 
 
-def _self_pinned_counts_of_the_forward_row(monkeypatch) -> list:
-    """The self-pinned faces' counts, pooled over the forward row's cases."""
+def _self_pinned_counts_of_the_double_window_row(monkeypatch) -> list:
+    """The self-pinned faces' counts, pooled over the double window's cases."""
     counts = []
     for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, "forward_seam_pinned")
+        run = _run_case(monkeypatch, case, "double_window")
         found = _self_pinned_fault_counts(run)
         counts.extend(found)
     return counts
@@ -614,11 +610,11 @@ def _decided_column_counts(monkeypatch) -> list:
     """The decided faults still offered, pooled over both pinned rows."""
     counts = []
     for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, "near_seam_pinned")
+        run = _run_case(monkeypatch, case, "redo_window")
         near = _decided_columns(run)
         counts.extend(near)
     for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, "forward_seam_pinned")
+        run = _run_case(monkeypatch, case, "double_window")
         forward = _decided_columns(run)
         counts.extend(forward)
     return counts

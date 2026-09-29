@@ -161,6 +161,10 @@ class DecoderStageRecord:
     cycles: Optional[int]  # None for the algorithm, priced in time
     start_ticks: int
     end_ticks: int
+    # the unit the decode ran on, the lane it belongs to, as each LLVM
+    # XRay record carries the thread it ran on
+    # (tools/llvm-xray/xray-converter.cc:232-245)
+    unit_name: str
     # the (operation, round) identities a formation stage turned into
     # detection events here; empty for every stage that forms none
     round_keys: tuple = ()
@@ -184,6 +188,10 @@ class DecoderStageRecord:
     # r_strong is what Toshio's backlog bound divides by (2510.25222
     # lines 1270-1300), and the window record keeps only the last decode
     round_count: int = 0
+    # the ticks the decode had waited inside a strong backend when this
+    # stage closed (DecodeJob.backend_queue_wait_ticks), all of it by the
+    # algorithm stage's end
+    backend_queue_wait_ticks: int = 0
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -372,12 +380,14 @@ class StagedDecoder(decoder_module.DecoderBase):
             step.cycles,
             running.open_start_ticks,
             running.engine.now,
+            job.decoding_unit_name,
             step.round_keys,
             sequences,
             cancelled,
             job.dispatch_ticks,
             job.ready_ticks,
             round_count=job.round_count,
+            backend_queue_wait_ticks=job.backend_queue_wait_ticks,
         )
         self.stage_recorded.fire(record)
 

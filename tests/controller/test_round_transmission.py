@@ -54,6 +54,17 @@ SERIALIZATION_TICKS = config.microseconds_to_ticks(0.064)
 STORE_HOP_TICKS = config.microseconds_to_ticks(0.04)
 
 
+class RecordingPackingLine:
+    """The line in front of the packing stage, keeping each retry's count."""
+
+    def __init__(self, transmitter=None) -> None:
+        self.transmitter = transmitter
+        self.in_flight_at_retry = []
+
+    def retry(self) -> None:
+        self.in_flight_at_retry.append(self.transmitter.in_flight)
+
+
 class RecordingWindows:
     """The window side and the decoders' memory end, in one recorder."""
 
@@ -185,6 +196,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     transmitter.link = links
     transmitter.memory_arrivals = windows
     transmitter.weak_receiver = weak_receiver
+    transmitter.packing_line = RecordingPackingLine(transmitter)
     transmitter.trace.round_event.connect(recorder.record)
     weak_receiver.trace.round_event.connect(recorder.record)
     return transmitter, store, windows, recorder, ledger
@@ -212,6 +224,26 @@ def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
     kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
     assert kinds_and_ticks == [("CWB_SENT", 0), ("PUBLISHED", CWB_TICKS)]
     assert transmitter.in_flight == 0
+
+
+def test_a_round_that_leaves_its_route_lets_a_waiting_round_enter():
+    """The stage's room frees when the windows hear of the round.
+
+    gem5's responder calls sendRetryReq once it can take the request it
+    refused (src/mem/port.hh:244-262), so the line is retried after the
+    count drops, once per round.
+    """
+    engine = engine_module.Engine()
+    profile = priced_cwb_profile()
+    transmitter, _store, _windows, _recorder, _ledger = transmitter_with(
+        engine, profile
+    )
+    first = packed(1)
+
+    reserve_and_send(transmitter, first)
+    engine.run()
+
+    assert transmitter.packing_line.in_flight_at_retry == [0]
 
 
 def test_a_window_round_is_in_flight_until_its_write_publishes_it():

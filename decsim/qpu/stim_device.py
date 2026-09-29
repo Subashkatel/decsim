@@ -67,6 +67,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     operation_circuit_scope = "per_operation"
     # the circuit states every round's width
     takes_code_card = False
+    emits_bit_values = True
 
     def __init__(
         self,

@@ -14,7 +14,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager
-import decsim.decoders.decoders as decoders
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
@@ -104,20 +104,21 @@ class TwoRoundSource:
         )
 
 
-def _manager(engine, row, formation_by_pool=None, unit_count=1):
-    router = decoders.CodeRouter(row)
+def _manager(engine, row, formation=None, unit_count=1):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
-        engine,
-        router=router,
-        scheduler=scheduler,
-        strong_requests=strong_requests,
-        unit_pools={"default": unit_count},
-        escalation_policy=policy,
-        formation_by_pool=formation_by_pool,
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=unit_count, formation=formation
     )
+    manager = decoder_manager.DecoderManager(
+        engine,
+        scheduler=scheduler,
+        pool_settings=pool_settings,
+    )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = row
+    manager.escalation_policy = policy
+    return manager
 
 
 def _window_job():
@@ -200,7 +201,7 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
         1, 1, window_records.DecoderTier.WEAK, 1
     )
     manager.enqueue(waiting, None, on_decoded)
-    assert manager.queue.total() == 0  # both took a slot of the one unit
+    assert manager.queue.waiting == []  # both took a slot of the one unit
     manager.withdraw_window((1, 1))
     assert waiting.cancelled is True
     assert waiting.unit is None
@@ -228,7 +229,7 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     source = OneRoundSource()
     placement = event_formation.SeatedFormation(source, at_the_weak_decoder)
     formation = detection_events.TierFormation(placement, "weak_decoder")
-    manager = _manager(engine, row, {"default": formation})
+    manager = _manager(engine, row, formation)
     formation_stage = detection_events.DetectionEventFormationStage(
         "detection_event_formation", formation=formation
     )
@@ -266,7 +267,7 @@ def test_the_round_before_is_held_by_the_tier_and_not_deposited():
     placement = event_formation.SeatedFormation(source, at_the_weak_decoder)
     formation = detection_events.TierFormation(placement, "weak_decoder")
     row = FixedRow()
-    manager = _manager(engine, row, {"default": formation})
+    manager = _manager(engine, row, formation)
     deposited = []
 
     def note_deposit(job, *_) -> None:
@@ -301,7 +302,7 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     """The strong escalation tier is not pipelined yet, so it refuses.
 
     A pipelined route serves plain window and external decodes only; a
-    strong re-decode, a gap sibling and a merged batch keep occupancy
+    strong re-decode, a gap's second solve and a merged batch keep occupancy
     equal to latency until they get their own design pass, and routing
     one to a pipelined unit would silently serialize it instead of
     honoring the declared card (decode_service.py, _pipeline_of). The
@@ -314,19 +315,17 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     )
     algorithm = FixedRow()
     strong = staged_decoder.StagedDecoder(algorithm, timing)
-    weak = FixedRow()
-    router = decoders.SwitchingRouter(weak=weak, strong=strong)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
+    pool_settings = decoder_pool.PoolSettings(name="strong", unit_count=1)
     manager = decoder_manager.DecoderManager(
         engine,
-        router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
-        unit_pools={"default": 1, "strong": 1},
-        escalation_policy=policy,
+        pool_settings=pool_settings,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.escalation_policy = policy
+    manager.decoder = strong
     job = _window_job()
     job.kind = decoding_records.DecodeJobKind.STRONG_REDECODE
     job.strong_decode_for = (1, 0)
@@ -363,7 +362,8 @@ def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
     log = log_writers.LogWriter()
     engine.line.connect(log.write)
     row = UnpinnableRow()
-    _manager(engine, row)
+    manager = _manager(engine, row)
+    manager.start()
     model = _Model()
     reason = "one observable, no boundary"
     row.forced_solve_unavailable.fire(model, reason)
@@ -387,19 +387,20 @@ def test_every_job_kind_says_how_it_is_settled():
 
 def _blocking_manager(engine, row, *, blocks_unit: bool):
     """A one-unit manager whose default pool blocks, or does not."""
-    router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
-        engine,
-        router=router,
-        scheduler=scheduler,
-        strong_requests=strong_requests,
-        unit_pools={"default": 1},
-        escalation_policy=policy,
-        blocks_unit_by_pool={"default": blocks_unit},
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=1, blocks_unit=blocks_unit
     )
+    manager = decoder_manager.DecoderManager(
+        engine,
+        scheduler=scheduler,
+        pool_settings=pool_settings,
+    )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = row
+    manager.escalation_policy = policy
+    return manager
 
 
 def test_a_tier_that_does_not_block_frees_its_unit_at_the_decodes_end():
@@ -566,19 +567,20 @@ def _enqueue_timed_jobs(manager, decode_microseconds, send_input, on_decoded):
 
 def _staging_manager(engine, row, *, copies_input: bool):
     """A one-unit manager whose default pool copies its input, or does not."""
-    router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
-        engine,
-        router=router,
-        scheduler=scheduler,
-        strong_requests=strong_requests,
-        unit_pools={"default": 1},
-        escalation_policy=policy,
-        copies_input_by_pool={"default": copies_input},
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=1, copies_input=copies_input
     )
+    manager = decoder_manager.DecoderManager(
+        engine,
+        scheduler=scheduler,
+        pool_settings=pool_settings,
+    )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = row
+    manager.escalation_policy = policy
+    return manager
 
 
 class RoundsRow(decoder_module.DecoderBase):

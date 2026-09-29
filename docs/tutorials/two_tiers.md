@@ -46,7 +46,7 @@ extends: ../bases/weak_decoder_baseline.yaml
 escalation:
   kind: switching
   gap_threshold_db: 20.0
-  strong_window: near_seam_pinned
+  strong_window: redo_window
 
 links:
   qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
@@ -101,7 +101,7 @@ The `escalation` section is the new part.
   escalated, written in the paper's decibels. decsim converts it once,
   at load, into natural-log weight, which is the unit the decoder
   compares in (`decsim/escalation/settings.py`, `decibels_to_nats`).
-- `strong_window: near_seam_pinned` says which rounds the strong
+- `strong_window: redo_window` says which rounds the strong
   decoder re-reads: the escalated window's commit region and one buffer
   region ahead of it, with its past face pinned on the correction the
   window before it committed.
@@ -198,7 +198,7 @@ ready to frame commit: median 28.368 us, p99 70.340 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/two_tiers/combined/two_tiers-ab2ef497/sweep.csv
+every column: results/two_tiers/combined/two_tiers-1bd7c0f9/sweep.csv
 ```
 
 Read `service time per window, mean` against the weak card of one
@@ -277,8 +277,8 @@ Two things here are new since [Your first run](first_run.md).
 The window was **dispatched twice**, and the algorithm ran twice, at
 6.036 and again at 7.076. That is the confidence being computed: two
 solves of one window, each forced into one of the two logical answers.
-`solve held` at 7.076 is the first result waiting for its sibling, so
-that the two weights can be subtracted.
+`solve held` at 7.076 is the first result waiting for the other class's
+solve, so that the two weights can be subtracted.
 
 Then, at 8.140, `verdict`. This window's confidence was at or above the
 threshold, so the weak answer was kept: the boundary went to the next
@@ -312,8 +312,8 @@ tick (us)  where                            what                                
 15.012     Decoder unit default#0           residence, unbounded, data ready 15.012, freed at decode done  2.128     copy      48
 15.036     Decoder unit default#0           stage algorithm                                                1.000
 16.036     Decoder unit default#0           stage release                                                  0.040
-16.076     Window planner                   masked view copy                                                         copy      48
 16.076     Window planner                   solve held
+16.076     Window planner                   masked view copy                                                         copy      48
 16.076     Decoder unit default#0           stage fetch                                                    0.024
 16.076     Decoder unit default#0           decode service                                                 1.064
 16.100     Decoder unit default#0           stage algorithm                                                1.000
@@ -368,7 +368,7 @@ eight things happen that did not happen for window 0.
   input comes from the strong syndrome buffer, where the escalation just
   put it, and not from the weak decoder.
 - **`decoder_to_decoder` at 17.144, 8 bits.** Window 2's committed
-  boundary, shipped to the strong window: `near_seam_pinned` pins the
+  boundary, shipped to the strong window: `redo_window` pins the
   strong window's past face on it, and the strong solve folds it in
   (`decsim/windows/window_boundaries.py`, `pin_strong_face`).
 - **The strong decode costs 10 microseconds**, its card, against the
@@ -381,7 +381,7 @@ eight things happen that did not happen for window 0.
 provisionally commits on the weak answer as soon as the verdict is in
 (`decsim/windows/window_commits.py`, `commit`). What it does not do is
 ship its boundary: this run's boundary policy is `held`, chosen for you
-because the escalation may escalate and `near_seam_pinned` does not
+because the escalation may escalate and `redo_window` does not
 absorb the windows it covers. A strong window absorbs a weak window when
 it decodes the same rounds again and replaces that window's answer, so
 the weak window never ships a boundary of its own

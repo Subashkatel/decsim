@@ -137,7 +137,7 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
         region_parts = parts.values()
         self._parts_by_region[region_id] = tuple(region_parts)
         forget = self._forget(job)
-        join = _RegionJoin(job, len(parts), on_result, forget)
+        join = _RegionJoin(job, parts, on_result, forget)
         for basis, part in parts.items():
             on_part = join.on_part(basis)
             self._arrive(part, on_part, engine)
@@ -169,6 +169,8 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
         walk = _Walk(job, on_result)
         if self.resources.acquire(DISPATCHER, walk):
             self._enter(walk, engine)
+            return
+        walk.queued_ticks = engine.now
 
     def _enter(self, walk: "_Walk", engine) -> None:
         """Holding the dispatcher, the decode is handed to the device."""
@@ -191,6 +193,8 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
             return
         if self.resources.acquire(needed, walk):
             self._run_step(walk, engine)
+            return
+        walk.queued_ticks = engine.now
 
     def _run_step(self, walk: "_Walk", engine) -> None:
         """The step's time; a resource it moves off is freed at its end."""
@@ -218,6 +222,8 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
         waiting = self.resources.release(resource)
         if waiting is None:
             return
+        waited = engine.now - waiting.queued_ticks
+        waiting.job.backend_queue_wait_ticks += waited
         if waiting.ticket is None:
             self._enter(waiting, engine)
             return
@@ -305,6 +311,8 @@ class _Walk:
     # the step to run next, and the resource the decode holds now
     index: int = 0
     held: Optional[str] = None
+    # the tick it joined the queue of the resource it waits for now
+    queued_ticks: int = 0
     # cancelled on the device: it walks to the end and reports nothing
     cancelled: bool = False
 
@@ -372,17 +380,22 @@ class _Resources:
 
 
 class _RegionJoin:
-    """The answers of one region's parts, joined once all have come."""
+    """The answers of one region's parts, joined once all have come.
+
+    The region waited as long as the part that ended last, since both
+    arrived with it: its time on the device is that part's waits and
+    that part's steps.
+    """
 
     def __init__(
         self,
         job: decoding_records.DecodeJob,
-        part_count: int,
+        parts: dict,
         on_result: decoder_module.OnResult,
         on_joined: Callable,
     ) -> None:
         self.job = job
-        self.part_count = part_count
+        self.parts = parts
         self.on_result = on_result
         self.on_joined = on_joined
         self.results: dict = {}
@@ -395,8 +408,10 @@ class _RegionJoin:
         self, basis: str, result: decoding_records.DecodeResult
     ) -> None:
         self.results[basis] = result
-        if len(self.results) < self.part_count:
+        if len(self.results) < len(self.parts):
             return
+        last_part = self.parts[basis]
+        self.job.backend_queue_wait_ticks = last_part.backend_queue_wait_ticks
         self.on_joined()
         joined = joined_result(self.job, self.results)
         self.on_result(joined)

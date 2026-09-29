@@ -11,8 +11,8 @@
 # settings.py). tests/experiments/test_yaml_surface.py loads this file, so
 # a key its section no longer knows fails there; a key a reader gained is
 # added here by hand, in the same commit. Knobs the yaml
-# cannot reach are Python objects on the settings records: routers,
-# escalation families, schedulers, devices, policies.
+# cannot reach are Python objects on the settings records: escalation
+# families, schedulers, devices, policies.
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
@@ -196,11 +196,14 @@ escalation:
 #                                  # and refuses uncalibrated points. online
 #                                  # starts at gap_threshold_db and adapts it
 #                                  # across the point's shots (serial only)
-#   threshold_table: cal.csv       # table only: a calibration csv with
-#                                  # columns distance and p and one threshold
-#                                  # column per method, in dB, set as Toshio
-#                                  # 2510.25222 Sec. III B sets g_th (brute
-#                                  # force, or Eq. (4)); path relative to this
+#   threshold_table: cal.csv       # table only: a calibration csv whose key
+#                                  # columns are headed by the yaml path of
+#                                  # the setting each matches, as
+#                                  # qpu.distance and workload.arguments.
+#                                  # physical_error_probability, with one
+#                                  # threshold column per method, in dB, set
+#                                  # as Toshio 2510.25222 Sec. III B sets g_th
+#                                  # (brute force, or Eq. (4)); path relative to this
 #                                  # config file. Calibrate for this run's
 #                                  # window geometry; thresholds do not transfer
 #                                  # between geometries
@@ -244,13 +247,13 @@ escalation:
 #                                  # weak_decoder_to_strong_decoder hop, which the
 #                                  # paper expects to cost little because the
 #                                  # switching rate decays with the code distance
-#   strong_window: near_seam_pinned  # near_seam_pinned |
-#                                  # forward_seam_pinned: the shape
-#                                  # of the window the strong tier re-decodes
+#   strong_window: redo_window     # redo_window | double_window: the
+#                                  # shape of the window the strong tier
+#                                  # re-decodes
 #                                  # (STRONG_WINDOW_SHAPES in
 #                                  # escalation/strong_window_shapes.py).
-#                                  # near_seam_pinned, the default, re-decodes
-#                                  # the escalated window's commit region and
+#                                  # redo_window, the default, decodes the
+#                                  # escalated window again: its commit region and
 #                                  # pins its past face on the earlier
 #                                  # neighbour's committed correction: the
 #                                  # input carries d(e + kappa) on the seam
@@ -264,8 +267,9 @@ escalation:
 #                                  # is the distance. It escalates with Held
 #                                  # boundaries, serially or beside the weak
 #                                  # decode (run_both_at_once).
-#                                  # forward_seam_pinned is the paper's
-#                                  # Sec. III C as it is stated: the weak chain
+#                                  # double_window is Toshio's double window
+#                                  # decoding scheme, Sec. III C and Fig. 12
+#                                  # as it is stated: the weak chain
 #                                  # keeps committing past an escalated strong
 #                                  # window of r_com + 2 r_buf rounds, which
 #                                  # is read with no context, its near face
@@ -278,7 +282,7 @@ escalation:
 #                                  # to the restart window, and reads one
 #                                  # buffer region of raw context on a near
 #                                  # face that no committed correction closes
-#   restart_reread_buffer_regions: 1  # forward_seam_pinned only: how many
+#   restart_reread_buffer_regions: 1  # double_window only: how many
 #                                  # of the strong region's buffer regions
 #                                  # the restarted weak window re-reads. Toshio
 #                                  # 2510.25222 lines 1229-1235 resume the weak
@@ -294,7 +298,8 @@ escalation:
 #                                  # per bounded window. 0 reads
 #                                  # nothing inside the region, and the
 #                                  # restart window owns the faults of the
-#                                  # rounds it reads
+#                                  # rounds it reads. Refused beside any other
+#                                  # strong_window, which restarts nothing
 
 burst_detector:
   kind: none                       # none | event_count |
@@ -493,13 +498,18 @@ workload:
 # lays out for each operation before the run starts.
 windows:
   clock: fridge                    # a clocks domain; absent uses controller.clock
-  decision_cycles: 0               # per-submission readiness decision before
-                                   # the decode queue admits the job. Zero is
-                                   # synchronous, without edge rounding; positive
-                                   # costs end on this domain's clock edge.
-                                   # gem5 src/mem/XBar.py frontend_latency;
-                                   # RISC-Q 2603.16203 lines 893-904 times
-                                   # aggregation and distribution separately
+  decision_cycles: 0               # the window side's decision, once per
+                                   # window, before any of its requests enters
+                                   # a decode queue: its weak jobs and a
+                                   # run_both_at_once speculative strong
+                                   # decode leave when it ends, the one
+                                   # pre-decode step RISC-Q
+                                   # 2603.16203 lines 893-904 times before the
+                                   # decoder, and Step 1's "simultaneously fed
+                                   # to both" (Toshio 2510.25222 lines 598-601).
+                                   # Zero is synchronous, without edge rounding;
+                                   # positive costs end on this domain's clock
+                                   # edge
   kind: sliding                    # sliding | parallel | sandwich | naive_online
   commit_rounds: null              # rounds committed per window; null = d. The
                                    # sandwich row needs at least 2: it lays each
@@ -601,11 +611,12 @@ collection:
                                    # max(piece_rounds // a shot's rounds, 1)
                                    # shots and is saved whole when it ends,
                                    # so a killed collect loses at most the
-                                   # pieces it was running. Sized in rounds,
-                                   # a piece takes about as long at any
-                                   # history length. A point whose threshold
-                                   # is calibrated online runs its pieces
-                                   # one after another, each from the
+                                   # pieces it was running. A shot's rounds
+                                   # add up every patch's rounds. Sized in
+                                   # rounds, a piece takes about as long at
+                                   # any history length. A point whose
+                                   # threshold is calibrated online runs its
+                                   # pieces one after another, each from the
                                    # calibrator state the last one saved,
                                    # and stops at max_shots alone: it takes
                                    # no max_failures and no max_core_seconds.
@@ -654,21 +665,14 @@ controller:                        # controller work per round, in cycles of its
                                    # conditional together: an upper bound here
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
                                    # through the packing stage, a whole count of
-                                   # at least one. null = unbounded
-  packing_overflow: stall          # stall | drop_round: what the controller does
-                                   # with a finished round the weak syndrome buffer (or the packing
-                                   # workspace) cannot take. stall holds it upstream
-                                   # and writes it in order once a slot frees, the
-                                   # backpressure real-time stacks apply to their
-                                   # source (Caune et al. 2410.05202: the sequencer
-                                   # polls the decoder's status register and stalls);
-                                   # under stall a full packing workspace stops the
-                                   # run. drop_round drops it instead, ns-3's drop
-                                   # tail (point-to-point-net-device.cc Send:
-                                   # Enqueue false, the packet is dropped).
-                                   # LILLIPUT's readout buffer overwrites the latest
-                                   # value (2108.06569), a storage choice neither
-                                   # word models
+                                   # at least one. null = unbounded. A round
+                                   # counts from its emission until the windows
+                                   # hear of it: on the readout link, in
+                                   # assembly, held for store room or on its
+                                   # route. Rounds take places in emission
+                                   # order. One that finds the stage full waits
+                                   # in front of it and enters when a round
+                                   # leaves. The QPU keeps measuring
 
 detection_events:                  # where a round's raw measurement outcomes
                                    # become its detection events, and what it
@@ -788,15 +792,19 @@ links:                             # a kind, then one card per path; null = the
                                    # roce_v2_cpu is the reference card with the
                                    # strong tier's off-board hops priced by
                                    # Backline's measured FPGA-to-CPU round trip over
-                                   # RoCE v2 (2609.09270 Table III), half of the
-                                   # 2.305 us median on each leg it crosses, the
-                                   # bits at the cable's 100 Gb/s on top.
+                                   # RoCE v2 (2609.09270 Table III): each leg it
+                                   # crosses carries half of the 2.305 us median
+                                   # less the 16-byte echo's time on the cable's
+                                   # 100 Gb/s (line 1611), and every transfer
+                                   # pays its own bits at that rate, so the
+                                   # paper's echo takes the median exactly.
                                    # roce_v2_gpu is the same card on the FPGA-to-GPU
                                    # round trip, 4.5 us in the median.
                                    # nvqlink_gpu is the same split on NVQLink's
                                    # FPGA-to-GPU round trip over RoCE, a persistent
                                    # kernel looping each packet back, 3.839 us in
-                                   # the steady-state median (2510.25213 line 485),
+                                   # the steady-state median (2510.25213 line 485)
+                                   # for a 32-byte echo (lines 402-403),
                                    # at its 100 Gb Ethernet rate, on an unreliable
                                    # connection, so the ideal protocol row.
                                    # Each card, in cycles of its named clock domain;
@@ -986,9 +994,8 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
                                    # When it is full the controller holds the
                                    # finished round and publishes it in order
                                    # once a slot frees, the backpressure real
-                                   # systems apply to their source;
-                                   # controller.packing_overflow chooses that
-                                   # hold or a drop. null = unbounded. A
+                                   # systems apply to their source, and drops
+                                   # nothing. null = unbounded. A
                                    # bounded store refuses a round that states
                                    # no size.
                                    # A store holds its widest hold's rounds
@@ -1101,22 +1108,26 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # windows folds a boundary
   result_blocks_unit: false        # false | true: when a finished decode gives
                                    # its unit's compute back. false gives it
-                                   # back at the decode's end, because the frame
-                                   # manager takes the correction without
-                                   # blocking the decoder (Chen 2605.30765 lines
-                                   # 1618-1620). true holds the unit until the
-                                   # window commits, which is a decoder whose
-                                   # output sits in a status register until the
-                                   # reader polls it (Riverlane 2410.05202 lines
-                                   # 1256-1259); the unit is then busy for the
-                                   # output hop and the frame write too. Read on
-                                   # the tier that decodes the plan's windows: a
-                                   # strong re-decode's result waits in its unit
-                                   # until the window side takes it in any case.
-                                   # A confidence that forces two class solves
-                                   # per window needs a unit per forced class
-                                   # under true, because the join reads neither
-                                   # solve until both have finished
+                                   # back at the decode's end, or when the
+                                   # confidence walk charged on the unit ends,
+                                   # because the frame manager takes the
+                                   # correction without blocking the decoder
+                                   # (Chen 2605.30765 lines 1618-1620). true
+                                   # holds the unit until the result is read:
+                                   # the window's commit, or the confidence join
+                                   # holding a forced-class solve, which is a
+                                   # unit with no output buffer, stalled by
+                                   # back-pressure until its output is taken
+                                   # (Bascones 2605.01035 lines 607-609 size
+                                   # FIFOs to avoid that stall); the unit is
+                                   # then busy for the output hop and the frame
+                                   # write too. Read on the tier that decodes
+                                   # the plan's windows: a strong re-decode's
+                                   # result waits in its unit until the window
+                                   # side takes it in any case. A forced-class
+                                   # solve the confidence join holds is read
+                                   # when the join takes it, so one unit serves
+                                   # both solves of a window
   unit_memory:                     # the input memory of one decoder unit: a
                                    # window's rounds are copied into it before
                                    # the unit decodes them, and freed when the
@@ -1394,11 +1405,12 @@ decoder_manager:                   # the manager that gives ready windows a unit
                                    # resources", 1259-1262). The batch is
                                    # timing-only, since one decode cannot carry
                                    # each member window's correction, so it
-                                   # prices a bulk strong tier and refuses a
-                                   # run whose accuracy is coupled to the
-                                   # strong result; serial escalation only (it
-                                   # contradicts escalation.run_both_at_once
-                                   # and the double window)
+                                   # prices a bulk strong tier and needs
+                                   # qpu.kind timing_only, whose rounds carry
+                                   # sizes and no bits; serial switching only
+                                   # (it contradicts escalation.run_both_at_once
+                                   # and the double window, and any other
+                                   # escalation.kind has no strong pool)
   clock: fridge                    # the domain dispatch_cycles counts in
   dispatch_cycles: 0               # the manager's own work per dispatch,
                                    # charged on its clock after a job is placed
@@ -1430,7 +1442,7 @@ idle_policy:
                                    # 2303.00054 line 144), so the default costs one
                                    # load-only decode job per idle commit region
                                    # and one shorter job for the rounds left when
-                                   # an operation claims the patch or the
+                                   # an operation starts on the patch or the
                                    # workload completes.
                                    # ignore is the optimistic card for active-path
                                    # latency studies. Inert while the workload is a
@@ -1531,10 +1543,12 @@ observation:                       # what a run records beyond its results
                                    # otherwise
   confidence_shot_count: 100       # a count of shots from seed 0, or all. When a
                                    # confidence signal decides the escalation
-                                   # (switching), those shots write each committed
-                                   # window's gap, escalation and strong revision to
-                                   # window_confidence.csv, and every shot's gaps are
-                                   # counted into confidence_histogram.csv. A gap is
+                                   # (switching), the scored ones among those shots
+                                   # write each committed window's gap, escalation
+                                   # and strong revision to window_confidence.csv,
+                                   # and every scored shot's gaps are counted into
+                                   # confidence_histogram.csv; an unscored shot is
+                                   # sinter's discard and writes neither. A gap is
                                    # written in nats, ln of the likelihood ratio, and
                                    # binned in decibels, 10 log10 of it, so dB = nats
                                    # x 10 / ln 10 (decsim/escalation/settings.py

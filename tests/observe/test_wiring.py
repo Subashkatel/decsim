@@ -232,6 +232,7 @@ class PortOnlyDecoder:
             None,
             engine.now,
             end_tick,
+            job.decoding_unit_name,
         )
         self.stage_recorded.fire(record)
         engine.schedule(self.latency_ticks, lambda: on_result(result))

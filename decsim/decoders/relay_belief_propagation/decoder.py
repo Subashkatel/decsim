@@ -21,6 +21,7 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.PHYSICAL
+    backend_is_seeded = True
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -152,9 +153,9 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         return joined, elapsed_nanoseconds
 
     def compile(self, faults, model):
-        """The window decoder, which compiles the backend per model itself."""
-        del faults
+        """The window decoder, its backend for this model built untimed."""
         del model
+        self.window_decoder.compiled_model(faults)
         return self.window_decoder
 
     def decode_window(self, backend, model, faults, syndrome):

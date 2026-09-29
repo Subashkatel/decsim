@@ -25,7 +25,7 @@ The idle accounting, as the QPU sees it: it takes every idle round.
 | Method | What it does |
 | --- | --- |
 | `emit_idle_round` | Take one idle cycle of a patch nobody is operating on. |
-| `bind_at_start` | The command as it starts after its patches' idle rounds. |
+| `start_command` | The command as it starts after its patches' idle rounds. |
 
 ## the store holds the packed round
 
@@ -127,7 +127,7 @@ The decoders' end for a timing-only round, as the controller sees it.
 
 ### `HeldRounds`
 
-The waiting line in front of a store, as the store sees it.
+The waiting line in front of a bounded stage, as the stage sees it.
 
 | Method | What it does |
 | --- | --- |
@@ -317,18 +317,9 @@ The decoder manager, as the window manager sees it.
 | `accept_selection` | The selection landed: the request's result may reach the window. |
 | `charge_soft_output` | Charge the confidence's own computation on the job's unit. |
 | `resolve_weak_request` | The window side decided this weak request; close its attempt. |
-| `read_result` | The window side has this job's result in hand. |
+| `read_result` | The window side, or the confidence join, has this result in hand. |
 | `cancel_strong` | A kept weak result: the window's strong request ends where it is. |
 | `close_companion_request` | This forced solve lost; its window is answered by the other. |
-
-### `DecoderRouter`
-
-The routing table over the tiers' units, as a caller outside sees it.
-
-| Method | What it does |
-| --- | --- |
-| `route` | The decoder this job goes to. |
-| `fault_model_requirement_for` | What a window model must offer for the unit that takes this code. |
 
 ## the decoder returns a result
 
@@ -447,6 +438,7 @@ What the QPU reads out each round for an operation.
 | --- | --- |
 | `operation_circuit_scope` | `str` |
 | `takes_code_card` | `bool` |
+| `emits_bit_values` | `bool` |
 | `shot_sampled` | `Any` |
 
 | Method | What it does |
@@ -481,6 +473,7 @@ Where the machine forms a round's detection events, and what it costs.
 | --- | --- |
 | `forms_at` | Whether the seat forms the rounds that cross it. |
 | `form_at` | The fragments as they leave the seat: formed, or as they came. |
+| `width_at` | The width one round's fragments take as they leave the seat. |
 | `needs_the_round_before` | Whether the seat must be given the raw round before this one. |
 | `cycles_at` | The cycles of forming round_count rounds together at the seat. |
 

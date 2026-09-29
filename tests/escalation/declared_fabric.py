@@ -92,7 +92,7 @@ def switching_machine(
     *,
     rounds: int,
     escalated_windows,
-    strong_window: str = "near_seam_pinned",
+    strong_window: str = "redo_window",
     run_both_at_once: bool = False,
     round_microseconds: float = 1.0,
     escalation_microseconds: Optional[float] = None,
@@ -101,12 +101,14 @@ def switching_machine(
     trace_path=None,
     scheme=None,
     weak_syndrome_buffer=None,
+    decision_cycles: int = 0,
 ) -> machine_module.Machine:
     """One d=3 memory operation, weak-primary switching on declared ticks.
 
     escalation replaces the Python-built Switching settings when given
     (a table row under its own kind); scheme replaces the lookahead
-    sliding windows with a caller's own windowing scheme.
+    sliding windows with a caller's own windowing scheme; decision_cycles
+    is the window side's decision, on the declared clock.
     """
     probability = escalate_only(escalated_windows)
     weak_latency = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
@@ -114,7 +116,8 @@ def switching_machine(
         weak_latency, 0.0, probability_for=probability
     )
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    router = decoders.SwitchingRouter(weak=weak, strong=strong)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -143,10 +146,10 @@ def switching_machine(
         )
         scheme = sliding_scheme.SlidingWindowScheme(lookahead)
     windows = window_settings.WindowSettings(
-        scheme=scheme, boundary_policy=boundary_policy
-    )
-    decoder_manager = decoder_settings.DecoderManagerSettings(
-        router=router, unit_pools={"default": 1, "strong": 1}
+        clock=DECLARED_CLOCK,
+        decision_cycles=decision_cycles,
+        scheme=scheme,
+        boundary_policy=boundary_policy,
     )
     if escalation is None:
         escalation = escalation_settings.EscalationSettings(
@@ -175,7 +178,8 @@ def switching_machine(
         workload=workload,
         qpu=qpu,
         windows=windows,
-        decoder_manager=decoder_manager,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
         escalation=escalation,
         links=links,
         controller=controller,

@@ -63,7 +63,9 @@ PROCESS_ID = 1
 # the controller's packing workspace draws on the controller's own lane
 ASSEMBLER_THREAD = "Controller"
 ASSEMBLER_COUNTER = "controller assembler rounds"
-# and so does its waiting line for store room, beside the workspace
+# and so do its two waiting lines, one in front of the workspace and one
+# in front of the stores
+WAITING_ROUNDS_COUNTER = "controller rounds waiting for a packing place"
 HELD_ROUNDS_COUNTER = "controller rounds held for store room"
 
 
@@ -171,8 +173,9 @@ class TraceWriter:
 
         The workspace is the one bounded controller-side structure
         (controller.packing_rounds_in_flight, data_path.md's residence
-        table): a round enters at its first fragment and leaves when it
-        is packed, or when it is dropped for want of room.
+        table): the residence is the round's bits in the workspace, from its
+        first fragment, or from its release when it waited for a place, to
+        its packing. Its place in the bound is taken at its emission.
         """
         round_key = (event.operation_id, event.round_index)
         if event.kind == "BINARY_AVAILABLE":
@@ -180,9 +183,22 @@ class TraceWriter:
             return
         if event.kind == "PACKED":
             self._end_assembly(round_key, "packed")
+
+    def round_waiting_for_a_place(self, capacity, event) -> None:
+        """A round waiting in front of a full packing stage, and its entry.
+
+        The wait opens when the QPU emits the round
+        (controller/round_assembly.py), so the fragments that arrive while
+        it waits find the round's key open and open no place in the stage.
+        Its place opens when the line lets it go.
+        """
+        round_key = (event.operation_id, event.round_index)
+        if event.kind == "STALLED":
+            self._begin_waiting_round(round_key, event)
             return
-        if event.kind == "DROPPED":
-            self._end_assembly(round_key, "dropped, workspace full")
+        if event.kind == "RELEASED":
+            self._end_waiting_round(round_key)
+            self._begin_assembly(capacity, round_key, event)
 
     def round_held_for_room(self, event) -> None:
         """A packed round waiting in front of a full store, and its release.
@@ -523,8 +539,6 @@ class TraceWriter:
     def job_started(self, job: decoding_records.DecodeJob, unit) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
-        window_key = (job.operation_id, job.window_id)
-        self._open.unit_thread_by_window[window_key] = thread
         args = {
             "request": request_text(job.request_key),
             "service": _service_text(job.service_key),
@@ -549,16 +563,17 @@ class TraceWriter:
         self._complete(thread, name, "window,service", start, duration, args)
 
     def stage_recorded(self, record) -> None:
-        """One stage of one job on the lane of the unit that started it.
+        """One stage of one job on the lane of the unit that ran it.
 
-        A stage the cancel closed carries the mark, so the trace shows
-        where the decode stopped rather than where its card would have
-        ended.
+        The record names its unit, since two decodes of one window run
+        on two units at once (a complementary gap's forced-class pair, a
+        run_both_at_once speculative strong decode) and two decodes that
+        serve no request share every other identity. A stage the cancel
+        closed carries the mark, so the trace shows where the decode
+        stopped rather than where its card would have ended.
         """
         window_key = (record.operation_id, record.window_id)
-        thread = self._open.unit_thread_by_window.get(window_key)
-        if thread is None:
-            return
+        thread = _unit_thread(record.unit_name)
         args = {
             "window": window_text(window_key),
             "cycles": record.cycles,
@@ -707,7 +722,7 @@ class TraceWriter:
         self._counter(thread, name, {series: value}, self.engine.now)
 
     def _begin_assembly(self, capacity, round_key, event) -> None:
-        """The round's first fragment opens its place in the workspace."""
+        """The round's bits enter: at its first fragment, or its release."""
         if (ASSEMBLER_THREAD, round_key) in self._open.open_residence:
             return
         args = {
@@ -725,12 +740,34 @@ class TraceWriter:
         self._count(ASSEMBLER_THREAD, ASSEMBLER_COUNTER, 1)
 
     def _end_assembly(self, round_key, reason: str) -> None:
-        """The round left the workspace, packed or dropped."""
+        """The round left the workspace, packed."""
         if (ASSEMBLER_THREAD, round_key) not in self._open.open_residence:
             return
         closing = {"freed": self.engine.now, "freed_reason": reason}
         self._end_residence(ASSEMBLER_THREAD, round_key, closing)
         self._count(ASSEMBLER_THREAD, ASSEMBLER_COUNTER, -1)
+
+    def _begin_waiting_round(self, round_key, event) -> None:
+        """The stage was full: the round's wait for a place opens here."""
+        args = {
+            "round": round_text(round_key),
+            "transfer": "reference",
+            "held_from": event.tick,
+        }
+        name = f"wait round {round_key[1]} for a packing place"
+        self._begin_residence(
+            ASSEMBLER_THREAD, round_key, name, "round,residence", args
+        )
+        self._count(ASSEMBLER_THREAD, WAITING_ROUNDS_COUNTER, 1)
+
+    def _end_waiting_round(self, round_key) -> None:
+        """A round left the stage and this one took its place."""
+        closing = {
+            "freed": self.engine.now,
+            "freed_reason": "packing place freed",
+        }
+        self._end_residence(ASSEMBLER_THREAD, round_key, closing)
+        self._count(ASSEMBLER_THREAD, WAITING_ROUNDS_COUNTER, -1)
 
     def _begin_held_round(self, round_key, event) -> None:
         """The round found no room: its wait opens here."""
@@ -1145,10 +1182,8 @@ class _OpenSlices:
     (thread, key) and writes one X event at its end; flowing_rounds and
     flowing_windows hold the id of each flow whose start has been
     written, so a step never precedes its start, and flows_started is
-    how many ids have been given; unit_thread_by_window says which
-    unit's lane a stage lands on, because a stage record names the
-    window and not the unit. gem5 groups a component's many members the
-    same way (gem5 src/base/stats/group.hh:60-92).
+    how many ids have been given. gem5 groups a component's many members
+    the same way (gem5 src/base/stats/group.hh:60-92).
     """
 
     tid_by_thread: dict = dataclasses.field(default_factory=dict)
@@ -1156,7 +1191,6 @@ class _OpenSlices:
     open_service: dict = dataclasses.field(default_factory=dict)
     flowing_rounds: dict = dataclasses.field(default_factory=dict)
     flowing_windows: dict = dataclasses.field(default_factory=dict)
-    unit_thread_by_window: dict = dataclasses.field(default_factory=dict)
     counter_value: dict = dataclasses.field(default_factory=dict)
     unnamed_threads: int = 0
     flows_started: int = 0

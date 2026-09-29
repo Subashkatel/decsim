@@ -459,6 +459,28 @@ def test_the_store_holds_the_events_when_the_chip_forms_them():
     assert copied_bits == [2]
 
 
+def test_the_room_is_weighed_at_the_width_the_chip_stores():
+    """A round that crosses at two bits and is stored as one event takes one.
+
+    gem5 makes room for a block at the size it will be stored at after
+    its own compressor, not the packet's (src/mem/cache/base.cc:1678-1698).
+    """
+    engine = engine_module.Engine()
+    store = _store(engine, bits=2)
+    on_the_chip = _on_the_chip()
+    receiver, _windows = _receiver_with(
+        engine, store, detection_events=on_the_chip
+    )
+    crossing = _packed(1)
+    asked = _packed(2)
+    receiver.reserve_write(crossing)
+
+    has_room = receiver.has_room(asked)
+
+    assert receiver.reserved_bits_by_round == {(1, 1): 1}
+    assert has_room is True
+
+
 def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     engine = engine_module.Engine()
     clock = config.Clock(10)

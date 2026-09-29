@@ -56,6 +56,9 @@ class ReadoutLog:
         del operation_id
         self.idle_ticks.append((self.engine.now, patch, round_index))
 
+    def start_command(self, command):
+        return command
+
     def body_done(self, operation):
         self.completion_ticks.append((self.engine.now, operation.id))
 
@@ -138,7 +141,8 @@ def clocked_qpu(cycle_ticks, source=None):
     if source is None:
         source = syndrome_devices.TimingOnlyDevice(CODE)
     clock = config.Clock(cycle_ticks)
-    qpu = cycle_clock.QPUDevice(engine, source, clock, CODE)
+    qpu = cycle_clock.QPUDevice(engine, clock, CODE)
+    qpu.syndrome_source = source
     qpu.readout_receiver = log
     qpu.runtime = log
     qpu.idle_rounds = log

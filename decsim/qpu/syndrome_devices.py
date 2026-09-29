@@ -54,6 +54,7 @@ class TimingOnlyDevice:
 
     operation_circuit_scope = "none"
     takes_code_card = True
+    emits_bit_values = False
     # nothing is sampled here, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
 
@@ -180,6 +181,7 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
 
     operation_circuit_scope = "none"
     takes_code_card = True
+    emits_bit_values = True
     # the bits are drawn per round, not per shot, so nothing fires here
     shot_sampled = trace_source.SILENT
 

@@ -46,12 +46,13 @@ class RecordingAssembler:
     def expect_round(
         self,
         fragment: round_records.RetainedSyndromeFragment,
+        fragment_count: int,
         route: round_records.SyndromePacketRoute,
     ) -> None:
-        self.expected.append((fragment, route))
+        self.expected.append((fragment, fragment_count, route))
 
-    def add(self, fragment, fragment_count, route):
-        self.added.append((self.engine.now, fragment, fragment_count, route))
+    def add(self, fragment, route):
+        self.added.append((self.engine.now, fragment, route))
 
 
 def controller_with(engine, links, assembler, settings=SETTINGS):
@@ -77,12 +78,13 @@ def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay() -> (
     )
 
     controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)
-    assert len(assembler.expected) == 1
+    (expected,) = assembler.expected
     assert assembler.added == []
     engine.run()
 
     (added,) = assembler.added
-    tick, fragment, fragment_count, route = added
+    tick, fragment, route = added
+    _, fragment_count, _ = expected
     expected_tick = crossing_ticks + READOUT_TICKS
     assert tick == expected_tick
     assert fragment.bits == (1, 0, 1, 0)

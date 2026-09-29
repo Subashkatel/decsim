@@ -197,16 +197,16 @@ docstring.
 - `decsim/decoders/belief_propagation_osd/decoder.py`: The BP-OSD adapter: ldpc's BpOsdDecoder on the window's physical faults.
 - `decsim/decoders/decode_dispatch.py`: Dispatch: startable jobs first, in scheduler order, onto an offered unit.
 - `decsim/decoders/decode_outcomes.py`: What a finished decode means and where its result goes.
-- `decsim/decoders/decode_queue.py`: The jobs waiting for a decoder unit, per pool, in scheduler order.
+- `decsim/decoders/decode_queue.py`: The jobs waiting for a unit of the manager's pool, in scheduler order.
 - `decsim/decoders/decode_service.py`: One decode on one unit: staged, started once landed and allowed, freed.
 - `decsim/decoders/decoder.py`: The Decoder port's defaults, and the template every window decoder shares.
 - `decsim/decoders/decoder_manager.py`: The decoder manager: the facade that gives ready windows a decoder unit.
 - `decsim/decoders/decoder_memory.py`: The memory inside one decoder unit.
 - `decsim/decoders/decoder_memory_transfer.py`: Moves a job's rounds from the weak syndrome buffer into the unit's memory.
 - `decsim/decoders/decoder_output.py`: The decoder side's outgoing sends: the frame, the strong tier, a peer.
-- `decsim/decoders/decoder_pool.py`: The decoder pools: their units, the free ones, the unit a job is offered.
+- `decsim/decoders/decoder_pool.py`: A manager's pool: its units, the free ones, the unit a job is offered.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
-- `decsim/decoders/decoders.py`: Timing-only decoders, the routers and the sampled-confidence wrapper.
+- `decsim/decoders/decoders.py`: Timing-only decoders and the sampled-confidence wrapper.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
 - `decsim/decoders/dispatch_steps/__init__.py`: The dispatch_steps row: Relay-BP behind a CUDA-Q dispatcher, step by step.
 - `decsim/decoders/dispatch_steps/decoder.py`: Relay-BP on a GPU behind a CUDA-Q dispatcher, step by step.

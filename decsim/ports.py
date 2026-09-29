@@ -139,13 +139,16 @@ class IdleRoundReceiver(Protocol):
     def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
         """Take one idle cycle of a patch nobody is operating on."""
 
-    def bind_at_start(
+    def start_command(
         self, command: program_records.RunOperationBody
     ) -> program_records.RunOperationBody:
         """The command as it starts after its patches' idle rounds.
 
-        A segment that declares no stream offset continues its stream
-        after every round the stream has had, idle ones included.
+        The operation claims every idle round its patches emitted before
+        it started. A segment that declares no stream offset continues
+        its stream after every round the stream has had, idle ones
+        included, and a feedback source on a protected stream reads it
+        from there. Any other command comes back unbound.
         """
 
 
@@ -312,8 +315,7 @@ class SyndromeRoundSender(Protocol):
     The one end a packed round leaves the assembler by. The sender
     reserves room in every syndrome buffer the round must reach and
     sends it on; a round that finds no room goes to the waiting line,
-    which holds it for a retry or drops it as the controller's overflow
-    setting says.
+    which holds it for a retry.
 
     strong_crossing_count is the strong-primary rounds sent to the
     strong syndrome buffer and not yet landed there, which the packing
@@ -464,12 +466,13 @@ class MemoryRoundArrivals(Protocol):
 
 @runtime_checkable
 class HeldRounds(Protocol):
-    """The waiting line in front of a store, as the store sees it.
+    """The waiting line in front of a bounded stage, as the stage sees it.
 
-    A store that is full holds nothing back itself: the round waits at
-    the sender, and the store tells the line when a slot frees so the
-    head can try again. Ruby's MessageBuffer counts that wait as the
-    buffer's own statistic
+    A store or the packing stage that is full holds nothing back itself:
+    the round waits at the sender, and whatever frees a place in the
+    stage tells the line so the head can try again (gem5
+    src/mem/port.hh:244-262, sendRetryReq). Ruby's MessageBuffer counts
+    that wait as the buffer's own statistic
     (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82), and
     ns-3's queue disc stamps the packet at the enqueue
     (ns-3 src/traffic-control/model/queue-disc.cc:851).
@@ -1024,10 +1027,12 @@ class DecodeQueue(Protocol):
         """
 
     def read_result(self, job: decoding_records.DecodeJob) -> None:
-        """The window side has this job's result in hand.
+        """The window side, or the confidence join, has this result in hand.
 
         A tier whose result blocks its unit gets the unit back here; a
-        tier that gave it back at the decode's end has nothing to give.
+        tier that gave it back at the decode's end, or when the walk
+        charged on it ended, has nothing to give,
+        and nor does a result already read.
         """
 
     def cancel_strong(self, window_key: tuple) -> None:
@@ -1048,24 +1053,6 @@ class DecodeQueue(Protocol):
         it, so the losing solve is closed from there, not by the
         manager's own schedule.
         """
-
-
-@runtime_checkable
-class DecoderRouter(Protocol):
-    """The routing table over the tiers' units, as a caller outside sees it.
-
-    A job goes to one unit and the caller never learns which class that
-    is, which is the port API's promise (arXiv 2007.03152 lines 489-491).
-    The window side asks the second question rather than the first: what
-    a window model must offer for whichever unit would take that code,
-    which the planner needs before any job exists.
-    """
-
-    def route(self, job: decoding_records.DecodeJob):
-        """The decoder this job goes to."""
-
-    def fault_model_requirement_for(self, code: Optional[str]):
-        """What a window model must offer for the unit that takes this code."""
 
 
 # ------------------------------------------- the decoder returns a result
@@ -1113,14 +1100,13 @@ class Decoder(Protocol):
     without asking what the row is; DecoderBase gives a row that fires
     none of them the silent source.
 
-    A row that routes to other rows or wraps one is asked for those rows
-    under the seeding protocol, not under this port: decoder_pool's
-    routed_decoders walks run_seed_children (decsim/seeding.py
-    RunSeedComposite) from the router down, so a routing or wrapping row
-    that does not answer it hides the rows inside it from the trace, the
-    stage ledger and the referee audit. SwitchingRouter, CodeRouter,
-    StagedDecoder, SampledConfidenceDecoder and TesseractCheckedDecoder
-    are the shipped rows that answer it.
+    A row that wraps another is asked for it under the seeding protocol,
+    not under this port: decoder_pool's decoder_rows walks
+    run_seed_children (decsim/seeding.py RunSeedComposite) down from each
+    decoder seat, so a wrapping row that does not answer it hides the
+    row inside it from the trace, the stage ledger and the referee
+    audit. StagedDecoder, SampledConfidenceDecoder and
+    TesseractCheckedDecoder are the shipped rows that answer it.
     """
 
     fault_model_requirement: Any
@@ -1423,13 +1409,15 @@ class SyndromeSource(Protocol):
     takes_code_card says whether the row shapes its payloads by the
     run's code card: such a row is built with the card, so its rounds
     state the code's syndrome width, and a row that reads its widths
-    off a circuit is built without it.
+    off a circuit is built without it. emits_bit_values says whether a
+    round's payloads carry measured values, or their sizes alone.
     """
 
     # none means this consumer does not need Operation.circuit; it does not
     # require removal when an independent model provider needs the circuit.
     operation_circuit_scope: str
     takes_code_card: bool
+    emits_bit_values: bool
     shot_sampled: Any
 
     def declare_stream(
@@ -1589,6 +1577,14 @@ class DetectionEventPlacement(Protocol):
 
         round_before is the raw round before the first fragment, held by
         the seat for that round's detectors and never returned.
+        """
+
+    def width_at(self, seat: str, fragments: tuple) -> Optional[int]:
+        """The width one round's fragments take as they leave the seat.
+
+        Forms nothing and holds nothing, so a store can weigh its room at
+        the width it will hold before the round lands. None when the
+        width is unknown.
         """
 
     def needs_the_round_before(
@@ -1988,7 +1984,7 @@ class ThresholdSource(Protocol):
     escalation/settings.py). A source that audits by escalating (the
     online row labels a kept window by re-decoding it on the strong
     tier) needs one serial strong re-decode per window, so Switching
-    refuses it beside run_both_at_once and the forward strong window.
+    refuses it beside run_both_at_once and the double window.
     reads_a_calibration_table says the point's number comes from an
     offline calibration csv rather than from the section's card, so the
     settings demand threshold_table. built_per_sweep_point says the
@@ -2101,7 +2097,7 @@ class WindowingScheme(Protocol):
         reads rounds past its own commit, which is what the switching
         recovery re-reads when a strong result revises a window.
     commits_in_one_serial_chain: the windows commit one after another in
-        stride order, which the forward strong window absorbs.
+        stride order, which the double window absorbs.
     supports_dynamic_streams: an operation whose round count is not known
         at build can be windowed by this scheme.
     """
@@ -2194,7 +2190,7 @@ class IdlePolicy(Protocol):
     Table rows: separate_decode_jobs, ignore (controller/policies.py,
     beside the accounting they serve). relay carries one idle round
     through the idle accounting it is given (controller/idle_rounds.py);
-    end_idle_period runs when an operation claims the patch and, for
+    end_idle_period runs when an operation starts on the patch and, for
     every idle patch, when the workload completes, so rounds the policy
     has not charged yet can be settled.
     """

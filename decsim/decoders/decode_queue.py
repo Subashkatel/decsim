@@ -1,14 +1,11 @@
-"""The jobs waiting for a decoder unit, per pool, in scheduler order.
+"""The jobs waiting for a unit of the manager's pool, in scheduler order.
 
 gem5's instruction queue holds ready work in priority order and hands
 it out through one scheduling rule (src/cpu/o3/inst_queue.hh:160-178,
 scheduleReadyInsts); here the Scheduler port (schedulers.py) is that
-rule, per pool. A job queues in the pool its kind names, when the run
-has that pool, else the default pool. Under the yaml's
-decoder_manager.bulk_strong the STRONG POOL alone is served as one
-merged batch: every queued strong job, timing-only, becomes one decode
-serving every member request, so a run that names a pool bulk_strong
-does not mean is refused rather than merged. Toshio et al. 2510.25222
+rule. Under the yaml's decoder_manager.bulk_strong the STRONG POOL alone
+is served as one merged batch: every queued strong job, timing-only,
+becomes one decode serving every member request. Toshio et al. 2510.25222
 lines 1253-1264 ask for bulk decoding of one escalation's own
 contiguous region once both its boundaries are determined; merging
 several independent escalated windows is decsim's own step past that,
@@ -19,147 +16,80 @@ for the switching study.
 """
 
 import dataclasses
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
-import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
 
-# The decoder manager component's name in the narrator (docs/
-# architecture.md's component table). It lives here because every part of
-# the manager imports this module, and the manager's facade imports them.
+if TYPE_CHECKING:
+    import decsim.decoders.decoder_manager as decoder_manager_module
+
+# The names the build gives the two pools (decoder_pool.PoolSettings).
 DEFAULT_POOL = "default"
 STRONG_POOL = "strong"
-# the pool each job kind asks for; a run without that pool queues it in
-# the default pool
-POOL_BY_JOB_KIND = {
-    decoding_records.DecodeJobKind.WINDOW: DEFAULT_POOL,
-    decoding_records.DecodeJobKind.STRONG_REDECODE: STRONG_POOL,
-    decoding_records.DecodeJobKind.STRONG_BATCH: STRONG_POOL,
-    decoding_records.DecodeJobKind.SELF_CONTAINED: DEFAULT_POOL,
-}
-# a new job kind names its pool here, at the table, and not with a
-# KeyError inside the first enqueue of a run
-assert set(POOL_BY_JOB_KIND) == set(decoding_records.DecodeJobKind), (
-    "every decode job kind names the pool it asks for"
-)
 
 
 class WaitingJobs:
-    """One ready queue per pool, and the depth reported at every change.
+    """The pool's ready queue, and the depth reported at every change.
 
-    Trace sources: job_enqueued(job) as a job joins its queue, the job
+    Trace sources: job_enqueued(job) as a job joins the queue, the job
     naming the rounds it references in the store; depth_changed(tick,
-    depth) whenever the jobs waiting over every pool change.
+    depth) whenever the jobs waiting change.
     """
 
     def __init__(
         self,
         engine,
         scheduler,
-        pools,
-        strong_requests: strong_requests_module.StrongRequests,
-        is_bulk_strong: bool = False,
+        manager: "decoder_manager_module.DecoderManager",
+        merges_strong: bool = False,
     ) -> None:
         self.engine = engine
         self.scheduler = scheduler
-        self.waiting_by_pool: dict[str, list] = {}
-        for pool in pools:
-            self.waiting_by_pool[pool] = []
-        if is_bulk_strong:
-            _check_pools_bulk_strong_means(self.waiting_by_pool)
-        self.strong_requests = strong_requests
-        self.is_bulk_strong = is_bulk_strong
+        self.waiting: list = []
+        self.manager = manager
+        # decoder_manager.bulk_strong on the strong pool's queue
+        self.merges_strong = merges_strong
         self.trace = _TraceSources()
 
-    def pool_of(self, job: decoding_records.DecodeJob) -> str:
-        """The pool a job queues in: its kind's, when the run has it."""
-        pool = POOL_BY_JOB_KIND[job.kind]
-        if pool in self.waiting_by_pool:
-            return pool
-        return DEFAULT_POOL
-
     def add(self, job: decoding_records.DecodeJob) -> None:
-        """Put one admitted job at the back of its pool's queue, logged."""
+        """Put one admitted job at the back of the queue."""
         job.ready_time = self.engine.now
-        pool = self.pool_of(job)
-        queue = self.waiting_by_pool[pool]
-        queue.append(job)
-        pool_tag = pool_tag_of(pool)
-        queue_length = len(queue)
-        self.engine.log(
-            log_sources.DECODER_MANAGER,
-            f"{job.label} READY -> enqueue "
-            f"({pool_tag}ready-queue length = {queue_length})",
-        )
-        self.trace.job_enqueued.fire(job)
-        self.sample_depth()
-
-    def add_quietly(self, job: decoding_records.DecodeJob) -> None:
-        """Put a job carrying no input in its queue; no READY line."""
-        pool = self.pool_of(job)
-        queue = self.waiting_by_pool[pool]
-        queue.append(job)
+        self.waiting.append(job)
         self.trace.job_enqueued.fire(job)
         self.sample_depth()
 
     def remove(self, job: decoding_records.DecodeJob) -> bool:
-        """Take the job out of whichever queue holds it; whether one did."""
-        for queue in self.waiting_by_pool.values():
-            if job in queue:
-                queue.remove(job)
-                return True
-        return False
-
-    def has_jobs(self, pool: str) -> bool:
-        """Whether the pool's queue holds anything."""
-        queue = self.waiting_by_pool[pool]
-        return bool(queue)
-
-    def jobs(self) -> list:
-        """Every waiting job, pool by pool, in queue order."""
-        every = []
-        for queue in self.waiting_by_pool.values():
-            every.extend(queue)
-        return every
-
-    def total(self) -> int:
-        """Jobs waiting over every pool."""
-        total = 0
-        for queue in self.waiting_by_pool.values():
-            total += len(queue)
-        return total
+        """Take the job out of the queue; whether it was there."""
+        if job not in self.waiting:
+            return False
+        self.waiting.remove(job)
+        return True
 
     def sample_depth(self) -> None:
-        """Report the total depth now, and each pool's own."""
+        """Report the depth now."""
         now = self.engine.now
-        depth = self.total()
+        depth = len(self.waiting)
         self.trace.depth_changed.fire(now, depth)
-        for pool, queue in self.waiting_by_pool.items():
-            pool_depth = len(queue)
-            self.trace.pool_depth_changed.fire(now, pool, pool_depth)
 
-    def drain_in_scheduler_order(self, pool: str) -> list:
-        """Empty the pool's queue into a list, next job first."""
-        queue = self.waiting_by_pool[pool]
+    def drain_in_scheduler_order(self) -> list:
+        """Empty the queue into a list, next job first."""
         ordered = []
-        while queue:
-            job = self.next(pool)
+        while self.waiting:
+            job = self.next()
             ordered.append(job)
         return ordered
 
-    def restore(self, pool: str, ordered: list) -> None:
+    def restore(self, ordered: list) -> None:
         """Put drained jobs back at the queue's end, in the given order."""
-        queue = self.waiting_by_pool[pool]
-        queue.extend(ordered)
+        self.waiting.extend(ordered)
 
-    def next(self, pool: str) -> decoding_records.DecodeJob:
-        """Remove and return the pool's next job by the scheduler's rule."""
-        queue = self.waiting_by_pool[pool]
-        if self.is_bulk_strong and pool == STRONG_POOL:
-            return self._merge_strong_batch(queue)
-        return self.scheduler.pop(queue)
+    def next(self) -> decoding_records.DecodeJob:
+        """Remove and return the next job by the scheduler's rule."""
+        if self.merges_strong:
+            return self._merge_strong_batch(self.waiting)
+        return self.scheduler.pop(self.waiting)
 
     def _merge_strong_batch(self, queue: list) -> decoding_records.DecodeJob:
         """Batch every queued strong job (timing-only) into one decode.
@@ -169,9 +99,6 @@ class WaitingJobs:
         batch serves every request exactly once.
         """
         jobs = self._open_queued_strong_jobs(queue)
-        if len(jobs) > 1:
-            for job in jobs:
-                _refuse_bits_in_bulk_strong(job)
         window_keys = []
         request_keys = []
         for job in jobs:
@@ -184,7 +111,7 @@ class WaitingJobs:
             return jobs[0]
         batch = _batch_job(jobs, window_keys)
         batch.service_original_request_keys = request_keys
-        self.strong_requests.register_batch(window_keys, jobs, batch)
+        self.manager.strong_requests.register_batch(window_keys, jobs, batch)
         return batch
 
     def _open_queued_strong_jobs(self, queue: list) -> list:
@@ -192,7 +119,7 @@ class WaitingJobs:
         for _ in range(len(queue)):
             queued = self.scheduler.pop(queue)
             if strong_requests_module.is_merged_batch(queued):
-                members = self.strong_requests.members_of(queued)
+                members = self.manager.strong_requests.members_of(queued)
                 jobs.extend(members)
             else:
                 jobs.append(queued)
@@ -204,39 +131,6 @@ def pool_tag_of(pool: str) -> str:
     if pool == DEFAULT_POOL:
         return ""
     return f"{pool} "
-
-
-def _check_pools_bulk_strong_means(waiting_by_pool: dict) -> None:
-    """bulk_strong merges the strong pool; another pool is not its business.
-
-    A pool is a capability, so the rule that merges one names it. A run
-    that defines a pool beyond the default and the strong one is refused
-    here rather than having its jobs merged as though they were strong
-    re-decodes.
-    """
-    named = set(waiting_by_pool) - {DEFAULT_POOL, STRONG_POOL}
-    if not named:
-        return
-    listed = sorted(named)
-    raise ValueError(
-        f"decoder_manager.bulk_strong merges the {STRONG_POOL!r} pool "
-        f"only, and this run also has {listed}; give those pools their "
-        "own rule or turn bulk_strong off"
-    )
-
-
-def _refuse_bits_in_bulk_strong(job: decoding_records.DecodeJob) -> None:
-    """bulk_strong merges timing-only strong re-decodes; bits would be lost."""
-    has_model = job.detector_error_model is not None
-    has_bits = False
-    for payload in job.payloads:
-        if payload.bits is not None:
-            has_bits = True
-    if has_model or has_bits:
-        raise RuntimeError(
-            "bulk_strong only merges timing-only strong re-decodes; "
-            "disable it for accuracy-coupled switching."
-        )
 
 
 def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
@@ -278,7 +172,3 @@ class _TraceSources:
 
     job_enqueued: trace_source.TraceSource = trace_source.new_source()
     depth_changed: trace_source.TraceSource = trace_source.new_source()
-    # (tick, pool, jobs waiting in that pool): a pool sweep reads each
-    # tier's own backlog, the way DART-Q reports a max backlog per
-    # decoder instance (2605.09142 lines 1101-1109)
-    pool_depth_changed: trace_source.TraceSource = trace_source.new_source()

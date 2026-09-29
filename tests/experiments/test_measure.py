@@ -116,6 +116,7 @@ ONE_TIER_LINKS = {
 # the points that lie end to end between a window's data being complete
 # in the weak syndrome buffer and its correction being committed in the frame
 CHAIN = (
+    "admission_wait",
     "queue_wait",
     "weak_attempt",
     "input_link_per_window",
@@ -123,9 +124,21 @@ CHAIN = (
     "compute_wait",
     "service",
     "confidence",
+    "selection_wait",
     "output_link_per_window",
     "frame_commit",
 )
+
+
+# a unit's engine on the fridge clock: fetch one cycle a round, release
+# ten cycles a job
+ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE = {
+    "clock": "fridge",
+    "fetch_cycles_per_round": 1,
+    "fetch_cycles_per_job": 0,
+    "release_cycles_per_job": 10,
+    "release_cycles_per_round": 0,
+}
 
 
 def fridge_hop(cycles: int) -> dict:
@@ -153,9 +166,23 @@ TWO_TIER_LINKS = {
 }
 
 
-def slow_unit_shot(tmp_path, units: int, card_microseconds: float = 5.0):
-    """One shot of 30 rounds on `units` weak units of that card."""
+def slow_unit_shot(
+    tmp_path,
+    units: int,
+    card_microseconds: float = 5.0,
+    decision_cycles: int = 0,
+):
+    """One shot of 30 rounds on `units` weak units of that card.
+
+    decision_cycles is the window side's decision before each request,
+    on the fridge clock.
+    """
     raw = dict(MINIMAL_CONFIG)
+    raw["windows"] = {
+        **MINIMAL_CONFIG["windows"],
+        "decision_cycles": decision_cycles,
+        "clock": "fridge",
+    }
     workload = memory_workload(30)
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
@@ -199,7 +226,7 @@ def switching_run(
 
     A threshold far above every gap escalates every window and one far
     below escalates none, so the same two cards answer both branches.
-    run_both_at_once starts the strong sibling with the weak job and
+    run_both_at_once starts the speculative strong decode with the weak job and
     cancels it when the weak result is kept, which is Toshio et al.
     2510.25222 Sec. III A step 1. observation names the section's flags
     the shot turns on; more than one patch runs the memory_patches maker;
@@ -220,7 +247,7 @@ def switching_run(
     raw["escalation"] = {
         "kind": "switching",
         "gap_threshold_db": gap_threshold_db,
-        "strong_window": "near_seam_pinned",
+        "strong_window": "redo_window",
         "run_both_at_once": run_both_at_once,
     }
     raw["weak_decoder"] = {
@@ -409,6 +436,112 @@ def test_one_windows_points_sum_to_its_reaction_time(tmp_path):
     ]
 
 
+def test_a_windows_decision_time_is_its_own_point(tmp_path):
+    """1000 cycles of the 250 MHz fridge clock: 4 us before every queue.
+
+    windows.decision_cycles holds each window's requests until its clock
+    edge before they enter the decode queue (windows/decode_requests.py
+    request), so every window's admission_wait is 4.0 us and the
+    points still add up to its reaction time. Ciw keeps a customer's
+    pre-service wait as a field of its own record (ciw/data_record.py
+    lines 3-21), and so does this span.
+    """
+    measurement = slow_unit_shot(tmp_path, 1, decision_cycles=1000)
+
+    assert measurement.samples["admission_wait"] == [4.0] * 9
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+
+
+def test_a_strong_answer_held_for_its_selection_waits_in_its_own_point(
+    tmp_path,
+):
+    """A speculative strong decode that ends first waits for its selection.
+
+    Under run_both_at_once the strong decode starts with the weak one
+    (Toshio et al. 2510.25222 lines 598-601) and its answer waits in its
+    unit's output slot, as a sender keeps a packet until the far side
+    takes it (gem5 port.hh:244-255), until the verdict's selection has
+    crossed weak_decoder_to_strong_decoder. That crossing is
+    selection_wait, and the points add up to every window's reaction.
+    A 5.0 us weak card that runs both forced-class solves on one unit
+    answers after the 10.0 us strong decode it started with.
+    """
+    weak_decoder = {
+        "kind": 5.0,
+        "units": 1,
+        "unit_memory": {"bits": None},
+        "engine": ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
+    }
+    sections = {"weak_decoder": weak_decoder}
+    shot = switching_run(
+        tmp_path, 20.0, run_both_at_once=True, sections=sections
+    )
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.samples["selection_wait"][0] == 0.02
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+
+
+def test_a_gpu_decode_that_finds_the_dispatcher_busy_waits_in_its_own_point(
+    tmp_path,
+):
+    """Two patches share one GPU's dispatcher, one decode on it at a time.
+
+    Every window escalates to the measured_table row, whose decode holds
+    the one dispatcher (decoders/measured_table). Patch 1's window 0
+    finds it free and waits nothing; patch 2's window 0 arrives on the
+    other strong unit at 10.320 us and waits until patch 1's ends at
+    175.007 us, 164.687 us. The algorithm point holds that wait and the
+    device's own time after it.
+    """
+    strong_decoder = {
+        "kind": "measured_table",
+        "units": 2,
+        "unit_memory": {"bits": None},
+        "engine": ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
+    }
+    sections = {"strong_decoder": strong_decoder}
+    shot = switching_run(tmp_path, 1000000.0, patch_count=2, sections=sections)
+    measurement = measure.measure_shot(shot)
+    waits = measurement.samples["backend_queue_wait"]
+    algorithm = measurement.samples["algorithm"]
+
+    assert waits[0] == 0.0
+    assert waits[10] == 164.687
+    assert algorithm[10] == 272.93
+
+
+def test_a_withdrawn_request_waits_in_the_admission_point(tmp_path):
+    """A restart window's first request is withdrawn and asked for again.
+
+    double_window takes back the restart window's queued request
+    when it re-slices it (escalation/strong_window_shapes.py
+    _withdraw_stale_requests), and the fresh request enters the queue
+    later while the window's data was complete all along. The time
+    between is the window's admission_wait, as Ciw writes a customer
+    that left the queue unserved its own record (ciw/node.py
+    write_reneging_record) rather than folding it into the next wait,
+    and window 3 of this seed spends 1.132 us there.
+    """
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "double_window",
+    }
+    weak_decoder = {
+        "kind": 5.0,
+        "units": 1,
+        "unit_memory": {"bits": None},
+        "engine": ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
+    }
+    sections = {"escalation": escalation, "weak_decoder": weak_decoder}
+    shot = switching_run(tmp_path, 20.0, sections=sections)
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.samples["admission_wait"] == [0.0, 1.132] + [0.0] * 5
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+
+
 def test_load_is_the_units_occupancy_over_the_window_period(tmp_path):
     """Load is the compute plus the seam handoff over the period.
 
@@ -491,7 +624,7 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     """Under strong_only the default pool's numbers are the strong tier's.
 
     The plan's windows queue in the default pool whichever tier decodes
-    them (decode_queue.POOL_BY_JOB_KIND), and under strong_only that
+    them (build/decoders.py), and under strong_only that
     tier is the strong one, so its queue peak and busy fraction belong
     in the strong columns and the weak columns read zero, the mirror of
     test_the_pool_columns_read_each_tiers_own_queue_and_units.
@@ -565,9 +698,73 @@ def test_toshios_per_decode_bound_is_commit_time_over_escalated_share(
 
     assert measurement.escalated_windows == 10
     assert measurement.strong_decoded_rounds == 57
-    assert measurement.strong_service_mean_us == 10.0628
+    assert rows[0]["strong_service_mean_us"] == 10.0628
     assert rows[0]["strong_service_bound_us"] == 3.0
     assert rows[0]["escalated_windows"] == 10
+
+
+def test_a_points_strong_service_is_its_strong_decodes_mean(tmp_path):
+    """The point divides its summed service by its strong decodes.
+
+    At 5 dB seed 0 escalates no window and seed 1 escalates two, each a
+    10.064 us strong decode. The point's mean service is 10.064 us, the
+    sum over the count as gem5 forms avgMissLatency = missLatency /
+    misses (src/mem/cache/base.cc:2188), not the 5.032 us a mean of the
+    two shots' means would read.
+    """
+    quiet = switching_shot(tmp_path, 5.0, seed=0)
+    escalating = switching_shot(tmp_path, 5.0, seed=1)
+    record = report.record_of([quiet, escalating])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert quiet.escalated_windows == 0
+    assert escalating.escalated_windows == 2
+    assert rows[0]["escalated_windows"] == 2
+    assert rows[0]["strong_service_mean_us"] == 10.064
+
+
+def test_a_windows_samples_are_counted_under_the_tier_that_committed_it(
+    tmp_path,
+):
+    """Kept and escalated windows are told apart by the committing tier.
+
+    At 5 dB seed 1 escalates two of the ten windows: their 10.064 us
+    strong service is counted under strong and the eight weak decodes'
+    under weak, as Ciw writes each record's customer class beside its
+    wait (ciw node.py lines 856-862). A round's sample belongs to no
+    window, so it names no tier.
+    """
+    escalating = switching_shot(tmp_path, 5.0, seed=1)
+    record = report.record_of([escalating])
+    counts = _counts_by_name_tier_and_value(record.window_samples)
+
+    assert counts[("service", "strong", 10.064)] == 2
+    assert counts[("service", "weak", 1.064)] == 7
+    assert counts[("service", "weak", 1.052)] == 1
+    assert counts[("cwb_per_round", "", 0.004)] == 30
+
+
+def _counts_by_name_tier_and_value(rows: list) -> dict:
+    """window_samples.csv's counts, by latency point, tier and value."""
+    counts = {}
+    for row in rows:
+        key = (row["name"], row["tier"], row["value_us"])
+        counts[key] = row["count"]
+    return counts
+
+
+def test_a_point_with_no_strong_decode_has_no_strong_service(tmp_path):
+    """No strong decode, no mean: the cell is empty, not zero.
+
+    gem5 prints nothing for a ratio whose count is zero (the nonan flag,
+    src/base/stats/text.cc:288-290); a zero would say the strong tier
+    decoded in no time.
+    """
+    quiet = switching_shot(tmp_path, 5.0, seed=0)
+    record = report.record_of([quiet])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert rows[0]["strong_service_mean_us"] is None
 
 
 def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(
@@ -657,9 +854,9 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
     crossing.
 
     Window 3 is where the park's two halves trade places. Its decode
-    was dispatched with its sibling and waited 0.004 us for the input
-    the sibling's transfer brought, which is the dependency it had, and
-    then 1.064 us more for the unit's compute to finish that sibling's
+    was dispatched with its other forced-class solve and waited 0.004 us
+    for the input that solve's transfer brought, which is the dependency
+    it had, and then 1.064 us more for the unit's compute to finish that
     solve, which is the structural wait gem5 counts as fuBusy. Window 9
     is the plain case beside it: 1.064 us of dependency wait and no
     structural wait at all.
@@ -792,13 +989,13 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
 def test_the_shipped_pinned_config_sums_to_its_reaction_time():
     """The same law where the strong tier's time is measured, not declared.
 
-    configs/experiments/switching/seam_pinned_switching.yaml names a
+    configs/experiments/switching/redo_window_switching.yaml names a
     belief-matching strong tier, whose decode time is read off the host
     clock, so the values move from host to host and the identity does not:
     every window's points still add up to its reaction time to the tick, the
     solve it ran after the committing one being its confidence step.
     """
-    shot = shipped_shot("experiments/switching/seam_pinned_switching.yaml")
+    shot = shipped_shot("experiments/switching/redo_window_switching.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -872,12 +1069,12 @@ def test_the_stage_points_are_the_committing_decodes_own_stages(tmp_path):
     assert samples["fetch"] == [0.024] * 9 + [0.012]
 
 
-def test_a_cancelled_siblings_card_is_not_the_windows_algorithm(tmp_path):
+def test_a_cancelled_speculative_card_is_not_the_windows_algorithm(tmp_path):
     """A parallel run that escalates nothing reports the weak card.
 
-    run_both_at_once starts a strong sibling on every window and cancels
-    it at the verdict, and the sibling records its own stages under the
-    same window key. The window's algorithm point is the decode that
+    run_both_at_once starts a speculative strong decode on every window and
+    cancels it at the verdict, and the speculative decode records its own stages
+    under the same window key. The window's algorithm point is the decode that
     committed, which is the 1.0 us weak one on every window here.
     """
     measurement = switching_shot(tmp_path, 0.0, True)
@@ -900,13 +1097,13 @@ def test_a_second_forced_solve_is_not_the_windows_algorithm(tmp_path):
     assert measurement.samples["algorithm"] == [1.0] * 10
 
 
-def test_a_cancelled_siblings_record_ends_at_the_cancel(tmp_path):
-    """The strong sibling stops where the weak verdict stopped it.
+def test_a_cancelled_speculative_decode_ends_at_the_cancel(tmp_path):
+    """The speculative strong decode stops where the weak verdict stopped it.
 
     run_both_at_once starts the strong decoder on every window and the
     confident weak verdict halts it (Toshio et al. 2510.25222 Sec. III A
     steps 1 and 3). The engine cannot unschedule the card's timer, so
-    the cancel is what closes the sibling's open stage: one cancelled
+    the cancel is what closes the speculative decode's open stage: one cancelled
     record per window, each ending at that window's verdict rather than
     ten microseconds later, and the weak decode's own records untouched.
     """
@@ -1017,13 +1214,14 @@ def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it(tmp_path):
     assert measurement.samples["dep_block"] == [0.0] * 9
 
 
-def seam_streams(stream_count: int) -> tuple:
+def seam_streams(stream_count: int, stagger_rounds: int = 0) -> tuple:
     """That many memory streams, one patch and one qubit each.
 
     Every stream is the same 30-round distance-3 memory circuit, which
     is the circuit_list row of the workload table: the yaml's
     memory_circuit row plans one operation for the whole shot, so a run
-    with more than one stream is declared here instead.
+    with more than one stream is declared here instead. Stream i starts
+    i * stagger_rounds rounds into the shot.
     """
     circuit = workload_settings.memory_circuit(
         "surface_code:rotated_memory_z", 30, 3, 0.001
@@ -1031,12 +1229,14 @@ def seam_streams(stream_count: int) -> tuple:
     operations = []
     for index in range(stream_count):
         operation_id = index + 1
+        start_round = index * stagger_rounds
         operation = program_records.Operation(
             id=operation_id,
             name=f"mem{operation_id}",
             qubits=(index,),
             patches=(index,),
             circuit=circuit,
+            scheduled_start_round=start_round,
         )
         operations.append(operation)
     return tuple(operations)
@@ -1067,13 +1267,22 @@ def seam_only_fabric():
     return link_profiles.from_yaml(fabric, clocks, "one_card")
 
 
-def seam_streams_shot(stream_count: int):
-    """One shot of those streams on that fabric.
+def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
+    """One shot of those streams on that fabric."""
+    settings = seam_streams_settings(stream_count, stagger_rounds)
+    task = collect.Task(settings, {})
+    return collect.run_shot(task, 0)
+
+
+def seam_streams_settings(
+    stream_count: int, stagger_rounds: int = 0
+) -> machine_settings.MachineSettings:
+    """The machine of those streams on that fabric.
 
     Eight one-microsecond weak units decode them, so the streams run
     side by side and each plans nine sliding windows.
     """
-    operations = seam_streams(stream_count)
+    operations = seam_streams(stream_count, stagger_rounds)
     links = seam_only_fabric()
     rounds_policy = round_policies.FixedRounds(30)
     workload = workload_settings.WorkloadSettings(
@@ -1102,7 +1311,7 @@ def seam_streams_shot(stream_count: int):
     frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=4, clock=frame_clock
     )
-    settings = machine_settings.MachineSettings(
+    return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         windows=windows,
@@ -1111,8 +1320,6 @@ def seam_streams_shot(stream_count: int):
         pauli_frame=frame,
         links=links,
     )
-    task = collect.Task(settings, {})
-    return collect.run_shot(task, 0)
 
 
 def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
@@ -1133,6 +1340,30 @@ def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
     assert one_stream.samples["dd_per_window"] == one_stream_seams
     assert two_streams.samples["dd_per_window"] == one_stream_seams * 2
     assert two_streams.load == one_stream.load
+
+
+def test_a_late_streams_windows_count_from_their_own_rounds_sends():
+    """A stream started 20 rounds late reads its own rounds' QPU sends.
+
+    A round index counts within its operation's stream (records/
+    windows.py Window), so the second stream's round 1 leaves the QPU
+    20 us after the first stream's. Each window's first and last
+    required rounds are its own operation's, found by operation and
+    round as gem5 finds an instruction by thread and sequence number
+    (src/cpu/o3/rob.hh:131-134), so both streams read the one-stream
+    6.011 us and 1.011 us on every window, not 26.011 and 21.011.
+    """
+    one_stream_run = seam_streams_shot(1)
+    staggered_run = seam_streams_shot(2, stagger_rounds=20)
+    one_stream = measure.measure_shot(one_stream_run)
+    staggered = measure.measure_shot(staggered_run)
+
+    first_round = one_stream.samples["qpu_first_round_to_frame"]
+    last_round = one_stream.samples["qpu_last_round_to_frame"]
+    assert first_round == [6.011] * 9
+    assert last_round == [1.011] * 9
+    assert staggered.samples["qpu_first_round_to_frame"] == first_round * 2
+    assert staggered.samples["qpu_last_round_to_frame"] == last_round * 2
 
 
 def test_throughput_counts_the_rounds_the_shot_read_out():
@@ -1380,8 +1611,7 @@ class StrongResidentsWaitingOnCompute:
             machine.strong_decoder_manager,
         ):
             if manager is not None:
-                pool_units = manager.service.pool.units()
-                self.units.extend(pool_units)
+                self.units.extend(manager.service.pool.units)
         self.depth_by_tick = {}
 
     def sample(self, now: int) -> None:

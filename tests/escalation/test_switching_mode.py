@@ -126,11 +126,11 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
 
 
 def _restart_width_card(regions: int) -> dict:
-    """The switching card with the forward window and the re-read width."""
+    """The switching card with the double window and the re-read width."""
     escalation = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "forward_seam_pinned",
+        "strong_window": "double_window",
         "restart_reread_buffer_regions": regions,
     }
     strong_decoder = strong_unit("belief_matching")
@@ -180,6 +180,17 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
         load_experiment(weak_path)
 
 
+def test_a_restart_re_read_under_a_window_that_restarts_nothing_is_refused(
+    tmp_path,
+):
+    """The redo window absorbs no weak window, so none restarts."""
+    card = _restart_width_card(0)
+    card["escalation"]["strong_window"] = "redo_window"
+    path = write_config(tmp_path, card)
+    with pytest.raises(ValueError, match="restart_reread_buffer_regions"):
+        load_experiment(path)
+
+
 def _parallel_variant_card(run_both_at_once) -> dict:
     """The switching card with Sec. III A's Step 1 asked for, or not.
 
@@ -199,9 +210,9 @@ def _parallel_variant_card(run_both_at_once) -> dict:
         "clock": "fridge",
         "bits_per_cycle": None,
     }
-    # the weak input waits two microseconds, so a sibling submitted at
-    # weak readiness is live in the strong side when the weak verdict
-    # arrives and a confident window cancels it there
+    # the weak input waits two microseconds, so a speculative strong decode
+    # submitted at weak readiness is live in the strong side when the weak
+    # verdict arrives and a confident window cancels it there
     two_microseconds = {
         "latency_cycles": 500,
         "clock": "fridge",
@@ -244,7 +255,7 @@ def test_the_yaml_asks_for_the_papers_parallel_variant(tmp_path):
 
     The default is the same section's on-demand variant (lines 631-640),
     where a confident window makes no strong request at all; under
-    run_both_at_once every window's strong sibling starts and a
+    run_both_at_once every window's speculative strong decode starts and a
     confident window cancels it.
     """
     on_demand_card = _parallel_variant_card(False)
@@ -478,21 +489,19 @@ def test_the_serial_escalation_timeline_is_exact():
     assert parked_start == expected_parked_start
 
 
-def test_the_parallel_sibling_waits_for_the_context_it_reads():
-    """The parallel strong sibling starts when its copy has landed.
+def test_the_speculative_decode_waits_for_the_context_it_reads():
+    """The speculative strong decode starts when its copy has landed.
 
-    Toshio arXiv:2510.25222 Sec. III A, Step 1: "a sequence of syndrome
-    data sigma is simultaneously fed to both the weak and strong
-    decoders" (lines 598-601). The paper prices no transport in Sec.
-    III A, and its simulations set T_comm^strong to ten times
-    T_comm^weak (lines 1109-1114; Table I is a notation table and prices
-    nothing), so in a model that prices transport Step 1 means
-    the strong decoder starts when its copy has arrived. The copy rides
-    weak_decoder_to_strong_decoder at readiness, 3 us on the declared
-    card, so the first window's six context rounds are all still on
-    the chip when the window becomes ready: the sibling is held, and it
-    is submitted at the tick its last context round is stored in the
-    strong syndrome buffer.
+    Toshio arXiv:2510.25222 Sec. III A, Step 1: "a sequence of syndrome data
+    sigma is simultaneously fed to both the weak and strong decoders" (lines
+    598-601). The paper prices no transport in Sec. III A, and its simulations
+    set T_comm^strong to ten times T_comm^weak (lines 1109-1114; Table I is a
+    notation table and prices nothing), so in a model that prices transport Step
+    1 means the strong decoder starts when its copy has arrived. The copy rides
+    weak_decoder_to_strong_decoder at readiness, 3 us on the declared card, so
+    the first window's six context rounds are all still on the chip when the
+    window becomes ready: the speculative decode is held, and it is submitted at
+    the tick its last context round is stored in the strong syndrome buffer.
     """
     machine = fabric.switching_machine(
         rounds=9,
@@ -603,14 +612,14 @@ def _flows_of(document, lanes: dict, lane: str, window_text: str) -> list:
     return rows
 
 
-def test_a_sibling_held_for_its_input_is_cancelled_by_a_confident_result():
+def test_a_held_speculative_decode_is_cancelled_by_a_confident_result():
     """Step 3 halts the strong computation a confident weak result spares.
 
-    Toshio arXiv:2510.25222 Sec. III A, step 3 (lines 610-615). A
-    sibling still waiting for its context has not started, so the
-    confident weak result ends it where it waits; the room-side rounds
-    it would have read are freed with the window's final commit, and
-    the run settles with nothing held.
+    Toshio arXiv:2510.25222 Sec. III A, step 3 (lines 610-615). A speculative
+    strong decode still waiting for its context has not started, so the
+    confident weak result ends it where it waits; the room-side rounds it would
+    have read are freed with the window's final commit, and the run settles with
+    nothing held.
     """
     machine = fabric.switching_machine(
         rounds=9,
@@ -632,7 +641,7 @@ def test_a_sibling_held_for_its_input_is_cancelled_by_a_confident_result():
 
 
 def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
-    """A confident weak result cancels its sibling and frees its context.
+    """A confident weak result cancels its speculative decode and its context.
 
     Toshio arXiv:2510.25222 Sec. III A, Step 1: the parallel strong
     decode is speculative, so a confident weak result cancels it and no
@@ -659,7 +668,7 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
     """The other edge of the parallel variant: nothing is cancelled.
 
     Toshio arXiv:2510.25222 Sec. III A, Step 1: when every weak result
-    falls below the threshold the sibling that already ran is the
+    falls below the threshold the speculative decode that already ran is the
     window's answer, so every request is needed and the frame carries
     the strong tier alone.
     """
@@ -677,20 +686,20 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
     assert counts.cancelled == 0
 
 
-def test_a_pinned_sibling_is_planned_when_its_weak_job_leaves_its_park():
-    """Step 1 on a pinned row starts the sibling with the unparked weak job.
+def test_a_pinned_speculative_decode_is_planned_when_its_weak_job_unparks():
+    """Step 1 on a pinned row starts the speculative decode at the unpark.
 
     Toshio arXiv:2510.25222 Sec. III A, Step 1 feeds both decoders the
-    window at once (lines 598-601), and near_seam_pinned pins its past
+    window at once (lines 598-601), and redo_window pins its past
     face on the earlier neighbour's final commit (Bombin arXiv:2303.04846
     lines 775-788). Under held boundaries that commit is what unparks
-    the weak job, so the sibling is planned at that instant and every
+    the weak job, so the speculative decode is planned at that instant and every
     window's strong result pins on a committed neighbour.
     """
     machine = fabric.switching_machine(
         rounds=9,
         escalated_windows={0, 1, 2},
-        strong_window="near_seam_pinned",
+        strong_window="redo_window",
         run_both_at_once=True,
     )
     machine.run()

@@ -2,10 +2,10 @@
 
 A tier's kind names a row of decoders/settings.py's DECODERS and the
 unit is that algorithm between its fetch and release stages. Which pools
-the manager gets is the escalation policy's declared fact, not its name:
-a policy that may escalate puts two units behind one router with a
-strong pool, and every other policy routes every job to the tier that
-decodes the plan's windows.
+the managers get is the escalation policy's declared fact, not its name:
+a policy that may escalate gives the strong tier a unit and the host's
+manager a pool of its own, and the chip's manager always has one pool,
+of the tier that decodes the plan's windows.
 """
 
 import dataclasses
@@ -149,17 +149,18 @@ def test_a_tier_that_names_no_decoder_builds_none():
     assert unit is None
 
 
-def test_a_weak_only_run_routes_every_job_to_the_one_tier():
+def test_a_weak_only_run_has_one_pool_and_no_strong_unit():
     weak = _preset(10.0)
     settings = _settings(weak=weak)
 
     pool = _pool(settings)
 
-    assert isinstance(pool.router, decoders.CodeRouter)
-    assert sorted(pool.unit_pools) == ["default"]
+    assert pool.strong is None
+    assert pool.chip.name == "default"
+    assert pool.host is None
 
 
-def test_a_run_that_may_escalate_gets_a_strong_pool_behind_one_router():
+def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
@@ -172,8 +173,9 @@ def test_a_run_that_may_escalate_gets_a_strong_pool_behind_one_router():
 
     pool = _pool(settings)
 
-    assert isinstance(pool.router, decoders.SwitchingRouter)
-    assert decode_queue.STRONG_POOL in pool.unit_pools
+    assert pool.strong is not None
+    assert pool.strong is not pool.active
+    assert pool.host.name == decode_queue.STRONG_POOL
 
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
@@ -193,9 +195,27 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
 
     pool = _pool(settings)
 
-    memory = pool.decoder_memory
-    assert memory.capacity_for("default") == 12
-    assert memory.capacity_for(decode_queue.STRONG_POOL) == 30
+    assert pool.chip.capacity_bits == 12
+    assert pool.host.capacity_bits == 30
+
+
+def test_only_the_pool_that_decodes_the_windows_blocks_on_its_result():
+    """A strong decode frees its unit at its end and waits in its output."""
+    escalation = escalation_settings.EscalationSettings(
+        kind="switching",
+        threshold_source="fixed",
+        gap_threshold_nats=2.0,
+        confidence="complementary_gap",
+    )
+    weak_preset = _preset(10.0)
+    weak = dataclasses.replace(weak_preset, result_blocks_unit=True)
+    strong = _preset(30.0)
+    settings = _settings(escalation=escalation, weak=weak, strong=strong)
+
+    pool = _pool(settings)
+
+    assert pool.chip.blocks_unit
+    assert not pool.host.blocks_unit
 
 
 def test_a_plan_whose_active_tier_names_no_decoder_is_refused():
@@ -207,17 +227,6 @@ def test_a_plan_whose_active_tier_names_no_decoder_is_refused():
     sentence = str(refusal.value)
     assert "names no decoder" in sentence
     assert "weak tier" in sentence
-
-
-def test_every_pool_declares_whether_its_unit_takes_a_copy():
-    """The copy-or-reference key of I5, answered per pool at build."""
-    weak = _preset(10.0)
-    settings = _settings(weak=weak)
-
-    pool = _pool(settings)
-
-    assert sorted(pool.copies_input_by_pool) == sorted(pool.unit_pools)
-    assert sorted(pool.blocks_unit_by_pool) == sorted(pool.unit_pools)
 
 
 def test_a_decoder_seat_gives_each_pool_its_stage_whatever_the_source():
@@ -235,9 +244,8 @@ def test_a_decoder_seat_gives_each_pool_its_stage_whatever_the_source():
     formed_at_the_decoder = _pool(settings, at_the_decoder)
     formed_at_the_controller = _pool(settings, at_the_controller)
 
-    pools_with_a_stage = set(formed_at_the_decoder.formation_by_pool)
-    assert pools_with_a_stage == set(formed_at_the_decoder.unit_pools)
-    assert formed_at_the_controller.formation_by_pool == {}
+    assert formed_at_the_decoder.chip.formation is not None
+    assert formed_at_the_controller.chip.formation is None
 
 
 def test_a_decoder_kind_that_names_no_row_is_refused():

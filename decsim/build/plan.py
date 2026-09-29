@@ -153,6 +153,9 @@ def build_plan(
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
         error_model_provider = device.window_model_source()
+    _refuse_bulk_strong_without_a_merge(
+        settings, escalation_policy, device, error_model_provider
+    )
     _install_operation_circuits(device, error_model_provider, all_operations)
     idle_policy = _idle_policy(settings.idle_policy)
     return Plan(
@@ -468,6 +471,41 @@ def _detector_rounds(physical: workload_records.FiniteCircuit) -> dict:
         physical.circuit, round_count, measurement_rounds=schedule
     )
     return table.detector_rounds()
+
+
+def _refuse_bulk_strong_without_a_merge(
+    settings: machine_settings.MachineSettings,
+    escalation_policy,
+    device,
+    error_model_provider,
+) -> None:
+    """bulk_strong merges strong re-decodes that carry timing alone.
+
+    Only the strong pool of a switching run merges, so the key beside
+    any other escalation is read by nothing. The merged decode reads no
+    bits and returns no correction (decoder_manager.bulk_strong in
+    configs/reference.yaml), so rounds that carry values, or windows
+    whose models come from a provider other than the source's own,
+    would be lost.
+    """
+    if not settings.decoder_manager.bulk_strong:
+        return
+    if not escalation_policy.requires_strong_context:
+        raise ValueError(
+            "decoder_manager.bulk_strong merges the strong pool's queued "
+            f"re-decodes, and escalation.kind {settings.escalation.kind} "
+            "has no strong pool; remove the key or run switching"
+        )
+    own_models = device.window_model_source()
+    builds_models = error_model_provider is not own_models
+    if not device.emits_bit_values and not builds_models:
+        return
+    raise ValueError(
+        "decoder_manager.bulk_strong merges timing-only strong re-decodes, "
+        f"and qpu.kind {settings.qpu.kind} gives the decoders bits and "
+        "models the merged decode would drop; set bulk_strong false or "
+        "qpu.kind timing_only"
+    )
 
 
 def _install_operation_circuits(device, model_provider, operations) -> None:

@@ -1,4 +1,4 @@
-"""The controller-side build: formation, the factory, and the strong route.
+"""The controller-side build: formation and the factory.
 
 Each of these is one decision the root makes before a round is packed,
 and each is checked here rather than inside the running machine, which
@@ -12,7 +12,6 @@ import pytest
 
 import decsim.build.controller_side as controller_side
 import decsim.build.parts as build_parts
-import decsim.decoders.decoders as decoders
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.machine as machine_module
@@ -171,38 +170,6 @@ def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
         )
 
 
-def test_one_decoder_for_both_tiers_is_refused_when_the_run_may_escalate():
-    weak_and_strong_are_one = decoders.PresetLatencyDecoder(10.0)
-    router = decoders.SwitchingRouter(
-        weak=weak_and_strong_are_one, strong=weak_and_strong_are_one
-    )
-    may_escalate = _EscalatingPolicy()
-
-    with pytest.raises(ValueError) as refusal:
-        controller_side.check_strong_route(may_escalate, router)
-
-    assert "routes to the same decoder as the weak tier" in str(refusal.value)
-
-
-def test_a_run_that_never_escalates_is_asked_nothing_about_its_route():
-    """The check is about a strong re-decode, which such a run never makes."""
-    one_decoder = decoders.PresetLatencyDecoder(10.0)
-    router = decoders.SwitchingRouter(weak=one_decoder, strong=one_decoder)
-    never_escalates = _WeakOnlyPolicy()
-
-    controller_side.check_strong_route(never_escalates, router)
-
-
-def test_two_distinct_decoders_pass_the_strong_route_check():
-    weak = decoders.PresetLatencyDecoder(10.0)
-    strong = decoders.PresetLatencyDecoder(30.0)
-    router = decoders.SwitchingRouter(weak=weak, strong=strong)
-
-    escalating = _EscalatingPolicy()
-
-    controller_side.check_strong_route(escalating, router)
-
-
 _DISTILLATION = magic_state_factories.DistillationFactory
 _MULTI_LEVEL = magic_state_factories.MultiLevelDistillationFactory
 
@@ -344,16 +311,6 @@ class _OneRoundSource:
             size_bits=1,
             fragment_index=0,
         )
-
-
-class _EscalatingPolicy:
-    """The one fact check_strong_route reads."""
-
-    requires_strong_context = True
-
-
-class _WeakOnlyPolicy:
-    requires_strong_context = False
 
 
 def _parts(factory_settings, plan):

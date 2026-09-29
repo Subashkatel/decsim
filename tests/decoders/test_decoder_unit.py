@@ -159,18 +159,6 @@ def test_the_residents_describe_their_phase():
     )
 
 
-def test_a_memory_config_with_a_zero_capacity_is_refused_at_construction():
-    # A memory config from the experiments layer is a boundary: a unit
-    # that holds zero bits can serve nothing, so the mistake is caught
-    # before a run
-    # rather than at the first deposit.
-
-    with pytest.raises(
-        ValueError, match="pool 'default' needs a positive bit capacity"
-    ):
-        decoder_memory.DecoderMemoryConfig({"default": 0})
-
-
 def test_the_output_slot_holds_one_finished_result_until_it_is_taken():
     """AFS keeps the finished log in the unit until it is read (833-840)."""
     unit = _unit()

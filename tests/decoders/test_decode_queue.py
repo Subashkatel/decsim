@@ -13,17 +13,14 @@ import functools
 import random
 import statistics
 
-import pytest
-
 import decsim.config as config
-import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.observe.queue_depth as queue_depth
-import decsim.records.decoding as decoding_records
 import tests.declared_run as declared_run
 
 SERVICE_MICROSECONDS = 1.0
@@ -47,16 +44,15 @@ def _manager(engine, units, scheduler=None):
     if scheduler is None:
         scheduler = schedulers.FifoScheduler()
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
-    router = decoders.CodeRouter(decoder)
-    strong_requests = strong_requests_module.StrongRequests()
-    return decoder_manager.DecoderManager(
+    pool_settings = decoder_pool.PoolSettings(name="default", unit_count=units)
+    manager = decoder_manager.DecoderManager(
         engine,
-        router=router,
         scheduler=scheduler,
-        strong_requests=strong_requests,
-        unit_pools={"default": units},
-        escalation_policy=None,
+        pool_settings=pool_settings,
     )
+    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.decoder = decoder
+    return manager
 
 
 def _start_ticks(arrivals, units, scheduler=None):
@@ -171,7 +167,7 @@ def test_the_depth_is_reported_at_every_change():
     engine = engine_module.Engine()
     manager = _manager(engine, 1)
     depth_log = queue_depth.QueueDepthLog()
-    depth_changed = functools.partial(depth_log.depth_changed, 0)
+    depth_changed = functools.partial(depth_log.depth_changed, "default")
     manager.queue.trace.depth_changed.connect(depth_changed)
     _submit(manager, "a")
     _submit(manager, "b")
@@ -181,37 +177,6 @@ def test_the_depth_is_reported_at_every_change():
     depths = [depth for _tick, depth in depth_log.samples]
     assert depths == [1, 0, 1, 0]
     assert depth_log.peak == 1
-
-
-def test_bulk_strong_is_refused_beside_a_pool_it_does_not_mean():
-    """bulk_strong merges the strong pool, and says which pool that is.
-
-    A rule that read "not the default pool" would merge every job of a
-    third pool as though it were a strong re-decode, and the batch would
-    stamp request keys those jobs do not have. A pool is a capability: a
-    rule that means the strong pool names the strong pool, and a run
-    that defines another one is refused here rather than served by a
-    rule not written for it.
-    """
-    engine = engine_module.Engine()
-    decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
-    router = decoders.CodeRouter(decoder)
-    scheduler = schedulers.FifoScheduler()
-    strong_requests = strong_requests_module.StrongRequests()
-    build = functools.partial(
-        decoder_manager.DecoderManager,
-        engine,
-        router=router,
-        scheduler=scheduler,
-        strong_requests=strong_requests,
-        bulk_strong=True,
-        escalation_policy=None,
-    )
-    pools = {"default": 1, "strong": 1, "referee": 1}
-    with pytest.raises(ValueError, match="referee"):
-        build(unit_pools=pools)
-    manager = build(unit_pools={"default": 1, "strong": 1})
-    assert sorted(manager.queue.waiting_by_pool) == ["default", "strong"]
 
 
 def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
@@ -229,12 +194,11 @@ def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
     operations = [
         declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
     ]
-    unit_pools = {"default": 4, "strong": 1}
     machine = declared_run.switching_run(
         rounds=6,
         operations=operations,
         escalation_probability=1.0,
-        unit_pools=unit_pools,
+        weak_units=4,
         bulk_strong=True,
     )
     every_batch = declared_run.log_lines_containing(
@@ -259,17 +223,29 @@ def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
     ]
 
 
-def test_every_job_kind_names_the_pool_it_asks_for():
-    """The pool table is read at every enqueue, so it is closed at import.
+def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():
+    """Every member of a merged batch follows the strong tier's input rule.
 
-    A kind that named no pool would raise a KeyError inside the first
-    enqueue of a run that has it, which is a long way from the table
-    that is missing the row.
+    With strong_decoder.input in_place the strong units read the rounds
+    where the store keeps them, so no member's input lands in a strong
+    unit's memory, merged into a batch or not.
     """
-    kinds = set(decoding_records.DecodeJobKind)
-    named = set(decode_queue.POOL_BY_JOB_KIND)
-    assert named == kinds
-    asked = decode_queue.POOL_BY_JOB_KIND.values()
-    pools = set(asked)
-    known = {decode_queue.DEFAULT_POOL, decode_queue.STRONG_POOL}
-    assert pools <= known
+    operations = [
+        declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
+    ]
+    machine = declared_run.switching_run(
+        rounds=6,
+        operations=operations,
+        escalation_probability=1.0,
+        weak_units=4,
+        bulk_strong=True,
+        strong_input="in_place",
+    )
+    every_batch = declared_run.log_lines_containing(
+        machine, "START DECODE strong-batch"
+    )
+    admissions = []
+    for unit in machine.strong_decoder_manager.pool.units:
+        admissions.append(unit.memory.statistics.admissions)
+    assert every_batch
+    assert admissions == [0]

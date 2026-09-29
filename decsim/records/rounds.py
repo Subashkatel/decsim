@@ -264,7 +264,7 @@ class RoundEvent:
     """One recorded transition of one syndrome round through the controller.
 
     kind is one of EMITTED, BINARY_AVAILABLE, PACKED, STALLED, RELEASED,
-    CWB_SENT, PUBLISHED, DROPPED, FEEDBACK_MEMORY_DELIVERED.
+    CWB_SENT, PUBLISHED, FEEDBACK_MEMORY_DELIVERED.
     """
 
     kind: str

@@ -13,6 +13,8 @@ manager). The textbook treatment is Harchol-Balter, Performance
 Modeling and Design of Computer Systems, Cambridge 2013.
 """
 
+import types
+
 import pytest
 
 import decsim.config as config
@@ -24,10 +26,15 @@ import decsim.records.windows as window_records
 DECODE_TICKS = config.microseconds_to_ticks(1.0)
 
 
+def _settings(unit_count):
+    return decoder_pool.PoolSettings(name="default", unit_count=unit_count)
+
+
 def _pool(unit_count):
     decoder = decoders.PresetLatencyDecoder(1.0)
-    router = decoders.CodeRouter(decoder)
-    return decoder_pool.DecoderPool(router, {"default": unit_count})
+    manager = types.SimpleNamespace(decoder=decoder)
+    settings = _settings(unit_count)
+    return decoder_pool.DecoderPool(manager, settings)
 
 
 def _job(label):
@@ -70,7 +77,6 @@ def _input_nowhere(_job, _unit):
 
 def _offer(pool, job, carries_input, input_is_on_the_unit=_input_nowhere):
     return pool.offer(
-        "default",
         job,
         now=0,
         carries_input=carries_input,
@@ -82,7 +88,7 @@ def _offer(pool, job, carries_input, input_is_on_the_unit=_input_nowhere):
 
 def test_a_free_unit_with_room_is_offered_with_its_compute():
     pool = _pool(2)
-    first, second = pool.units_by_pool["default"]
+    first, second = pool.units
     busy = _job("busy")
     pool.claim(first, busy)
     next_job = _job("next")
@@ -93,7 +99,7 @@ def test_a_free_unit_with_room_is_offered_with_its_compute():
 
 def test_the_free_unit_the_fewest_residents_await_is_offered():
     pool = _pool(2)
-    first, second = pool.units_by_pool["default"]
+    first, second = pool.units
     waiting = _job("waiting")
     first.admit(waiting)
     next_job = _job("next")
@@ -104,7 +110,7 @@ def test_the_free_unit_the_fewest_residents_await_is_offered():
 
 def test_a_free_unit_that_has_the_jobs_rounds_is_offered_before_an_empty_one():
     pool = _pool(2)
-    _first, second = pool.units_by_pool["default"]
+    _first, second = pool.units
     waiting = _job("waiting")
     second.admit(waiting)
     next_job = _job("next")
@@ -124,7 +130,7 @@ def test_a_free_unit_that_has_the_jobs_rounds_is_offered_before_an_empty_one():
 
 def test_a_job_with_input_is_staged_on_the_busy_unit_that_frees_earliest():
     pool = _pool(2)
-    first, second = pool.units_by_pool["default"]
+    first, second = pool.units
     long_job = _job("long")
     pool.claim(first, long_job)
     first.expect_compute_free(30)
@@ -140,7 +146,7 @@ def test_a_job_with_input_is_staged_on_the_busy_unit_that_frees_earliest():
 def test_a_blocked_job_is_staged_on_the_unit_with_the_least_work_left():
     """A free unit a staged job waits on owes a whole decode."""
     pool = _pool(2)
-    first, second = pool.units_by_pool["default"]
+    first, second = pool.units
     running = _job("running")
     running.service_started = True
     first.admit(running)
@@ -158,7 +164,7 @@ def test_a_blocked_job_is_staged_on_the_unit_with_the_least_work_left():
 def test_a_holder_past_its_predicted_free_tick_is_unbounded_work():
     """A result not yet read holds the unit for a time nobody declared."""
     pool = _pool(2)
-    first, second = pool.units_by_pool["default"]
+    first, second = pool.units
     finished = _job("finished")
     finished.service_started = True
     first.admit(finished)
@@ -169,7 +175,6 @@ def test_a_holder_past_its_predicted_free_tick_is_unbounded_work():
     blocked = _blocked_job("blocked")
     long_after_ticks = 5 * DECODE_TICKS
     unit, has_free_compute = pool.offer(
-        "default",
         blocked,
         now=long_after_ticks,
         carries_input=True,
@@ -184,7 +189,7 @@ def test_a_holder_past_its_predicted_free_tick_is_unbounded_work():
 def test_a_blocked_job_leaves_the_unit_its_companion_is_staged_on():
     """The rounds being there never outweigh a decode to wait behind."""
     pool = _pool(2)
-    first, second = pool.units_by_pool["default"]
+    first, second = pool.units
     companion = _blocked_job("companion")
     first.admit(companion)
     blocked = _blocked_job("blocked")
@@ -204,7 +209,7 @@ def test_a_blocked_job_leaves_the_unit_its_companion_is_staged_on():
 
 def test_a_blocked_job_takes_the_rounds_in_place_when_the_work_is_equal():
     pool = _pool(2)
-    _first, second = pool.units_by_pool["default"]
+    _first, second = pool.units
     blocked = _blocked_job("blocked")
 
     def input_is_on_the_second_unit(_job, unit):
@@ -221,9 +226,10 @@ def test_a_blocked_job_takes_the_rounds_in_place_when_the_work_is_equal():
 
 def test_where_no_cost_is_declared_the_unit_with_the_fewest_jobs_is_taken():
     decoder = _MeasuredDecoder()
-    router = decoders.CodeRouter(decoder)
-    pool = decoder_pool.DecoderPool(router, {"default": 2})
-    first, second = pool.units_by_pool["default"]
+    manager = types.SimpleNamespace(decoder=decoder)
+    settings = _settings(2)
+    pool = decoder_pool.DecoderPool(manager, settings)
+    first, second = pool.units
     first_waiting = _job("first waiting")
     first.admit(first_waiting)
     second_waiting = _job("second waiting")
@@ -232,7 +238,6 @@ def test_where_no_cost_is_declared_the_unit_with_the_fewest_jobs_is_taken():
     second.admit(third_waiting)
     blocked = _blocked_job("blocked")
     unit, _has_free_compute = pool.offer(
-        "default",
         blocked,
         now=0,
         carries_input=True,
@@ -245,7 +250,7 @@ def test_where_no_cost_is_declared_the_unit_with_the_fewest_jobs_is_taken():
 
 def test_a_job_without_input_waits_when_no_unit_is_free():
     pool = _pool(1)
-    (unit,) = pool.units_by_pool["default"]
+    (unit,) = pool.units
     busy = _job("busy")
     pool.claim(unit, busy)
     next_job = _job("next")
@@ -254,7 +259,7 @@ def test_a_job_without_input_waits_when_no_unit_is_free():
 
 def test_a_released_unit_is_offered_after_the_ones_freed_before_it():
     pool = _pool(2)
-    first, second = pool.units_by_pool["default"]
+    first, second = pool.units
     job_a = _job("a")
     pool.claim(first, job_a)
     job_b = _job("b")
@@ -266,13 +271,7 @@ def test_a_released_unit_is_offered_after_the_ones_freed_before_it():
     assert unit is second
 
 
-def test_a_pool_map_that_names_no_pool_is_refused():
-    with pytest.raises(ValueError, match="names no pool"):
-        decoder_pool.DecoderPool(None, {})
-
-
-def test_a_pool_map_of_the_strong_pool_alone_is_the_hosts_managers():
-    pool = decoder_pool.DecoderPool(None, {"strong": 2})
-
-    assert sorted(pool.units_by_pool) == ["strong"]
-    assert len(pool.units_by_pool["strong"]) == 2
+def test_a_pool_with_no_unit_is_refused():
+    settings = _settings(0)
+    with pytest.raises(ValueError, match="needs at least 1 unit"):
+        decoder_pool.DecoderPool(None, settings)

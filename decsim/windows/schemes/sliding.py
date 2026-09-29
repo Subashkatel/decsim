@@ -87,7 +87,7 @@ class SlidingWindowScheme:
     ) -> tuple:
         """The geometries this operation's terminal policy lays out."""
         if self.terminal_policy == "flush":
-            return _finite_forward_window_geometries(
+            return _finite_double_window_geometries(
                 round_count, commit_round_count, buffer_round_count
             )
         return _lookahead_window_geometries(
@@ -114,7 +114,7 @@ def _chain_dependencies(window_count: int) -> tuple:
     return tuple(internal_dependencies)
 
 
-def _finite_forward_window_geometries(
+def _finite_double_window_geometries(
     round_count: int,
     commit_round_count: int,
     buffer_round_count: int,

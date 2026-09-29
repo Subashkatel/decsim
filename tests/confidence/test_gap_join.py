@@ -33,18 +33,29 @@ UNJOINED_WINDOW_ID = 999
 
 
 def _switching_machine(
-    weak_units: int, weak_microseconds: float = 4.0, trace_path=None
+    weak_units: int,
+    weak_microseconds: float = 4.0,
+    trace_path=None,
+    result_blocks_unit: bool = False,
+    walk_microseconds=None,
+    patch_count: int = 1,
 ):
     """The gate's switching card at d=3, priced so its ticks are declared."""
     sections = copy.deepcopy(test_strong_window_shapes.GATE_SWITCHING_CARD)
     sections["weak_decoder"]["kind"] = weak_microseconds
     sections["weak_decoder"]["units"] = weak_units
+    sections["weak_decoder"]["result_blocks_unit"] = result_blocks_unit
+    escalation = sections["escalation"]
+    escalation["confidence_walk_microseconds"] = walk_microseconds
     sections["strong_decoder"]["kind"] = 20.0
     sections["qpu"]["distance"] = 3
     sections["qpu"]["round_period_microseconds"] = 1.0
     arguments = sections["workload"]["arguments"]
     arguments["distance"] = 3
     arguments["physical_error_probability"] = 0.008
+    if patch_count > 1:
+        sections["workload"]["function"] = "decsim.producers:memory_patches"
+        arguments["patch_count"] = patch_count
     base_directory = pathlib.Path(".")
     section_folders = dict.fromkeys(sections, base_directory)
     settings = machine_settings.MachineSettings.from_mapping(
@@ -155,6 +166,61 @@ def test_one_unit_holds_the_window_for_the_sum_of_its_two_solves():
     assert len(weak_starts) == 2 * windows
 
 
+def test_one_unit_that_blocks_on_its_result_joins_both_solves():
+    """The held solve is read into the join, so its unit runs the other."""
+    machine = _switching_machine(1, result_blocks_unit=True)
+    machine.run()
+    windows = len(machine.observation.windows.windows)
+    committed = _committed_observables(machine)
+    assert len(committed) == windows
+
+
+def _walks_and_next_starts(machine) -> list:
+    """(walk end, next start) on the unit, for each decode that walked.
+
+    One unit, so the unit's decodes start in the order recorded here.
+    """
+    service = machine.decoder_manager.service
+    outcomes = machine.decoder_manager.outcomes
+    engine = machine.engine
+    starts = []
+    ends = {}
+
+    def started(job, _unit) -> None:
+        starts.append((engine.now, job))
+
+    def ended(job, ended_ticks) -> None:
+        ends[id(job)] = ended_ticks
+
+    service.trace.job_started.connect(started)
+    outcomes.trace.service_ended.connect(ended)
+    machine.run()
+    pairs = []
+    pair_count = len(starts) - 1
+    for index in range(pair_count):
+        (_tick, job) = starts[index]
+        (next_tick, _next_job) = starts[index + 1]
+        if job.soft_output_ticks > 0:
+            walk_end = ends[id(job)]
+            pairs.append((walk_end, next_tick))
+    return pairs
+
+
+def test_the_walk_keeps_its_unit_busy_before_the_next_decode_starts():
+    """Decision D8: the walk is the unit's time, so nothing overlaps it.
+
+    Two patches, so the other patch's window is ready while the walk runs.
+    """
+    machine = _switching_machine(1, walk_microseconds=12.0, patch_count=2)
+
+    pairs = _walks_and_next_starts(machine)
+
+    walk_count = len(pairs)
+    assert walk_count > 0
+    overlapping = [pair for pair in pairs if pair[1] < pair[0]]
+    assert overlapping == []
+
+
 def test_the_first_solve_is_held_and_the_join_names_the_windows_gap():
     """The held half and the join are named in the run's log."""
     machine = _switching_machine(1)
@@ -237,6 +303,7 @@ class _RecordingQueue:
     def __init__(self) -> None:
         self.charges = []
         self.closed = []
+        self.read = []
 
     def charge_soft_output(self, job, ticks):
         """Charge the signal's own computation on the job's unit."""
@@ -246,6 +313,10 @@ class _RecordingQueue:
     def close_companion_request(self, job, result):
         """The solve the window's answer did not come from."""
         self.closed.append((job, result))
+
+    def read_result(self, job: decoding_records.DecodeJob) -> None:
+        """The join has the solve in hand."""
+        self.read.append(job)
 
 
 def _join_with(signal_ticks: int):
@@ -333,6 +404,14 @@ def test_the_walk_is_charged_to_the_solve_that_delivered_last():
     assert queue.charges == [(second_job, 90)]
     assert second_job.soft_output_ticks == 90
     assert first_job.soft_output_ticks == 0
+
+
+def test_a_held_solve_is_read_off_its_unit_when_the_join_holds_it():
+    """The join keeps the value, as a reservation station does."""
+    engine, join, verdict, queue = _two_solve_join(0)
+    first_job, first_result = _forced_solve("first", 0, 4.0)
+    join.accept_result(first_job, first_result)
+    assert queue.read == [first_job]
 
 
 def test_the_answer_is_still_the_lightest_solve_and_still_waits():

@@ -107,42 +107,6 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     assert output.clock.edge(8, 0) == config_module.microseconds_to_ticks(0.016)
 
 
-def test_the_packing_overflow_word_reaches_the_controller(tmp_path):
-    controller = dict(yaml_configs.MINIMAL_CONFIG["controller"])
-    controller["packing_overflow"] = "drop_round"
-    config_path = yaml_configs.write_config(
-        tmp_path, {"controller": controller}
-    )
-    config = experiment.load_experiment(config_path)
-    first_point = config.first_point_task()
-    assert first_point.settings.controller.packing_overflow is (
-        controller_settings.PackingOverflowPolicy.DROP_ROUND
-    )
-
-
-def test_the_default_packing_overflow_is_backpressure(tmp_path):
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
-    first_point = config.first_point_task()
-    assert first_point.settings.controller.packing_overflow is (
-        controller_settings.PackingOverflowPolicy.STALL
-    )
-
-
-def test_an_unknown_packing_overflow_word_is_refused(tmp_path):
-    controller = dict(yaml_configs.MINIMAL_CONFIG["controller"])
-    controller["packing_overflow"] = "overwrite"
-    config_path = yaml_configs.write_config(
-        tmp_path, {"controller": controller}
-    )
-    sentence = (
-        "controller.packing_overflow must be one of "
-        r"\('stall', 'drop_round'\), got 'overwrite'"
-    )
-    with pytest.raises(ValueError, match=sentence):
-        experiment.load_experiment(config_path)
-
-
 @pytest.mark.parametrize("bound", [0.5, True, -1, 0, "x"])
 def test_a_packing_bound_that_is_not_a_count_of_rounds_is_refused(
     tmp_path, bound

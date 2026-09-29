@@ -152,15 +152,18 @@ def test_a_lost_frame_is_resent_after_the_sequence_nak_hand_traced():
     assert transfer.queue_wait_ticks == 2730 - 354 - 6 * LATER_PACKET_TICKS
 
 
-def test_a_nak_that_starts_a_retry_leaves_the_timer_running():
-    """The timer set at the first send still expires at 10_000.
+def test_the_retransmit_timer_restarts_at_every_send():
+    """The timer expires one timeout after the last resend, at 12_392.
 
-    rxe's completer leaves a retry started by a NAK without resetting
-    the timer (rxe_comp.c:668-669 and 743-749). p1 is lost, NAK(1) comes
+    rxe's send task runs the completer after every requester pass
+    (rxe_req.c:831-846); with no answer to read, the completer ends at
+    COMPST_EXIT, which resets the timer while packets are out
+    (rxe_comp.c:161-162, 742-749, 624-636). p1 is lost, NAK(1) comes
     back at 1716 and the resent p1 is lost too; p2 and p3 then arrive
     out of sequence, but one NAK per gap was sent already, so only the
-    timer recovers: back to p1 at 10_000, p3 ends at 10_676 + 338 and
-    lands one propagation on.
+    timer recovers. The resends at 1716, 2054 and 2392 each restart it:
+    back to p1 at 2392 + 10_000, p3 ends at 13_068 + 338 and lands one
+    propagation on.
     """
     pattern = (False, True, False, False, False, True) + (False,) * 6
     seed = seed_losing(pattern)
@@ -176,8 +179,32 @@ def test_a_nak_that_starts_a_retry_leaves_the_timer_running():
 
     starts = [record.timing.start_ticks for record in frames]
     transfer = delivered[0]
-    assert starts[4:] == [1716, 2054, 2392, 10_000, 10_338, 10_676]
-    assert transfer.delivery_ticks == 11_014 + PROPAGATION
+    assert starts[4:] == [1716, 2054, 2392, 12_392, 12_730, 13_068]
+    assert transfer.delivery_ticks == 13_406 + PROPAGATION
+
+
+def test_a_message_taken_while_packets_are_out_restarts_the_timer():
+    """A second message at 5000 moves the lost packet's timeout to 15_000.
+
+    Posting a message runs rxe's send task, whose completer pass resets
+    the timer while packets are out (rxe_comp.c:742-749, 624-636), even
+    when the window keeps the requester from sending. A window of one:
+    p0, 298 ticks, is lost; the message sent at 5000 waits behind it.
+    The timer expires at 15_000, p0 is resent 15_000-15_298 and lands
+    at 15_598.
+    """
+    seed = seed_losing((True, False, False, False, False))
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(BIT_ERROR_RATE, window_packets=1)
+    channel = seeded_channel(engine, settings, seed)
+    delivered = []
+    send_at(engine, channel, 0, 200, delivered)
+    send_at(engine, channel, 5000, 200, delivered)
+
+    engine.run()
+
+    first_transfer = delivered[0]
+    assert first_transfer.delivery_ticks == 15_598
 
 
 def test_a_lost_last_frame_is_resent_when_the_timer_expires():

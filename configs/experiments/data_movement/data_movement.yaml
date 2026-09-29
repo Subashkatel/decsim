@@ -93,7 +93,7 @@ sweep:
       escalation:
         - kind: switching
           gap_threshold_db: 20.0    # the paper's threshold, Sec. IV
-          strong_window: near_seam_pinned
+          strong_window: redo_window
       strong_decoder:
         - kind: 10.0                # ten tau_gen, Toshio 2510.25222
           units: 1

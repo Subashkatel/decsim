@@ -18,7 +18,7 @@ them:
 | --- | --- | --- |
 | `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one sweep point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`) without the swept columns, the `residence.csv` rows of its traced shots when it traced any, an online point's calibrator as the piece left it in `state.pickle`, which the point's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a collect skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `point_id`, `first_seed` and `count`, its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a point whose pieces differ in it, a piece without it included), its `scored_shots`, `failures`, `unscored_shots` and `core_seconds` (its shots' own wall time), its window status counts (the summary's `*_windows` status columns and `provisional_no_correction_windows`), its `configuration_id` and its `rounds` (its shots times the point's rounds per shot), the `state_sha256` of an online point's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended, which a later round's memory request is sized by), a planned piece's `round` and `task`, and the `commit`, `dirty`, `host` and `slurm_job_id` of the process that ran it |
-| `resolved/<id>.json`, `inputs/<id>/` | `decsim/experiments/run_folder.py`, `write_point_record` | each point's record and workload, written before any shot and only once every yaml of the plan or collect has resolved and been accepted, so a refused one changes no record, as a run folder holds them below; the record also holds `rounds_per_shot`, the QEC rounds of a shot, which sizes the point's pieces, and `experiment`: its `configuration_id` (the configuration that recorded it last), its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which a status folds it by whatever its yaml says later |
+| `resolved/<id>.json`, `inputs/<id>/` | `decsim/experiments/run_folder.py`, `write_point_record` | each point's record and workload, written before any shot and only once every yaml of the plan or collect has resolved and been accepted, so a refused one changes no record, as a run folder holds them below; the record also holds `rounds_per_shot`, the QEC rounds of a shot, each patch's rounds added up over every operation that sends detector data, which sizes the point's pieces, and `experiment`: its `configuration_id` (the configuration that recorded it last), its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which a status folds it by whatever its yaml says later |
 | `configurations.csv` | `decsim/experiments/run_folder.py`, `record_configuration` | one row per configuration: its `configuration_id` (the sha256 of its sections, the sweep and the collection left out), its `name` and its `config_chain` |
 | `combined/<name>-<id8>/` | `decsim/experiments/collect_command.py`, `write_the_run_folder` | the configuration's run folder, named by the first yaml `configurations.csv` records for its id and the first eight characters of the id, so a collect of any yaml of that id writes this one folder; a folder a second yaml name of the id got before keeps its manifest and traces but loses its fold at the next fold; a collect and a status write it, each fold built whole in a staging folder beside it and moved in in place of the earlier fold's files, so a refused fold leaves the last one as it was, and a status rebuilds every configuration's, one left with no point too, so a point that moved to another configuration is in one run folder. Two yamls of one configuration id, a sweep split one file a distance, fold into one |
 | `round<k>/plan.csv` | `decsim/experiments/plan_command.py`, `plan_round` | round `k`'s pieces, a row each: its `task`, `configuration_id`, `point_id`, `first_seed` and `count`. A planned piece whose seeds no saved piece holds is planned again, with its own seeds, in the next round, each seed once however many rounds planned it, and a task runs only the seeds of its pieces no saved piece holds. An online point's pieces go to one task in seed order, since each starts from the calibrator the one before it saved |
@@ -38,10 +38,10 @@ one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 | --- | --- | --- |
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
-| `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
+| `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
-| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
-| `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
+| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
+| `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `links.csv` | `decsim/experiments/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
@@ -112,7 +112,7 @@ and unit are its key's in `configs/reference.yaml`.
 | `max_queued_windows` | the most jobs that waited in the ready queue at once; a depth counts only when time passes at it, so a job that joins and leaves in one tick never waited |
 | `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
-| `escalated_windows`, `strong_decoded_rounds`, `strong_service_mean_us` | the windows the strong tier committed, the rounds its decodes read, and their mean service |
+| `escalated_windows`, `strong_decoded_rounds`, `strong_service_sum_us` | the windows the strong tier committed, the rounds its decodes read, and their service added up; a sweep point divides the sum by the windows |
 | `commit_rounds` | r_com, the rounds a window commits: `windows.commit_rounds`, or the code distance when it is null |
 | `window_period_us` | a window's inter-arrival, `commit_rounds` times the QPU's round period: what `load` divides by, and the deadline a window's decode must beat |
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
@@ -143,15 +143,18 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `cwb_stall_per_round` | the packed round finding the weak syndrome buffer full, to the freed slot that admitted it: the store's back-pressure on the controller, zero for a round that found room |
 | `csb_stall_per_round` | the same wait in front of the strong syndrome buffer, one sample per round that reached it |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
+| `admission_wait` | the window's data complete in the weak syndrome buffer, to its decode job entering the queue: the window side's decision (`windows.decision_cycles`), and any earlier request of the window that was withdrawn, as a restart window's is when a `double_window` strong window re-slices it; zero otherwise |
 | `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, and zero when nothing was owed at the landing |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
 | `queue_wait` | queued, to a unit assigned |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |
 | `fetch` | the unit reading the window out of its own memory |
 | `algorithm` | the decoding algorithm itself |
+| `backend_queue_wait` | inside `algorithm`: the time a strong backend's decode waited for its dispatcher or a worker (`decsim/decoders/strong_backend.py`). `algorithm` less this is the GPU's own steps: launch, copies and kernel. Zero for a decoder with no queue of its own |
 | `release` | the unit writing the correction out |
-| `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
-| `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the sibling forced-class solve's remaining time under `complementary_gap`, and zero for a window that escalated |
+| `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for outside the unit. A strong backend's queue holds the unit, so `backend_queue_wait` is inside |
+| `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the other forced-class solve's remaining time under `complementary_gap`, and zero for an escalated window whose strong decode began after the verdict |
+| `selection_wait` | the verdict, or the committing decode's end when later, to its answer leaving for the frame: a finished strong answer kept in its unit's output slot until the verdict's selection has crossed `weak_decoder_to_strong_decoder`, which a speculative strong decode under `run_both_at_once` waits for, and zero for every other window |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
 | `dd_per_window` | one decoder to the next: the boundary handoff |
@@ -174,6 +177,8 @@ the strong tier's hops and the stage points are the strong decode's. A
 window can be decoded more than once, and then every tick still belongs
 to one decode.
 
+- `admission_wait` runs from the window's data complete to its job
+  entering the queue.
 - `queue_wait` ends where a unit took the window's first decode.
 - `weak_attempt` runs from there to the verdict that sent the window to
   the strong tier. It is zero when the first decode is the one that
@@ -184,9 +189,11 @@ to one decode.
 - `service` is its compute, and `output_link_per_window` its way home.
 - `confidence` is the signal the verdict needs, computed after that
   decode ended.
+- `selection_wait` is a strong answer that finished first waiting for
+  the verdict's selection to reach it.
 - `frame_commit` closes it.
 
-On a serial path those nine add
+On a serial path those ten add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 
@@ -214,7 +221,7 @@ overlap rather than follow each other, so adding both would count the
 same wall time twice. `tests/experiments/test_measure.py` asserts the
 identity window by window on `configs/bases/weak_decoder_baseline.yaml`,
 `configs/examples/two_tiers.yaml`,
-`configs/experiments/switching/seam_pinned_switching.yaml` and
+`configs/experiments/switching/redo_window_switching.yaml` and
 `configs/experiments/switching/cluster_gap_switching.yaml`, which are a
 run with no signal to compute, a run whose signal is a second
 forced-class solve, the same on a host-clock strong tier, and a run
@@ -244,18 +251,21 @@ here and moves no column of any file.
 
 ### `window_samples.csv`
 
-One row per sweep point, latency point and distinct microsecond value.
+One row per sweep point, latency point, tier and distinct microsecond
+value.
 
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm` | the sweep point |
 | `name` | which latency point, from the list above |
+| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` points, whose samples are rounds, not windows |
 | `value_us` | one microsecond value that occurred |
 | `count` | how many windows carried it |
 
-This is the multiset of a point's window samples. A median and a p99
-need nothing more, and one piece records nothing more for another
-process to reach the same numbers.
+This is the multiset of a point's window samples, one per tier. A median
+and a p99 need nothing more, and one piece records nothing more for
+another process to reach the same numbers. The columns in `sweep.csv`
+add the tiers together.
 
 ### `latency_samples.csv`
 
@@ -267,6 +277,7 @@ with no rows writes no file.
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the shot |
+| `tier` | the tier whose decode the frame committed for the window, as in `window_samples.csv` |
 | `algorithm_us` | the time the algorithm stage held the unit for one decode: its wall clock, or its cycle count |
 | `window_period_us` | the shot's window inter-arrival, the deadline a window's decode must beat |
 
@@ -276,7 +287,9 @@ One row per window whose confidence the escalation verdict read, for
 the shots of seed 0 up to `observation.confidence_shot_count` (all of them
 for `all`). A run whose escalation reads no confidence writes no file.
 A window has no truth of its own, so a row carries its shot's failure
-and whether the strong decode changed the window's answer.
+and whether the strong decode changed the window's answer. An unscored
+shot writes no row: it is sinter's discard, neither a failure nor a
+success, and sweep.csv's `unscored_shots` counts it.
 
 | Column | What it is |
 | --- | --- |
@@ -290,8 +303,10 @@ and whether the strong decode changed the window's answer.
 
 ### `confidence_histogram.csv`
 
-Counts over every shot of a point, whatever `confidence_shot_count` says, so
-the counts of pieces add, as sinter's `custom_counts` do. A gap is
+Counts over every scored shot of a point, whatever `confidence_shot_count`
+says, so the counts of pieces add, as sinter's `custom_counts` do. An
+unscored shot is counted in no cell, as sinter keeps a discard out of
+every count it conditions on failure. A gap is
 binned in decibels, `dB = nats x 10 / ln 10`, to the tenth below it; an
 infinite gap has its own bin.
 
@@ -327,7 +342,7 @@ point the run held:
 | `logical_error_rate_estimate` | the prefix's failures over its scored shots, sinter's errors over shots less discards; empty with no scored shot, at a cap with no failure, and for an adaptive point |
 | `logical_error_rate_low`, `logical_error_rate_high` | its 95 percent limits, exact for the rule the prefix stopped by (`estimate` in `decsim/experiments/failure_statistics.py`): Clopper and Pearson's at a cap or minimum, Jennison and Turnbull's beta quantiles at a target; at a cap with no failure the upper limit alone, 1 - 0.025^(1/n) |
 | `logical_error_rate_plan_unbiased` | Girshick, Mosteller and Savage's estimate, unbiased over every outcome of a stopping plan fixed in advance in counts: (r - 1)/(n - 1) at a target stop, x/n otherwise. It is not unbiased among the outcomes that reached the target, and it is empty under a time cap, for a prefix still running and for an adaptive point |
-| `logical_error_rate_per_round`, `_per_round_low`, `_per_round_high` | the estimate and its limits as a round's rate, sinter's shot_error_rate_to_piece_error_rate over the shot's QEC rounds; empty when the rounds were not recorded |
+| `logical_error_rate_per_round`, `_per_round_low`, `_per_round_high` | the estimate and its limits as one patch's rate for one round, sinter's shot_error_rate_to_piece_error_rate over the shot's QEC rounds, every patch's rounds added up as Tesseract 2503.10988 counts a two-code shot; empty when the rounds were not recorded |
 | `is_shot_rate_above_half` | whether the estimate is past one half, where the per-round rate goes through its complement and, for an even round count, no round-flip probability gives the shot rate |
 | `prefix_shots`, `prefix_scored_shots`, `prefix_failures` | the prefix's counts, which the estimate and its limits read; a pool may run pieces past the stop, which count in `shots` and not here |
 | `logical_error_rate_unscored_as_failures` | the failures and the unscored shots together over every shot: the rate this sample would read if every unscored shot had failed, a bound on the sample and not a confidence bound. Beside the estimate, which is conditional on scoring, it shows how much a backend that failed on hard syndromes could hide |
@@ -336,7 +351,7 @@ point the run held:
 | `max_queued_windows` | the deepest queue over the point |
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
 | `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
-| `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point and their mean service |
+| `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point, and the point's summed `strong_service_sum_us` over those windows: every strong decode weighs the same, whichever shot ran it. Empty when nothing escalated |
 | `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen r_com windows / escalated windows over the point, with tau_gen r_com the shots' `window_period_us` (2510.25222 eq. (6)); infinite when nothing escalated |
 | `parallel_processes_needed` | the largest over the point's shots |
 | `weak_syndrome_weight_mean`, `weak_service_mean_us`, `strong_wait_mean_us` | the means over the point's shots, when they kept the switching records |

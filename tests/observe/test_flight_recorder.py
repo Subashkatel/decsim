@@ -26,17 +26,13 @@ the ledger takes here, a listener attached to a named probe point.
 """
 
 import random
-import types
 
 import pytest
 
 import decsim.collect as collect
 import decsim.config as config_module
-import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.observe.flight_recorder as flight_recorder_module
-import decsim.observe.round_events as round_events_module
-import decsim.records.rounds as round_records
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
 
@@ -95,16 +91,6 @@ def one_event(ledger, kind, operation_id):
     return found
 
 
-def terminal_rounds_and_kinds(ledger):
-    """(round, kind) of every event the ledger marked terminal."""
-    terminals = set()
-    for event in ledger.events:
-        if event.status != "terminal":
-            continue
-        terminals.add((event.round, event.kind))
-    return terminals
-
-
 def terminal_kinds_of_operation(ledger, operation_id):
     """The kind of every terminal event of one operation's stream."""
     kinds = []
@@ -115,33 +101,6 @@ def terminal_kinds_of_operation(ledger, operation_id):
             continue
         kinds.append(event.kind)
     return kinds
-
-
-def record_round_event(
-    recorder: round_events_module.RoundEventRecorder,
-    kind: str,
-    operation_id: object,
-    round_index: int,
-    patch_ids: tuple = (),
-) -> None:
-    """One transition of one round on the window-input route, at tick 0."""
-    route = round_records.WINDOW_INPUT_ROUTE
-    event = round_records.RoundEvent.of(
-        kind, 0, operation_id, round_index, route, patch_ids
-    )
-    recorder.record(event)
-
-
-def ledger_of_rounds_alone(recorder):
-    """The ledger of a run whose only listener is the round recorder."""
-    windows = types.SimpleNamespace(windows={})
-    stamps = types.SimpleNamespace(decode_release={}, result_return={})
-    commands = types.SimpleNamespace(events=())
-    corrections = flight_recorder_module.FrameCorrections()
-    rounds_only = flight_recorder_module.FlightRecorder(
-        recorder, windows, stamps, commands, corrections, ()
-    )
-    return rounds_only.ledger
 
 
 def test_a_rounds_chain_is_exact_and_each_event_names_its_cause():
@@ -358,55 +317,6 @@ def test_the_check_refuses_a_round_that_disappeared():
         view.check()
 
 
-def test_a_round_dropped_for_want_of_store_room_ends_in_dropped():
-    """A loss at the weak syndrome buffer admission is accounted, not silent.
-
-    DROPPED is one of the round terminals, so the round that the writer
-    refused closes its chain there and the conservation check still
-    passes: the ledger says the round was lost rather than saying
-    nothing (flight_recorder.py's _ROUND_TERMINALS).
-    """
-    engine = engine_module.Engine()
-    recorder = round_events_module.RoundEventRecorder(engine)
-    record_round_event(recorder, "EMITTED", 1, 1, patch_ids=(0,))
-    record_round_event(recorder, "PACKED", 1, 1)
-    record_round_event(recorder, "PUBLISHED", 1, 1)
-    record_round_event(recorder, "EMITTED", 1, 2, patch_ids=(0,))
-    record_round_event(recorder, "PACKED", 1, 2)
-    record_round_event(recorder, "DROPPED", 1, 2)
-    ledger = ledger_of_rounds_alone(recorder)
-
-    ledger.check()
-
-    terminals = terminal_rounds_and_kinds(ledger)
-    assert terminals == {(1, "PUBLISHED"), (2, "DROPPED")}
-    assert recorder.packing_drops == 1
-
-
-def test_a_round_refused_a_reassembly_context_ends_in_dropped():
-    """The same accounting holds for a loss before packing.
-
-    The assembler's workspace is bounded too, so a round refused a
-    context there is dropped with no PACKED row of its own; the chain
-    closes on DROPPED and the check still passes
-    (flight_recorder.py's _ROUND_TERMINALS).
-    """
-    engine = engine_module.Engine()
-    recorder = round_events_module.RoundEventRecorder(engine)
-    record_round_event(recorder, "EMITTED", 1, 1, patch_ids=(0,))
-    record_round_event(recorder, "EMITTED", 1, 2, patch_ids=(0,))
-    record_round_event(recorder, "DROPPED", 1, 2, patch_ids=(0,))
-    record_round_event(recorder, "PACKED", 1, 1)
-    record_round_event(recorder, "PUBLISHED", 1, 1)
-    ledger = ledger_of_rounds_alone(recorder)
-
-    ledger.check()
-
-    terminals = terminal_rounds_and_kinds(ledger)
-    assert terminals == {(1, "PUBLISHED"), (2, "DROPPED")}
-    assert recorder.packing_drops == 1
-
-
 def weak_mode(generator, rounds):
     """Weak only, over one to three independent memory patches."""
     operation_count = generator.randint(1, 3)
@@ -450,12 +360,12 @@ def switching_parallel_mode(_generator, rounds):
     )
 
 
-def switching_forward_mode(_generator, rounds):
-    """Escalation under the forward window, which holds no boundary."""
+def switching_double_window_mode(_generator, rounds):
+    """Escalation under the double window, which holds no boundary."""
     return declared_run.switching_run(
         rounds=rounds,
         escalation_probability=1.0,
-        strong_window="forward_seam_pinned",
+        strong_window="double_window",
     )
 
 
@@ -466,7 +376,7 @@ SWEEP_MODES = (
     ("switching_keep", switching_keep_mode),
     ("switching_escalate", switching_escalate_mode),
     ("switching_parallel", switching_parallel_mode),
-    ("switching_forward", switching_forward_mode),
+    ("switching_double_window", switching_double_window_mode),
 )
 WINDOW_STAMP_NAMES = (
     "t_first_round",

@@ -109,7 +109,7 @@ class PotentialStrong:
 class PotentialRestart:
     """A hold in the weak syndrome buffer: a window's reads and one before them.
 
-    Under the forward strong window an earlier escalation may re-slice
+    Under the double window an earlier escalation may re-slice
     this window as its restart window, whose weak decode re-reads one
     buffer into the strong region (Toshio 2510.25222 Sec. III C); the
     rounds stay past the window's own request and landing, until the
@@ -177,9 +177,9 @@ class DecoderServiceKey:
 class DecodeJobKind(Enum):
     """What one decode job is, declared once and read by everyone.
 
-    The manager, the queue, the router and the request ledger all need
-    to know what a job is before they read it, and a declared kind is
-    how a heterogeneous runtime says so: StarPU declares one codelet per
+    The manager, the queue and the request ledger all need to know what
+    a job is before they read it, and a declared kind is how a
+    heterogeneous runtime says so: StarPU declares one codelet per
     architecture and Legion one processor kind per task, and the
     scheduler reads the declaration rather than inferring it. WINDOW is
     one window's decode on the tier that owns it, forced-class solves
@@ -278,6 +278,11 @@ class DecodeJob:
     # unit's memory and its window owes no boundary. What it waits for
     # after this tick is the unit's compute, not a dependency
     ready_ticks: Optional[int] = None
+    # the ticks this decode waited inside a strong backend for its
+    # dispatcher or a worker, summed over its steps, as a gem5 instruction
+    # carries its own stage ticks (src/cpu/o3/dyn_inst.hh:1017-1028);
+    # zero on a decoder with no queue of its own
+    backend_queue_wait_ticks: int = 0
     memory: Optional[Any] = (
         None  # that unit's DecoderMemory while it holds this job's input
     )
@@ -285,12 +290,12 @@ class DecodeJob:
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
     strong_label: Optional[str] = (
-        None  # manager-owned label for a strong sibling
+        None  # manager-owned label for a speculative strong decode
     )
     spatial_nodes: Optional[int] = (
         None  # decoding-graph nodes per round (latency models)
     )
-    code: Optional[str] = None  # code name, drives CodeRouter routing
+    code: Optional[str] = None  # code name, a latency function may read it
     attempt: int = 0  # 0 = first (weak) decode, 1 = strong redo
     kind: DecodeJobKind = DecodeJobKind.WINDOW  # what this job is
     # the logical class this decode is pinned to, or None to decode
@@ -303,7 +308,7 @@ class DecodeJob:
     strong_decode_for: Optional[tuple] = (
         None  # (operation_id, window_id) this strong job re-decodes
     )
-    cancelled: bool = False  # cancelled siblings discard completion
+    cancelled: bool = False  # cancelled speculative decodes discard completion
     completed: bool = (
         False  # terminal flag; admission refuses reuse of a completed job
     )
@@ -537,8 +542,8 @@ class RunShape:
     STRONG_WINDOW_SHAPES the escalation section named, so a refusal
     names the shape the yaml chose; is_absorbing_strong_window is that
     row's own declaration that its region replaces the weak windows it
-    covers (the forward row of Toshio et al. 2510.25222 Sec. III C;
-    the near-seam row absorbs nothing); is_bulk_strong is the
+    covers (the double window of Toshio et al. 2510.25222 Sec. III C;
+    the redo window absorbs nothing); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and
     buffer_round_count size every window (windows.commit_rounds and

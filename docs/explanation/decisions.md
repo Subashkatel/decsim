@@ -84,9 +84,9 @@ compatible beyond the MWPM decoder.
 
 **Decided.** Two instances of one decoder manager class: the chip's
 over the weak pool, and, in a run whose windows may escalate, the
-host's over the strong pool. The escalation side and a window's strong
-sibling submit to the host's; the ledger of strong requests is one seat
-both take (a seat is a named slot in `decsim/assembly.py` that the root
+host's over the strong pool. The escalation side and a window's
+speculative strong decode submit to the host's; the ledger of strong
+requests is one seat both take (a seat is a named slot in `decsim/assembly.py` that the root
 fills with one built component and wires to its neighbours), since the chip's side opens a request and the host's serves
 it; a kept weak result halts its request through the escalation side.
 Each manager's own work is charged: `decoder_manager.dispatch_cycles`
@@ -491,7 +491,7 @@ places.
 
 **Decided.** A new latency point, `confidence`: the committing decode's
 end to the verdict on the window's answer, for a window whose weak
-result committed. It is the sibling forced-class solve's remaining time
+result committed. It is the other forced-class solve's remaining time
 under `complementary_gap`, the walk under `cluster_gap`, and zero under
 `weak_baseline`, whose verdict needs no signal. For a window that
 escalated it is zero too: its committing decode is the strong one,
@@ -725,8 +725,8 @@ window's own commit takes only the faults crossing behind it, because
 the rest of that commit is exactly what the region decodes again.
 
 **Where to see it.** `decsim/escalation/strong_regions.py`
-(`forward_near_face`), `decsim/escalation/strong_window_shapes.py`
-(`ForwardSeamWindow`), `decsim/windows/window_boundaries.py`
+(`double_window_near_face`), `decsim/escalation/strong_window_shapes.py`
+(`DoubleWindow`), `decsim/windows/window_boundaries.py`
 (`_pinned_boundary`), `decsim/windows/window_commits.py`
 (`_with_the_crossing_commit`), `decsim/decoders/decoder.py`
 (`_crossing_commit`).
@@ -1183,8 +1183,8 @@ memory while it waits, so each idle cycle is the stream's next round,
 emitted on the stream (`extend_live_stream`), until the source has no
 rounds left. A segment that declares no stream offset takes the
 stream's next round when the QPU starts it, after its boundary's idle
-rounds (`bind_at_start`); a declared offset is bound at load and a
-protected feedback source at issue. One call, `_bind`, writes the
+rounds (`bind_at_start`), and so does a protected feedback source; a
+declared offset is bound at load. One call, `_bind`, writes the
 offset to the bindings and to the result ledger, and the window plan
 cuts the stream before the segment's first round and after its last,
 so the result the ledger folds over the segment's rounds is a sum of
@@ -1201,8 +1201,8 @@ clipped on a segment's edge is the closed-tail case (Tan et al.
 2209.09219 lines 1052-1056).
 
 **What it cost the port file.** `IdleRoundReceiver` gained
-`bind_at_start`, which the QPU calls as a segment with no offset
-starts. `OperationIssuer.after_successor_release` lost
+`start_command`, which the QPU calls as every command starts, and which
+hands the command to the streams' `bind_at_start`. `OperationIssuer.after_successor_release` lost
 `waits_for_blocked`. The `IdlePolicy` table lost its `extend_stream`
 row.
 

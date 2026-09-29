@@ -155,8 +155,8 @@ In `decsim/escalation/settings.py`. A row of it is named under `escalation.stron
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `near_seam_pinned` | `NearSeamWindow` in `decsim/escalation/strong_window_shapes.py` | The commit region with its past face pinned and one open buffer. |
-| `forward_seam_pinned` | `ForwardSeamWindow` in `decsim/escalation/strong_window_shapes.py` | Sec. III C, Fig. 12 as the paper states it: both faces pinned. |
+| `redo_window` | `RedoWindow` in `decsim/escalation/strong_window_shapes.py` | The redo window: the escalated window decoded again, past face pinned. |
+| `double_window` | `DoubleWindow` in `decsim/escalation/strong_window_shapes.py` | Toshio's double window (Sec. |
 
 ## `SYNDROME_BUFFERS`
 

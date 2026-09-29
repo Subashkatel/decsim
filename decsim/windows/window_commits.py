@@ -44,8 +44,11 @@ class WindowCommitter:
 
     The engine stamps and logs; the courier, the decoder output and the
     results are the three the commit hands to; the strong redecode
-    (None when the run never escalates) hears every weak commit, because
-    a commit can release a held strong window. The commit is also where
+    (None when the run never escalates) hears every weak boundary as the
+    courier takes it, because a held strong window waits for the
+    boundaries the weak decoder has determined (Toshio et al. 2510.25222
+    lines 1248-1250), and a final result's trip to the frame comes after
+    that. The commit is also where
     the result is in the window side's hands, so the caller's
     on_result_read runs there. Trace source: window_committed(window,
     contribution), the window's record and the contribution that owns
@@ -82,6 +85,7 @@ class WindowCommitter:
             on_result_read()
             return
         self.courier.hand_on(window, operation, result, request_key, True)
+        self._release_held_strong_windows(window.key)
         commit = functools.partial(
             self._commit_the_final_result,
             window,
@@ -167,8 +171,7 @@ class WindowCommitter:
                 window.no_correction_reason
             )
             self.courier.hand_on(window, operation, result, request_key, False)
-        if self.strong_redecode is not None:
-            self.strong_redecode.submit_if_commit_releases(window.key)
+            self._release_held_strong_windows(window.key)
         self.results.deliver_if_final(operation)
 
     def finish_strong(
@@ -194,6 +197,12 @@ class WindowCommitter:
         self.courier.ship_held(window, result, request_key)
         self.results.release_committed_segments(operation.id)
         self.results.deliver_if_final(operation)
+
+    def _release_held_strong_windows(self, window_key: tuple) -> None:
+        """The weak boundary is handed on: a strong window held on it leaves."""
+        if self.strong_redecode is None:
+            return
+        self.strong_redecode.submit_if_commit_releases(window_key)
 
 
 class WindowVerdict:

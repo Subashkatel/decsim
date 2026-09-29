@@ -85,7 +85,7 @@ def _waiting_by_pool(decoder_managers) -> dict:
     """Every pool's ready queue, over both sides' managers."""
     waiting_by_pool = {}
     for manager in decoder_managers:
-        waiting_by_pool.update(manager.queue.waiting_by_pool)
+        waiting_by_pool[manager.pool.name] = manager.queue.waiting
     return waiting_by_pool
 
 

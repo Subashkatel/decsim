@@ -1,19 +1,18 @@
 """The decode requests: a job per complete window, asked for once.
 
-A complete window pays its store read and readiness decision before
-submission; a window that still owes a boundary is masked when its decode
-starts (qLDPC folds the net error into the syndrome of the next window,
-qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps raw
-rounds and applies syndrome_mods at assembly). WindowInputGate is what
-the decoder side calls back into through job.gate: may_stage says
-whether a blocked job may take an input slot yet, may_start whether the
-landed job may decode, mask_input folds the boundary into the landed
-input once. The requester builds the
-primary tier's job, asks the escalation policy which tiers decode the
-window now, and enqueues one submission per tier on the DecodeQueue
-port with each job's input send; a strong sibling's submission is the
-strong tier's window side's, and a sibling that side holds for its
-input has no submission to make here.
+A complete window pays its store read and readiness decision before submission;
+a window that still owes a boundary is masked when its decode starts (qLDPC
+folds the net error into the syndrome of the next window,
+qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps raw rounds and
+applies syndrome_mods at assembly). WindowInputGate is what the decoder side
+calls back into through job.gate: may_stage says whether a blocked job may take
+an input slot yet, may_start whether the landed job may decode, mask_input folds
+the boundary into the landed input once. The requester builds the primary tier's
+job, asks the escalation policy which tiers decode the window now, and enqueues
+one submission per tier on the DecodeQueue port with each job's input send; a
+speculative strong decode's submission is the strong tier's window side's, and a
+speculative strong decode that side holds for its input has no submission to
+make here.
 """
 
 import dataclasses
@@ -399,7 +398,7 @@ class DecodeRequester:
     retention = ports.Port(round_retention_module.RoundRetention)
     builder = ports.Port(DecodeRequestBuilder)
     decode_queue = ports.Port(ports.DecodeQueue)
-    # the strong side's manager, which serves the sibling a window
+    # the strong side's manager, which serves the speculative decode a window
     # submits beside its weak job; a run that never escalates has none
     strong_decode_queue = ports.Port(ports.DecodeQueue, optional=True)
     escalation_policy = ports.Port(ports.EscalationPolicy)
@@ -416,13 +415,14 @@ class DecodeRequester:
     ) -> None:
         self.clock = clock
         self.decision_cycles = decision_cycles
-        self.pending_submissions: dict = {}
+        # the windows whose decision has not ended, by window key
+        self.deciding_by_window: dict = {}
 
     def request_ready_windows(self, windows, strong_redecode) -> None:
         """Request each window that has its data, in the given order.
 
-        strong_redecode is the strong tier's window side, which builds
-        the strong sibling when the policy decodes both tiers at once;
+        strong_redecode is the strong tier's window side, which builds the
+        speculative strong decode when the policy decodes both tiers at once;
         None when the run never escalates.
         """
         for window in windows:
@@ -458,12 +458,16 @@ class DecodeRequester:
         operation: program_records.Operation,
         strong_redecode,
     ) -> None:
-        """Build the primary job, ask the policy its tiers, enqueue each.
+        """Build the primary jobs; the window's requests leave at its decision.
 
-        The primary tier's job is the one built here; a strong tier the
-        policy names too gets its sibling from the strong redecode (the
-        paper's Step 1, both decoders started on the same window).
-        The store is read when the input leaves it, at dispatch
+        The primary tier's jobs are built and their input held here; a strong
+        tier the policy names too gets its speculative strong decode from the
+        strong redecode. The window side decides once per window, the pre-decode
+        step a syndrome passes before any decoder has it (RISC-Q 2603.16203
+        lines 895-898), and Step 1 feeds that syndrome to both decoders at once
+        (Toshio et al. 2510.25222 lines 598-601), so the speculative strong
+        decode is planned and every request admitted when it ends. The store is
+        read when the input leaves it, at dispatch
         (syndrome_buffer/round_output.py), not here.
         """
         store = self.retention.primary_store
@@ -479,17 +483,41 @@ class DecodeRequester:
         primary_jobs = self._primary_jobs(job, forced_classes)
         window_reads = decoding_records.WindowReads(window.key)
         is_input_held = self._bind_input_hold(primary_jobs, window_reads)
+        primary = self._primary_submissions(primary_jobs, is_input_held)
+        deciding = _DecidingWindow(job, tiers, primary, strong_redecode)
+        if self.decision_cycles == 0:
+            self._issue(deciding)
+            return
+        self.deciding_by_window[window.key] = deciding
+        engine = self.builder.engine
+        edge = self.clock.edge(self.decision_cycles, engine.now)
+        delay = edge - engine.now
+        decide = functools.partial(self._decide, window.key)
+        engine.schedule(delay, decide, label="window decision")
+
+    def _decide(self, window_key: tuple) -> None:
+        """The window's decision ended: issue its requests, unless withdrawn."""
+        deciding = self.deciding_by_window.pop(window_key, None)
+        if deciding is None:
+            return
+        self._issue(deciding)
+
+    def _issue(self, deciding: "_DecidingWindow") -> None:
+        """Admit the primary jobs and the speculative decode beside them."""
+        primary_tier = self.retention.primary_tier
         submissions = []
-        for tier in tiers:
+        for tier in deciding.tiers:
             if tier is primary_tier:
-                primary = self._primary_submissions(primary_jobs, is_input_held)
-                submissions.extend(primary)
-            else:
-                sibling = strong_redecode.parallel_strong_submission(job)
-                started = _sibling_submissions(sibling)
-                submissions.extend(started)
+                submissions.extend(deciding.primary_submissions)
+                continue
+            strong_redecode = deciding.strong_redecode
+            speculative = strong_redecode.parallel_strong_submission(
+                deciding.job
+            )
+            started = _speculative_submissions(speculative)
+            submissions.extend(started)
         for submission in submissions:
-            self.enqueue(submission)
+            self._admit(submission)
 
     def _primary_submissions(
         self, primary_jobs: list, is_input_held: bool
@@ -558,24 +586,6 @@ class DecodeRequester:
             job.input_hold = shared.release
         return False
 
-    def enqueue(self, submission: decoding_records.Submission) -> None:
-        """Admit one submission with its input send and its return path.
-
-        A strong job's result finalizes its window; a primary job's
-        result commits it, through the confidence join when the window's
-        answer takes both forced-class solves.
-        """
-        if self.decision_cycles == 0:
-            self._admit(submission)
-            return
-        job = submission.job
-        self.pending_submissions[job.request_key] = submission
-        engine = self.builder.engine
-        edge = self.clock.edge(self.decision_cycles, engine.now)
-        delay = edge - engine.now
-        admit = functools.partial(self._admit, submission)
-        engine.schedule(delay, admit, label="window decision")
-
     def check_settled(self) -> None:
         """At the end of a run no window may still hold an unjoined solve."""
         if self.gap_join is None:
@@ -593,44 +603,45 @@ class DecodeRequester:
 
         Its submission bookkeeping is reset so it can be resubmitted fresh
         (a strong window that absorbs the window owns its rounds from then
-        on).
+        on). The reset comes first: taking the decode back frees its slot
+        and the manager dispatches at once, and a later window staged then
+        must not read this one as still dispatched, the order gem5's IEW
+        keeps by taking a squash before it dispatches (src/cpu/o3/iew.cc
+        1451-1452).
         """
-        cancelled = self._withdraw_submissions(window.key)
-        if not cancelled:
-            self.decode_queue.withdraw_window(window.key)
         window.queued = False
         window.t_queued = None
         window.t_dispatch = None
         window.service_began = False
+        has_dropped_decision = self._withdraw_decision(window.key)
+        if not has_dropped_decision:
+            self.decode_queue.withdraw_window(window.key)
 
     def release_parked(self, window_key: tuple, strong_redecode) -> None:
         """The window's last boundary arrived: its parked decodes may start.
 
-        The window's weak decode parks on the chip's manager; a strong
-        sibling or re-decode of the same window parks on the host's. A
-        sibling the strong side waited to plan until the weak job left
-        its park is submitted first, so the two start together.
+        The window's weak decode parks on the chip's manager; a speculative
+        strong decode or a re-decode of the same window parks on the host's. A
+        speculative strong decode the strong side waited to plan until the weak
+        job left its park is submitted first, so the two start together.
         """
         if strong_redecode is not None:
-            sibling = strong_redecode.unparked_submission(window_key)
-            started = _sibling_submissions(sibling)
+            speculative = strong_redecode.unparked_submission(window_key)
+            started = _speculative_submissions(speculative)
             for submission in started:
-                self.enqueue(submission)
+                self._admit(submission)
         self.decode_queue.release_parked(window_key)
         if self.strong_decode_queue is not None:
             self.strong_decode_queue.release_parked(window_key)
 
     def _admit(self, submission: decoding_records.Submission) -> None:
         job = submission.job
-        if job.cancelled:
-            return
-        self.pending_submissions.pop(job.request_key, None)
         if job.strong_decode_for is None:
             job.window.t_queued = self.builder.engine.now
         queue = self.decode_queue
         on_decoded = self.verdict.accept_result
         if job.strong_decode_for is not None:
-            # the strong sibling started with the weak job (Toshio
+            # the speculative strong decode started with the weak job (Toshio
             # 2510.25222 lines 598-601) is the strong side's to serve
             queue = self.strong_decode_queue
             on_decoded = self.verdict.accept_strong_result
@@ -638,24 +649,17 @@ class DecodeRequester:
             on_decoded = self.gap_join.accept_result
         queue.enqueue(job, submission.send_input, on_decoded)
 
-    def _withdraw_submissions(self, window_key: tuple) -> bool:
-        """Release requests still waiting for this window's decision edge."""
-        submissions = self.pending_submissions.values()
-        pending = tuple(submissions)
-        cancelled = False
-        for submission in pending:
+    def _withdraw_decision(self, window_key: tuple) -> bool:
+        """Drop a window still in its decision and release its input hold."""
+        deciding = self.deciding_by_window.pop(window_key, None)
+        if deciding is None:
+            return False
+        for submission in deciding.primary_submissions:
             job = submission.job
-            key = (job.operation_id, job.window_id)
-            if key != window_key:
-                continue
-            del self.pending_submissions[job.request_key]
-            job.cancelled = True
-            hold = job.input_hold
-            if hold is not None:
-                hold()
+            if job.input_hold is not None:
+                job.input_hold()
                 job.input_hold = None
-            cancelled = True
-        return cancelled
+        return True
 
 
 class _SharedInputHold:
@@ -679,6 +683,17 @@ class _SharedInputHold:
         self.hold_release()
 
 
+@dataclasses.dataclass(frozen=True)
+class _DecidingWindow:
+    """A window in its decision: its primary job, tiers and submissions."""
+
+    job: decoding_records.DecodeJob
+    tiers: tuple
+    primary_submissions: list
+    # the strong tier's window side; None on a run that never escalates
+    strong_redecode: Optional[ports.StrongRedecode]
+
+
 def _needs_no_slot(window: Optional[window_records.Window]) -> bool:
     """Unplanned, absorbed, decoded or decoding: it asks for no slot."""
     if window is None:
@@ -690,11 +705,11 @@ def _needs_no_slot(window: Optional[window_records.Window]) -> bool:
     return window.service_began
 
 
-def _sibling_submissions(sibling) -> list:
-    """The strong sibling's submission, or none while its side holds it."""
-    if sibling is None:
+def _speculative_submissions(speculative) -> list:
+    """The speculative decode's submission, or none while its side holds it."""
+    if speculative is None:
         return []
-    return [sibling]
+    return [speculative]
 
 
 def _first_forced_class(forced_classes: tuple) -> Optional[int]:

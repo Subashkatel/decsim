@@ -115,12 +115,14 @@ def test_feedback_restart_obeys_the_declared_clock(
     events = machine.observation.command_events.events
     arrival = _command_tick(events, "ARRIVED", 3)
     started = _command_tick(events, "STARTED", 3)
+    release = machine.observation.runtime_stamps.decode_release[3]
     period_ticks = config.microseconds_to_ticks(period_microseconds)
     clock = config.Clock(period_ticks)
-    assert started == clock.edge(0, arrival)
-    cycle_offset_ticks = arrival % period_ticks
     instruction_ticks = config.microseconds_to_ticks(instruction_microseconds)
-    assert cycle_offset_ticks == instruction_ticks
+    # the pulse leaves as the decision lands and plays at the next timing
+    # point after it arrives (QubiC 2404.15260 lines 286-290)
+    assert arrival == release + instruction_ticks
+    assert started == clock.edge(0, arrival)
     assert [packet.round_index for packet in readouts] == list(range(1, 25))
     assert sum(packet.size_bits for packet in readouts) == 201
     assert readouts[-1].size_bits == 17

@@ -53,7 +53,6 @@ def observe(
     operations: tuple,
     traffic_ledger: link_traffic.TrafficLedger,
     syndrome_source,
-    pool,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
@@ -61,12 +60,11 @@ def observe(
     file gave that seat. The seats a run may have none of are read with
     get, and the listeners that hear them take None; the decoder
     managers, one per side, are heard as one tuple by every listener of
-    the decode path. The syndrome source, the decoder pool and the
-    operations are the run's fixtures rather than seats, so they arrive
-    on their own. It stays whole past the size prompt: it is the run's
-    one list of listeners, in pipeline order, one built or connected per
-    line, and a split would only hand the list from one half to the
-    other.
+    the decode path. The syndrome source and the operations are the run's
+    fixtures rather than seats, so they arrive on their own. It stays
+    whole past the size prompt: it is the run's one list of listeners, in
+    pipeline order, one built or connected per line, and a split would
+    only hand the list from one half to the other.
     """
     strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
     strong_syndrome_round_receiver = seats.get("strong_syndrome_round_receiver")
@@ -98,8 +96,8 @@ def observe(
     queue_depth = _connect_queue_depth(decoder_managers)
     controller_counters = _connect_controller_counters(seats["idle_rounds"])
     command_events = _connect_command_events(seats["qpu"])
-    stages = _connect_stage_records(pool)
-    referee_audit = _connect_referee_audit(pool)
+    stages = _connect_stage_records(seats)
+    referee_audit = _connect_referee_audit(seats)
     sampled_shots = _connect_sampled_shots(syndrome_source)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
@@ -108,7 +106,7 @@ def observe(
     )
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
-    _connect_data_path(trace_writer, data_movement, seats, pool)
+    _connect_data_path(trace_writer, data_movement, seats)
     decode_backlog = _decode_backlog(
         observation, engine, seats["window_manager"], decoder_managers
     )
@@ -185,14 +183,20 @@ def _decoder_managers(seats: Mapping[str, Any]) -> tuple:
     return tuple(managers)
 
 
+def _decoder_rows(seats: Mapping[str, Any]) -> list:
+    """Every decoder row of the run's two decoder seats, either absent."""
+    primary = seats.get("primary_decoder")
+    strong = seats.get("strong_decoder")
+    return decoder_pool.decoder_rows((primary, strong))
+
+
 def _connect_queue_depth(decoder_managers) -> queue_depth_module.QueueDepthLog:
     """The waiting jobs, sampled at every change of either queue's depth."""
     depth_log = queue_depth_module.QueueDepthLog()
-    for index, manager in enumerate(decoder_managers):
-        queue_trace = manager.queue.trace
-        depth_changed = functools.partial(depth_log.depth_changed, index)
-        queue_trace.depth_changed.connect(depth_changed)
-        queue_trace.pool_depth_changed.connect(depth_log.pool_depth_changed)
+    for manager in decoder_managers:
+        pool_name = manager.pool.name
+        depth_changed = functools.partial(depth_log.depth_changed, pool_name)
+        manager.queue.trace.depth_changed.connect(depth_changed)
     return depth_log
 
 
@@ -250,7 +254,6 @@ def _connect_data_path(
     trace_writer: Optional[trace_writer_module.TraceWriter],
     data_movement: Optional[data_movement_module.DataMovement],
     seats: Mapping[str, Any],
-    pool,
 ) -> None:
     """Hand the trace and the counters every source of the data path.
 
@@ -261,7 +264,7 @@ def _connect_data_path(
     if data_movement is not None:
         _connect_data_movement(data_movement, seats)
     if trace_writer is not None:
-        _connect_trace_writer(trace_writer, seats, pool)
+        _connect_trace_writer(trace_writer, seats)
 
 
 def _connect_data_movement(
@@ -288,7 +291,6 @@ def _connect_data_movement(
 def _connect_trace_writer(
     trace_writer: trace_writer_module.TraceWriter,
     seats: Mapping[str, Any],
-    pool,
 ) -> None:
     """The trace hears every hop and residence, in the order of the path."""
     qpu = seats["qpu"]
@@ -299,14 +301,7 @@ def _connect_trace_writer(
     links.trace.frame_landed.connect(trace_writer.frame_landed)
     for source in _copy_sources(seats):
         source.connect(trace_writer.copy_made)
-    assembler = seats["assembler"]
-    in_assembly = functools.partial(
-        trace_writer.round_in_assembly,
-        assembler.settings.packing_rounds_in_flight,
-    )
-    assembler.trace.round_event.connect(in_assembly)
-    held_rounds = seats["held_rounds"]
-    held_rounds.trace.round_event.connect(trace_writer.round_held_for_room)
+    _connect_controller_trace(trace_writer, seats)
     _connect_store_trace(
         trace_writer, seats["weak_syndrome_buffer"], "weak syndrome buffer"
     )
@@ -318,13 +313,31 @@ def _connect_trace_writer(
     decoder_managers = _decoder_managers(seats)
     for index, manager in enumerate(decoder_managers):
         _connect_decoder_trace(trace_writer, index, manager)
-    for decoder in decoder_pool.routed_decoders(pool.router):
+    decoder_rows = _decoder_rows(seats)
+    for decoder in decoder_rows:
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
     _connect_window_trace(
         trace_writer, seats["window_manager"], decoder_managers
     )
     pauli_frame = seats.get("pauli_frame")
     _connect_frame_trace(trace_writer, pauli_frame)
+
+
+def _connect_controller_trace(
+    trace_writer: trace_writer_module.TraceWriter,
+    seats: Mapping[str, Any],
+) -> None:
+    """The packing stage, the line in front of it and the one after it."""
+    assembler = seats["assembler"]
+    capacity = assembler.settings.packing_rounds_in_flight
+    in_assembly = functools.partial(trace_writer.round_in_assembly, capacity)
+    assembler.trace.round_event.connect(in_assembly)
+    waiting = functools.partial(
+        trace_writer.round_waiting_for_a_place, capacity
+    )
+    seats["packing_line"].trace.round_event.connect(waiting)
+    held_rounds = seats["held_rounds"]
+    held_rounds.trace.round_event.connect(trace_writer.round_held_for_room)
 
 
 def _connect_frame_trace(
@@ -410,7 +423,7 @@ def _connect_decoder_trace(
     service.trace.input_landed.connect(trace_writer.input_landed)
     service.trace.job_started.connect(trace_writer.job_started)
     service.trace.job_finished.connect(trace_writer.job_finished)
-    for unit in decoder_manager.pool.units():
+    for unit in decoder_manager.pool.units:
         memory = unit.memory
         deposited = functools.partial(
             trace_writer.memory_deposited, memory.name
@@ -528,19 +541,23 @@ def _connect_round_events(
 
 
 def _connect_stage_records(
-    pool,
+    seats: Mapping[str, Any],
 ) -> stage_records_module.StageLedger:
-    """The run's stage history, heard from every routed decoder."""
+    """The run's stage history, heard from every decoder row."""
     stages = stage_records_module.StageLedger()
-    for decoder in decoder_pool.routed_decoders(pool.router):
+    decoder_rows = _decoder_rows(seats)
+    for decoder in decoder_rows:
         decoder.stage_recorded.connect(stages.stage_recorded)
     return stages
 
 
-def _connect_referee_audit(pool) -> referee_audit_module.RefereeAudit:
-    """The referee's checks, heard from every routed decoder row."""
+def _connect_referee_audit(
+    seats: Mapping[str, Any],
+) -> referee_audit_module.RefereeAudit:
+    """The referee's checks, heard from every decoder row."""
     audit = referee_audit_module.RefereeAudit()
-    for decoder in decoder_pool.routed_decoders(pool.router):
+    decoder_rows = _decoder_rows(seats)
+    for decoder in decoder_rows:
         decoder.window_checked.connect(audit.window_checked)
     return audit
 
@@ -591,8 +608,8 @@ def _decoder_utilization(
     """
     units_by_pool = {}
     for manager in decoder_managers:
-        for name, units in manager.pool.units_by_pool.items():
-            units_by_pool[name] = len(units)
+        pool = manager.pool
+        units_by_pool[pool.name] = len(pool.units)
     utilization = metrics.DecoderUtilization(engine, units_by_pool)
     for manager in decoder_managers:
         pool = manager.pool
@@ -625,8 +642,7 @@ def _decoder_memory_occupancy(
         return None
     units = []
     for manager in decoder_managers:
-        pool_units = manager.pool.units()
-        units.extend(pool_units)
+        units.extend(manager.pool.units)
     capacity_by_unit = {}
     for unit in units:
         capacity_by_unit[unit.name] = unit.memory.capacity_bits

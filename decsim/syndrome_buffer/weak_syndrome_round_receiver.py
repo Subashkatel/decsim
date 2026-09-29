@@ -99,14 +99,16 @@ class WeakSyndromeRoundReceiver:
 
     def has_room(self, packed: round_records.PackedRound) -> bool:
         """A write can land: the store weighs it against what is reserved."""
+        bits = self._stored_width(packed)
         return self.store.has_room(
-            packed.round_key, packed.wire_bits, self.reserved_bits_by_round
+            packed.round_key, bits, self.reserved_bits_by_round
         )
 
     def reserve_write(self, packed: round_records.PackedRound) -> None:
         """Take the bits one crossing round will need, before it leaves."""
         assert self.has_room(packed), "a round was written into a full store"
-        bits = round_records.stated_bits(packed.wire_bits)
+        width = self._stored_width(packed)
+        bits = round_records.stated_bits(width)
         self.reserved_bits_by_round[packed.round_key] = bits
 
     def receive_round(
@@ -222,6 +224,11 @@ class WeakSyndromeRoundReceiver:
         self._give_back_reservation(packed)
         self._take_slot(packed, "controller_to_weak_buffer", None)
         self.output.send_memory_round(packed, on_delivered)
+
+    def _stored_width(self, packed: round_records.PackedRound) -> Optional[int]:
+        """The width the store will hold the round at, as this seat forms it."""
+        fragments = packed.packet.fragments
+        return self.detection_events.width_at(_SEAT, fragments)
 
     def _give_back_reservation(self, packed: round_records.PackedRound) -> None:
         """The crossing is over: it gives back exactly what it reserved."""

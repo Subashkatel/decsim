@@ -3,11 +3,12 @@
 Belief propagation on the physical hyperedges, then matching on the
 graphlike edges with posterior weights: Higgott et al., beliefmatching's
 BeliefMatching.decode (.pydeps/beliefmatching/belief_matching.py:344-358).
-ldpc's BpDecoder gives the hyperedge posteriors, the window's projection
-maps them onto matching edges, PyMatching matches with -log(posterior)
-weights. The posterior clamp is 1e-15 here and 1e-14 there. Toshio et
-al. 2510.25222 run belief matching as the accurate decoder
-invoked on demand.
+ldpc's BpDecoder gives the hyperedge posteriors, one per distinct
+detector set as beliefmatching's matrices hold them (lines 104-136), the
+window's projection maps them onto matching edges, PyMatching matches
+with -log(posterior) weights. The posterior clamp is 1e-15 here and
+1e-14 there. Toshio et al. 2510.25222 run belief matching as the
+accurate decoder invoked on demand.
 """
 
 from typing import Optional
@@ -21,6 +22,7 @@ import scipy.special
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.records.decoding as decoding_records
 
 POSTERIOR_FLOOR = 1e-15
@@ -72,17 +74,19 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             raise ValueError(
                 "belief matching needs the physical-to-graphlike link"
             )
+        columns, error_channel = _distinct_hyperedges(physical)
         physical_check = scipy.sparse.csr_matrix(physical.check)
-        error_channel = list(physical.priors)
+        hyperedge_check = physical_check[:, columns]
         belief_propagation = ldpc.BpDecoder(
-            physical_check,
+            hyperedge_check,
             error_channel=error_channel,
             max_iter=self.max_iterations,
             bp_method=self.belief_propagation_method,
             input_vector_type="syndrome",
         )
-        projection = projection.astype(numpy.float64)
-        edge_from_hyperedge = scipy.sparse.csr_matrix(projection)
+        hyperedge_projection = projection[:, columns]
+        hyperedge_projection = hyperedge_projection.astype(numpy.float64)
+        edge_from_hyperedge = scipy.sparse.csr_matrix(hyperedge_projection)
         backend = (belief_propagation, edge_from_hyperedge)
         detector_count = physical.check.shape[0]
         empty_syndrome = numpy.zeros(detector_count, dtype=numpy.uint8)
@@ -119,6 +123,36 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             )
         correction = numpy.asarray(selected, dtype=numpy.uint8)
         return decoding_records.WindowDecode(correction)
+
+
+def _distinct_hyperedges(physical) -> tuple:
+    """One column per distinct detector set, and its combined prior.
+
+    stim's decomposed model lists a hyperedge once per decomposition and
+    the linked catalog keeps each as a column. beliefmatching gives BP
+    one mechanism per detector set, the instructions' priors combined as
+    independent faults, its edges the first decomposition's
+    (belief_matching.py lines 104-112 and 135-136), so the first column
+    of each set stands for it here.
+    """
+    check = physical.check
+    position_by_detectors = {}
+    columns = []
+    priors = []
+    for column in range(check.shape[1]):
+        start = check.indptr[column]
+        end = check.indptr[column + 1]
+        detectors = tuple(check.indices[start:end])
+        prior = float(physical.priors[column])
+        position = position_by_detectors.get(detectors)
+        if position is None:
+            position_by_detectors[detectors] = len(columns)
+            columns.append(column)
+            priors.append(prior)
+            continue
+        earlier = priors[position]
+        priors[position] = stim_fault_catalog.merge_probability(earlier, prior)
+    return columns, priors
 
 
 def _edge_posteriors(belief_propagation, edge_from_hyperedge, syndrome):

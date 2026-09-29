@@ -78,6 +78,7 @@ import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.schemes.naive_online as naive_online
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
@@ -133,6 +134,16 @@ class RecordingReceiver:
         self.arrivals.append((self.engine.now, readout.round_index))
 
 
+class StreamlessIdleRounds:
+    """The idle accounting of a run with no streams and no idle patch."""
+
+    def emit_idle_round(self, operation_id, patch, round_index) -> None:
+        del operation_id, patch, round_index
+
+    def start_command(self, command):
+        return command
+
+
 class FinishingRuntime:
     """A runtime whose one move is to stop the clock when a body ends."""
 
@@ -166,10 +177,12 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     code = code_geometry.SurfaceCodeModel(distance=3)
     device = syndrome_devices.TimingOnlyDevice(code)
     cycle_clock_domain = config.Clock(CYCLE_TICKS)
-    qpu = cycle_clock.QPUDevice(engine, device, cycle_clock_domain, code)
+    qpu = cycle_clock.QPUDevice(engine, cycle_clock_domain, code)
     runtime = FinishingRuntime(qpu)
+    qpu.syndrome_source = device
     qpu.readout_receiver = receiver
     qpu.runtime = runtime
+    qpu.idle_rounds = StreamlessIdleRounds()
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
@@ -433,10 +446,11 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
-    # a two microsecond strong input keeps the live stream running fifteen
-    # rounds, so its last window holds six rounds ending on the final one
+    # a three microsecond strong input keeps the live stream running
+    # fifteen rounds, so its last window holds six rounds ending on the
+    # final one
     links = _price_path(
-        settings.links, "strong_buffer_to_strong_decoder", 2_000_000
+        settings.links, "strong_buffer_to_strong_decoder", 3_000_000
     )
     settings = dataclasses.replace(
         settings,
@@ -446,7 +460,7 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     )
     run = _run(settings)
     assert max(run.strong_occupancies) <= window_bits
-    units = run.machine.decoder_manager.pool.units()
+    units = run.machine.decoder_manager.pool.units
     memory = units[0].memory.snapshot()
     assert memory.capacity_bits == window_bits
     assert memory.peak_occupied_bits == window_bits
@@ -1887,11 +1901,13 @@ def test_every_measured_bit_crosses_the_link_exactly_once(recorded_memory):
 # The whole machine on the declared card: what only the composition of
 # the controller, the stores, the windows and the frame decides.
 
-PACKING_BOUND_STOP_TICKS = {
-    1: 7_000_000,
-    2: 8_000_000,
-    3: 9_000_000,
-    4: 10_000_000,
+# each round's publication in microseconds, rounds 1 to 12, under each
+# packing bound: publication(r) = max(5 + r, publication(r - b)) + 4
+PUBLISHED_MICROSECONDS_BY_BOUND = {
+    1: [10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54],
+    2: [10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31],
+    3: [10, 11, 12, 14, 15, 16, 18, 19, 20, 22, 23, 24],
+    4: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
 }
 TWELVE_ROUND_RUN_END_TICK = 54_000_000
 
@@ -1919,10 +1935,10 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
 
     A real-time decoder backpressures its source rather than discarding
     syndromes: the Rigetti sequencer polls the decoder's status register
-    and stalls (Caune et al. 2410.05202), and QubiC's cores block in
-    WAIT_MEAS until the readout is consumed (Fruitwala et al.
-    2404.15260); that is the STALL policy of
-    decsim/controller/settings.py. While the store has room round r is
+    and stalls (Caune et al. 2410.05202 lines 1255-1257), and a QubiC
+    core halts on its idle instruction until the measurement is in
+    (Fruitwala et al. 2404.15260 lines 297-302, 566-567). While the
+    store has room round r is
     published at r plus qpu_to_controller 2 plus readout_to_bits 3 plus
     controller_to_weak_buffer 4, so rounds 1 to 7 fill a store of
     seven at 16 us and round 8 waits past 17 us for the first window's
@@ -1943,7 +1959,6 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     eighth_publication_with_room = config.microseconds_to_ticks(17.0)
     tiers = declared_run.frame_tiers(machine)
 
-    assert machine.observation.round_events.packing_drops == 0
     assert round_indices == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     assert ticks == sorted(ticks)
     assert publication_tick_by_round[7] == seventh_publication
@@ -2040,28 +2055,34 @@ def twelve_rounds_with_packing_bound(bound):
 
 
 @pytest.mark.parametrize("bound", [1, 2, 3, 4])
-def test_the_packing_bound_stops_the_run_at_the_tick_it_fills(bound):
-    """A round counts against the bound until the windows hear of it.
+def test_a_full_packing_stage_holds_each_round_until_one_leaves(bound):
+    """At most b rounds are in flight; the next enters as one is published.
 
-    controller.packing_rounds_in_flight bounds the whole packing stage,
-    not the assembly step alone: a round counts from its first fragment
-    until it is published (decsim/controller/settings.py). On the
-    declared card round r reaches assembly at r plus qpu_to_controller 2
-    plus readout_to_bits 3 and is published four microseconds later, so
-    under a bound of b round 1 + b arrives at 6 + b us while round 1 is
-    still on its route, and the run stops there naming the setting.
+    controller.packing_rounds_in_flight bounds the whole packing stage: a
+    round counts from its emission until it is published. On the declared
+    card round r is emitted at r, its bits arrive at r plus
+    qpu_to_controller 2 plus readout_to_bits 3, and it is published four
+    microseconds after both its bits and its place are there. Under a
+    bound of b it takes its place at max(r, publication of round r - b),
+    so it is published at max(5 + r, publication of round r - b) + 4: the
+    window law of credit flow control, b credits and a four microsecond
+    return (garnet's OutVcState credit count,
+    src/mem/ruby/network/garnet/OutVcState.hh:51-54). No round is lost.
     """
     settings = twelve_rounds_with_packing_bound(bound)
     machine = machine_module.Machine.build(settings, 0)
-    stop_tick = PACKING_BOUND_STOP_TICKS[bound]
-    sentence = f"the packing workspace is full at tick {stop_tick}: "
 
-    with pytest.raises(RuntimeError, match=sentence) as refusal:
-        machine.run()
+    result = machine.run()
 
-    named_setting = f"controller.packing_rounds_in_flight is {bound}"
-    assert named_setting in str(refusal.value)
-    assert machine.engine.now == stop_tick
+    published = published_rounds(machine)
+    ticks = publication_ticks(published)
+    expected_microseconds = PUBLISHED_MICROSECONDS_BY_BOUND[bound]
+    expected_ticks = [
+        config.microseconds_to_ticks(microseconds)
+        for microseconds in expected_microseconds
+    ]
+    assert result.terminal_status == "complete"
+    assert ticks == expected_ticks
 
 
 def test_a_packing_bound_of_six_clears_a_twelve_round_run():
@@ -2077,7 +2098,6 @@ def test_a_packing_bound_of_six_clears_a_twelve_round_run():
     result = machine.run()
 
     assert result.terminal_status == "complete"
-    assert machine.observation.round_events.packing_drops == 0
     assert machine.engine.now == TWELVE_ROUND_RUN_END_TICK
 
 
@@ -2239,7 +2259,7 @@ LATE_LANDING_ESCALATION = {
     "confidence": "complementary_gap",
     "gap_threshold_db": 20.0,
     "threshold_source": "fixed",
-    "strong_window": "near_seam_pinned",
+    "strong_window": "redo_window",
 }
 
 
@@ -2597,6 +2617,145 @@ def test_a_recorded_stream_scores_the_full_prediction_against_full_truth() -> (
     assert owner.logical_failure is False
 
 
+def test_a_released_pulse_on_a_protected_patch_waits_for_one_boundary():
+    """The pulse leaves at the decision and starts on the next boundary.
+
+    The controller's branch arms the pulse as the decision lands and the
+    QPU plays it at its next timing point (QubiC 2404.15260 lines
+    286-290, eQASM 1808.02449 lines 535-545). The protected patch keeps
+    measuring meanwhile (Quantum Machines 2412.00289 lines 524-531).
+    """
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 24, 3, 0.001
+    )
+    source = stim_device.StimDevice()
+    settings = _protected_memory_settings(circuit, source)
+    machine = machine_module.Machine.build(settings, 0)
+    outputs = {}
+    commands = {}
+
+    def heard_output(event):
+        outputs[(event.kind, event.operation_id)] = event.tick
+
+    def heard_command(event):
+        commands[(event.kind, event.command.operation.id)] = event.tick
+
+    machine.instruction_output.trace.output_event.connect(heard_output)
+    machine.qpu.trace.command_event.connect(heard_command)
+    machine.run()
+
+    decided = outputs[("DECISION_AVAILABLE", 3)]
+    issued = outputs[("CONTROL_PULSE_COMMAND_ISSUED", 3)]
+    arrived = commands[("ARRIVED", 3)]
+    started = commands[("STARTED", 3)]
+    assert issued == decided
+    assert started == machine.qpu.boundary_at_or_after(arrived) == 7_700_000
+
+
+def test_a_released_feedback_source_binds_to_the_round_it_starts_at():
+    """The source reads the protected stream from the boundary it starts on.
+
+    A released command is sent when its decision lands and starts on the
+    first boundary after it arrives, so its place in the stream is known
+    only then, as a segment's is (bind_at_start). With a one microsecond
+    controller_to_qpu the resume pulse sent at 6.872 us arrives after the
+    7.7 us boundary and starts at 8.8 us, after the prefix's three rounds
+    and the protected rounds of 4.4, 5.5, 6.6 and 7.7 us.
+    """
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 24, 3, 0.001
+    )
+    source = stim_device.StimDevice()
+    settings = _protected_memory_settings(circuit, source)
+    prefix, protect, resume, finish = settings.workload.operations
+    check = program_records.Operation(
+        5,
+        "check",
+        (0,),
+        patches=(0,),
+        predecessors=(3,),
+        blocked_by=3,
+        emits_detector_data=False,
+    )
+    finish = dataclasses.replace(finish, predecessors=(5,))
+    rounds = {100: 24, 1: 3, 2: 0, 3: 1, 5: 1, 4: 0}
+    policy = round_policies.PerOperationRounds(rounds)
+    operations = (prefix, protect, resume, check, finish)
+    workload = dataclasses.replace(
+        settings.workload, operations=operations, rounds_policy=policy
+    )
+    links = _price_path(settings.links, "controller_to_qpu", 1_000_000)
+    settings = dataclasses.replace(settings, workload=workload, links=links)
+    machine = machine_module.Machine.build(settings, 0)
+    starts = {}
+
+    def heard_command(event):
+        starts[(event.kind, event.command.operation.id)] = event.tick
+
+    machine.qpu.trace.command_event.connect(heard_command)
+    machine.run()
+
+    binding = machine.issuer.stream_binding_for(3)
+    assert starts[("STARTED", 3)] == 8_800_000
+    assert (binding.stream_id, binding.stream_offset) == (100, 7)
+
+
+def test_an_operation_claims_every_idle_cycle_before_it_starts():
+    """The rounds its patches measure until it starts are its history.
+
+    Two memories on patches 1 and 2 end and their patches idle. The
+    operation on both is released by the first memory's decision, sent
+    at 32 us and started on the 34 us boundary. A waiting patch keeps
+    measuring and those rounds must be decoded too (Quantum Machines
+    2412.00289 lines 524-531), so the operation's one window batches
+    every idle cycle through its start boundary, 31 of them.
+    """
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(2)
+    both = program_records.Operation(
+        3,
+        "both",
+        (1, 2),
+        patches=(1, 2),
+        predecessors=(1, 2),
+        blocked_by=1,
+    )
+    workload = declared_run.declared_workload([first, second, both], 3)
+    scheme = naive_online.NaiveOnlineScheme()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    decoder = decoders.PresetLatencyDecoder(10.0)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    ignore = idle_policies.Ignore()
+    idle = controller_settings.IdlePolicySettings(policy=ignore)
+    qpu = declared_run.declared_qpu()
+    links = declared_run.declared_profile()
+    controller = declared_run.declared_controller()
+    frame = declared_run.declared_frame()
+    settings = machine_settings.MachineSettings(
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        links=links,
+        controller=controller,
+        pauli_frame=frame,
+        windows=windows,
+        idle_policy=idle,
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    idle_patches = []
+
+    def heard_idle_round(operation_id, patch, round_index):
+        del operation_id, round_index
+        idle_patches.append(patch)
+
+    machine.idle_rounds.trace.idle_round_emitted.connect(heard_idle_round)
+    machine.run()
+
+    window = machine.window_manager.planner.plan.windows[(3, 0)]
+    assert idle_patches.count(1) == idle_patches.count(2) == 31
+    assert window.batched_preceding_idle_round_count == 31
+
+
 def _protected_memory_settings(circuit, source):
     """One physical stream with a prefix that releases a waiting operation."""
     owner = program_records.Operation(
@@ -2827,7 +2986,7 @@ def _assert_drained(run: _Run) -> None:
     assert run.machine.strong_syndrome_buffer.occupancy == 0
     receiver = run.machine.strong_syndrome_round_receiver
     assert receiver.reserved_bits_by_round == {}
-    units = run.machine.decoder_manager.pool.units()
+    units = run.machine.decoder_manager.pool.units
     occupied = [unit.memory.occupied_bits for unit in units]
     assert occupied == [0] * len(units)
 

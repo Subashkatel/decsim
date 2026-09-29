@@ -1,4 +1,4 @@
-"""The forward strong region's width is declared once and read everywhere.
+"""The double-window region's width is declared once and read everywhere.
 
 The escalated window's strong region is its commit region with one
 buffer region folded in on each side, rcom + 2 rbuf. Toshio et al.

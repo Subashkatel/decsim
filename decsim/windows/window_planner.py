@@ -33,8 +33,10 @@ class WindowModels:
 
     # a circuit-less source names one that answers every model with None
     provider = ports.Port(ports.WindowModelSource, optional=True)
-    # the routing table answers what a model must offer for a code
-    router = ports.Port(ports.DecoderRouter)
+    # the decoders a model is built for: the tier that decodes the plan's
+    # windows, and the strong tier on a run that may escalate
+    decoder = ports.Port(ports.Decoder)
+    strong_decoder = ports.Port(ports.Decoder, optional=True)
 
     def __init__(
         self, built_models: built_window_models.BuiltWindowModels
@@ -44,10 +46,13 @@ class WindowModels:
         # models object builds them, so it is where they live
         self.model_by_window: dict = {}
 
-    def requirement_for(self, resolved_operation):
-        """The decoder views for the operation's frozen code."""
-        code_name = resolved_operation.code_geometry.code_name
-        return self.router.fault_model_requirement_for(code_name)
+    def requirement(self):
+        """What a model must offer every decoder that may decode it."""
+        requirement = self.decoder.fault_model_requirement
+        if self.strong_decoder is None:
+            return requirement
+        strong_needs = self.strong_decoder.fault_model_requirement
+        return requirement.joined(strong_needs)
 
     def models_for_operation(
         self, operation, resolved_operation, windows: list, protocol
@@ -60,7 +65,7 @@ class WindowModels:
         """
         if self.provider is None:
             return []
-        requirement = self.requirement_for(resolved_operation)
+        requirement = self.requirement()
         key = _model_key(
             operation, resolved_operation, windows, requirement, protocol
         )
@@ -88,7 +93,7 @@ class WindowModels:
         """Note a dynamic stream; the rounds its source can supply, or None."""
         if self.provider is None:
             return None
-        requirement = self.requirement_for(resolved_operation)
+        requirement = self.requirement()
         return self.provider.register_dynamic_stream(
             stream_operation,
             resolved_operation.round_count,
@@ -110,7 +115,6 @@ class WindowModels:
     def strong_model_for_operation(
         self,
         operation,
-        resolved_operation,
         window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
@@ -123,7 +127,7 @@ class WindowModels:
         """
         if self.provider is None:
             return None
-        requirement = self.requirement_for(resolved_operation)
+        requirement = self.requirement()
         if len(fault_exclusion_ranges) <= 1:
             exclusion = None
             if fault_exclusion_ranges:
@@ -268,10 +272,8 @@ class WindowPlanner:
         prior_faults: Optional[dict],
     ):
         """The error model of one strong window of that operation."""
-        resolved = self.resolved_operation_by_id[operation.id]
         return self.models.strong_model_for_operation(
             operation,
-            resolved,
             window,
             round_count,
             fault_exclusion_ranges,

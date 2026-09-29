@@ -14,7 +14,7 @@ escalation:
   confidence: cluster_gap
   confidence_walk_microseconds: 12.0
   gap_threshold_db: 20.0
-  strong_window: near_seam_pinned
+  strong_window: redo_window
 
 links:
   qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}

@@ -7,7 +7,7 @@ which strong region replaces an escalated window. It returns data and
 immutable decisions; the window side owns event ordering, retention,
 logical accounting and finality. The default interaction is decsim's
 defect-mask boundary (qLDPC net_error, cudaq-x syndrome_mods) and its
-forward strong region.
+double-window region.
 """
 
 import dataclasses
@@ -76,7 +76,7 @@ class WindowInteraction(Protocol):
 
 
 class DefaultWindowInteraction:
-    """decsim's defect-mask boundary and forward strong region.
+    """decsim's defect-mask boundary and double-window region.
 
     The boundary is a mask per (round, patch_ids) or per round, XORed into
     the landed rounds when the decode starts; a same-operation A/B
@@ -196,7 +196,7 @@ class DefaultWindowInteraction:
     def plan_strong_region(
         self, weak_window, _later_windows, operation_round_count
     ):
-        """The forward strong window: commit plus two buffers, one restart.
+        """The double window: commit plus two buffers, one restart.
 
         The strong window commits from the weak window's commit start over
         commit + 2 buffer rounds (clamped at the operation's end) and reads
@@ -249,7 +249,7 @@ class DefaultWindowInteraction:
         decoded them with both boundaries determined. A strong region
         that reads no round past its edge and pins its far face there
         leaves them to the restart window whatever the width
-        (escalation/strong_regions.py, forward_seam_region).
+        (escalation/strong_regions.py, double_window_region).
         """
         if self.restart_reread_buffer_regions == 0:
             return window_records.SeamFaultOwner.RESTART_WINDOW

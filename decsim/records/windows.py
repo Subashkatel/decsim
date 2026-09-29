@@ -354,7 +354,7 @@ class SeamFaultOwner(Enum):
     RESTART_WINDOW = auto()
 
 
-# The forward strong region folds one buffer region into the escalated
+# The double-window region folds one buffer region into the escalated
 # window's commit region on each side, so it commits rcom + 2 rbuf
 # rounds. Toshio et al. 2510.25222 line 1352 parameterises that two as
 # alpha, so a sweep over region width changes this number here and every
@@ -368,7 +368,7 @@ STRONG_REGION_BUFFER_REGIONS = 2
 def strong_region_round_count(
     commit_round_count: int, buffer_round_count: int
 ) -> int:
-    """How many rounds one forward strong region covers."""
+    """How many rounds one double-window region covers."""
     buffered = STRONG_REGION_BUFFER_REGIONS * buffer_round_count
     return commit_round_count + buffered
 
@@ -382,7 +382,7 @@ def strong_context_bounds(window: "Window") -> tuple:
     boundary condition replaces the buffer that would otherwise open
     that face (Bombin et al. 2303.04846 lines 1456-1458), while the
     future face stays open over one buffer region of raw context (lines
-    850-852). The near-seam row reads exactly this; the forward row
+    850-852). The redo window reads exactly this; the double window
     reads from the same first round on, further forward
     (escalation/strong_regions.py). The round retention keeps this span
     for a window the strong tier may redo.

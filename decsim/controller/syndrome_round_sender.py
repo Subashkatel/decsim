@@ -16,17 +16,17 @@ and re-sends it when clearBlocked schedules the retry
 blocking keeps the customer at the upstream node and releases the
 longest blocked one when the destination has capacity
 (Ciw ciw/node.py:470-473, block_individual,
-release_blocked_individual). Nothing is reordered; under the stall
-policy nothing is dropped. The written round leaves on its route at the
-write (RoundTransmitter) and takes its slot where it lands.
+release_blocked_individual). Nothing is reordered and nothing is
+dropped. The written round leaves on its route at the write
+(RoundTransmitter) and takes its slot where it lands.
 """
 
 import dataclasses
 import functools
 from collections.abc import Callable
+from typing import Protocol
 
 import decsim.controller.round_transmission as round_transmission
-import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
@@ -34,15 +34,38 @@ import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
 
 
-class HeldRounds:
-    """The waiting line in front of the stores, and what a full store does.
+class WaitingRound(Protocol):
+    """What a waiting line reads of a round: its key and its route.
 
+    A packed round waits in front of the stores and a round in assembly
+    in front of the packing stage; the line is this package's own seam.
+    """
+
+    round_key: tuple
+    route: round_records.SyndromePacketRoute
+
+
+class HeldRounds:
+    """The waiting line in front of one bounded stage of the readout path.
+
+    The run keeps two: one in front of the stores, one in front of the
+    packing stage (round_assembly.py); a round waits whole in either,
+    and the stage it waits for calls retry when it has room.
+    Neither line has a size. The QPU keeps measuring while a round waits,
+    so the rounds pile up as a backlog in the controller (Terhal
+    1302.3428 lines 3151-3159, Quantum Machines 2412.00289 lines
+    478-485), and a Ruby MessageBuffer holds any number of messages
+    unless it is given a size (gem5
+    src/mem/ruby/network/MessageBuffer.py:58-61,
+    MessageBuffer.cc:147-153). A finite line would, when full, have to
+    stall the QPU or drop a round, and no source settles either for a
+    QEC stream.
     Trace source: round_event(RoundEvent) with kind STALLED when a round
-    is held for room, RELEASED when a freed slot admits it, DROPPED when
-    the policy drops it. The two ends are the wait itself, which is the
-    back-pressure a full store applies to its sender and is measured
-    nowhere else: the round waits here, before the wire is asked for, so
-    its transfer carries none of it. Ruby's MessageBuffer counts that
+    is held for room and RELEASED when a freed slot admits it. The two
+    ends are the wait itself, which is the
+    back-pressure a full stage applies to its sender and is measured
+    nowhere else: the round waits here, before the stage is asked again,
+    so the stage's own time carries none of it. Ruby's MessageBuffer counts that
     wait as the buffer's own statistic, the ticks a message was stalled
     in it (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82
     for the stall counters, :331 where the wait is summed at the
@@ -52,44 +75,28 @@ class HeldRounds:
     and :701, the trace source described at queue-disc.h:162-167).
     """
 
-    def __init__(
-        self,
-        engine: engine_module.Engine,
-        on_full: controller_settings.PackingOverflowPolicy,
-    ) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         # (held round, the admission it retries), in completion order
         self.waiting: list = []
-        self.on_full = on_full
         self.trace = _HeldRoundsTraceSources()
 
     def refuse(
         self,
-        packed: round_records.PackedRound,
-        admit: Callable[[round_records.PackedRound], bool],
+        held: WaitingRound,
+        admit: Callable[[WaitingRound], bool],
     ) -> bool:
-        """A round found no room: hold it for a retry, or drop it.
+        """A round found no room: hold it for a retry.
 
-        False either way, so the admission that called reports the
-        refusal; a held round is recorded STALLED once.
+        False, so the admission that called reports the refusal; a held
+        round is recorded STALLED once.
         """
-        operation_id, round_index = packed.round_key
-        drop = controller_settings.PackingOverflowPolicy.DROP_ROUND
-        if self.on_full is drop:
-            dropped = round_records.RoundEvent.of(
-                "DROPPED",
-                self.engine.now,
-                operation_id,
-                round_index,
-                packed.route,
-            )
-            self.trace.round_event.fire(dropped)
+        operation_id, round_index = held.round_key
+        if self._is_holding(held):
             return False
-        if self._is_holding(packed):
-            return False
-        self.waiting.append((packed, admit))
+        self.waiting.append((held, admit))
         stalled = round_records.RoundEvent.of(
-            "STALLED", self.engine.now, operation_id, round_index, packed.route
+            "STALLED", self.engine.now, operation_id, round_index, held.route
         )
         self.trace.round_event.fire(stalled)
         return False
@@ -97,33 +104,33 @@ class HeldRounds:
     def retry(self) -> None:
         """A slot freed: admit from the head, stop at the first refused."""
         while self.waiting:
-            packed, admit = self.waiting[0]
-            admitted = admit(packed)
+            held, admit = self.waiting[0]
+            admitted = admit(held)
             if not admitted:
                 return
             self.waiting.pop(0)
-            self._released(packed)
+            self._released(held)
 
     @property
     def count(self) -> int:
         """How many rounds wait."""
         return len(self.waiting)
 
-    def _released(self, packed: round_records.PackedRound) -> None:
+    def _released(self, held: WaitingRound) -> None:
         """The round left the waiting line: its wait ends at this tick."""
-        operation_id, round_index = packed.round_key
+        operation_id, round_index = held.round_key
         released = round_records.RoundEvent.of(
             "RELEASED",
             self.engine.now,
             operation_id,
             round_index,
-            packed.route,
+            held.route,
         )
         self.trace.round_event.fire(released)
 
-    def _is_holding(self, packed: round_records.PackedRound) -> bool:
-        for held, _admit in self.waiting:
-            if held is packed:
+    def _is_holding(self, held: WaitingRound) -> bool:
+        for waiting, _admit in self.waiting:
+            if waiting is held:
                 return True
         return False
 
@@ -160,6 +167,9 @@ class SyndromeRoundSender:
         ports.StrongSyndromeRoundReceiver, optional=True
     )
     held_rounds = ports.Port(ports.HeldRounds)
+    # the line in front of the packing stage, which a landed round's
+    # place in the stage frees
+    packing_line = ports.Port(ports.HeldRounds)
     transmitter = ports.Port(round_transmission.RoundTransmitter)
     windows = ports.Port(ports.WindowInput)
 
@@ -184,7 +194,7 @@ class SyndromeRoundSender:
         self.publishes_from_strong_store = not reads_from_buffer_zero
 
     def admit(self, packed: round_records.PackedRound) -> bool:
-        """Write the round where it belongs; False when it waits or drops.
+        """Write the round where it belongs; False when it waits.
 
         A round that finds rounds already held joins the line behind them
         without asking for room, even when its own bits would fit: gem5's
@@ -263,7 +273,9 @@ class SyndromeRoundSender:
         )
 
     def _leave_strong_crossing(self) -> None:
+        """The round left the packing stage, so a waiting round may enter."""
         self.strong_crossing_count -= 1
+        self.packing_line.retry()
 
 
 @dataclasses.dataclass(frozen=True)

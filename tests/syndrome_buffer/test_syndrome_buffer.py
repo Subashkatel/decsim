@@ -28,7 +28,6 @@ import random
 import pytest
 
 import decsim.config as config
-import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
@@ -37,7 +36,6 @@ import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
-STALL = controller_settings.PackingOverflowPolicy.STALL
 # every round this file stores carries one fragment of two bits
 BITS_PER_ROUND = 2
 # the key the random programs ask room for; no program writes it
@@ -82,7 +80,7 @@ def unsized_packet(round_index: int) -> round_records.SyndromeRoundPacket:
 
 def held_rounds() -> syndrome_round_sender.HeldRounds:
     engine = engine_module.Engine()
-    return syndrome_round_sender.HeldRounds(engine, STALL)
+    return syndrome_round_sender.HeldRounds(engine)
 
 
 def store(bits=None, waiting_line=None, listener=None):

@@ -235,7 +235,7 @@ of the weak syndrome buffer, `r_com + 2 r_buf` of them under Toshio's
 assumption less any the strong side already has, at the width each
 round left the controller (`EscalatedRegion.wire_bits`). A window whose
 rounds are all measured at the verdict carries them with the selection;
-a forward window carries them at the far commit, when its extent is
+a double window carries them at the far commit, when its extent is
 known, and a terminal one, a window at the end of the stream whose last
 rounds are still being measured, carries the rest as they arrive (Toshio
 arXiv:2510.25222 lines 1247 to 1250: the syndrome data of `r_strong`

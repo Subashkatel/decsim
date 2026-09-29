@@ -11,7 +11,7 @@ Toshio et al. 2510.25222 Sec. III C: the strong decoder starts "after
 the boundary conditions at both ends have been determined by the weak
 decoder" (lines 1248-1250). Which boundaries those are is the row's own
 geometry, so the condition is a declaration rather than a fixed hook per
-row: the forward window waits on the restart window's commit, a
+row: the double window waits on the restart window's commit, a
 seam-pinned window would wait on both of its faces, and a Skoric
 layer-B window on its two adjacent layer-A commits (2209.08552 lines
 419-421).

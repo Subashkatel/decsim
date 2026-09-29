@@ -202,7 +202,7 @@ def _round_terminals(events: tuple) -> tuple:
     return emitted_rounds, round_terminals
 
 
-_ROUND_TERMINALS = ("PUBLISHED", "DROPPED", "FEEDBACK_MEMORY_DELIVERED")
+_ROUND_TERMINALS = ("PUBLISHED", "FEEDBACK_MEMORY_DELIVERED")
 
 
 class _LedgerRows:

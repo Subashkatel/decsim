@@ -5,7 +5,7 @@ assembler, the held rounds, the transmitter and both syndrome round
 receivers, on the instruction output's output_event, and on the strong
 store's round_stored; the components never read it. The rows are append-only
 and passive; recording never schedules or decides. A finished run's
-terminal states are PUBLISHED, DROPPED or FEEDBACK_MEMORY_DELIVERED;
+terminal states are PUBLISHED or FEEDBACK_MEMORY_DELIVERED;
 the run ledger (observe/run_views.py) is built from these rows, the
 controller's output events and the strong store's landings.
 """
@@ -22,13 +22,10 @@ class RoundEventRecorder:
         self.output_events: list = []
         # (tick, operation_id, round_index) per strong-store landing
         self.stored_rounds: list = []
-        self.packing_drops = 0
 
     def record(self, event: round_records.RoundEvent) -> None:
-        """One transition of one round; a DROPPED one is counted."""
+        """One transition of one round."""
         self.events.append(event)
-        if event.kind == "DROPPED":
-            self.packing_drops += 1
 
     def output(self, event: round_records.ControllerOutputEvent) -> None:
         """One transition on the controller's digital-to-QPU path."""

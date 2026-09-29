@@ -107,17 +107,6 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     assert output.clock.edge(8, 0) == config_module.microseconds_to_ticks(0.016)
 
 
-def test_a_controller_section_naming_an_overflow_word_is_refused(tmp_path):
-    """A full store holds the round; no word chooses to drop it."""
-    controller = dict(yaml_configs.MINIMAL_CONFIG["controller"])
-    controller["packing_overflow"] = "drop_round"
-    config_path = yaml_configs.write_config(
-        tmp_path, {"controller": controller}
-    )
-    with pytest.raises(ValueError, match="controller does not know"):
-        experiment.load_experiment(config_path)
-
-
 @pytest.mark.parametrize("bound", [0.5, True, -1, 0, "x"])
 def test_a_packing_bound_that_is_not_a_count_of_rounds_is_refused(
     tmp_path, bound

@@ -33,24 +33,6 @@ def test_an_event_is_kept_with_the_tick_it_carries():
     ]
 
 
-def test_a_dropped_round_is_counted_and_kept_as_dropped():
-    engine = engine_module.Engine()
-    recorder = round_events.RoundEventRecorder(engine)
-    dropped = round_records.RoundEvent.of(
-        "DROPPED", 0, 1, 2, round_records.WINDOW_INPUT_ROUTE, (0,)
-    )
-
-    recorder.record(dropped)
-
-    assert recorder.packing_drops == 1
-    (event,) = recorder.events
-    assert (event.kind, event.round_index, event.patch_ids) == (
-        "DROPPED",
-        2,
-        (0,),
-    )
-
-
 def test_an_output_event_carries_the_payload_itself():
     engine = engine_module.Engine()
     recorder = round_events.RoundEventRecorder(engine)

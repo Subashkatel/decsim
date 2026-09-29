@@ -180,6 +180,17 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
         load_experiment(weak_path)
 
 
+def test_a_restart_re_read_under_a_window_that_restarts_nothing_is_refused(
+    tmp_path,
+):
+    """The near-seam window absorbs no weak window, so none restarts."""
+    card = _restart_width_card(0)
+    card["escalation"]["strong_window"] = "near_seam_pinned"
+    path = write_config(tmp_path, card)
+    with pytest.raises(ValueError, match="restart_reread_buffer_regions"):
+        load_experiment(path)
+
+
 def _parallel_variant_card(run_both_at_once) -> dict:
     """The switching card with Sec. III A's Step 1 asked for, or not.
 

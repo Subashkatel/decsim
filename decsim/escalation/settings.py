@@ -451,7 +451,7 @@ def _switching_settings(
     run_both_at_once = config.boolean(section, "escalation", "run_both_at_once")
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, threshold_row, strong_window)
-    reread_regions = _restart_reread_buffer_regions(section)
+    reread_regions = _restart_reread_buffer_regions(section, strong_window)
     threshold_table = section.get("threshold_table")
     threshold_cycles = section.get("threshold_cycles", 0)
     switch_cycles = section.get("switch_cycles", 0)
@@ -475,8 +475,16 @@ def _switching_settings(
     )
 
 
-def _restart_reread_buffer_regions(section: Mapping) -> int:
-    """How far into the strong region the restart window re-reads."""
+def _restart_reread_buffer_regions(section: Mapping, strong_window: str) -> int:
+    """How far into the strong region the restart window re-reads.
+
+    Only a strong window that absorbs the weak windows it covers
+    restarts the weak chain, so the key written beside any other row
+    would be read by nothing and is refused.
+    """
+    row = STRONG_WINDOW_SHAPES[strong_window]
+    if "restart_reread_buffer_regions" in section:
+        _refuse_restart_without_absorption(row, strong_window)
     regions = section.get("restart_reread_buffer_regions", 1)
     is_a_count = type(regions) is int
     if not is_a_count or regions not in RESTART_REREAD_BUFFER_REGIONS:
@@ -487,6 +495,17 @@ def _restart_reread_buffer_regions(section: Mapping) -> int:
             f"2510.25222 Fig. 12 step 5 draws it; got {regions!r}"
         )
     return int(regions)
+
+
+def _refuse_restart_without_absorption(row, strong_window: str) -> None:
+    if row.absorbs_weak_windows:
+        return
+    raise ValueError(
+        "escalation.restart_reread_buffer_regions sets how far the weak "
+        f"window restarted past a strong region re-reads, and "
+        f"escalation.strong_window {strong_window} restarts none; remove "
+        "the key or name forward_seam_pinned"
+    )
 
 
 def _gap_threshold_db(

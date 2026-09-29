@@ -297,7 +297,8 @@ escalation:
 #                                  # per bounded window. 0 reads
 #                                  # nothing inside the region, and the
 #                                  # restart window owns the faults of the
-#                                  # rounds it reads
+#                                  # rounds it reads. Refused beside any other
+#                                  # strong_window, which restarts nothing
 
 burst_detector:
   kind: none                       # none | event_count |

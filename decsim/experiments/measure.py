@@ -49,6 +49,14 @@ POINTS = (
     "csb_stall_per_round",
     # the window's first round readable -> its last (waiting on the QPU)
     "buffer_fill",
+    # that last round readable -> the job entered the decode queue: the
+    # window side's decision (windows.decision_cycles) and any earlier
+    # request of the window that was withdrawn before it, as a restart
+    # window's is when a forward strong window re-slices it. Ciw keeps
+    # a customer's pre-service wait as a field of its own and writes a
+    # visit that left the queue unserved as its own record (ciw
+    # data_record.py lines 3-21, node.py write_reneging_record)
+    "admission_wait",
     # the dependency wait around the committing decode's own hop: from
     # where its path started, the dispatch or the verdict that escalated
     # the window, to the first tick it may compute, less the input hop
@@ -560,6 +568,9 @@ def window_points_us(
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
+        ),
+        "admission_wait": _span_microseconds(
+            window.t_queued, window.t_data_complete
         ),
         "dep_block": rounds_wait + park,
         "compute_wait": _span_microseconds(

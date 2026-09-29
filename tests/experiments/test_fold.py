@@ -8,7 +8,7 @@ points its folders' rows hold. The third is the reason the module
 exists: the 500 shard folders of one weak_ler experiment hold 115
 million link rows, which do not fit in memory as lists. The fourth is
 why that experiment can be folded at all: its shards hold the sixteen
-latency points that tree measured, and this tree measures twenty-two.
+latency points that tree measured, and this tree measures twenty-three.
 
 A switching run's window_confidence.csv folds as the other per-shot
 files do, and its confidence_histogram.csv counts add as sinter's
@@ -469,7 +469,7 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     """A newer tree folds the folders an older tree wrote.
 
     The 500 shard folders of one weak_ler experiment hold sixteen
-    latency points and this tree measures twenty-two, so a summary that
+    latency points and this tree measures twenty-three, so a summary that
     asked for its own columns could not read those folders at all. Here
     two pieces lose one point's columns, as an older tree's pieces lack
     them, and the fold reports the points they hold and every other

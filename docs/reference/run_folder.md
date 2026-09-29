@@ -143,6 +143,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `cwb_stall_per_round` | the packed round finding the weak syndrome buffer full, to the freed slot that admitted it: the store's back-pressure on the controller, zero for a round that found room |
 | `csb_stall_per_round` | the same wait in front of the strong syndrome buffer, one sample per round that reached it |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
+| `admission_wait` | the window's data complete in the weak syndrome buffer, to its decode job entering the queue: the window side's decision (`windows.decision_cycles`), and any earlier request of the window that was withdrawn, as a restart window's is when a `double_window` strong window re-slices it; zero otherwise |
 | `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, and zero when nothing was owed at the landing |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
 | `queue_wait` | queued, to a unit assigned |
@@ -174,6 +175,8 @@ the strong tier's hops and the stage points are the strong decode's. A
 window can be decoded more than once, and then every tick still belongs
 to one decode.
 
+- `admission_wait` runs from the window's data complete to its job
+  entering the queue.
 - `queue_wait` ends where a unit took the window's first decode.
 - `weak_attempt` runs from there to the verdict that sent the window to
   the strong tier. It is zero when the first decode is the one that
@@ -186,7 +189,7 @@ to one decode.
   decode ended.
 - `frame_commit` closes it.
 
-On a serial path those nine add
+On a serial path those ten add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 

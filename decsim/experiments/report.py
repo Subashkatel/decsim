@@ -1149,7 +1149,7 @@ def _points_held(fields) -> list:
     A run folder is read by the columns it holds and not by the columns
     the reading tree would write: the 500 folders of one weak_ler
     sweep hold the sixteen latency points the tree that wrote them
-    measured, and this tree measures twenty-two, so a summary that asked
+    measured, and this tree measures twenty-three, so a summary that asked
     for its own could not read those folders at all. It is the rule that
     lets a fold read a folder an older tree wrote, which is the same
     rule sinter's counter table keeps, where a counter a file does not

@@ -116,6 +116,7 @@ ONE_TIER_LINKS = {
 # the points that lie end to end between a window's data being complete
 # in the weak syndrome buffer and its correction being committed in the frame
 CHAIN = (
+    "admission_wait",
     "queue_wait",
     "weak_attempt",
     "input_link_per_window",
@@ -126,6 +127,17 @@ CHAIN = (
     "output_link_per_window",
     "frame_commit",
 )
+
+
+# a unit's engine on the fridge clock: fetch one cycle a round, release
+# ten cycles a job
+ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE = {
+    "clock": "fridge",
+    "fetch_cycles_per_round": 1,
+    "fetch_cycles_per_job": 0,
+    "release_cycles_per_job": 10,
+    "release_cycles_per_round": 0,
+}
 
 
 def fridge_hop(cycles: int) -> dict:
@@ -153,9 +165,23 @@ TWO_TIER_LINKS = {
 }
 
 
-def slow_unit_shot(tmp_path, units: int, card_microseconds: float = 5.0):
-    """One shot of 30 rounds on `units` weak units of that card."""
+def slow_unit_shot(
+    tmp_path,
+    units: int,
+    card_microseconds: float = 5.0,
+    decision_cycles: int = 0,
+):
+    """One shot of 30 rounds on `units` weak units of that card.
+
+    decision_cycles is the window side's decision before each request,
+    on the fridge clock.
+    """
     raw = dict(MINIMAL_CONFIG)
+    raw["windows"] = {
+        **MINIMAL_CONFIG["windows"],
+        "decision_cycles": decision_cycles,
+        "clock": "fridge",
+    }
     workload = memory_workload(30)
     raw["workload"] = workload
     raw["links"] = ONE_TIER_LINKS
@@ -407,6 +433,53 @@ def test_one_windows_points_sum_to_its_reaction_time(tmp_path):
         19.552,
         21.620,
     ]
+
+
+def test_a_windows_decision_time_is_its_own_point(tmp_path):
+    """1000 cycles of the 250 MHz fridge clock: 4 us before every queue.
+
+    windows.decision_cycles holds each request until its clock edge
+    before it enters the decode queue (windows/decode_requests.py
+    enqueue), so every window's admission_wait is 4.0 us and the
+    points still add up to its reaction time. Ciw keeps a customer's
+    pre-service wait as a field of its own record (ciw/data_record.py
+    lines 3-21), and so does this span.
+    """
+    measurement = slow_unit_shot(tmp_path, 1, decision_cycles=1000)
+
+    assert measurement.samples["admission_wait"] == [4.0] * 9
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+
+
+def test_a_withdrawn_request_waits_in_the_admission_point(tmp_path):
+    """A restart window's first request is withdrawn and asked for again.
+
+    double_window takes back the restart window's queued request
+    when it re-slices it (escalation/strong_window_shapes.py
+    _withdraw_stale_requests), and the fresh request enters the queue
+    later while the window's data was complete all along. The time
+    between is the window's admission_wait, as Ciw writes a customer
+    that left the queue unserved its own record (ciw/node.py
+    write_reneging_record) rather than folding it into the next wait,
+    and window 3 of this seed spends 1.132 us there.
+    """
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "double_window",
+    }
+    weak_decoder = {
+        "kind": 5.0,
+        "units": 1,
+        "unit_memory": {"bits": None},
+        "engine": ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
+    }
+    sections = {"escalation": escalation, "weak_decoder": weak_decoder}
+    shot = switching_run(tmp_path, 20.0, sections=sections)
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.samples["admission_wait"] == [0.0, 1.132] + [0.0] * 5
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
 
 
 def test_load_is_the_units_occupancy_over_the_window_period(tmp_path):

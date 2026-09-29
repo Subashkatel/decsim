@@ -666,9 +666,13 @@ controller:                        # controller work per round, in cycles of its
   packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
                                    # through the packing stage, a whole count of
                                    # at least one. null = unbounded. A round
-                                   # that finds the stage full waits in front
-                                   # of it, in arrival order, and enters when
-                                   # a round leaves. The QPU keeps measuring
+                                   # counts from its emission until the windows
+                                   # hear of it: on the readout link, in
+                                   # assembly, held for store room or on its
+                                   # route. Rounds take places in emission
+                                   # order. One that finds the stage full waits
+                                   # in front of it and enters when a round
+                                   # leaves. The QPU keeps measuring
 
 detection_events:                  # where a round's raw measurement outcomes
                                    # become its detection events, and what it

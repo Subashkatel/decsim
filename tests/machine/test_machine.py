@@ -2047,12 +2047,14 @@ def test_a_full_packing_stage_holds_each_round_until_one_leaves(bound):
     """At most b rounds are in flight; the next enters as one is published.
 
     controller.packing_rounds_in_flight bounds the whole packing stage: a
-    round counts from its first fragment until it is published. On the
-    declared card round r reaches the stage at r plus qpu_to_controller 2
-    plus readout_to_bits 3 and is published four microseconds after it
-    enters, so under a bound of b it enters at max(5 + r, publication of
-    round r - b): the window law of credit flow control, b credits and a
-    four microsecond return (garnet's OutVcState credit count,
+    round counts from its emission until it is published. On the declared
+    card round r is emitted at r, its bits arrive at r plus
+    qpu_to_controller 2 plus readout_to_bits 3, and it is published four
+    microseconds after both its bits and its place are there. Under a
+    bound of b it takes its place at max(r, publication of round r - b),
+    so it is published at max(5 + r, publication of round r - b) + 4: the
+    window law of credit flow control, b credits and a four microsecond
+    return (garnet's OutVcState credit count,
     src/mem/ruby/network/garnet/OutVcState.hh:51-54). No round is lost.
     """
     settings = twelve_rounds_with_packing_bound(bound)

@@ -62,8 +62,9 @@ class ControllerSettings:
     deeper tProcessor (2110.00557 lines 893-900). The reference yaml
     carries the trace.
     packing_rounds_in_flight bounds the rounds in flight through the
-    packing stage at once, each from its first fragment until the windows
-    hear of it (round_assembly.RoundsInFlight); None is unbounded.
+    packing stage at once, each from its emission, in emission order,
+    until the windows hear of it (round_assembly.RoundsInFlight); None is
+    unbounded.
     clock is the domain all three cycle counts are charged on; a cost of
     zero cycles is uncharged rather than rounded up to the next edge.
     """

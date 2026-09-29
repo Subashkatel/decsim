@@ -7,8 +7,9 @@ conditional together, an upper bound); a round arrives in several
 fragments when its source reads it out in more than one acquisition
 group (RepeatedStimCircuit.readout_partitions in decsim/records/
 circuits.py). The bound counts every round in flight
-through the stage, in assembly, held for store room or on its route
-(controller.packing_rounds_in_flight); a round that finds the stage full
+through the stage from its emission, on the readout link, in assembly,
+held for store room or on its route (controller.packing_rounds_in_flight).
+Places are taken in emission order, and a round that finds the stage full
 waits in front of it and enters on the retry, never lost
 (gem5 src/mem/port.hh:244-262).
 """
@@ -77,12 +78,12 @@ def test_later_completed_round_waits_for_the_prior_emitted_round() -> None:
     assembler = assembler_with(engine, packed, None)
     first = fragment(1, bits=(1, 0))
     second = fragment(2, bits=(0, 1))
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 1, round_records.WINDOW_INPUT_ROUTE)
 
-    assembler.add(second, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
     assert packed == []
-    assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
 
     round_indices = [round.packet.round_index for round in packed]
     assert round_indices == [1, 2]
@@ -100,36 +101,18 @@ def test_waiting_for_another_channel_does_not_block_an_independent_stream() -> (
     first = fragment(1)
     second = fragment(2)
     independent = dataclasses.replace(first, operation_id="independent")
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(independent, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(independent, 1, round_records.WINDOW_INPUT_ROUTE)
 
-    assembler.add(second, 1, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(independent, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(independent, round_records.WINDOW_INPUT_ROUTE)
 
     operation_ids = [round.packet.operation_id for round in packed]
     assert operation_ids == ["independent"]
-    assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
     round_indices = [round.packet.round_index for round in packed]
     assert round_indices == [1, 1, 2]
-
-
-def test_a_completed_round_waiting_for_its_predecessor_consumes_capacity() -> (
-    None
-):
-    engine = engine_module.Engine()
-    packed = []
-    assembler = assembler_with(engine, packed, None, packing_rounds_in_flight=1)
-    first = fragment(1)
-    second = fragment(2)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(second, 1, round_records.WINDOW_INPUT_ROUTE)
-
-    assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
-
-    assert assembler.packing_line.count == 1
-    assert packed == []
 
 
 def test_formation_retains_capacity_until_the_round_leaves() -> None:
@@ -147,12 +130,12 @@ def test_formation_retains_capacity_until_the_round_leaves() -> None:
     assembler.packing_line = syndrome_round_sender.HeldRounds(engine)
     first = fragment(1)
     second = fragment(2)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
 
     assert departures.records == []
-    assembler.add(second, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
     assert assembler.packing_line.count == 1
     engine.run()
     (departure_ticks, packed) = departures.records[0]
@@ -177,8 +160,8 @@ def test_the_assembler_hands_a_packed_round_to_its_round_sender() -> None:
 
     only_fragment = fragment(1)
 
-    assembler.expect_round(only_fragment, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(only_fragment, round_records.WINDOW_INPUT_ROUTE)
 
     assert [round.packet.round_index for round in admitted] == [1]
 
@@ -196,13 +179,13 @@ def test_packing_starts_at_the_edge_after_the_last_fragment_arrives() -> None:
     )
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(1, 1))
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 2, round_records.WINDOW_INPUT_ROUTE)
     add_first = functools.partial(
-        assembler.add, first, 2, round_records.WINDOW_INPUT_ROUTE
+        assembler.add, first, round_records.WINDOW_INPUT_ROUTE
     )
     add_second = functools.partial(
-        assembler.add, second, 2, round_records.WINDOW_INPUT_ROUTE
+        assembler.add, second, round_records.WINDOW_INPUT_ROUTE
     )
     engine.schedule(0, add_first)
     engine.schedule(5, add_second)
@@ -238,12 +221,12 @@ def test_a_round_that_finds_the_stage_full_waits_until_a_round_leaves() -> None:
     first = fragment(1, fragment_index=0)
     last = fragment(1, fragment_index=1)
     second_round = fragment(2)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second_round, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(second_round, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second_round, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second_round, round_records.WINDOW_INPUT_ROUTE)
     waiting_count = assembler.packing_line.count
-    assembler.add(last, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(last, round_records.WINDOW_INPUT_ROUTE)
     packed_before_the_retry = len(packed)
 
     assembler.packing_line.retry()
@@ -254,6 +237,35 @@ def test_a_round_that_finds_the_stage_full_waits_until_a_round_leaves() -> None:
     assert packed_before_the_retry == 1
     assert round_indices == [1, 2]
     assert engine.now == 0
+    assembler.check_settled()
+
+
+def test_places_are_taken_in_emission_order_so_a_late_round_one_packs():
+    """Round 2 arrives first and round 1 still gets the one place.
+
+    A round takes its place in the order the QPU emitted it, as gem5's
+    O3 rename stalls in program order when the reorder buffer has no free
+    entry (src/cpu/o3/rename.cc:556-584) and commit inserts in that order
+    (src/cpu/o3/commit.cc:1295-1316). A round that arrived early cannot
+    take the place its predecessor needs to retire it.
+    """
+    engine = engine_module.Engine()
+    packed = []
+    assembler = assembler_with(engine, packed, None, packing_rounds_in_flight=1)
+    first = fragment(1)
+    second = fragment(2)
+    assembler.expect_round(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
+    packed_before_the_retry = len(packed)
+
+    assembler.packing_line.retry()
+    engine.run()
+
+    round_indices = [round.packet.round_index for round in packed]
+    assert packed_before_the_retry == 1
+    assert round_indices == [1, 2]
     assembler.check_settled()
 
 
@@ -274,8 +286,8 @@ def test_the_bound_counts_rounds_held_and_on_their_route() -> None:
     assembler.syndrome_round_sender = types.SimpleNamespace(admit=packed.append)
     assembler.packing_line = syndrome_round_sender.HeldRounds(engine)
     first = fragment(1)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
     waiting_count = assembler.packing_line.count
 
     full.capacity = 3
@@ -304,9 +316,9 @@ def test_a_round_joined_from_two_fragments_states_both_event_widths() -> None:
     readout = dataclasses.replace(
         checks, size_bits=9, fragment_index=1, event_bits=4
     )
-    assembler.expect_round(checks, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(checks, 2, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(readout, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(checks, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(checks, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(readout, round_records.WINDOW_INPUT_ROUTE)
 
     engine.run()
 
@@ -332,10 +344,10 @@ def test_detection_events_are_formed_once_from_the_merged_bits() -> None:
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
 
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(second, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
 
     assert former.asked == [(1, 1, (1, 0, 0, 1))]
     (round,) = packed
@@ -364,10 +376,10 @@ def test_events_formed_at_the_decoder_keep_the_raw_measurement_width() -> None:
     first = fragment(1, fragment_index=0, bits=(1, 0))
     second = fragment(1, fragment_index=1, bits=(0, 1))
 
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(second, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
 
     (round,) = packed
     (left,) = round.packet.fragments
@@ -397,8 +409,8 @@ def test_the_controller_seat_delays_the_round_by_its_formation_time() -> None:
 
     only_fragment = fragment(1, bits=(1, 0))
 
-    assembler.expect_round(only_fragment, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(only_fragment, round_records.WINDOW_INPUT_ROUTE)
     engine.run()
 
     departure_ticks, round = departures.records[0]
@@ -422,8 +434,8 @@ def test_an_uncharged_controller_seat_hands_the_round_on_at_once() -> None:
     )
     only_fragment = fragment(1, bits=(1, 0))
 
-    assembler.expect_round(only_fragment, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(only_fragment, round_records.WINDOW_INPUT_ROUTE)
 
     departure_ticks, _round = departures.records[0]
     assert departure_ticks == 0
@@ -438,13 +450,13 @@ def test_interleaved_patch_fragments_keep_measurement_order() -> None:
     second = dataclasses.replace(second, patch_ids=("other",))
     third = fragment(1, fragment_index=2, bits=(1,))
 
-    assembler.expect_round(third, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(third, 3, round_records.WINDOW_INPUT_ROUTE)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 3, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(third, 3, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(third, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 3, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
     assert packed == []
-    assembler.expect_round(second, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(second, 3, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(second, 3, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
     engine.run()
 
     (round,) = packed
@@ -457,8 +469,8 @@ def test_settlement_reports_a_round_still_in_assembly() -> None:
     recorder = None
     assembler = assembler_with(engine, [], recorder)
     first = fragment(1, fragment_index=0)
-    assembler.expect_round(first, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.expect_round(first, 2, round_records.WINDOW_INPUT_ROUTE)
+    assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
 
     with pytest.raises(RuntimeError, match="incomplete syndrome packing"):
         assembler.check_settled()

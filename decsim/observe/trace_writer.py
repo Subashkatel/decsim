@@ -173,8 +173,9 @@ class TraceWriter:
 
         The workspace is the one bounded controller-side structure
         (controller.packing_rounds_in_flight, data_path.md's residence
-        table): a round enters at its first fragment, or when it leaves
-        the line in front of a full stage, and leaves when it is packed.
+        table): the residence is the round's bits in the workspace, from its
+        first fragment, or from its release when it waited for a place, to
+        its packing. Its place in the bound is taken at its emission.
         """
         round_key = (event.operation_id, event.round_index)
         if event.kind == "BINARY_AVAILABLE":
@@ -186,10 +187,10 @@ class TraceWriter:
     def round_waiting_for_a_place(self, capacity, event) -> None:
         """A round waiting in front of a full packing stage, and its entry.
 
-        The wait opens before the round's first fragment is reported
+        The wait opens when the QPU emits the round
         (controller/round_assembly.py), so the fragments that arrive while
-        it waits find the round's key open and open no place in the stage;
-        its place opens when the line lets it go.
+        it waits find the round's key open and open no place in the stage.
+        Its place opens when the line lets it go.
         """
         round_key = (event.operation_id, event.round_index)
         if event.kind == "STALLED":
@@ -721,7 +722,7 @@ class TraceWriter:
         self._counter(thread, name, {series: value}, self.engine.now)
 
     def _begin_assembly(self, capacity, round_key, event) -> None:
-        """The round takes its place: at its first fragment, or its release."""
+        """The round's bits enter: at its first fragment, or its release."""
         if (ASSEMBLER_THREAD, round_key) in self._open.open_residence:
             return
         args = {

@@ -228,6 +228,9 @@ ROCE_V2_GPU_SOURCE = (
     "Backline 2609.09270 Table III GPU echo, 4.5 us median round trip, "
     "FPGA controller to GPU coprocessor over RoCE v2"
 )
+# the payload each echo carried, whose time on the cable the measured
+# round trip holds: 16 bytes (2609.09270 line 1611)
+ROCE_V2_ECHO_PAYLOAD_BITS = 128
 
 # NVQLink (NVIDIA), arXiv 2510.25213, Sec. 2.4. An FPGA sends 32-byte
 # payloads as RoCE packets over 100 Gb Ethernet to a ConnectX-7 NIC,
@@ -238,6 +241,8 @@ ROCE_V2_GPU_SOURCE = (
 # unreliable by choice: a dropped packet is not retransmitted (lines
 # 376-388). The steady-state mean and median are 3.839 us (line 485).
 NVQLINK_ROUND_TRIP_MICROSECONDS = 3.839
+# 32 bytes (2510.25213 lines 402-403)
+NVQLINK_ECHO_PAYLOAD_BITS = 256
 NVQLINK_SOURCE = (
     "NVQLink 2510.25213 line 485, 3.839 us steady-state median round "
     "trip, FPGA to a persistent GPU kernel and back over RoCE"
@@ -248,20 +253,22 @@ _NVQLINK_RATE_SOURCE = (
 )
 
 # decsim prices one number per hop, so each leg of the round trip is
-# charged half of it and the coprocessor's own poll is charged nothing.
+# charged half of it, less the echo payload's time on the cable, which
+# every transfer pays for its own bits; the coprocessor's own poll is
+# charged nothing.
 # The legs the measurement covers are the controller's one-sided write
 # into the coprocessor's memory (paper lines 1610-1612), the coprocessor's
 # poll "on the expected memory buffer" (1616-1617) and the reply's
 # one-sided write back (1617-1620).
 ROCE_V2_WRITE_LEG = (
     "the controller's one-sided write into the coprocessor's memory, one "
-    "half of the measured round trip; the paper gives no per-direction "
-    "split"
+    "half of the measured round trip less the echo payload's time on the "
+    "cable; the paper gives no per-direction split"
 )
 ROCE_V2_ESCALATION_LEG = (
     "the escalation request, the same one-sided write from the "
-    "controller side, one half of the measured round trip; the paper "
-    "gives no per-direction split"
+    "controller side, one half of the measured round trip less the echo "
+    "payload's time on the cable; the paper gives no per-direction split"
 )
 ROCE_V2_POLL_LEG = (
     "zero: the coprocessor polls the buffer in its own memory that the "
@@ -269,7 +276,8 @@ ROCE_V2_POLL_LEG = (
 )
 ROCE_V2_REPLY_LEG = (
     "the reply's one-sided write back to the controller, one half of the "
-    "measured round trip; the paper gives no per-direction split"
+    "measured round trip less the echo payload's time on the cable; the "
+    "paper gives no per-direction split"
 )
 
 
@@ -588,16 +596,14 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     round trip in its own clock. The paper gives no per-direction
     number, so the split below is decsim's rule rather than a
     measurement: the controller's write into strong syndrome buffer, the
-    escalation request and the strong decoder's reply to the frame are
-    each one half of the round trip, and the
-    strong store's read into the strong decoder is zero because the
-    coprocessor polls a buffer in its own memory. The latencies of the
-    escalation round trip on this card, weak_decoder_to_strong_decoder
-    plus strong_buffer_to_strong_decoder plus strong_decoder_to_frame,
-    therefore sum to the measured median exactly. The three legs that
-    cross the cable also serialize their bits at its 100 Gb/s (lines
-    1229-1230), so a transfer costs its latency plus its bits, as on
-    every other row.
+    escalation request and the strong decoder's reply to the frame each
+    carry one half of the round trip, and the strong store's read into
+    the strong decoder is zero because the coprocessor polls a buffer in
+    its own memory. The three legs that cross the cable serialize their
+    bits at its 100 Gb/s (lines 1229-1230), and the measured round trip
+    already holds the 16-byte echo payload's time on it (line 1611), so
+    each leg's latency is its half less that time: an echo of that
+    payload, out, polled and back, takes the measured median exactly.
 
     The card prices that median. It does not cover the first, warm-up
     round trip, 4.64 us on the CPU path and 9.27 us on the GPU path, nor
@@ -616,7 +622,10 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
         _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
     )
     strong_paths = _roce_v2_strong_paths(
-        round_trip_microseconds, measurement_source, cable_rate
+        round_trip_microseconds,
+        measurement_source,
+        cable_rate,
+        ROCE_V2_ECHO_PAYLOAD_BITS,
     )
     reference = logical_reference_profile()
     row_name = f"roce_v2_{coprocessor}"
@@ -632,11 +641,9 @@ def nvqlink_measured_profile() -> settings.FabricSettings:
     Backline does: an FPGA sends RoCE packets that land in GPU memory, a
     persistent GPU kernel loops each back, and the FPGA times the round
     trip, 3.839 us in the steady-state median (line 485). The split is
-    roce_v2_measured_profile's: the write, the escalation request and
-    the reply each half of the round trip, the poll of the GPU's own
-    memory zero, so the escalation round trip sums to the median. The
-    three legs that cross the 100 Gb Ethernet link (line 382, Fig. 2)
-    serialize their bits at its rate.
+    roce_v2_measured_profile's, on the 32-byte echo payload (lines
+    402-403) and the 100 Gb Ethernet link (line 382, Fig. 2): an echo of
+    that payload takes the median exactly.
 
     The connection is unreliable by choice (lines 376-388), so a frame
     is never retransmitted: the ideal protocol row, whose wire loses
@@ -653,7 +660,10 @@ def nvqlink_measured_profile() -> settings.FabricSettings:
         _OFF_BOARD_BITS_PER_MICROSECOND, _NVQLINK_RATE_SOURCE
     )
     strong_paths = _roce_v2_strong_paths(
-        NVQLINK_ROUND_TRIP_MICROSECONDS, NVQLINK_SOURCE, cable_rate
+        NVQLINK_ROUND_TRIP_MICROSECONDS,
+        NVQLINK_SOURCE,
+        cable_rate,
+        NVQLINK_ECHO_PAYLOAD_BITS,
     )
     reference = logical_reference_profile()
     row_name = "nvqlink_gpu"
@@ -721,8 +731,9 @@ class RoceV2CpuFabric:
     The four strong-side hops are priced by Backline's measured
     FPGA-to-CPU round trip over RoCE v2, 2.305 us in the median
     (arXiv 2609.09270, Table III): half of it on each leg the write
-    crosses, and nothing for the coprocessor's poll of its own memory.
-    Every other hop keeps the reference numbers.
+    crosses, less the echo payload's time on the cable, and nothing for
+    the coprocessor's poll of its own memory. Every other hop keeps the
+    reference numbers.
     """
 
     @staticmethod
@@ -744,10 +755,11 @@ class RoceV2GpuFabric:
     The four strong-side hops are priced by Backline's measured
     FPGA-to-GPU round trip over RoCE v2, 4.5 us in the median
     (arXiv 2609.09270, Table III): half of it on each leg the write
-    crosses, and nothing for the coprocessor's poll of its own memory.
-    The GPU path is the slower and the wider of the two Backline
-    measured, because the reply is written by a CPU thread the GPU
-    signals. Every other hop keeps the reference numbers.
+    crosses, less the echo payload's time on the cable, and nothing for
+    the coprocessor's poll of its own memory. The GPU path is the slower
+    and the wider of the two Backline measured, because the reply is
+    written by a CPU thread the GPU signals. Every other hop keeps the
+    reference numbers.
     """
 
     @staticmethod
@@ -769,8 +781,9 @@ class NvqlinkGpuFabric:
     The four strong-side hops are priced by NVQLink's measured round
     trip from an FPGA to a persistent GPU kernel over RoCE, 3.839 us in
     the steady-state median (arXiv 2510.25213, line 485): half of it on
-    each leg the packet crosses, nothing for the kernel's poll of its own
-    memory. Every other hop keeps the reference numbers.
+    each leg the packet crosses, less the echo payload's time on the
+    cable, nothing for the kernel's poll of its own memory. Every other
+    hop keeps the reference numbers.
     """
 
     @staticmethod
@@ -866,14 +879,21 @@ def _roce_v2_strong_paths(
     round_trip_microseconds: float,
     measurement_source: str,
     cable_rate: settings.CapacitySettings,
+    echo_payload_bits: int,
 ) -> dict:
     """The four strong-side paths, priced from one measured round trip.
 
     The three legs that cross the measured cable serialize their bits at
-    its rate, as the reference card's strong hops do; the poll reads the
-    coprocessor's own memory, crosses no cable and stays unbounded.
+    its rate, as the reference card's strong hops do, so the echo
+    payload's time on the cable comes out of each leg's half; the poll
+    reads the coprocessor's own memory, crosses no cable and stays
+    unbounded.
     """
-    leg_microseconds = round_trip_microseconds / 2
+    rate = cable_rate.exact_aggregate_bits_per_microsecond()
+    echo_fraction = echo_payload_bits / rate
+    echo_on_the_cable = float(echo_fraction)
+    half_microseconds = round_trip_microseconds / 2
+    leg_microseconds = half_microseconds - echo_on_the_cable
     write_source = f"{measurement_source}; {ROCE_V2_WRITE_LEG}"
     escalation_source = f"{measurement_source}; {ROCE_V2_ESCALATION_LEG}"
     poll_source = f"{measurement_source}; {ROCE_V2_POLL_LEG}"

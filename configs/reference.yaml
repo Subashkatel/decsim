@@ -792,15 +792,19 @@ links:                             # a kind, then one card per path; null = the
                                    # roce_v2_cpu is the reference card with the
                                    # strong tier's off-board hops priced by
                                    # Backline's measured FPGA-to-CPU round trip over
-                                   # RoCE v2 (2609.09270 Table III), half of the
-                                   # 2.305 us median on each leg it crosses, the
-                                   # bits at the cable's 100 Gb/s on top.
+                                   # RoCE v2 (2609.09270 Table III): each leg it
+                                   # crosses carries half of the 2.305 us median
+                                   # less the 16-byte echo's time on the cable's
+                                   # 100 Gb/s (line 1611), and every transfer
+                                   # pays its own bits at that rate, so the
+                                   # paper's echo takes the median exactly.
                                    # roce_v2_gpu is the same card on the FPGA-to-GPU
                                    # round trip, 4.5 us in the median.
                                    # nvqlink_gpu is the same split on NVQLink's
                                    # FPGA-to-GPU round trip over RoCE, a persistent
                                    # kernel looping each packet back, 3.839 us in
-                                   # the steady-state median (2510.25213 line 485),
+                                   # the steady-state median (2510.25213 line 485)
+                                   # for a 32-byte echo (lines 402-403),
                                    # at its 100 Gb Ethernet rate, on an unreliable
                                    # connection, so the ideal protocol row.
                                    # Each card, in cycles of its named clock domain;

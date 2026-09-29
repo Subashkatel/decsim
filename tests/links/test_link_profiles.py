@@ -650,46 +650,53 @@ def _cites_backline(source: str) -> bool:
     return identifier == "2609.09270"
 
 
-def test_the_cpu_row_charges_half_the_measured_round_trip_on_each_leg():
-    """Backline times one round trip; decsim needs a number per hop.
+@pytest.mark.parametrize(
+    ("measured_profile", "arguments", "echo_bits", "round_trip_microseconds"),
+    [
+        (link_profiles.roce_v2_measured_profile, ("cpu",), 128, 2.305),
+        (link_profiles.roce_v2_measured_profile, ("gpu",), 128, 4.5),
+        (link_profiles.nvqlink_measured_profile, (), 256, 3.839),
+    ],
+)
+def test_an_echo_of_the_measured_payload_takes_the_measured_round_trip(
+    measured_profile, arguments, echo_bits, round_trip_microseconds
+):
+    """The paper's own echo, replayed on the card, is the paper's median.
 
-    The controller's one-sided write into the strong syndrome buffer, the
-    escalation request and the reply to the frame are each half of the
-    2.305 us median (2609.09270 Table III, CPU echo); the strong store's
-    read into the strong decoder is free, because the coprocessor polls
-    a slot in its own memory. The escalation round trip is therefore the
-    measured median exactly.
+    Backline echoes a 16-byte payload (2609.09270 line 1611) and NVQLink
+    a 32-byte one (2510.25213 lines 402-403), and each times the whole
+    round trip, the payload's own time on the 100 Gb/s cable included.
+    An echo is the escalation out, the poll of the coprocessor's own
+    memory, and the reply back, each its latency and its bits' time on
+    its wire.
     """
-    profile = link_profiles.roce_v2_measured_profile("cpu")
-    latencies = latencies_of(profile)
-    half = config.microseconds_to_ticks(1.1525)
-    assert latencies["controller_to_strong_buffer"] == half
-    assert latencies["weak_decoder_to_strong_decoder"] == half
-    assert latencies["strong_buffer_to_strong_decoder"] == 0
-    assert latencies["strong_decoder_to_frame"] == half
-    escalation_round_trip = (
-        latencies["weak_decoder_to_strong_decoder"]
-        + latencies["strong_buffer_to_strong_decoder"]
-        + latencies["strong_decoder_to_frame"]
+    profile = measured_profile(*arguments)
+    out = profile.weak_decoder_to_strong_decoder
+    poll = profile.strong_buffer_to_strong_decoder
+    back = profile.strong_decoder_to_frame
+    echo_ticks = (
+        _crossing_ticks(out, echo_bits)
+        + _crossing_ticks(poll, echo_bits)
+        + _crossing_ticks(back, echo_bits)
     )
-    assert escalation_round_trip == config.microseconds_to_ticks(2.305)
+    measured_ticks = config.microseconds_to_ticks(round_trip_microseconds)
+    write = profile.controller_to_strong_buffer
+
+    assert echo_ticks == measured_ticks
+    assert write.channel.propagation_latency_ticks == (
+        out.channel.propagation_latency_ticks
+    )
+    assert poll.channel.propagation_latency_ticks == 0
 
 
-def test_the_gpu_row_charges_half_the_measured_round_trip_on_each_leg():
-    """The same split on the 4.5 us GPU echo row of Table III."""
-    profile = link_profiles.roce_v2_measured_profile("gpu")
-    latencies = latencies_of(profile)
-    half = config.microseconds_to_ticks(2.25)
-    assert latencies["controller_to_strong_buffer"] == half
-    assert latencies["weak_decoder_to_strong_decoder"] == half
-    assert latencies["strong_buffer_to_strong_decoder"] == 0
-    assert latencies["strong_decoder_to_frame"] == half
-    escalation_round_trip = (
-        latencies["weak_decoder_to_strong_decoder"]
-        + latencies["strong_buffer_to_strong_decoder"]
-        + latencies["strong_decoder_to_frame"]
-    )
-    assert escalation_round_trip == config.microseconds_to_ticks(4.5)
+def _crossing_ticks(path_settings, bits: int) -> int:
+    """One transfer of `bits` alone on the path: latency and wire time."""
+    channel = path_settings.channel
+    latency = channel.propagation_latency_ticks
+    if channel.capacity is None:
+        return latency
+    wire_ticks = channel_module.serialization_ticks(bits, channel.capacity)
+    return latency + wire_ticks
 
 
 @pytest.mark.parametrize("coprocessor", ["cpu", "gpu"])
@@ -833,28 +840,6 @@ def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
     assert settings.links.kind == "roce_v2_gpu"
     assert result.terminal_status == "complete"
     assert "2609.09270" in strong_buffer_source_of(built)
-
-
-def test_the_nvqlink_row_charges_half_the_measured_round_trip_on_each_leg():
-    """NVQLink 2510.25213 line 485: 3.839 us, the steady-state median.
-
-    The write, the escalation and the reply each carry half; the GPU
-    kernel's poll of its own memory is free, so the escalation round
-    trip is the measured median exactly.
-    """
-    profile = link_profiles.nvqlink_measured_profile()
-    latencies = latencies_of(profile)
-    half = config.microseconds_to_ticks(1.9195)
-    assert latencies["controller_to_strong_buffer"] == half
-    assert latencies["weak_decoder_to_strong_decoder"] == half
-    assert latencies["strong_buffer_to_strong_decoder"] == 0
-    assert latencies["strong_decoder_to_frame"] == half
-    escalation_round_trip = (
-        latencies["weak_decoder_to_strong_decoder"]
-        + latencies["strong_buffer_to_strong_decoder"]
-        + latencies["strong_decoder_to_frame"]
-    )
-    assert escalation_round_trip == config.microseconds_to_ticks(3.839)
 
 
 def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():

@@ -1051,13 +1051,14 @@ def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it(tmp_path):
     assert measurement.samples["dep_block"] == [0.0] * 9
 
 
-def seam_streams(stream_count: int) -> tuple:
+def seam_streams(stream_count: int, stagger_rounds: int = 0) -> tuple:
     """That many memory streams, one patch and one qubit each.
 
     Every stream is the same 30-round distance-3 memory circuit, which
     is the circuit_list row of the workload table: the yaml's
     memory_circuit row plans one operation for the whole shot, so a run
-    with more than one stream is declared here instead.
+    with more than one stream is declared here instead. Stream i starts
+    i * stagger_rounds rounds into the shot.
     """
     circuit = workload_settings.memory_circuit(
         "surface_code:rotated_memory_z", 30, 3, 0.001
@@ -1065,12 +1066,14 @@ def seam_streams(stream_count: int) -> tuple:
     operations = []
     for index in range(stream_count):
         operation_id = index + 1
+        start_round = index * stagger_rounds
         operation = program_records.Operation(
             id=operation_id,
             name=f"mem{operation_id}",
             qubits=(index,),
             patches=(index,),
             circuit=circuit,
+            scheduled_start_round=start_round,
         )
         operations.append(operation)
     return tuple(operations)
@@ -1101,13 +1104,13 @@ def seam_only_fabric():
     return link_profiles.from_yaml(fabric, clocks, "one_card")
 
 
-def seam_streams_shot(stream_count: int):
+def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
     """One shot of those streams on that fabric.
 
     Eight one-microsecond weak units decode them, so the streams run
     side by side and each plans nine sliding windows.
     """
-    operations = seam_streams(stream_count)
+    operations = seam_streams(stream_count, stagger_rounds)
     links = seam_only_fabric()
     rounds_policy = round_policies.FixedRounds(30)
     workload = workload_settings.WorkloadSettings(
@@ -1167,6 +1170,30 @@ def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
     assert one_stream.samples["dd_per_window"] == one_stream_seams
     assert two_streams.samples["dd_per_window"] == one_stream_seams * 2
     assert two_streams.load == one_stream.load
+
+
+def test_a_late_streams_windows_count_from_their_own_rounds_sends():
+    """A stream started 20 rounds late reads its own rounds' QPU sends.
+
+    A round index counts within its operation's stream (records/
+    windows.py Window), so the second stream's round 1 leaves the QPU
+    20 us after the first stream's. Each window's first and last
+    required rounds are its own operation's, found by operation and
+    round as gem5 finds an instruction by thread and sequence number
+    (src/cpu/o3/rob.hh:131-134), so both streams read the one-stream
+    6.011 us and 1.011 us on every window, not 26.011 and 21.011.
+    """
+    one_stream_run = seam_streams_shot(1)
+    staggered_run = seam_streams_shot(2, stagger_rounds=20)
+    one_stream = measure.measure_shot(one_stream_run)
+    staggered = measure.measure_shot(staggered_run)
+
+    first_round = one_stream.samples["qpu_first_round_to_frame"]
+    last_round = one_stream.samples["qpu_last_round_to_frame"]
+    assert first_round == [6.011] * 9
+    assert last_round == [1.011] * 9
+    assert staggered.samples["qpu_first_round_to_frame"] == first_round * 2
+    assert staggered.samples["qpu_last_round_to_frame"] == last_round * 2
 
 
 def test_throughput_counts_the_rounds_the_shot_read_out():

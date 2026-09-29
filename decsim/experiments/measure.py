@@ -466,18 +466,27 @@ def strong_store_round_keys(stored_rounds: list) -> list:
 
 
 def qpu_send_ticks(transfers: list) -> dict:
-    """The tick each round left the QPU (its earliest QC request), by round."""
+    """The tick each round left the QPU, by (operation, round).
+
+    A round's index counts within its operation's stream (records/
+    windows.py Window), so two operations share every index and a round
+    is found by both, as gem5 finds an instruction by its thread and its
+    sequence number (src/cpu/o3/rob.hh:131-134). A readout carries one
+    round of one operation, and a round's send is its earliest QC
+    request.
+    """
     send = {}
     for row in transfers:
         if row["path"] != "qpu_to_controller":
             continue
-        # a readout carries one round of one operation
         (rounds,) = row["attribution"]["rounds_by_operation"]
-        round_index = rounds["round_lo"]
-        earlier = send.get(round_index)
+        operation_id = identity_records.stable_identity_from_json(
+            rounds["operation_id"]
+        )
+        round_key = (operation_id, rounds["round_lo"])
         start = _hop_start_ticks(row)
-        if earlier is None or start < earlier:
-            send[round_index] = start
+        earlier = send.get(round_key, start)
+        send[round_key] = min(earlier, start)
     return send
 
 
@@ -528,7 +537,7 @@ def window_points_us(
     rather than one number (Ciw ciw/data_record.py lines 3-21).
     """
     operation_id, window_id = window.key
-    last_emitted_round = max(qpu_send)
+    last_emitted_round = _last_emitted_round(qpu_send, operation_id)
     last_required_round = min(window.buffer_hi, last_emitted_round)
     committed = frame_record.committed_ticks
     handoff_ticks = link_delay.get(
@@ -546,8 +555,8 @@ def window_points_us(
     park = _span_microseconds(startable, input_landed)
     rounds_wait = _span_microseconds(input_sent, attempt_end)
     confidence_ticks = _confidence_ticks(window, decode)
-    last_required_send = qpu_send[last_required_round]
-    first_required_send = qpu_send[window.start_round]
+    last_required_send = qpu_send[(operation_id, last_required_round)]
+    first_required_send = qpu_send[(operation_id, window.start_round)]
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
@@ -1404,6 +1413,14 @@ def parallel_processes_needed(
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
     return config_module.ticks_to_microseconds(span_ticks)
+
+
+def _last_emitted_round(qpu_send: dict, operation_id) -> int:
+    last_round = 0
+    for sent_operation_id, round_index in qpu_send:
+        if sent_operation_id == operation_id:
+            last_round = max(last_round, round_index)
+    return last_round
 
 
 def _hop_start_ticks(row: dict) -> int:

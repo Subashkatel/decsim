@@ -18,6 +18,7 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
+import tests.experiments.test_measure as measure_tests
 import tests.observe.gate_point as gate_point
 
 SEED = gate_point.SEED
@@ -25,6 +26,18 @@ POINT_LOG_SHA256 = gate_point.POINT_LOG_SHA256
 
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
 _METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
+# the switching run's one-microsecond weak card
+ONE_MICROSECOND_WEAK = {
+    "kind": 1.0,
+    "unit_memory": {"bits": None},
+    "engine": {
+        "clock": "fridge",
+        "fetch_cycles_per_round": 1,
+        "fetch_cycles_per_job": 0,
+        "release_cycles_per_job": 10,
+        "release_cycles_per_round": 0,
+    },
+}
 
 
 def _settings(trace_path=None, data_movement=False):
@@ -235,6 +248,17 @@ def _tick_spans_by_tid(complete_rows) -> dict:
     return spans_by_tid
 
 
+def _lanes_with_overlapping_spans(spans_by_tid: dict) -> list:
+    """The lanes on which a span starts before the one before it ends."""
+    overlapping = []
+    for thread_id in sorted(spans_by_tid):
+        ordered = sorted(spans_by_tid[thread_id])
+        pairs = zip(ordered, ordered[1:], strict=False)
+        if any(later[0] < earlier[1] for earlier, later in pairs):
+            overlapping.append(thread_id)
+    return overlapping
+
+
 def _rows_outside_every_span(rows, spans_by_tid: dict) -> list:
     """The rows whose tick no span on their own lane covers."""
     outside = []
@@ -245,6 +269,42 @@ def _rows_outside_every_span(rows, spans_by_tid: dict) -> list:
         if not covered:
             outside.append(row)
     return outside
+
+
+@pytest.mark.parametrize("run_both_at_once", [False, True])
+def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
+    tmp_path, run_both_at_once
+):
+    """Two decodes of one window on two units keep two lanes.
+
+    The forced-class pair of a complementary gap runs on both weak
+    units at once, and under run_both_at_once the speculative strong
+    decode does too. A slice's tid is its lane, and slices on one lane must nest
+    (Perfetto, "Other trace formats": overlapping, non-nested events
+    are out of spec), so every lane that served a decode carries that
+    decode's stages and no two of its stages overlap.
+    """
+    trace_path = tmp_path / "pair.trace.json"
+    observation = {"trace": str(trace_path)}
+    weak_decoder = {**ONE_MICROSECOND_WEAK, "units": 2}
+    sections = {"weak_decoder": weak_decoder, "observation": observation}
+    shot = measure_tests.switching_run(
+        tmp_path,
+        20.0,
+        run_both_at_once=run_both_at_once,
+        strong_units=2,
+        sections=sections,
+    )
+    document = shot.machine.observation.trace_writer.document()
+    complete_rows = _by_phase(document, "X")
+    stages = _rows_with(complete_rows, "cat", "stage")
+    services = _rows_with(complete_rows, "cat", "window,service")
+
+    stage_spans_by_tid = _tick_spans_by_tid(stages)
+    service_lanes = {row["tid"] for row in services}
+    assert len(service_lanes) > 2
+    assert set(stage_spans_by_tid) == service_lanes
+    assert _lanes_with_overlapping_spans(stage_spans_by_tid) == []
 
 
 def test_every_flow_chain_has_a_number_of_its_own(traced):

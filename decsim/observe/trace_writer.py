@@ -523,8 +523,12 @@ class TraceWriter:
     def job_started(self, job: decoding_records.DecodeJob, unit) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
-        window_key = (job.operation_id, job.window_id)
-        self._open.unit_thread_by_window[window_key] = thread
+        decode_key = _decode_key_of_job(job)
+        self._open.unit_thread_by_decode[decode_key] = thread
+        # a row may leave a record's run_sequences empty (ports.py
+        # Decoder), and its stages then take the window's latest lane
+        unnamed_key = (job.operation_id, job.window_id, ())
+        self._open.unit_thread_by_decode[unnamed_key] = thread
         args = {
             "request": request_text(job.request_key),
             "service": _service_text(job.service_key),
@@ -551,12 +555,19 @@ class TraceWriter:
     def stage_recorded(self, record) -> None:
         """One stage of one job on the lane of the unit that started it.
 
-        A stage the cancel closed carries the mark, so the trace shows
-        where the decode stopped rather than where its card would have
-        ended.
+        The lane is found by the decode, not by its window: two decodes
+        of one window run on two units at once (a complementary gap's
+        forced-class pair, a run_both_at_once sibling), and an event's
+        tid is its lane, as each LLVM XRay record carries the thread it
+        ran on (tools/llvm-xray/xray-converter.cc:232-245). A record
+        whose row names no request lands on its window's latest decode,
+        the one identity it gives. A stage the cancel closed carries the
+        mark, so the trace shows where the decode stopped rather than
+        where its card would have ended.
         """
         window_key = (record.operation_id, record.window_id)
-        thread = self._open.unit_thread_by_window.get(window_key)
+        decode_key = (*window_key, record.run_sequences)
+        thread = self._open.unit_thread_by_decode.get(decode_key)
         if thread is None:
             return
         args = {
@@ -1119,6 +1130,21 @@ def _verdict_text(verdict) -> str:
     return name.lower()
 
 
+def _decode_key_of_job(job: decoding_records.DecodeJob) -> tuple:
+    """A started decode as its stage records name it.
+
+    Its window and the run ordinals of the requests it serves, which is
+    what decoders/staged_decoder.py writes into every DecoderStageRecord;
+    the dispatch has already set service_original_request_keys
+    (decode_service.py _assign_service_key). A self-contained decode
+    serves no request, and its ordinals are empty.
+    """
+    run_sequences = []
+    for request_key in job.service_original_request_keys:
+        run_sequences.append(request_key.run_sequence)
+    return (job.operation_id, job.window_id, tuple(run_sequences))
+
+
 def _service_text(service_key) -> str:
     """A service key as the args carry it: its run-wide ordinal."""
     if service_key is None:
@@ -1145,9 +1171,9 @@ class _OpenSlices:
     (thread, key) and writes one X event at its end; flowing_rounds and
     flowing_windows hold the id of each flow whose start has been
     written, so a step never precedes its start, and flows_started is
-    how many ids have been given; unit_thread_by_window says which
+    how many ids have been given; unit_thread_by_decode says which
     unit's lane a stage lands on, because a stage record names the
-    window and not the unit. gem5 groups a component's many members the
+    decode and not the unit. gem5 groups a component's many members the
     same way (gem5 src/base/stats/group.hh:60-92).
     """
 
@@ -1156,7 +1182,7 @@ class _OpenSlices:
     open_service: dict = dataclasses.field(default_factory=dict)
     flowing_rounds: dict = dataclasses.field(default_factory=dict)
     flowing_windows: dict = dataclasses.field(default_factory=dict)
-    unit_thread_by_window: dict = dataclasses.field(default_factory=dict)
+    unit_thread_by_decode: dict = dataclasses.field(default_factory=dict)
     counter_value: dict = dataclasses.field(default_factory=dict)
     unnamed_threads: int = 0
     flows_started: int = 0

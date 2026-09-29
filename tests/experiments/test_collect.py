@@ -104,6 +104,7 @@ WALL_CLOCK_COLUMNS = (
     "strong_queue_max",
     "weak_busy_fraction",
     "strong_busy_fraction",
+    "strong_service_sum_us",
     "strong_service_mean_us",
     "parallel_processes_needed",
     "sim_wall_seconds_per_shot",

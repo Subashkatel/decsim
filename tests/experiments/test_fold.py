@@ -498,6 +498,42 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     assert older[0] == whole_without_the_point
 
 
+def test_a_fold_reports_no_strong_service_mean_for_folders_without_its_sum(
+    tmp_path,
+):
+    """A folder whose shots hold no strong service sum gets no mean.
+
+    The point's mean is the shots' summed service over their strong
+    decodes, so a folder without the sum reports no strong_service_mean_us
+    and every other column as the whole fold does, the rule a latency
+    point the folder did not measure keeps.
+    """
+    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    folders = _piece_folders(experiment_dir)
+    whole_dir = tmp_path / "whole"
+    older_dir = tmp_path / "older"
+    _folded(experiment_dir, folders, whole_dir)
+    _each_without_a_shot_column(folders, "strong_service_sum_us")
+    _folded(experiment_dir, folders, older_dir)
+
+    whole_path = whole_dir / "sweep.csv"
+    older_path = older_dir / "sweep.csv"
+    whole = _rows_of(whole_path)
+    older = _rows_of(older_path)
+    dropped = ("strong_service_mean_us",)
+    assert set(dropped) <= set(whole[0])
+    assert older[0] == _without_columns(whole[0], dropped)
+
+
+def _each_without_a_shot_column(folders, column) -> None:
+    for folder in folders:
+        shots_path = pathlib.Path(folder) / "shots.csv"
+        rows = _rows_of(shots_path)
+        for row in rows:
+            row.pop(column)
+        _write_rows(shots_path, rows)
+
+
 def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
     """The terminal keeps the rule the columns keep, or the fold dies.
 

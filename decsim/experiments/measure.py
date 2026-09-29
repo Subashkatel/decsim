@@ -180,12 +180,15 @@ class ShotMeasurement:
     weak_busy_fraction: float
     strong_busy_fraction: float
     # the windows the strong tier committed, the rounds its decodes read
-    # and their mean service, and r_com, the rounds a window commits: the
-    # report forms Toshio's Theorem 1 bound on that service per sweep
-    # point from the first and the last (2510.25222 eq. (6))
+    # and their summed service, and r_com, the rounds a window commits.
+    # The report divides the summed service by the summed windows per
+    # sweep point, a ratio of two sums as gem5 forms avgMissLatency =
+    # missLatency / misses (src/mem/cache/base.cc:2188), and forms
+    # Toshio's Theorem 1 bound on that mean from the windows and r_com
+    # (2510.25222 eq. (6))
     escalated_windows: int
     strong_decoded_rounds: int
-    strong_service_mean_us: float
+    strong_service_sum_us: float
     commit_rounds: int
     # tau_gen r_com: a window's inter-arrival, commit rounds times the
     # round period, which the chain's load divides by
@@ -810,7 +813,7 @@ def _measurement(
         strong_busy_fraction=pools.strong_busy_fraction,
         escalated_windows=strong.windows,
         strong_decoded_rounds=strong.rounds,
-        strong_service_mean_us=strong.service_mean_us,
+        strong_service_sum_us=strong.service_sum_microseconds,
         commit_rounds=commit_rounds,
         window_period_us=window_period_us,
         parallel_processes_needed=processes,
@@ -1043,7 +1046,7 @@ class _StrongDecodes:
 
     windows: int
     rounds: int
-    service_mean_us: float
+    service_sum_microseconds: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1196,12 +1199,13 @@ def _strong_decodes(
     Toshio's Theorem 1 bounds one strong decode's time by the round
     time times d over the switching rate (2510.25222 eq. (6)); the
     report forms that bound per sweep point from the escalated windows,
-    and the mean service here is the time it bounds.
+    and the point's summed service over its windows is the time it
+    bounds. The sum is taken in ticks, so it is exact.
     """
     stages = observation.stages
     windows = 0
     rounds = 0
-    services = []
+    service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
         tier = window_records.DecoderTier(frame_record.tier)
         if tier is not window_records.DecoderTier.STRONG:
@@ -1209,12 +1213,11 @@ def _strong_decodes(
         decode = _committed_decode(stages, frame_record)
         windows += 1
         rounds += decode.round_count
-        service = _span_microseconds(
-            decode.done_ticks, decode.compute_start_ticks
-        )
-        services.append(service)
-    service_mean_us = _mean_or_zero(services)
-    return _StrongDecodes(windows, rounds, service_mean_us)
+        service_ticks += decode.done_ticks - decode.compute_start_ticks
+    service_sum_microseconds = config_module.ticks_to_microseconds(
+        service_ticks
+    )
+    return _StrongDecodes(windows, rounds, service_sum_microseconds)
 
 
 def _tier_records(

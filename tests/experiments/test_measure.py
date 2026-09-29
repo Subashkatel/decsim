@@ -565,9 +565,43 @@ def test_toshios_per_decode_bound_is_commit_time_over_escalated_share(
 
     assert measurement.escalated_windows == 10
     assert measurement.strong_decoded_rounds == 57
-    assert measurement.strong_service_mean_us == 10.0628
+    assert rows[0]["strong_service_mean_us"] == 10.0628
     assert rows[0]["strong_service_bound_us"] == 3.0
     assert rows[0]["escalated_windows"] == 10
+
+
+def test_a_points_strong_service_is_its_strong_decodes_mean(tmp_path):
+    """The point divides its summed service by its strong decodes.
+
+    At 5 dB seed 0 escalates no window and seed 1 escalates two, each a
+    10.064 us strong decode. The point's mean service is 10.064 us, the
+    sum over the count as gem5 forms avgMissLatency = missLatency /
+    misses (src/mem/cache/base.cc:2188), not the 5.032 us a mean of the
+    two shots' means would read.
+    """
+    quiet = switching_shot(tmp_path, 5.0, seed=0)
+    escalating = switching_shot(tmp_path, 5.0, seed=1)
+    record = report.record_of([quiet, escalating])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert quiet.escalated_windows == 0
+    assert escalating.escalated_windows == 2
+    assert rows[0]["escalated_windows"] == 2
+    assert rows[0]["strong_service_mean_us"] == 10.064
+
+
+def test_a_point_with_no_strong_decode_has_no_strong_service(tmp_path):
+    """No strong decode, no mean: the cell is empty, not zero.
+
+    gem5 prints nothing for a ratio whose count is zero (the nonan flag,
+    src/base/stats/text.cc:288-290); a zero would say the strong tier
+    decoded in no time.
+    """
+    quiet = switching_shot(tmp_path, 5.0, seed=0)
+    record = report.record_of([quiet])
+    rows = report.summarize(record.shots, record.window_samples)
+
+    assert rows[0]["strong_service_mean_us"] is None
 
 
 def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(

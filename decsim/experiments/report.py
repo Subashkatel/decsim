@@ -107,7 +107,6 @@ SHOT_MEANS = (
     "sim_wall_seconds",
     "weak_busy_fraction",
     "strong_busy_fraction",
-    "strong_service_mean_us",
     *LOAD_MEANS,
 )
 SHOT_MAXES = (
@@ -132,6 +131,7 @@ SHOT_SUMS = (
     "decoded_windows",
     "escalated_windows",
     "strong_decoded_rounds",
+    "strong_service_sum_us",
     *STATUS_SUMS,
 )
 SHOT_TRUE_COUNTS = (
@@ -1034,7 +1034,8 @@ def _add_pool_columns(row: dict, totals) -> None:
     row["weak_busy_fraction"] = totals.mean("weak_busy_fraction")
     row["strong_busy_fraction"] = totals.mean("strong_busy_fraction")
     row["escalated_windows"] = totals.sums["escalated_windows"]
-    row["strong_service_mean_us"] = totals.mean("strong_service_mean_us")
+    if "strong_service_sum_us" in totals.sums:
+        row["strong_service_mean_us"] = _strong_service_mean_us(totals)
     row["strong_service_bound_us"] = strong_service_bound_us(totals)
     row["parallel_processes_needed"] = totals.maxes["parallel_processes_needed"]
 
@@ -1069,6 +1070,23 @@ def _add_burst_columns(row: dict, totals) -> None:
         if column in totals.true_counts:
             flagged = totals.true_counts[column]
             row[share] = flagged / totals.rows
+
+
+def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
+    """The point's strong service over its strong decodes; None for none.
+
+    A ratio of two sums, gem5's Formula avgMissLatency = missLatency /
+    misses (src/mem/cache/base.cc:2187-2188), whose nonan flag prints
+    nothing for a zero count (src/base/stats/text.cc:288-290); sinter
+    likewise sums counts and divides at read time
+    (sinter/_data/_anon_task_stats.py:57-78). A mean of each shot's
+    mean would weigh a shot of one decode like a shot of ten. A folder
+    whose shots hold no sum gets no mean, the rule of _points_held.
+    """
+    escalated_windows = totals.sums["escalated_windows"]
+    if escalated_windows == 0:
+        return None
+    return totals.sums["strong_service_sum_us"] / escalated_windows
 
 
 def strong_service_bound_us(totals: fold.RowTotals) -> float:

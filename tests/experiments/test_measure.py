@@ -124,6 +124,7 @@ CHAIN = (
     "compute_wait",
     "service",
     "confidence",
+    "selection_wait",
     "output_link_per_window",
     "frame_commit",
 )
@@ -438,9 +439,9 @@ def test_one_windows_points_sum_to_its_reaction_time(tmp_path):
 def test_a_windows_decision_time_is_its_own_point(tmp_path):
     """1000 cycles of the 250 MHz fridge clock: 4 us before every queue.
 
-    windows.decision_cycles holds each request until its clock edge
-    before it enters the decode queue (windows/decode_requests.py
-    enqueue), so every window's admission_wait is 4.0 us and the
+    windows.decision_cycles holds each window's requests until its clock
+    edge before they enter the decode queue (windows/decode_requests.py
+    request), so every window's admission_wait is 4.0 us and the
     points still add up to its reaction time. Ciw keeps a customer's
     pre-service wait as a field of its own record (ciw/data_record.py
     lines 3-21), and so does this span.
@@ -448,6 +449,36 @@ def test_a_windows_decision_time_is_its_own_point(tmp_path):
     measurement = slow_unit_shot(tmp_path, 1, decision_cycles=1000)
 
     assert measurement.samples["admission_wait"] == [4.0] * 9
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+
+
+def test_a_strong_answer_held_for_its_selection_waits_in_its_own_point(
+    tmp_path,
+):
+    """A speculative strong decode that ends first waits for its selection.
+
+    Under run_both_at_once the strong decode starts with the weak one
+    (Toshio et al. 2510.25222 lines 598-601) and its answer waits in its
+    unit's output slot, as a sender keeps a packet until the far side
+    takes it (gem5 port.hh:244-255), until the verdict's selection has
+    crossed weak_decoder_to_strong_decoder. That crossing is
+    selection_wait, and the points add up to every window's reaction.
+    A 5.0 us weak card that runs both forced-class solves on one unit
+    answers after the 10.0 us strong decode it started with.
+    """
+    weak_decoder = {
+        "kind": 5.0,
+        "units": 1,
+        "unit_memory": {"bits": None},
+        "engine": ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
+    }
+    sections = {"weak_decoder": weak_decoder}
+    shot = switching_run(
+        tmp_path, 20.0, run_both_at_once=True, sections=sections
+    )
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.samples["selection_wait"][0] == 0.02
     assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
 
 

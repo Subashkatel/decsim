@@ -152,7 +152,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `algorithm` | the decoding algorithm itself |
 | `release` | the unit writing the correction out |
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
-| `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the other forced-class solve's remaining time under `complementary_gap`, and zero for a window that escalated |
+| `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the other forced-class solve's remaining time under `complementary_gap`, and zero for an escalated window whose strong decode began after the verdict |
+| `selection_wait` | the verdict, or the committing decode's end when later, to its answer leaving for the frame: a finished strong answer kept in its unit's output slot until the verdict's selection has crossed `weak_decoder_to_strong_decoder`, which a speculative strong decode under `run_both_at_once` waits for, and zero for every other window |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
 | `dd_per_window` | one decoder to the next: the boundary handoff |
@@ -187,6 +188,8 @@ to one decode.
 - `service` is its compute, and `output_link_per_window` its way home.
 - `confidence` is the signal the verdict needs, computed after that
   decode ended.
+- `selection_wait` is a strong answer that finished first waiting for
+  the verdict's selection to reach it.
 - `frame_commit` closes it.
 
 On a serial path those ten add

@@ -87,10 +87,16 @@ POINTS = (
     # the committing decode's end -> the verdict on the window's answer:
     # the confidence signal's own computation, which is the walk under
     # cluster_gap and the other forced-class solve's remaining time under
-    # complementary_gap. Zero for an escalated window, whose committing
-    # decode is the strong one and whose weak_attempt already runs to
-    # the verdict
+    # complementary_gap. Zero for an escalated window whose strong decode
+    # began after the verdict, since its weak_attempt already runs to it
     "confidence",
+    # the verdict, or the committing decode's end when later -> its answer
+    # leaving for the frame: a finished strong answer kept in its unit's
+    # output slot (decoders/decoder_unit.py hold_output) until the
+    # verdict's selection has crossed weak_decoder_to_strong_decoder, the
+    # wait a strong decode started with the weak one under
+    # run_both_at_once has; zero for every other window
+    "selection_wait",
     # a unit took the window's first decode -> the verdict that
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
@@ -563,6 +569,8 @@ def window_points_us(
     park = _span_microseconds(startable, input_landed)
     rounds_wait = _span_microseconds(input_sent, attempt_end)
     confidence_ticks = _confidence_ticks(window, decode)
+    output_sent = frame_record.accepted_ticks - output_ticks
+    answered = max(window.t_done, decode.done_ticks)
     last_required_send = qpu_send[(operation_id, last_required_round)]
     first_required_send = qpu_send[(operation_id, window.start_round)]
     return {
@@ -587,6 +595,7 @@ def window_points_us(
             decode.done_ticks, decode.compute_start_ticks
         ),
         "confidence": config_module.ticks_to_microseconds(confidence_ticks),
+        "selection_wait": _span_microseconds(output_sent, answered),
         "weak_attempt": _span_microseconds(attempt_end, first_dispatch),
         "escalation_link_per_window": config_module.ticks_to_microseconds(
             escalation_ticks

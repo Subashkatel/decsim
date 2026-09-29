@@ -438,6 +438,7 @@ What the QPU reads out each round for an operation.
 | --- | --- |
 | `operation_circuit_scope` | `str` |
 | `takes_code_card` | `bool` |
+| `emits_bit_values` | `bool` |
 | `shot_sampled` | `Any` |
 
 | Method | What it does |

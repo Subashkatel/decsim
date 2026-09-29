@@ -1406,13 +1406,15 @@ class SyndromeSource(Protocol):
     takes_code_card says whether the row shapes its payloads by the
     run's code card: such a row is built with the card, so its rounds
     state the code's syndrome width, and a row that reads its widths
-    off a circuit is built without it.
+    off a circuit is built without it. emits_bit_values says whether a
+    round's payloads carry measured values, or their sizes alone.
     """
 
     # none means this consumer does not need Operation.circuit; it does not
     # require removal when an independent model provider needs the circuit.
     operation_circuit_scope: str
     takes_code_card: bool
+    emits_bit_values: bool
     shot_sampled: Any
 
     def declare_stream(

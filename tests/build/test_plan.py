@@ -16,6 +16,7 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
+import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
@@ -32,9 +33,18 @@ import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
+# the decoder manager section a run gets when the test names none
+NO_BULK_STRONG = decoder_settings.DecoderManagerSettings()
+
 
 def _plan(
-    *, escalation=None, windows=None, qpu=None, idle_policy=None, workload=None
+    *,
+    escalation=None,
+    windows=None,
+    qpu=None,
+    idle_policy=None,
+    workload=None,
+    decoder_manager=NO_BULK_STRONG,
 ):
     """The plan of a six-round memory run with the given sections."""
     if idle_policy is None:
@@ -59,6 +69,7 @@ def _plan(
         escalation=escalation,
         windows=windows,
         idle_policy=idle_policy,
+        decoder_manager=decoder_manager,
     )
     policy = escalation_build.build_escalation_policy(
         escalation, settings.weak_decoder
@@ -74,6 +85,36 @@ def _switching():
         gap_threshold_nats=2.0,
         confidence="complementary_gap",
     )
+
+
+def test_bulk_strong_is_refused_when_the_rounds_carry_bits():
+    """A merged strong decode carries timing alone; bits would be dropped."""
+    bits = qpu_settings.QpuSettings(kind="syndrome_bits", distance=3)
+    escalation = _switching()
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+
+    with pytest.raises(ValueError, match="qpu.kind syndrome_bits"):
+        _plan(qpu=bits, escalation=escalation, decoder_manager=bulk)
+
+
+def test_bulk_strong_is_built_beside_an_explicitly_empty_model_source():
+    empty_models = syndrome_devices.NO_WINDOW_MODELS
+    timing = qpu_settings.QpuSettings(error_model_provider=empty_models)
+    escalation = _switching()
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+
+    plan = _plan(qpu=timing, escalation=escalation, decoder_manager=bulk)
+
+    assert plan.error_model_provider is empty_models
+
+
+def test_bulk_strong_is_built_when_the_rounds_carry_timing_alone():
+    escalation = _switching()
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+
+    plan = _plan(escalation=escalation, decoder_manager=bulk)
+
+    assert not plan.device.emits_bit_values
 
 
 def test_a_row_shaped_by_the_code_card_is_built_with_the_runs_card():

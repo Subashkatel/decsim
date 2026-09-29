@@ -5,10 +5,11 @@ A stream is a run of syndrome rounds shared by several operations
 is bound to which stream round, the next free round of every stream, and the
 protected regions: a protected region keeps one live stream on its owner group
 between a start and an end operation, emits one round of it per QEC cycle
-at the cycle boundary, holds operations that need the patch until that
-boundary, and seals the stream only after its final round. An idle
-patch continues the stream it holds (extend_live_stream), and a segment
-that declares no offset is bound as the QPU starts it (bind_at_start).
+at the cycle boundary, holds preloaded operations that need the patch
+until that boundary, and seals the stream only after its final round. An
+idle patch continues the stream it holds (extend_live_stream), and a
+segment that declares no offset is bound as the QPU starts it
+(bind_at_start).
 Each stream's state is one record (_LiveStream, its protected cycle in
 _ProtectedCycle); the program's regions and the resolved plan are one
 table. Nothing here schedules decoding; the window manager learns about
@@ -188,7 +189,17 @@ class FeedbackStreams:
     # ---- starting an operation
 
     def blocks_start(self, operation: program_records.Operation) -> bool:
-        """True while a live protected group holds this operation."""
+        """True while a live protected group holds this operation.
+
+        A preloaded command starts on the boundary it is issued at, so it
+        waits here for that boundary to open. A released command already
+        waits once: the controller arms its pulse as the decision lands
+        and the QPU plays it at the next timing point after it arrives
+        (QubiC 2404.15260 lines 286-290, eQASM 1808.02449 lines
+        535-545), while the protected patch keeps measuring (Quantum
+        Machines 2412.00289 lines 524-531). It is not held for a boundary
+        before it is sent.
+        """
         live_patches = self._live_protected_patches()
         patches = set(operation.patches)
         active_patches = patches.intersection(live_patches)
@@ -198,6 +209,8 @@ class FeedbackStreams:
             if active_patches.intersection(starting_patches):
                 return True
         if not active_patches:
+            return False
+        if operation.blocked_by is not None:
             return False
         open_patches = self._boundary_open_patches()
         return not active_patches.issubset(open_patches)

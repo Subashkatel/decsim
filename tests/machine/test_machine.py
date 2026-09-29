@@ -434,10 +434,11 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
-    # a two microsecond strong input keeps the live stream running fifteen
-    # rounds, so its last window holds six rounds ending on the final one
+    # a three microsecond strong input keeps the live stream running
+    # fifteen rounds, so its last window holds six rounds ending on the
+    # final one
     links = _price_path(
-        settings.links, "strong_buffer_to_strong_decoder", 2_000_000
+        settings.links, "strong_buffer_to_strong_decoder", 3_000_000
     )
     settings = dataclasses.replace(
         settings,
@@ -2600,6 +2601,41 @@ def test_a_recorded_stream_scores_the_full_prediction_against_full_truth() -> (
     assert owner.logical_observables == (1,)
     assert owner.observable_truth == (1,)
     assert owner.logical_failure is False
+
+
+def test_a_released_pulse_on_a_protected_patch_waits_for_one_boundary():
+    """The pulse leaves at the decision and starts on the next boundary.
+
+    The controller's branch arms the pulse as the decision lands and the
+    QPU plays it at its next timing point (QubiC 2404.15260 lines
+    286-290, eQASM 1808.02449 lines 535-545). The protected patch keeps
+    measuring meanwhile (Quantum Machines 2412.00289 lines 524-531).
+    """
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z", 24, 3, 0.001
+    )
+    source = stim_device.StimDevice()
+    settings = _protected_memory_settings(circuit, source)
+    machine = machine_module.Machine.build(settings, 0)
+    outputs = {}
+    commands = {}
+
+    def heard_output(event):
+        outputs[(event.kind, event.operation_id)] = event.tick
+
+    def heard_command(event):
+        commands[(event.kind, event.command.operation.id)] = event.tick
+
+    machine.instruction_output.trace.output_event.connect(heard_output)
+    machine.qpu.trace.command_event.connect(heard_command)
+    machine.run()
+
+    decided = outputs[("DECISION_AVAILABLE", 3)]
+    issued = outputs[("CONTROL_PULSE_COMMAND_ISSUED", 3)]
+    arrived = commands[("ARRIVED", 3)]
+    started = commands[("STARTED", 3)]
+    assert issued == decided
+    assert started == machine.qpu.boundary_at_or_after(arrived) == 7_700_000
 
 
 def _protected_memory_settings(circuit, source):

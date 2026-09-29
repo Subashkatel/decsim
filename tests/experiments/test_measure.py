@@ -491,7 +491,7 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     """Under strong_only the default pool's numbers are the strong tier's.
 
     The plan's windows queue in the default pool whichever tier decodes
-    them (decode_queue.POOL_BY_JOB_KIND), and under strong_only that
+    them (build/decoders.py), and under strong_only that
     tier is the strong one, so its queue peak and busy fraction belong
     in the strong columns and the weak columns read zero, the mirror of
     test_the_pool_columns_read_each_tiers_own_queue_and_units.
@@ -1380,8 +1380,7 @@ class StrongResidentsWaitingOnCompute:
             machine.strong_decoder_manager,
         ):
             if manager is not None:
-                pool_units = manager.service.pool.units()
-                self.units.extend(pool_units)
+                self.units.extend(manager.service.pool.units)
         self.depth_by_tick = {}
 
     def sample(self, now: int) -> None:

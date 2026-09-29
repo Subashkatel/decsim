@@ -447,7 +447,7 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     )
     run = _run(settings)
     assert max(run.strong_occupancies) <= window_bits
-    units = run.machine.decoder_manager.pool.units()
+    units = run.machine.decoder_manager.pool.units
     memory = units[0].memory.snapshot()
     assert memory.capacity_bits == window_bits
     assert memory.peak_occupied_bits == window_bits
@@ -2828,7 +2828,7 @@ def _assert_drained(run: _Run) -> None:
     assert run.machine.strong_syndrome_buffer.occupancy == 0
     receiver = run.machine.strong_syndrome_round_receiver
     assert receiver.reserved_bits_by_round == {}
-    units = run.machine.decoder_manager.pool.units()
+    units = run.machine.decoder_manager.pool.units
     occupied = [unit.memory.occupied_bits for unit in units]
     assert occupied == [0] * len(units)
 

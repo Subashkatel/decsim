@@ -597,9 +597,8 @@ def test_a_fourth_escalation_row_gets_the_boundaries_pools_and_join(
     boundary_policy = machine.window_manager.courier.boundary_policy
     assert isinstance(boundary_policy, boundary_policies.Held)
     assert machine.window_manager.requester.gap_join is not None
-    assert sorted(machine.decoder_manager.pool.units_by_pool) == ["default"]
-    strong_pool = machine.strong_decoder_manager.pool
-    assert sorted(strong_pool.units_by_pool) == ["strong"]
+    assert machine.decoder_manager.pool.name == "default"
+    assert machine.strong_decoder_manager.pool.name == "strong"
     chip_decoder = machine.decoder_manager.decoder
     assert machine.strong_decoder_manager.decoder is not chip_decoder
     assert machine.window_manager.planner.scheme.has_trailing_tail_context

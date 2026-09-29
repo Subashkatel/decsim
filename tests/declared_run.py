@@ -13,7 +13,6 @@ import dataclasses
 
 import decsim.config as config
 import decsim.controller.settings as controller_settings
-import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
@@ -292,6 +291,7 @@ def switching_run(
     clock=None,
     threshold_cycles=0,
     switch_cycles=0,
+    strong_input="copy",
 ):
     """Weak-primary switching on the declared fabric.
 
@@ -300,10 +300,13 @@ def switching_run(
     (keep the weak result) or 0.0 (escalate) against the threshold.
     """
     weak, strong = switching_decoders(escalation_probability, probability_for)
+    weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
     weak_decoder = decoder_settings.DecoderSettings(
-        decoder=weak, units=weak_units
+        decoder=weak, units=weak_units, unit_memory=weak_memory
     )
-    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
+    strong_decoder = decoder_settings.DecoderSettings(
+        decoder=strong, input=strong_input
+    )
     threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -321,14 +324,8 @@ def switching_run(
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )
-    memory = None
-    if weak_memory_bits is not None:
-        memory = decoder_memory.DecoderMemoryConfig(
-            {"default": weak_memory_bits}
-        )
     decoder_manager = decoder_settings.DecoderManagerSettings(
-        decoder_memory=memory,
-        bulk_strong=bulk_strong,
+        bulk_strong=bulk_strong
     )
     escalation = escalation_settings.EscalationSettings(
         policy=policy,

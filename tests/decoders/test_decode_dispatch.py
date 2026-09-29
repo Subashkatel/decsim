@@ -17,6 +17,7 @@ import functools
 
 import decsim.config as config
 import decsim.decoders.decoder_manager as decoder_manager
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
@@ -122,10 +123,13 @@ def _manager(engine, unit_count):
     decoder = decoders.PresetLatencyDecoder(DECODE_MICROSECONDS)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=unit_count
+    )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
-        unit_pools={"default": unit_count},
+        pool_settings=pool_settings,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = decoder
@@ -143,9 +147,9 @@ def test_a_blocked_job_never_displaces_a_startable_one():
     dispatched = []
     original_dispatch_to = manager.service.dispatch_to
 
-    def recording_dispatch_to(pool, job, unit, claim_compute):
+    def recording_dispatch_to(job, unit, claim_compute):
         dispatched.append(job.label)
-        original_dispatch_to(pool, job, unit, claim_compute)
+        original_dispatch_to(job, unit, claim_compute)
 
     manager.service.dispatch_to = recording_dispatch_to
     # a computes and b lands in the second slot: the unit is full, so

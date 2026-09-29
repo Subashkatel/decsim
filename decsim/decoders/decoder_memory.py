@@ -21,8 +21,6 @@ another unit.
 """
 
 import dataclasses
-import types
-from collections.abc import Mapping
 from typing import Any, Optional
 
 import decsim.records.decoding as decoding_records
@@ -52,32 +50,6 @@ class DecoderMemoryCapacityError(RuntimeError):
         self.unit = unit
         self.requested_bits = requested_bits
         self.capacity_bits = capacity_bits
-
-
-@dataclasses.dataclass(frozen=True)
-class DecoderMemoryConfig:
-    """Bits of memory per decoder unit, by pool.
-
-    A pool absent from the map is unbounded; no config at all leaves
-    every unit unbounded.
-    """
-
-    capacity_bits_by_pool: Mapping[str, int]
-
-    def __post_init__(self) -> None:
-        copied = dict(self.capacity_bits_by_pool)
-        for pool, capacity in copied.items():
-            if capacity < 1:
-                raise ValueError(
-                    f"pool {pool!r} needs a positive bit capacity, "
-                    f"got {capacity}"
-                )
-        frozen = types.MappingProxyType(copied)
-        object.__setattr__(self, "capacity_bits_by_pool", frozen)
-
-    def capacity_for(self, pool: str) -> Optional[int]:
-        """The pool's bits per unit; None when unbounded."""
-        return self.capacity_bits_by_pool.get(pool)
 
 
 @dataclasses.dataclass(frozen=True)

@@ -1,10 +1,10 @@
 """The decode queues' depth over time, one sample per change.
 
-A listener on each manager's depth_changed(tick, depth), one manager
-per side, so a sample is the jobs waiting over both; the samples are
-what the gate pins as queue_log and what the switching study reads as
-the ready-queue's peak. It also hears pool_depth_changed(tick, pool,
-depth) and keeps each pool's samples apart, for the max backlog per
+A listener on each manager's depth_changed(tick, depth), bound to the
+name of that manager's one pool, one manager per side, so a sample is
+the jobs waiting over both; the samples are what the gate pins as
+queue_log and what the switching study reads as the ready-queue's peak.
+Each pool's samples are also kept apart, for the max backlog per
 decoder instance DART-Q reports (2605.09142 lines 1101-1109), which the
 pool sweep reads per tier.
 
@@ -22,22 +22,19 @@ import collections
 
 
 class QueueDepthLog:
-    """(tick, jobs waiting over every pool of every manager) at every change."""
+    """(tick, jobs waiting over both managers' pools) at every change."""
 
     def __init__(self) -> None:
         self.samples: list = []
-        self.depth_by_manager: dict = {}
+        self.depth_by_pool: dict = {}
         self.samples_by_pool: dict = collections.defaultdict(list)
 
-    def depth_changed(self, manager, tick: int, depth: int) -> None:
-        """One manager's depth now; the sample is the sum over managers."""
-        self.depth_by_manager[manager] = depth
-        depths = self.depth_by_manager.values()
+    def depth_changed(self, pool: str, tick: int, depth: int) -> None:
+        """One pool's depth now; the sample is the sum over pools."""
+        self.depth_by_pool[pool] = depth
+        depths = self.depth_by_pool.values()
         total = sum(depths)
         self.samples.append((tick, total))
-
-    def pool_depth_changed(self, tick: int, pool: str, depth: int) -> None:
-        """One pool's depth now, kept apart from the total's samples."""
         self.samples_by_pool[pool].append((tick, depth))
 
     @property

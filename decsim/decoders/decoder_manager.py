@@ -1,6 +1,6 @@
 """The decoder manager: the facade that gives ready windows a decoder unit.
 
-A job waits in the WaitingJobs of its pool, the DecodeDispatcher places
+A job waits in the WaitingJobs, the DecodeDispatcher places
 it on the DecoderUnit the DecoderPool offers, the DecodeService stages
 its input into that unit's memory and starts the manager's decoder once
 the input landed and the window owes no boundary, the StrongRequests say
@@ -35,7 +35,6 @@ import decsim.decoders.decode_dispatch as decode_dispatch
 import decsim.decoders.decode_outcomes as decode_outcomes
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decode_service as decode_service
-import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.strong_requests as strong_requests_module
@@ -72,31 +71,24 @@ class DecoderManager:
         engine,
         *,
         scheduler,
-        unit_pools: dict,
+        pool_settings: decoder_pool_module.PoolSettings,
         bulk_strong: bool = False,
-        decoder_memory: Optional[
-            decoder_memory_module.DecoderMemoryConfig
-        ] = None,
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
-        copies_input_by_pool: Optional[dict] = None,
-        blocks_unit_by_pool: Optional[dict] = None,
-        formation_by_pool: Optional[dict] = None,
     ):
         self.engine = engine
-        pool = decoder_pool_module.DecoderPool(
-            self, unit_pools, decoder_memory, blocks_unit_by_pool
-        )
+        pool = decoder_pool_module.DecoderPool(self, pool_settings)
+        is_strong_pool = pool_settings.name == decode_queue.STRONG_POOL
+        merges_strong = bulk_strong and is_strong_pool
         self.queue = decode_queue.WaitingJobs(
-            engine,
-            scheduler,
-            pool.units_by_pool,
-            self,
-            is_bulk_strong=bulk_strong,
+            engine, scheduler, self, merges_strong
         )
         transport = staging_module.CancellableDecoderMemoryTransfer(engine)
         staging = staging_module.DecoderInputStaging(
-            transport, engine, copies_input_by_pool, formation_by_pool
+            transport,
+            engine,
+            pool_settings.copies_input,
+            pool_settings.formation,
         )
         self.service = decode_service.DecodeService(
             engine,
@@ -207,6 +199,13 @@ class DecoderManager:
             self.dispatcher.run()
             return
         self.queue.add(job)
+        pool_tag = decode_queue.pool_tag_of(self.pool.name)
+        queue_length = len(self.queue.waiting)
+        self.engine.log(
+            log_sources.DECODER_MANAGER,
+            f"{job.label} READY -> enqueue "
+            f"({pool_tag}ready-queue length = {queue_length})",
+        )
         self.dispatcher.run()
 
     def enqueue_without_input(
@@ -234,7 +233,7 @@ class DecoderManager:
             spatial_nodes=spatial_nodes,
             kind=decoding_records.DecodeJobKind.SELF_CONTAINED,
         )
-        self.queue.add_quietly(job)
+        self.queue.add(job)
         self.dispatcher.run()
 
     def dispatch(self) -> None:
@@ -376,7 +375,7 @@ class DecoderManager:
         block gave the unit back at the decode's end and has nothing to
         give back here.
         """
-        if not self.pool.blocks_unit(job):
+        if not self.pool.blocks_unit:
             return
         self.service.free(job)
         self.dispatcher.run()
@@ -484,7 +483,7 @@ class DecoderManager:
         # no-op.
         self.service.release_input(job)
         pool_tag = decode_queue.pool_tag_of(job.pool)
-        free_now = self.service.free_unit_count(job.pool)
+        free_now = self.service.free_unit_count()
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"DECODE DONE {job.label} ({pool_tag}units free now {free_now})",
@@ -502,7 +501,7 @@ class DecoderManager:
         has read it (<tier>.result_blocks_unit).
         """
         job.completed = True
-        if not self.pool.blocks_unit(job):
+        if not self.pool.blocks_unit:
             self.service.free(job)
         self.outcomes.deliver_weak(job, result)
         self.service.release_input(job)
@@ -569,7 +568,7 @@ class DecoderManager:
 
     def _find_window_jobs(self, window_key: tuple) -> list:
         """Every live weak job of the window: one attempt, one or two jobs."""
-        candidates = self.queue.jobs()
+        candidates = list(self.queue.waiting)
         residents = self.service.resident_jobs()
         candidates.extend(residents)
         found = []

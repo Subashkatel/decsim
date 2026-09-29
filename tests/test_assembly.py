@@ -142,8 +142,8 @@ def test_each_side_has_its_own_manager_decoder_pool_and_one_ledger():
     assembly.bind(wires, seats)
     chip = seats["decoder_manager"]
     host = seats["strong_decoder_manager"]
-    assert sorted(chip.pool.units_by_pool) == ["default"]
-    assert sorted(host.pool.units_by_pool) == ["strong"]
+    assert chip.pool.name == "default"
+    assert host.pool.name == "strong"
     assert chip.strong_requests is seats["strong_requests"]
     assert host.strong_requests is seats["strong_requests"]
     assert host.escalation_policy is seats["escalation_policy"]

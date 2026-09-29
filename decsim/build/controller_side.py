@@ -18,8 +18,8 @@ import decsim.controller.operation_issue as operation_issue
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
-import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
+import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -53,16 +53,12 @@ def build_strong_requests(
 def build_decoder_manager(
     parts: build_parts.Parts,
 ) -> decoder_manager_module.DecoderManager:
-    """The chip's decoder manager: every pool but the strong one.
+    """The chip's decoder manager, over the default pool.
 
     The strong pool is the host's manager's, so this one never holds a
     strong job; the ledger is the seat both managers are wired to.
     """
-    unit_pools = {}
-    for name, units in parts.pool.unit_pools.items():
-        if name != decode_queue.STRONG_POOL:
-            unit_pools[name] = units
-    return _decoder_manager(parts, unit_pools)
+    return _decoder_manager(parts, parts.pool.chip)
 
 
 def build_strong_decoder_manager(
@@ -75,9 +71,7 @@ def build_strong_decoder_manager(
     the host's scheduler owns the decode queue and the thread pool).
     The escalation side and the requester's strong sibling submit here.
     """
-    units = parts.pool.unit_pools[decode_queue.STRONG_POOL]
-    unit_pools = {decode_queue.STRONG_POOL: units}
-    return _decoder_manager(parts, unit_pools)
+    return _decoder_manager(parts, parts.pool.host)
 
 
 def build_detection_events(
@@ -269,23 +263,18 @@ def resolved_patches_by_identity(plan) -> dict:
 
 
 def _decoder_manager(
-    parts: build_parts.Parts, unit_pools: dict
+    parts: build_parts.Parts, pool_settings: decoder_pool_module.PoolSettings
 ) -> decoder_manager_module.DecoderManager:
-    """One manager over the named pools, on the run's one manager card."""
-    pool = parts.pool
+    """One manager over its pool, on the run's one manager card."""
     settings = parts.settings.decoder_manager
     scheduler = settings.scheduler()
     return decoder_manager_module.DecoderManager(
         parts.engine,
         scheduler=scheduler,
-        unit_pools=unit_pools,
+        pool_settings=pool_settings,
         bulk_strong=settings.bulk_strong,
-        decoder_memory=pool.decoder_memory,
         clock=settings.clock,
         dispatch_cycles=settings.dispatch_cycles,
-        copies_input_by_pool=pool.copies_input_by_pool,
-        blocks_unit_by_pool=pool.blocks_unit_by_pool,
-        formation_by_pool=pool.formation_by_pool,
     )
 
 

@@ -29,6 +29,7 @@ from collections.abc import Callable
 from typing import Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.detection_events as detection_events_module
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
 
@@ -49,20 +50,20 @@ class DecoderInputStaging:
         self,
         transport,
         engine,
-        copies_input_by_pool=None,
-        formation_by_pool=None,
+        copies_input: bool = True,
+        formation: Optional[detection_events_module.TierFormation] = None,
     ):
         self.transport = transport
         self.engine = engine
         self.trace = _TraceSources()
         # landing key -> the transfer in flight and the jobs joining it
         self.awaited_by_input: dict = {}
-        # pool name -> whether that tier copies its input into the unit;
-        # a pool this map does not name copies, which is the default
-        self.copies_input_by_pool = copies_input_by_pool or {}
-        # pool name -> that tier's event-detection logic, for a run that
-        # seats the former at the tier's decoder (detection_events)
-        self.formation_by_pool = formation_by_pool or {}
+        # whether the pool's tier copies its input into the unit
+        # (<tier>.input)
+        self.copies_input = copies_input
+        # the tier's event-detection logic, for a run that seats the
+        # former at the tier's decoder (detection_events.formed_at)
+        self.formation = formation
 
     def stage(
         self,
@@ -79,7 +80,7 @@ class DecoderInputStaging:
         and moves nothing. A tier that reads its input in place deposits
         nothing and sends nothing.
         """
-        if not self.copies_input(job):
+        if not self.copies_input:
             self._read_in_place(job, on_landed)
             return
         if memory.holds(job):
@@ -162,10 +163,6 @@ class DecoderInputStaging:
             return
         job.decoder_input = memory.rewrite(job, masked_input)
 
-    def copies_input(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether this job's tier is given a copy of the rounds it reads."""
-        return self.copies_input_by_pool.get(job.pool, True)
-
     def _form_detection_events(self, job: decoding_records.DecodeJob) -> None:
         """This tier's event-detection logic runs on the rounds it received.
 
@@ -176,10 +173,9 @@ class DecoderInputStaging:
         """
         round_before = job.round_before
         job.round_before = ()
-        formation = self.formation_by_pool.get(job.pool)
-        if formation is None:
+        if self.formation is None:
             return
-        job.payloads = formation.form(job.payloads, round_before)
+        job.payloads = self.formation.form(job.payloads, round_before)
 
     def _land(
         self,
@@ -302,10 +298,9 @@ class DecoderInputStaging:
 
     def _release_formation_claim(self, job: decoding_records.DecodeJob) -> None:
         """The job's tier takes back the rounds it claimed, never formed."""
-        formation = self.formation_by_pool.get(job.pool)
-        if formation is None:
+        if self.formation is None:
             return
-        formation.release(job)
+        self.formation.release(job)
 
     def _drop_awaited(self, job: decoding_records.DecodeJob) -> None:
         """Forget a landing this job was sending or waiting for.

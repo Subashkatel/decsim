@@ -5,19 +5,17 @@ is what lets the backlog sampler take a view after every action without
 changing what the run does.
 """
 
+import types
+
 import decsim.observe.decode_records as decode_records
 import decsim.observe.run_views as run_views
 import decsim.observe.window_ledger as window_ledger_module
 
 
-class _Queue:
-    def __init__(self, waiting_by_pool: dict) -> None:
-        self.waiting_by_pool = waiting_by_pool
-
-
 class _DecoderManager:
-    def __init__(self, waiting_by_pool: dict) -> None:
-        self.queue = _Queue(waiting_by_pool)
+    def __init__(self, pool: str, waiting: list) -> None:
+        self.pool = types.SimpleNamespace(name=pool)
+        self.queue = types.SimpleNamespace(waiting=waiting)
 
 
 class _WindowManager:
@@ -31,7 +29,7 @@ class _WindowManager:
 
 
 def test_an_idle_run_has_no_ready_job_and_no_waiting_round():
-    decoders = (_DecoderManager({"default": []}),)
+    decoders = (_DecoderManager("default", []),)
     windows = _WindowManager(())
 
     view = run_views.backlog_view(windows, decoders)
@@ -42,8 +40,8 @@ def test_an_idle_run_has_no_ready_job_and_no_waiting_round():
 
 
 def test_the_default_pool_is_the_unnamed_lane_and_the_hosts_keeps_its_name():
-    chip = _DecoderManager({"default": ["a"]})
-    host = _DecoderManager({"strong": ["b", "c"]})
+    chip = _DecoderManager("default", ["a"])
+    host = _DecoderManager("strong", ["b", "c"])
     decoders = (chip, host)
     windows = _WindowManager(())
 
@@ -54,7 +52,7 @@ def test_the_default_pool_is_the_unnamed_lane_and_the_hosts_keeps_its_name():
 
 
 def test_the_rounds_are_summed_per_operation_per_patch_and_over_the_run():
-    decoders = (_DecoderManager({"default": []}),)
+    decoders = (_DecoderManager("default", []),)
     windows = _WindowManager(((1, "p0", 4), (2, "p0", 3), (3, "p1", 2)))
 
     view = run_views.backlog_view(windows, decoders)

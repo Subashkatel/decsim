@@ -1158,8 +1158,8 @@ def _pool_measures(
 ) -> _PoolMeasures:
     """Each pool's own queue peak and busy fraction, by the tier's name.
 
-    The plan's windows queue in the default pool and a strong re-decode
-    in the strong pool (decode_queue.POOL_BY_JOB_KIND), so the default
+    The plan's windows queue in the chip's default pool and a strong
+    re-decode in the host's strong pool (build/decoders.py), so the default
     pool's numbers are the primary tier's: the weak tier's on a
     weak-primary run, the strong tier's under strong_only, where the
     weak columns read zero; a run without a pool reads zero for it.

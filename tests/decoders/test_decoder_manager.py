@@ -14,6 +14,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.staged_decoder as staged_decoder
@@ -103,14 +104,16 @@ class TwoRoundSource:
         )
 
 
-def _manager(engine, row, formation_by_pool=None, unit_count=1):
+def _manager(engine, row, formation=None, unit_count=1):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=unit_count, formation=formation
+    )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
-        unit_pools={"default": unit_count},
-        formation_by_pool=formation_by_pool,
+        pool_settings=pool_settings,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
@@ -198,7 +201,7 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
         1, 1, window_records.DecoderTier.WEAK, 1
     )
     manager.enqueue(waiting, None, on_decoded)
-    assert manager.queue.total() == 0  # both took a slot of the one unit
+    assert manager.queue.waiting == []  # both took a slot of the one unit
     manager.withdraw_window((1, 1))
     assert waiting.cancelled is True
     assert waiting.unit is None
@@ -226,7 +229,7 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     source = OneRoundSource()
     placement = event_formation.SeatedFormation(source, at_the_weak_decoder)
     formation = detection_events.TierFormation(placement, "weak_decoder")
-    manager = _manager(engine, row, {"default": formation})
+    manager = _manager(engine, row, formation)
     formation_stage = detection_events.DetectionEventFormationStage(
         "detection_event_formation", formation=formation
     )
@@ -264,7 +267,7 @@ def test_the_round_before_is_held_by_the_tier_and_not_deposited():
     placement = event_formation.SeatedFormation(source, at_the_weak_decoder)
     formation = detection_events.TierFormation(placement, "weak_decoder")
     row = FixedRow()
-    manager = _manager(engine, row, {"default": formation})
+    manager = _manager(engine, row, formation)
     deposited = []
 
     def note_deposit(job, *_) -> None:
@@ -314,10 +317,11 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     strong = staged_decoder.StagedDecoder(algorithm, timing)
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    pool_settings = decoder_pool.PoolSettings(name="strong", unit_count=1)
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
-        unit_pools={"strong": 1},
+        pool_settings=pool_settings,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.escalation_policy = policy
@@ -385,11 +389,13 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     """A one-unit manager whose default pool blocks, or does not."""
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=1, blocks_unit=blocks_unit
+    )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
-        unit_pools={"default": 1},
-        blocks_unit_by_pool={"default": blocks_unit},
+        pool_settings=pool_settings,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
@@ -563,11 +569,13 @@ def _staging_manager(engine, row, *, copies_input: bool):
     """A one-unit manager whose default pool copies its input, or does not."""
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=1, copies_input=copies_input
+    )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
-        unit_pools={"default": 1},
-        copies_input_by_pool={"default": copies_input},
+        pool_settings=pool_settings,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row

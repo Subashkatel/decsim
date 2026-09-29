@@ -1,9 +1,11 @@
-"""The decoder pools: their units, the free ones, the unit a job is offered.
+"""A manager's pool: its units, the free ones, the unit a job is offered.
 
 gem5's FUPool (src/cpu/o3/fu_pool.hh:64-75): the pool keeps the units and
-knows which are free; the issue logic decides what runs. The manager's
-decoder port names the one algorithm every job of its pools runs (a
-Decoder row, ports.py).
+knows which are free; the issue logic decides what runs. Each manager
+has one pool: the chip's holds the units of the tier that decodes the
+plan's windows, the host's those of a switching run's strong tier. The
+manager's decoder port names the one algorithm every job of the pool
+runs (a Decoder row, ports.py).
 
 A job that may start is offered a free unit with a free slot first.
 Among those, a unit that already holds this job's rounds, or is
@@ -58,6 +60,7 @@ from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_unit as decoder_unit_module
+import decsim.decoders.detection_events as detection_events_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
@@ -66,16 +69,38 @@ import decsim.trace_source as trace_source
 if TYPE_CHECKING:
     import decsim.decoders.decoder_manager as decoder_manager_module
 
-DEFAULT_POOL = "default"
-
 # whether a job's rounds are in that unit's memory or on their way there
 InputIsOnTheUnit = Callable[
     [decoding_records.DecodeJob, decoder_unit_module.DecoderUnit], bool
 ]
 
 
+@dataclasses.dataclass(frozen=True)
+class PoolSettings:
+    """One pool as the root derives it from its tier's settings.
+
+    A manager takes its pool as this one record, as a gem5 FUPool takes
+    its units as one parameter (src/cpu/o3/FUPool.py:49). name labels
+    the pool in logs and results: "default" for the tier that decodes
+    the plan's windows, "strong" for the strong tier of a switching run.
+    unit_count is <tier>.units; capacity_bits is one unit's memory
+    (<tier>.unit_memory, None unbounded); copies_input is <tier>.input;
+    blocks_unit is the primary tier's result_blocks_unit, for both
+    pools; formation is the tier's event-detection logic when
+    detection_events.formed_at seats it at the tier's decoder, else
+    None.
+    """
+
+    name: str
+    unit_count: int
+    capacity_bits: Optional[int] = None
+    copies_input: bool = True
+    blocks_unit: bool = False
+    formation: Optional[detection_events_module.TierFormation] = None
+
+
 class DecoderPool:
-    """The units of every pool and the free ones, by pool name.
+    """The pool's units and the free ones.
 
     Trace sources: unit_busy(unit) when a job takes a unit's compute out
     of the free list, unit_freed(unit) when the compute goes back, so a
@@ -85,59 +110,33 @@ class DecoderPool:
     def __init__(
         self,
         manager: "decoder_manager_module.DecoderManager",
-        unit_pools: dict,
-        decoder_memory: Optional[
-            decoder_memory_module.DecoderMemoryConfig
-        ] = None,
-        blocks_unit_by_pool: Optional[dict] = None,
+        settings: PoolSettings,
     ) -> None:
-        _check_unit_pools(unit_pools)
+        if settings.unit_count < 1:
+            raise ValueError(
+                f"pool {settings.name!r} needs at least 1 unit "
+                f"(got {settings.unit_count})"
+            )
         self.manager = manager
-        # pool name -> whether a finished decode holds its unit until
-        # the window side reads the result (<tier>.result_blocks_unit)
-        self.blocks_unit_by_pool = blocks_unit_by_pool or {}
-        self.units_by_pool: dict[str, list] = {}
+        self.name = settings.name
+        self.blocks_unit = settings.blocks_unit
+        self.units = []
+        for index in range(settings.unit_count):
+            memory = decoder_memory_module.DecoderMemory(
+                settings.name, index, settings.capacity_bits
+            )
+            unit = decoder_unit_module.DecoderUnit(settings.name, index, memory)
+            self.units.append(unit)
         # the units whose compute is back in the pool, in return order
-        self.free_by_pool: dict[str, list] = {}
+        self.free = list(self.units)
         self.trace = _TraceSources()
-        for pool, unit_count in unit_pools.items():
-            capacity = None
-            if decoder_memory is not None:
-                capacity = decoder_memory.capacity_for(pool)
-            units = []
-            for index in range(unit_count):
-                memory = decoder_memory_module.DecoderMemory(
-                    pool, index, capacity
-                )
-                unit = decoder_unit_module.DecoderUnit(pool, index, memory)
-                units.append(unit)
-            self.units_by_pool[pool] = units
-            self.free_by_pool[pool] = list(units)
-
-    def blocks_unit(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether this job's tier holds its unit until the result is read."""
-        return self.blocks_unit_by_pool.get(job.pool, False)
-
-    def units(self) -> list:
-        """Every unit of every pool, pool by pool."""
-        every = []
-        for units in self.units_by_pool.values():
-            every.extend(units)
-        return every
-
-    def free_count(self, pool: str) -> int:
-        """Units of the pool with free compute."""
-        free = self.free_by_pool[pool]
-        return len(free)
 
     def is_free(self, unit: decoder_unit_module.DecoderUnit) -> bool:
-        """Whether the unit's compute is back in its pool."""
-        free = self.free_by_pool[unit.pool]
-        return unit in free
+        """Whether the unit's compute is back in the pool."""
+        return unit in self.free
 
     def offer(
         self,
-        pool: str,
         job: decoding_records.DecodeJob,
         *,
         now: int,
@@ -158,19 +157,19 @@ class DecoderPool:
         """
         takes_free_compute = decoder_unit_module.is_startable(job)
         if takes_free_compute or not carries_input:
-            free = self.free_by_pool[pool]
             free_with_room = _with_room(
-                free, job, resident_capacity, memory_demand_of
+                self.free, job, resident_capacity, memory_demand_of
             )
             unit = _free_unit_for(free_with_room, job, input_is_on_the_unit)
             if unit is not None:
                 return unit, True
         if not carries_input:
             return None
-        units = self.units_by_pool[pool]
-        with_room = _with_room(units, job, resident_capacity, memory_demand_of)
+        with_room = _with_room(
+            self.units, job, resident_capacity, memory_demand_of
+        )
         if takes_free_compute:
-            with_room = self._freeing_first(units, with_room, now)
+            with_room = self._freeing_first(with_room, now)
         if not with_room:
             return None
         staging_rank = functools.partial(
@@ -186,18 +185,16 @@ class DecoderPool:
         job: decoding_records.DecodeJob,
     ) -> None:
         """The job takes the unit's compute out of the pool."""
-        free = self.free_by_pool[unit.pool]
-        free.remove(unit)
+        self.free.remove(unit)
         unit.claim_compute(job)
         self.trace.unit_busy.fire(unit)
 
     def release(self, unit: decoder_unit_module.DecoderUnit) -> None:
-        """The unit's compute goes back to its pool."""
-        free = self.free_by_pool[unit.pool]
-        free.append(unit)
+        """The unit's compute goes back to the pool."""
+        self.free.append(unit)
         self.trace.unit_freed.fire(unit)
 
-    def _freeing_first(self, units: list, with_room: list, now: int) -> list:
+    def _freeing_first(self, with_room: list, now: int) -> list:
         """The units with room among those with the pool's least work left.
 
         A job that may start and finds no free unit starts when the unit
@@ -207,7 +204,7 @@ class DecoderPool:
         full the job waits in the queue.
         """
         work_left_by_unit = {}
-        for unit in units:
+        for unit in self.units:
             work_left = unit.work_left_ticks(now, self._occupancy_ticks)
             work_left_by_unit[unit] = work_left
         work_left_values = work_left_by_unit.values()
@@ -333,21 +330,6 @@ def _fewest_awaiting_compute(units: list) -> decoder_unit_module.DecoderUnit:
             fewest_count = awaiting_count
             chosen = unit
     return chosen
-
-
-def _check_unit_pools(unit_pools: dict) -> None:
-    """A pool map names at least one pool and gives every pool a unit.
-
-    Which pools a manager holds is the assembly's: the chip's manager
-    holds the default pool, the host's the strong one.
-    """
-    if not unit_pools:
-        raise ValueError("unit_pools names no pool")
-    for pool_name, units in unit_pools.items():
-        if units < 1:
-            raise ValueError(
-                f"pool {pool_name!r} needs at least 1 unit (got {units})"
-            )
 
 
 @dataclasses.dataclass(frozen=True)

@@ -24,6 +24,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_memory as decoder_memory
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
@@ -152,12 +153,6 @@ def test_a_second_reader_of_one_input_is_one_copy_held_until_both_are_done():
     assert memory.occupied_bits == 0
 
 
-def test_a_pool_the_yaml_leaves_out_holds_as_many_bits_as_it_is_given():
-    memory_config = decoder_memory.DecoderMemoryConfig({"default": 6})
-    assert memory_config.capacity_for("default") == 6
-    assert memory_config.capacity_for("strong") is None
-
-
 def test_an_inputs_size_is_the_sum_of_its_fragments_bits():
     payloads = [
         fragment(1, 0, 0, bits=(1, 0, 1)),
@@ -265,20 +260,12 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     )
     qpu = qpu_settings.QpuSettings(distance=3)
     decoder = decoders.PerRoundDecoder(tau_us=1.0)
+    unit_memory = decoder_settings.UnitMemorySettings(bits=bits_per_unit)
     weak_decoder = decoder_settings.DecoderSettings(
-        decoder=decoder, units=unit_count
-    )
-    memory_config = decoder_memory.DecoderMemoryConfig(
-        {"default": bits_per_unit}
-    )
-    manager = decoder_settings.DecoderManagerSettings(
-        decoder_memory=memory_config
+        decoder=decoder, units=unit_count, unit_memory=unit_memory
     )
     return machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak_decoder,
-        decoder_manager=manager,
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
 
 
@@ -289,7 +276,7 @@ def test_every_unit_has_its_own_memory_and_ends_the_run_empty():
     settings = _two_patch_memory_run(six_rounds_bits, unit_count=2)
     machine = machine_module.Machine.build(settings)
     machine.run()
-    units = machine.decoder_manager.pool.units()
+    units = machine.decoder_manager.pool.units
     names = [unit.name for unit in units]
     occupied = [unit.memory.occupied_bits for unit in units]
     admissions = [unit.memory.statistics.admissions for unit in units]
@@ -328,15 +315,14 @@ def window_completion_ticks(
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(compute_microseconds)
     scheduler = schedulers.FifoScheduler()
-    memory_config = decoder_memory.DecoderMemoryConfig(
-        {"default": capacity_bits}
-    )
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    pool_settings = decoder_pool.PoolSettings(
+        name="default", unit_count=1, capacity_bits=capacity_bits
+    )
     manager = decoder_manager_module.DecoderManager(
         engine,
         scheduler=scheduler,
-        unit_pools={"default": 1},
-        decoder_memory=memory_config,
+        pool_settings=pool_settings,
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = decoder

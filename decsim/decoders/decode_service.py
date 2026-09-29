@@ -159,7 +159,6 @@ class DecodeService:
 
     def dispatch_to(
         self,
-        pool: str,
         job: decoding_records.DecodeJob,
         unit: decoder_unit_module.DecoderUnit,
         claim_compute: bool,
@@ -170,7 +169,7 @@ class DecodeService:
         model: invoke the unit, then DMA its input); compute is claimed
         only when this unit's compute is actually free.
         """
-        job.pool = pool
+        job.pool = self.pool.name
         self._assign_service_key(job)
         unit.admit(job)
         # kept past the job's eviction: the confidence its evidence
@@ -181,7 +180,7 @@ class DecodeService:
         job.dispatch_ticks = self.engine.now
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
-        self._log_assignment(pool, job, claim_compute)
+        self._log_assignment(job, claim_compute)
         self.trace.job_dispatched.fire(job, unit)
         self._charge_dispatch(job, unit, claim_compute)
 
@@ -320,16 +319,16 @@ class DecodeService:
         """Return the credits of every request one decode still serves."""
         self.staging.release_service_members(members)
 
-    def free_unit_count(self, pool: str) -> int:
+    def free_unit_count(self) -> int:
         """Units of the pool with free compute now."""
-        return self.pool.free_count(pool)
+        return len(self.pool.free)
 
     # ------------------------------------------------- the units' state
 
     def parked_jobs(self) -> list:
         """Every resident landed with a boundary still owed, unit by unit."""
         parked = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             unit_parked = unit.parked_residents()
             parked.extend(unit_parked)
         return parked
@@ -337,7 +336,7 @@ class DecodeService:
     def resident_jobs(self) -> list:
         """Every job holding a slot of any unit, unit by unit."""
         residents = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             residents.extend(unit.residents)
         return residents
 
@@ -348,7 +347,7 @@ class DecodeService:
         it, and a destination has at most one, so the first unit holding
         one for this window is the one.
         """
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             completion = unit.take_output(window_key)
             if completion is not None:
                 return completion
@@ -357,7 +356,7 @@ class DecodeService:
     def windows_holding_output(self) -> list:
         """The destinations whose results are still waiting in a unit."""
         waiting = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             windows = unit.output_windows()
             waiting.extend(windows)
         return sorted(waiting)
@@ -365,7 +364,7 @@ class DecodeService:
     def units_holding_rounds(self) -> list:
         """The names of the units whose memory still holds rounds."""
         held = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             if unit.memory.resident_input_count:
                 held.append(unit.name)
         return held
@@ -390,7 +389,7 @@ class DecodeService:
         """No unit ends the run with a decode in flight or its intake open."""
         in_flight = []
         busy = []
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             flight_labels = unit.flight_labels()
             in_flight.extend(flight_labels)
             if unit.pipeline.intake_job is not None:
@@ -449,7 +448,7 @@ class DecodeService:
             member.service_dispatch_ticks = self.engine.now
 
     def _log_assignment(
-        self, pool: str, job: decoding_records.DecodeJob, claim_compute: bool
+        self, job: decoding_records.DecodeJob, claim_compute: bool
     ) -> None:
         waited_ticks = self.engine.now - job.ready_time
         waited = config.format_ticks(waited_ticks)
@@ -457,8 +456,8 @@ class DecodeService:
         slot_note = ""
         if not claim_compute:
             slot_note = "staged, "
-        pool_tag = decode_queue.pool_tag_of(pool)
-        free_now = self.pool.free_count(pool)
+        pool_tag = decode_queue.pool_tag_of(self.pool.name)
+        free_now = self.free_unit_count()
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"ASSIGN UNIT {job.decoding_unit_name} to {job.label} "
@@ -725,7 +724,7 @@ class DecodeService:
         normal flow performs the compute offer unless offer_now says
         otherwise.
         """
-        for unit in self.pool.units():
+        for unit in self.pool.units:
             if not unit.take_flight(job):
                 continue
             self._lift_pipeline_stall(unit, offer_now)

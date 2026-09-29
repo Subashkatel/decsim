@@ -16,6 +16,7 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.decoder_manager as decoder_manager
+import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
@@ -101,10 +102,11 @@ def _send_after(engine, ticks):
 def _manager(engine, decoder, dispatch_cycles=0):
     scheduler = schedulers.FifoScheduler()
     policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+    pool_settings = decoder_pool.PoolSettings(name="default", unit_count=1)
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
-        unit_pools={"default": 1},
+        pool_settings=pool_settings,
         clock=DISPATCH_CLOCK,
         dispatch_cycles=dispatch_cycles,
     )
@@ -263,11 +265,11 @@ def test_a_parked_job_keeps_its_slot_and_releases_the_compute():
     job = _job(0, gate)
     on_decoded = _resolving(manager)
     manager.enqueue(job, None, on_decoded)
-    (unit,) = manager.pool.units_by_pool["default"]
+    (unit,) = manager.pool.units
     assert job.is_parked is True
     assert unit.residents == [job]
     assert unit.holder is None
-    assert manager.pool.free_count("default") == 1
+    assert manager.pool.free == [unit]
     gate.is_open = True
     release_ticks = config.microseconds_to_ticks(3.0)
     window_key = (1, 0)

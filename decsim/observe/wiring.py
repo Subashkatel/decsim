@@ -193,11 +193,10 @@ def _decoder_rows(seats: Mapping[str, Any]) -> list:
 def _connect_queue_depth(decoder_managers) -> queue_depth_module.QueueDepthLog:
     """The waiting jobs, sampled at every change of either queue's depth."""
     depth_log = queue_depth_module.QueueDepthLog()
-    for index, manager in enumerate(decoder_managers):
-        queue_trace = manager.queue.trace
-        depth_changed = functools.partial(depth_log.depth_changed, index)
-        queue_trace.depth_changed.connect(depth_changed)
-        queue_trace.pool_depth_changed.connect(depth_log.pool_depth_changed)
+    for manager in decoder_managers:
+        pool_name = manager.pool.name
+        depth_changed = functools.partial(depth_log.depth_changed, pool_name)
+        manager.queue.trace.depth_changed.connect(depth_changed)
     return depth_log
 
 
@@ -414,7 +413,7 @@ def _connect_decoder_trace(
     service.trace.input_landed.connect(trace_writer.input_landed)
     service.trace.job_started.connect(trace_writer.job_started)
     service.trace.job_finished.connect(trace_writer.job_finished)
-    for unit in decoder_manager.pool.units():
+    for unit in decoder_manager.pool.units:
         memory = unit.memory
         deposited = functools.partial(
             trace_writer.memory_deposited, memory.name
@@ -599,8 +598,8 @@ def _decoder_utilization(
     """
     units_by_pool = {}
     for manager in decoder_managers:
-        for name, units in manager.pool.units_by_pool.items():
-            units_by_pool[name] = len(units)
+        pool = manager.pool
+        units_by_pool[pool.name] = len(pool.units)
     utilization = metrics.DecoderUtilization(engine, units_by_pool)
     for manager in decoder_managers:
         pool = manager.pool
@@ -633,8 +632,7 @@ def _decoder_memory_occupancy(
         return None
     units = []
     for manager in decoder_managers:
-        pool_units = manager.pool.units()
-        units.extend(pool_units)
+        units.extend(manager.pool.units)
     capacity_by_unit = {}
     for unit in units:
         capacity_by_unit[unit.name] = unit.memory.capacity_bits

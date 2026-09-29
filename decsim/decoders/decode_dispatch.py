@@ -21,7 +21,7 @@ import decsim.records.decoding as decoding_records
 
 
 class DecodeDispatcher:
-    """Places waiting jobs on units, one pass over every pool."""
+    """Places waiting jobs on units of the manager's pool."""
 
     def __init__(
         self,
@@ -35,47 +35,46 @@ class DecodeDispatcher:
         self.is_dispatching = False
 
     def run(self) -> None:
-        """Dispatch every pool; a call from inside the loop returns at once."""
+        """Dispatch the queue; a call from inside the loop returns at once."""
         if self.is_dispatching:
             return
         self.is_dispatching = True
         try:
-            for pool in self.queue.waiting_by_pool:
-                self._dispatch_pool(pool)
+            self._dispatch()
         finally:
             self.is_dispatching = False
 
-    def _dispatch_pool(self, pool: str) -> None:
-        while self.queue.has_jobs(pool):
-            ordered = self.queue.drain_in_scheduler_order(pool)
-            selection = self._select_placement(pool, ordered)
+    def _dispatch(self) -> None:
+        while self.queue.waiting:
+            ordered = self.queue.drain_in_scheduler_order()
+            selection = self._select_placement(ordered)
             if selection is None:
-                self.queue.restore(pool, ordered)
+                self.queue.restore(ordered)
                 return
             index, job, unit, claim_compute = selection
             del ordered[index]
-            self.queue.restore(pool, ordered)
+            self.queue.restore(ordered)
             self.queue.sample_depth()
-            self.service.dispatch_to(pool, job, unit, claim_compute)
+            self.service.dispatch_to(job, unit, claim_compute)
 
-    def _select_placement(self, pool: str, ordered: list) -> Optional[tuple]:
+    def _select_placement(self, ordered: list) -> Optional[tuple]:
         """(index, job, unit, claim_compute) of the first placeable job.
 
         Startable jobs are tried before boundary-blocked ones.
         """
-        startable = self._first_placement(pool, ordered, True)
+        startable = self._first_placement(ordered, True)
         if startable is not None:
             return startable
-        return self._first_placement(pool, ordered, False)
+        return self._first_placement(ordered, False)
 
     def _first_placement(
-        self, pool: str, ordered: list, startable: bool
+        self, ordered: list, startable: bool
     ) -> Optional[tuple]:
         for index, job in enumerate(ordered):
             is_startable = decoder_unit_module.is_startable(job)
             if is_startable is not startable:
                 continue
-            placement = self._eligible_unit(pool, job)
+            placement = self._eligible_unit(job)
             if placement is None:
                 continue
             unit, claim_compute = placement
@@ -83,7 +82,7 @@ class DecodeDispatcher:
         return None
 
     def _eligible_unit(
-        self, pool: str, job: decoding_records.DecodeJob
+        self, job: decoding_records.DecodeJob
     ) -> Optional[tuple]:
         """(unit, claim_compute) for this job, or None.
 
@@ -104,7 +103,6 @@ class DecodeDispatcher:
         resident_capacity = self.service.resident_capacity(job)
         carries_input = self.service.carries_input(job)
         placement = self.pool.offer(
-            pool,
             job,
             now=self.service.engine.now,
             carries_input=carries_input,

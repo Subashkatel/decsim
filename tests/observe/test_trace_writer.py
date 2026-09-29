@@ -505,7 +505,7 @@ def _last_rounds_data_ready(document, ready) -> list:
 def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
     """The C track of the unit's memory is the memory's own occupancy."""
     machine, _result, document = traced
-    (unit,) = machine.decoder_manager.pool.units()
+    (unit,) = machine.decoder_manager.pool.units
     name = f"{unit.memory.name} bits"
     values = _counter_values(document, name, "bits")
 

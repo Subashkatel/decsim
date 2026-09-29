@@ -16,7 +16,6 @@ from typing import Any, Optional, Union
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
-import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.dispatch_steps.decoder as dispatch_steps
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.schedulers as schedulers
@@ -300,12 +299,9 @@ class DecoderManagerSettings:
     chip's and the host's queues are separate hardware (LATTE 2509.03954
     lines 20-25 and 718-722), as gem5 gives every object its own copy of
     a SimObject parameter (src/python/m5/SimObject.py:775-782).
-    decoder_memory bounds each pool's input memory in bits (built from
-    the tiers' unit_memory by default).
     """
 
     scheduler: type = schedulers.FifoScheduler
-    decoder_memory: Optional[decoder_memory_module.DecoderMemoryConfig] = None
     bulk_strong: bool = False
     dispatch_cycles: int = 0
     clock: Optional[config.Clock] = None

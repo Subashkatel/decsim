@@ -47,8 +47,10 @@ WINDOW_COLORS = (
     "tab:olive",
 )
 MAX_LEGEND_WINDOWS = 8
-# The measured window chain from syndrome arrival to frame commit, in
-# pipeline order; each name is a per-shot mean column of shots.csv.
+# A window's hops and decoder stages from syndrome arrival to frame
+# commit, in pipeline order; each name is a per-shot mean column of
+# shots.csv. The waits that are points of their own (admission_wait,
+# dep_block, compute_wait) and the escalation's points are not drawn.
 STAGE_BREAKDOWN_STAGES = (
     ("buffer_fill_mean_us", "buffer fill"),
     ("queue_wait_mean_us", "queue wait"),

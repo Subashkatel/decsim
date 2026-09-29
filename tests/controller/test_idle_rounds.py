@@ -153,9 +153,28 @@ def test_an_operation_without_patches_claims_by_its_qubits():
     operation = program_records.Operation(9, "bare", ("patch-a", "patch-b"))
 
     accounting.emit_idle_round(7, "patch-a", 1)
-    accounting.emit_idle_round(8, "patch-b", 1)
+    accounting.emit_idle_round(7, "patch-a", 2)
 
     assert accounting.claim(operation) == 2
+
+
+def test_patches_idle_through_the_same_cycles_claim_each_cycle_once():
+    """Two patches idle through three cycles are three rounds of history.
+
+    A code cycle measures every check of every patch once (Litinski
+    1808.02892 lines 204-206).
+    """
+    ignore = policies.Ignore()
+    accounting, _qpu, _demand = accounting_with(ignore)
+    both = program_records.Operation(
+        9, "both", ("patch-a", "patch-b"), patches=("patch-a", "patch-b")
+    )
+
+    for round_index in (1, 2, 3):
+        accounting.emit_idle_round(7, "patch-a", round_index)
+        accounting.emit_idle_round(8, "patch-b", round_index)
+
+    assert accounting.claim(both) == 3
 
 
 def test_a_patch_on_a_live_protected_stream_emits_through_the_stream():

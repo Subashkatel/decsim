@@ -88,18 +88,25 @@ class IdleRoundAccounting:
         return self.streams.bind_at_start(command)
 
     def claim(self, operation) -> int:
-        """The idle rounds on the operation's patches since the last claim."""
+        """The idle cycles on the operation's patches since the last claim.
+
+        A code cycle measures every check of every patch once (Litinski
+        1808.02892 lines 204-206), so patches idle through the same cycles
+        are those cycles once. Each patch's unclaimed rounds are the
+        cycles since it was last claimed, one per cycle, all ending here,
+        so the longest run among the patches is every cycle they idled.
+        """
         patches = operation.patches
         if not patches:
             patches = operation.qubits
-        total = 0
+        cycle_count = 0
         for patch in patches:
             idle = self.idle_by_patch.get(patch)
             if idle is None:
                 continue
-            total += idle.unclaimed
+            cycle_count = max(cycle_count, idle.unclaimed)
             idle.unclaimed = 0
-        return total
+        return cycle_count
 
     def end_idle_period(self, operation, patch) -> None:
         """An operation claims the patch: the policy settles its idle rounds."""

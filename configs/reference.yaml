@@ -501,8 +501,9 @@ windows:
   decision_cycles: 0               # the window side's decision, once per
                                    # window, before any of its requests enters
                                    # a decode queue: its weak jobs and a
-                                   # run_both_at_once strong sibling leave when
-                                   # it ends, the one pre-decode step RISC-Q
+                                   # run_both_at_once speculative strong
+                                   # decode leave when it ends, the one
+                                   # pre-decode step RISC-Q
                                    # 2603.16203 lines 893-904 times before the
                                    # decoder, and Step 1's "simultaneously fed
                                    # to both" (Toshio 2510.25222 lines 598-601).

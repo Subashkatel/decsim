@@ -397,13 +397,13 @@ def test_a_shared_input_is_written_once_and_the_other_solve_reads_it():
     """
     fixture = _Fixture()
     job, memory = _landed_job(fixture, folds_in_place=True)
-    sibling = _sibling_solve(job, memory)
+    companion = _companion_solve(job, memory)
 
     fixture.gate.mask_input(job)
-    fixture.gate.mask_input(sibling)
+    fixture.gate.mask_input(companion)
 
     resident = memory.input_of(job)
-    assert sibling.decoder_input is resident
+    assert companion.decoder_input is resident
     (masked,) = resident.rounds[4].fragments
     assert masked.bits == (1, 0, 1)
 
@@ -423,9 +423,9 @@ def test_an_input_that_carries_its_mask_is_not_masked_again():
         memory.rewrite(job, job.decoder_input)
 
 
-def _sibling_solve(job, memory):
+def _companion_solve(job, memory):
     """The window's other forced-class solve, reading the same input."""
-    sibling = decoding_records.DecodeJob(
+    companion = decoding_records.DecodeJob(
         operation_id=job.operation_id,
         window_id=job.window_id,
         round_count=job.round_count,
@@ -433,8 +433,8 @@ def _sibling_solve(job, memory):
         window=job.window,
         memory=memory,
     )
-    sibling.decoder_input = memory.add_reader(sibling)
-    return sibling
+    companion.decoder_input = memory.add_reader(companion)
+    return companion
 
 
 # one sweep point per noise level, counting the movement each shot made
@@ -608,16 +608,15 @@ def test_decision_cycles_delay_queue_admission_and_later_reaction_points():
     assert shifts == [0, expected, expected, expected, expected, expected]
 
 
-def test_a_strong_sibling_leaves_at_its_windows_decision():
+def test_a_speculative_decode_leaves_at_its_windows_decision():
     """Both tiers get the window when its one decision ends.
 
-    Step 1 feeds the window's syndrome to both decoders at once (Toshio
-    et al. 2510.25222 lines 598-601), after one pre-decode step on it
-    (RISC-Q 2603.16203 lines 895-898). So a sibling is asked for no
-    earlier than its window's decision, at it when the window owes no
-    boundary (window 0), and its way from the request to the strong
-    queue is the one a run without a decision time takes: the decision
-    is not charged to it again.
+    Step 1 feeds the window's syndrome to both decoders at once (Toshio et al.
+    2510.25222 lines 598-601), after one pre-decode step on it (RISC-Q
+    2603.16203 lines 895-898). So a speculative strong decode is asked for no
+    earlier than its window's decision, at it when the window owes no boundary
+    (window 0), and its way from the request to the strong queue is the one a
+    run without a decision time takes: the decision is not charged to it again.
     """
     free = declared_fabric.switching_machine(
         rounds=15,
@@ -634,9 +633,9 @@ def test_a_strong_sibling_leaves_at_its_windows_decision():
     )
     free.run()
     charged.run()
-    free_way = _sibling_way_to_the_queue(free)
-    charged_way = _sibling_way_to_the_queue(charged)
-    after_decision = _sibling_request_after_decision(charged)
+    free_way = _speculative_way_to_the_queue(free)
+    charged_way = _speculative_way_to_the_queue(charged)
+    after_decision = _speculative_request_after_decision(charged)
     offsets = after_decision.values()
 
     assert len(charged_way) == 5
@@ -645,8 +644,8 @@ def test_a_strong_sibling_leaves_at_its_windows_decision():
     assert min(offsets) >= 0
 
 
-def _sibling_records(machine) -> dict:
-    """Window index -> its strong sibling's request record."""
+def _speculative_records(machine) -> dict:
+    """Window index -> its speculative strong decode's request record."""
     records = {}
     for record in machine.observation.decode_records.requests:
         key = record.request_key
@@ -655,18 +654,18 @@ def _sibling_records(machine) -> dict:
     return records
 
 
-def _sibling_way_to_the_queue(machine) -> dict:
-    """Window index -> its sibling's ticks from request to strong queue."""
-    records = _sibling_records(machine)
+def _speculative_way_to_the_queue(machine) -> dict:
+    """Window index -> its speculative decode's request to strong queue."""
+    records = _speculative_records(machine)
     way = {}
     for window_id, record in records.items():
         way[window_id] = record.admitted_ticks - record.created_ticks
     return way
 
 
-def _sibling_request_after_decision(machine) -> dict:
-    """Window index -> its sibling's request tick less its decision's end."""
-    records = _sibling_records(machine)
+def _speculative_request_after_decision(machine) -> dict:
+    """Window index -> its speculative request tick less its decision's end."""
+    records = _speculative_records(machine)
     windows = machine.window_manager.planner.windows_by_key
     after = {}
     for (_operation_id, window_id), window in windows.items():

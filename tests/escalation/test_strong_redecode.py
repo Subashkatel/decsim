@@ -271,7 +271,7 @@ def test_a_held_job_leaves_when_the_window_it_named_commits():
     assert not redecode.has_pending()
 
 
-def test_a_sibling_started_with_the_weak_job_is_selected_as_it_is():
+def test_a_speculative_decode_started_with_the_weak_job_is_selected():
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)
     redecode, output, strong_output, queue, _done = _redecode(shape)
@@ -279,17 +279,17 @@ def test_a_sibling_started_with_the_weak_job_is_selected_as_it_is():
     submission = redecode.parallel_strong_submission(weak_job)
     assert submission.job is strong_job
     redecode.escalate(weak_job)
-    # one plan, one selection, no second job: the sibling is selected
+    # one plan, one selection, no second job: the speculative decode is selected
     assert len(shape.planned) == 1
     assert len(output.selections) == 1
     assert queue.calls == [("await", WINDOW_KEY, strong_job.request_key)]
 
 
-def test_a_sibling_is_planned_when_its_weak_job_leaves_its_park():
+def test_a_speculative_decode_is_planned_when_its_weak_job_unparks():
     """Step 1 starts both decoders together (2510.25222 lines 598-601).
 
-    A weak job that still owes a boundary parks, so its sibling is
-    planned at the unpark and not at the submission.
+    A weak job that still owes a boundary parks, so its speculative strong
+    decode is planned at the unpark and not at the submission.
     """
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)

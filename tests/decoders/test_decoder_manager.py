@@ -302,7 +302,7 @@ def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
     """The strong escalation tier is not pipelined yet, so it refuses.
 
     A pipelined route serves plain window and external decodes only; a
-    strong re-decode, a gap sibling and a merged batch keep occupancy
+    strong re-decode, a gap's second solve and a merged batch keep occupancy
     equal to latency until they get their own design pass, and routing
     one to a pipelined unit would silently serialize it instead of
     honoring the declared card (decode_service.py, _pipeline_of). The

@@ -285,7 +285,7 @@ class DecodeJob:
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
     strong_label: Optional[str] = (
-        None  # manager-owned label for a strong sibling
+        None  # manager-owned label for a speculative strong decode
     )
     spatial_nodes: Optional[int] = (
         None  # decoding-graph nodes per round (latency models)
@@ -303,7 +303,7 @@ class DecodeJob:
     strong_decode_for: Optional[tuple] = (
         None  # (operation_id, window_id) this strong job re-decodes
     )
-    cancelled: bool = False  # cancelled siblings discard completion
+    cancelled: bool = False  # cancelled speculative decodes discard completion
     completed: bool = (
         False  # terminal flag; admission refuses reuse of a completed job
     )

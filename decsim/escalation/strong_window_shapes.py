@@ -177,18 +177,17 @@ class RedoWindow(StrongWindowPorts):
     shape on the weak tier: "it has a closed past boundary and an open
     future boundary".
 
-    The pin is on whatever the neighbour committed (Toshio et al.
-    2510.25222 line 1250, boundary conditions "determined by the weak
-    decoder"). This row absorbs no weak window, so serial switching
-    gives it Held boundaries (escalation/policies.py, check_plan), under
-    which a committed boundary is a final one; and the neighbour has
-    committed by the time its dependent escalates, since a window's weak
-    decode starts only once every boundary it owes has arrived and the
-    escalation follows that decode; a Step 1 sibling is planned at that
-    same instant, when the weak job leaves its park (strong_redecode.py,
-    parallel_strong_submission). The escalated window that has no
-    earlier neighbour pins nothing: its past face is the operation's
-    first round layer, closed by the initialisation.
+    The pin is on whatever the neighbour committed (Toshio et al. 2510.25222
+    line 1250, boundary conditions "determined by the weak decoder"). This row
+    absorbs no weak window, so serial switching gives it Held boundaries
+    (escalation/policies.py, check_plan), under which a committed boundary is a
+    final one; and the neighbour has committed by the time its dependent
+    escalates, since a window's weak decode starts only once every boundary it
+    owes has arrived and the escalation follows that decode; a Step 1
+    speculative strong decode is planned at that same instant, when the weak job
+    leaves its park (strong_redecode.py, parallel_strong_submission). The
+    escalated window that has no earlier neighbour pins nothing: its past face
+    is the operation's first round layer, closed by the initialisation.
 
     The job waits for its own rounds stored in the strong syndrome
     buffer, and the rounds the chip still holds are carried up with the
@@ -553,7 +552,7 @@ class DoubleWindow(StrongWindowPorts):
             plan.restart_seam_fault_owner,
         )
         restart = self.planner.window_at(restart_key)
-        # its absorbed dependency is gone; no strong sibling in the
+        # its absorbed dependency is gone; no speculative strong decode in the
         # double window
         self.requester.request_if_ready(restart, None)
         self.retention.release_restart_reads(restart_key)

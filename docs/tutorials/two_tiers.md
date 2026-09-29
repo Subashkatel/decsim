@@ -277,8 +277,8 @@ Two things here are new since [Your first run](first_run.md).
 The window was **dispatched twice**, and the algorithm ran twice, at
 6.036 and again at 7.076. That is the confidence being computed: two
 solves of one window, each forced into one of the two logical answers.
-`solve held` at 7.076 is the first result waiting for its sibling, so
-that the two weights can be subtracted.
+`solve held` at 7.076 is the first result waiting for the other class's
+solve, so that the two weights can be subtracted.
 
 Then, at 8.140, `verdict`. This window's confidence was at or above the
 threshold, so the weak answer was kept: the boundary went to the next

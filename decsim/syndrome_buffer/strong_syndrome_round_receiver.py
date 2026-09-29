@@ -21,7 +21,7 @@ stores each round at its landing; the store's holds and lifetime are
 SyndromeBuffer's. A landing whose operation closed while its bits
 crossed is dropped at the door instead of stored, since no reader can
 ever name it (_drop_landing): a strong-primary run's last rounds, or
-the region of a parallel strong sibling that a confident weak result
+the region of a speculative strong decode that a confident weak result
 cancelled while the region was on the wire.
 
 A landed round is stored as the run's detection event placement says

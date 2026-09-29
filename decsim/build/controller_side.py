@@ -66,10 +66,10 @@ def build_strong_decoder_manager(
 ) -> decoder_manager_module.DecoderManager:
     """The host's decoder manager: the strong pool alone.
 
-    The same class as the chip's, over the strong units, with its own
-    ready queue, staging and outcomes (LATTE 2509.03954 lines 705-720,
-    the host's scheduler owns the decode queue and the thread pool).
-    The escalation side and the requester's strong sibling submit here.
+    The same class as the chip's, over the strong units, with its own ready
+    queue, staging and outcomes (LATTE 2509.03954 lines 705-720, the host's
+    scheduler owns the decode queue and the thread pool). The escalation side
+    and the requester's speculative strong decode submit here.
     """
     return _decoder_manager(parts, parts.pool.host)
 

@@ -84,9 +84,9 @@ compatible beyond the MWPM decoder.
 
 **Decided.** Two instances of one decoder manager class: the chip's
 over the weak pool, and, in a run whose windows may escalate, the
-host's over the strong pool. The escalation side and a window's strong
-sibling submit to the host's; the ledger of strong requests is one seat
-both take (a seat is a named slot in `decsim/assembly.py` that the root
+host's over the strong pool. The escalation side and a window's
+speculative strong decode submit to the host's; the ledger of strong
+requests is one seat both take (a seat is a named slot in `decsim/assembly.py` that the root
 fills with one built component and wires to its neighbours), since the chip's side opens a request and the host's serves
 it; a kept weak result halts its request through the escalation side.
 Each manager's own work is charged: `decoder_manager.dispatch_cycles`
@@ -491,7 +491,7 @@ places.
 
 **Decided.** A new latency point, `confidence`: the committing decode's
 end to the verdict on the window's answer, for a window whose weak
-result committed. It is the sibling forced-class solve's remaining time
+result committed. It is the other forced-class solve's remaining time
 under `complementary_gap`, the walk under `cluster_gap`, and zero under
 `weak_baseline`, whose verdict needs no signal. For a window that
 escalated it is zero too: its committing decode is the strong one,

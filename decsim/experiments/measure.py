@@ -78,7 +78,7 @@ POINTS = (
     "service",
     # the committing decode's end -> the verdict on the window's answer:
     # the confidence signal's own computation, which is the walk under
-    # cluster_gap and the sibling forced solve's remaining time under
+    # cluster_gap and the other forced-class solve's remaining time under
     # complementary_gap. Zero for an escalated window, whose committing
     # decode is the strong one and whose weak_attempt already runs to
     # the verdict
@@ -994,13 +994,13 @@ def _burst_onset_round(qpu_row_settings) -> Optional[int]:
 class _CommittedDecode:
     """The decode whose result the frame committed, as the points read it.
 
-    One window can be decoded several times: the two forced-class solves
-    of a complementary gap (decision D2), a strong re-decode after an
-    escalation (Toshio et al. 2510.25222 Sec. III A), and under
-    run_both_at_once a sibling that is cancelled. Every stage record of
-    all of them carries the same window key, so the decode that
-    committed is named by the frame's own record: the tier it ran on and
-    the run ordinal of its request.
+    One window can be decoded several times: the two forced-class solves of a
+    complementary gap (decision D2), a strong re-decode after an escalation
+    (Toshio et al. 2510.25222 Sec. III A), and under run_both_at_once a
+    speculative strong decode that is cancelled. Every stage record of all of
+    them carries the same window key, so the decode that committed is named by
+    the frame's own record: the tier it ran on and the run ordinal of its
+    request.
     """
 
     tier: window_records.DecoderTier
@@ -1551,7 +1551,7 @@ def _confidence_ticks(window, decode: _CommittedDecode) -> int:
     window", and lines 360-363, the response time running to the
     correction). What that computation is depends on the row: the walk
     under cluster_gap, charged on the weak unit (decision D8), and the
-    sibling forced-class solve's remaining time under complementary_gap,
+    other forced-class solve's remaining time under complementary_gap,
     which is that solve's own service on the same unit (decision D2).
     An escalated window has none: its committing decode is the strong
     one, which answers after the verdict, and weak_attempt already runs
@@ -1586,7 +1586,7 @@ def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:
     to the verdict is the weak_attempt point and the committing decode's
     own hop starts there. When the committing decode was already
     computing at that answer, which is a kept weak result and which is
-    run_both_at_once's parallel sibling, the attempt cost the window
+    run_both_at_once's speculative strong decode, the attempt cost the window
     nothing and both start at the dispatch.
     """
     if window.t_done >= decode.compute_start_ticks:
@@ -1597,13 +1597,13 @@ def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:
 def _stage_microseconds(stages, frame_record) -> dict:
     """The committing decode's stages, in microseconds, by stage name.
 
-    Every decode of a window records its stages under the window's key:
-    the two forced-class solves of a complementary gap, which are two
-    jobs of one window and are charged one card each (decisions D2 and
-    D7), the strong re-decode of an escalated window, and a sibling that
-    was cancelled. Keeping the last record of each name mixes them, so
-    the stages are the committing request's, which is the rule every
-    other point of the window follows.
+    Every decode of a window records its stages under the window's key: the two
+    forced-class solves of a complementary gap, which are two jobs of one window
+    and are charged one card each (decisions D2 and D7), the strong re-decode of
+    an escalated window, and a speculative strong decode that was cancelled.
+    Keeping the last record of each name mixes them, so the stages are the
+    committing request's, which is the rule every other point of the window
+    follows.
     """
     operation_id, window_id = frame_record.window_key
     records = _committing_stage_records(

@@ -20,7 +20,7 @@ transfer or, for a window whose tail is still being measured, several
 (CUDA-Q QEC's enqueue_syndromes takes the rounds in one call or many,
 realtime_decoding.rst lines 52 to 56); the landing stores them and
 releases the window. When the policy decodes both tiers at once
-(Sec. III A, Step 1), it builds the strong sibling the requester
+(Sec. III A, Step 1), it builds the speculative strong decode the requester
 enqueues beside the weak job and selects it at the verdict. A strong
 input landed in its unit waits for its selection to arrive before it
 decodes; the submission uses the per-job law,
@@ -77,42 +77,41 @@ class StrongRedecode:
     def parallel_strong_submission(
         self, weak_job: decoding_records.DecodeJob
     ) -> Optional[decoding_records.Submission]:
-        """The strong sibling started with the weak job (the paper's Step 1).
+        """The speculative strong decode, started with the weak job (Step 1).
 
-        Step 1 feeds both decoders the same window and starts them
-        together (2510.25222 lines 598-601), and a weak job whose window
-        still owes a boundary parks until it lands, so its sibling is
-        planned when the weak job leaves the park (unparked_submission):
-        a strong window that pins a face reads the neighbour's final
-        commit, and under held boundaries that commit is what unparks
-        the weak job. A planned sibling has its context held and its
-        send built now; the verdict selects it or cancels it. One whose
-        input has not landed yet is held instead and enqueued when its
-        condition fires, so there is no submission for the requester to
-        make: in a model that prices transport the strong decoder starts
-        when its copy has arrived.
+        Step 1 feeds both decoders the same window and starts them together
+        (2510.25222 lines 598-601), and a weak job whose window still owes a
+        boundary parks until it lands, so its speculative strong decode is
+        planned when the weak job leaves the park (unparked_submission): a
+        strong window that pins a face reads the neighbour's final commit, and
+        under held boundaries that commit is what unparks the weak job. A
+        planned speculative decode has its context held and its send built now;
+        the verdict selects it or cancels it. One whose input has not landed yet
+        is held instead and enqueued when its condition fires, so there is no
+        submission for the requester to make: in a model that prices transport
+        the strong decoder starts when its copy has arrived.
         """
         key = (weak_job.operation_id, weak_job.window_id)
         if weak_job.window.deps_remaining > 0:
-            self.selections.park_sibling(key, weak_job)
+            self.selections.park_speculative_decode(key, weak_job)
             return None
-        return self._planned_sibling(weak_job)
+        return self._planned_speculative_decode(weak_job)
 
     def unparked_submission(
         self, window_key: tuple
     ) -> Optional[decoding_records.Submission]:
-        """The window's weak job left its park: plan its strong sibling."""
-        weak_job = self.selections.unpark_sibling(window_key)
+        """The weak job left its park: plan its speculative strong decode."""
+        weak_job = self.selections.unpark_speculative_decode(window_key)
         if weak_job is None:
             return None
-        return self._planned_sibling(weak_job)
+        return self._planned_speculative_decode(weak_job)
 
-    def _planned_sibling(
+    def _planned_speculative_decode(
         self, weak_job: decoding_records.DecodeJob
     ) -> Optional[decoding_records.Submission]:
         key = (weak_job.operation_id, weak_job.window_id)
         assignment = self.shape.plan(weak_job)
-        self.selections.remember_sibling(key, assignment.request_key)
+        self.selections.remember_speculative_decode(key, assignment.request_key)
         if assignment.job is None:
             self._hold(key, assignment, None)
             self.submit_if_stored_data_releases(weak_job.operation_id)
@@ -124,7 +123,7 @@ class StrongRedecode:
         """Ask the strong tier to re-decode the weak job's window.
 
         The selection rides weak_decoder_to_strong_decoder and the
-        decoder side awaits the request's result. A strong sibling
+        decoder side awaits the request's result. A speculative strong decode
         started with the weak job is selected as it is; otherwise the
         shape assigns the strong window: a job built now is queued
         behind its selection, a held one is registered under the
@@ -132,10 +131,10 @@ class StrongRedecode:
         waiting on data already stored leaves now).
         """
         key = (weak_job.operation_id, weak_job.window_id)
-        sibling_request_key = self.selections.sibling_for(key)
-        if sibling_request_key is not None:
-            self._send_selection(weak_job, sibling_request_key)
-            self.decode_queue.await_strong_result(key, sibling_request_key)
+        speculative_request_key = self.selections.speculative_decode_for(key)
+        if speculative_request_key is not None:
+            self._send_selection(weak_job, speculative_request_key)
+            self.decode_queue.await_strong_result(key, speculative_request_key)
             return
         assignment = self.shape.plan(weak_job)
         request_key = assignment.request_key
@@ -152,10 +151,10 @@ class StrongRedecode:
     def submit_if_commit_releases(self, window_key: tuple) -> None:
         """A weak window committed: a strong window waiting on it leaves.
 
-        The committed window's own strong sibling, selected or cancelled
-        by its verdict, is forgotten.
+        The committed window's own speculative strong decode, selected or
+        cancelled by its verdict, is forgotten.
         """
-        self.selections.forget_sibling(window_key)
+        self.selections.forget_speculative_decode(window_key)
         released = self.pending.released_by_commit(window_key)
         self._submit_released(released)
 
@@ -167,13 +166,12 @@ class StrongRedecode:
     def cancel_strong_request(self, window_key: tuple) -> None:
         """A kept weak result: its strong request ends, held or submitted.
 
-        The parallel sibling is speculative (Toshio et al. 2510.25222
-        Sec. III A, Step 1), so a confident weak result halts it (Step
-        3, lines 606-614). One still held for its input is dropped here,
-        before the window's final commit frees the rounds it would have
-        read; one already submitted is cancelled by the strong side's
-        manager wherever it is, and a window with no request there is
-        left alone.
+        The strong decode started with the weak one is speculative (Toshio et
+        al. 2510.25222 Sec. III A, Step 1), so a confident weak result halts it
+        (Step 3, lines 606-614). One still held for its input is dropped here,
+        before the window's final commit frees the rounds it would have read;
+        one already submitted is cancelled by the strong side's manager wherever
+        it is, and a window with no request there is left alone.
         """
         held = self.pending.held_for(window_key)
         if held is not None:
@@ -182,7 +180,7 @@ class StrongRedecode:
 
     def _drop_held(self, window_key: tuple, held) -> None:
         self.pending.take(held)
-        self.selections.forget_sibling(window_key)
+        self.selections.forget_speculative_decode(window_key)
         self.trace.strong_window_left.fire(
             held.assignment.request_key,
             window_key,
@@ -191,8 +189,8 @@ class StrongRedecode:
         )
         self.engine.log(
             log_sources.DECODER_MANAGER,
-            f"strong sibling for {window_key} cancelled while held for "
-            f"its input (the weak result is confident)",
+            f"speculative strong decode for {window_key} cancelled while "
+            f"held for its input (the weak result is confident)",
         )
 
     # ---- observation
@@ -382,40 +380,41 @@ class StrongRedecode:
 class _StrongSelections:
     """The selection handshake's state.
 
-    Which weak jobs wait in their park for their sibling to be planned,
-    which strong sibling each window may select (the paper's Step 1),
-    which selections have arrived over weak_decoder_to_strong_decoder,
-    and which landed strong inputs wait for one that has not.
+    Which weak jobs wait in their park for their speculative strong decode
+    to be planned, which speculative strong decode each window may select
+    (the paper's Step 1), which selections have arrived over
+    weak_decoder_to_strong_decoder, and which landed strong inputs wait for
+    one that has not.
     """
 
     def __init__(self) -> None:
-        self.sibling_key_by_window: dict = {}
+        self.speculative_key_by_window: dict = {}
         self.parked_weak_job_by_window: dict = {}
         self.delivered_request_keys: set = set()
         self.landing_by_request_key: dict = {}
 
-    def park_sibling(
+    def park_speculative_decode(
         self, window_key: tuple, weak_job: decoding_records.DecodeJob
     ) -> None:
         self.parked_weak_job_by_window[window_key] = weak_job
 
-    def unpark_sibling(
+    def unpark_speculative_decode(
         self, window_key: tuple
     ) -> Optional[decoding_records.DecodeJob]:
         return self.parked_weak_job_by_window.pop(window_key, None)
 
-    def remember_sibling(
+    def remember_speculative_decode(
         self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
-        self.sibling_key_by_window[window_key] = request_key
+        self.speculative_key_by_window[window_key] = request_key
 
-    def sibling_for(
+    def speculative_decode_for(
         self, window_key: tuple
     ) -> Optional[window_records.DecoderRequestKey]:
-        return self.sibling_key_by_window.get(window_key)
+        return self.speculative_key_by_window.get(window_key)
 
-    def forget_sibling(self, window_key: tuple) -> None:
-        self.sibling_key_by_window.pop(window_key, None)
+    def forget_speculative_decode(self, window_key: tuple) -> None:
+        self.speculative_key_by_window.pop(window_key, None)
 
     def land_after_selection(
         self,

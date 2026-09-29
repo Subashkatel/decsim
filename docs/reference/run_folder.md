@@ -151,7 +151,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `algorithm` | the decoding algorithm itself |
 | `release` | the unit writing the correction out |
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for |
-| `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the sibling forced-class solve's remaining time under `complementary_gap`, and zero for a window that escalated |
+| `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the other forced-class solve's remaining time under `complementary_gap`, and zero for a window that escalated |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
 | `dd_per_window` | one decoder to the next: the boundary handoff |

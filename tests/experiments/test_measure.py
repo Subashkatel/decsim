@@ -199,7 +199,7 @@ def switching_run(
 
     A threshold far above every gap escalates every window and one far
     below escalates none, so the same two cards answer both branches.
-    run_both_at_once starts the strong sibling with the weak job and
+    run_both_at_once starts the speculative strong decode with the weak job and
     cancels it when the weak result is kept, which is Toshio et al.
     2510.25222 Sec. III A step 1. observation names the section's flags
     the shot turns on; more than one patch runs the memory_patches maker;
@@ -657,9 +657,9 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops(tmp_path):
     crossing.
 
     Window 3 is where the park's two halves trade places. Its decode
-    was dispatched with its sibling and waited 0.004 us for the input
-    the sibling's transfer brought, which is the dependency it had, and
-    then 1.064 us more for the unit's compute to finish that sibling's
+    was dispatched with its other forced-class solve and waited 0.004 us
+    for the input that solve's transfer brought, which is the dependency
+    it had, and then 1.064 us more for the unit's compute to finish that
     solve, which is the structural wait gem5 counts as fuBusy. Window 9
     is the plain case beside it: 1.064 us of dependency wait and no
     structural wait at all.
@@ -872,12 +872,12 @@ def test_the_stage_points_are_the_committing_decodes_own_stages(tmp_path):
     assert samples["fetch"] == [0.024] * 9 + [0.012]
 
 
-def test_a_cancelled_siblings_card_is_not_the_windows_algorithm(tmp_path):
+def test_a_cancelled_speculative_card_is_not_the_windows_algorithm(tmp_path):
     """A parallel run that escalates nothing reports the weak card.
 
-    run_both_at_once starts a strong sibling on every window and cancels
-    it at the verdict, and the sibling records its own stages under the
-    same window key. The window's algorithm point is the decode that
+    run_both_at_once starts a speculative strong decode on every window and
+    cancels it at the verdict, and the speculative decode records its own stages
+    under the same window key. The window's algorithm point is the decode that
     committed, which is the 1.0 us weak one on every window here.
     """
     measurement = switching_shot(tmp_path, 0.0, True)
@@ -900,13 +900,13 @@ def test_a_second_forced_solve_is_not_the_windows_algorithm(tmp_path):
     assert measurement.samples["algorithm"] == [1.0] * 10
 
 
-def test_a_cancelled_siblings_record_ends_at_the_cancel(tmp_path):
-    """The strong sibling stops where the weak verdict stopped it.
+def test_a_cancelled_speculative_decode_ends_at_the_cancel(tmp_path):
+    """The speculative strong decode stops where the weak verdict stopped it.
 
     run_both_at_once starts the strong decoder on every window and the
     confident weak verdict halts it (Toshio et al. 2510.25222 Sec. III A
     steps 1 and 3). The engine cannot unschedule the card's timer, so
-    the cancel is what closes the sibling's open stage: one cancelled
+    the cancel is what closes the speculative decode's open stage: one cancelled
     record per window, each ending at that window's verdict rather than
     ten microseconds later, and the weak decode's own records untouched.
     """

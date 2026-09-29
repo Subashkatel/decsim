@@ -31,10 +31,9 @@ class EscalationCollaborators:
     collaborators arrive as one structure rather than as a signature per
     subclass (gem5 src/python/m5/SimObject.py:204-205).
 
-    threshold is the ThresholdSource the row decides keep on,
-    expected_source is the soft output source the run's confidence
-    signal reports, and run_both_at_once starts the strong sibling with
-    the weak job.
+    threshold is the ThresholdSource the row decides keep on, expected_source is
+    the soft output source the run's confidence signal reports, and
+    run_both_at_once starts the speculative strong decode with the weak job.
     """
 
     threshold: Any = None
@@ -124,19 +123,18 @@ class StrongOnly(EscalationPolicyBase):
 class Switching(EscalationPolicyBase):
     """Weak decoder first; escalate to a strong decoder on low confidence.
 
-    The threshold source decides keep from the weak result's soft
-    output, whose source must be the one the policy expects; a result
-    without a soft output escalates. run_both_at_once starts the strong
-    sibling with the weak job and cancels it on confidence (the paper's
-    Step 1, Toshio et al. 2510.25222 Sec. III A); otherwise the strong
-    re-decode starts at the verdict, after the weak_decoder_to_strong_
-    decoder hop (the serial modification of the same section). How the
-    strong window is laid out is the run's shape (the row
-    escalation.strong_window names in STRONG_WINDOW_SHAPES,
-    strong_window_shapes.py, which every refusal here names back), and
-    whether queued re-decodes are batched
-    is the decoder manager's (bulk_strong); check_plan holds the policy's
-    knobs and its threshold source against both once, at build.
+    The threshold source decides keep from the weak result's soft output, whose
+    source must be the one the policy expects; a result without a soft output
+    escalates. run_both_at_once starts a speculative strong decode with the weak
+    job and cancels it on confidence (the paper's Step 1, Toshio et al.
+    2510.25222 Sec. III A); otherwise the strong re-decode starts at the
+    verdict, after the weak_decoder_to_strong_decoder hop (the serial
+    modification of the same section). How the strong window is laid out is the
+    run's shape (the row escalation.strong_window names in STRONG_WINDOW_SHAPES,
+    strong_window_shapes.py, which every refusal here names back), and whether
+    queued re-decodes are batched is the decoder manager's (bulk_strong);
+    check_plan holds the policy's knobs and its threshold source against both
+    once, at build.
     """
 
     decides_on_a_confidence = True
@@ -210,7 +208,7 @@ class Switching(EscalationPolicyBase):
                 "threshold source"
             )
         if self.threshold.decide_keep(job, result):
-            # a kept result cancels the parallel sibling
+            # a kept result cancels the speculative strong decode
             return decoding_records.Verdict.KEEP
         return decoding_records.Verdict.ESCALATE
 

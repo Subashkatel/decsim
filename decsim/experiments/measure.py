@@ -80,9 +80,16 @@ POINTS = (
     # window out of its own memory)
     "fetch",
     "algorithm",  # the fetch's end -> the decoding algorithm's end
+    # inside the algorithm: the ticks a strong backend's decode waited
+    # for its dispatcher or a worker (decoders/strong_backend.py), summed
+    # as Ciw writes a customer's wait (ciw node.py lines 856-862). The
+    # algorithm less this is the device's own steps: launch, copies and
+    # kernel. Zero for a decoder with no queue of its own
+    "backend_queue_wait",
     "release",  # the algorithm's end -> the correction written out
     # the compute start -> the decode's end: every stage the unit ran,
-    # and nothing the decode waited for
+    # and nothing the decode waited for outside the unit; a strong
+    # backend's queue holds the unit, so backend_queue_wait is inside
     "service",
     # the committing decode's end -> the verdict on the window's answer:
     # the confidence signal's own computation, which is the walk under
@@ -590,6 +597,9 @@ def window_points_us(
         ),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
+        "backend_queue_wait": config_module.ticks_to_microseconds(
+            decode.backend_queue_wait_ticks
+        ),
         "release": stage_us["release"],
         "service": _span_microseconds(
             decode.done_ticks, decode.compute_start_ticks
@@ -1041,6 +1051,7 @@ class _CommittedDecode:
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
     run_sequence: int  # the run ordinal of the request it committed
     round_count: int  # the rounds it read, its job's own count
+    backend_queue_wait_ticks: int  # its waits inside a strong backend
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1488,7 +1499,18 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     ready = _ready_ticks(records)
     run_sequence = frame_record.run_sequence
     rounds = _rounds_read(records)
-    return _CommittedDecode(tier, first, last, ready, run_sequence, rounds)
+    waited = _backend_queue_wait_ticks(records)
+    return _CommittedDecode(
+        tier, first, last, ready, run_sequence, rounds, waited
+    )
+
+
+def _backend_queue_wait_ticks(records: list) -> int:
+    """The decode's waits inside a strong backend, whole at its last stage."""
+    waits = []
+    for record in records:
+        waits.append(record.backend_queue_wait_ticks)
+    return max(waits, default=0)
 
 
 def _rounds_read(records: list) -> int:

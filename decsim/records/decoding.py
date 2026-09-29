@@ -278,6 +278,11 @@ class DecodeJob:
     # unit's memory and its window owes no boundary. What it waits for
     # after this tick is the unit's compute, not a dependency
     ready_ticks: Optional[int] = None
+    # the ticks this decode waited inside a strong backend for its
+    # dispatcher or a worker, summed over its steps, as a gem5 instruction
+    # carries its own stage ticks (src/cpu/o3/dyn_inst.hh:1017-1028);
+    # zero on a decoder with no queue of its own
+    backend_queue_wait_ticks: int = 0
     memory: Optional[Any] = (
         None  # that unit's DecoderMemory while it holds this job's input
     )

@@ -482,6 +482,35 @@ def test_a_strong_answer_held_for_its_selection_waits_in_its_own_point(
     assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
 
 
+def test_a_gpu_decode_that_finds_the_dispatcher_busy_waits_in_its_own_point(
+    tmp_path,
+):
+    """Two patches share one GPU's dispatcher, one decode on it at a time.
+
+    Every window escalates to the measured_table row, whose decode holds
+    the one dispatcher (decoders/measured_table). Patch 1's window 0
+    finds it free and waits nothing; patch 2's window 0 arrives on the
+    other strong unit at 10.320 us and waits until patch 1's ends at
+    175.007 us, 164.687 us. The algorithm point holds that wait and the
+    device's own time after it.
+    """
+    strong_decoder = {
+        "kind": "measured_table",
+        "units": 2,
+        "unit_memory": {"bits": None},
+        "engine": ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
+    }
+    sections = {"strong_decoder": strong_decoder}
+    shot = switching_run(tmp_path, 1000000.0, patch_count=2, sections=sections)
+    measurement = measure.measure_shot(shot)
+    waits = measurement.samples["backend_queue_wait"]
+    algorithm = measurement.samples["algorithm"]
+
+    assert waits[0] == 0.0
+    assert waits[10] == 164.687
+    assert algorithm[10] == 272.93
+
+
 def test_a_withdrawn_request_waits_in_the_admission_point(tmp_path):
     """A restart window's first request is withdrawn and asked for again.
 

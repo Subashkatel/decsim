@@ -188,6 +188,10 @@ class DecoderStageRecord:
     # r_strong is what Toshio's backlog bound divides by (2510.25222
     # lines 1270-1300), and the window record keeps only the last decode
     round_count: int = 0
+    # the ticks the decode had waited inside a strong backend when this
+    # stage closed (DecodeJob.backend_queue_wait_ticks), all of it by the
+    # algorithm stage's end
+    backend_queue_wait_ticks: int = 0
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -383,6 +387,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             job.dispatch_ticks,
             job.ready_ticks,
             round_count=job.round_count,
+            backend_queue_wait_ticks=job.backend_queue_wait_ticks,
         )
         self.stage_recorded.fire(record)
 

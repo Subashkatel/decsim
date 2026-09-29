@@ -73,9 +73,11 @@ PORTS = frozenset(
 
 # Types decsim does not own, met at the edge of another library; an
 # enum member is written into json as its name, a number json cannot
-# hold as its exact text and an array as its values (collect.json_value).
+# hold as its exact text, an array as its values and a class given as a
+# setting as its module and qualified name (collect.json_value).
 FOREIGN_TYPES = frozenset(
     {
+        "type",
         "enum.Enum",
         "numbers.Number",
         "numpy.generic",

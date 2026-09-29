@@ -424,10 +424,16 @@ def _json_object(value: Any, keep_labels: bool) -> Any:
     Two instances that hold different values are two tasks. The id is
     taken before a shot binds the component's neighbours onto it. An
     array (recorded measurements) is its values; a value with no
-    attributes of its own (a lock) is its class.
+    attributes of its own (a lock) is its class. A class given as a value
+    (the scheduler rule) is its module and qualified name, the identity
+    pickle writes for a class (Lib/pickle.py save_global, 1056-1113): its
+    attributes are code, and Python adds __annotations__ to a class the
+    first time it is read.
     """
     if isinstance(value, numpy.ndarray):
         return value.tolist()
+    if isinstance(value, type):
+        return f"{value.__module__}.{value.__qualname__}"
     value_type = type(value)
     class_name = f"{value_type.__module__}.{value_type.__qualname__}"
     attributes = _attributes_of(value)

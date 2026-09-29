@@ -600,6 +600,25 @@ def test_two_python_built_sources_that_hold_the_same_values_are_one_task():
     assert len(unique) == 1
 
 
+def test_a_class_enters_the_id_by_its_name_whatever_it_holds():
+    """A class in the settings is its module and qualified name.
+
+    That is the identity pickle writes for a class (Lib/pickle.py
+    save_global), so an attribute the class gains later, as Python adds
+    __annotations__ on first read, leaves the id alone.
+    """
+
+    class Rule:
+        pass
+
+    before = collect.json_value(Rule)
+    Rule.touched = True
+    after = collect.json_value(Rule)
+
+    assert before == f"{Rule.__module__}.{Rule.__qualname__}"
+    assert after == before
+
+
 def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
     """A yaml link rate is an exact Fraction and enters the id as its text.
 

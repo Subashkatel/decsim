@@ -4,8 +4,8 @@ Two rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
 escalation.strong_window
 (Toshio et al. 2510.25222). Both pin a face on a neighbour's committed
 correction, which is Bombin et al. 2303.04846's input adaptation (lines
-775-788): NearSeamWindow is the escalated window's commit region with
-its past face pinned, and ForwardSeamWindow is Sec. III C's forward
+775-788): RedoWindow is the escalated window's commit region with
+its past face pinned, and DoubleWindow is Sec. III C's forward
 extent with both faces pinned. A third shape, both faces pinned and
 absorbing nothing, is not a row: it
 waits for the window after it, which waits for its own strong result,
@@ -15,8 +15,8 @@ shape Skoric et al. 2209.08552 decode block by block (lines 398-401,
 1038-1040); the row would read that off a fact the scheme declares, the
 way it reads absorption off itself, and refuse a scheme that does not
 declare it.
-NearSeamWindow is built the moment its rounds are stored in the strong
-syndrome buffer. ForwardSeamWindow is Sec. III C and Fig. 12: a strong
+RedoWindow is built the moment its rounds are stored in the strong
+syndrome buffer. DoubleWindow is Sec. III C and Fig. 12: a strong
 window that starts at the escalated commit and extends forward, absorbs
 the weak windows it covers, re-slices the window past it (the restart
 window) and is held until that window's weak commit or, at the
@@ -63,9 +63,9 @@ import decsim.trace_source as trace_source
 class StrongAssignment:
     """A strong window assigned to an escalated weak window.
 
-    job is the strong job when the row builds it now (the near-seam
+    job is the strong job when the row builds it now (the redo
     window); None when the row holds it until the conditions it declares
-    fire (the forward window). held_plan is then the row's own record of
+    fire (the double window). held_plan is then the row's own record of
     what it planned, handed back to the row when the redecode asks for
     the job, and round_count is the strong window's rounds, which the
     views name while the job is held. folded_boundaries names the
@@ -132,7 +132,7 @@ class StrongWindowShape(Protocol):
     committing, so it names eager, and a region that absorbs nothing
     names held, since its escalation would revise a boundary already
     shipped. window_absorbed(key, owner_key) is the shape's one trace
-    source: the forward window fires it for every weak window a strong
+    source: the double window fires it for every weak window a strong
     one covers, and a shape that absorbs nothing exposes the silent
     source, so the machine connects the ledger and the trace without
     asking which shape it built.
@@ -159,8 +159,8 @@ class StrongWindowShape(Protocol):
         """The rounds the row reads that the strong side does not have yet."""
 
 
-class NearSeamWindow(StrongWindowPorts):
-    """The commit region with its past face pinned and one open buffer.
+class RedoWindow(StrongWindowPorts):
+    """The redo window: the escalated window decoded again, past face pinned.
 
     The escalated window's commit region is re-decoded on an input
     whose past face carries the correction the earlier neighbour
@@ -203,7 +203,7 @@ class NearSeamWindow(StrongWindowPorts):
     determined by the weak decoder" (Toshio et al. 2510.25222 lines
     1249-1250): pinning the future face too without absorbing the
     window after it is the both-faces shape this module refuses, since
-    that window waits for this one's strong result. The forward row is
+    that window waits for this one's strong result. The double window is
     the Fig. 12 geometry.
     """
 
@@ -214,8 +214,8 @@ class NearSeamWindow(StrongWindowPorts):
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The near-pinned job, built now or held for its own rounds."""
         key = (weak_job.operation_id, weak_job.window_id)
-        region = self.regions.near_seam_region(key)
-        pinned_source_key = self.regions.near_seam_source(key)
+        region = self.regions.redo_region(key)
+        pinned_source_key = self.regions.redo_pin_source(key)
         folded_boundaries = _declared_faces(pinned_source_key)
         held = _held_redo(
             self,
@@ -243,8 +243,8 @@ class NearSeamWindow(StrongWindowPorts):
         return _rounds_not_stored(self, assignment.held_plan)
 
 
-class ForwardSeamWindow(StrongWindowPorts):
-    """Sec. III C, Fig. 12 as the paper states it: both faces pinned.
+class DoubleWindow(StrongWindowPorts):
+    """Toshio's double window (Sec. III C, Fig. 12): both faces pinned.
 
     The window starts at the escalated commit and extends forward by
     the interaction's plan, r_strong = r_com + 2 r_buf rounds (Toshio et
@@ -292,7 +292,7 @@ class ForwardSeamWindow(StrongWindowPorts):
     The restart window owns the faults crossing the far face at every
     escalation.restart_reread_buffer_regions width, since this region
     reads no round past its commit (strong_regions.py,
-    forward_seam_region). At width 1, the width Fig. 12 step 5 draws,
+    double_window_region). At width 1, the width Fig. 12 step 5 draws,
     the restart window reads the region's last buffer region raw as its
     own past context and commits nothing inside the region, so the far
     pin carries only those crossing faults and no round of the input is
@@ -312,7 +312,7 @@ class ForwardSeamWindow(StrongWindowPorts):
     # ---- the shape
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
-        """Lay out the forward strong window; hold its job until it may start.
+        """Lay out the double window; hold its job until it may start.
 
         The strong window absorbs the windows it covers. Its job waits for
         the restart window's weak commit (waiting_far_boundary) or, at the
@@ -328,8 +328,8 @@ class ForwardSeamWindow(StrongWindowPorts):
             window_records.DecoderTier.STRONG,
         )
         strong_request_created_ticks = self.engine.now
-        near_source_key = self.regions.forward_near_face(key)
-        resolved_region = self.regions.forward_seam_region(
+        near_source_key = self.regions.double_window_near_face(key)
+        resolved_region = self.regions.double_window_region(
             key, near_source_key=near_source_key
         )
         folded_boundaries = _pinned_faces(near_source_key, resolved_region)
@@ -347,7 +347,7 @@ class ForwardSeamWindow(StrongWindowPorts):
             resolved_region.restart_read_keys,
         )
         operation = self.regions.operation(weak_job.operation_id)
-        held = _HeldForwardWindow(
+        held = _HeldDoubleWindow(
             key=key,
             weak_job=weak_job,
             label=weak_job.strong_label,
@@ -438,7 +438,7 @@ class ForwardSeamWindow(StrongWindowPorts):
     # ---- private: what releases the job
 
     def _far_face_conditions(
-        self, held: "_HeldForwardWindow"
+        self, held: "_HeldDoubleWindow"
     ) -> pending_strong_windows.ReleaseConditions:
         """The restart window's commit and then its rounds, or the stored tail.
 
@@ -477,7 +477,7 @@ class ForwardSeamWindow(StrongWindowPorts):
     # ---- private: landing the plan
 
     def _withdraw_stale_requests(
-        self, resolved_region: strong_regions.ForwardRegion
+        self, resolved_region: strong_regions.DoubleWindowRegion
     ) -> None:
         """Take back the weak decodes the strong window supersedes.
 
@@ -520,8 +520,8 @@ class ForwardSeamWindow(StrongWindowPorts):
 
     def _log_assignment(
         self,
-        held: "_HeldForwardWindow",
-        resolved_region: strong_regions.ForwardRegion,
+        held: "_HeldDoubleWindow",
+        resolved_region: strong_regions.DoubleWindowRegion,
     ) -> None:
         plan = resolved_region.plan
         readiness_description = "the far-side weak boundary"
@@ -554,7 +554,7 @@ class ForwardSeamWindow(StrongWindowPorts):
         )
         restart = self.planner.window_at(restart_key)
         # its absorbed dependency is gone; no strong sibling in the
-        # forward scheme
+        # double window
         self.requester.request_if_ready(restart, None)
         self.retention.release_restart_reads(restart_key)
 
@@ -581,7 +581,7 @@ class ForwardSeamWindow(StrongWindowPorts):
     # ---- private: the held job
 
     def _build_strong_job(
-        self, held: "_HeldForwardWindow"
+        self, held: "_HeldDoubleWindow"
     ) -> decoding_records.DecodeJob:
         """The strong window's job, once both of its boundaries exist.
 
@@ -612,7 +612,7 @@ class ForwardSeamWindow(StrongWindowPorts):
         )
 
 
-# a row that pins no face, the near-seam window at the operation's
+# a row that pins no face, the redo window at the operation's
 # first round, folds no committed neighbour boundary into its input
 FOLDS_NO_BOUNDARY: tuple = ()
 
@@ -654,7 +654,7 @@ def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
 
 def _pinned_faces(
     near_source_key: Optional[tuple],
-    resolved_region: strong_regions.ForwardRegion,
+    resolved_region: strong_regions.DoubleWindowRegion,
 ) -> tuple:
     """The commit closing the near face, and the window restarting after.
 
@@ -832,7 +832,7 @@ def _strong_redecode_job(
 class _HeldStrongRedo:
     """What a row that waits only for its own rounds keeps from its plan.
 
-    The near-seam row lays a strong window over the escalated window's
+    The redo window lays a strong window over the escalated window's
     commit region and builds the job as soon as the rounds it reads are
     stored; read_keys and folded_boundaries are the rounds it reads and
     the face it pins.
@@ -851,13 +851,13 @@ class _HeldStrongRedo:
 
 
 @dataclasses.dataclass(frozen=True)
-class _HeldForwardWindow:
-    """All the forward window keeps from its plan until it builds the job."""
+class _HeldDoubleWindow:
+    """All the double window keeps from its plan until it builds the job."""
 
     key: tuple
     weak_job: decoding_records.DecodeJob
     label: str
-    resolved_region: strong_regions.ForwardRegion
+    resolved_region: strong_regions.DoubleWindowRegion
     strong_window: window_records.Window
     strong_model: object
     operation: program_records.Operation

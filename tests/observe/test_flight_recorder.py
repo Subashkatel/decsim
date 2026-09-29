@@ -450,12 +450,12 @@ def switching_parallel_mode(_generator, rounds):
     )
 
 
-def switching_forward_mode(_generator, rounds):
-    """Escalation under the forward window, which holds no boundary."""
+def switching_double_window_mode(_generator, rounds):
+    """Escalation under the double window, which holds no boundary."""
     return declared_run.switching_run(
         rounds=rounds,
         escalation_probability=1.0,
-        strong_window="forward_seam_pinned",
+        strong_window="double_window",
     )
 
 
@@ -466,7 +466,7 @@ SWEEP_MODES = (
     ("switching_keep", switching_keep_mode),
     ("switching_escalate", switching_escalate_mode),
     ("switching_parallel", switching_parallel_mode),
-    ("switching_forward", switching_forward_mode),
+    ("switching_double_window", switching_double_window_mode),
 )
 WINDOW_STAMP_NAMES = (
     "t_first_round",

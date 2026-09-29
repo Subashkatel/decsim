@@ -126,11 +126,11 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
 
 
 def _restart_width_card(regions: int) -> dict:
-    """The switching card with the forward window and the re-read width."""
+    """The switching card with the double window and the re-read width."""
     escalation = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "forward_seam_pinned",
+        "strong_window": "double_window",
         "restart_reread_buffer_regions": regions,
     }
     strong_decoder = strong_unit("belief_matching")
@@ -183,9 +183,9 @@ def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
 def test_a_restart_re_read_under_a_window_that_restarts_nothing_is_refused(
     tmp_path,
 ):
-    """The near-seam window absorbs no weak window, so none restarts."""
+    """The redo window absorbs no weak window, so none restarts."""
     card = _restart_width_card(0)
-    card["escalation"]["strong_window"] = "near_seam_pinned"
+    card["escalation"]["strong_window"] = "redo_window"
     path = write_config(tmp_path, card)
     with pytest.raises(ValueError, match="restart_reread_buffer_regions"):
         load_experiment(path)
@@ -692,7 +692,7 @@ def test_a_pinned_sibling_is_planned_when_its_weak_job_leaves_its_park():
     """Step 1 on a pinned row starts the sibling with the unparked weak job.
 
     Toshio arXiv:2510.25222 Sec. III A, Step 1 feeds both decoders the
-    window at once (lines 598-601), and near_seam_pinned pins its past
+    window at once (lines 598-601), and redo_window pins its past
     face on the earlier neighbour's final commit (Bombin arXiv:2303.04846
     lines 775-788). Under held boundaries that commit is what unparks
     the weak job, so the sibling is planned at that instant and every
@@ -701,7 +701,7 @@ def test_a_pinned_sibling_is_planned_when_its_weak_job_leaves_its_park():
     machine = fabric.switching_machine(
         rounds=9,
         escalated_windows={0, 1, 2},
-        strong_window="near_seam_pinned",
+        strong_window="redo_window",
         run_both_at_once=True,
     )
     machine.run()

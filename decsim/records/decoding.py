@@ -109,7 +109,7 @@ class PotentialStrong:
 class PotentialRestart:
     """A hold in the weak syndrome buffer: a window's reads and one before them.
 
-    Under the forward strong window an earlier escalation may re-slice
+    Under the double window an earlier escalation may re-slice
     this window as its restart window, whose weak decode re-reads one
     buffer into the strong region (Toshio 2510.25222 Sec. III C); the
     rounds stay past the window's own request and landing, until the
@@ -537,8 +537,8 @@ class RunShape:
     STRONG_WINDOW_SHAPES the escalation section named, so a refusal
     names the shape the yaml chose; is_absorbing_strong_window is that
     row's own declaration that its region replaces the weak windows it
-    covers (the forward row of Toshio et al. 2510.25222 Sec. III C;
-    the near-seam row absorbs nothing); is_bulk_strong is the
+    covers (the double window of Toshio et al. 2510.25222 Sec. III C;
+    the redo window absorbs nothing); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and
     buffer_round_count size every window (windows.commit_rounds and

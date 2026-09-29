@@ -12,7 +12,7 @@ across the region's edge, committed regions tile without a gap.
 
 Toshio et al. 2510.25222 Sec. III C and Fig. 12 give the forward
 region's rule, r_strong = r_com + 2 r_buf with the weak chain resuming
-after it (lines 1232-1235, 1248-1251); the near-seam region is the
+after it (lines 1232-1235, 1248-1251); the redo region is the
 escalated window's commit region with its past face pinned (Bombin et
 al. 2303.04846 lines 775-788, 1456-1458).
 """
@@ -35,8 +35,8 @@ class RedoRegion:
 
 
 @dataclasses.dataclass(frozen=True)
-class ForwardRegion:
-    """One forward strong region, resolved against the live window graph."""
+class DoubleWindowRegion:
+    """One double-window region, resolved against the live window graph."""
 
     plan: window_records.StrongRegionPlan
     absorbed_window_keys: tuple
@@ -62,7 +62,7 @@ class StrongRegions:
     # priors; unbound when burst_detector.kind is none
     burst_detector = ports.Port(ports.BurstDetector, optional=True)
 
-    def near_seam_region(self, key: tuple) -> RedoRegion:
+    def redo_region(self, key: tuple) -> RedoRegion:
         """The escalated window's commit rounds, its past face pinned.
 
         The rounds before the commit region are not read: their defects
@@ -85,7 +85,7 @@ class StrongRegions:
         )
         return RedoRegion(strong_window, tuple(read_keys))
 
-    def near_seam_source(self, key: tuple) -> Optional[tuple]:
+    def redo_pin_source(self, key: tuple) -> Optional[tuple]:
         """The window whose commit region ends where this one's begins.
 
         A pinned face is the seam between two commit regions, so the
@@ -103,8 +103,8 @@ class StrongRegions:
                 return dependency_key
         return None
 
-    def forward_near_face(self, key: tuple) -> Optional[tuple]:
-        """The commit a forward region's near face pins on.
+    def double_window_near_face(self, key: tuple) -> Optional[tuple]:
+        """The commit a double-window region's near face pins on.
 
         The window before the region, when one committed the round
         before it. When none did and the region does not start the
@@ -116,7 +116,7 @@ class StrongRegions:
         ends determined by the weak decoder). None at the operation's
         first round, round one, whose face the initialisation closes.
         """
-        neighbour = self.near_seam_source(key)
+        neighbour = self.redo_pin_source(key)
         if neighbour is not None:
             return neighbour
         weak_window = self.planner.window_at(key)
@@ -174,10 +174,10 @@ class StrongRegions:
             return model
         return self.burst_detector.with_burst_priors(window, model)
 
-    def forward_seam_region(
+    def double_window_region(
         self, key: tuple, *, near_source_key: Optional[tuple]
-    ) -> ForwardRegion:
-        """The forward strong region, checked, read with no context.
+    ) -> DoubleWindowRegion:
+        """The double-window region, checked, read with no context.
 
         Toshio et al. 2510.25222 Fig. 12 assigns the strong decoder
         r_strong rounds and no more, "after the boundary conditions at
@@ -199,7 +199,7 @@ class StrongRegions:
         buffer and committing only past it, so what the pin carries is
         those crossing faults and nothing inside the region.
         """
-        proposal = self._proposed_forward_region(key)
+        proposal = self._proposed_double_window_region(key)
         plan = proposal.plan
         context_lo = plan.context_lo
         if near_source_key is not None:
@@ -212,9 +212,11 @@ class StrongRegions:
             restart_seam_fault_owner=seam_fault_owner,
         )
         pinned = dataclasses.replace(proposal, plan=pinned_plan)
-        return self._resolved_forward_region(key, pinned, near_source_key)
+        return self._resolved_double_window_region(key, pinned, near_source_key)
 
-    def _proposed_forward_region(self, key: tuple) -> "_ForwardProposal":
+    def _proposed_double_window_region(
+        self, key: tuple
+    ) -> "_DoubleWindowProposal":
         """The extent the interaction proposes, with what it was read on."""
         operation_id, escalated_index = key
         weak_window = self.planner.window_at(key)
@@ -223,19 +225,19 @@ class StrongRegions:
             operation_id, escalated_index
         )
         plan = self._plan_region(weak_window, later_windows, round_count)
-        return _ForwardProposal(
+        return _DoubleWindowProposal(
             weak_window=weak_window,
             round_count=round_count,
             later_windows=later_windows,
             plan=plan,
         )
 
-    def _resolved_forward_region(
+    def _resolved_double_window_region(
         self,
         key: tuple,
-        proposal: "_ForwardProposal",
+        proposal: "_DoubleWindowProposal",
         near_source_key: Optional[tuple],
-    ) -> ForwardRegion:
+    ) -> DoubleWindowRegion:
         """The proposed extent checked against the windows that exist."""
         operation_id = key[0]
         weak_window = proposal.weak_window
@@ -337,7 +339,7 @@ class StrongRegions:
         restart_reads: tuple,
         context_keys: list,
         near_source_key: Optional[tuple],
-    ) -> ForwardRegion:
+    ) -> DoubleWindowRegion:
         """The resolved region with the two windows' error models.
 
         The restart window is modelled first, because a row that pins
@@ -360,7 +362,7 @@ class StrongRegions:
                 restart_exclusions,
                 None,
             )
-        prior_faults = self._forward_prior_faults(
+        prior_faults = self._double_window_prior_faults(
             key, near_source_key, restart_model
         )
         planned_model = self.planner.strong_window_model(
@@ -371,7 +373,7 @@ class StrongRegions:
             prior_faults,
         )
         strong_model = self._with_burst_priors(strong_window, planned_model)
-        return ForwardRegion(
+        return DoubleWindowRegion(
             plan=plan,
             absorbed_window_keys=absorbed,
             restart_window_key=restart_key,
@@ -383,13 +385,13 @@ class StrongRegions:
             restart_model=restart_model,
         )
 
-    def _forward_prior_faults(
+    def _double_window_prior_faults(
         self,
         key: tuple,
         near_source_key: Optional[tuple],
         restart_model,
     ):
-        """What the faces of a forward region's pins carry.
+        """What the faces of a double-window region's pins carry.
 
         The near face pins on a commit the planner holds the owned
         faults of, or on nothing at the operation's first round; the far
@@ -429,7 +431,7 @@ class StrongRegions:
 
 
 @dataclasses.dataclass(frozen=True)
-class _ForwardProposal:
+class _DoubleWindowProposal:
     """The extent an interaction proposes, before it is checked.
 
     A row that reads the extent with no context narrows the plan here,
@@ -647,7 +649,7 @@ def _fault_exclusions(
 ) -> tuple:
     """(strong window's, restart window's) fault exclusion ranges.
 
-    The restart window owns the crossing faults (forward_seam_region):
+    The restart window owns the crossing faults (double_window_region):
     the strong window excludes the rounds past its edge and the restart
     window excludes only the rounds before the strong window.
     """

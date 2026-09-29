@@ -1,4 +1,4 @@
-# The seam-pinned switching point: weak pymatching with the
+# The redo window switching point: weak pymatching with the
 # complementary gap, escalating to belief matching below the paper's
 # 20 dB threshold (Toshio 2510.25222 Sec. IV), with the escalated
 # window's near face pinned on its neighbour's committed correction
@@ -11,7 +11,7 @@ extends: ../../bases/weak_decoder_baseline.yaml
 escalation:
   kind: switching
   gap_threshold_db: 20.0
-  strong_window: near_seam_pinned
+  strong_window: redo_window
 
 links:
   qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}

@@ -1973,7 +1973,7 @@ class ThresholdSource(Protocol):
     escalation/settings.py). A source that audits by escalating (the
     online row labels a kept window by re-decoding it on the strong
     tier) needs one serial strong re-decode per window, so Switching
-    refuses it beside run_both_at_once and the forward strong window.
+    refuses it beside run_both_at_once and the double window.
     reads_a_calibration_table says the point's number comes from an
     offline calibration csv rather than from the section's card, so the
     settings demand threshold_table. built_per_sweep_point says the
@@ -2086,7 +2086,7 @@ class WindowingScheme(Protocol):
         reads rounds past its own commit, which is what the switching
         recovery re-reads when a strong result revises a window.
     commits_in_one_serial_chain: the windows commit one after another in
-        stride order, which the forward strong window absorbs.
+        stride order, which the double window absorbs.
     supports_dynamic_streams: an operation whose round count is not known
         at build can be windowed by this scheme.
     """

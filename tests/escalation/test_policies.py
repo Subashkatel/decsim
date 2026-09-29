@@ -322,7 +322,7 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="forward_seam_pinned",
+            strong_window="double_window",
             run_both_at_once=True,
         )
 
@@ -335,21 +335,21 @@ def test_a_refusal_names_the_strong_window_row_the_yaml_chose():
     """
     with pytest.raises(
         ValueError,
-        match="escalation.strong_window forward_seam_pinned defers the "
+        match="escalation.strong_window double_window defers the "
         "strong start until the far weak boundary exists",
     ):
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="forward_seam_pinned",
+            strong_window="double_window",
             run_both_at_once=True,
         )
 
 
-def _forward_window_settings(
+def _double_window_settings(
     commit_rounds: int, buffer_rounds: int
 ) -> machine_settings.MachineSettings:
-    """The gate's switching card with the forward window and the sizes.
+    """The gate's switching card with the double window and the sizes.
 
     Every part is a table row, the way the yaml builds it.
     """
@@ -367,7 +367,7 @@ def _forward_window_settings(
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         gap_threshold_nats=1.0,
-        strong_window="forward_seam_pinned",
+        strong_window="double_window",
     )
     return machine_settings.MachineSettings(
         windows=windows,
@@ -378,7 +378,7 @@ def _forward_window_settings(
 
 
 @pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 4), (4, 3)])
-def test_a_forward_window_crossing_a_later_commit_region_is_refused(
+def test_a_double_window_crossing_a_later_commit_region_is_refused(
     commit_rounds, buffer_rounds
 ):
     """The crossing shape is decided at build.
@@ -388,29 +388,29 @@ def test_a_forward_window_crossing_a_later_commit_region_is_refused(
     commit region, and that window commits across the region's end with
     no owner.
     """
-    settings = _forward_window_settings(commit_rounds, buffer_rounds)
+    settings = _double_window_settings(commit_rounds, buffer_rounds)
     with pytest.raises(
         ValueError,
-        match="the strong region of forward_seam_pinned, commit plus two "
+        match="the strong region of double_window, commit plus two "
         "buffers, must end inside its own commit region",
     ):
         machine_module.Machine.build(settings, 0)
 
 
 @pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 3), (4, 4)])
-def test_a_forward_window_ending_on_a_commit_edge_builds(
+def test_a_double_window_ending_on_a_commit_edge_builds(
     commit_rounds, buffer_rounds
 ):
-    settings = _forward_window_settings(commit_rounds, buffer_rounds)
+    settings = _double_window_settings(commit_rounds, buffer_rounds)
     machine = machine_module.Machine.build(settings, 0)
     assert machine.window_manager.strong_redecode is not None
 
 
-def test_an_online_source_under_a_forward_window_is_refused_as_serial():
+def test_an_online_source_under_a_double_window_is_refused_as_serial():
     """check_plan's serial-only law.
 
     An audit label compares one window's weak and strong committed
-    observables, and a forward-window strong result owns a larger extent
+    observables, and a double-window strong result owns a larger extent
     than the audited window.
     """
     online = _always_auditing_online_threshold(threshold=2.0)
@@ -419,7 +419,7 @@ def test_an_online_source_under_a_forward_window_is_refused_as_serial():
     )
     policy = policies.Switching(collaborators)
     escalation = escalation_settings.EscalationSettings(
-        policy=policy, strong_window="forward_seam_pinned"
+        policy=policy, strong_window="double_window"
     )
     with pytest.raises(
         ValueError, match="online threshold calibration is serial-only"
@@ -427,7 +427,7 @@ def test_an_online_source_under_a_forward_window_is_refused_as_serial():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="forward_seam_pinned",
+            strong_window="double_window",
             escalation=escalation,
         )
 
@@ -673,7 +673,7 @@ class _Draws:
 def _serial_switching_settings(
     boundary_policy,
 ) -> machine_settings.MachineSettings:
-    """Serial switching (no forward window) with the boundary policy given."""
+    """Serial switching (no double window) with the boundary policy given."""
     lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
     scheme = sliding_scheme.SlidingWindowScheme(lookahead)
     windows = window_settings.WindowSettings(
@@ -707,15 +707,15 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
         machine_module.Machine.build(settings, 0)
 
 
-def test_the_forward_window_refuses_held_boundaries_at_build():
+def test_the_double_window_refuses_held_boundaries_at_build():
     """The far boundary IS the restart window's weak commit.
 
-    Toshio 2510.25222 Sec. III C: under the forward window the weak chain
+    Toshio 2510.25222 Sec. III C: under the double window the weak chain
     keeps committing while the strong region decodes, so holding the
     weak boundaries until the strong result arrives would deadlock the
     strong window on itself.
     """
-    settings = _forward_window_settings(3, 3)
+    settings = _double_window_settings(3, 3)
     held = boundary_policies.Held()
     windows = window_settings.WindowSettings(
         commit_rounds=3, buffer_rounds=3, boundary_policy=held
@@ -784,16 +784,16 @@ class UndeclaredWindowScheme:
 
 
 def test_a_windowing_scheme_added_from_outside_runs_under_switching():
-    """The forward window reads the row's declaration, not its class.
+    """The double window reads the row's declaration, not its class.
 
     A row that commits in one serial chain and keeps trailing tail
-    context serves the forward strong window, whatever class it is.
+    context serves the double window, whatever class it is.
     """
     scheme = DelegatingWindowScheme()
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="forward_seam_pinned",
+        strong_window="double_window",
         round_microseconds=4.0,
         scheme=scheme,
     )

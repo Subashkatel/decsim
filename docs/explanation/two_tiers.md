@@ -119,8 +119,8 @@ faced, and would have little reason to do better.
 
 | Row | The rounds it reads |
 | --- | --- |
-| `near_seam_pinned` | the escalated window's commit region and one buffer ahead, with its past face pinned on the neighbour's committed correction. Built the moment its rounds are stored. |
-| `forward_seam_pinned` | Toshio Sec. III C and Fig. 12: it starts at the escalated commit and extends forward over `r_com + 2 r_buf` rounds, absorbing the weak windows it covers, with both faces pinned. |
+| `redo_window` | the escalated window's commit region and one buffer ahead, with its past face pinned on the neighbour's committed correction. Built the moment its rounds are stored. |
+| `double_window` | Toshio Sec. III C and Fig. 12: it starts at the escalated commit and extends forward over `r_com + 2 r_buf` rounds, absorbing the weak windows it covers, with both faces pinned. |
 
 A **face** is one end of a window, where it meets the window beside it:
 the past face behind it and the far face ahead of it.
@@ -182,7 +182,7 @@ Everything above has a price, and decsim's point is to charge all of it:
 - and the strong decode itself.
 
 A study of switching is a study of whether the accuracy bought is worth
-that list. `configs/experiments/switching/seam_pinned_switching.yaml` is
+that list. `configs/experiments/switching/redo_window_switching.yaml` is
 a worked point, and [Two tiers](../tutorials/two_tiers.md) runs one.
 
 ## Read next

@@ -278,7 +278,7 @@ def switching_run(
     escalation_probability=0.0,
     operations=None,
     run_both_at_once=False,
-    strong_window="near_seam_pinned",
+    strong_window="redo_window",
     weak_units=1,
     seed=0,
     io_trace=False,
@@ -315,10 +315,10 @@ def switching_run(
     )
     policy = escalation_policies.Switching(collaborators)
     workload = declared_workload(operations, rounds)
-    # serial switching needs Held boundaries; the forward window refuses
+    # serial switching needs Held boundaries; the double window refuses
     # them (escalation.policies.Switching.check_plan)
     boundary_policy = boundary_policies.Held()
-    if strong_window == "forward_seam_pinned":
+    if strong_window == "double_window":
         boundary_policy = None
     scheme = lookahead_sliding_scheme()
     windows = window_settings.WindowSettings(

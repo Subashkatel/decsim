@@ -46,7 +46,7 @@ extends: ../bases/weak_decoder_baseline.yaml
 escalation:
   kind: switching
   gap_threshold_db: 20.0
-  strong_window: near_seam_pinned
+  strong_window: redo_window
 
 links:
   qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
@@ -101,7 +101,7 @@ The `escalation` section is the new part.
   escalated, written in the paper's decibels. decsim converts it once,
   at load, into natural-log weight, which is the unit the decoder
   compares in (`decsim/escalation/settings.py`, `decibels_to_nats`).
-- `strong_window: near_seam_pinned` says which rounds the strong
+- `strong_window: redo_window` says which rounds the strong
   decoder re-reads: the escalated window's commit region and one buffer
   region ahead of it, with its past face pinned on the correction the
   window before it committed.
@@ -368,7 +368,7 @@ eight things happen that did not happen for window 0.
   input comes from the strong syndrome buffer, where the escalation just
   put it, and not from the weak decoder.
 - **`decoder_to_decoder` at 17.144, 8 bits.** Window 2's committed
-  boundary, shipped to the strong window: `near_seam_pinned` pins the
+  boundary, shipped to the strong window: `redo_window` pins the
   strong window's past face on it, and the strong solve folds it in
   (`decsim/windows/window_boundaries.py`, `pin_strong_face`).
 - **The strong decode costs 10 microseconds**, its card, against the
@@ -381,7 +381,7 @@ eight things happen that did not happen for window 0.
 provisionally commits on the weak answer as soon as the verdict is in
 (`decsim/windows/window_commits.py`, `commit`). What it does not do is
 ship its boundary: this run's boundary policy is `held`, chosen for you
-because the escalation may escalate and `near_seam_pinned` does not
+because the escalation may escalate and `redo_window` does not
 absorb the windows it covers. A strong window absorbs a weak window when
 it decodes the same rounds again and replaces that window's answer, so
 the weak window never ships a boundary of its own

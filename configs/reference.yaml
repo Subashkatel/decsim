@@ -247,13 +247,13 @@ escalation:
 #                                  # weak_decoder_to_strong_decoder hop, which the
 #                                  # paper expects to cost little because the
 #                                  # switching rate decays with the code distance
-#   strong_window: near_seam_pinned  # near_seam_pinned |
-#                                  # forward_seam_pinned: the shape
-#                                  # of the window the strong tier re-decodes
+#   strong_window: redo_window     # redo_window | double_window: the
+#                                  # shape of the window the strong tier
+#                                  # re-decodes
 #                                  # (STRONG_WINDOW_SHAPES in
 #                                  # escalation/strong_window_shapes.py).
-#                                  # near_seam_pinned, the default, re-decodes
-#                                  # the escalated window's commit region and
+#                                  # redo_window, the default, decodes the
+#                                  # escalated window again: its commit region and
 #                                  # pins its past face on the earlier
 #                                  # neighbour's committed correction: the
 #                                  # input carries d(e + kappa) on the seam
@@ -267,8 +267,9 @@ escalation:
 #                                  # is the distance. It escalates with Held
 #                                  # boundaries, serially or beside the weak
 #                                  # decode (run_both_at_once).
-#                                  # forward_seam_pinned is the paper's
-#                                  # Sec. III C as it is stated: the weak chain
+#                                  # double_window is Toshio's double window
+#                                  # decoding scheme, Sec. III C and Fig. 12
+#                                  # as it is stated: the weak chain
 #                                  # keeps committing past an escalated strong
 #                                  # window of r_com + 2 r_buf rounds, which
 #                                  # is read with no context, its near face
@@ -281,7 +282,7 @@ escalation:
 #                                  # to the restart window, and reads one
 #                                  # buffer region of raw context on a near
 #                                  # face that no committed correction closes
-#   restart_reread_buffer_regions: 1  # forward_seam_pinned only: how many
+#   restart_reread_buffer_regions: 1  # double_window only: how many
 #                                  # of the strong region's buffer regions
 #                                  # the restarted weak window re-reads. Toshio
 #                                  # 2510.25222 lines 1229-1235 resume the weak

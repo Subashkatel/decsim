@@ -220,7 +220,7 @@ def switching_run(
     raw["escalation"] = {
         "kind": "switching",
         "gap_threshold_db": gap_threshold_db,
-        "strong_window": "near_seam_pinned",
+        "strong_window": "redo_window",
         "run_both_at_once": run_both_at_once,
     }
     raw["weak_decoder"] = {
@@ -792,13 +792,13 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
 def test_the_shipped_pinned_config_sums_to_its_reaction_time():
     """The same law where the strong tier's time is measured, not declared.
 
-    configs/experiments/switching/seam_pinned_switching.yaml names a
+    configs/experiments/switching/redo_window_switching.yaml names a
     belief-matching strong tier, whose decode time is read off the host
     clock, so the values move from host to host and the identity does not:
     every window's points still add up to its reaction time to the tick, the
     solve it ran after the committing one being its confidence step.
     """
-    shot = shipped_shot("experiments/switching/seam_pinned_switching.yaml")
+    shot = shipped_shot("experiments/switching/redo_window_switching.yaml")
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)

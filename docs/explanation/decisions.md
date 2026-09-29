@@ -725,8 +725,8 @@ window's own commit takes only the faults crossing behind it, because
 the rest of that commit is exactly what the region decodes again.
 
 **Where to see it.** `decsim/escalation/strong_regions.py`
-(`forward_near_face`), `decsim/escalation/strong_window_shapes.py`
-(`ForwardSeamWindow`), `decsim/windows/window_boundaries.py`
+(`double_window_near_face`), `decsim/escalation/strong_window_shapes.py`
+(`DoubleWindow`), `decsim/windows/window_boundaries.py`
 (`_pinned_boundary`), `decsim/windows/window_commits.py`
 (`_with_the_crossing_commit`), `decsim/decoders/decoder.py`
 (`_crossing_commit`).

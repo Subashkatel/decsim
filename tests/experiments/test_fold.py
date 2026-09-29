@@ -711,7 +711,7 @@ def _burst_and_quiet_pieces(tmp_path):
     overrides["escalation"] = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "near_seam_pinned",
+        "strong_window": "redo_window",
     }
     overrides["burst_detector"] = {"kind": "event_count"}
     # the event count's windows need 22 rounds of a shot

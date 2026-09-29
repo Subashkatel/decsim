@@ -9,7 +9,7 @@ buffer, because the chip keeps them until the verdict and carries them
 up with the escalation (Toshio 2510.25222 lines 1247 to 1250), and in
 the strong syndrome buffer, where they are expected. At admission the
 window's hold becomes the request's and is released once the input
-lands in the unit's memory. Under the forward strong window a window
+lands in the unit's memory. Under the double window a window
 that an earlier window bounds also keeps the rounds its restart would
 read as a potential restart read (PotentialRestart, planned in
 frontends/planner.py), past its own request and landing: an earlier

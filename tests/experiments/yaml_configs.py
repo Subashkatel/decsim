@@ -31,7 +31,7 @@ SHIPPED_CONFIGS = (
     "experiments/data_movement/data_movement.yaml",
     "experiments/decoder_baseline/decoder_baseline.yaml",
     "experiments/switching/cluster_gap_switching.yaml",
-    "experiments/switching/seam_pinned_switching.yaml",
+    "experiments/switching/redo_window_switching.yaml",
 )
 # Where a memory maker's physical error rate sits in a point's sections.
 ERROR_RATE_PATH = "workload.arguments.physical_error_probability"
@@ -235,7 +235,7 @@ def fixed_threshold_switching() -> dict:
     overrides["escalation"] = {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "near_seam_pinned",
+        "strong_window": "redo_window",
     }
     return overrides
 

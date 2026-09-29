@@ -1,7 +1,7 @@
 """The window ledger: every window's record, what owns it, what absorbed it.
 
 A listener on the committer's window_committed(window, contribution) and
-the forward strong window's window_absorbed(key, owner_key); it holds
+the double window's window_absorbed(key, owner_key); it holds
 the Window records the plan laid out at build, so the stamps a window
 carries (a window's status lives on its record) are read here, never
 from the planner. The switching study's final rows (run_views.py) come from

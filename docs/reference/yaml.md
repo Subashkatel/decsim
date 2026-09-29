@@ -195,7 +195,7 @@ preview copy. A run too long for one job is cut into pieces by
 | `configs/examples/my_first_sweep.yaml` | three distances at one error rate, the second tutorial's run |
 | `configs/examples/two_tiers.yaml` | switching with both tiers on priced cards, the third tutorial's run |
 | `configs/examples/priced_cards_example.yaml` | one tier on a priced card, for a timing study |
-| `configs/experiments/switching/seam_pinned_switching.yaml` | switching with a seam-pinned strong window |
+| `configs/experiments/switching/redo_window_switching.yaml` | switching with the redo window |
 | `configs/experiments/switching/cluster_gap_switching.yaml` | switching whose confidence signal is the union find growth's own walk, priced as a card |
 | `configs/experiments/data_movement/data_movement.yaml` | every copy, reference and move of the data path counted per hop, in four blocks: every hop copying, the weak input read in place, the boundary folded in place, and the switching escalation |
 | `configs/experiments/decoder_baseline/decoder_baseline.yaml` | the paper's decoder baseline: Union-Find, MWPM, Relay-BP-1 and Tesseract on the same samples of the rotated surface code memory, d = 5 to 15, six error rates, both bases, 100 rounds, each point stopped at 100 failures or 24 core-hours |

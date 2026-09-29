@@ -495,7 +495,7 @@ SWITCHING_FOLD_SWEEP = {
     "escalation": {
         "kind": "switching",
         "gap_threshold_db": 20.0,
-        "strong_window": "near_seam_pinned",
+        "strong_window": "redo_window",
         "run_both_at_once": False,
     },
     "strong_decoder": {
@@ -655,7 +655,7 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     machine = declared_fabric.switching_machine(
         rounds=15,
         escalated_windows={0},
-        strong_window="forward_seam_pinned",
+        strong_window="double_window",
         weak_syndrome_buffer=settings,
         record=True,
     )

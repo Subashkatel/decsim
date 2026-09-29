@@ -673,12 +673,12 @@ def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
     assert held_rounds == tuple((1, index) for index in range(2, 7))
 
 
-def test_a_forward_windows_strong_hold_ends_at_the_operations_end():
-    """The forward region is clamped at the operation's last round.
+def test_a_double_windows_strong_hold_ends_at_the_operations_end():
+    """The double-window region is clamped at the operation's last round.
 
     It commits the window's two rounds and two buffers of two from round
     3, clamped at round 7, and reads no round past its commit
-    (escalation/strong_regions.py, forward_seam_region), so no successor
+    (escalation/strong_regions.py, double_window_region), so no successor
     round is held for it.
     """
     execution = one_window_with_a_successor()

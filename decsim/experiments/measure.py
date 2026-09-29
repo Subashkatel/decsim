@@ -129,6 +129,10 @@ POINTS = (
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
 )
 
+# the points sampled once a round, not once a window, so no committing
+# tier names their samples
+ROUND_POINTS = ("cwb_per_round", "cwb_stall_per_round", "csb_stall_per_round")
+
 # One count column per status a committed window's decode may carry
 # besides success (records/decoding.py BackendDecodeStatus), so a status
 # the enum gains is counted with no change here; sinter keeps its
@@ -185,6 +189,11 @@ class ShotMeasurement:
     decoded_windows: int
     logical_failure: bool
     samples: dict  # point -> us list, one per window (per round for cwb)
+    # the tier whose decode the frame committed, one per window in the
+    # samples' order: weak for a kept window, strong for an escalated one
+    # on a run the weak tier decodes, as Ciw writes each record's
+    # customer class (ciw node.py lines 856-862)
+    window_tiers: tuple
     means: dict  # point -> mean us over this shot's windows
     maxes: dict  # point -> max us
     load: float  # service per window / window inter-arrival
@@ -657,8 +666,8 @@ def frame_records_by_window(
 def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
-) -> dict:
-    """Every point's microsecond samples over the shot's decoded windows.
+) -> tuple:
+    """Every point's microsecond samples, and each window's committing tier.
 
     Every point of a window describes the decode whose result the frame
     committed: the two links it rode, in from its tier's store and home
@@ -676,6 +685,7 @@ def collect_samples(
     samples = {}
     for point in POINTS:
         samples[point] = []
+    window_tiers = []
     samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
     round_events = observation.round_events
     waits = round_stall_ticks(round_events.events)
@@ -711,7 +721,8 @@ def collect_samples(
         )
         for point, value in points.items():
             samples[point].append(value)
-    return samples
+        window_tiers.append(decode.tier.value)
+    return samples, tuple(window_tiers)
 
 
 def chain_load(samples: dict, window_period_us: float) -> float:
@@ -802,7 +813,7 @@ def _measurement(
     reading and the placing of one number in two places.
     """
     sample_digest = _sample_digest(observation, result)
-    samples = collect_samples(observation, result)
+    samples, window_tiers = collect_samples(observation, result)
     logical_failure = _logical_failure(result)
     predictions = _predictions(result)
     throughput = _throughput_per_microsecond(observation, samples)
@@ -840,6 +851,7 @@ def _measurement(
         decoded_windows=decoded_windows,
         logical_failure=is_scored_failure,
         samples=samples,
+        window_tiers=window_tiers,
         means=means,
         maxes=maxes,
         load=load,

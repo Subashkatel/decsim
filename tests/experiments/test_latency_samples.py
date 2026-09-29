@@ -13,6 +13,7 @@ import csv
 
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
+import decsim.experiments.report as report
 import tests.experiments.yaml_configs as yaml_configs
 
 
@@ -53,6 +54,22 @@ def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
     samples = measurement.samples["algorithm"]
     assert len(samples) == measurement.decoded_windows
     assert all(sample > 0 for sample in samples)
+
+
+def test_a_latency_sample_names_the_tier_that_decoded_its_window(tmp_path):
+    """A weak-only run's windows are all the weak tier's."""
+    config_path = wall_clock_config(tmp_path, [3])
+    config = experiment.load_experiment(config_path)
+    measurement = yaml_configs.measure_point_shot(
+        config,
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_microseconds=1.0,
+        seed=0,
+    )
+    rows = report.latency_sample_rows([measurement])
+    tiers = [row["tier"] for row in rows]
+    assert tiers == ["weak"] * measurement.decoded_windows
 
 
 def test_a_wall_clock_run_records_every_windows_sample_and_deadline(

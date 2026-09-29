@@ -723,6 +723,36 @@ def test_a_points_strong_service_is_its_strong_decodes_mean(tmp_path):
     assert rows[0]["strong_service_mean_us"] == 10.064
 
 
+def test_a_windows_samples_are_counted_under_the_tier_that_committed_it(
+    tmp_path,
+):
+    """Kept and escalated windows are told apart by the committing tier.
+
+    At 5 dB seed 1 escalates two of the ten windows: their 10.064 us
+    strong service is counted under strong and the eight weak decodes'
+    under weak, as Ciw writes each record's customer class beside its
+    wait (ciw node.py lines 856-862). A round's sample belongs to no
+    window, so it names no tier.
+    """
+    escalating = switching_shot(tmp_path, 5.0, seed=1)
+    record = report.record_of([escalating])
+    counts = _counts_by_name_tier_and_value(record.window_samples)
+
+    assert counts[("service", "strong", 10.064)] == 2
+    assert counts[("service", "weak", 1.064)] == 7
+    assert counts[("service", "weak", 1.052)] == 1
+    assert counts[("cwb_per_round", "", 0.004)] == 30
+
+
+def _counts_by_name_tier_and_value(rows: list) -> dict:
+    """window_samples.csv's counts, by latency point, tier and value."""
+    counts = {}
+    for row in rows:
+        key = (row["name"], row["tier"], row["value_us"])
+        counts[key] = row["count"]
+    return counts
+
+
 def test_a_point_with_no_strong_decode_has_no_strong_service(tmp_path):
     """No strong decode, no mean: the cell is empty, not zero.
 

@@ -60,6 +60,7 @@ import decsim.observe.settings as observe_settings
 # path of a file rather than a fact of the shot
 NON_COLUMN_FIELDS = (
     "samples",
+    "window_tiers",
     "means",
     "maxes",
     "link_totals",
@@ -290,7 +291,7 @@ def summarize_point(
     _add_load_columns(row, totals)
     _add_burst_columns(row, totals)
     for name in _points_held(totals.means):
-        multiset = counts.get((point, name), {})
+        multiset = _multiset_over_tiers(counts, point, name)
         _add_latency_point_columns(row, totals, name, multiset)
     return row
 
@@ -472,15 +473,17 @@ def shot_link_rows(measurements: list) -> list:
 
 
 def window_sample_rows(measurements: list) -> list:
-    """One row per point, latency point and distinct value: its count.
+    """One row per point, latency point, tier and distinct value: its count.
 
     The multiset of a point's window samples, which is all its median
     and p99 columns need and all a piece has to record for another
-    process to reach the same numbers.
+    process to reach the same numbers. Each window's samples sit under
+    the tier that committed it, so kept and escalated windows are two
+    multisets; a round's sample has no window and names no tier.
     """
     counts = _counts_of_samples(measurements)
     points = []
-    for point, _name in counts:
+    for point, _name, _tier in counts:
         points.append(point)
     unique_points = dict.fromkeys(points)
     return _rows_of_counts(counts, list(unique_points))
@@ -493,19 +496,23 @@ def latency_sample_rows(measurements: list) -> list:
     what held the unit: the measured wall clock, or the row's own cycle
     count. A number instead of a name is a fixed latency and produces
     none. These are the inputs a latency figure is drawn from, so a
-    reader draws one, across tiers too, from run folders alone; each
-    row carries its window's inter-arrival, the deadline a decode must
-    beat. What such a figure computes (log times, densities, medians)
-    is computed when it is drawn, not stored.
+    reader draws one from run folders alone; each row carries the tier
+    that decoded its window and the window's inter-arrival, the
+    deadline a decode must beat. What such a figure computes (log
+    times, densities, medians) is computed when it is drawn, not
+    stored.
     """
     rows = []
     for measurement in measurements:
         if not isinstance(measurement.algorithm, str):
             continue
         point = measured_point(measurement)
-        for sample_us in measurement.samples["algorithm"]:
+        samples = measurement.samples["algorithm"]
+        tiers = measurement.window_tiers
+        for sample_us, tier in zip(samples, tiers, strict=True):
             row = point_columns(point)
             row["seed"] = measurement.seed
+            row["tier"] = tier
             row["algorithm_us"] = sample_us
             row["window_period_us"] = measurement.window_period_us
             rows.append(row)
@@ -1299,21 +1306,45 @@ def _value_at_index(multiset: dict, index: int) -> float:
 
 
 def _counts_of_samples(measurements: list) -> dict:
-    """(point, latency point) -> value -> how many windows carried it."""
+    """(point, latency point, tier) -> value -> how many carried it."""
     counts = {}
     for measurement in measurements:
         point = measured_point(measurement)
         for name, values in measurement.samples.items():
-            at_this_name = counts.setdefault((point, name), {})
-            _count_the_values(at_this_name, values)
+            tiers = _tiers_of_samples(measurement, name)
+            _count_the_values(counts, (point, name), tiers, values)
     return counts
 
 
-def _count_the_values(multiset: dict, values: list) -> None:
-    """Add one shot's samples of one latency point to the multiset."""
-    for value in values:
+def _tiers_of_samples(measurement: measure.ShotMeasurement, name: str) -> tuple:
+    """The tier each sample of a latency point sits under."""
+    if name in measure.ROUND_POINTS:
+        values = measurement.samples[name]
+        return ("",) * len(values)
+    return measurement.window_tiers
+
+
+def _count_the_values(
+    counts: dict, key: tuple, tiers: tuple, values: list
+) -> None:
+    """Add one shot's samples of one latency point, each under its tier."""
+    for tier, value in zip(tiers, values, strict=True):
+        tier_key = (*key, tier)
+        multiset = counts.setdefault(tier_key, {})
         already = multiset.get(value, 0)
         multiset[value] = already + 1
+
+
+def _multiset_over_tiers(counts: dict, point: tuple, name: str) -> dict:
+    """One latency point's multiset at one sweep point, every tier's added."""
+    merged = {}
+    for (at_point, at_name, _tier), multiset in counts.items():
+        if (at_point, at_name) != (point, name):
+            continue
+        for value, count in multiset.items():
+            already = merged.get(value, 0)
+            merged[value] = already + count
+    return merged
 
 
 def _counts_of_rows(window_samples: list) -> dict:
@@ -1331,7 +1362,7 @@ def _add_counts_of_rows(counts: dict, window_samples: list) -> None:
     """
     for row in window_samples:
         point = sweep_point_of(row)
-        key = (point, row["name"])
+        key = (point, row["name"], row["tier"])
         at_this_name = counts.setdefault(key, {})
         value = row["value_us"]
         already = at_this_name.get(value, 0)
@@ -1352,12 +1383,13 @@ def _rows_of_counts(counts: dict, points: list) -> list:
 
 def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
     """One latency point's counts at one sweep point, by rising value."""
-    point, name = key
+    point, name, tier = key
     columns = point_columns(point)
     rows = []
     for value in sorted(multiset):
         row = dict(columns)
         row["name"] = name
+        row["tier"] = tier
         row["value_us"] = value
         row["count"] = multiset[value]
         rows.append(row)
@@ -1365,11 +1397,11 @@ def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
 
 
 def _point_and_name_order(positions: dict, key: tuple) -> tuple:
-    """A (point, latency point) key where a single run would write it."""
-    point, name = key
+    """A (point, latency point, tier) key where a single run writes it."""
+    point, name, tier = key
     place = measure.POINTS.index(name)
     point_order = positions[point]
-    return (point_order, place)
+    return (point_order, place, tier)
 
 
 def _task_positions(points: list) -> dict:

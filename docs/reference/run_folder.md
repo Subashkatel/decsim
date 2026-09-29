@@ -38,7 +38,7 @@ one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 | --- | --- | --- |
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
-| `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point and distinct microsecond value |
+| `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
 | `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
@@ -251,18 +251,21 @@ here and moves no column of any file.
 
 ### `window_samples.csv`
 
-One row per sweep point, latency point and distinct microsecond value.
+One row per sweep point, latency point, tier and distinct microsecond
+value.
 
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm` | the sweep point |
 | `name` | which latency point, from the list above |
+| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` points, whose samples are rounds, not windows |
 | `value_us` | one microsecond value that occurred |
 | `count` | how many windows carried it |
 
-This is the multiset of a point's window samples. A median and a p99
-need nothing more, and one piece records nothing more for another
-process to reach the same numbers.
+This is the multiset of a point's window samples, one per tier. A median
+and a p99 need nothing more, and one piece records nothing more for
+another process to reach the same numbers. The columns in `sweep.csv`
+add the tiers together.
 
 ### `latency_samples.csv`
 
@@ -274,6 +277,7 @@ with no rows writes no file.
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the shot |
+| `tier` | the tier whose decode the frame committed for the window, as in `window_samples.csv` |
 | `algorithm_us` | the time the algorithm stage held the unit for one decode: its wall clock, or its cycle count |
 | `window_period_us` | the shot's window inter-arrival, the deadline a window's decode must beat |
 

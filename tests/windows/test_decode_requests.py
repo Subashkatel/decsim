@@ -608,6 +608,73 @@ def test_decision_cycles_delay_queue_admission_and_later_reaction_points():
     assert shifts == [0, expected, expected, expected, expected, expected]
 
 
+def test_a_strong_sibling_leaves_at_its_windows_decision():
+    """Both tiers get the window when its one decision ends.
+
+    Step 1 feeds the window's syndrome to both decoders at once (Toshio
+    et al. 2510.25222 lines 598-601), after one pre-decode step on it
+    (RISC-Q 2603.16203 lines 895-898). So a sibling is asked for no
+    earlier than its window's decision, at it when the window owes no
+    boundary (window 0), and its way from the request to the strong
+    queue is the one a run without a decision time takes: the decision
+    is not charged to it again.
+    """
+    free = declared_fabric.switching_machine(
+        rounds=15,
+        escalated_windows={0, 1, 2, 3, 4},
+        run_both_at_once=True,
+        record=True,
+    )
+    charged = declared_fabric.switching_machine(
+        rounds=15,
+        escalated_windows={0, 1, 2, 3, 4},
+        run_both_at_once=True,
+        record=True,
+        decision_cycles=40,
+    )
+    free.run()
+    charged.run()
+    free_way = _sibling_way_to_the_queue(free)
+    charged_way = _sibling_way_to_the_queue(charged)
+    after_decision = _sibling_request_after_decision(charged)
+    offsets = after_decision.values()
+
+    assert len(charged_way) == 5
+    assert charged_way == free_way
+    assert after_decision[0] == 0
+    assert min(offsets) >= 0
+
+
+def _sibling_records(machine) -> dict:
+    """Window index -> its strong sibling's request record."""
+    records = {}
+    for record in machine.observation.decode_records.requests:
+        key = record.request_key
+        if key.tier is window_records.DecoderTier.STRONG:
+            records[key.window_id] = record
+    return records
+
+
+def _sibling_way_to_the_queue(machine) -> dict:
+    """Window index -> its sibling's ticks from request to strong queue."""
+    records = _sibling_records(machine)
+    way = {}
+    for window_id, record in records.items():
+        way[window_id] = record.admitted_ticks - record.created_ticks
+    return way
+
+
+def _sibling_request_after_decision(machine) -> dict:
+    """Window index -> its sibling's request tick less its decision's end."""
+    records = _sibling_records(machine)
+    windows = machine.window_manager.planner.windows_by_key
+    after = {}
+    for (_operation_id, window_id), window in windows.items():
+        record = records[window_id]
+        after[window_id] = record.created_ticks - window.t_queued
+    return after
+
+
 def test_a_withdrawn_window_reads_undispatched_when_the_manager_takes_it():
     """The manager dispatches as it takes the decode back.
 

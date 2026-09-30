@@ -108,11 +108,8 @@ class RunSeedComposite(Protocol):
 class _AtomicRunSeedConsumer:
     """Shared two-phase seed binding for stochastic runtime leaves.
 
-    A subclass installs its random state in _install_run_seed_state and,
-    when it has one, names its explicit seed in _explicit_seed_label.
+    A subclass installs its random state in _install_run_seed_state.
     """
-
-    _explicit_seed_label = "seed"
 
     def _initialize_run_seed_binding(self, explicit_seed) -> None:
         self._explicit_seed = explicit_seed
@@ -120,9 +117,6 @@ class _AtomicRunSeedConsumer:
         self._pending_run_seed = None
         self._run_seed_claimed = False
         self._stochastic_use_started = False
-
-    def _explicit_run_seed(self):
-        return self._explicit_seed
 
     def _entropy_seed(self):
         return None
@@ -188,9 +182,8 @@ class _AtomicRunSeedConsumer:
             )
         if seed is not None and self._explicit_seed is not None:
             raise ValueError(
-                f"{component_name} has an explicit "
-                f"{self._explicit_seed_label} that conflicts with "
-                f"numeric run root {seed}"
+                f"{component_name} has an explicit seed that conflicts "
+                f"with numeric run root {seed}"
             )
 
     def _seed_source(self, seed) -> tuple:
@@ -198,8 +191,7 @@ class _AtomicRunSeedConsumer:
         if seed is not None:
             return "derived", seed
         if self._explicit_seed is not None:
-            explicit_seed = self._explicit_run_seed()
-            return "explicit_local", explicit_seed
+            return "explicit_local", self._explicit_seed
         entropy_seed = self._entropy_seed()
         return "entropy", entropy_seed
 

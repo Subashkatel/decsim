@@ -28,10 +28,10 @@
 
 #include "union_find.h"
 
+#include "graph_workspace.h"
+
 #include <stdlib.h>
 #include <string.h>
-
-enum { boundary_detector = -1 };
 
 /* What one fusion changed. A step carries the strongest of its own
  * fusions: nothing when the closing edge stood inside one cluster,
@@ -116,18 +116,6 @@ struct workspace {
   /* set when a closing edge completes a walk of odd logical parity */
   int32_t found_odd_walk;
 };
-
-static void *allocate_array(int32_t count, size_t size, int32_t *taken) {
-  size_t wanted = (size_t)count;
-  if (wanted == 0) {
-    wanted = 1;
-  }
-  void *array = calloc(wanted, size);
-  if (array == NULL) {
-    *taken = 0;
-  }
-  return array;
-}
 
 static void release_workspace(struct workspace *workspace) {
   free(workspace->parent);
@@ -230,13 +218,6 @@ static int32_t take_workspace(struct workspace *workspace, int32_t node_count,
   workspace->component_nodes =
       allocate_array(node_count, sizeof(int32_t), &taken);
   return taken;
-}
-
-static int32_t endpoint_node(int32_t detector, int32_t detector_count) {
-  if (detector == boundary_detector) {
-    return detector_count;
-  }
-  return detector;
 }
 
 /* The root of a node's cluster, the path compressed on the way. The

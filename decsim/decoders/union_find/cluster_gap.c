@@ -21,11 +21,11 @@
 
 #include "cluster_gap.h"
 
+#include "graph_workspace.h"
+
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-
-enum { boundary_detector = -1 };
 
 /* An open edge splits at zero, both interval bounds and its length. */
 enum { maximum_coordinates = 4 };
@@ -78,18 +78,6 @@ struct search {
   int32_t *distance_stamp;
   int32_t generation;
 };
-
-static void *allocate_array(int32_t count, size_t size, int32_t *taken) {
-  size_t wanted = (size_t)count;
-  if (wanted == 0) {
-    wanted = 1;
-  }
-  void *array = calloc(wanted, size);
-  if (array == NULL) {
-    *taken = 0;
-  }
-  return array;
-}
 
 static void release_workspace(struct workspace *workspace) {
   free(workspace->edge_coordinates);
@@ -155,13 +143,6 @@ static int32_t take_quotient_graph(struct workspace *workspace,
   workspace->heap_state =
       allocate_array(heap_capacity, sizeof(int32_t), &taken);
   return taken;
-}
-
-static int32_t endpoint_node(int32_t detector, int32_t detector_count) {
-  if (detector == boundary_detector) {
-    return detector_count;
-  }
-  return detector;
 }
 
 static void sort_coordinates(int64_t *values, int32_t count) {

@@ -16,6 +16,7 @@ waits in front of it and enters on the retry, never lost
 
 import dataclasses
 import functools
+import operator
 import types
 
 import pytest
@@ -499,7 +500,8 @@ class _Former:
         """The round's fragments as one fragment of the events."""
         first = fragments[0]
         bits = []
-        for fragment in sorted(fragments, key=_fragment_order):
+        by_fragment_index = operator.attrgetter("fragment_index")
+        for fragment in sorted(fragments, key=by_fragment_index):
             bits.extend(fragment.bits)
         self.asked.append((first.operation_id, first.round_index, tuple(bits)))
         size_bits = len(self.events)
@@ -534,7 +536,3 @@ class _Placement:
         if seat != self.seat:
             return 0
         return self.cycles
-
-
-def _fragment_order(fragment):
-    return fragment.fragment_index

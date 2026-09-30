@@ -17,6 +17,7 @@ make here.
 
 import dataclasses
 import functools
+import operator
 from collections.abc import Callable
 from typing import Optional
 
@@ -378,7 +379,8 @@ class DecodeRequestBuilder:
         """One round's fragments in measurement order, no boundary folded."""
         if fragments is None:
             return
-        ordered = sorted(fragments, key=_fragment_order)
+        by_fragment_index = operator.attrgetter("fragment_index")
+        ordered = sorted(fragments, key=by_fragment_index)
         for fragment in ordered:
             payload = self.interaction.apply_boundary(
                 None, window_info, fragment, round_index
@@ -717,10 +719,6 @@ def _first_forced_class(forced_classes: tuple) -> Optional[int]:
     if not forced_classes:
         return None
     return forced_classes[0]
-
-
-def _fragment_order(fragment):
-    return fragment.fragment_index
 
 
 @dataclasses.dataclass(frozen=True)

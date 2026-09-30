@@ -672,6 +672,18 @@ def nvqlink_measured_profile() -> settings.FabricSettings:
     )
 
 
+def build_protocol_fabric(
+    card: settings.FabricSettings, engine: decsim.engine.Engine
+) -> ports.Link:
+    """The fabric every shipped row carries its transfers on.
+
+    Each row's build is this one function: the rows differ only in the
+    card their base_card supplies, and a row with its own fabric model
+    defines its own build.
+    """
+    return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+
+
 class LogicalReferenceFabric:
     """The default row: the reference card's latencies and rates.
 
@@ -685,12 +697,7 @@ class LogicalReferenceFabric:
         """The numbers a yaml's per-path cards override."""
         return logical_reference_profile()
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class BandwidthLimitedFabric:
@@ -717,12 +724,7 @@ class BandwidthLimitedFabric:
             "the machine's links setting"
         )
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class RoceV2CpuFabric:
@@ -741,12 +743,7 @@ class RoceV2CpuFabric:
         """The numbers a yaml's per-path cards override."""
         return roce_v2_measured_profile("cpu")
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class RoceV2GpuFabric:
@@ -767,12 +764,7 @@ class RoceV2GpuFabric:
         """The numbers a yaml's per-path cards override."""
         return roce_v2_measured_profile("gpu")
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class NvqlinkGpuFabric:
@@ -791,12 +783,7 @@ class NvqlinkGpuFabric:
         """The numbers a yaml's per-path cards override."""
         return nvqlink_measured_profile()
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 # links.kind names one of these rows: which fabric model carries the

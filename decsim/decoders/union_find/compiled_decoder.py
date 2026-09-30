@@ -22,6 +22,7 @@ from typing import Optional, Union
 import numpy
 
 import decsim.compiled_libraries as compiled_libraries
+import decsim.decoders.decoder as decoder_module
 import decsim.records.decoder_evidence as evidence_records
 
 LIBRARY_FILE = "union_find.so"
@@ -372,7 +373,7 @@ def _refuse_failure(status: int) -> None:
 
 def _selected_edges(selected) -> tuple:
     found = numpy.nonzero(selected)
-    return _int_tuple(found[0])
+    return decoder_module.int_tuple(found[0])
 
 
 def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
@@ -480,11 +481,4 @@ def _growth_steps(
 def _prefix(values, count) -> tuple:
     """The first count[0] entries the C wrote, as Python integers."""
     taken = values[: count[0]]
-    return _int_tuple(taken)
-
-
-def _int_tuple(values) -> tuple:
-    integers = []
-    for value in values:
-        integers.append(int(value))
-    return tuple(integers)
+    return decoder_module.int_tuple(taken)

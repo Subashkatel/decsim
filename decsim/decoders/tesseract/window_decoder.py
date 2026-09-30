@@ -468,7 +468,7 @@ def _outcome_of(
     reconstructed = decoder_module.parity_product(
         physical_faults.check, correction
     )
-    correction_tuple = decoder_module.bit_tuple(correction)
+    correction_tuple = decoder_module.int_tuple(correction)
     if low_confidence:
         return _failed_outcome(
             status=_Status.LOW_CONFIDENCE,

@@ -313,7 +313,7 @@ def parity_product(matrix, vector):
     return flat % 2
 
 
-def bit_tuple(array) -> tuple:
+def int_tuple(array) -> tuple:
     """The array's entries as a tuple of ints."""
     bits = []
     for bit in array:
@@ -373,7 +373,7 @@ def result_from_selected_faults(
         placed_faults.boundary_flips, committed
     )
     correction = committed.astype(numpy.uint8)
-    logical_observables = bit_tuple(observable_flips)
+    logical_observables = int_tuple(observable_flips)
     boundary_data = dependency_residual(model, residual_detector_ids)
     crossing_commit = _crossing_commit(model, placed_faults, committed)
     return decoding_records.DecodeResult(
@@ -417,7 +417,7 @@ def _crossing_commit(
     )
     residual = dependency_residual(model, detector_ids)
     observable_flips = parity_product(placed_faults.observables, crossing)
-    logical_observables = bit_tuple(observable_flips)
+    logical_observables = int_tuple(observable_flips)
     return window_records.CrossingCommit(residual, logical_observables)
 
 

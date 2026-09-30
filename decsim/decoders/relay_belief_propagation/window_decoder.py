@@ -294,13 +294,13 @@ def _binary_vector(value, *, expected_size: int) -> tuple:
     is_bit = is_zero | is_one
     if not numpy.all(is_bit):
         raise _NonbinaryCorrectionError
-    return decoder_module.bit_tuple(vector)
+    return decoder_module.int_tuple(vector)
 
 
 def _reconstruct(check, correction) -> tuple:
     correction_array = numpy.asarray(correction)
     parity = decoder_module.parity_product(check, correction_array)
-    return decoder_module.bit_tuple(parity)
+    return decoder_module.int_tuple(parity)
 
 
 def _detailed_evidence(detailed, faults) -> _DetailedEvidence:
@@ -322,7 +322,7 @@ def _outcome_of(
 ) -> backend_outcome.BackendDecodeOutcome:
     """The outcome of one answer: inconsistent, nonconverged or succeeded."""
     reconstructed = _reconstruct(faults.check, correction)
-    syndrome_bits = decoder_module.bit_tuple(syndrome)
+    syndrome_bits = decoder_module.int_tuple(syndrome)
     is_inconsistent = evidence.decoded_detectors != reconstructed
     if evidence.succeeded and reconstructed != syndrome_bits:
         is_inconsistent = True

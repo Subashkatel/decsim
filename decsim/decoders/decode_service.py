@@ -228,7 +228,7 @@ class DecodeService:
         """The unit's memory holds the input: start the decode."""
         if job.cancelled:  # cancelled while its input was in flight
             return
-        if gated and self._is_boundary_owed(job):
+        if gated and is_boundary_owed(job):
             self._park(job)
             return
         if job.gate is not None:
@@ -514,7 +514,7 @@ class DecodeService:
     ) -> None:
         """Every transfer landed: start now, or wait for the unit's compute."""
         job.input_landed = True
-        if not self._is_boundary_owed(job):
+        if not is_boundary_owed(job):
             self._mark_ready(job)
         self.engine.log_io(
             f"unit {unit.name} SRAM",
@@ -549,7 +549,7 @@ class DecodeService:
                 continue
             if not job.input_landed:
                 continue
-            if self._is_boundary_owed(job):
+            if is_boundary_owed(job):
                 continue
             self._mark_ready(job)
 
@@ -558,11 +558,6 @@ class DecodeService:
         if job.ready_ticks is not None:
             return
         job.ready_ticks = self.engine.now
-
-    def _is_boundary_owed(self, job: decoding_records.DecodeJob) -> bool:
-        if job.gate is None:
-            return False
-        return not job.gate.may_start(job)
 
     def _park(self, job: decoding_records.DecodeJob) -> None:
         job.is_parked = True
@@ -768,6 +763,13 @@ def job_defects_text(job: decoding_records.DecodeJob) -> str:
         defect_texts.append(str(defect))
     listed = ", ".join(defect_texts)
     return f"defects {{{listed}}}"
+
+
+def is_boundary_owed(job: decoding_records.DecodeJob) -> bool:
+    """Whether the job's window gate still holds its start back."""
+    if job.gate is None:
+        return False
+    return not job.gate.may_start(job)
 
 
 def _is_outside_pipelined_model(job: decoding_records.DecodeJob) -> bool:

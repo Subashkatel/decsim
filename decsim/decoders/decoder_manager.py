@@ -252,7 +252,7 @@ class DecoderManager:
             key = (job.operation_id, job.window_id)
             if key != window_key:
                 continue
-            if _is_boundary_owed(job):
+            if decode_service.is_boundary_owed(job):
                 continue  # another dependency still owed
             job.is_parked = False
             self.service.restart_parked(job)
@@ -638,12 +638,6 @@ def _spent_state(job: decoding_records.DecodeJob) -> Optional[str]:
     if job.submitted:
         return "admitted"
     return None
-
-
-def _is_boundary_owed(job: decoding_records.DecodeJob) -> bool:
-    if job.gate is None:
-        return False
-    return not job.gate.may_start(job)
 
 
 def _is_live_weak_window_job(

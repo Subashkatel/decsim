@@ -71,8 +71,10 @@ class DispatchStepsSettings:
         del clocks
         device = section.get("device", "gh200")
         path = section.get("path", "device")
-        workers = section.get("workers", 1)
         _check_path(section_name, device, path)
+        workers = config.whole_count(
+            section, section_name, "workers", 1, "graph workers"
+        )
         _check_workers(section_name, path, workers)
         return cls(device=device, path=path, workers=workers)
 
@@ -200,21 +202,10 @@ def _check_path(section_name: str, device: str, path: str) -> None:
     )
 
 
-def _check_workers(section_name: str, path: str, workers) -> None:
-    """A whole count of at least one, named only on the host path."""
+def _check_workers(section_name: str, path: str, workers: int) -> None:
+    """Workers other than the one are named only on the host path."""
     if path == "device" and workers != 1:
         raise ValueError(
             f"{section_name}.workers is the host path's; the device path "
             "decodes on its one dispatcher"
         )
-    if not _is_worker_count(workers):
-        raise ValueError(
-            f"{section_name}.workers must be a whole number of at least 1, "
-            f"not {workers!r}"
-        )
-
-
-def _is_worker_count(workers) -> bool:
-    if isinstance(workers, bool) or not isinstance(workers, int):
-        return False
-    return workers >= 1

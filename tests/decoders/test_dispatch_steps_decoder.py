@@ -189,6 +189,19 @@ def test_an_a100_device_path_is_refused_naming_the_cards():
     )
 
 
+def test_a_worker_count_of_true_is_refused_on_the_host_path():
+    """A bool is refused though Python counts it an int."""
+    section = {"device": "gh200", "path": "host", "workers": True}
+    with pytest.raises(ValueError) as refusal:
+        dispatch_steps.DispatchStepsSettings.from_yaml(
+            section, None, "strong_decoder"
+        )
+    assert str(refusal.value) == (
+        "strong_decoder.workers must be a whole number of graph workers, "
+        "at least 1 (got True)"
+    )
+
+
 def test_workers_on_the_device_path_are_refused():
     section = {"device": "gh200", "path": "device", "workers": 4}
     with pytest.raises(ValueError) as refusal:

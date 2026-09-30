@@ -10,8 +10,8 @@ resolved. A strong result teaches the policy and becomes one completion
 per member request, delivered to each destination that waits for it now
 and left in the output slot of the unit that produced it when the
 destination's selection is still crossing the weak-to-strong link
-(decoders/decoder_unit.py). Every terminal outcome goes out on
-request_ended and service_ended; the record ledger listens.
+(decoders/decoder_unit.py). Every request's terminal outcome goes out
+on request_ended; the record ledger listens.
 """
 
 import dataclasses
@@ -34,8 +34,7 @@ class DecodeOutcomes:
 
     Trace sources: verdict_given(window_key, request_key, verdict) as
     the window side answers each weak request; request_ended(job,
-    result, outcome, decode_output_ticks) and service_ended(job, tick)
-    at every terminal outcome.
+    result, outcome, decode_output_ticks) at every terminal outcome.
     """
 
     def __init__(
@@ -58,15 +57,8 @@ class DecodeOutcomes:
         committer, or the confidence join in front of it when the
         window's answer takes two forced-class solves. The verdict on
         the window comes back later, through resolve_weak_request.
-
-        The service ends when the decode and the confidence its evidence
-        fed are both done: the join charges the signal's own computation
-        on this unit while the delivery runs (decision D8), and a run
-        whose signal only subtracts charges nothing.
         """
         job.on_decoded(job, result)
-        service_ended_ticks = self.engine.now + job.soft_output_ticks
-        self.trace.service_ended.fire(job, service_ended_ticks)
 
     def resolve_weak_request(
         self,
@@ -122,7 +114,6 @@ class DecodeOutcomes:
         )
         for held in deliveries:
             self.complete_strong(held)
-        self.trace.service_ended.fire(job, self.engine.now)
 
     def complete_strong(
         self, completion: strong_requests_module.StrongCompletion
@@ -168,10 +159,6 @@ class DecodeOutcomes:
         """A request ended outside a conclusion: cancelled or withdrawn."""
         self.trace.request_ended.fire(job, result, outcome, decode_output_ticks)
 
-    def report_service(self, job: decoding_records.DecodeJob) -> None:
-        """A physical decode ended outside its conclusion: aborted."""
-        self.trace.service_ended.fire(job, self.engine.now)
-
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
@@ -185,4 +172,3 @@ class _TraceSources:
 
     verdict_given: trace_source.TraceSource = trace_source.new_source()
     request_ended: trace_source.TraceSource = trace_source.new_source()
-    service_ended: trace_source.TraceSource = trace_source.new_source()

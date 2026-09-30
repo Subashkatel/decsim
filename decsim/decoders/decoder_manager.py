@@ -337,9 +337,9 @@ class DecoderManager:
         Decision D8: the walk over a decode's growth reads the evidence
         that decode left behind, and the evidence and its reader are the
         same hardware (Toshio 2510.25222 lines 152-160), so the time is
-        the unit's. The job's service carries it, so the record of that
-        decode ends when the confidence it fed is done, and the window
-        side waits for the same ticks before its answer moves on.
+        the unit's. The unit gives its compute back when the confidence
+        it fed is done, and the window side waits for the same ticks
+        before its answer moves on.
         """
         if ticks <= 0:
             return
@@ -568,7 +568,6 @@ class DecoderManager:
         self, live: strong_requests_module.LiveStrongRequest
     ) -> None:
         job = live.service_job
-        job.service_cancelled_request_keys.add(live.request_job.request_key)
         if self.strong_requests.has_survivors(job):
             self.service.release_input(live.request_job)
             self.outcomes.report_request(
@@ -581,7 +580,6 @@ class DecoderManager:
         job.cancelled = True
         self.service.abort(job)
         self.service.release_input(live.request_job)
-        self.outcomes.report_service(job)
         self.dispatcher.run()
         self.outcomes.report_request(
             live.request_job,

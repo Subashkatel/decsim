@@ -818,17 +818,8 @@ def _confidence_charges(machine) -> list:
     return charged
 
 
-def _weak_services(machine) -> list:
-    """The decode services of the weak pool, in the order they ended."""
-    weak = []
-    for service in machine.observation.decode_records.services:
-        if service.pool == "default":
-            weak.append(service)
-    return weak
-
-
 def _walk_card_machine(tmp_path, microseconds):
-    """One d=3 shot of the walk card, built and run through the yaml."""
+    """One d=3 shot of the walk card through the yaml, and its decodes."""
     from decsim.machine import Machine
 
     card = _walk_card(microseconds, "union_find", "cluster_gap")
@@ -843,8 +834,10 @@ def _walk_card_machine(tmp_path, microseconds):
     )
     settings = point.settings
     machine = Machine.build(settings, 0)
+    decodes = declared_run.FinishedDecodes()
+    decodes.attach(machine)
     machine.run()
-    return machine
+    return machine, decodes
 
 
 def test_a_priced_confidence_walk_charges_its_card_once_per_window(tmp_path):
@@ -857,12 +850,12 @@ def test_a_priced_confidence_walk_charges_its_card_once_per_window(tmp_path):
     window, so a yaml experiment can price it the way a decoder tier is
     priced.
     """
-    machine = _walk_card_machine(tmp_path, 12.0)
+    machine, decodes = _walk_card_machine(tmp_path, 12.0)
     expected_ticks = decsim_config.microseconds_to_ticks(12.0)
     charged = _confidence_charges(machine)
-    weak_services = _weak_services(machine)
+    weak_decodes = decodes.of_pool("default")
     assert charged
-    assert len(charged) == len(weak_services)
+    assert len(charged) == len(weak_decodes)
     for ticks in charged:
         assert ticks == expected_ticks
 

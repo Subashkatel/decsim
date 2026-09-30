@@ -192,11 +192,11 @@ def _walks_and_next_starts(machine) -> list:
     def started(job, _unit) -> None:
         starts.append((engine.now, job))
 
-    def ended(job, ended_ticks) -> None:
-        ends[id(job)] = ended_ticks
+    def answered(job, _result, _outcome, answered_ticks) -> None:
+        ends[id(job)] = answered_ticks
 
     service.trace.job_started.connect(started)
-    outcomes.trace.service_ended.connect(ended)
+    outcomes.trace.request_ended.connect(answered)
     machine.run()
     pairs = []
     pair_count = len(starts) - 1
@@ -389,13 +389,13 @@ def _two_solve_join(signal_ticks: int):
 
 
 def test_the_walk_is_charged_to_the_solve_that_delivered_last():
-    """Two solves, and the ticks go where a service still closes.
+    """Two solves, and the ticks go to the unit that is still busy.
 
     The answering solve is the lightest, which is not in general the last
-    to arrive. decode_outcomes.deliver_weak ends a service at
-    now + job.soft_output_ticks for the job it is delivering, which is
-    the last one; the lightest solve's service record may have closed
-    already. The complementary gap's card
+    to arrive. The decoder manager gives a unit back
+    job.soft_output_ticks after it delivers that unit's job, which is
+    the last one; the lightest solve's unit may have gone back already.
+    The complementary gap's card
     (escalation.confidence_walk_microseconds) is the only way to price
     the walk at all, and it defaults to null, so no shipped config sees
     this.

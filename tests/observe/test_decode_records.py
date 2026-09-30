@@ -1,4 +1,4 @@
-"""The record ledgers: listeners on the two terminal sources."""
+"""The record ledgers: listeners on the request_ended terminal source."""
 
 import decsim.confidence.complementary as complementary
 import decsim.observe.decode_records as decode_records
@@ -30,11 +30,10 @@ def _job():
         ready_time=12,
         service_dispatch_ticks=15,
         service_key=service_key,
-        service_original_request_keys=(request_key,),
     )
 
 
-def test_a_request_and_its_service_are_recorded_at_their_end():
+def test_a_request_is_recorded_at_its_end():
     ledger = decode_records.DecodeRecordLedger()
     job = _job()
     result = decoding_records.DecodeResult(1, 0)
@@ -42,13 +41,11 @@ def test_a_request_and_its_service_are_recorded_at_their_end():
         decoding_records.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
     )
     ledger.request_ended(job, result, outcome, 40)
-    ledger.service_ended(job, 40)
     (request,) = ledger.requests
-    (service,) = ledger.services
     assert request.input_round_count == 5
     assert request.decode_output_ticks == 40
-    assert service.service_ticks == 25
-    assert service.completed_request_keys == (job.request_key,)
+    assert request.dispatch_ticks == 15
+    assert request.service_key == job.service_key
 
 
 WEAK_KEPT = (

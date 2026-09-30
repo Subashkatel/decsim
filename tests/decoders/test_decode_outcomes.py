@@ -150,19 +150,16 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     assert requests.unsettled() == {}
 
 
-def test_the_terminal_sources_carry_every_ended_request_and_service():
-    """The record ledger connects and hears both; nothing else is needed."""
+def test_the_terminal_source_carries_every_ended_request():
+    """The record ledger connects and hears it; nothing else is needed."""
     outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     ledger = decode_records.DecodeRecordLedger()
     outcomes.trace.request_ended.connect(ledger.request_ended)
-    outcomes.trace.service_ended.connect(ledger.service_ended)
     delivered = []
     job = _weak_job(delivered)
     job.request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.WEAK, 0
     )
-    job.service_key = decoding_records.DecoderServiceKey(0)
-    job.service_original_request_keys = (job.request_key,)
     job.service_dispatch_ticks = 0
     job.window = window_records.Window(
         operation_id=1,
@@ -177,9 +174,7 @@ def test_the_terminal_sources_carry_every_ended_request_and_service():
     outcomes.deliver_weak(job, result)
     outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
     (request,) = ledger.requests
-    (service,) = ledger.services
     assert request.request_key == job.request_key
-    assert service.completed_request_keys == (job.request_key,)
 
 
 def test_a_run_with_no_listener_concludes_the_same_way():
@@ -193,25 +188,3 @@ def test_a_run_with_no_listener_concludes_the_same_way():
     outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
     assert delivered == [(job, result)]
     assert policy.learned == []
-
-
-def test_the_service_ends_after_the_confidence_its_evidence_fed():
-    """D8: the signal's own work is the unit's, so the service carries it."""
-    outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
-    ledger = decode_records.DecodeRecordLedger()
-    outcomes.trace.service_ended.connect(ledger.service_ended)
-    delivered = []
-    job = _weak_job(delivered)
-    job.request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
-    )
-    job.service_key = decoding_records.DecoderServiceKey(0)
-    job.service_original_request_keys = (job.request_key,)
-    job.service_dispatch_ticks = 0
-    job.soft_output_ticks = 70
-    requests.admit(job, now=0)
-    result = decoding_records.DecodeResult(1, 0)
-    outcomes.deliver_weak(job, result)
-    (service,) = ledger.services
-    assert service.terminal_ticks == 70
-    assert service.service_ticks == 70

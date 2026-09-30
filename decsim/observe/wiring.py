@@ -444,13 +444,12 @@ def _connect_decode_records(
     decoder_managers: tuple,
     decode_records: Optional[decode_records_module.DecodeRecordLedger],
 ) -> None:
-    """The ledger hears both terminal outcomes of either side's manager."""
+    """The ledger hears every request's end on either side's manager."""
     if decode_records is None:
         return
     for manager in decoder_managers:
         outcomes = manager.outcomes
         outcomes.trace.request_ended.connect(decode_records.request_ended)
-        outcomes.trace.service_ended.connect(decode_records.service_ended)
 
 
 def _connect_confidence(

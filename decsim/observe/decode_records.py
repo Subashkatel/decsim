@@ -1,10 +1,10 @@
-"""The switching study's terminal records: per request, per service, per gap.
+"""The switching study's terminal records: per request and per gap.
 
-Listeners on the decode outcomes' request_ended and service_ended
-sources; they never read the decoder. The request and service ledger is
-built only when the observation section asks for the switching windows,
-and the confidence ledger only when a confidence signal decides the
-escalation, so the decoder runs with no record kept.
+Listeners on the decode outcomes' request_ended source; they never read
+the decoder. The request ledger is built only when the observation
+section asks for the switching windows, and the confidence ledger only
+when a confidence signal decides the escalation, so the decoder runs
+with no record kept.
 """
 
 import dataclasses
@@ -41,27 +41,11 @@ class TerminalRequestRecord:
     soft_output: Optional[decoding_records.SoftOutput]
 
 
-@dataclasses.dataclass(frozen=True)
-class TerminalServiceRecord:
-    """One decode service at its end: the requests it served and its ticks."""
-
-    service_key: decoding_records.DecoderServiceKey
-    pool: str
-    original_request_keys: tuple[window_records.DecoderRequestKey, ...]
-    completed_request_keys: tuple[window_records.DecoderRequestKey, ...]
-    cancelled_request_keys: tuple[window_records.DecoderRequestKey, ...]
-    input_round_count: int
-    dispatch_ticks: int
-    terminal_ticks: int
-    service_ticks: int
-
-
 class DecodeRecordLedger:
-    """The request and service records, in the order they ended."""
+    """The request records, in the order they ended."""
 
     def __init__(self) -> None:
         self.requests: list[TerminalRequestRecord] = []
-        self.services: list[TerminalServiceRecord] = []
 
     def request_ended(
         self,
@@ -91,33 +75,6 @@ class DecodeRecordLedger:
             soft_output,
         )
         self.requests.append(record)
-
-    def service_ended(self, job: decoding_records.DecodeJob, now: int) -> None:
-        """One physical decode ended, with every request it served."""
-        if job.service_key is None:
-            return
-        original = job.service_original_request_keys
-        cancelled = []
-        completed = []
-        for key in original:
-            if key in job.service_cancelled_request_keys:
-                cancelled.append(key)
-            else:
-                completed.append(key)
-        dispatch = job.service_dispatch_ticks
-        service_ticks = now - dispatch
-        record = TerminalServiceRecord(
-            job.service_key,
-            job.pool,
-            original,
-            tuple(completed),
-            tuple(cancelled),
-            job.round_count,
-            dispatch,
-            now,
-            service_ticks,
-        )
-        self.services.append(record)
 
 
 class ConfidenceLedger:

@@ -3,17 +3,19 @@
 DecoderUtilization hears the decoder pool's unit_busy and unit_freed;
 DecoderMemoryOccupancy hears every unit memory's deposited and taken.
 Each is checked against a fact it never sees: the busy integral against
-the spans the decode records report, the held-round count against the
-memory's own dictionary of inputs. Gate point 1 is the frozen suite's
-first strict point (weak_decoder_baseline d 3 p 0.003 seed 0). A time
-average runs from the run's start to the tick it is read, as gem5's
-AvgStor integrates to curTick() (src/base/stats/storage.hh:130-213).
+the decode service's own dispatch-to-finish spans, the held-round count
+against the memory's own dictionary of inputs. Gate point 1 is the
+frozen suite's first strict point (weak_decoder_baseline d 3 p 0.003
+seed 0). A time average runs from the run's start to the tick it is
+read, as gem5's AvgStor integrates to curTick()
+(src/base/stats/storage.hh:130-213).
 """
 
 import types
 
 import decsim.machine as machine_module
 import decsim.observe.metrics as metrics
+import tests.declared_run as declared_run
 import tests.observe.gate_point as gate_point
 
 
@@ -42,20 +44,24 @@ def test_the_busy_integral_equals_the_services_own_spans():
     """A unit's compute is busy from its job's dispatch to its decode end.
 
     An identity, not a golden number: the integral the listener stepped
-    at the pool's claims and returns equals the sum of the spans the
-    decode records report for the point's nine services, which the
-    listener never sees.
+    at the pool's claims and returns equals the sum of the point's nine
+    decodes' spans, dispatch to finish, which the decode service reports
+    and the listener never sees.
     """
-    machine, _result = gate_point.run(record_switching_windows=True)
+    point = gate_point.settings()
+    machine = machine_module.Machine.build(point, gate_point.SEED)
+    decodes = declared_run.FinishedDecodes()
+    decodes.attach(machine)
+    machine.run()
 
     utilization = machine.observation.decoder_utilization.result()
-    services = machine.observation.decode_records.services
     spans = [
-        service.terminal_ticks - service.dispatch_ticks for service in services
+        decode.finish_ticks - decode.dispatch_ticks
+        for decode in decodes.finished
     ]
     busy_ticks = sum(spans)
 
-    assert len(services) == 9
+    assert len(decodes.finished) == 9
     assert utilization["busy_unit_ticks"] == busy_ticks
     assert utilization["aggregate_total_units"] == 1
     span_ticks = utilization["observation_span_ticks"]

@@ -566,15 +566,14 @@ def test_strong_settings_price_the_route_and_clock_the_feedback(
     settings = _settings(program, "live", "controller", period_microseconds)
     settings = _declared_timing(settings)
     run = _run(settings)
-    services = run.machine.observation.decode_records.services
-    first = services[0]
+    first = run.decodes.finished[0]
     period_ticks = config.microseconds_to_ticks(period_microseconds)
     sixth_round_ticks = 6 * period_ticks
     expected_dispatch_ticks = sixth_round_ticks + 250_000
     assert first.dispatch_ticks == expected_dispatch_ticks
     input_arrival_ticks = expected_dispatch_ticks + 350_000
     expected_terminal_ticks = input_arrival_ticks + 200_000
-    assert first.terminal_ticks == expected_terminal_ticks
+    assert first.finish_ticks == expected_terminal_ticks
     arrival = _command_tick(run, "ARRIVED", 3)
     started = _command_tick(run, "STARTED", 3)
     clock = config.Clock(period_ticks)
@@ -701,7 +700,7 @@ def test_single_terminal_window_matches_direct_pymatching(
     result = run.result.operation_results[-1]
     assert result.logical_observables == tuple(prediction)
     assert result.logical_failure is False
-    assert len(run.machine.observation.decode_records.services) == 1
+    assert len(run.decodes.finished) == 1
     _assert_actual_truth(run)
 
 
@@ -858,8 +857,7 @@ def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
     assert owner.logical_observables == expected
     assert owner.observable_truth == expected
     assert any(expected) == has_logical_flips
-    services = run.machine.observation.decode_records.services
-    assert len(services) == 1
+    assert len(run.decodes.finished) == 1
 
 
 def test_bb_live_feedback_preserves_the_full_logical_vector() -> None:
@@ -1303,11 +1301,21 @@ def _switching_memory(weak_kind: str, confidence: str):
     )
 
 
-def _weak_service_ticks(machine) -> list:
-    """Every decode service's charged ticks, in the order they ended."""
+def _run_hearing_decodes(settings, seed: int):
+    """One run, and every decode that gave its unit back in it."""
+    machine = machine_module.Machine.build(settings, seed)
+    decodes = declared_run.FinishedDecodes()
+    decodes.attach(machine)
+    result = machine.run()
+    return machine, result, decodes
+
+
+def _decode_span_ticks(decodes: declared_run.FinishedDecodes) -> list:
+    """Every decode's dispatch-to-finish ticks, in the order they finished."""
     ticks = []
-    for service in machine.observation.decode_records.services:
-        ticks.append(service.service_ticks)
+    for finished in decodes.finished:
+        span_ticks = finished.finish_ticks - finished.dispatch_ticks
+        ticks.append(span_ticks)
     return ticks
 
 
@@ -1322,8 +1330,7 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     shot in which no window escalates, so every decode is a weak one.
     """
     settings = _switching_memory("union_find", "cluster_gap")
-    machine = machine_module.Machine.build(settings, 1)
-    result = machine.run()
+    machine, result, decodes = _run_hearing_decodes(settings, 1)
     assert result.terminal_status == "complete"
     assert result.operation_results[0].logical_observables == (0,)
     requests = machine.observation.decode_records.requests
@@ -1332,13 +1339,14 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
         if record.soft_output is not None:
             sources.add(record.soft_output.source.method)
     assert sources == {"cluster_gap"}
-    window_count = len(machine.observation.decode_records.services)
+    window_count = len(decodes.finished)
     assert len(requests) == window_count
     matching_settings = _switching_memory("pymatching", "complementary_gap")
-    matching = machine_module.Machine.build(matching_settings, 1)
-    matching.run()
-    union_find_services = _weak_service_ticks(machine)
-    matching_services = _weak_service_ticks(matching)
+    _matching, _result, matching_decodes = _run_hearing_decodes(
+        matching_settings, 1
+    )
+    union_find_services = _decode_span_ticks(decodes)
+    matching_services = _decode_span_ticks(matching_decodes)
     union_find_ticks = min(union_find_services)
     matching_ticks = max(matching_services)
     assert union_find_ticks > 3 * matching_ticks
@@ -1364,16 +1372,14 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     the weak decoder itself, and Meister's Algorithm 2 walks the
     union-find decode's own edge intervals (2405.07433 lines 518-536),
     so the evidence and its reader are the same hardware. The run
-    charges one walk per window on the weak unit, and each weak service
-    ends after the decode and the walk it fed. Seed 1 is a shot in which
-    no window escalates, so every service is a weak one.
+    charges one walk per window on the weak unit, and each weak decode
+    gives its unit back after the decode and the walk it fed. Seed 1 is
+    a shot in which no window escalates, so every decode is a weak one.
     """
     settings = _switching_memory("union_find", "cluster_gap")
-    machine = machine_module.Machine.build(settings, 1)
-    machine.run()
+    machine, _result, decodes = _run_hearing_decodes(settings, 1)
     charged = _confidence_charges(machine)
-    services = machine.observation.decode_records.services
-    assert len(charged) == len(services)
+    assert len(charged) == len(decodes.finished)
     for ticks in charged:
         assert ticks > 0
     named = []
@@ -1382,7 +1388,7 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
             named.append(line)
     # the weak tier of this card is the default pool's one unit
     assert "on unit default#0" in named[0]
-    service_ticks = _weak_service_ticks(machine)
+    service_ticks = _decode_span_ticks(decodes)
     assert min(service_ticks) > max(charged)
     assert sum(service_ticks) > sum(charged)
     for record in machine.observation.decode_records.requests:
@@ -3007,6 +3013,7 @@ class _Run:
     shots: list
     weak_writes: list
     strong_occupancies: list[int]
+    decodes: declared_run.FinishedDecodes
 
 
 def _program(producer: str) -> circuit_records.RepeatedStimCircuit:
@@ -3102,9 +3109,17 @@ def _run(
     if machine.readout.strong_syndrome_buffer is not None:
         strong_store = machine.readout.strong_syndrome_buffer
         strong_store.trace.round_stored.connect(observe)
+    decodes = declared_run.FinishedDecodes()
+    decodes.attach(machine)
     result = machine.run()
     return _Run(
-        machine, result, packets, shots, weak_writes, strong_occupancies
+        machine,
+        result,
+        packets,
+        shots,
+        weak_writes,
+        strong_occupancies,
+        decodes,
     )
 
 
@@ -3346,8 +3361,10 @@ def _run_static(
     )
     strong_store = machine.readout.strong_syndrome_buffer
     strong_store.trace.round_released.connect(released)
+    decodes = declared_run.FinishedDecodes()
+    decodes.attach(machine)
     result = machine.run()
-    run = _Run(machine, result, [], [], weak_writes, [])
+    run = _Run(machine, result, [], [], weak_writes, [], decodes)
     return run, release_ticks_by_round
 
 

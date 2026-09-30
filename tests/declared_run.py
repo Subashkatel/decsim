@@ -10,6 +10,7 @@ tests/controller/test_round_assembly.py).
 """
 
 import dataclasses
+import functools
 from typing import Optional
 
 import decsim.config as config
@@ -230,6 +231,52 @@ class EndedRequests:
             if ended.job.request_key.tier is tier:
                 requests.append(ended)
         return requests
+
+
+@dataclasses.dataclass(frozen=True)
+class FinishedDecode:
+    """One decode whose unit gave its compute back, with its two ticks."""
+
+    job: decoding_records.DecodeJob
+    dispatch_ticks: int
+    finish_ticks: int
+
+
+class FinishedDecodes:
+    """A probe that hears every decode give its unit back, on both sides.
+
+    It listens on each decode service's job_finished, which fires when
+    the unit's compute goes back, so a decode's span runs from its
+    dispatch to the end of any confidence walk charged on its unit.
+    Attach it before the run.
+    """
+
+    def __init__(self) -> None:
+        self.finished: list = []
+
+    def attach(self, machine) -> None:
+        """Hear the decode services of both decoder managers the run has."""
+        part = machine.decoders
+        managers = (part.decoder_manager, part.strong_decoder_manager)
+        listener = functools.partial(self.job_finished, machine.engine)
+        for manager in managers:
+            if manager is None:
+                continue
+            manager.service.trace.job_finished.connect(listener)
+
+    def job_finished(self, engine, job, unit) -> None:
+        """One decode's unit took its compute back at this tick."""
+        del unit
+        finished = FinishedDecode(job, job.service_dispatch_ticks, engine.now)
+        self.finished.append(finished)
+
+    def of_pool(self, pool: str) -> list:
+        """The decodes of one pool, in the order they finished."""
+        decodes = []
+        for finished in self.finished:
+            if finished.job.pool == pool:
+                decodes.append(finished)
+        return decodes
 
 
 def operations_or_one(operations):

@@ -334,15 +334,12 @@ class DecodeJob:
     service_original_request_keys: tuple[
         window_records.DecoderRequestKey, ...
     ] = ()
-    service_cancelled_request_keys: set[window_records.DecoderRequestKey] = (
-        field(default_factory=set)
-    )
     service_dispatch_ticks: Optional[int] = None
     # the unit that ran this decode, by name, kept after the job leaves
     # its slot so the confidence its evidence feeds is attributed to it
     decoding_unit_name: Optional[str] = None
     # ticks of confidence computation charged on that unit after the
-    # decode, so the job's service carries the signal's own work (D8)
+    # decode, so the unit stays busy for the signal's own work (D8)
     soft_output_ticks: int = 0
     # the rounds this job's tier turns into detection events for it,
     # frozen at the first ask so the formation stage and the dispatcher

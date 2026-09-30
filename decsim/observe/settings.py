@@ -48,8 +48,8 @@ class ObservationSettings:
     log_component_io adds component I/O lines (what each store and unit
     received, holds and emitted). check_windows_with tesseract re-decodes
     every window with the Tesseract referee and counts disagreements,
-    never priced. record_switching_windows keeps every request and
-    service record for the switching study; syndrome_buffer_occupancy builds
+    never priced. record_switching_windows keeps every request record
+    for the switching study; syndrome_buffer_occupancy builds
     the occupancy listener on the weak syndrome buffer; backlog_trace
     builds the sampler of the rounds waiting to be decoded;
     decoder_memory_occupancy builds the memory sweep's sampler (the

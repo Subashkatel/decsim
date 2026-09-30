@@ -1011,7 +1011,7 @@ def test_the_policy_instance_is_the_authority_over_its_settings_row():
     tier = escalation_build.primary_tier(settings)
 
     assert row is built
-    assert policy is built
+    assert isinstance(policy, policies.StrongOnly)
     assert tier == window_records.DecoderTier.STRONG.value
 
 

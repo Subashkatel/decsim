@@ -5,6 +5,7 @@ only how the yaml names it (sinter's _mux_sampler.py:33-40, which
 resolves the caller's object before its own table).
 """
 
+import copy
 from typing import TYPE_CHECKING, Optional
 
 import decsim.burst_detectors.settings as burst_detector_settings
@@ -73,9 +74,16 @@ def build_escalation_policy(
     settings: escalation_settings.EscalationSettings,
     weak_decoder: decoder_settings.DecoderSettings,
 ):
-    """The policy of the escalation kind, or the Python-built one."""
+    """The policy of the escalation kind, or a copy of the Python-built one.
+
+    Each machine binds its own peers onto the policy's ports, and one
+    settings record builds a machine per shot, so the built policy is a
+    prototype: each machine gets a shallow copy, whose ports start
+    unbound and whose collaborators (its threshold source) are the
+    prototype's own, shared by every shot as a row's are.
+    """
     if settings.policy is not None:
-        return settings.policy
+        return copy.copy(settings.policy)
     row = escalation_row(settings)
     collaborators = _collaborators(row, settings, weak_decoder)
     return row(collaborators)

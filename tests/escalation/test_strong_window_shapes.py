@@ -31,7 +31,6 @@ import decsim.config as config
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
-import decsim.observe.run_views as run_views
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
@@ -123,10 +122,7 @@ GATE_SWITCHING_CARD = {
 
 
 def _strong_request_record(machine, window_id: int):
-    view = run_views.switching_records_view(
-        machine.observation.windows, machine.observation.decode_records
-    )
-    for record in view.requests:
+    for record in machine.observation.decode_records.requests:
         is_window = record.request_key.window_id == window_id
         is_strong = record.request_key.tier is window_records.DecoderTier.STRONG
         if is_window and is_strong:

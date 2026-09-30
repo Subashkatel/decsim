@@ -371,7 +371,7 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
     assert links["weak_decoder_to_frame"]["transfers"] == 0
 
 
-def gaps_by_window(view, weak_tier) -> dict:
+def gaps_by_window(requests, weak_tier) -> dict:
     """Every window's gap, keyed by the window it decoded.
 
     A window's two forced-class requests are one attempt: the request
@@ -379,7 +379,7 @@ def gaps_by_window(view, weak_tier) -> dict:
     carries none.
     """
     gaps = {}
-    for record in view.requests:
+    for record in requests:
         if record.request_key.tier is not weak_tier:
             continue
         if record.soft_output is None:
@@ -412,7 +412,6 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
 
     import decsim.records.windows as window_records
     from decsim.machine import Machine
-    from decsim.observe.run_views import switching_records_view
 
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)
@@ -435,13 +434,12 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
         settings = replace(settings, observation=observation)
         completed = Machine.build(settings, seed)
         completed.run()
-        view = switching_records_view(
-            completed.observation.windows, completed.observation.decode_records
-        )
-        gap_by_window = gaps_by_window(view, weak_tier)
-        for row in view.windows:
-            gap = gap_by_window[row.destination_key]
-            selected_tier = row.selected_request_key.tier
+        requests = completed.observation.decode_records.requests
+        gap_by_window = gaps_by_window(requests, weak_tier)
+        windows = completed.observation.windows.windows
+        for key, window in windows.items():
+            gap = gap_by_window[key]
+            selected_tier = window.published_request_key.tier
             expected_tier = expected_tier_of(
                 gap, threshold_nats, weak_tier, strong_tier
             )

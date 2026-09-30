@@ -21,7 +21,6 @@ import decsim.escalation.policies as escalation_policies
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
 import decsim.links.window_transfers as window_transfers
-import decsim.observe.run_views as run_views
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -331,12 +330,8 @@ def test_a_decode_job_is_priced_for_the_rounds_it_reads():
     reads only the three rounds the operation ever emitted.
     """
     machine = declared_run.switching_run(rounds=9, record=True)
-    view = run_views.switching_records_view(
-        machine.observation.windows, machine.observation.decode_records
-    )
-    by_window = {
-        record.request_key.window_id: record for record in view.requests
-    }
+    records = machine.observation.decode_records.requests
+    by_window = {record.request_key.window_id: record for record in records}
     regular = by_window[1]
     tail = by_window[2]
     assert regular.request_key.tier is window_records.DecoderTier.WEAK

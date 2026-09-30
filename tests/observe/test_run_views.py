@@ -1,15 +1,13 @@
-"""Frozen views of a run's state: the backlog and the switching tables.
+"""A frozen view of a run's decode backlog.
 
-Each builder receives the owners it reads and writes nothing back, which
+The builder receives the owners it reads and writes nothing back, which
 is what lets the backlog sampler take a view after every action without
 changing what the run does.
 """
 
 import types
 
-import decsim.observe.decode_records as decode_records
 import decsim.observe.run_views as run_views
-import decsim.observe.window_ledger as window_ledger_module
 
 
 class _DecoderManager:
@@ -60,14 +58,3 @@ def test_the_rounds_are_summed_per_operation_per_patch_and_over_the_run():
     assert view.per_op_rounds == ((1, 4), (2, 3), (3, 2))
     assert view.per_patch_rounds == (("p0", 7), ("p1", 2))
     assert view.total_rounds == 9
-
-
-def test_the_switching_view_composes_the_three_tables_without_copying_timing():
-    windows = window_ledger_module.WindowLedger()
-    records = decode_records.DecodeRecordLedger()
-
-    view = run_views.switching_records_view(windows, records)
-
-    assert view.windows == ()
-    assert view.requests == ()
-    assert view.services == ()

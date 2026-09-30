@@ -4,7 +4,7 @@ A component fires a trace source and knows no listener; this package
 holds the listeners and the machine wires them (wiring.py, from the yaml's
 observation section), so a run with none of them gives the same result
 record as a run with all of them. observation.py names the listeners of
-one run and run_views freezes what they hold.
+one run and run_views freezes the decode backlog for its sampler.
 
 The ledgers: result_ledger the logical observables per operation,
 window_ledger every window's record, stage_records the decoders' stage

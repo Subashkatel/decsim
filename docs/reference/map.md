@@ -289,7 +289,7 @@ docstring.
 - `decsim/observe/referee_audit.py`: The window referee's audit: what it re-decoded and where it disagreed.
 - `decsim/observe/result_ledger.py`: The logical observables each operation delivered.
 - `decsim/observe/round_events.py`: The flight recorder of the readout path: what happened to every round.
-- `decsim/observe/run_views.py`: Frozen views of a run's state.
+- `decsim/observe/run_views.py`: A frozen view of a run's decode backlog.
 - `decsim/observe/runtime_stamps.py`: The ticks of every operation's life, heard from the execution runtime.
 - `decsim/observe/sampled_shots.py`: The shots the syndrome source sampled, by the operation that asked.
 - `decsim/observe/settings.py`: The observation settings: what a run records beyond its results.

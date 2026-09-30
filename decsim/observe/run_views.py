@@ -1,14 +1,11 @@
-"""Frozen views of a run's state.
+"""A frozen view of a run's decode backlog.
 
 The decode backlog sampler (observe/metrics.py) takes a view after every
-action and the switching study reads one at the end of the run. Each
-builder receives the owners it reads and writes nothing back.
+action. The builder receives the owners it reads and writes nothing back.
 """
 
 import dataclasses
 
-import decsim.observe.decode_records as decode_records
-import decsim.observe.window_ledger as window_ledger_module
 import decsim.records.identity as identity_records
 
 
@@ -24,15 +21,6 @@ class BacklogView:
     per_op_rounds: tuple  # ((operation_id, rounds_waiting), ...)
     per_patch_rounds: tuple  # ((patch, rounds_waiting), ...)
     total_rounds: int  # system-level depth
-
-
-@dataclasses.dataclass(frozen=True)
-class SwitchingRecordsView:
-    """The switching study's three tables at the end of the run."""
-
-    windows: tuple[window_ledger_module.FinalWindowRow, ...]
-    requests: tuple[decode_records.TerminalRequestRecord, ...]
-    services: tuple[decode_records.TerminalServiceRecord, ...]
 
 
 def backlog_view(window_manager, decoder_managers) -> BacklogView:
@@ -68,17 +56,6 @@ def backlog_view(window_manager, decoder_managers) -> BacklogView:
         per_patch_rounds=tuple(per_patch_rounds),
         total_rounds=total_rounds,
     )
-
-
-def switching_records_view(
-    windows: window_ledger_module.WindowLedger,
-    records: decode_records.DecodeRecordLedger,
-) -> SwitchingRecordsView:
-    """Compose the terminal owner facts without duplicating transfer timing."""
-    final_rows = windows.final_rows()
-    requests = tuple(records.requests)
-    services = tuple(records.services)
-    return SwitchingRecordsView(final_rows, requests, services)
 
 
 def _waiting_by_pool(decoder_managers) -> dict:

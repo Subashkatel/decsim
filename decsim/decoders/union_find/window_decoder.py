@@ -24,6 +24,7 @@ from typing import Optional
 
 import numpy
 
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.records.decoder_evidence as evidence_records
 
@@ -51,7 +52,7 @@ def graph_from_model(
     priors = raw_priors.astype(float, copy=False)
     likely = priors > 0.5
     baseline = likely.astype(numpy.uint8)
-    baseline_syndrome = _parity_product(check, baseline)
+    baseline_syndrome = decoder_module.parity_product(check, baseline)
     edges = _edges(check, priors, baseline, observables, weight_step)
     _refuse_lengths_past_the_counters(edges, weight_step, location)
     logical_columns = _logical_columns(observables, fault_count)
@@ -188,16 +189,6 @@ def _check_priors(raw_priors, fault_count: int, location: str) -> None:
     inside = at_least_zero & at_most_one
     if not numpy.all(inside):
         raise ValueError(f"{location} priors must lie in [0, 1]")
-
-
-def _parity_product(matrix, vector):
-    """The matrix times the vector over GF(2), as a flat array."""
-    matrix_integers = matrix.astype(numpy.int64)
-    vector_integers = vector.astype(numpy.int64)
-    product = matrix_integers @ vector_integers
-    product = numpy.asarray(product)
-    flat = product.ravel()
-    return flat % 2
 
 
 def _edge_of(

@@ -166,11 +166,11 @@ def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     config = experiment.load_experiment(REFERENCE_YAML)
     tasks = config.tasks()
     measurements = yaml_configs.run_sweep(tasks, 2)
-    record = sweep_report.record_of(measurements)
-    summary_rows = sweep_report.summarize(record.shots, record.window_samples)
-    link_rows = sweep_report.link_rows(record.shot_links)
-    sweep_now = _written_rows(summary_rows, tmp_path, "sweep.csv")
-    links_now = _written_rows(link_rows, tmp_path, "links.csv")
+    _rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
+    folded_sweep_path = run_dir / "sweep.csv"
+    folded_links_path = run_dir / "links.csv"
+    sweep_now = _csv_rows(folded_sweep_path)
+    links_now = _csv_rows(folded_links_path)
     sweep_path = DATA / "reference_sweep.csv"
     links_path = DATA / "reference_links.csv"
     sweep_before = _csv_rows(sweep_path)
@@ -412,48 +412,6 @@ def test_two_points_under_one_cache_do_not_share_models():
 
     assert built.builds == 3
     assert built.reuses == 0
-
-
-def test_the_summary_off_the_written_files_is_the_summary_of_the_shots(
-    tmp_path,
-):
-    """The precondition sinter meets: a folder's rows rebuild its rows.
-
-    sinter/_data/_task_stats.py keeps only additive fields, sums them in
-    __add__ and derives every rate from the summed row. A decsim run
-    folder records the same way, so reading its files back and
-    summarizing them returns the rows the run wrote.
-    """
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    whole_task = collect.Unit(task, 0, 3)
-    outcome = collect.run_unit(whole_task, measure_shot.measure_shot)
-    measurements = outcome.rows
-    record = sweep_report.record_of(measurements)
-    swept = {task.strong_id(): task.metadata}
-    sweep_report.write_record(record, tmp_path, swept)
-    shots_path = tmp_path / "shots.csv"
-    samples_path = tmp_path / "window_samples.csv"
-    shot_links_path = tmp_path / "shot_links.csv"
-
-    read_shots = sweep_report.read_rows(shots_path)
-    read_samples = sweep_report.read_rows(samples_path)
-    read_shot_links = sweep_report.read_rows(shot_links_path)
-
-    measured_summary = sweep_report.summarize(
-        record.shots, record.window_samples
-    )
-    read_summary = sweep_report.summarize(read_shots, read_samples)
-    assert read_summary == measured_summary
-    measured_links = sweep_report.link_rows(record.shot_links)
-    read_links = sweep_report.link_rows(read_shot_links)
-    assert read_links == measured_links
 
 
 # ---- an escalation row written outside decsim
@@ -848,13 +806,6 @@ def _csv_rows(path: pathlib.Path) -> list:
     with open(path, newline="") as handle:
         reader = csv.DictReader(handle)
         return list(reader)
-
-
-def _written_rows(rows: list, tmp_path: pathlib.Path, name: str) -> list:
-    """The rows as the runner writes them, read back as csv text."""
-    path = tmp_path / name
-    sweep_report.write_csv(rows, path)
-    return _csv_rows(path)
 
 
 def _reference_yaml() -> dict:

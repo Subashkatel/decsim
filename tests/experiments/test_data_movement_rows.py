@@ -128,6 +128,13 @@ def _class_rows(point_rows: list) -> list:
     return rows
 
 
+def _folded_data_movement(tmp_path, measurements) -> list:
+    """data_movement.csv of those shots, folded as a collect folds them."""
+    _rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
+    movement_path = run_dir / "data_movement.csv"
+    return sweep_report.read_rows(movement_path)
+
+
 def test_a_shots_rows_add_up_to_that_shots_own_counters(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 1)
@@ -159,7 +166,7 @@ def test_a_memory_class_row_is_that_classs_paths_over_the_shots(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 2)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
-    point_rows = sweep_report.data_movement_rows(shot_rows)
+    point_rows = _folded_data_movement(tmp_path, measurements)
     on_board_paths = _class_copy_bits(shot_rows, "on_board")
     class_rows = _class_rows(point_rows)
     per_shot_by_class = {
@@ -173,8 +180,7 @@ def test_a_memory_class_row_is_that_classs_paths_over_the_shots(tmp_path):
 def test_the_class_rows_are_listed_cheapest_first(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 1)
-    shot_rows = sweep_report.shot_data_movement_rows(measurements)
-    point_rows = sweep_report.data_movement_rows(shot_rows)
+    point_rows = _folded_data_movement(tmp_path, measurements)
     class_rows = _class_rows(point_rows)
     listed = [row["name"] for row in class_rows]
 
@@ -228,8 +234,7 @@ def test_a_references_column_counts_one_shots_holds_once(tmp_path):
     """
     config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
     measurements = measured_shots(config_path, 2)
-    shot_rows = sweep_report.shot_data_movement_rows(measurements)
-    point_rows = sweep_report.data_movement_rows(shot_rows)
+    point_rows = _folded_data_movement(tmp_path, measurements)
     first = measurements[0].data_movement["references"]
     second = measurements[1].data_movement["references"]
     mean_references = (first + second) / 2
@@ -252,7 +257,7 @@ def test_a_path_only_some_shots_took_still_carries_the_points_holds(
     config_path = yaml_configs.write_config(tmp_path, ESCALATING_SWEEP)
     measurements = measured_shots(config_path, 8, probability=0.005)
     shot_rows = sweep_report.shot_data_movement_rows(measurements)
-    point_rows = sweep_report.data_movement_rows(shot_rows)
+    point_rows = _folded_data_movement(tmp_path, measurements)
     escalating_shots = _shots_with_a_path(
         shot_rows, "strong_buffer_to_strong_decoder"
     )

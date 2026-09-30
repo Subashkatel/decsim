@@ -915,11 +915,11 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
         )
         for seed in range(2)
     ]
-    record = report.record_of(measurements)
-    rows = report.summarize(record.shots, record.window_samples)
+    rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
+    links_path = run_dir / "links.csv"
+    per_link = report.read_rows(links_path)
     assert len(rows) == 1
     assert rows[0]["algorithm"] == 0.028
-    per_link = report.link_rows(record.shot_links)
     assert per_link and all(row["algorithm"] == 0.028 for row in per_link)
 
 

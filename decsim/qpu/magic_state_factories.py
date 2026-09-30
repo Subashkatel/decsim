@@ -163,9 +163,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
     def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Deliver a state now if one is in stock, else when one is ready."""
-        request = (operation_id, callback)
-        self.waiting.append(request)
-        self._stall_start_by_operation_id[operation_id] = self.engine.now
+        self.waiting.add(operation_id, callback)
         waiting_count = len(self.waiting)
         self.engine.log(
             log_sources.MAGIC_STATE_FACTORY,
@@ -181,13 +179,12 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
     def _reset_state(self, initial_store: int) -> None:
         self.stored_state_count = initial_store
-        self.waiting: list[tuple[int, Callable[[], None]]] = []
+        self.waiting = _WaitingRequests(self.engine)
         self.produced_count = 0
         self.in_flight_count = 0
         self.busy_unit_count = 0
         self.peak_in_flight_count = 0
         self.total_stall_ticks = 0
-        self._stall_start_by_operation_id: dict[int, int] = {}
         self._is_shut_down = False
 
     def _start_attempts(self) -> None:
@@ -283,8 +280,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     def _deliver_to_waiting(self) -> None:
         while self.stored_state_count > 0 and self.waiting:
             self.stored_state_count -= 1
-            operation_id, callback = self.waiting.pop(0)
-            waited_ticks = self._stall_ticks_of(operation_id)
+            operation_id, callback, waited_ticks = self.waiting.serve_oldest()
             self.total_stall_ticks += waited_ticks
             self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
@@ -294,11 +290,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
                 f"(store now {self.stored_state_count}){tag}",
             )
             callback()
-
-    def _stall_ticks_of(self, operation_id: int) -> int:
-        now = self.engine.now
-        started = self._stall_start_by_operation_id.pop(operation_id, now)
-        return now - started
 
 
 @dataclasses.dataclass
@@ -416,9 +407,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Record the demand for a final state and pull the chain."""
-        request = (operation_id, callback)
-        self.waiting.append(request)
-        self._stall_start_by_operation_id[operation_id] = self.engine.now
+        self.waiting.add(operation_id, callback)
         top_counters = self.counters_by_level[len(self.levels)]
         top_store = top_counters.stored_state_count
         waiting_count = len(self.waiting)
@@ -447,9 +436,8 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self.counters_by_level = {}
         for level in range(0, above_top_level):
             self.counters_by_level[level] = _LevelCounters()
-        self.waiting: list[tuple[int, Callable[[], None]]] = []
+        self.waiting = _WaitingRequests(self.engine)
         self.total_stall_ticks = 0
-        self._stall_start_by_operation_id: dict[int, int] = {}
         self.peak_in_flight_count = 0
         self._is_shut_down = False
 
@@ -457,8 +445,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         top_counters = self.counters_by_level[len(self.levels)]
         while top_counters.stored_state_count > 0 and self.waiting:
             top_counters.stored_state_count -= 1
-            operation_id, callback = self.waiting.pop(0)
-            waited_ticks = self._stall_ticks_of(operation_id)
+            operation_id, callback, waited_ticks = self.waiting.serve_oldest()
             self.total_stall_ticks += waited_ticks
             self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
@@ -467,11 +454,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
                 f"  -> delivered final state to op#{operation_id}{tag}",
             )
             callback()
-
-    def _stall_ticks_of(self, operation_id: int) -> int:
-        now = self.engine.now
-        started = self._stall_start_by_operation_id.pop(operation_id, now)
-        return now - started
 
     def _start_work(self) -> None:
         """Deliver what is ready, then start every round the demand allows."""
@@ -659,6 +641,36 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         else:
             counters.failure_count += 1
         self._start_work()
+
+
+class _WaitingRequests:
+    """The requests waiting for a magic state, served oldest first.
+
+    A request's stall runs from the tick it asked to the tick it is
+    served, so a request served at once waited nothing.
+    """
+
+    def __init__(self, engine: decsim.engine.Engine) -> None:
+        self.engine = engine
+        self._requests: list[tuple[int, Callable[[], None]]] = []
+        self._stall_start_by_operation_id: dict[int, int] = {}
+
+    def __len__(self) -> int:
+        return len(self._requests)
+
+    def add(self, operation_id: int, callback: Callable[[], None]) -> None:
+        """Queue a request behind every earlier one."""
+        request = (operation_id, callback)
+        self._requests.append(request)
+        self._stall_start_by_operation_id[operation_id] = self.engine.now
+
+    def serve_oldest(self) -> tuple[int, Callable[[], None], int]:
+        """The oldest request's operation, its callback, the ticks it waited."""
+        operation_id, callback = self._requests.pop(0)
+        now = self.engine.now
+        started = self._stall_start_by_operation_id.pop(operation_id, now)
+        waited_ticks = now - started
+        return operation_id, callback, waited_ticks
 
 
 @dataclasses.dataclass

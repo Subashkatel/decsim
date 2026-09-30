@@ -71,7 +71,10 @@ class PauliFrameConfig:
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "PauliFrameConfig":
         """The `pauli_frame` section: a kind, and write_cycles on its clock."""
-        _check_section_keys(section)
+        tables.refuse_unknown_keys("pauli_frame", section, _PAULI_FRAME_KEYS)
+        tables.refuse_missing_keys(
+            "pauli_frame", section, _REQUIRED_PAULI_FRAME_KEYS
+        )
         kind = section.get("kind", "logical_register")
         tables.row(FRAMES, "pauli_frame.kind", kind)
         clock = clocks.clock(section["clock"])
@@ -252,28 +255,6 @@ class PauliFrame:
         )
         self.trace.correction_committed.fire(record)
         pending.on_committed()
-
-
-def _check_section_keys(section: Mapping) -> None:
-    """The section names its required keys and no key it does not have.
-
-    gem5 refuses a parameter its class does not declare
-    (src/python/m5/SimObject.py:932-936), as the controller section does.
-    """
-    unknown = set(section) - set(_PAULI_FRAME_KEYS)
-    if unknown:
-        listed = sorted(unknown)
-        raise ValueError(
-            f"pauli_frame does not know {listed}; its keys are "
-            f"{list(_PAULI_FRAME_KEYS)}"
-        )
-    missing = set(_REQUIRED_PAULI_FRAME_KEYS) - set(section)
-    if missing:
-        listed = sorted(missing)
-        raise ValueError(
-            f"pauli_frame needs the keys {listed}; configs/reference.yaml "
-            "holds every key with its unit"
-        )
 
 
 @dataclasses.dataclass(frozen=True)

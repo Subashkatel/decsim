@@ -961,12 +961,7 @@ def _check_card(path_name: str, card) -> None:
             f"{card_name} holds {card!r}; a path's card is a mapping of "
             f"{list(_CARD_KEYS)}, or null for the row's own numbers"
         )
-    unknown = [key for key in card if key not in _CARD_KEYS]
-    if unknown:
-        raise ValueError(
-            f"{card_name} does not know {unknown}; its keys are "
-            f"{list(_CARD_KEYS)}"
-        )
+    tables.refuse_unknown_keys(card_name, card, _CARD_KEYS)
     missing = [key for key in _REQUIRED_CARD_KEYS if key not in card]
     if missing:
         raise ValueError(

@@ -40,6 +40,7 @@ import decsim.engine
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
+import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 
@@ -831,13 +832,8 @@ def _levels_from_yaml(level_sections) -> tuple:
     level_keys = _distill_level_keys()
     levels = []
     for index, level_section in enumerate(level_sections):
-        unknown = set(level_section) - set(level_keys)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"magic_state_factory.levels[{index}] does not know "
-                f"{listed}; its keys are {list(level_keys)}"
-            )
+        level_name = f"magic_state_factory.levels[{index}]"
+        tables.refuse_unknown_keys(level_name, level_section, level_keys)
         level_fields = _with_numbers(level_section, ("success_probability",))
         level = DistillLevel(**level_fields)
         levels.append(level)

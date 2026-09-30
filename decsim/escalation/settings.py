@@ -120,14 +120,7 @@ class OnlineThresholdSettings:
                 "escalation.online must be a mapping of the calibrator's "
                 f"knobs (got {section!r})"
             )
-        unknown = set(section) - set(ONLINE_KEYS)
-        if unknown:
-            listed = sorted(unknown)
-            known = _listed(ONLINE_KEYS)
-            raise ValueError(
-                f"escalation.online does not know {listed}; its keys are "
-                f"{known}"
-            )
+        tables.refuse_unknown_keys("escalation.online", section, ONLINE_KEYS)
         target_escalation_rate = _online_float(
             section, "target_escalation_rate", 1e-3
         )
@@ -289,13 +282,7 @@ class EscalationSettings:
         can accept timing keys while still refusing confidence knobs.
         """
         kind = section.get("kind", "weak_baseline")
-        unknown = set(section) - set(ESCALATION_KEYS)
-        if unknown:
-            listed = sorted(unknown)
-            known = _listed(ESCALATION_KEYS)
-            raise ValueError(
-                f"escalation does not know {listed}; its keys are {known}"
-            )
+        tables.refuse_unknown_keys("escalation", section, ESCALATION_KEYS)
         row = tables.row(ESCALATIONS, "escalation.kind", kind)
         clock = default_clock
         if "clock" in section:
@@ -619,12 +606,6 @@ def _online_float(section: Mapping, key: str, default: float) -> float:
     if not math.isfinite(value):
         raise ValueError(sentence)
     return value
-
-
-def _listed(keys: tuple) -> str:
-    """The keys as prose: a, b and c."""
-    leading = ", ".join(keys[:-1])
-    return f"{leading} and {keys[-1]}"
 
 
 def _table_rows(table_path: pathlib.Path, column: str) -> list:

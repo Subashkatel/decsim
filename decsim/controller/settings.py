@@ -95,7 +95,10 @@ class ControllerSettings:
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "ControllerSettings":
         """The `controller` section: its cycle counts, and its clock."""
-        _check_section_keys(section)
+        tables.refuse_unknown_keys("controller", section, _CONTROLLER_KEYS)
+        tables.refuse_missing_keys(
+            "controller", section, _REQUIRED_CONTROLLER_KEYS
+        )
         clock = clocks.clock(section["clock"])
         readout_cycles = section["readout_to_bits_cycles"]
         packing_cycles = section["packing_cycles_per_round"]
@@ -177,29 +180,6 @@ class IdlePolicySettings:
             row, "idle_policy", section, _IDLE_POLICY_KEYS
         )
         return cls(kind=kind, row_settings=row_settings)
-
-
-def _check_section_keys(section: Mapping) -> None:
-    """The section names its required keys and no key it does not have.
-
-    gem5 refuses a parameter its class does not declare
-    (src/python/m5/SimObject.py:932-936), as the decoder_manager and
-    escalation sections here do.
-    """
-    unknown = set(section) - set(_CONTROLLER_KEYS)
-    if unknown:
-        listed = sorted(unknown)
-        raise ValueError(
-            f"controller does not know {listed}; its keys are "
-            f"{list(_CONTROLLER_KEYS)}"
-        )
-    missing = set(_REQUIRED_CONTROLLER_KEYS) - set(section)
-    if missing:
-        listed = sorted(missing)
-        raise ValueError(
-            f"controller needs the keys {listed}; configs/reference.yaml "
-            "holds every key with its unit"
-        )
 
 
 def _is_round_count(value) -> bool:

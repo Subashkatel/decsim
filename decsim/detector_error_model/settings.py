@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.tables as tables
 
 # The points on the path from the controller to a decoder where the
 # former may sit, in path order: the controller's assembler, the two
@@ -102,13 +103,7 @@ class DetectionEventSettings:
         controller_clock: Optional[config.Clock],
     ) -> "DetectionEventSettings":
         """The section's seats and cost, on controller.clock by default."""
-        unknown = set(section) - set(_KEYS)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"detection_events does not know {listed}; its keys are "
-                f"{list(_KEYS)}"
-            )
+        tables.refuse_unknown_keys("detection_events", section, _KEYS)
         formed_at = _formed_at(section)
         clock = controller_clock
         if "clock" in section:

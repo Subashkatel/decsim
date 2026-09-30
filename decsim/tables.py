@@ -9,7 +9,8 @@ caller's own object first and its table second
 (sinter/_collection/_mux_sampler.py:33-40).
 
 A row's own yaml keys are split off its section here too, so every
-table hands a row its keys the same way.
+table hands a row its keys the same way, and every section refuses a key
+it does not declare, or a required key it lacks, with the same sentence.
 
 This module holds nothing else, so a settings module can reach the
 lookup without importing the root that aggregates the sections.
@@ -52,7 +53,8 @@ def row_settings(
     """
     settings_class = getattr(row_class, "Settings", None)
     declared_keys = row_keys(row_class)
-    _refuse_undeclared_keys(section_name, section, other_keys, declared_keys)
+    known_keys = list(other_keys) + list(declared_keys)
+    refuse_unknown_keys(section_name, section, known_keys)
     if settings_class is None:
         return None
     own_section = {}
@@ -73,15 +75,34 @@ def row_keys(row_class) -> tuple:
     return tuple(names)
 
 
-def _refuse_undeclared_keys(
-    section_name: str, section: Mapping, other_keys, declared_keys: tuple
+def refuse_unknown_keys(
+    section_name: str, section: Mapping, known_keys
 ) -> None:
-    """A key neither the section nor the row declares is refused by name."""
-    known_keys = list(other_keys) + list(declared_keys)
+    """A key the section does not declare is refused by name.
+
+    gem5 refuses a parameter its class does not declare
+    (src/python/m5/SimObject.py:932-936), so a misspelt key is refused
+    rather than left at its default.
+    """
     unknown = set(section) - set(known_keys)
     if not unknown:
         return
     listed = sorted(unknown)
     raise ValueError(
-        f"{section_name} does not know {listed}; its keys are {known_keys}"
+        f"{section_name} does not know {listed}; its keys are "
+        f"{list(known_keys)}"
+    )
+
+
+def refuse_missing_keys(
+    section_name: str, section: Mapping, required_keys
+) -> None:
+    """A key the section cannot do without is refused by name when absent."""
+    missing = set(required_keys) - set(section)
+    if not missing:
+        return
+    listed = sorted(missing)
+    raise ValueError(
+        f"{section_name} needs the keys {listed}; configs/reference.yaml "
+        "holds every key with its unit"
     )

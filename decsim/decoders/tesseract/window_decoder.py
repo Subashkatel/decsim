@@ -91,6 +91,22 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
             syndrome_array,
         )
 
+    def prepare(self, model: fault_models.WindowErrorModel) -> None:
+        """Build and keep the backend of one model, decoding nothing.
+
+        A model the backend refuses is left to decode, which answers it
+        with a failed outcome.
+        """
+        physical_faults = model.require_faults(
+            fault_models.FaultRepresentation.PHYSICAL
+        )
+        if physical_faults.check.shape[1] == 0:
+            return
+        try:
+            self._compiled_decoder(model, physical_faults)
+        except _BackendConstructionError:
+            return
+
     def _entropy_seed(self):
         return secrets.randbits(64)
 

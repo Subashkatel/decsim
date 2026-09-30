@@ -241,3 +241,43 @@ def test_an_odd_cluster_with_no_boundary_stops_growing_and_peels_partially():
     evidence = window_decoder.decode_graph(graph, syndrome)
     assert evidence.selected_faults == (0, 0)
     assert evidence.unmatched_detectors == (0, 1)
+
+
+def ring_at(weight_step: float):
+    """Three detectors in a ring, every prior 0.1, one logical column."""
+    check = numpy.asarray(((1, 0, 1), (1, 1, 0), (0, 1, 1)), numpy.uint8)
+    priors = numpy.asarray((0.1, 0.1, 0.1))
+    observables = numpy.asarray(((1, 0, 0),), dtype=numpy.uint8)
+    owned = numpy.ones(3, dtype=bool)
+    placed = fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=check,
+        priors=priors,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=(0, 1, 2),
+        boundary_flips={},
+    )
+    return window_decoder.graph_from_model(
+        placed, location="ring", weight_step=weight_step
+    )
+
+
+def test_a_weight_step_whose_sums_would_wrap_the_compiled_counters_is_refused():
+    """Each edge fits 64 bits at 1e-18, the ring's walk of three does not.
+
+    The walk the cluster gap takes adds edge lengths in signed 64-bit
+    integers, which wrap negative past 2**63 - 1 (C11 6.5p5); at 1e-12
+    the same ring sums far inside it.
+    """
+    fine_enough = ring_at(1e-12)
+
+    with pytest.raises(ValueError) as refusal:
+        ring_at(1e-18)
+
+    sentence = str(refusal.value)
+    assert "ring: at weight_step 1e-18" in sentence
+    assert "13183347464017313778 half ticks long together" in sentence
+    assert "can reach up to three times that" in sentence
+    assert "raise the decoder's weight_step" in sentence
+    assert len(fine_enough.edges) == 3

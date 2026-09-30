@@ -177,6 +177,27 @@ def test_streaming_formation_equals_stims_converter_on_sampled_shots():
     assert decsim_events.any()
 
 
+def test_sparse_observable_ids_equal_stims_converter_on_sampled_shots():
+    """A circuit naming observables 0 and 3 declares four; 1 and 2 are 0.
+
+    Stim's converter reports circuit.num_observables columns, an ID the
+    circuit never names always zero.
+    """
+    circuit = stim.Circuit(
+        "R 0 1\nX_ERROR(0.3) 0 1\nM 0 1\nDETECTOR rec[-2]\n"
+        "OBSERVABLE_INCLUDE(0) rec[-2]\nOBSERVABLE_INCLUDE(3) rec[-1]\n"
+    )
+    table = detector_formation.build_formation_table(circuit, 1)
+    sampler = circuit.compile_sampler(seed=7)
+    measurements = sampler.sample(64)
+    decsim_events, decsim_observables = formed_by_decsim(table, measurements)
+    stim_events, stim_observables = formed_by_stim(circuit, measurements)
+    assert decsim_observables.shape == (64, 4)
+    assert numpy.array_equal(decsim_events, stim_events)
+    assert numpy.array_equal(decsim_observables, stim_observables)
+    assert decsim_observables[:, 3].any()
+
+
 def test_the_reference_parity_is_used_when_the_expected_reading_is_one():
     circuit = stim.Circuit("R 0\nX 0\nM 0\nDETECTOR rec[-1]\n")
     table = detector_formation.build_formation_table(circuit, 1)

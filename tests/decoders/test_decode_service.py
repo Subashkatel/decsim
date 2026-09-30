@@ -9,7 +9,9 @@ pipelined unit starts one decode per initiation interval, at most depth
 in flight, each result a fixed latency after its start. The laws are
 computed inside the tests. The strong-primary law needs the whole
 declared fabric (tests/declared_run.py), because only a run builds the
-request whose tier the pipelined model must accept.
+request whose tier the pipelined model must accept. A withdrawn job's
+landing follows the transport that carries it: once the transfer is
+cancelled, no landing is awaited.
 """
 
 import pytest
@@ -297,6 +299,62 @@ def test_the_second_slots_transfer_overlaps_the_compute():
         "w1": config.microseconds_to_ticks(3.0),
         "w2": config.microseconds_to_ticks(5.0),
     }
+
+
+def test_a_withdrawn_job_leaves_no_landing_on_its_unit():
+    """A job withdrawn while its input is on the link takes back its landing.
+
+    The withdrawal cancels the transfer, so nothing lands for it, and
+    the unit stops counting the rounds as on their way once the
+    transport no longer carries them.
+    """
+    engine = engine_module.Engine()
+    decoder = decoders.PresetLatencyDecoder(2.0)
+    manager = _manager(engine, decoder)
+    on_decoded = _resolving(manager)
+    busy = _job(0)
+    manager.enqueue(busy, None, on_decoded)
+    withdrawn = _job(1)
+    transfer_ticks = config.microseconds_to_ticks(5.0)
+    send_input = _send_after(engine, transfer_ticks)
+    manager.enqueue(withdrawn, send_input, on_decoded)
+    (unit,) = manager.pool.units
+    was_landing = manager.service.input_is_on_the_unit(withdrawn, unit)
+    manager.withdraw_window((1, 1))
+    engine.run()
+    manager.check_decode_work_settled()
+    assert was_landing is True
+    assert manager.service.input_is_on_the_unit(withdrawn, unit) is False
+
+
+def test_a_withdrawn_sender_and_its_joined_reader_leave_no_landing():
+    """The jobs of one attempt that share one transfer are withdrawn together.
+
+    The second job reads the first one's rounds (input_key), so it joins
+    that landing rather than sending them again, and withdrawing their
+    window cancels the one transfer both were waiting for.
+    """
+    engine = engine_module.Engine()
+    decoder = decoders.PresetLatencyDecoder(2.0)
+    manager = _manager(engine, decoder)
+    on_decoded = _resolving(manager)
+    sender = _job(1)
+    transfer_ticks = config.microseconds_to_ticks(5.0)
+    send_input = _send_after(engine, transfer_ticks)
+    manager.enqueue(sender, send_input, on_decoded)
+    reader = _job(1)
+    reader.input_key = sender.request_key
+    reader.request_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.WEAK, 2
+    )
+    manager.enqueue(reader, None, on_decoded)
+    (unit,) = manager.pool.units
+    was_joined = reader.input_landing_ticks == sender.input_landing_ticks
+    manager.withdraw_window((1, 1))
+    engine.run()
+    manager.check_decode_work_settled()
+    assert was_joined is True
+    assert manager.service.input_is_on_the_unit(reader, unit) is False
 
 
 def test_a_pipelined_unit_issues_at_its_initiation_interval():

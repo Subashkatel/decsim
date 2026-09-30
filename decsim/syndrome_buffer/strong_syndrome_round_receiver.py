@@ -104,8 +104,7 @@ class StrongSyndromeRoundReceiver:
         self.reserved_bits_by_round[packed.round_key] = bits
 
     def receive_round(self, packed: round_records.PackedRound) -> None:
-        """Take one round that landed here: its room is now its slot."""
-        del self.reserved_bits_by_round[packed.round_key]
+        """Take one round that landed here; its room is kept until stored."""
         window_input = round_records.SyndromePacketRouteKind.WINDOW_INPUT
         if packed.route.kind is window_input:
             packets = (packed.packet,)
@@ -114,6 +113,7 @@ class StrongSyndromeRoundReceiver:
                 packets, packet_bits, CONTROLLER_WRITE, False, _nothing
             )
             return
+        del self.reserved_bits_by_round[packed.round_key]
         self._forward_memory_round(packed)
 
     def reserve_region(self, region: round_records.EscalatedRegion) -> None:
@@ -144,8 +144,6 @@ class StrongSyndromeRoundReceiver:
         on_stored is called once the store holds every round, after this
         seat has formed them when it forms them.
         """
-        for round_key in region.round_keys:
-            del self.reserved_bits_by_round[round_key]
         packet_bits = []
         for packet in region.packets:
             bits = round_records.fragment_wire_bits(packet.fragments)
@@ -295,7 +293,15 @@ class StrongSyndromeRoundReceiver:
         packet_bits: Optional[int],
         hop: _Hop,
     ) -> None:
-        """Store the round, or drop it when its operation already closed."""
+        """Store the round, or drop it when its operation already closed.
+
+        The round's reservation is given back here, not at the landing:
+        the bits stay taken while this seat forms them, as gem5's packet
+        store clears its reserve only in the push that fills the slot
+        (src/dev/net/pktfifo.hh, `push`).
+        """
+        round_key = (packet.operation_id, packet.round_index)
+        del self.reserved_bits_by_round[round_key]
         if self.store.has_operation(packet.operation_id):
             self._store_landing(packet, packet_bits, hop)
             return

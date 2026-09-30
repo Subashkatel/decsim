@@ -21,10 +21,12 @@ import pytest
 import stim
 
 import decsim.config as config
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.tesseract.window_decoder as tesseract_window
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 from tests.decoders import windows
 
 ROUNDS = 3
@@ -323,3 +325,90 @@ def test_a_row_that_draws_its_orders_names_its_window_decoder():
     (_timing, orders) = row.run_seed_children()
 
     assert orders.child is row.window_decoder
+
+
+class _FakeClock:
+    """A perf_counter_ns that moves only when the backend works."""
+
+    def __init__(self) -> None:
+        self.now_ns = 0
+
+    def perf_counter_ns(self) -> int:
+        return self.now_ns
+
+
+class _TimedBackend:
+    """The compiled backend, advancing the fake clock 10 ns a decode."""
+
+    def __init__(self, backend, clock: _FakeClock) -> None:
+        self.backend = backend
+        self.clock = clock
+
+    def decode_to_errors(self, bits):
+        self.clock.now_ns += 10
+        return self.backend.decode_to_errors(bits)
+
+    def __getattr__(self, name):
+        return getattr(self.backend, name)
+
+
+def test_a_measured_decode_charges_the_search_and_not_the_build(monkeypatch):
+    """Tesseract's benchmark builds its decoder outside the timer.
+
+    tesseract-decoder src/tesseract_main.cc:568-579 constructs the
+    decoder, then times decode_to_errors alone. The build here takes
+    1000 ns of a fake clock and each search 10 ns, so every measured
+    decode, the first included, is 10 ns.
+    """
+    pytest.importorskip("tesseract_decoder")
+    clock = _FakeClock()
+    build = tesseract_window._compile_backend
+
+    def slow_build(settings, detector_error_model, seed):
+        clock.now_ns += 1000
+        backend = build(settings, detector_error_model, seed)
+        return _TimedBackend(backend, clock)
+
+    monkeypatch.setattr(tesseract_window, "_compile_backend", slow_build)
+    monkeypatch.setattr(decoder_module, "time", clock)
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    detection_events, _ = windows.sampled_shots(circuit, 2, 3)
+    row = _seeded_row()
+    first_job = windows.job_for(model, detection_events[0])
+    second_job = windows.job_for(model, detection_events[1])
+
+    _first, first_ns = row.decode_timed(first_job)
+    _second, second_ns = row.decode_timed(second_job)
+
+    assert (first_ns, second_ns) == (10, 10)
+    assert clock.now_ns == 1020
+
+
+def test_a_beam_the_backend_cannot_build_leaves_the_shot_unscored():
+    """The yaml takes a beam of 2**31, which the backend's build refuses.
+
+    TesseractConfig takes det_beam as a C++ int (tesseract-decoder
+    src/tesseract.pybind.h:57), so the build raises at compile and again
+    at the decode, which answers with no correction and the upstream
+    exception as its reason, as a search that raises does.
+    """
+    pytest.importorskip("tesseract_decoder")
+    section = {"detector_beam": 2**31}
+    settings = tesseract.TesseractDecoder.Settings.from_yaml(
+        section, None, "strong_decoder"
+    )
+    row = tesseract.TesseractDecoder(settings=settings)
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    detection_events, _ = windows.sampled_shots(circuit, 1, 3)
+    job = windows.job_for(model, detection_events[0])
+
+    result, _elapsed_ns = row.decode_timed(job)
+
+    reasons = decoding_records.BackendFailureReason
+    assert result.no_correction_reason is reasons.UPSTREAM_EXCEPTION

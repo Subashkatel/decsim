@@ -353,7 +353,9 @@ burst_detector:
 #                                  # calibrated from the operation's own
 #                                  # circuit: its faults' exact law, the
 #                                  # tail estimated by draws, so a
-#                                  # noiseless circuit fires on one event
+#                                  # noiseless circuit fires on one event;
+#                                  # a fault prior of one half or more is
+#                                  # refused, its parity rate infinite
 #   rate_tracking_rounds: 10000    # time constant of each position's usual
 #                                  # rate, an exponential average frozen
 #                                  # while a flag fires (DGR 2311.16214
@@ -956,8 +958,10 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
   read_cycles: 0                   # one read of a decode's rounds, paid when
                                    # they leave the store at dispatch, for copy
                                    # (then the move) or in_place (then the
-                                   # decode), and one read of an escalated
-                                   # region's rounds before they go up. A read
+                                   # decode), one read of an escalated
+                                   # region's rounds before they go up, and
+                                   # one read of a timing-only idle round
+                                   # before it goes to the decoder. A read
                                    # never waits for another.
                                    # Both default to zero, with no edge rounding.
                                    # Positive costs finish on this clock's edge.
@@ -1169,6 +1173,9 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the engine's cycles directly. Helios's own
                                    # weights run 2 to 16 (2301.08419 lines
                                    # 1242-1254, the weight resolution wmax).
+                                   # A step so fine that three times a
+                                   # window's total edge length passes the
+                                   # decoder's 64-bit counters is refused
   # cycle_count: null             # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
                                    # count per growth tick, on a named clock.

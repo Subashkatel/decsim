@@ -16,8 +16,11 @@ byte per tick: a message's first packet is 38 + 20 + 8 + 12 + 16 + 256
 = 86 (tests/links/test_framings.py).
 """
 
+import functools
+import gc
 import math
 import random
+import weakref
 
 import pytest
 
@@ -336,6 +339,55 @@ def test_the_run_ends_at_the_last_acknowledgement_not_at_the_timer():
 
     assert delivered[0].delivery_ticks == 598
     assert engine.now == 984
+
+
+class _Delivery:
+    """A delivery callback, which in a run closes over a job's state."""
+
+    def __init__(self, delivered: list) -> None:
+        self.delivered = delivered
+
+    def __call__(self, transfer) -> None:
+        self.delivered.append(transfer)
+
+
+def test_an_acknowledged_message_is_let_go_under_loss():
+    """A message is let go once acknowledged, as rxe_comp.c retires one.
+
+    Two 200-byte messages at 0, the first packet lost: m0 goes 0-298, m1
+    298-596 and lands out of order at 896, and its NAK, 896-982, is back
+    at 1282. The go-back resends m0 1282-1580 and m1 1580-1878, which
+    land at 1880 and 2178 and are acknowledged; the channel then keeps
+    neither callback.
+    """
+    seed = seed_losing((True, False, False, False, False, False))
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(BIT_ERROR_RATE)
+    channel = seeded_channel(engine, settings, seed)
+    delivered = []
+    first_callback = _Delivery(delivered)
+    second_callback = _Delivery(delivered)
+    first_reference = weakref.ref(first_callback)
+    second_reference = weakref.ref(second_callback)
+    first_payload = channel_module.FramedPayload(1600)
+    second_payload = channel_module.FramedPayload(1600)
+    first_send = functools.partial(
+        channel.send, first_payload, 0, 0, first_callback
+    )
+    second_send = functools.partial(
+        channel.send, second_payload, 0, 0, second_callback
+    )
+    engine.schedule(0, first_send)
+    engine.schedule(0, second_send)
+    del first_callback, second_callback, first_send, second_send
+
+    engine.run()
+    gc.collect()
+
+    delivery_ticks = [transfer.delivery_ticks for transfer in delivered]
+    assert delivery_ticks == [1880, 2178]
+    assert first_reference() is None
+    assert second_reference() is None
 
 
 def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():

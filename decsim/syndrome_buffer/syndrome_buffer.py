@@ -56,7 +56,8 @@ class SyndromeBuffer:
         """The row's own keys: a flat cost per write and per read, in cycles.
 
         A write of a round costs write_cycles and a read of a decode's
-        rounds read_cycles, on the section's clock, whatever their width,
+        rounds, or of an idle round leaving for the decoder, read_cycles,
+        on the section's clock, whatever their width,
         and no access waits for another: SimpleMemory's latency with no
         bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174).
         A row built on this store with keys of its own answers book_write

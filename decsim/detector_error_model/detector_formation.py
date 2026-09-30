@@ -551,10 +551,14 @@ def _read_recipes(circuit, tables: _CircuitTables) -> tuple[list, list]:
             )
             continue
         measurement_count_so_far += _measurement_count(instruction)
+    # every ID below circuit.num_observables is an observable, one the
+    # circuit never names always zero, as Stim's converter reports it
+    # (compile_m2d_converter, separate_observables)
     observables = []
-    for index in sorted(observable_records):
-        records = tuple(observable_records[index])
-        parity = observable_parity[index]
+    for index in range(circuit.num_observables):
+        records = observable_records.get(index, [])
+        records = tuple(records)
+        parity = observable_parity.get(index, 0)
         recipe = ObservableRecipe(index, records, parity)
         observables.append(recipe)
     return detectors, observables

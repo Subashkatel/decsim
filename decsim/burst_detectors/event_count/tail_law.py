@@ -63,6 +63,7 @@ class TailLaw:
         remainder is below TRUNCATION_SHARE of the smallest false-alarm
         rate asked for.
         """
+        _refuse_priors_of_one_half(priors)
         fault_rates = _parity_rates(priors)
         fault_rate = numpy.sum(fault_rates)
         if fault_rate == 0:
@@ -125,6 +126,22 @@ def _fault_count_bound(rate: float, remainder_bound: float) -> int:
     while scipy.stats.poisson.sf(largest_fault_count, rate) > remainder_bound:
         largest_fault_count += 1
     return largest_fault_count
+
+
+def _refuse_priors_of_one_half(priors) -> None:
+    """The parity law holds below one half, where a fault's rate is finite.
+
+    At one half the rate -ln(1 - 2p) / 2 is infinite and no count of
+    firings covers the Poisson tail; past it the logarithm has no value.
+    """
+    largest_prior = numpy.max(priors, initial=0.0)
+    if largest_prior < 0.5:
+        return
+    raise ValueError(
+        f"burst_detector event_count calibrates from fault priors below one "
+        f"half, and the circuit's error model has a fault of prior "
+        f"{largest_prior}, whose detectors flip as coin tosses"
+    )
 
 
 def _parity_rates(priors):

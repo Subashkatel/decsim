@@ -235,9 +235,10 @@ class EscalationSettings:
     model.
     The complementary gap's two forced-class solves are two ordinary
     jobs of the weak pool, so weak_decoder.units alone decides whether
-    they overlap. A Python-built policy is used as it is. The
-    threshold in nats and the online threshold source are set per sweep
-    point by the experiments layer; base_directory resolves a relative
+    they overlap. A Python-built policy is used as it is, each machine
+    binding its own shallow copy of it. The threshold in nats and the
+    online threshold source are set per sweep point by the experiments
+    layer; base_directory resolves a relative
     threshold_table. base_directory is a label, no part of a point's
     id: the threshold the table gives a point is set on its settings
     (experiments/experiment.py _point_task_of), so the value names the

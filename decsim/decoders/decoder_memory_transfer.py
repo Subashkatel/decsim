@@ -143,11 +143,12 @@ class DecoderInputStaging:
         The mask is written once per input, not once per job. The jobs
         that share one landed input are the forced-class solves of one
         window's request (decision D2), so they share one window and one
-        boundary: the solve that starts first writes the mask into the
-        unit's memory and every solve after it reads exactly those
-        rounds, which is what the copy fold gives each of them too. A
-        job whose input another has already written finds the memory
-        holding rounds it is not reading yet, and takes them.
+        boundary, final before any of them starts: the solve that starts
+        first writes the mask into the unit's memory and every solve
+        after it reads exactly those rounds, which is what the copy fold
+        gives each of them too. A job whose input another has already
+        written takes the written rounds, whether it joined them before
+        the write or after.
         """
         memory = job.memory
         if memory is None:
@@ -157,9 +158,8 @@ class DecoderInputStaging:
                 "place (input: in_place); fold into a copy, or copy the "
                 "input"
             )
-        resident = memory.input_of(job)
-        if resident is not job.decoder_input:
-            job.decoder_input = resident
+        if memory.is_rewritten(job):
+            job.decoder_input = memory.input_of(job)
             return
         job.decoder_input = memory.rewrite(job, masked_input)
 

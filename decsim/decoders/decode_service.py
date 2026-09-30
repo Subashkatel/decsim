@@ -286,12 +286,13 @@ class DecodeService:
     def evict(self, job: decoding_records.DecodeJob) -> None:
         """Drop a job from its slot before its decode started.
 
-        Compute it held or reserved passes onward.
+        Compute it held or reserved passes onward. The staging cancels
+        first, because it finds the job's landing through its unit.
         """
         unit = job.unit
+        self.staging.cancel(job)
         unit.evict(job)
         job.is_parked = False
-        self.staging.cancel(job)
         if unit.holder is job:
             unit.release_compute()
             self._offer_compute(unit)

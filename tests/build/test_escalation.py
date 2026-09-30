@@ -44,7 +44,7 @@ def test_a_built_policy_answers_for_itself_and_the_kind_is_ignored():
 
     assert tier == window_records.DecoderTier.STRONG.value
     assert row is built
-    assert policy is built
+    assert isinstance(policy, escalation_policies.StrongOnly)
 
 
 def test_an_escalation_kind_that_names_no_row_is_refused():
@@ -86,6 +86,41 @@ def test_a_row_that_decides_on_a_confidence_gets_the_three_fields():
     assert policy.threshold.threshold_nats == 2.0
     assert policy.expected_source is signal.source
     assert policy.run_both_at_once is False
+
+
+class _StubBurstDetector:
+    """A peer for the burst detector port; its answers are not the law."""
+
+    def is_burst_window(self, window) -> bool:
+        del window
+        return False
+
+
+def test_every_machine_binds_its_own_copy_of_a_built_policy():
+    """One settings record builds a machine per shot.
+
+    Each machine binds its burst detector onto the policy's port, and a
+    port takes one peer, so a built policy is a prototype: every build
+    gets a copy with its ports unbound and the prototype's threshold.
+    """
+    switching = escalation_settings.EscalationSettings(
+        kind="switching",
+        threshold_source="fixed",
+        gap_threshold_nats=2.0,
+        confidence="complementary_gap",
+    )
+    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    built = escalation_build.build_escalation_policy(switching, weak)
+    settings = escalation_settings.EscalationSettings(policy=built)
+
+    first = escalation_build.build_escalation_policy(settings, weak)
+    first.burst_detector = _StubBurstDetector()
+    second = escalation_build.build_escalation_policy(settings, weak)
+    second.burst_detector = _StubBurstDetector()
+
+    assert first.burst_detector is not second.burst_detector
+    assert built.burst_detector is None
+    assert second.threshold is built.threshold
 
 
 def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():

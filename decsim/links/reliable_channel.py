@@ -152,9 +152,9 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         """
         wire = self._wire.copy()
         now_ticks = self._engine.now
-        packets = self._sending.packets
-        for psn in range(self._sending.next_psn, len(packets)):
-            packet = packets[psn]
+        sending = self._sending
+        for psn in range(sending.next_psn, sending.packet_count):
+            packet = sending.packet_by_psn[psn]
             wire.cross_frame(packet.bits, now_ticks)
         return wire
 
@@ -173,10 +173,11 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         sending.message_count += 1
         last_index = len(frame_bits) - 1
         for frame_index, bits in enumerate(frame_bits):
-            psn = len(sending.packets)
+            psn = sending.packet_count
             is_last = frame_index == last_index
             packet = _Packet(psn, bits, message, frame_index, is_last)
-            sending.packets.append(packet)
+            sending.packet_by_psn[psn] = packet
+            sending.packet_count += 1
         self._send_next()
         self._restart_timer_if_out()
 
@@ -185,7 +186,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
     def _send_next(self) -> None:
         """Send the next packet when the window and a credit allow."""
         sending = self._sending
-        if sending.next_psn >= len(sending.packets):
+        if sending.next_psn >= sending.packet_count:
             return
         window = self._connection.window_packets
         if sending.next_psn - sending.unacked_psn >= window:
@@ -195,7 +196,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         if start_ticks > now_ticks:
             self._wake_at(start_ticks)
             return
-        packet = sending.packets[sending.next_psn]
+        packet = sending.packet_by_psn[sending.next_psn]
         sending.next_psn += 1
         self._transmit(packet, now_ticks)
 
@@ -278,6 +279,23 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         if not is_retry:
             self._restart_timer_if_out()
         self._send_next()
+        self._retire_acknowledged()
+
+    def _retire_acknowledged(self) -> None:
+        """Let go of the packets no send can reach again.
+
+        rxe's completer retires a work request once it is acknowledged,
+        moving the send queue's consumer index past it (rxe_comp.c
+        do_complete). A go-back returns to the first unacknowledged PSN
+        (rxe_req.c:38-53), and the requester may still stand behind it
+        after a NAK that overtook a go-back, so what it keeps starts at
+        the lower of the two.
+        """
+        sending = self._sending
+        first_needed_psn = min(sending.unacked_psn, sending.next_psn)
+        for psn in range(sending.first_kept_psn, first_needed_psn):
+            del sending.packet_by_psn[psn]
+        sending.first_kept_psn = first_needed_psn
 
     def _error_retry(self, is_timeout: bool) -> bool:
         """Resend from the first unacknowledged PSN, or give up.
@@ -305,7 +323,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         """IB_WC_RETRY_EXC_ERR: the link has failed, and the run stops."""
         sending = self._sending
         psn = sending.unacked_psn
-        packet = sending.packets[psn]
+        packet = sending.packet_by_psn[psn]
         retry_count = self._connection.retry_count
         raise RuntimeError(
             f"channel {self._settings.name!r} gave up on frame "
@@ -476,7 +494,10 @@ class _SendState:
     """The requester's side: rxe's req.psn, comp.psn and counters."""
 
     retries_left: int
-    packets: list = dataclasses.field(default_factory=list)
+    # the packets a send can still reach, by PSN, from first_kept_psn
+    packet_by_psn: dict = dataclasses.field(default_factory=dict)
+    packet_count: int = 0
+    first_kept_psn: int = 0
     next_psn: int = 0
     unacked_psn: int = 0
     is_retry_started: bool = False

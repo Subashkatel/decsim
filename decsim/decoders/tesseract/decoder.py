@@ -114,9 +114,14 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         return (timing, orders)
 
     def compile(self, faults, model):
-        """The window decoder, which compiles the backend per model itself."""
+        """The window decoder, with this model's backend already built.
+
+        The build is setup, outside the timed decode, as Tesseract's own
+        benchmark builds its decoder outside the timer (tesseract-decoder
+        src/tesseract_main.cc:568-579).
+        """
         del faults
-        del model
+        self.window_decoder.prepare(model)
         return self.window_decoder
 
     def decode_window(self, backend, model, faults, syndrome):

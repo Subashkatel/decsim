@@ -1539,7 +1539,7 @@ observation:                       # what a run records beyond its results
                                    # held-round count at every change: the
                                    # buffer's occupancy over time
   backlog_trace: false             # true samples the undecoded-round backlog after
-                                   # every action: the backlog over time, as a step function
+                                   # every action for its peak, backlog_peak_rounds
   decoder_memory_occupancy: false  # true samples each unit memory's held-bit count,
                                    # for a sweep over unit_memory.bits
   data_movement: false             # true counts the copies, references and moves of

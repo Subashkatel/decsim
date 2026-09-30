@@ -6,9 +6,8 @@ run, from tick 0 to the tick it is read, as gem5's AvgStor integrates
 from its last reset to curTick() (src/base/stats/storage.hh:130-213).
 DecoderUtilization and DecoderMemoryOccupancy step where the quantity
 changes, on the decoder
-pool's and the unit memories' own sources; DecodeBacklog is the one that
-still samples, after every action, because the rounds waiting to be
-decoded are spread over the window manager and the queues.
+pool's and the unit memories' own sources; DecodeBacklog keeps only its
+peak, sampled after every action.
 DecoderUtilization is always built, since every run's pool columns read
 each tier's busy fraction off it; the other two are built only when the
 observation section asks, backlog_trace for DecodeBacklog and
@@ -154,42 +153,24 @@ class DecoderMemoryOccupancy:
 
 
 class DecodeBacklog:
-    """Rounds of syndrome data produced but not yet decoded.
+    """The most rounds of syndrome data produced and not yet decoded.
 
-    Sampled once when built, before the first action, and after every
-    action; the trace keeps one row per change of value.
+    Sampled after every action, since the rounds waiting are spread over
+    the window manager and the queues and no one source reports them.
     """
 
     def __init__(self, window_manager, decoder_managers) -> None:
         self.window_manager = window_manager
         self.decoder_managers = decoder_managers
-        self._integral = _StepIntegral()
         self.peak = 0
-        self.trace: list = []
-        self.observe(0)
 
     def observe(self, tick: int) -> None:
-        """Sample the backlog and update the peak, the average, the trace."""
+        """Sample the backlog after an action and keep its peak."""
+        del tick
         view = run_views.backlog_view(
             self.window_manager, self.decoder_managers
         )
-        self._integral.observe(tick, view.total_rounds)
         self.peak = max(self.peak, view.total_rounds)
-        is_first = not self.trace
-        if is_first or self.trace[-1][1] != view.total_rounds:
-            self.trace.append((tick, view.total_rounds))
-
-    def rows(self) -> list:
-        """Backlog time series, one record per value change."""
-        rows = []
-        for time_ticks, backlog_rounds in self.trace:
-            rows.append({"t": time_ticks, "backlog_rounds": backlog_rounds})
-        return rows
-
-    def result(self) -> dict:
-        """Peak and time-average backlog, in rounds waiting to be decoded."""
-        time_average = self._integral.time_average()
-        return {"peak_rounds": self.peak, "time_avg_rounds": time_average}
 
 
 class _UnitMemoryOccupancy:

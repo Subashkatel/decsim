@@ -187,7 +187,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `release_absorbed_strong_hold` | Drop the rounds an absorbed window kept; the strong request has them. |
 | `require_rounds_retained` | A strong window starts only once every round it reads is held. |
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
-| `strong_rounds_before` | The raw rounds a strong read from first_round reads before it. |
+| `strong_rounds_before` | The raw rounds a strong read of these rounds reads before them. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
 | `require_strong_retained` | The same, on the strong syndrome buffer. |
 
@@ -474,8 +474,8 @@ Where the machine forms a round's detection events, and what it costs.
 | `forms_at` | Whether the seat forms the rounds that cross it. |
 | `form_at` | The fragments as they leave the seat: formed, or as they came. |
 | `width_at` | The width one round's fragments take as they leave the seat. |
-| `rounds_needed_before` | How many raw rounds before this one the seat must be given. |
-| `rounds_read_before` | How many raw rounds before this one the round's recipes read. |
+| `rounds_needed_before` | The raw rounds before a read's first round the seat must be given. |
+| `rounds_read_before` | How many raw rounds before first_round a read to last_round reads. |
 | `cycles_at` | The cycles of forming round_count rounds together at the seat. |
 
 ### `WindowModelSource`

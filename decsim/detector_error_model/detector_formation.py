@@ -108,6 +108,21 @@ class FormationTable:
                 earliest_round = min(earliest_round, record_round)
         return round_index - earliest_round
 
+    def rounds_read_before_first(self, first_round: int, round_indices) -> int:
+        """How many rounds before first_round forming these rounds reads.
+
+        A read forms each of its rounds in turn, and a later round can
+        reach further back than the first (a detector of rec[-1] and
+        rec[-4] after rounds of rec[-1] alone), so the read reaches back
+        to the earliest round any of them reads (rounds_read_before).
+        """
+        earliest_round = first_round
+        for round_index in round_indices:
+            reach_count = self.rounds_read_before(round_index)
+            earliest_read = round_index - reach_count
+            earliest_round = min(earliest_round, earliest_read)
+        return first_round - earliest_round
+
     def detector_rounds(self) -> dict[int, int]:
         """Each detector's round, the map resolve_detector_rounds yields."""
         return {

@@ -650,6 +650,28 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     _assert_drained(run)
 
 
+@pytest.mark.parametrize("commit_rounds", [1, 2])
+def test_an_unbuffered_live_reader_forms_each_window_from_its_own_ring(
+    commit_rounds: int,
+) -> None:
+    """The round before a window is one its decoder formed and keeps.
+
+    With no buffer, the previous window's read is released before the
+    next window starts; its decoder formed that round, so the next read
+    is given nothing from the store.
+    """
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", "decoder")
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=commit_rounds, buffer_rounds=0
+    )
+    settings = dataclasses.replace(settings, windows=windows)
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
 def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")

@@ -22,11 +22,14 @@ import pytest
 import stim
 
 import decsim.build.decoders as decoder_build
+import decsim.escalation.policies as escalation_policies
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.workload as workload_records
+import tests.declared_run as declared_run
 
 CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
@@ -833,6 +836,80 @@ def test_a_switching_run_on_a_two_round_lookback_consumes_stims_events(
     on the rows the QPU emitted is the referent).
     """
     machine = _lookback_switching_machine(formed_at, LOOKBACK_SEED)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert mismatched == []
+
+
+def _reach_growing_machine(formed_at):
+    """The second window of a reach-growing circuit escalates, alone.
+
+    Ten rounds of rec[-1], then rec[-1] ^ rec[-4] from round 4 on, in
+    windows of two plus two, so the strong region from round 3 reads
+    round 3 alone first and round 1 for its round 4. The weak decoder
+    declares the confidence, so only window 1 escalates.
+    """
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        formed_at,
+    )
+    settings = machine.settings
+    noisy_round = "M(0.15) 0\n"
+    circuit = stim.Circuit(
+        f"R 0\nREPEAT 3 {{\n{noisy_round}DETECTOR rec[-1]\n}}\n"
+        f"REPEAT 7 {{\n{noisy_round}DETECTOR rec[-1] rec[-4]\n}}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+    workload = workload_records.Workload((operation,), {1: 10}, physical)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=2, buffer_rounds=2
+    )
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_window_one)
+    weak_decoder = dataclasses.replace(settings.weak_decoder, decoder=weak)
+    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    running = settings.workload.running(workload)
+    settings = dataclasses.replace(
+        settings,
+        workload=running,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _is_window_one(job) -> bool:
+    return job.window_id == 1
+
+
+@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
+def test_a_strong_region_is_given_every_round_its_later_rounds_read(
+    formed_at,
+):
+    """Round 4 of the region from round 3 reads round 1; Stim agrees.
+
+    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
+    the referent for every unit's landed rounds.
+    """
+    machine = _reach_growing_machine(formed_at)
     emitted = _raw_rounds(machine)
     landed = _landed_rounds(machine)
 

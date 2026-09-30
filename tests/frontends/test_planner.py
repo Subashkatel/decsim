@@ -259,6 +259,9 @@ def compiled_plan(operations, planned_ids, **overrides):
     absorbs_weak_windows = overrides.pop("absorbs_weak_windows", False)
     reread_regions = overrides.pop("restart_reread_buffer_regions", 0)
     open_ended = overrides.pop("open_ended", False)
+    formation_reads = overrides.pop(
+        "formation_reads", planner.NO_FORMING_READER
+    )
     views = []
     for operation in operations:
         view = planning_view(operation)
@@ -275,6 +278,7 @@ def compiled_plan(operations, planned_ids, **overrides):
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=open_ended,
+        formation_reads=formation_reads,
     )
 
 
@@ -668,73 +672,99 @@ def lookback_table():
     )
 
 
+def reach_growing_table():
+    """Seven rounds of rec[-1], then rec[-1] ^ rec[-4] from round 4 on."""
+    circuit = stim.Circuit(
+        "R 0\nREPEAT 3 {\nM 0\nDETECTOR rec[-1]\n}\n"
+        "REPEAT 4 {\nM 0\nDETECTOR rec[-1] rec[-4]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(7)}
+    return detector_formation.build_formation_table(
+        circuit, 7, measurement_rounds=measurement_rounds
+    )
+
+
+class OneWindowScheme:
+    """A scheme that plans one window, buffered 2, committing 3 and 4."""
+
+    def plan_operation(
+        self,
+        operation_id,
+        round_count,
+        *,
+        commit_round_count,
+        buffer_round_count,
+    ):
+        del round_count, commit_round_count, buffer_round_count
+        geometry = window_records.WindowGeometry(2, 3, 4, 6)
+        return operation_window_plan(operation_id, (geometry,))
+
+
+def seven_round_plan(formation_reads, retain_strong_context=True):
+    """The plan of one seven-round operation's one window."""
+    operation = operation_of(1)
+    scheme = OneWindowScheme()
+    rounds_policy = round_policies.FixedRounds(7)
+    return compiled_plan(
+        (operation,),
+        (1,),
+        scheme=scheme,
+        rounds_policy=rounds_policy,
+        retain_strong_context=retain_strong_context,
+        formation_reads=formation_reads,
+    )
+
+
 def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
     """Its former reads round 2 for round 3's surface-code detectors."""
-    execution = one_window_with_a_successor()
     table = surface_code_table()
     reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
 
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=True,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-        formation_reads=reads,
-    )
+    plan = seven_round_plan(reads)
 
-    held_rounds = buffering.potential_holds[0][1]
+    held_rounds = plan.buffering.potential_holds[0][1]
     assert held_rounds == tuple((1, index) for index in range(2, 7))
 
 
 def test_a_strong_side_that_forms_holds_every_round_the_commit_reads():
     """Round 3's detector is rec[-1] ^ rec[-3]: it reads round 1."""
-    execution = one_window_with_a_successor()
     table = lookback_table()
     reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
 
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=True,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-        formation_reads=reads,
-    )
+    plan = seven_round_plan(reads)
 
-    held_rounds = buffering.potential_holds[0][1]
+    held_rounds = plan.buffering.potential_holds[0][1]
+    assert held_rounds == tuple((1, index) for index in range(1, 7))
+
+
+def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
+    """Round 3 reads only itself; round 4 of the same read reads round 1."""
+    table = reach_growing_table()
+    reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
+
+    plan = seven_round_plan(reads)
+
+    held_rounds = plan.buffering.potential_holds[0][1]
     assert held_rounds == tuple((1, index) for index in range(1, 7))
 
 
 def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
-    execution = one_window_with_a_successor()
     reads = planner.FormationReads(strong_side_forms=True)
 
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=True,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-        formation_reads=reads,
-    )
+    plan = seven_round_plan(reads)
 
-    held_rounds = buffering.potential_holds[0][1]
+    held_rounds = plan.buffering.potential_holds[0][1]
     assert held_rounds == tuple((1, index) for index in range(3, 7))
 
 
 def test_a_forming_decoders_read_holds_the_rounds_before_its_start():
     """The window starts at round 2, whose detectors read round 1."""
-    execution = one_window_with_a_successor()
     table = surface_code_table()
     reads = planner.FormationReads(primary_reader_forms=True, tables={1: table})
 
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=False,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-        formation_reads=reads,
-    )
+    plan = seven_round_plan(reads, retain_strong_context=False)
 
-    owner, held_rounds = buffering.weak_holds[0]
+    owner, held_rounds = plan.buffering.weak_holds[0]
     assert owner == decoding_records.WindowReads((1, 0))
     assert held_rounds == ((1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6))
 

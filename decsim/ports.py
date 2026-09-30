@@ -680,8 +680,10 @@ class WindowRetention(Protocol):
     ) -> list:
         """The retained round keys of a possibly cross-operation range."""
 
-    def strong_rounds_before(self, operation_id: Any, first_round: int) -> list:
-        """The raw rounds a strong read from first_round reads before it."""
+    def strong_rounds_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> list:
+        """The raw rounds a strong read of these rounds reads before them."""
 
     def require_retained(
         self, round_keys: list, purpose: str, store=None
@@ -1589,16 +1591,18 @@ class DetectionEventPlacement(Protocol):
         """
 
     def rounds_needed_before(
-        self, seat: str, operation_id: Any, round_index: int
-    ) -> int:
-        """How many raw rounds before this one the seat must be given.
+        self, seat: str, operation_id: Any, first_round: int, last_round: int
+    ) -> tuple:
+        """The raw rounds before a read's first round the seat must be given.
 
-        The rounds the round's recipes read, none on a round the seat
-        has formed.
+        Back to the earliest round the read's unformed rounds' recipes
+        read, less the rounds the seat has formed.
         """
 
-    def rounds_read_before(self, operation_id: Any, round_index: int) -> int:
-        """How many raw rounds before this one the round's recipes read.
+    def rounds_read_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> int:
+        """How many raw rounds before first_round a read to last_round reads.
 
         What a read holds before its first round for a seat that forms,
         whatever that seat has formed by then; zero with no recipes.

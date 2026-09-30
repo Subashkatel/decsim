@@ -143,6 +143,18 @@ def _lookback_table():
     )
 
 
+def _reach_growing_table():
+    """Ten rounds of rec[-1], then rec[-1] ^ rec[-4] from round 4 on."""
+    circuit = stim.Circuit(
+        "R 0\nREPEAT 3 {\nM 0\nDETECTOR rec[-1]\n}\n"
+        "REPEAT 7 {\nM 0\nDETECTOR rec[-1] rec[-4]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    return detector_formation.build_formation_table(
+        circuit, 10, measurement_rounds=measurement_rounds
+    )
+
+
 def _forming_retention(table, **forms):
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
@@ -158,7 +170,7 @@ def test_a_strong_side_that_forms_reads_the_raw_round_before_a_redo():
     table = _surface_code_table()
     retention = _forming_retention(table, strong_side_forms=True)
 
-    assert retention.strong_rounds_before(1, 3) == [(1, 2)]
+    assert retention.strong_rounds_before(1, 3, 3) == [(1, 2)]
 
 
 def test_a_strong_side_reads_every_round_its_first_rounds_recipes_read():
@@ -166,21 +178,29 @@ def test_a_strong_side_reads_every_round_its_first_rounds_recipes_read():
     table = _lookback_table()
     retention = _forming_retention(table, strong_side_forms=True)
 
-    assert retention.strong_rounds_before(1, 5) == [(1, 3), (1, 4)]
+    assert retention.strong_rounds_before(1, 5, 5) == [(1, 3), (1, 4)]
+
+
+def test_a_strong_read_holds_every_round_a_later_round_of_it_reads():
+    """Its first round 3 reads only itself; its round 4 reads round 1."""
+    table = _reach_growing_table()
+    retention = _forming_retention(table, strong_side_forms=True)
+
+    assert retention.strong_rounds_before(1, 3, 4) == [(1, 1), (1, 2)]
 
 
 def test_an_operations_first_round_has_no_round_before_to_read():
     table = _surface_code_table()
     retention = _forming_retention(table, strong_side_forms=True)
 
-    assert retention.strong_rounds_before(1, 1) == []
+    assert retention.strong_rounds_before(1, 1, 1) == []
 
 
 def test_a_strong_side_that_does_not_form_reads_nothing_before_a_redo():
     table = _lookback_table()
     retention = _forming_retention(table)
 
-    assert retention.strong_rounds_before(1, 5) == []
+    assert retention.strong_rounds_before(1, 5, 5) == []
 
 
 def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
@@ -194,7 +214,7 @@ def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
     )
     retention.detection_events = formation.SeatedFormation(None, settings)
 
-    assert retention.strong_rounds_before(1, 5) == []
+    assert retention.strong_rounds_before(1, 5, 5) == []
 
 
 def test_a_forming_decoders_window_holds_the_rounds_its_start_reads():

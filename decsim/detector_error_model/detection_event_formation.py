@@ -112,35 +112,42 @@ class SeatedFormation:
         return history.width(fragments)
 
     def rounds_needed_before(
-        self, seat: str, operation_id: Any, round_index: int
-    ) -> int:
-        """How many raw rounds before this one the seat must be given.
+        self, seat: str, operation_id: Any, first_round: int, last_round: int
+    ) -> tuple:
+        """The raw rounds before a read's first round the seat must be given.
 
         A detector compares a round against earlier ones, one round back
         on a surface code (LILLIPUT 2108.06569 lines 499-510) and further
-        on others, so a seat that has not formed this round is given
-        every round its recipes read (detector_formation.FormationTable
-        rounds_read_before). A round the seat formed before is answered
-        from what it remembers and needs nothing.
+        on others, so a read of first_round to last_round reaches back to
+        the earliest round its unformed rounds' recipes read
+        (detector_formation.FormationTable rounds_read_before_first). A
+        round the seat formed before is answered from what it remembers,
+        and its packet sits in the seat's ring, so it is not given again.
         """
         history = self.history_by_seat.get(seat)
         if history is None:
-            return 0
-        return history.rounds_needed_before(operation_id, round_index)
+            return ()
+        return history.rounds_needed_before(
+            operation_id, first_round, last_round
+        )
 
-    def rounds_read_before(self, operation_id: Any, round_index: int) -> int:
-        """How many raw rounds before this one the round's recipes read.
+    def rounds_read_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> int:
+        """How many raw rounds before first_round a read to last_round reads.
 
-        The count a read keeps before its first round for a seat that
+        The count a read holds before its first round for a seat that
         forms, whatever that seat has formed by the time it reads
-        (detector_formation.FormationTable rounds_read_before); a live
-        stream's table holds every round that has executed. Zero for a
-        source with no recipes, which forms nothing.
+        (detector_formation.FormationTable rounds_read_before_first); a
+        live stream's table holds every round that has executed. Zero
+        for a source with no recipes, which forms nothing.
         """
         if self.recipes is None:
             return 0
         table = self.recipes.formation_table(operation_id)
-        return table.rounds_read_before(round_index)
+        stop_round = last_round + 1
+        read_rounds = range(first_round, stop_round)
+        return table.rounds_read_before_first(first_round, read_rounds)
 
     def cycles_at(self, seat: str, round_count: int) -> int:
         """What forming round_count rounds together costs the seat, on clock."""
@@ -244,18 +251,34 @@ class _SeatHistory:
             former.hold_packet(first.round_index, bits)
             self._report_state(first.operation_id, former)
 
-    def rounds_needed_before(self, operation_id: Any, round_index: int) -> int:
-        """The raw rounds before this one that forming it here reads.
+    def rounds_needed_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> tuple:
+        """The raw rounds before first_round that forming the read reads.
 
         A source with no recipes forms nothing, so nothing is missing.
         """
         if self.recipes is None:
-            return 0
-        round_key = (operation_id, round_index)
-        if round_key in self.events_by_round:
-            return 0
+            return ()
         table = self.recipes.formation_table(operation_id)
-        return table.rounds_read_before(round_index)
+        stop_round = last_round + 1
+        unformed_rounds = self._unformed(operation_id, first_round, stop_round)
+        reach_count = table.rounds_read_before_first(
+            first_round, unformed_rounds
+        )
+        earliest_round = first_round - reach_count
+        return self._unformed(operation_id, earliest_round, first_round)
+
+    def _unformed(
+        self, operation_id: Any, first_round: int, stop_round: int
+    ) -> tuple:
+        """The rounds from first_round to before stop_round never formed."""
+        unformed_rounds = []
+        for round_index in range(first_round, stop_round):
+            if (operation_id, round_index) in self.events_by_round:
+                continue
+            unformed_rounds.append(round_index)
+        return tuple(unformed_rounds)
 
     def _form_round(self, fragments: list) -> tuple:
         """One round's fragments as one fragment of its events.

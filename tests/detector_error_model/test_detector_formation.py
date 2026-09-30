@@ -245,6 +245,21 @@ def test_a_round_reads_back_to_the_earliest_record_of_its_detectors():
     assert table.rounds_read_before(3) == 1
 
 
+def test_a_read_reaches_back_as_far_as_its_furthest_reaching_round():
+    """Round 3 reads only itself; round 4 reads round 1 (rec[-4])."""
+    circuit = stim.Circuit(
+        "R 0\nREPEAT 3 {\nM 0\nDETECTOR rec[-1]\n}\n"
+        "M 0\nDETECTOR rec[-1] rec[-4]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(4)}
+    table = detector_formation.build_formation_table(
+        circuit, 4, measurement_rounds=measurement_rounds
+    )
+    read_rounds = range(3, 5)
+
+    assert table.rounds_read_before_first(3, read_rounds) == 2
+
+
 def test_the_last_round_reads_back_as_far_as_an_observable_reads():
     """Round 3's detector reads round 3; the observable reads round 1."""
     circuit = stim.Circuit(

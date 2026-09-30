@@ -70,13 +70,13 @@ class StrongRegions:
         al. 2303.04846 lines 1456-1458). One buffer region of raw
         context stays on the open future face. A strong side that forms
         the events also reads the raw rounds before the commit that its
-        first round's recipes read, which its former holds and nothing
-        decodes (strong_rounds_before).
+        rounds' recipes read, which its former holds and nothing decodes
+        (strong_rounds_before).
         """
         weak_window = self.planner.window_at(key)
         strong_window = _near_pinned_window_of(weak_window)
         read_keys = self.retention.strong_rounds_before(
-            key[0], strong_window.buffer_lo
+            key[0], strong_window.buffer_lo, strong_window.buffer_hi
         )
         read_keys += self.retention.read_keys_for_bounds(
             key[0],
@@ -252,7 +252,7 @@ class StrongRegions:
         restart_key = _restart_window_key(later_windows, plan)
         restart_reads = self._restart_reads(key, restart_key, plan)
         context_keys = self.retention.strong_rounds_before(
-            operation_id, plan.context_lo
+            operation_id, plan.context_lo, plan.context_hi
         )
         context_keys += _context_round_keys(operation_id, plan)
         self._require_reads_retained(key, context_keys, restart_reads)

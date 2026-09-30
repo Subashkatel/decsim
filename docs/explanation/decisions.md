@@ -1246,13 +1246,17 @@ and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
 
 ## D34. A seat is told how many rounds before a round it must be given
 
-**Decided.** A seat that has not formed a round is given every raw round
-that round's recipes read: `rounds_needed_before` answers a count, the
-round minus the earliest round any of its detectors names, and on the
-last round any of its observables, and zero on a round the seat has
-formed. The recipe table owns the law (`rounds_read_before`); the
-seat's former keeps its one ring of `max_record_span + 1` packets.
-Every read whose reader forms holds those rounds under its own hold,
+**Decided.** A read is given every raw round before its first that its
+unformed rounds' recipes read, less the rounds its seat has formed:
+`rounds_needed_before` answers those rounds, from the earliest round
+any detector of an unformed round of the read names (and, on the last
+round, any observable). A later round of a read can reach further back
+than its first (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the
+whole read is counted, not its first round. A round the seat formed sits
+in its former's one ring of `max_record_span + 1` packets and is not
+given again. The recipe table owns the law (`rounds_read_before` per
+round, `rounds_read_before_first` per read).
+Every read whose reader forms holds the rounds its whole read reaches under its own hold,
 in both stores for a strong read and in the primary store for a
 decoder's read, so the reader never depends on the store still having
 them. The plan places a finite operation's holds before the operation
@@ -1293,13 +1297,14 @@ bandwidth (`src/mem/xbar.cc` lines 133-136, `src/mem/simple_mem.cc`
 line 154).
 
 **What it cost the port file.** `DetectionEventPlacement` lost
-`needs_the_round_before` and gained `rounds_needed_before` and
-`rounds_read_before`, and `form_at` takes `rounds_before` in place of
+`needs_the_round_before` and gained `rounds_needed_before` (the rounds,
+for a read's first and last round) and `rounds_read_before` (a count,
+for the same two), and `form_at` takes `rounds_before` in place of
 `round_before`; `WindowRetention.strong_round_before` became
-`strong_rounds_before`.
+`strong_rounds_before`, which takes the read's last round too.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
-(`FormationTable.rounds_read_before`),
+(`FormationTable.rounds_read_before`, `rounds_read_before_first`),
 `decsim/detector_error_model/detection_event_formation.py`
 (`rounds_needed_before`, `rounds_read_before`),
 `decsim/frontends/planner.py` (`FormationReads`),
@@ -1309,8 +1314,9 @@ line 154).
 `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
 (`_land_formed`);
 `tests/detector_error_model/test_detection_event_formation.py` forms
-the surface code, the two-round lookback and the color code at every
-seat against Stim's converter.
+the surface code, the two-round lookback, a memory whose reach grows
+from round 4 and the color code at every seat against Stim's
+converter.
 
 ## What is not modelled yet
 

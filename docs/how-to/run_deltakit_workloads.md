@@ -94,7 +94,10 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
 
 The rerun runs the point the first folder recorded: its distance,
 probability and period come from that point's `resolved/<id>.json`, and
-a value on the command line replaces the recorded one.
+its basis, noise model and T1/T2 from the first run's `arguments.json`,
+unknown when neither names them. A distance or a period on the command
+line replaces the recorded one; a basis, probability, noise model or
+T1/T2 is refused, since the loaded circuit already holds it.
 
 The default noise model is SD6. The prefix requests decoding, protection
 continues on the same live stream, and decoded release permits resume

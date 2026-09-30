@@ -88,7 +88,6 @@ class ControllerSettings:
             self.decision_to_pulse_cycles,
         )
         self._check_rounds_in_flight()
-        self._check_clock()
 
     @classmethod
     def from_yaml(
@@ -130,19 +129,6 @@ class ControllerSettings:
             "controller.packing_rounds_in_flight must be a whole count of "
             f"rounds, at least one, or null for no bound (got {bound!r})"
         )
-
-    def _check_clock(self) -> None:
-        """A charged cost names the clock domain its cycles are counted on."""
-        if self.clock is not None:
-            return
-        charged = self.readout_to_bits_cycles
-        charged += self.packing_cycles_per_round
-        charged += self.decision_to_pulse_cycles
-        if charged > 0:
-            raise ValueError(
-                "a charged controller cost needs the clock domain its "
-                "cycles are counted on"
-            )
 
 
 @dataclasses.dataclass(frozen=True)

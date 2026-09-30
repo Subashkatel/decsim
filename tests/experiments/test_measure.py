@@ -498,6 +498,7 @@ def test_a_gpu_decode_that_finds_the_dispatcher_busy_waits_in_its_own_point(
     175.007 us, 164.687 us. The algorithm point holds that wait and the
     device's own time after it.
     """
+    pytest.importorskip("relay_bp")
     strong_decoder = {
         "kind": "measured_table",
         "units": 2,

@@ -26,6 +26,7 @@ import numpy
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.records.decoder_evidence as evidence_records
 
 BOUNDARY = -1
@@ -218,9 +219,7 @@ def _edge_of(
 
 def _endpoints(check, fault_index: int) -> tuple:
     """The two detectors of a column; a missing one is the boundary."""
-    start = check.indptr[fault_index]
-    end = check.indptr[fault_index + 1]
-    detectors = decoder_module.int_tuple(check.indices[start:end])
+    detectors = basis_split.column_rows(check, fault_index)
     if len(detectors) == 0:
         return BOUNDARY, BOUNDARY
     if len(detectors) == 1:

@@ -79,6 +79,18 @@ def rows_of_basis(
     return rows
 
 
+def column_rows(matrix, column: int) -> tuple:
+    """The rows one column of a csc matrix flips, as Python ints.
+
+    A check or an observable matrix of a placed fault model is csc, so a
+    column's rows are one slice of its indices.
+    """
+    start = matrix.indptr[column]
+    end = matrix.indptr[column + 1]
+    indices = matrix.indices[start:end]
+    return tuple(int(index) for index in indices)
+
+
 @dataclasses.dataclass
 class _MergedColumns:
     """One part's columns, each identical restriction kept once.
@@ -213,7 +225,7 @@ def _part_faults(
     kept_observables = _observables_of(model.observable_bases, basis)
     merged = _MergedColumns()
     for column in range(part_check.shape[1]):
-        part_rows = _column_rows(part_check, column)
+        part_rows = column_rows(part_check, column)
         if not part_rows:
             continue
         key = _column_key(model, basis, column, part_rows, kept_observables)
@@ -228,7 +240,7 @@ def _column_key(
 ) -> tuple:
     """(part rows, part observables, owned, part detectors it flips)."""
     faults = model.physical_faults
-    observables = _column_rows(faults.observables, column)
+    observables = column_rows(faults.observables, column)
     part_observables = tuple(
         index for index in observables if index in kept_observables
     )
@@ -248,14 +260,6 @@ def _observables_of(observable_bases: tuple, basis: str) -> frozenset:
         if observable_basis == basis:
             kept.add(index)
     return frozenset(kept)
-
-
-def _column_rows(matrix, column: int) -> tuple:
-    """The rows one csc column flips."""
-    start = matrix.indptr[column]
-    end = matrix.indptr[column + 1]
-    indices = matrix.indices[start:end]
-    return tuple(int(index) for index in indices)
 
 
 def _column_matrix(rows_by_column: list, row_count: int):

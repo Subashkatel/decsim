@@ -23,6 +23,7 @@ import scipy.sparse
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
@@ -203,11 +204,12 @@ def _warm_up_syndromes(check) -> list:
     for column in range(check.shape[1]):
         if len(syndromes) == WARM_UP_COLUMNS:
             break
-        rows = _column_rows(check, column)
-        if rows.size == 0:
+        rows = basis_split.column_rows(check, column)
+        if not rows:
             continue
         syndrome = numpy.zeros(detector_count, dtype=numpy.uint8)
-        syndrome[rows] = 1
+        row_indices = list(rows)
+        syndrome[row_indices] = 1
         syndromes.append((column, syndrome))
     return syndromes
 
@@ -282,9 +284,3 @@ def _with_pinned_observable(syndrome, observable_bit: int):
     """The syndrome with the pinned graph's observable detector appended."""
     extended = numpy.concatenate([syndrome, [observable_bit]])
     return extended.astype(numpy.uint8)
-
-
-def _column_rows(check, column: int):
-    start = check.indptr[column]
-    end = check.indptr[column + 1]
-    return check.indices[start:end]

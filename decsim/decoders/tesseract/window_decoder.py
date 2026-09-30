@@ -21,6 +21,7 @@ import stim
 
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
@@ -364,11 +365,9 @@ def _append_errors(detector_error_model, check, observables, priors) -> None:
 
 
 def _error_targets(check, observables, fault_index: int) -> list:
-    start = check.indptr[fault_index]
-    end = check.indptr[fault_index + 1]
+    detectors = basis_split.column_rows(check, fault_index)
     targets = []
-    for detector_index in check.indices[start:end]:
-        detector = int(detector_index)
+    for detector in detectors:
         target = stim.DemTarget.relative_detector_id(detector)
         targets.append(target)
     column = observables[:, fault_index]

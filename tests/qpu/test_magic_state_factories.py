@@ -199,13 +199,9 @@ def test_eleven_correction_decodes_run_in_parallel_before_delivery():
     assert factory.produced_count == 1
     assert factory.in_flight_count == 0
     assert factory.stored_state_count == 0
-    snapshot = factory.latency_aggregate_snapshot()
-    assert snapshot["distill"] == {"sum": 100, "max": 100, "n": 1}
-    assert snapshot["corr_decode"] == {"sum": 40, "max": 40, "n": 1}
-    assert snapshot["total"] == {"sum": 140, "max": 140, "n": 1}
 
 
-def test_the_return_trip_after_the_decodes_is_the_deliver_stage():
+def test_the_return_trip_follows_the_correction_decodes():
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=40)
     factory = distillation(
@@ -220,35 +216,6 @@ def test_the_return_trip_after_the_decodes_is_the_deliver_stage():
     factory.request(1, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [170]
-    snapshot = factory.latency_aggregate_snapshot()
-    assert snapshot["deliver"] == {"sum": 30, "max": 30, "n": 1}
-    assert snapshot["total"] == {"sum": 170, "max": 170, "n": 1}
-
-
-def test_a_delivered_state_carries_the_tick_of_every_stage():
-    engine = decsim.engine.Engine()
-    decoder = DecodeLog(engine, latency_ticks=40)
-    factory = distillation(
-        engine,
-        unit_count=1,
-        attempt_ticks=100,
-        decode_queue=decoder,
-        correction_round_count=3,
-        return_ticks=30,
-    )
-    factory.request(1, lambda: None)
-    engine.run()
-    assert list(factory.traces) == [
-        magic_state_factories.StateTrace(
-            state_id=0,
-            distill_start_tick=0,
-            physical_done_tick=100,
-            correction_submit_tick=100,
-            correction_done_tick=140,
-            released_tick=170,
-            delivered_tick=170,
-        )
-    ]
 
 
 def test_two_units_hold_two_states_in_flight_at_the_peak():
@@ -357,28 +324,6 @@ def test_another_seed_gives_another_delivery_sequence():
     eight_requests(factory, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [100, 300, 600, 700, 900, 1000, 1200, 1400]
-
-
-def test_the_latency_maximum_is_kept_over_several_deliveries():
-    # The first state waits 50 ticks in the buffer before a request takes
-    # it (total 150); the refill is taken as soon as it is ready (total
-    # 100), so the maximum is the earlier delivery's.
-    engine = decsim.engine.Engine()
-    factory = single_stage(
-        engine, production_mode="continuous", buffer_capacity=1
-    )
-    delivered = []
-
-    def two_requests():
-        factory.request(1, lambda: delivered.append(engine.now))
-        factory.request(2, lambda: delivered.append(engine.now))
-
-    engine.schedule(150, two_requests)
-    engine.run()
-    assert delivered == [150, 250]
-    snapshot = factory.latency_aggregate_snapshot()
-    assert snapshot["total"] == {"sum": 250, "max": 150, "n": 2}
-    assert snapshot["deliver"] == {"sum": 50, "max": 50, "n": 2}
 
 
 def test_the_single_stage_log_names_the_request_the_ready_state_and_delivery():

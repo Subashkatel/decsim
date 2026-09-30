@@ -28,7 +28,6 @@ request at the top propagates demand down the chain, so no level
 free-runs unless production_mode is "continuous".
 """
 
-import collections
 import dataclasses
 import functools
 import math
@@ -42,19 +41,6 @@ import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
 import decsim.tables as tables
 import decsim.trace_source as trace_source
-
-
-@dataclasses.dataclass
-class StateTrace:
-    """When one magic state was distilled, corrected, released, delivered."""
-
-    state_id: int
-    distill_start_tick: int
-    physical_done_tick: int
-    correction_submit_tick: int
-    correction_done_tick: Optional[int] = None
-    released_tick: Optional[int] = None
-    delivered_tick: Optional[int] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -109,8 +95,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     Demand mode starts an attempt only for an unmet request; continuous
     mode also keeps buffer_capacity states in the pipeline. A state with
     no correction decodes to wait on is released one return trip after
-    the physical attempt. initial_store warm-starts the store with states
-    that carry no trace.
+    the physical attempt. initial_store warm-starts the store.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -194,18 +179,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         """Stop launching attempts; the program is complete."""
         self._is_shut_down = True
 
-    def latency_aggregate_snapshot(self) -> dict:
-        """Exact totals over every delivery, whatever traces were evicted."""
-        snapshot = {}
-        totals = self._latency_totals
-        for stage, total in totals.sum_by_stage.items():
-            snapshot[stage] = {
-                "sum": total,
-                "max": totals.max_by_stage[stage],
-                "n": totals.delivered_count,
-            }
-        return snapshot
-
     def _reset_state(self, initial_store: int) -> None:
         self.stored_state_count = initial_store
         self.waiting: list[tuple[int, Callable[[], None]]] = []
@@ -216,12 +189,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self.total_stall_ticks = 0
         self._stall_start_by_operation_id: dict[int, int] = {}
         self._is_shut_down = False
-        self.traces: collections.deque = collections.deque(maxlen=4096)
-        sum_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
-        max_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
-        self._latency_totals = _LatencyTotals(0, sum_by_stage, max_by_stage)
-        self._ready_traces: list[StateTrace] = []
-        self._next_state_id = 0
 
     def _start_attempts(self) -> None:
         """Launch attempts while demand is unmet or the pipeline is short."""
@@ -267,22 +234,12 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self.peak_in_flight_count = max(
             self.peak_in_flight_count, self.in_flight_count
         )
-        now = self.engine.now
-        distill_start_tick = now - self.card.attempt_ticks
-        trace = StateTrace(
-            state_id=self._next_state_id,
-            distill_start_tick=distill_start_tick,
-            physical_done_tick=now,
-            correction_submit_tick=now,
-        )
-        self._next_state_id += 1
         if not self.card.correction_decode_count:
             # Nothing to wait on: the state returns after the physical
             # attempt, as it does in the multi-level factory.
-            trace.correction_done_tick = now
             self.engine.schedule(
                 self.card.return_ticks,
-                lambda: self._release(trace),
+                self._release,
                 label="distill_release",
             )
             return
@@ -292,7 +249,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             f"{self.card.correction_decode_count} correction-qubit decode jobs "
             f"to the cluster (parallel)",
         )
-        batch = _CorrectionBatch(self.card.correction_decode_count, trace)
+        batch = _CorrectionBatch(self.card.correction_decode_count)
         on_done = functools.partial(self._finish_correction_decode, batch)
         for _ in range(self.card.correction_decode_count):
             self.decode_queue.enqueue_without_input(
@@ -305,21 +262,17 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         batch.remaining_count -= 1
         if batch.remaining_count != 0:
             return
-        trace = batch.trace
-        trace.correction_done_tick = self.engine.now
         self.engine.schedule(
             self.card.return_ticks,
-            lambda: self._release(trace),
+            self._release,
             label="distill_release",
         )
 
-    def _release(self, trace: StateTrace) -> None:
+    def _release(self) -> None:
         """A corrected state reaches the store and serves the oldest request."""
         self.in_flight_count -= 1
         self.stored_state_count += 1
         self.produced_count += 1
-        trace.released_tick = self.engine.now
-        self._ready_traces.append(trace)
         self.engine.log(
             log_sources.MAGIC_STATE_FACTORY,
             f"magic state ready (store now {self.stored_state_count})",
@@ -330,7 +283,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     def _deliver_to_waiting(self) -> None:
         while self.stored_state_count > 0 and self.waiting:
             self.stored_state_count -= 1
-            self._stamp_delivered_trace()
             operation_id, callback = self.waiting.pop(0)
             waited_ticks = self._stall_ticks_of(operation_id)
             self.total_stall_ticks += waited_ticks
@@ -343,33 +295,10 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             )
             callback()
 
-    def _stamp_delivered_trace(self) -> None:
-        # A warm-start state has no trace.
-        if not self._ready_traces:
-            return
-        trace = self._ready_traces.pop(0)
-        trace.delivered_tick = self.engine.now
-        self._record_delivered_trace(trace)
-        self.traces.append(trace)
-
     def _stall_ticks_of(self, operation_id: int) -> int:
         now = self.engine.now
         started = self._stall_start_by_operation_id.pop(operation_id, now)
         return now - started
-
-    def _record_delivered_trace(self, trace: StateTrace) -> None:
-        ticks_by_stage = {
-            "distill": trace.physical_done_tick - trace.distill_start_tick,
-            "corr_decode": trace.correction_done_tick
-            - trace.physical_done_tick,
-            "deliver": trace.delivered_tick - trace.correction_done_tick,
-            "total": trace.delivered_tick - trace.distill_start_tick,
-        }
-        totals = self._latency_totals
-        totals.delivered_count += 1
-        for stage, ticks in ticks_by_stage.items():
-            totals.sum_by_stage[stage] += ticks
-            totals.max_by_stage[stage] = max(totals.max_by_stage[stage], ticks)
 
 
 @dataclasses.dataclass
@@ -732,18 +661,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self._start_work()
 
 
-_LATENCY_STAGES = ("distill", "corr_decode", "deliver", "total")
-
-
-@dataclasses.dataclass
-class _LatencyTotals:
-    """Exact sums and maxima per latency stage over every delivery."""
-
-    delivered_count: int
-    sum_by_stage: dict
-    max_by_stage: dict
-
-
 @dataclasses.dataclass
 class _LevelCounters:
     """The states in store, units busy, states made and rounds failed."""
@@ -759,7 +676,6 @@ class _CorrectionBatch:
     """The correction decodes one distilled state is waiting on."""
 
     remaining_count: int
-    trace: StateTrace
 
 
 @dataclasses.dataclass

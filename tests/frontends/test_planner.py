@@ -13,8 +13,10 @@ zero-tick cadence never advances the clock.
 
 import numpy
 import pytest
+import stim
 
 import decsim.config as config
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.planner as planner
 import decsim.machine as machine_module
 import decsim.qpu.code_geometry as code_geometry
@@ -646,24 +648,95 @@ def test_a_strong_context_hold_starts_at_the_commit():
     assert held_rounds == tuple((1, index) for index in range(3, 7))
 
 
-def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
-    """Its former reads round 2 for round 3's detectors.
+def surface_code_table():
+    """Seven rounds of a d=3 memory: each bulk round reads the one before."""
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", rounds=7, distance=3
+    )
+    return detector_formation.build_formation_table(circuit, 7)
 
-    A detector compares a round against the one before it (LILLIPUT
-    2108.06569 lines 499-510), and the strong side never formed round 2.
-    """
+
+def lookback_table():
+    """Seven rounds of one qubit; round r's detector is rec[-1] ^ rec[-3]."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\n"
+        "REPEAT 5 {\nM 0\nDETECTOR rec[-1] rec[-3]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(7)}
+    return detector_formation.build_formation_table(
+        circuit, 7, measurement_rounds=measurement_rounds
+    )
+
+
+def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
+    """Its former reads round 2 for round 3's surface-code detectors."""
     execution = one_window_with_a_successor()
+    table = surface_code_table()
+    reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
 
     buffering = planner._plan_syndrome_buffering(
         execution,
         retain_strong_context=True,
         absorbs_weak_windows=False,
         restart_reread_buffer_regions=0,
-        strong_side_forms=True,
+        formation_reads=reads,
     )
 
     held_rounds = buffering.potential_holds[0][1]
     assert held_rounds == tuple((1, index) for index in range(2, 7))
+
+
+def test_a_strong_side_that_forms_holds_every_round_the_commit_reads():
+    """Round 3's detector is rec[-1] ^ rec[-3]: it reads round 1."""
+    execution = one_window_with_a_successor()
+    table = lookback_table()
+    reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
+
+    buffering = planner._plan_syndrome_buffering(
+        execution,
+        retain_strong_context=True,
+        absorbs_weak_windows=False,
+        restart_reread_buffer_regions=0,
+        formation_reads=reads,
+    )
+
+    held_rounds = buffering.potential_holds[0][1]
+    assert held_rounds == tuple((1, index) for index in range(1, 7))
+
+
+def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
+    execution = one_window_with_a_successor()
+    reads = planner.FormationReads(strong_side_forms=True)
+
+    buffering = planner._plan_syndrome_buffering(
+        execution,
+        retain_strong_context=True,
+        absorbs_weak_windows=False,
+        restart_reread_buffer_regions=0,
+        formation_reads=reads,
+    )
+
+    held_rounds = buffering.potential_holds[0][1]
+    assert held_rounds == tuple((1, index) for index in range(3, 7))
+
+
+def test_a_forming_decoders_read_holds_the_rounds_before_its_start():
+    """The window starts at round 2, whose detectors read round 1."""
+    execution = one_window_with_a_successor()
+    table = surface_code_table()
+    reads = planner.FormationReads(primary_reader_forms=True, tables={1: table})
+
+    buffering = planner._plan_syndrome_buffering(
+        execution,
+        retain_strong_context=False,
+        absorbs_weak_windows=False,
+        restart_reread_buffer_regions=0,
+        formation_reads=reads,
+    )
+
+    owner, held_rounds = buffering.weak_holds[0]
+    assert owner == decoding_records.WindowReads((1, 0))
+    assert held_rounds == ((1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6))
 
 
 def test_a_double_windows_strong_hold_ends_at_the_operations_end():

@@ -72,9 +72,9 @@ class StrongAssignment:
     neighbour windows whose committed boundary conditions the row folds
     into the job's input, Bombin et al. 2303.04846's input adaptation
     (lines 775-788); a row that reads raw rounds folds none. first_round
-    is the strong window's first round, so a carried round before it is
-    the raw round a strong side that forms the events reads
-    (windows/round_retention.py, strong_round_before).
+    is the strong window's first round, so the carried rounds before it
+    are the raw rounds a strong side that forms the events reads
+    (windows/round_retention.py, strong_rounds_before).
     """
 
     request_key: window_records.DecoderRequestKey

@@ -69,12 +69,13 @@ class StrongRegions:
         arrive as the neighbour's committed boundary instead (Bombin et
         al. 2303.04846 lines 1456-1458). One buffer region of raw
         context stays on the open future face. A strong side that forms
-        the events also reads the raw round before the commit, which its
-        former holds and nothing decodes (strong_round_before).
+        the events also reads the raw rounds before the commit that its
+        first round's recipes read, which its former holds and nothing
+        decodes (strong_rounds_before).
         """
         weak_window = self.planner.window_at(key)
         strong_window = _near_pinned_window_of(weak_window)
-        read_keys = self.retention.strong_round_before(
+        read_keys = self.retention.strong_rounds_before(
             key[0], strong_window.buffer_lo
         )
         read_keys += self.retention.read_keys_for_bounds(
@@ -250,7 +251,7 @@ class StrongRegions:
         self.planner.check_absorbable(absorbed)
         restart_key = _restart_window_key(later_windows, plan)
         restart_reads = self._restart_reads(key, restart_key, plan)
-        context_keys = self.retention.strong_round_before(
+        context_keys = self.retention.strong_rounds_before(
             operation_id, plan.context_lo
         )
         context_keys += _context_round_keys(operation_id, plan)

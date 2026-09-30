@@ -63,6 +63,8 @@ class SeatedFormation:
     ) -> None:
         self.settings = settings
         self.clock = settings.clock
+        # the source's recipes, None when it answers none
+        self.recipes = source
         self.trace = _TraceSources()
         self.history_by_seat = {}
         for seat in settings.formed_at:
@@ -125,6 +127,20 @@ class SeatedFormation:
         if history is None:
             return 0
         return history.rounds_needed_before(operation_id, round_index)
+
+    def rounds_read_before(self, operation_id: Any, round_index: int) -> int:
+        """How many raw rounds before this one the round's recipes read.
+
+        The count a read keeps before its first round for a seat that
+        forms, whatever that seat has formed by the time it reads
+        (detector_formation.FormationTable rounds_read_before); a live
+        stream's table holds every round that has executed. Zero for a
+        source with no recipes, which forms nothing.
+        """
+        if self.recipes is None:
+            return 0
+        table = self.recipes.formation_table(operation_id)
+        return table.rounds_read_before(round_index)
 
     def cycles_at(self, seat: str, round_count: int) -> int:
         """What forming round_count rounds together costs the seat, on clock."""

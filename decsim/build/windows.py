@@ -104,7 +104,7 @@ class Windows:
             plan.planned_operations,
         )
         tracker = round_tracker_module.RoundTracker()
-        retention = _retention(settings, escalation_policy)
+        retention = _retention(plan, escalation_policy)
         window_transfers = window_transfers_module.WindowTransfers(engine)
         decoder_output = decoder_output_module.DecoderOutput(engine)
         copies_the_fold = _copies_the_boundary_fold(settings, escalation_policy)
@@ -173,12 +173,14 @@ class Windows:
         frame: Optional[ports.Frame],
         conditional_release: ports.ReleaseReceiver,
         factory: ports.MagicStateFactory,
+        detection_events: ports.DetectionEventPlacement,
     ) -> None:
         """Read from the stores, decode on the managers, commit to the frame."""
         self.models.decoder = primary_decoder
         self.models.strong_decoder = strong_decoder
         self.retention.weak_store = weak_store
         self.retention.strong_store = strong_store
+        self.retention.detection_events = detection_events
         self.gate.input_fold = input_fold
         self.requester.store_output = store_output
         self.requester.decode_queue = decode_queue
@@ -324,16 +326,19 @@ def _decides_on_a_confidence(
 
 
 def _retention(
-    settings: machine_settings.MachineSettings,
-    escalation_policy: ports.EscalationPolicy,
+    plan: plan_build.Plan, escalation_policy: ports.EscalationPolicy
 ) -> round_retention_module.RoundRetention:
-    """Which store holds a window's rounds, and for how long."""
-    detection_events = settings.detection_events
-    strong_side_forms = detection_events.forms_on_the_strong_side()
+    """Which store holds a window's rounds, and for how long.
+
+    The reads the run places while it goes hold the rounds before their
+    first by the same rule as the reads the plan placed.
+    """
+    formation_reads = plan.formation_reads
     return round_retention_module.RoundRetention(
         is_strong_context_retained=escalation_policy.requires_strong_context,
         primary_tier=escalation_policy.primary_tier,
-        strong_side_forms=strong_side_forms,
+        strong_side_forms=formation_reads.strong_side_forms,
+        primary_reader_forms=formation_reads.primary_reader_forms,
     )
 
 

@@ -8,8 +8,8 @@ and the buffers read the plan and never change it.
 
 import dataclasses
 import math
-from collections.abc import Callable
-from typing import Optional
+from collections.abc import Callable, Mapping
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.records.decoding as decoding_records
@@ -46,6 +46,49 @@ class SyndromeBufferingPlan:
     strong_sufficient_live_rounds: Optional[tuple]
 
 
+@dataclasses.dataclass(frozen=True)
+class FormationReads:
+    """Which reads also hold the raw rounds their first round's recipes read.
+
+    A seat that forms the events and starts mid-stream is given every
+    raw round its first round's recipes read (FormationTable
+    rounds_read_before), so the read that carries those rounds holds
+    them, as an HEVC decoder keeps each picture the current reference
+    set names (FFmpeg hevc/refs.c:486-517). strong_side_forms is a seat
+    past the weak syndrome buffer that forms; primary_reader_forms is
+    the decoder the primary store feeds, forming. tables maps an
+    operation id to its formation table; an operation with none reads
+    nothing before its first round.
+    """
+
+    strong_side_forms: bool = False
+    primary_reader_forms: bool = False
+    tables: Mapping = dataclasses.field(default_factory=dict)
+
+    def strong_read_start(self, operation_id: Any, first_round: int) -> int:
+        """The first round a strong read from first_round holds."""
+        if not self.strong_side_forms:
+            return first_round
+        return self._earliest_round_read(operation_id, first_round)
+
+    def primary_read_start(self, operation_id: Any, first_round: int) -> int:
+        """The first round a primary read from first_round holds."""
+        if not self.primary_reader_forms:
+            return first_round
+        return self._earliest_round_read(operation_id, first_round)
+
+    def _earliest_round_read(self, operation_id: Any, first_round: int) -> int:
+        table = self.tables.get(operation_id)
+        if table is None:
+            return first_round
+        count = table.rounds_read_before(first_round)
+        return first_round - count
+
+
+# a run whose reading seats form nothing holds no round before a read
+NO_FORMING_READER = FormationReads()
+
+
 def plan_execution(
     *,
     operations: tuple[program_records.OperationPlanningView, ...],
@@ -59,7 +102,7 @@ def plan_execution(
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
     has_open_ended_dynamic_streams: bool = False,
-    strong_side_forms: bool = False,
+    formation_reads: FormationReads = NO_FORMING_READER,
 ) -> RunPlan:
     """Resolve cadence, geometry and windows once for one runtime code."""
     round_ticks = _resolve_round_ticks(code, fallback_round_microseconds)
@@ -95,7 +138,7 @@ def plan_execution(
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=restart_reread_buffer_regions,
         has_open_ended_dynamic_streams=has_open_ended_dynamic_streams,
-        strong_side_forms=strong_side_forms,
+        formation_reads=formation_reads,
     )
     return RunPlan(
         code_geometry=geometry,
@@ -336,15 +379,16 @@ def _plan_syndrome_buffering(
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
     has_open_ended_dynamic_streams: bool = False,
-    strong_side_forms: bool = False,
+    formation_reads: FormationReads = NO_FORMING_READER,
 ) -> SyndromeBufferingPlan:
     """Plan logical holds over one upstream round allocation.
 
     Weak and possible-strong consumers may overlap, but overlapping holds
     do not create another physical packet allocation, so the sufficient
     witness is the union of round identities, not a sum of ledgers.
-    strong_side_forms says a possible strong read also holds the raw
-    round before it (windows/round_retention.py, strong_round_before).
+    formation_reads says which reads also hold the raw rounds before
+    their first (windows/round_retention.py keeps the same rule for the
+    reads it places while the run goes).
     """
     weak = _HoldSet()
     strong = _HoldSet()
@@ -353,20 +397,19 @@ def _plan_syndrome_buffering(
             window = execution.windows[(operation_id, index)]
             _hold_window(
                 execution,
-                operation_id,
                 window,
                 weak,
                 absorbs_weak_windows,
                 restart_reread_buffer_regions,
+                formation_reads,
             )
             _hold_strong_context(
                 execution,
-                operation_id,
                 window,
                 strong,
                 retain_strong_context,
                 absorbs_weak_windows,
-                strong_side_forms,
+                formation_reads,
             )
     weak_sufficient = weak.sufficient_live_rounds(
         has_open_ended_dynamic_streams
@@ -384,39 +427,44 @@ def _plan_syndrome_buffering(
 
 def _hold_window(
     execution,
-    operation_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
+    formation_reads: FormationReads,
 ) -> None:
     """The window's weak syndrome buffer holds: the weak read, the restart read.
 
-    The weak decode reads the window from its start to its buffer.
+    The weak decode reads the window from its start to its buffer, and
+    the raw rounds before its start when its decoder forms the events.
     """
+    operation_id = window.operation_id
     key = (operation_id, window.window_index)
+    first_read = formation_reads.primary_read_start(
+        operation_id, window.start_round
+    )
     round_keys = _read_keys(
-        execution, operation_id, window.start_round, window.buffer_hi
+        execution, operation_id, first_read, window.buffer_hi
     )
     reads = decoding_records.WindowReads(key)
     weak.add(reads, round_keys)
     _hold_restart_reads(
         execution,
-        operation_id,
         window,
         weak,
         absorbs_weak_windows,
         restart_reread_buffer_regions,
+        formation_reads,
     )
 
 
 def _hold_restart_reads(
     execution,
-    operation_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
+    formation_reads: FormationReads,
 ) -> None:
     """Under an absorbing strong window, a bounded window keeps its reads.
 
@@ -428,6 +476,7 @@ def _hold_restart_reads(
     window's own request and landing, until the window before it commits
     (round_retention.release_restart_reads).
     """
+    operation_id = window.operation_id
     if not absorbs_weak_windows:
         return
     if not _has_same_operation_dependency(window, operation_id):
@@ -438,7 +487,8 @@ def _hold_restart_reads(
         restart_reread_buffer_regions, buffer_rounds
     )
     lower_start = window.commit_lo - reread_rounds
-    lower = max(1, lower_start)
+    restart_start = max(1, lower_start)
+    lower = formation_reads.primary_read_start(operation_id, restart_start)
     round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
     owner = decoding_records.PotentialRestart(
         (operation_id, window.window_index)
@@ -456,12 +506,11 @@ def _has_same_operation_dependency(window, operation_id) -> bool:
 
 def _hold_strong_context(
     execution,
-    operation_id,
     window,
     strong: "_HoldSet",
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
-    strong_side_forms: bool,
+    formation_reads: FormationReads,
 ) -> None:
     """The rounds a possible strong redo of the window reads, from its commit.
 
@@ -470,14 +519,15 @@ def _hold_strong_context(
     commit; the double-window region reads its own rounds, commit plus two
     buffers clamped at the operation's end, and no round past them
     (escalation/strong_regions.py, double_window_region). A strong side
-    that forms the events also reads the raw round before the commit.
+    that forms the events also reads the raw rounds before the commit
+    that the commit's first round's recipes read.
     """
+    operation_id = window.operation_id
     if not retain_strong_context:
         return
     bounds = window_records.strong_context_bounds(window)
-    lower, _commit_lo, _commit_hi, upper = bounds
-    if strong_side_forms and lower > 1:
-        lower -= 1
+    context_lo, _commit_lo, _commit_hi, upper = bounds
+    lower = formation_reads.strong_read_start(operation_id, context_lo)
     if absorbs_weak_windows:
         round_count = execution.rounds_by_operation[operation_id]
         upper = _double_window_region_end(window, round_count)

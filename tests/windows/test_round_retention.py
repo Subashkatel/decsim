@@ -8,13 +8,20 @@ double window a window's potential restart read (PotentialRestart,
 placed by the planner) keeps the rounds its restart decode would read
 past the landing, follows a re-slice, and ends when the retention is
 told no earlier escalation can re-slice the window (Toshio 2510.25222
-Sec. III C).
+Sec. III C). A read whose reader forms the detection events also holds
+the raw rounds its first round's recipes read, the rounds Stim's
+converter reads for that round's detectors
+(stim.Circuit.compile_m2d_converter).
 """
 
 import types
 
 import pytest
+import stim
 
+import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -30,7 +37,9 @@ def _store() -> syndrome_buffer_module.SyndromeBuffer:
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
 
-def _retention(store, round_counts: dict, successors: dict):
+def _retention(
+    store, round_counts: dict, successors: dict, primary_reader_forms=False
+):
     planner = types.SimpleNamespace(successors_by_operation=successors)
 
     def effective_round_count_for_window(operation_id, _window):
@@ -44,6 +53,7 @@ def _retention(store, round_counts: dict, successors: dict):
     retention = round_retention.RoundRetention(
         is_strong_context_retained=False,
         primary_tier=window_records.DecoderTier.WEAK,
+        primary_reader_forms=primary_reader_forms,
     )
     retention.weak_store = store
     retention.planner = planner
@@ -92,34 +102,144 @@ def _strong_retention(strong_store, rounds_arrived: int):
     return retention
 
 
-def test_a_strong_side_that_forms_reads_the_raw_round_before_a_redo():
-    """LILLIPUT 2108.06569 lines 499-510: a detector reads the round before."""
+class _OneTable:
+    """A source whose recipes are one circuit's, for every operation."""
+
+    def __init__(self, table) -> None:
+        self.table = table
+
+    def formation_table(self, operation_id):
+        """The one table."""
+        del operation_id
+        return self.table
+
+
+def _placement(table):
+    """The run's real placement, forming at the strong decoder."""
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("strong_decoder",)
+    )
+    source = _OneTable(table)
+    return formation.SeatedFormation(source, settings)
+
+
+def _surface_code_table():
+    """Four rounds of a d=3 memory: each bulk round reads the one before."""
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", rounds=4, distance=3
+    )
+    return detector_formation.build_formation_table(circuit, 4)
+
+
+def _lookback_table():
+    """Ten rounds of one qubit; round r's detector is rec[-1] ^ rec[-3]."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\n"
+        "REPEAT 8 {\nM 0\nDETECTOR rec[-1] rec[-3]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    return detector_formation.build_formation_table(
+        circuit, 10, measurement_rounds=measurement_rounds
+    )
+
+
+def _forming_retention(table, **forms):
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
         primary_tier=window_records.DecoderTier.WEAK,
-        strong_side_forms=True,
+        **forms,
     )
+    retention.detection_events = _placement(table)
+    return retention
 
-    assert retention.strong_round_before(1, 4) == [(1, 3)]
+
+def test_a_strong_side_that_forms_reads_the_raw_round_before_a_redo():
+    """A surface-code bulk detector reads the round before its own."""
+    table = _surface_code_table()
+    retention = _forming_retention(table, strong_side_forms=True)
+
+    assert retention.strong_rounds_before(1, 3) == [(1, 2)]
+
+
+def test_a_strong_side_reads_every_round_its_first_rounds_recipes_read():
+    """Round 5's detector reads rounds 5 and 3, so rounds 3 and 4 go up."""
+    table = _lookback_table()
+    retention = _forming_retention(table, strong_side_forms=True)
+
+    assert retention.strong_rounds_before(1, 5) == [(1, 3), (1, 4)]
 
 
 def test_an_operations_first_round_has_no_round_before_to_read():
+    table = _surface_code_table()
+    retention = _forming_retention(table, strong_side_forms=True)
+
+    assert retention.strong_rounds_before(1, 1) == []
+
+
+def test_a_strong_side_that_does_not_form_reads_nothing_before_a_redo():
+    table = _lookback_table()
+    retention = _forming_retention(table)
+
+    assert retention.strong_rounds_before(1, 5) == []
+
+
+def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("strong_decoder",)
+    )
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
         primary_tier=window_records.DecoderTier.WEAK,
         strong_side_forms=True,
     )
+    retention.detection_events = formation.SeatedFormation(None, settings)
 
-    assert retention.strong_round_before(1, 1) == []
+    assert retention.strong_rounds_before(1, 5) == []
 
 
-def test_a_strong_side_that_does_not_form_reads_nothing_before_a_redo():
-    retention = round_retention.RoundRetention(
-        is_strong_context_retained=True,
-        primary_tier=window_records.DecoderTier.WEAK,
+def test_a_forming_decoders_window_holds_the_rounds_its_start_reads():
+    """Its decode reads rounds 3 and 4 raw, under the window's own hold."""
+    store = _store()
+    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
+    table = _lookback_table()
+    retention.detection_events = _placement(table)
+    window = window_records.Window(
+        operation_id=1,
+        window_index=2,
+        commit_lo=5,
+        commit_hi=6,
+        buffer_hi=8,
+        round_count=4,
     )
 
-    assert retention.strong_round_before(1, 4) == []
+    retention.register_window((1, 2), window)
+
+    reads = decoding_records.WindowReads((1, 2))
+    held = store.hold_round_identities(reads)
+    assert held == ((1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8))
+
+
+def test_a_clipped_tail_of_a_forming_decoder_keeps_its_rounds_before():
+    store = _store()
+    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
+    table = _lookback_table()
+    retention.detection_events = _placement(table)
+    window = window_records.Window(
+        operation_id=1,
+        window_index=2,
+        commit_lo=5,
+        commit_hi=6,
+        buffer_hi=8,
+        round_count=4,
+    )
+    retention.register_window((1, 2), window)
+    window.buffer_hi = 7
+
+    retention.reset_clipped_window_reads(window)
+
+    reads = decoding_records.WindowReads((1, 2))
+    held = store.hold_round_identities(reads)
+    assert held == ((1, 3), (1, 4), (1, 5), (1, 6))
 
 
 def test_a_context_round_still_crossing_is_told_apart_from_one_released():

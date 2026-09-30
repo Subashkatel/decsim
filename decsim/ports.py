@@ -680,8 +680,8 @@ class WindowRetention(Protocol):
     ) -> list:
         """The retained round keys of a possibly cross-operation range."""
 
-    def strong_round_before(self, operation_id: Any, first_round: int) -> list:
-        """The raw round a strong redo from first_round reads before it."""
+    def strong_rounds_before(self, operation_id: Any, first_round: int) -> list:
+        """The raw rounds a strong read from first_round reads before it."""
 
     def require_retained(
         self, round_keys: list, purpose: str, store=None
@@ -1595,6 +1595,13 @@ class DetectionEventPlacement(Protocol):
 
         The rounds the round's recipes read, none on a round the seat
         has formed.
+        """
+
+    def rounds_read_before(self, operation_id: Any, round_index: int) -> int:
+        """How many raw rounds before this one the round's recipes read.
+
+        What a read holds before its first round for a seat that forms,
+        whatever that seat has formed by then; zero with no recipes.
         """
 
     def cycles_at(self, seat: str, round_count: int) -> int:

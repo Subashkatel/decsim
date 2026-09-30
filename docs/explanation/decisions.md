@@ -1252,6 +1252,14 @@ round minus the earliest round any of its detectors names, and on the
 last round any of its observables, and zero on a round the seat has
 formed. The recipe table owns the law (`rounds_read_before`); the
 seat's former keeps its one ring of `max_record_span + 1` packets.
+Every read whose reader forms holds those rounds under its own hold,
+in both stores for a strong read and in the primary store for a
+decoder's read, so the reader never depends on the store still having
+them. The plan places a finite operation's holds before the operation
+begins, so it reads the operation's recipes off the same circuit the
+source will (`build/plan.py`, `_formation_tables`); the holds the run
+places while it goes ask the placement, whose source's table a live
+stream extends as its rounds execute.
 
 **Why.** A detection event is the parity of the records a detector
 names, however far back, so the same round's events are the same at
@@ -1262,16 +1270,25 @@ could not say so. On every surface-code round the count is the one
 round the yes or no gave.
 
 **Sources.** Stim's converter reads every record a detector names
-(`stim.Circuit.compile_m2d_converter`); a detector compares a round
-against earlier ones (LILLIPUT 2108.06569 lines 499-510).
+(`stim.Circuit.compile_m2d_converter`), and cudaqx counts the
+measurements a decoder's detectors read (`libs/qec/lib/decoder.cpp`
+lines 115-127); a detector compares a round against earlier ones
+(LILLIPUT 2108.06569 lines 499-510). An HEVC decoder keeps each
+picture the current reference set names, whatever else it holds
+(FFmpeg `hevc/refs.c` lines 486-517).
 
 **What it cost the port file.** `DetectionEventPlacement` lost
-`needs_the_round_before` and gained `rounds_needed_before`.
+`needs_the_round_before` and gained `rounds_needed_before` and
+`rounds_read_before`; `WindowRetention.strong_round_before` became
+`strong_rounds_before`.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`),
 `decsim/detector_error_model/detection_event_formation.py`
-(`rounds_needed_before`);
+(`rounds_needed_before`, `rounds_read_before`),
+`decsim/frontends/planner.py` (`FormationReads`),
+`decsim/windows/round_retention.py` (`strong_rounds_before`,
+`primary_rounds_before`);
 `tests/detector_error_model/test_detection_event_formation.py` forms
 the surface code, the two-round lookback and the color code at every
 seat against Stim's converter.

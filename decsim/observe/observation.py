@@ -4,12 +4,12 @@ The Machine builds each listener the observation section asks for,
 connects it to the sources it hears, and keeps it here so
 decsim.experiments, the gate and the experiments read a run's numbers
 from its listeners and never from a component. The log writer, the
-window ledger, the flight recorder, the runtime stamps, the queue
-depth, the controller counters, the command events, the frame's
-corrections, the referee's audit and the sampled shots are always
-there; the ones a study asks for are None when the section did not ask,
-the burst flags are None when the run has no burst detector, and the
-confidence ledger when no confidence signal decides the escalation.
+window ledger, the runtime stamps, the queue depth, the controller
+counters, the command events, the frame's corrections, the referee's
+audit and the sampled shots are always there; the ones a study asks
+for are None when the section did not ask, the burst flags are None
+when the run has no burst detector, and the confidence ledger when no
+confidence signal decides the escalation.
 """
 
 import dataclasses
@@ -44,7 +44,6 @@ class Observation:
     windows: window_ledger_module.WindowLedger
     results: result_ledger_module.ResultLedger
     traffic: link_traffic.TrafficLedger
-    flight_recorder: flight_recorder_module.FlightRecorder
     frame_corrections: flight_recorder_module.FrameCorrections
     trace_writer: Optional[trace_writer_module.TraceWriter]
     data_movement: Optional[data_movement_module.DataMovement]

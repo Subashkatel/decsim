@@ -280,7 +280,7 @@ docstring.
 - `decsim/observe/controller_counters.py`: The controller's counters: how many idle rounds it emitted.
 - `decsim/observe/data_movement.py`: How often a run copied bits, referenced them and moved them.
 - `decsim/observe/decode_records.py`: The switching study's terminal records: per request, per service, per gap.
-- `decsim/observe/flight_recorder.py`: The flight recorder: one causal row per hardware transition of a run.
+- `decsim/observe/flight_recorder.py`: The frame's corrections: every window's write, as accepted and as landed.
 - `decsim/observe/link_traffic.py`: The traffic ledger: what the links carried, and the JSON the run exports.
 - `decsim/observe/log_writers.py`: The two listeners of the engine's narrator: the record and the console.
 - `decsim/observe/metrics.py`: The integrated metrics: step functions of time over one run.

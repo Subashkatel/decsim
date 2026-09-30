@@ -16,7 +16,6 @@ ALWAYS_PRESENT = (
     "windows",
     "results",
     "traffic",
-    "flight_recorder",
     "frame_corrections",
     "runtime_stamps",
     "queue_depth",

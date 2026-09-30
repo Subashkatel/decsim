@@ -54,7 +54,6 @@ def observe(
     windows: Any,
     decoders: Any,
     process_name: str,
-    operations: tuple,
     traffic_ledger: link_traffic.TrafficLedger,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
@@ -113,20 +112,11 @@ def observe(
     )
     frame_corrections = _frame_corrections(control.pauli_frame)
     burst_flags = _connect_burst_flags(windows.burst_detector)
-    flight_recorder = flight_recorder_module.FlightRecorder(
-        round_events,
-        window_ledger,
-        runtime_stamps,
-        command_events,
-        frame_corrections,
-        operations,
-    )
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
         results=result_ledger,
         traffic=traffic_ledger,
-        flight_recorder=flight_recorder,
         frame_corrections=frame_corrections,
         trace_writer=trace_writer,
         data_movement=data_movement,
@@ -547,7 +537,7 @@ def _connect_sampled_shots(
 def _frame_corrections(
     pauli_frame,
 ) -> flight_recorder_module.FrameCorrections:
-    """The frame's accepted and landed corrections, for the recorder."""
+    """The frame's accepted and landed corrections."""
     corrections = flight_recorder_module.FrameCorrections()
     if pauli_frame is None:
         return corrections

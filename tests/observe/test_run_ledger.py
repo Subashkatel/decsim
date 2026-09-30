@@ -1,6 +1,6 @@
-"""The flight recorder's ledger: one causal row per hardware transition.
+"""The run ledger: one causal row per hardware transition.
 
-`FlightRecorder.ledger` assembles the run's causal record out of the
+`run_ledger.ledger_of` assembles the run's causal record out of the
 owners' own records, named in the module's docstring: the packing
 stage's round events, the strong syndrome buffer's landings, the window
 stamps, the frame's corrections and the runtime's release times. Its
@@ -32,9 +32,9 @@ import pytest
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.experiments.experiment as experiment
-import decsim.observe.flight_recorder as flight_recorder_module
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
+import tests.observe.run_ledger as run_ledger
 
 
 def kinds_and_ticks(chain):
@@ -110,10 +110,10 @@ def test_a_rounds_chain_is_exact_and_each_event_names_its_cause():
     free so it is packed and sent at 8, and the weak-buffer path
     publishes it in the weak syndrome buffer at 12. Each row's cause is the row
     before it, which is what lets a reader follow one readout through the
-    machine (flight_recorder.py's _round_chains).
+    machine (run_ledger.py's _round_chains).
     """
     machine = declared_run.weak_only_run(rounds=6)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     chain = ledger.chain(op=1, round=3)
 
@@ -140,10 +140,10 @@ def test_a_windows_chain_is_exact_and_its_cause_is_the_last_round_it_read():
     takes 10 us behind a 5 us input path, and the frame accepts at 32
     and commits its 1 us write at 33. The chain's cause is the last
     round it read, because that publication is the event the window
-    manager waited on (flight_recorder.py's _window_chains).
+    manager waited on (run_ledger.py's _window_chains).
     """
     machine = declared_run.weak_only_run(rounds=6)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     chain = ledger.chain(op=1, window=0)
 
@@ -170,10 +170,10 @@ def test_every_emitted_round_reaches_exactly_one_terminal_state():
 
     A weak-only run of six rounds publishes all six, so the check finds
     one terminal state per emitted round and nothing lost on the way
-    (flight_recorder.py's RunLedgerView docstring).
+    (run_ledger.py's RunLedgerView docstring).
     """
     machine = declared_run.weak_only_run(rounds=6)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     ledger.check()
 
@@ -189,12 +189,12 @@ def test_a_strong_primary_run_records_the_room_side_landing():
     Readiness listens to the strong syndrome buffer, so nothing crosses the
     weak-buffer path: the round is packed at 8 us and lands at 15, and
     that landing is its terminal state rather than a publication
-    (flight_recorder.py's _store_landings). The window then waits the
+    (run_ledger.py's _store_landings). The window then waits the
     6 us strong input path and the 30 us strong decoder, and the frame
     records the tier that served it.
     """
     machine = declared_run.strong_only_run(rounds=6)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     ledger.check()
 
@@ -227,7 +227,7 @@ def test_a_full_escalation_runs_ledger_passes_its_check():
     first.
     """
     machine = declared_run.switching_run(rounds=6, escalates=True)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     ledger.check()
 
@@ -241,13 +241,13 @@ def test_a_release_is_caused_by_the_blocking_operations_commit():
     issued at 35, and the command link puts the command at the qpu at
     37. The cause of the decision is the blocking operation's commit,
     not the blocked operation's own work
-    (flight_recorder.py's _output_row and _releases).
+    (run_ledger.py's _output_row and _releases).
     """
     first = declared_run.memory_operation(1)
     second = declared_run.memory_operation(2, blocked_by=1)
     operations = [first, second]
     machine = declared_run.weak_only_run(rounds=6, operations=operations)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     ledger.check()
 
@@ -278,14 +278,14 @@ def test_the_check_refuses_an_effect_stamped_before_its_cause():
     A ledger whose rows are ordered by tick can still name a cause that
     is later than its effect, and that is a modeling bug rather than a
     slow run, so the check raises instead of reporting a negative
-    latency (flight_recorder.py's _causes_before_effects).
+    latency (run_ledger.py's _causes_before_effects).
     """
     cause_tick = config_module.microseconds_to_ticks(5.0)
     effect_tick = config_module.microseconds_to_ticks(4.0)
-    cause = flight_recorder_module.LedgerEvent(
+    cause = run_ledger.LedgerEvent(
         event_id=0, kind="EMITTED", tick=cause_tick, op=1, round=1
     )
-    effect = flight_recorder_module.LedgerEvent(
+    effect = run_ledger.LedgerEvent(
         event_id=1,
         kind="PUBLISHED",
         tick=effect_tick,
@@ -294,7 +294,7 @@ def test_the_check_refuses_an_effect_stamped_before_its_cause():
         prev_event_id=0,
         status="terminal",
     )
-    view = flight_recorder_module.RunLedgerView(events=(cause, effect))
+    view = run_ledger.RunLedgerView(events=(cause, effect))
 
     with pytest.raises(RuntimeError, match="precedes its cause"):
         view.check()
@@ -305,13 +305,13 @@ def test_the_check_refuses_a_round_that_disappeared():
 
     A round emitted and never terminal is a packet that vanished. The
     ledger is used as evidence, so it must fail rather than read as a
-    complete run (flight_recorder.py's _one_terminal_per_round).
+    complete run (run_ledger.py's _one_terminal_per_round).
     """
     orphan_tick = config_module.microseconds_to_ticks(1.0)
-    orphan = flight_recorder_module.LedgerEvent(
+    orphan = run_ledger.LedgerEvent(
         event_id=0, kind="EMITTED", tick=orphan_tick, op=1, round=1
     )
-    view = flight_recorder_module.RunLedgerView(events=(orphan,))
+    view = run_ledger.RunLedgerView(events=(orphan,))
 
     with pytest.raises(RuntimeError, match="terminal states"):
         view.check()
@@ -428,7 +428,7 @@ def unaccounted_rounds_of_window(window, accounted, highest):
 
 def unaccounted_window_rounds(machine):
     """Every decoded window's rounds that no store accounted for."""
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
     accounted = accounted_round_keys(ledger)
     highest = highest_emitted_round(ledger)
     windows = machine.observation.windows.windows
@@ -485,7 +485,7 @@ def test_the_ledger_holds_over_random_runs_of_every_mode(seed):
     mode_name, build_mode = SWEEP_MODES[mode_index]
     rounds = generator.randint(6, 9)
     machine = build_mode(generator, rounds)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     ledger.check()
 
@@ -500,14 +500,14 @@ def test_an_idle_feedback_memory_round_reaches_one_terminal_state():
 
     An idle stream's rounds are routed as feedback memory rather than as
     window input, so each must carry its FEEDBACK_MEMORY_DELIVERED
-    terminal and no publication beside it (flight_recorder.py's
+    terminal and no publication beside it (run_ledger.py's
     _ROUND_TERMINALS).
     """
     first = declared_run.memory_operation(1)
     second = declared_run.memory_operation(2, blocked_by=1)
     operations = [first, second]
     machine = declared_run.weak_only_run(rounds=6, operations=operations)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
 
     ledger.check()
 
@@ -601,7 +601,7 @@ def ledger_without(ledger, kind, window_id):
         if event.kind == kind and event.window == window_id:
             continue
         kept.append(event)
-    return flight_recorder_module.RunLedgerView(events=tuple(kept))
+    return run_ledger.RunLedgerView(events=tuple(kept))
 
 
 def test_every_window_of_a_shipped_run_records_its_four_trace_events():
@@ -628,7 +628,7 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
         },
     )
     shot = collect.run_shot(task, 0)
-    ledger = shot.machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(shot.machine)
 
     problems = windows_with_a_broken_trace(ledger)
 
@@ -656,7 +656,7 @@ def test_a_window_whose_frame_write_is_missing_fails_the_trace_walk():
     four events, which is what makes the failure point at one window.
     """
     machine = declared_run.weak_only_run(rounds=6)
-    ledger = machine.observation.flight_recorder.ledger
+    ledger = run_ledger.ledger_of(machine)
     intact = windows_with_a_broken_trace(ledger)
     broken = ledger_without(ledger, "FRAME_COMMITTED", 0)
 

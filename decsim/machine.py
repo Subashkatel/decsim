@@ -230,7 +230,6 @@ class Machine:
         observation = _observe(
             settings,
             engine,
-            plan,
             links,
             qpu=qpu,
             control=control,
@@ -316,7 +315,6 @@ def _seed_roots(
 def _observe(
     settings: machine_settings.MachineSettings,
     engine: engine_module.Engine,
-    plan: plan_build.Plan,
     links: ports.Link,
     *,
     qpu: qpu_part.Qpu,
@@ -339,7 +337,6 @@ def _observe(
         windows=windows,
         decoders=decoders,
         process_name=name,
-        operations=plan.operations,
         traffic_ledger=traffic_ledger,
     )
 

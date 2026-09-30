@@ -321,9 +321,9 @@ def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
 def _bare_observe(observation, engine, **parts):
     """The narrator and the three listeners the run result reads, no more.
 
-    No trace writer, no data movement, no flight recorder input, no stage
-    ledger, no referee audit, no metrics, no window ledger, no round
-    events, no command events, no queue depth, no occupancy. The narrator
+    No trace writer, no data movement, no stage ledger, no referee
+    audit, no metrics, no window ledger, no round events, no command
+    events, no queue depth, no occupancy. The narrator
     hears both of the engine's line sources, as the real wiring does when
     observation.log_component_io is on, because a source with no listener
     is never fired at all (decsim/engine.py log_io).
@@ -354,7 +354,6 @@ def _bare_observation(
 ):
     """The record those three listeners hang on, every other field empty."""
     windows = window_ledger_module.WindowLedger()
-    recorder = _bare_flight_recorder(engine, runtime_stamps)
     corrections = flight_recorder_module.FrameCorrections()
     queue_depth = queue_depth_module.QueueDepthLog()
     counters = controller_counters_module.ControllerCounters()
@@ -369,7 +368,6 @@ def _bare_observation(
         windows=windows,
         results=result_ledger,
         traffic=traffic_ledger,
-        flight_recorder=recorder,
         frame_corrections=corrections,
         trace_writer=None,
         data_movement=None,
@@ -388,22 +386,6 @@ def _bare_observation(
         sampled_shots=shots,
         burst_flags=None,
         confidence=None,
-    )
-
-
-def _bare_flight_recorder(engine, runtime_stamps):
-    """A recorder over empty ledgers, so no component is heard through it."""
-    rounds = round_events_module.RoundEventRecorder(engine)
-    windows = window_ledger_module.WindowLedger()
-    commands = command_events_module.CommandEvents()
-    corrections = flight_recorder_module.FrameCorrections()
-    return flight_recorder_module.FlightRecorder(
-        rounds,
-        windows,
-        runtime_stamps,
-        commands,
-        corrections,
-        (),
     )
 
 

@@ -5,9 +5,10 @@ assembler, the held rounds, the transmitter and both syndrome round
 receivers, on the instruction output's output_event, and on the strong
 store's round_stored; the components never read it. The rows are append-only
 and passive; recording never schedules or decides. A finished run's
-terminal states are PUBLISHED or FEEDBACK_MEMORY_DELIVERED;
-the run ledger (observe/run_views.py) is built from these rows, the
-controller's output events and the strong store's landings.
+terminal states are PUBLISHED or FEEDBACK_MEMORY_DELIVERED. The
+controller's output events are read only by the run ledger the tests
+check (tests/observe/run_ledger.py), and are kept here because the
+instruction output's output_event has no other listener.
 """
 
 import decsim.records.rounds as round_records

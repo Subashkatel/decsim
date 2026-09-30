@@ -16,7 +16,7 @@ queue_depth the decode queue over time, controller_counters the idle
 rounds, metrics the integrated step functions, command_events and
 runtime_stamps the ticks of each operation's life, round_events the
 readout path's flight recorder, sampled_shots what the syndrome source
-sampled, and flight_recorder one causal row per hardware transition.
+sampled, and flight_recorder the frame's accepted and landed corrections.
 The writers: log_writers for the engine's narrator, trace_writer for a
 shot's Chrome trace. settings.py is the section that turns them on.
 """

@@ -56,9 +56,9 @@ def recipe_of(folder: pathlib.Path) -> types.ModuleType:
     not built and nothing runs.
     """
     path = folder / "run.py"
-    spec = importlib.util.spec_from_file_location("recipe", path)
-    recipe = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(recipe)
+    specification = importlib.util.spec_from_file_location("recipe", path)
+    recipe = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(recipe)
     return recipe
 
 

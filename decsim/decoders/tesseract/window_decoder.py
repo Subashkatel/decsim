@@ -91,7 +91,7 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
             syndrome_array,
         )
 
-    def prepare(self, model) -> None:
+    def prepare(self, model: fault_models.WindowErrorModel) -> None:
         """Build and keep the backend of one model, decoding nothing.
 
         A model the backend refuses is left to decode, which answers it

@@ -1,12 +1,14 @@
 """The wiring: every listener connected once, and no source heard twice.
 
 decsim/observe/wiring.py is the one place that connects a listener to
-the sources it hears, so the census below is the whole picture: walk the
-built machine, find every trace source, and read who hears it. A source
-with two listeners of one class is a connection made twice, which would
-double a count without failing anything.
+the sources it hears, so the census below is the whole picture: record
+every connection made while the machine is built, then walk the built
+machine and find every trace source. A source with two listeners of one
+class is a connection made twice, which would double a count without
+failing anything.
 """
 
+import collections
 import dataclasses
 
 import decsim.config
@@ -52,6 +54,16 @@ def _listener_class(listener):
     if owner is None:
         return type(bound)
     return type(owner)
+
+
+def _listener_classes_by_source(connections) -> collections.defaultdict:
+    """The class of every listener connected to each source, by identity."""
+    classes_by_source = collections.defaultdict(list)
+    for source, listener in connections:
+        heard_by = _listener_class(listener)
+        source_identity = id(source)
+        classes_by_source[source_identity].append(heard_by)
+    return classes_by_source
 
 
 def _walk(root) -> list:
@@ -130,18 +142,29 @@ def _sources_on(owner) -> list:
     return sources
 
 
-def test_no_source_is_heard_twice_by_one_listener_class():
-    """One connection per (source, listener class), with every knob on."""
+def test_no_source_is_heard_twice_by_one_listener_class(monkeypatch):
+    """One connection per (source, listener class), with every knob on.
+
+    A listener reaches a source only through connect, so the connections
+    recorded while the machine is built are every listener it holds.
+    """
+    connections = []
+    connect = trace_source.TraceSource.connect
+
+    def recording_connect(source, listener):
+        connections.append((source, listener))
+        connect(source, listener)
+
+    monkeypatch.setattr(trace_source.TraceSource, "connect", recording_connect)
     point = gate_point.settings(**EVERY_KNOB)
     machine = machine_module.Machine.build(point, gate_point.SEED)
 
     census = _walk(machine)
+    classes_by_source = _listener_classes_by_source(connections)
     doubled = []
     for owner_name, source_name, source in census:
-        classes = []
-        for listener in source.listeners:
-            heard_by = _listener_class(listener)
-            classes.append(heard_by)
+        source_identity = id(source)
+        classes = classes_by_source[source_identity]
         if len(classes) != len(set(classes)):
             doubled.append((owner_name, source_name, classes))
 

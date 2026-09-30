@@ -28,6 +28,8 @@ import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.records.decoder_evidence as evidence_records
 
 BOUNDARY = -1
+# the compiled decoder counts lengths, ticks and walk distances in int64
+_LARGEST_HALF_TICK_COUNT = 2**63 - 1
 
 
 def graph_from_model(
@@ -50,13 +52,8 @@ def graph_from_model(
     likely = priors > 0.5
     baseline = likely.astype(numpy.uint8)
     baseline_syndrome = _parity_product(check, baseline)
-    edges = []
-    for fault_index in range(fault_count):
-        edge = _edge_of(
-            check, priors, baseline, observables, fault_index, weight_step
-        )
-        if edge is not None:
-            edges.append(edge)
+    edges = _edges(check, priors, baseline, observables, weight_step)
+    _refuse_lengths_past_the_counters(edges, weight_step, location)
     logical_columns = _logical_columns(observables, fault_count)
     baseline_faults = _int_tuple(baseline)
     baseline_syndrome = _int_tuple(baseline_syndrome)
@@ -139,6 +136,43 @@ def _quantize_weight_ticks(weight: float, weight_step: float) -> int:
     rounds_up = 2 * remainder >= denominator
     ticks = whole + int(rounds_up)
     return max(1, ticks)
+
+
+def _edges(check, priors, baseline, observables, weight_step: float) -> list:
+    """The edge of every fault column whose residual is not certain."""
+    edges = []
+    fault_count = check.shape[1]
+    for fault_index in range(fault_count):
+        edge = _edge_of(
+            check, priors, baseline, observables, fault_index, weight_step
+        )
+        if edge is not None:
+            edges.append(edge)
+    return edges
+
+
+def _refuse_lengths_past_the_counters(
+    edges: list, weight_step: float, location: str
+) -> None:
+    """A weight_step so fine that the compiled sums would wrap is refused.
+
+    The cluster gap's shortest odd walk crosses each edge at most once in
+    each parity layer and relaxes one edge past that, so no sum the
+    compiled decoder forms passes three times the edges' total length;
+    a signed 64-bit sum past its largest value wraps negative without a
+    word (C11 6.5p5 leaves it undefined).
+    """
+    total_half_ticks = 0
+    for edge in edges:
+        total_half_ticks += edge.length_half_ticks
+    if 3 * total_half_ticks <= _LARGEST_HALF_TICK_COUNT:
+        return
+    raise ValueError(
+        f"{location}: at weight_step {weight_step} the graph's edges are "
+        f"{total_half_ticks} half ticks long together, and the compiled "
+        "decoder's 64-bit sums reach three times that; raise the "
+        "decoder's weight_step"
+    )
 
 
 def _check_priors(raw_priors, fault_count: int, location: str) -> None:

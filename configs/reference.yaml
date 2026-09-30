@@ -1165,6 +1165,9 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # the engine's cycles directly. Helios's own
                                    # weights run 2 to 16 (2301.08419 lines
                                    # 1242-1254, the weight resolution wmax).
+                                   # A step so fine that three times a
+                                   # window's total edge length passes the
+                                   # decoder's 64-bit counters is refused
   # cycle_count: null             # the union_find row's own timing, in place of
                                    # its host wall clock: the decoder's cycle
                                    # count per growth tick, on a named clock.

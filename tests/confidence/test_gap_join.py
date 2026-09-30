@@ -24,6 +24,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
 
@@ -92,18 +93,20 @@ def _weak_decode_starts(machine) -> list:
     return weak_starts
 
 
-def _companions_and_answers(machine) -> tuple:
-    """The weak requests the ledger marks companions, and those answered."""
+def _companions_and_answers(requests) -> tuple:
+    """The weak requests that ended as companions, and those answered."""
     outcomes = decoding_records.RequestProcessingOutcome
     companion = outcomes.WEAK_FORCED_CLASS_COMPANION
     companions = []
     answered = []
-    for record in _weak_requests(machine):
-        if record.terminal_processing_outcome is companion:
-            companions.append(record)
+    for ended in requests.of_tier(window_records.DecoderTier.WEAK):
+        if ended.outcome is companion:
+            companions.append(ended)
             continue
-        if record.soft_output is not None:
-            answered.append(record)
+        if ended.result is None:
+            continue
+        if ended.result.soft_output is not None:
+            answered.append(ended)
     return companions, answered
 
 
@@ -234,11 +237,13 @@ def test_the_first_solve_is_held_and_the_join_names_the_windows_gap():
     assert "gap " in joined[0]
 
 
-def test_a_windows_two_requests_are_one_attempt_in_the_ledger():
+def test_a_windows_two_requests_are_one_attempt():
     """One attempt, two forced-class requests, one of them the answer."""
     machine = _switching_machine(1)
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
     machine.run()
-    companions, answered = _companions_and_answers(machine)
+    companions, answered = _companions_and_answers(requests)
     windows = len(machine.observation.windows.windows)
     assert len(companions) == windows
     assert len(answered) == windows

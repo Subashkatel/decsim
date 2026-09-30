@@ -45,10 +45,8 @@ def test_a_request_and_its_service_are_recorded_at_their_end():
     ledger.service_ended(job, 40)
     (request,) = ledger.requests
     (service,) = ledger.services
-    assert request.input_round_lo == 1
-    assert request.input_round_hi == 5
+    assert request.input_round_count == 5
     assert request.decode_output_ticks == 40
-    assert request.terminal_processing_outcome is outcome
     assert service.service_ticks == 25
     assert service.completed_request_keys == (job.request_key,)
 

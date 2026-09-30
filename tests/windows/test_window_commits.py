@@ -88,11 +88,10 @@ class _Transfers:
 
 def _strong_admissions(requests) -> list:
     """The tick each strong request was admitted, in request order."""
-    strong = window_records.DecoderTier.STRONG
+    strong = requests.of_tier(window_records.DecoderTier.STRONG)
     admissions = []
-    for row in requests:
-        if row.request_key.tier is strong:
-            admissions.append(row.admitted_ticks)
+    for ended in strong:
+        admissions.append(ended.job.request_admitted_ticks)
     return admissions
 
 
@@ -363,13 +362,17 @@ def test_threshold_cycles_delay_kept_and_escalated_frame_points(escalates):
 def test_switch_cycles_delay_the_strong_request_and_frame_points():
     clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
     clock = clocks.clock("decisions")
-    free = declared_run.switching_run(rounds=3, escalates=True, record=True)
+    free_requests = declared_run.EndedRequests()
+    charged_requests = declared_run.EndedRequests()
+    free = declared_run.switching_run(
+        rounds=3, escalates=True, probes=(free_requests,)
+    )
     charged = declared_run.switching_run(
         rounds=3,
         escalates=True,
         clock=clock,
         switch_cycles=3,
-        record=True,
+        probes=(charged_requests,),
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
@@ -377,8 +380,6 @@ def test_switch_cycles_delay_the_strong_request_and_frame_points():
     shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
     expected = 3 * clock.period_ticks
     assert shifts == [0, 0, 0, 0, expected, expected]
-    free_requests = free.observation.decode_records.requests
-    charged_requests = charged.observation.decode_records.requests
     free_admissions = _strong_admissions(free_requests)
     charged_admissions = _strong_admissions(charged_requests)
     assert len(free_admissions) == 1

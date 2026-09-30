@@ -10,6 +10,7 @@ tests/controller/test_round_assembly.py).
 """
 
 import dataclasses
+from typing import Optional
 
 import decsim.config as config
 import decsim.controller.settings as controller_settings
@@ -179,12 +180,56 @@ def declared_workload(operations, rounds):
 
 
 def run_machine(settings, seed=0, probes=()):
-    """Build the machine, connect the test's probes, run it."""
+    """Build the machine, attach the test's probes to it, run it."""
     machine = machine_module.Machine.build(settings, seed)
     for probe in probes:
-        machine.engine.action_done.connect(probe.observe)
+        probe.attach(machine)
     machine.run()
     return machine
+
+
+@dataclasses.dataclass(frozen=True)
+class EndedRequest:
+    """One decode request at its end: its job, its result, its outcome."""
+
+    job: decoding_records.DecodeJob
+    result: Optional[decoding_records.DecodeResult]
+    outcome: decoding_records.RequestProcessingOutcome
+
+
+class EndedRequests:
+    """A probe that hears every decode request end, on both sides.
+
+    It listens on the decode outcomes' request_ended, the source the
+    package's record ledgers hear, so a test reads a request's window,
+    ticks and outcome off the job itself. Attach it before the run.
+    """
+
+    def __init__(self) -> None:
+        self.ended: list = []
+
+    def attach(self, machine) -> None:
+        """Hear the requests of both decoder managers the run has."""
+        part = machine.decoders
+        managers = (part.decoder_manager, part.strong_decoder_manager)
+        for manager in managers:
+            if manager is None:
+                continue
+            manager.outcomes.trace.request_ended.connect(self.request_ended)
+
+    def request_ended(self, job, result, outcome, decode_output_ticks) -> None:
+        """One request reached its terminal outcome."""
+        del decode_output_ticks
+        ended = EndedRequest(job, result, outcome)
+        self.ended.append(ended)
+
+    def of_tier(self, tier) -> list:
+        """The requests of one tier, in the order they ended."""
+        requests = []
+        for ended in self.ended:
+            if ended.job.request_key.tier is tier:
+                requests.append(ended)
+        return requests
 
 
 def operations_or_one(operations):

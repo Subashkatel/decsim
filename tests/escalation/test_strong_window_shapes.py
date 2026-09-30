@@ -39,6 +39,7 @@ import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.window_boundaries as window_boundaries
+import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 
 # The gate's switching card, section by section as the yaml reads.
@@ -121,12 +122,19 @@ GATE_SWITCHING_CARD = {
 }
 
 
-def _strong_request_record(machine, window_id: int):
-    for record in machine.observation.decode_records.requests:
-        is_window = record.request_key.window_id == window_id
-        is_strong = record.request_key.tier is window_records.DecoderTier.STRONG
-        if is_window and is_strong:
-            return record
+def _heard_requests(machine) -> declared_run.EndedRequests:
+    """A probe on the machine's decode requests, attached before it runs."""
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
+    return requests
+
+
+def _strong_job(requests: declared_run.EndedRequests, window_id: int):
+    """The strong decode job one window's escalation sent, as it ended."""
+    strong = requests.of_tier(window_records.DecoderTier.STRONG)
+    for ended in strong:
+        if ended.job.request_key.window_id == window_id:
+            return ended.job
     raise AssertionError(f"no strong request for window {window_id}")
 
 
@@ -829,12 +837,12 @@ def test_the_redo_window_row_reads_its_commit_region_and_one_buffer():
         rounds=12,
         escalated_windows={1},
         strong_window="redo_window",
-        record=True,
     )
+    requests = _heard_requests(machine)
     machine.run()
-    strong = _strong_request_record(machine, 1)
-    assert (strong.input_round_lo, strong.input_round_hi) == (4, 9)
-    assert strong.input_round_count == 6
+    strong = _strong_job(requests, 1)
+    assert (strong.window.start_round, strong.window.buffer_hi) == (4, 9)
+    assert strong.round_count == 6
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "strong"),
@@ -854,12 +862,12 @@ def test_the_redo_window_row_pins_nothing_at_the_operations_first_window():
         rounds=12,
         escalated_windows={0},
         strong_window="redo_window",
-        record=True,
     )
+    requests = _heard_requests(machine)
     machine.run()
-    strong = _strong_request_record(machine, 0)
-    assert (strong.input_round_lo, strong.input_round_hi) == (1, 6)
-    assert strong.input_round_count == 6
+    strong = _strong_job(requests, 0)
+    assert (strong.window.start_round, strong.window.buffer_hi) == (1, 6)
+    assert strong.round_count == 6
 
 
 def _pinned_boundary_transfers(result) -> list:
@@ -932,12 +940,12 @@ def test_the_double_window_row_reads_exactly_the_rounds_it_commits():
         escalated_windows={1},
         strong_window="double_window",
         round_microseconds=4.0,
-        record=True,
     )
+    requests = _heard_requests(machine)
     machine.run()
-    strong = _strong_request_record(machine, 1)
-    assert (strong.input_round_lo, strong.input_round_hi) == (4, 12)
-    assert strong.input_round_count == 9
+    strong = _strong_job(requests, 1)
+    assert (strong.window.start_round, strong.window.buffer_hi) == (4, 12)
+    assert strong.round_count == 9
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 4), "weak"),
@@ -1011,15 +1019,15 @@ def test_the_double_window_row_at_the_operations_end_has_no_far_pin():
         rounds=9,
         escalated_windows={2},
         strong_window="double_window",
-        record=True,
     )
+    requests = _heard_requests(machine)
     result = machine.run()
     submitted = fabric.log_lines_containing(
         machine, "terminal data complete -> strong window submitted"
     )
     assert len(submitted) == 1
-    strong = _strong_request_record(machine, 2)
-    assert (strong.input_round_lo, strong.input_round_hi) == (7, 9)
+    strong = _strong_job(requests, 2)
+    assert (strong.window.start_round, strong.window.buffer_hi) == (7, 9)
     sources = _pin_sources(result)
     # only the near face: W2's own dependency
     assert sources == [1]
@@ -1040,16 +1048,15 @@ def test_a_region_at_a_back_to_back_seam_reads_the_rounds_it_commits():
         escalated_windows={1, 4},
         strong_window="double_window",
         round_microseconds=4.0,
-        record=True,
     )
+    requests = _heard_requests(machine)
     machine.run()
-    first_region = _strong_request_record(machine, 1)
-    assert (first_region.input_round_lo, first_region.input_round_hi) == (
-        4,
-        12,
-    )
-    seam_region = _strong_request_record(machine, 4)
-    assert (seam_region.input_round_lo, seam_region.input_round_hi) == (13, 21)
+    first_region = _strong_job(requests, 1)
+    first_window = first_region.window
+    assert (first_window.start_round, first_window.buffer_hi) == (4, 12)
+    seam_region = _strong_job(requests, 4)
+    seam_window = seam_region.window
+    assert (seam_window.start_round, seam_window.buffer_hi) == (13, 21)
 
 
 def test_a_region_at_a_back_to_back_seam_pins_its_near_face_on_itself():

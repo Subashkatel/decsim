@@ -86,20 +86,18 @@ def _arrive_all(fixture, round_indices) -> None:
         fixture.arrive(round_index)
 
 
-def _completed_weak_requests(records, window_id: int) -> list:
-    """One window's weak requests that were forwarded for delivery."""
-    weak = window_records.DecoderTier.WEAK
+def _completed_weak_jobs(requests, window_id: int) -> list:
+    """One window's weak jobs whose requests were forwarded for delivery."""
+    weak = requests.of_tier(window_records.DecoderTier.WEAK)
     outcomes = decoding_records.RequestProcessingOutcome
     completed = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
-    requests = []
-    for row in records:
-        if row.request_key.tier is not weak:
+    jobs = []
+    for ended in weak:
+        if ended.job.request_key.window_id != window_id:
             continue
-        if row.request_key.window_id != window_id:
-            continue
-        if row.terminal_processing_outcome is completed:
-            requests.append(row)
-    return requests
+        if ended.outcome is completed:
+            jobs.append(ended.job)
+    return jobs
 
 
 class _Fixture:
@@ -329,17 +327,19 @@ def test_a_decode_job_is_priced_for_the_rounds_it_reads():
     rounds 4 to 9, while the lookahead tail plans rounds 7 to 12 and
     reads only the three rounds the operation ever emitted.
     """
-    machine = declared_run.switching_run(rounds=9, record=True)
-    records = machine.observation.decode_records.requests
-    by_window = {record.request_key.window_id: record for record in records}
+    requests = declared_run.EndedRequests()
+    declared_run.switching_run(rounds=9, probes=(requests,))
+    by_window = {}
+    for ended in requests.ended:
+        by_window[ended.job.request_key.window_id] = ended.job
     regular = by_window[1]
     tail = by_window[2]
     assert regular.request_key.tier is window_records.DecoderTier.WEAK
-    assert (regular.input_round_lo, regular.input_round_hi) == (4, 9)
-    assert regular.input_round_count == 6
+    assert (regular.window.start_round, regular.window.buffer_hi) == (4, 9)
+    assert regular.round_count == 6
     assert tail.request_key.tier is window_records.DecoderTier.WEAK
-    assert (tail.input_round_lo, tail.input_round_hi) == (7, 12)
-    assert tail.input_round_count == 3
+    assert (tail.window.start_round, tail.window.buffer_hi) == (7, 12)
+    assert tail.round_count == 3
 
 
 def _landed_job(fixture, folds_in_place: bool):
@@ -617,20 +617,24 @@ def test_a_speculative_decode_leaves_at_its_windows_decision():
         rounds=15,
         escalated_windows={0, 1, 2, 3, 4},
         run_both_at_once=True,
-        record=True,
     )
     charged = declared_fabric.switching_machine(
         rounds=15,
         escalated_windows={0, 1, 2, 3, 4},
         run_both_at_once=True,
-        record=True,
         decision_cycles=40,
     )
+    free_requests = declared_run.EndedRequests()
+    charged_requests = declared_run.EndedRequests()
+    free_requests.attach(free)
+    charged_requests.attach(charged)
     free.run()
     charged.run()
-    free_way = _speculative_way_to_the_queue(free)
-    charged_way = _speculative_way_to_the_queue(charged)
-    after_decision = _speculative_request_after_decision(charged)
+    free_way = _speculative_way_to_the_queue(free_requests)
+    charged_way = _speculative_way_to_the_queue(charged_requests)
+    after_decision = _speculative_request_after_decision(
+        charged, charged_requests
+    )
     offsets = after_decision.values()
 
     assert len(charged_way) == 5
@@ -639,33 +643,33 @@ def test_a_speculative_decode_leaves_at_its_windows_decision():
     assert min(offsets) >= 0
 
 
-def _speculative_records(machine) -> dict:
-    """Window index -> its speculative strong decode's request record."""
-    records = {}
-    for record in machine.observation.decode_records.requests:
-        key = record.request_key
-        if key.tier is window_records.DecoderTier.STRONG:
-            records[key.window_id] = record
-    return records
+def _speculative_jobs(requests) -> dict:
+    """Window index -> its speculative strong decode's job."""
+    strong = requests.of_tier(window_records.DecoderTier.STRONG)
+    jobs = {}
+    for ended in strong:
+        window_id = ended.job.request_key.window_id
+        jobs[window_id] = ended.job
+    return jobs
 
 
-def _speculative_way_to_the_queue(machine) -> dict:
+def _speculative_way_to_the_queue(requests) -> dict:
     """Window index -> its speculative decode's request to strong queue."""
-    records = _speculative_records(machine)
+    jobs = _speculative_jobs(requests)
     way = {}
-    for window_id, record in records.items():
-        way[window_id] = record.admitted_ticks - record.created_ticks
+    for window_id, job in jobs.items():
+        way[window_id] = job.request_admitted_ticks - job.request_created_ticks
     return way
 
 
-def _speculative_request_after_decision(machine) -> dict:
+def _speculative_request_after_decision(machine, requests) -> dict:
     """Window index -> its speculative request tick less its decision's end."""
-    records = _speculative_records(machine)
+    jobs = _speculative_jobs(requests)
     windows = machine.windows.window_manager.planner.windows_by_key
     after = {}
     for (_operation_id, window_id), window in windows.items():
-        record = records[window_id]
-        after[window_id] = record.created_ticks - window.t_queued
+        job = jobs[window_id]
+        after[window_id] = job.request_created_ticks - window.t_queued
     return after
 
 
@@ -718,15 +722,15 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
         escalated_windows={0},
         strong_window="double_window",
         weak_syndrome_buffer=settings,
-        record=True,
     )
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
 
     result = machine.run()
 
-    records = machine.observation.decode_records.requests
-    restarted = _completed_weak_requests(records, 3)
+    restarted = _completed_weak_jobs(requests, 3)
     (restart,) = restarted
     assert result.terminal_status == "complete"
     # W3 commits 10-12 past the strong region 1-9 and, at the default
     # re-read width, reads 7-15: the region's last block and its own six
-    assert restart.input_round_count == 9
+    assert restart.round_count == 9

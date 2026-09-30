@@ -16,8 +16,11 @@ byte per tick: a message's first packet is 38 + 20 + 8 + 12 + 16 + 256
 = 86 (tests/links/test_framings.py).
 """
 
+import functools
+import gc
 import math
 import random
+import weakref
 
 import pytest
 
@@ -336,6 +339,45 @@ def test_the_run_ends_at_the_last_acknowledgement_not_at_the_timer():
 
     assert delivered[0].delivery_ticks == 598
     assert engine.now == 984
+
+
+class _Delivery:
+    """A delivery callback, which in a run closes over a job's state."""
+
+    def __init__(self, delivered: list) -> None:
+        self.delivered = delivered
+
+    def __call__(self, transfer) -> None:
+        self.delivered.append(transfer)
+
+
+def test_an_acknowledged_message_is_let_go_under_loss():
+    """A message is let go once acknowledged, as rxe_comp.c retires one.
+
+    Forty messages on a lossy wire, each delivered and acknowledged: the
+    channel keeps none of their callbacks once the run is over.
+    """
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(0.00003)
+    channel = seeded_channel(engine, settings, 5)
+    delivered = []
+    callbacks = []
+    for index in range(40):
+        callback = _Delivery(delivered)
+        reference = weakref.ref(callback)
+        callbacks.append(reference)
+        framed = channel_module.FramedPayload(800)
+        send_tick = index * 2000
+        send = functools.partial(channel.send, framed, send_tick, 0, callback)
+        engine.schedule(send_tick, send)
+        del callback, send
+
+    engine.run()
+    gc.collect()
+
+    alive = [reference for reference in callbacks if reference() is not None]
+    assert len(delivered) == 40
+    assert alive == []
 
 
 def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():

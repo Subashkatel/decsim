@@ -121,18 +121,26 @@ class OnlineThresholdSettings:
                 f"knobs (got {section!r})"
             )
         tables.refuse_unknown_keys("escalation.online", section, ONLINE_KEYS)
-        target_escalation_rate = _online_float(
-            section, "target_escalation_rate", 1e-3
+        target_escalation_rate = config.finite_number(
+            section, "escalation.online", "target_escalation_rate", 1e-3
         )
-        step_db = _online_float(section, "step_db", 0.25)
-        audit_rate = _online_float(section, "audit_rate", 0.01)
-        kept_bad_budget = _online_float(section, "kept_bad_budget", 2e-4)
-        adjust_factor = _online_float(section, "adjust_factor", 2.0)
-        min_escalation_rate = _online_float(
-            section, "min_escalation_rate", 1e-5
+        step_db = config.finite_number(
+            section, "escalation.online", "step_db", 0.25
         )
-        max_escalation_rate = _online_float(
-            section, "max_escalation_rate", 0.30
+        audit_rate = config.finite_number(
+            section, "escalation.online", "audit_rate", 0.01
+        )
+        kept_bad_budget = config.finite_number(
+            section, "escalation.online", "kept_bad_budget", 2e-4
+        )
+        adjust_factor = config.finite_number(
+            section, "escalation.online", "adjust_factor", 2.0
+        )
+        min_escalation_rate = config.finite_number(
+            section, "escalation.online", "min_escalation_rate", 1e-5
+        )
+        max_escalation_rate = config.finite_number(
+            section, "escalation.online", "max_escalation_rate", 0.30
         )
         settings = cls(
             target_escalation_rate=target_escalation_rate,
@@ -587,25 +595,6 @@ def _check_serial_only(
             "windows it covers owns a larger extent than the audited "
             "window"
         )
-
-
-def _online_float(section: Mapping, key: str, default: float) -> float:
-    """One knob of the online card: a finite number, never a flag.
-
-    A string is read as a number, because YAML 1.1 loads `1e-3`, the
-    way reference.yaml writes the target, as text.
-    """
-    raw = section.get(key, default)
-    sentence = f"escalation.online.{key} must be a finite number (got {raw!r})"
-    if isinstance(raw, bool):
-        raise ValueError(sentence)
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        raise ValueError(sentence) from None
-    if not math.isfinite(value):
-        raise ValueError(sentence)
-    return value
 
 
 def _table_rows(table_path: pathlib.Path, column: str) -> list:

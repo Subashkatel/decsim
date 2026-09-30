@@ -141,7 +141,9 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             """The keys the yaml wrote; the three with no default must be."""
             required = ("unit_count", "attempt_ticks", "correction_round_count")
             _check_required_keys("distillation", section, required)
-            fields = _with_numbers(section, ("success_probability",))
+            fields = _with_numbers(
+                section, "magic_state_factory", ("success_probability",)
+            )
             return cls(**fields)
 
     # the run's decoder manager, where the correction decodes compete
@@ -381,7 +383,9 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             _check_required_keys("multi_level", section, ("levels",))
             levels = _levels_from_yaml(section["levels"])
             probability_keys = ("preparation_success_probability",)
-            fields = _with_numbers(section, probability_keys)
+            fields = _with_numbers(
+                section, "magic_state_factory", probability_keys
+            )
             fields["levels"] = levels
             return cls(**fields)
 
@@ -728,17 +732,14 @@ def _check_probability(name: str, value) -> None:
         raise ValueError(f"{name} must be finite and in [0, 1]")
 
 
-def _with_numbers(section: Mapping, keys: tuple) -> dict:
-    """The section's keys, each named one read as the number it writes.
-
-    YAML 1.1 loads `1e-3` as text, so a probability the yaml writes that
-    way arrives as a string, as escalation's online card reads it too
-    (decsim/escalation/settings.py _online_float).
-    """
+def _with_numbers(section: Mapping, section_name: str, keys: tuple) -> dict:
+    """The section's keys, each named one read as config.finite_number."""
     fields = dict(section)
     for key in keys:
         if key in fields:
-            fields[key] = float(fields[key])
+            fields[key] = config.finite_number(
+                section, section_name, key, fields[key]
+            )
     return fields
 
 
@@ -762,7 +763,9 @@ def _levels_from_yaml(level_sections) -> tuple:
     for index, level_section in enumerate(level_sections):
         level_name = f"magic_state_factory.levels[{index}]"
         tables.refuse_unknown_keys(level_name, level_section, level_keys)
-        level_fields = _with_numbers(level_section, ("success_probability",))
+        level_fields = _with_numbers(
+            level_section, level_name, ("success_probability",)
+        )
         level = DistillLevel(**level_fields)
         levels.append(level)
     return tuple(levels)

@@ -134,6 +134,28 @@ def boolean(
     )
 
 
+def finite_number(
+    section: Mapping, section_name: str, key: str, default: float
+) -> float:
+    """A finite number the yaml wrote, the default when it is silent.
+
+    YAML 1.1 loads `1e-3`, a number with no decimal point, as text, so
+    text that reads as a number is one; a bool is refused though float
+    takes it, since a flag is never a rate or a probability.
+    """
+    value = section.get(key, default)
+    sentence = f"{section_name}.{key} must be a finite number (got {value!r})"
+    if isinstance(value, bool):
+        raise ValueError(sentence)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(sentence) from None
+    if not math.isfinite(number):
+        raise ValueError(sentence)
+    return number
+
+
 def is_number(value: object) -> bool:
     """Whether a yaml value is a number; a bool is not one."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)

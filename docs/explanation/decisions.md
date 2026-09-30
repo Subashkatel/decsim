@@ -1090,6 +1090,9 @@ D20 left; `DetectionEventFormer` is `formation_table(operation_id)`;
 `WindowRetention` gained `strong_round_before` and `SyndromeBuffer`
 gained `retained_fragments`.
 
+**Widened since.** D34 replaces the yes or no for the round before
+with a count of the rounds a round's recipes read.
+
 **Where to see it.** `decsim/detector_error_model/settings.py`,
 `decsim/detector_error_model/detection_event_formation.py`,
 `decsim/build/readout.py` (`build_detection_events`) and
@@ -1240,6 +1243,38 @@ as the task hands it over (sinter/_data/_task.py:163).
 and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
 (`record_point`);
 `tests/experiments/test_command_set.py`.
+
+## D34. A seat is told how many rounds before a round it must be given
+
+**Decided.** A seat that has not formed a round is given every raw round
+that round's recipes read: `rounds_needed_before` answers a count, the
+round minus the earliest round any of its detectors names, and on the
+last round any of its observables, and zero on a round the seat has
+formed. The recipe table owns the law (`rounds_read_before`); the
+seat's former keeps its one ring of `max_record_span + 1` packets.
+
+**Why.** A detection event is the parity of the records a detector
+names, however far back, so the same round's events are the same at
+every seat only when each seat holds those records. A surface code
+reads one round back; Stim's `color_code:memory_xyz` and a
+`rec[-1] ^ rec[-3]` memory read two, and a yes or no for one round
+could not say so. On every surface-code round the count is the one
+round the yes or no gave.
+
+**Sources.** Stim's converter reads every record a detector names
+(`stim.Circuit.compile_m2d_converter`); a detector compares a round
+against earlier ones (LILLIPUT 2108.06569 lines 499-510).
+
+**What it cost the port file.** `DetectionEventPlacement` lost
+`needs_the_round_before` and gained `rounds_needed_before`.
+
+**Where to see it.** `decsim/detector_error_model/detector_formation.py`
+(`FormationTable.rounds_read_before`),
+`decsim/detector_error_model/detection_event_formation.py`
+(`rounds_needed_before`);
+`tests/detector_error_model/test_detection_event_formation.py` forms
+the surface code, the two-round lookback and the color code at every
+seat against Stim's converter.
 
 ## What is not modelled yet
 

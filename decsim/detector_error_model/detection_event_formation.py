@@ -87,7 +87,7 @@ class SeatedFormation:
         unit's input memory was written the raw round and a memory
         counts what is written into it. round_before is the raw round
         before the first of the fragments, given to a seat that needs it
-        (needs_the_round_before): the seat holds it for that round's
+        (rounds_needed_before): the seat holds it for that round's
         detectors and neither forms nor returns it.
         """
         history = self.history_by_seat.get(seat)
@@ -109,22 +109,22 @@ class SeatedFormation:
             return round_records.fragment_wire_bits(fragments)
         return history.width(fragments)
 
-    def needs_the_round_before(
+    def rounds_needed_before(
         self, seat: str, operation_id: Any, round_index: int
-    ) -> bool:
-        """Whether the seat must be given the raw round before this one.
+    ) -> int:
+        """How many raw rounds before this one the seat must be given.
 
-        A detector compares a round against the one before it (LILLIPUT
-        2108.06569 lines 499-510), so a seat that has not formed this
-        round reads the round before it, except on its operation's first
-        round, which compares against the reset. A round the seat formed
-        before is answered from what it remembers and needs nothing.
+        A detector compares a round against earlier ones, one round back
+        on a surface code (LILLIPUT 2108.06569 lines 499-510) and further
+        on others, so a seat that has not formed this round is given
+        every round its recipes read (detector_formation.FormationTable
+        rounds_read_before). A round the seat formed before is answered
+        from what it remembers and needs nothing.
         """
         history = self.history_by_seat.get(seat)
-        if history is None or round_index <= 1:
-            return False
-        round_key = (operation_id, round_index)
-        return not history.has_formed(round_key)
+        if history is None:
+            return 0
+        return history.rounds_needed_before(operation_id, round_index)
 
     def cycles_at(self, seat: str, round_count: int) -> int:
         """What forming round_count rounds together costs the seat, on clock."""
@@ -228,14 +228,18 @@ class _SeatHistory:
             former.hold_packet(first.round_index, bits)
             self._report_state(first.operation_id, former)
 
-    def has_formed(self, round_key: tuple) -> bool:
-        """Whether a source with no recipes, or this seat, formed the round.
+    def rounds_needed_before(self, operation_id: Any, round_index: int) -> int:
+        """The raw rounds before this one that forming it here reads.
 
         A source with no recipes forms nothing, so nothing is missing.
         """
         if self.recipes is None:
-            return True
-        return round_key in self.events_by_round
+            return 0
+        round_key = (operation_id, round_index)
+        if round_key in self.events_by_round:
+            return 0
+        table = self.recipes.formation_table(operation_id)
+        return table.rounds_read_before(round_index)
 
     def _form_round(self, fragments: list) -> tuple:
         """One round's fragments as one fragment of its events.

@@ -254,7 +254,7 @@ class DecodeJob:
     decoder_input: Optional[Any] = None  # materialized decoder memory value
     # the raw round before the first payload, read out of the store with
     # them when the tier's decoder forms the events and has not formed
-    # that first round (detection_events, needs_the_round_before); held
+    # that first round (detection_events, rounds_needed_before); held
     # by the former and never decoded, cleared with the payloads
     round_before: tuple = ()
     input_hold: Optional[Any] = (

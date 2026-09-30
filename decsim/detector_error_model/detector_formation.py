@@ -88,6 +88,26 @@ class FormationTable:
         detectors = self._detectors_by_round.get(round_index, ())
         return list(detectors)
 
+    def rounds_read_before(self, round_index: int) -> int:
+        """How many rounds before this one its formation reads.
+
+        Forming a round reads the records of its detectors and, on the
+        last round, of every observable (StreamingDetectorFormer
+        feed_packet), so a former that starts at this round needs the
+        raw rounds from the earliest record on. Stim's converter reads
+        every record a detector names, however far back
+        (stim.Circuit.compile_m2d_converter). Records start at round
+        one, so the count never reaches before it.
+        """
+        recipes_of_round = self.detectors_of_round(round_index)
+        if round_index == self.round_count:
+            recipes_of_round.extend(self.observables)
+        earliest_round = round_index
+        for recipe in recipes_of_round:
+            for record_round, _ in recipe.records:
+                earliest_round = min(earliest_round, record_round)
+        return round_index - earliest_round
+
     def detector_rounds(self) -> dict[int, int]:
         """Each detector's round, the map resolve_detector_rounds yields."""
         return {

@@ -99,18 +99,19 @@ class SyndromeBufferOutput:
         """Add the raw round before the job's first, when its reader needs it.
 
         A decoder that forms the events and has not formed the job's
-        first round reads the round before it (needs_the_round_before),
-        so that round leaves the store with the job's own and is priced
-        with them. A round the store no longer holds is not read, and
-        the former says so if it was needed.
+        first round needs the rounds before it that the round's recipes
+        read (rounds_needed_before); the round before leaves the store
+        with the job's own and is priced with them. A round the store no
+        longer holds is not read, and the former says so if it was
+        needed.
         """
         if self.detection_events is None or not job.payloads:
             return
         first = job.payloads[0]
-        needs_it = self.detection_events.needs_the_round_before(
+        needed_count = self.detection_events.rounds_needed_before(
             self.reader_seat, first.operation_id, first.round_index
         )
-        if not needs_it:
+        if needed_count == 0:
             return
         round_key = (first.operation_id, first.round_index - 1)
         fragments = self.store.retained_fragments(round_key)

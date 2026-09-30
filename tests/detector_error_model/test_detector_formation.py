@@ -237,6 +237,29 @@ def test_the_record_span_reaches_back_as_far_as_an_observable_reads():
     assert former.kept_packet_count == 3
 
 
+def test_a_round_reads_back_to_the_earliest_record_of_its_detectors():
+    """The reset layer reads only itself; a bulk layer the round before."""
+    table = formation_table(4)
+
+    assert table.rounds_read_before(1) == 0
+    assert table.rounds_read_before(3) == 1
+
+
+def test_the_last_round_reads_back_as_far_as_an_observable_reads():
+    """Round 3's detector reads round 3; the observable reads round 1."""
+    circuit = stim.Circuit(
+        "R 0 1\n"
+        "M 0\nDETECTOR(0,0) rec[-1]\n"
+        "M 1\nDETECTOR(0,1) rec[-1]\n"
+        "M 0\nDETECTOR(0,2) rec[-1]\n"
+        "OBSERVABLE_INCLUDE(0) rec[-3] rec[-1]\n"
+    )
+    table = detector_formation.build_formation_table(circuit, 3)
+
+    assert table.rounds_read_before(2) == 0
+    assert table.rounds_read_before(3) == 2
+
+
 def test_a_packet_of_the_wrong_width_is_refused():
     table = formation_table(4)
     former = detector_formation.StreamingDetectorFormer(table)

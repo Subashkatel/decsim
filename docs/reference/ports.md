@@ -474,7 +474,7 @@ Where the machine forms a round's detection events, and what it costs.
 | `forms_at` | Whether the seat forms the rounds that cross it. |
 | `form_at` | The fragments as they leave the seat: formed, or as they came. |
 | `width_at` | The width one round's fragments take as they leave the seat. |
-| `needs_the_round_before` | Whether the seat must be given the raw round before this one. |
+| `rounds_needed_before` | How many raw rounds before this one the seat must be given. |
 | `cycles_at` | The cycles of forming round_count rounds together at the seat. |
 
 ### `WindowModelSource`

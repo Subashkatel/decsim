@@ -109,9 +109,9 @@ class _DecoderThatFormedNothing:
         del seat, round_before
         return fragments
 
-    def needs_the_round_before(self, seat, operation_id, round_index) -> bool:
+    def rounds_needed_before(self, seat, operation_id, round_index) -> int:
         self.asked.append((seat, operation_id, round_index))
-        return True
+        return 1
 
     def cycles_at(self, seat, round_count) -> int:
         del seat, round_count

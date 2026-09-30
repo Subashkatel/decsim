@@ -1588,10 +1588,14 @@ class DetectionEventPlacement(Protocol):
         width is unknown.
         """
 
-    def needs_the_round_before(
+    def rounds_needed_before(
         self, seat: str, operation_id: Any, round_index: int
-    ) -> bool:
-        """Whether the seat must be given the raw round before this one."""
+    ) -> int:
+        """How many raw rounds before this one the seat must be given.
+
+        The rounds the round's recipes read, none on a round the seat
+        has formed.
+        """
 
     def cycles_at(self, seat: str, round_count: int) -> int:
         """The cycles of forming round_count rounds together at the seat."""

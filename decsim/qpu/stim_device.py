@@ -372,13 +372,16 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
         span = _window_span(window)
+        fault_exclusion_ranges = ()
+        if exclude_faults_touching is not None:
+            fault_exclusion_ranges = (exclude_faults_touching,)
         return window_models.build_single_window_error_model(
             operation.circuit,
             span,
             round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
-            exclude_faults_touching=exclude_faults_touching,
+            fault_exclusion_ranges=fault_exclusion_ranges,
             prior_faults=prior_faults,
         )
 
@@ -398,7 +401,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
         span = _window_span(window)
-        return window_models.build_single_window_error_model_with_exclusions(
+        return window_models.build_single_window_error_model(
             operation.circuit,
             span,
             round_count=round_count,

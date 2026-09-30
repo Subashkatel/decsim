@@ -5,7 +5,9 @@ unit is that algorithm between its fetch and release stages. Which pools
 the managers get is the escalation policy's declared fact, not its name:
 a policy that may escalate gives the strong tier a unit and the host's
 manager a pool of its own, and the chip's manager always has one pool,
-of the tier that decodes the plan's windows.
+of the tier that decodes the plan's windows. Each manager has its own
+queue, scheduler and staging, and the two share one ledger of strong
+requests.
 """
 
 import dataclasses
@@ -18,12 +20,15 @@ import decsim.build.plan as plan_build
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoders as decoders
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.escalation.settings as escalation_settings
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.seeds as seed_records
 import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
@@ -259,3 +264,71 @@ def test_a_decoder_kind_that_names_no_row_is_refused():
         decoder_build.build_decoder_unit(settings, "weak", policy)
 
     assert "oracle" in str(refusal.value)
+
+
+def test_a_weak_only_run_has_no_host_manager():
+    machine = declared_run.weak_only_run()
+
+    assert machine.decoders.strong_decoder_manager is None
+
+
+def test_each_side_has_its_own_manager_pool_and_one_ledger():
+    """The chip side opens a strong request and the host side serves it."""
+    machine = declared_run.switching_run(escalation_probability=1.0)
+    decode_side = machine.decoders
+    chip = decode_side.decoder_manager
+    host = decode_side.strong_decoder_manager
+    strong_decoder = decode_side.strong_decoder
+
+    assert chip.pool.name == decode_queue.DEFAULT_POOL
+    assert host.pool.name == decode_queue.STRONG_POOL
+    assert chip.strong_requests is decode_side.strong_requests
+    assert host.strong_requests is decode_side.strong_requests
+    assert host.escalation_policy is machine.windows.escalation_policy
+    assert chip.decoder is decode_side.primary_decoder
+    assert host.decoder is strong_decoder
+    assert machine.windows.models.strong_decoder is strong_decoder
+    assert chip.queue is not host.queue
+    assert chip.queue.scheduler is not host.queue.scheduler
+    assert chip.service.staging is not host.service.staging
+
+
+class _SeedRecordingScheduler(schedulers.FifoScheduler):
+    """A FIFO that keeps the seed the run hands it."""
+
+    def __init__(self):
+        self.reserved_seeds = []
+
+    def reserve_run_seed(self, seed):
+        self.reserved_seeds.append(seed)
+        return seed_records.RunSeedReservation("derived", seed, None)
+
+    def commit_run_seed(self, reservation):
+        del reservation
+
+    def cancel_run_seed(self, reservation):
+        del reservation
+
+
+def test_each_managers_scheduler_is_seeded_on_its_own_path():
+    weak, strong = declared_run.switching_decoders(0.0, None)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
+    manager_settings = decoder_settings.DecoderManagerSettings(
+        scheduler=_SeedRecordingScheduler
+    )
+    switching = declared_run.switching_run(escalation_probability=1.0)
+    settings = dataclasses.replace(
+        switching.settings,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        decoder_manager=manager_settings,
+    )
+
+    machine = machine_module.Machine.build(settings, 7)
+
+    chip_scheduler = machine.decoders.decoder_manager.queue.scheduler
+    host_scheduler = machine.decoders.strong_decoder_manager.queue.scheduler
+    assert len(chip_scheduler.reserved_seeds) == 1
+    assert len(host_scheduler.reserved_seeds) == 1
+    assert chip_scheduler.reserved_seeds != host_scheduler.reserved_seeds

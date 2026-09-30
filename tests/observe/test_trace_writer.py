@@ -143,8 +143,8 @@ def test_the_trace_moves_no_tick_and_narrates_the_same_log(tmp_path):
     plain, plain_result = _run()
     traced, traced_result = _run(trace_path)
     plain_sha = _log_sha(plain)
-    plain_frame = plain.pauli_frame.snapshot()
-    traced_frame = traced.pauli_frame.snapshot()
+    plain_frame = plain.control.pauli_frame.snapshot()
+    traced_frame = traced.control.pauli_frame.snapshot()
 
     assert plain_sha == _log_sha(traced)
     assert plain_sha.startswith(POINT_LOG_SHA256)
@@ -606,7 +606,7 @@ def _last_rounds_data_ready(document, ready) -> list:
 def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
     """The C track of the unit's memory is the memory's own occupancy."""
     machine, _result, document = traced
-    (unit,) = machine.decoder_manager.pool.units
+    (unit,) = machine.decoders.decoder_manager.pool.units
     name = f"{unit.memory.name} bits"
     values = _counter_values(document, name, "bits")
 

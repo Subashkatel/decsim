@@ -63,8 +63,8 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     heard_settings = dataclasses.replace(settings, observation=every_listener)
     heard = machine_module.Machine.build(heard_settings, 0)
     heard.run()
-    bare_frame = bare.pauli_frame.snapshot()
-    heard_frame = heard.pauli_frame.snapshot()
+    bare_frame = bare.control.pauli_frame.snapshot()
+    heard_frame = heard.control.pauli_frame.snapshot()
     assert heard_frame.records == bare_frame.records
     assert heard.observation.log.lines == bare.observation.log.lines
     assert heard.observation.syndrome_buffer_occupancy.arrivals == 30

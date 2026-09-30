@@ -23,8 +23,11 @@ Three things, in this order, and a file is done only when all three hold.
    different buffer or link, arrives as one class that implements the
    port the machine already has, is named in the yaml, and nothing else
    changes. That is gem5's shape: a component owns its settings and its
-   state, talks to other components only through named ports, and one
-   root object wires them.
+   state, talks to other components only through named ports, and the
+   part that holds it wires it. The machine is a handful of parts, each
+   building and wiring its own components, and one root connects the
+   parts, as a gem5 board incorporates its processor, memory and caches
+   and an OMNeT++ compound module hides its submodules behind its gates.
 
 ## Rule 1. One line does one thing
 
@@ -103,7 +106,7 @@ reads this list and reports every other wide class, so the exemptions are
 visible here, beside the rule, rather than buried in the checker. The list
 stays short; past eight names the rule is wrong, not the list.
 
-The list is empty. A neighbour arrives as a port the root binds rather
+The list is empty. A neighbour arrives as a port its part binds rather
 than as a constructor argument the class keeps, so a component with many
 collaborators sets few attributes, and the two classes that were listed
 here, the idle round accounting and the round sender, set five and one.
@@ -223,12 +226,14 @@ says so.
 
 This is the shape of every component. The ownership and the name table
 are gem5's (a SimObject's Python class is its params; `allClasses` maps
-a name to a class); the table plus one abstract class per pluggable part
-is sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring is gem5's
-late port bind: a component declares each neighbour as a `ports.Port`
-class attribute, its constructor takes settings only, and the root binds
-every wire by attribute assignment after every component is built, then
-calls `start` on each in build order. A port bound twice is refused by
+a name to a class); the table plus one abstract class per pluggable
+component is sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring
+is gem5's late port bind: a component declares each neighbour as a `ports.Port`
+class attribute, its constructor takes settings only, and the part that
+holds it binds each wire by attribute assignment, the wires inside the
+part when the part is built and the wires to another part when the
+machine connects the parts; only then does any part `start`. A port
+bound twice is refused by
 name, and a required port read before it is bound raises. An optional
 port left unbound reads as None, which is the neighbour a run does not
 have. It applies to every component.
@@ -256,17 +261,27 @@ package order whose two Protocols cannot move without making the two
 depend on each other. Everything a second package implements or calls is
 a port and lives in the port file.
 
-One root object, `Machine`, builds every component from its settings and
-binds their ports; no component builds or looks up another. The
-yaml has one section per component, each section builds one settings
-dataclass, and a pluggable component's section carries one `kind` key
-naming a row in the root's table (`qpu: {kind: stim_device, ...}`,
-`weak_decoder: {kind: union_find, ...}`).
+The machine is six parts, in `decsim/build/`: the qpu, the readout
+path, the windows, the decoders, the control side and the link fabric.
+A part is a record of the components it holds. Its `build` makes each
+component from its settings and binds the wires between them; its
+`connect` binds the wires that leave the part to the neighbours it is
+handed. Every hop rides the link fabric, so it is built first and each
+part is handed it at `build`; every other wire that crosses from one
+part to another is in `Machine.assemble`, which connects the parts. One
+root object, `Machine`, compiles the plan, builds the parts and
+assembles them; no component builds or looks up another. The yaml has one section per component, each section
+builds one settings dataclass, and a pluggable component's section
+carries one `kind` key naming a row in its package's table
+(`qpu: {kind: stim_device, ...}`, `weak_decoder: {kind: union_find, ...}`).
 
 Adding a component means: write one class that implements the port, add
 one row to that table, add its section to the yaml reference. Nothing
 else changes. A change that makes adding a component take more than that
-is not done. The port also lets an old and a new implementation coexist
+is not done. A new kind of component, one no table lists, is built and
+wired in the part it belongs to; a neighbour it needs from another part
+is one more argument of that part's `connect` and one more line of
+`Machine.assemble`. The port also lets an old and a new implementation coexist
 while callers move (Fowler's branch by abstraction), so a restructuring
 never needs a long-lived branch.
 

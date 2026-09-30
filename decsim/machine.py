@@ -1,28 +1,33 @@
-"""The root: one object that builds every component and wires them.
+"""The machine: the parts of one run, built from its settings and connected.
 
-A Machine is gem5's shape (src/python/m5/SimObject.py: a SimObject's
-Python class is its params, `allClasses` maps a name to a class; the
-learning_gem5 simple.py script names each component once and assigns
-its ports). A MachineSettings (decsim/settings.py) holds one
-settings record per yaml section, each built by its own package's
-`from_yaml`, and each package's own settings module maps that section's
-`kind` to the class that fills the port, sinter's `BUILT_IN_DECODERS`
-(sinter/_decoding/_decoding_all_built_in_decoders.py) made one dict per
-pluggable part. A new component is one class that fills its port in
-decsim/ports.py and one row in its package's table.
+A run is six parts, each a record of the components it holds, in the
+order a readout travels: the qpu (the device and its readouts), the
+readout path (the controller, the packing stage and the syndrome
+buffers), the windows (the window manager, the verdict and the strong
+re-decode), the decoders (each tier's units and their managers), the
+control side (the program's execution and the Pauli frame) and the link
+fabric every hop rides. Each part lives in decsim/build/, builds its own
+components from their settings and wires them to one another; the
+machine builds the parts and connects them, and Machine.assemble lists
+every wire that crosses from one part to another.
 
-What the machine is made of and what is wired to what is one file of
-two tables, decsim/assembly.py; this file reads them. The root compiles
-the run's settings into the plan, the decoder pool and the escalation
-policy, builds every seat from its settings, binds every wire by
-assignment, which is gem5's script binding one port to another
-(configs/learning_gem5/part1/simple.py:68), and only then lets a seat do
-work. Where two components refer to each other the per-job callback law
-breaks the cycle (SimPy's callback on the event, simpy/core.py step()):
-the submitting side carries the return path with the job, so the window
-side names the decoder manager as its DecodeQueue and the strong
-redecode asks it to await and accept a strong selection over the same
-port.
+That is the shape of gem5's standard library and of OMNeT++'s compound
+modules. A gem5 board is handed a processor, a memory and a cache
+hierarchy, and each wires its own insides through one method
+(src/python/gem5/components/boards/abstract_board.py:426-459,
+cachehierarchies/classic/private_l1_cache_hierarchy.py:97-130); an
+OMNeT++ compound module declares its submodules and connections and
+shows its parent only its own gates (manual section 3.4,
+samples/routing/node/Node.ned). A component still meets its neighbours
+only through the ports of decsim/ports.py, and a pluggable component is
+still one class and one row in its package's table, sinter's
+`BUILT_IN_DECODERS` (sinter/_decoding/_decoding_all_built_in_decoders.py)
+made one dict per pluggable component. Where two components refer to
+each other the per-job callback law breaks the cycle (SimPy's callback
+on the event, simpy/core.py step()): the submitting side carries the
+return path with the job, so the window side names the decoder manager
+as its DecodeQueue and the strong redecode asks it to await and accept
+a strong selection over the same port.
 
 The packages import each other in one direction only, so the top can be
 cut off and what is left still runs (Parnas 1972 lines 505-529;
@@ -37,11 +42,10 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     4  confidence, frontends, observe, sinter_adapters
     5  producers, settings
     6  build
-    7  assembly
-    8  machine (this file)
-    9  collect
-    10 experiments
-    11 __main__, experiment_runner, results
+    7  machine (this file)
+    8  collect
+    9  experiments
+    10 __main__, experiment_runner, results
 
 Level 3 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.
@@ -62,97 +66,62 @@ runs out, the link has failed and the run stops with an error.
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
-import decsim.assembly as assembly
-import decsim.build.controller_side as controller_side
-import decsim.build.decoders as decoder_build
+import decsim.build.control as control_part
+import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
-import decsim.build.listeners as listener_build
-import decsim.build.parts as build_parts
 import decsim.build.plan as plan_build
-import decsim.build.stores as store_build
-import decsim.controller.conditional_release as conditional_release_module
-import decsim.controller.controller as controller_module
-import decsim.controller.idle_rounds as idle_rounds_module
-import decsim.controller.instruction_output as instruction_output_module
-import decsim.controller.operation_issue as operation_issue
-import decsim.controller.round_assembly as round_assembly
-import decsim.controller.round_transmission as round_transmission
-import decsim.controller.syndrome_round_sender as syndrome_round_sender
-import decsim.decoders.decoder_manager as decoder_manager_module
+import decsim.build.program as program_build
+import decsim.build.qpu as qpu_part
+import decsim.build.readout as readout_part
+import decsim.build.windows as windows_part
 import decsim.engine as engine_module
-import decsim.frontends.execution_runtime as execution_runtime_module
-import decsim.links.fabric as fabric
+import decsim.links.link_profiles as link_profiles
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.wiring as wiring
-import decsim.pauli_frame.pauli_frame as pauli_frame_module
-import decsim.qpu.cycle_clock as cycle_clock
+import decsim.ports as ports
 import decsim.records.results as result_records
+import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-import decsim.windows.window_manager as window_manager_module
-from decsim.syndrome_buffer import (
-    strong_syndrome_round_receiver as strong_syndrome_round_receiver_module,
-)
-from decsim.syndrome_buffer import (
-    weak_syndrome_round_receiver as weak_syndrome_round_receiver_module,
-)
+import decsim.tables as tables
 
 
 @dataclasses.dataclass(frozen=True)
 class Machine:
-    """Every component of one run, built from its settings and wired.
+    """The parts of one run, built from its settings and connected.
 
-    Build one per seed with Machine.build, then run it once; the
-    components stay readable afterwards for the measurements and the
-    views that read them. active_decoder is the unit of the tier that
-    decodes the plan's windows, None when no decoder was named.
+    Build one per seed with Machine.build, then run it once; the parts
+    stay readable afterwards for the measurements and the views that
+    read them.
     """
 
     settings: machine_settings.MachineSettings
     engine: engine_module.Engine
+    plan: plan_build.Plan
+    links: ports.Link
+    qpu: qpu_part.Qpu
+    control: control_part.Control
+    readout: readout_part.Readout
+    windows: windows_part.Windows
+    decoders: decoders_part.Decoders
     observation: observation_module.Observation
-    links: fabric.LinkFabric
-    conditional_release: conditional_release_module.ConditionalRelease
-    weak_syndrome_buffer: syndrome_buffer_module.SyndromeBuffer
-    weak_syndrome_round_receiver: (
-        weak_syndrome_round_receiver_module.WeakSyndromeRoundReceiver
-    )
-    strong_syndrome_buffer: Optional[syndrome_buffer_module.SyndromeBuffer]
-    strong_syndrome_round_receiver: Optional[
-        strong_syndrome_round_receiver_module.StrongSyndromeRoundReceiver
-    ]
-    pauli_frame: Optional[pauli_frame_module.PauliFrame]
-    window_manager: window_manager_module.WindowManager
-    assembler: round_assembly.RoundAssembler
-    syndrome_round_sender: syndrome_round_sender.SyndromeRoundSender
-    transmitter: round_transmission.RoundTransmitter
-    decoder_manager: decoder_manager_module.DecoderManager
-    strong_decoder_manager: Optional[decoder_manager_module.DecoderManager]
-    active_decoder: Optional[Any]
-    factory: Any
-    syndrome_source: Any
-    qpu: cycle_clock.QPUDevice
-    controller: controller_module.Controller
-    issuer: operation_issue.OperationIssuer
-    instruction_output: instruction_output_module.InstructionOutput
-    idle_rounds: idle_rounds_module.IdleRoundAccounting
-    execution_runtime: execution_runtime_module.ExecutionRuntime
-    operations: tuple
 
     @classmethod
     def build(
         cls, settings: machine_settings.MachineSettings, seed: Optional[int] = 0
     ) -> "Machine":
-        """Build every seat of the assembly file, wire it, and start it.
+        """Build every part from the run's settings, then assemble them.
 
-        The seed is the run's root; every stochastic component derives
-        its own from it and its path.
+        These are the steps a script that replaces one part repeats: the
+        escalation policy, the plan and the decoder units are compiled
+        first, since the parts are built for them; then each part is
+        built on its own, and assemble connects them. The seed is the
+        run's root; every stochastic component derives its own from it
+        and its path.
         """
-        root_seed = _root_seed(seed)
         engine = engine_module.Engine()
         escalation_policy = escalation_build.build_escalation_policy(
             settings.escalation, settings.weak_decoder
@@ -161,131 +130,230 @@ class Machine:
         burst_detector = escalation_build.build_burst_detector(
             settings, engine, plan, escalation_policy
         )
-        detection_events = controller_side.build_detection_events(
+        detection_events = readout_part.build_detection_events(
             settings, plan.device, escalation_policy, burst_detector
         )
-        pool = decoder_build.build_decoder_pool(
+        pool = decoders_part.build_decoder_pool(
             settings, plan, escalation_policy, detection_events
         )
-        store_build.check_readout_cost_is_priced(settings)
-        store_build.check_one_price_for_a_read(settings)
-        store_build.check_store_kinds(settings)
-        parts = build_parts.Parts(
-            settings=settings,
-            engine=engine,
-            plan=plan,
-            escalation_policy=escalation_policy,
-            pool=pool,
-            detection_events=detection_events,
-            burst_detector=burst_detector,
+        links = build_links(settings, engine)
+        qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
+        control = control_part.Control.build(
+            settings.controller, settings.pauli_frame, engine, plan, links
         )
-        seats = assembly.build_seats(parts)
-        wires = assembly.wires_for(parts)
-        assembly.bind(wires, seats)
-        assembly.start_wired_seats(seats)
-        seed_roots = assembly.seed_roots(parts, seats)
-        seeding.bind_run_seed(root_seed, seed_roots)
-        listeners = _observe(settings, parts, seats, seed)
-        strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
-        strong_syndrome_round_receiver = seats.get(
-            "strong_syndrome_round_receiver"
+        readout = readout_part.Readout.build(
+            settings, engine, escalation_policy, detection_events, links
         )
-        pauli_frame = seats.get("pauli_frame")
-        strong_decoder_manager = seats.get("strong_decoder_manager")
-        listener_build.load_program(
+        windows = windows_part.Windows.build(
+            settings, engine, plan, escalation_policy, burst_detector, links
+        )
+        decoders = decoders_part.Decoders.build(
+            settings.decoder_manager, engine, pool, escalation_policy
+        )
+        return cls.assemble(
+            settings,
+            engine,
             plan,
-            seats["conditional_release"],
-            seats["window_manager"],
-            seats["streams"],
-            seats["idle_rounds"],
-            seats["execution_runtime"],
+            links,
+            qpu,
+            control,
+            readout,
+            windows,
+            decoders,
+            seed,
         )
+
+    @classmethod
+    def assemble(
+        cls,
+        settings: machine_settings.MachineSettings,
+        engine: engine_module.Engine,
+        plan: plan_build.Plan,
+        links: ports.Link,
+        qpu: qpu_part.Qpu,
+        control: control_part.Control,
+        readout: readout_part.Readout,
+        windows: windows_part.Windows,
+        decoders: decoders_part.Decoders,
+        seed: Optional[int] = 0,
+    ) -> "Machine":
+        """Connect the parts, start them, seed them, and load the program.
+
+        The connections are every wire that crosses from one part to
+        another, in the order a readout travels; each part wired its own
+        inside when it was built. Nothing is scheduled until the machine
+        runs, so the order the parts were built in cannot move a tick
+        (gem5 src/sim/sim_object.hh lines 194 and 280).
+        """
+        root_seed = _root_seed(seed)
+        qpu.connect(
+            readout_receiver=readout.controller,
+            runtime=control.execution_runtime,
+            idle_rounds=control.idle_rounds,
+            decode_queue=decoders.decoder_manager,
+        )
+        readout.connect(
+            windows=windows.window_manager,
+            retention=windows.retention,
+        )
+        input_fold = decoders.decoder_manager.input_fold()
+        windows.connect(
+            weak_store=readout.weak_syndrome_buffer,
+            strong_store=readout.strong_syndrome_buffer,
+            store_output=readout.primary_output,
+            strong_output=readout.strong_output,
+            strong_receiver=readout.strong_syndrome_round_receiver,
+            primary_decoder=decoders.primary_decoder,
+            strong_decoder=decoders.strong_decoder,
+            decode_queue=decoders.decoder_manager,
+            strong_decode_queue=decoders.strong_decoder_manager,
+            input_fold=input_fold,
+            frame=control.pauli_frame,
+            conditional_release=control.conditional_release,
+            factory=qpu.factory,
+        )
+        control.connect(
+            qpu=qpu.device,
+            factory=qpu.factory,
+            windows=windows.window_manager,
+            decode_queue=decoders.decoder_manager,
+        )
+        # the managers hear their rows before the planner compiles a
+        # model, and the sender asks the wired window side where it reads
+        decoders.start()
+        windows.start()
+        readout.start()
+        parts = (qpu, control, readout, windows, decoders)
+        seed_roots = _seed_roots(plan, links, parts)
+        seeding.bind_run_seed(root_seed, seed_roots)
+        observation = _observe(
+            settings,
+            engine,
+            plan,
+            links,
+            qpu=qpu,
+            control=control,
+            readout=readout,
+            windows=windows,
+            decoders=decoders,
+            seed=seed,
+        )
+        program_build.load_program(plan, control, windows)
         return cls(
             settings=settings,
             engine=engine,
-            observation=listeners,
-            links=seats["links"],
-            conditional_release=seats["conditional_release"],
-            weak_syndrome_buffer=seats["weak_syndrome_buffer"],
-            weak_syndrome_round_receiver=seats["weak_syndrome_round_receiver"],
-            strong_syndrome_buffer=strong_syndrome_buffer,
-            strong_syndrome_round_receiver=strong_syndrome_round_receiver,
-            pauli_frame=pauli_frame,
-            window_manager=seats["window_manager"],
-            assembler=seats["assembler"],
-            syndrome_round_sender=seats["syndrome_round_sender"],
-            transmitter=seats["transmitter"],
-            decoder_manager=seats["decoder_manager"],
-            strong_decoder_manager=strong_decoder_manager,
-            active_decoder=pool.active,
-            factory=seats["factory"],
-            syndrome_source=plan.device,
-            qpu=seats["qpu"],
-            controller=seats["controller"],
-            issuer=seats["issuer"],
-            instruction_output=seats["instruction_output"],
-            idle_rounds=seats["idle_rounds"],
-            execution_runtime=seats["execution_runtime"],
-            operations=plan.all_operations,
+            plan=plan,
+            links=links,
+            qpu=qpu,
+            control=control,
+            readout=readout,
+            windows=windows,
+            decoders=decoders,
+            observation=observation,
         )
 
     def start(self) -> None:
         """Queue the first event of every component that has one.
 
         Every component is built and wired first and nothing is
-        scheduled while the graph is still being assembled, so the order
-        the root builds in cannot move a tick; each seat with a first
-        event queues it here, in build order. That is gem5's split
-        between the constructor and startup, "the appropriate place to
-        schedule initial event(s)"
+        scheduled while the graph is still being assembled; that is
+        gem5's split between the constructor and startup, "the
+        appropriate place to schedule initial event(s)"
         (gem5 src/sim/sim_object.hh lines 194 and 280).
         """
-        self.factory.start()
-        self.execution_runtime.start()
+        self.qpu.factory.start()
+        self.control.execution_runtime.start()
 
     def run(self) -> result_records.RunResult:
         """Start every component, run to quiescence, read the result."""
         self.start()
         self.engine.run()
-        strong_redecode = self.window_manager.strong_redecode
-        if strong_redecode is not None and strong_redecode.has_pending():
-            pending = strong_redecode.pending_work()
-            raise RuntimeError(
-                f"the run ended with pending strong escalations: {pending}"
-            )
-        self.decoder_manager.check_decode_work_settled()
-        if self.strong_decoder_manager is not None:
-            self.strong_decoder_manager.check_decode_work_settled()
-        self.window_manager.check_settled()
-        self.assembler.check_settled()
-        # the stores before the waiting line: a round held for room is
-        # the symptom, the hold that keeps the store full is the cause
-        self.weak_syndrome_round_receiver.check_settled()
-        if self.strong_syndrome_round_receiver is not None:
-            self.strong_syndrome_round_receiver.check_settled()
-        self.syndrome_round_sender.check_settled()
-        self.transmitter.check_settled()
+        self.windows.check_settled()
+        self.decoders.check_settled()
+        self.readout.check_settled()
         return _capture_result(self)
+
+
+def build_links(
+    settings: machine_settings.MachineSettings, engine: engine_module.Engine
+) -> ports.Link:
+    """The link fabric of the run's kind, carded by the links section."""
+    row = tables.row(
+        link_profiles.LINK_FABRICS, "links.kind", settings.links.kind
+    )
+    return row.build(settings.links, engine)
+
+
+def _seed_roots(
+    plan: plan_build.Plan, links: ports.Link, parts: tuple
+) -> tuple:
+    """The seed path of every stochastic owner; the names are results.
+
+    The plan's own rows first, then each part's. The seeding sorts the
+    roots by path, so the order they are listed in moves nothing.
+    """
+    owners = [
+        ("code", plan.code),
+        ("scheme", plan.scheme),
+        ("device", plan.device),
+        ("error_model_provider", plan.error_model_provider),
+        ("boundary_policy", plan.boundary_policy),
+        ("window_interaction", plan.window_interaction),
+        ("idle_policy", plan.idle_policy),
+        ("links", links),
+    ]
+    for part in parts:
+        part_roots = part.seed_roots()
+        owners.extend(part_roots)
+    roots = []
+    for name, owner in owners:
+        path = (seed_records.RunSeedPathSegment("field", name),)
+        roots.append((path, owner))
+    return tuple(roots)
 
 
 def _observe(
     settings: machine_settings.MachineSettings,
-    parts: build_parts.Parts,
-    seats: dict,
+    engine: engine_module.Engine,
+    plan: plan_build.Plan,
+    links: ports.Link,
+    *,
+    qpu: qpu_part.Qpu,
+    control: control_part.Control,
+    readout: readout_part.Readout,
+    windows: windows_part.Windows,
+    decoders: decoders_part.Decoders,
     seed: Optional[int],
 ) -> observation_module.Observation:
     """Connect the run's listeners, before the workload is loaded."""
     traffic_ledger = link_traffic.TrafficLedger(settings.links)
-    process_name = controller_side.process_name(settings, seed)
+    name = _process_name(settings, seed)
     return wiring.observe(
         settings.observation,
-        parts.engine,
-        seats,
-        process_name=process_name,
-        operations=parts.plan.operations,
+        engine,
+        links=links,
+        qpu=qpu,
+        control=control,
+        readout=readout,
+        windows=windows,
+        decoders=decoders,
+        process_name=name,
+        operations=plan.operations,
         traffic_ledger=traffic_ledger,
-        syndrome_source=parts.plan.device,
     )
+
+
+def _process_name(
+    settings: machine_settings.MachineSettings, seed: Optional[int]
+) -> str:
+    """The machine the trace is of: its escalation, code distance and seed.
+
+    The machine knows no sweep, so the point's other values name the
+    trace's file (experiments/measure.py shot_label) and not this line.
+    """
+    kind = settings.escalation.kind
+    distance = settings.qpu.distance
+    return f"decsim {kind} d{distance} seed{seed}"
 
 
 def _root_seed(value) -> Optional[int]:
@@ -301,12 +369,12 @@ def _root_seed(value) -> Optional[int]:
 def _capture_result(machine: Machine) -> result_records.RunResult:
     """Project the finished components into the immutable run result."""
     engine = machine.engine
-    execution_runtime = machine.execution_runtime
+    execution_runtime = machine.control.execution_runtime
     if not engine.idle or not execution_runtime.workload_complete:
         raise RuntimeError("primary run ended before workload completed")
-    truth_for = machine.syndrome_source.logical_observable_truth
+    truth_for = machine.qpu.syndrome_source.logical_observable_truth
     operation_by_id = {}
-    for operation in machine.operations:
+    for operation in machine.plan.all_operations:
         operation_by_id[operation.id] = operation
     rows = []
     for operation_id in sorted(operation_by_id):
@@ -353,7 +421,7 @@ def _operation_result(
     if logical is not None:
         bits = tuple(logical)
         status = "logical_observables"
-    binding = machine.issuer.stream_binding_for(operation_id)
+    binding = machine.control.issuer.stream_binding_for(operation_id)
     actual = _operation_truth(operation, binding, truth_for)
     if actual is not None:
         actual = tuple(actual)

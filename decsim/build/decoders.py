@@ -1,9 +1,10 @@
-"""Build the decoder units of both tiers and the pool the manager schedules.
+"""The decoders part: each tier's units and the manager that schedules them.
 
 A tier's kind names a row of decoders/settings.py's DECODERS, and the
 unit is that algorithm between its fetch and release stages. The two
 tiers' units and the managers' pools are one record, gem5's
-CacheConfig.config_cache shape (configs/common/CacheConfig.py).
+CacheConfig.config_cache shape (configs/common/CacheConfig.py), built
+before the parts because the window models are compiled for the units.
 """
 
 import dataclasses
@@ -12,12 +13,14 @@ from typing import Optional
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.decoders.decode_queue as decode_queue
+import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.detection_events as detection_events_module
-import decsim.decoders.memory_rounds as memory_rounds_module
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.strong_requests as strong_requests_module
+import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.observe.settings as observe_settings
 import decsim.ports as ports
@@ -47,6 +50,78 @@ class DecoderPool:
     strong: Optional[ports.Decoder]
     chip: decoder_pool_module.PoolSettings
     host: Optional[decoder_pool_module.PoolSettings]
+
+
+@dataclasses.dataclass(frozen=True)
+class Decoders:
+    """The decode side: the units of both tiers and the managers over them.
+
+    The chip's manager schedules the tier that decodes the plan's windows.
+    A run that may escalate has the host's manager too, over the strong
+    tier's units (LATTE 2509.03954 lines 705-720), and the two share one
+    ledger of strong requests, since the chip side opens a strong request
+    and the host side serves it. Nothing here reaches outward: the other
+    parts are handed the managers as their decode queues.
+    """
+
+    primary_decoder: Optional[ports.Decoder]
+    strong_decoder: Optional[ports.Decoder]
+    strong_requests: strong_requests_module.StrongRequests
+    decoder_manager: decoder_manager_module.DecoderManager
+    strong_decoder_manager: Optional[decoder_manager_module.DecoderManager]
+
+    @classmethod
+    def build(
+        cls,
+        manager_settings: decoder_settings.DecoderManagerSettings,
+        engine: engine_module.Engine,
+        pool: DecoderPool,
+        escalation_policy: ports.EscalationPolicy,
+    ) -> "Decoders":
+        """Each manager over its pool, bound to its tier's unit."""
+        strong_requests = strong_requests_module.StrongRequests()
+        decoder_manager = _decoder_manager(manager_settings, engine, pool.chip)
+        decoder_manager.decoder = pool.active
+        decoder_manager.strong_requests = strong_requests
+        decoder_manager.escalation_policy = escalation_policy
+        strong_decoder_manager = None
+        if pool.host is not None:
+            strong_decoder_manager = _decoder_manager(
+                manager_settings, engine, pool.host
+            )
+            strong_decoder_manager.decoder = pool.strong
+            strong_decoder_manager.strong_requests = strong_requests
+            strong_decoder_manager.escalation_policy = escalation_policy
+        return cls(
+            primary_decoder=pool.active,
+            strong_decoder=pool.strong,
+            strong_requests=strong_requests,
+            decoder_manager=decoder_manager,
+            strong_decoder_manager=strong_decoder_manager,
+        )
+
+    def start(self) -> None:
+        """Let each manager hear its rows before any window model exists."""
+        self.decoder_manager.start()
+        if self.strong_decoder_manager is not None:
+            self.strong_decoder_manager.start()
+
+    def check_settled(self) -> None:
+        """Every decode either manager admitted has finished."""
+        self.decoder_manager.check_decode_work_settled()
+        if self.strong_decoder_manager is not None:
+            self.strong_decoder_manager.check_decode_work_settled()
+
+    def seed_roots(self) -> tuple:
+        """This part's stochastic owners, each by the name its seed hashes."""
+        input_transport = self.decoder_manager.input_transport()
+        return (
+            ("primary_decoder", self.primary_decoder),
+            ("strong_decoder", self.strong_decoder),
+            ("decoder_manager", self.decoder_manager),
+            ("strong_decoder_manager", self.strong_decoder_manager),
+            ("decoder_memory_transfer", input_transport),
+        )
 
 
 def build_decoder_unit(
@@ -129,11 +204,6 @@ def build_decoder_pool(
         settings, decode_queue.STRONG_POOL, "strong", strong_formation, False
     )
     return DecoderPool(active=active, strong=strong, chip=chip, host=host)
-
-
-def build_memory_round_arrivals(parts):
-    """The decoders' end of the memory route."""
-    return memory_rounds_module.MemoryRoundArrivals(parts.engine)
 
 
 def _check_the_active_tier_decodes(
@@ -334,4 +404,21 @@ def _formation_stage(
         return None
     return detection_events_module.DetectionEventFormationStage(
         FORMATION_STAGE, formation=formation
+    )
+
+
+def _decoder_manager(
+    manager_settings: decoder_settings.DecoderManagerSettings,
+    engine: engine_module.Engine,
+    pool_settings: decoder_pool_module.PoolSettings,
+) -> decoder_manager_module.DecoderManager:
+    """One manager over its pool, on the run's one manager card."""
+    scheduler = manager_settings.scheduler()
+    return decoder_manager_module.DecoderManager(
+        engine,
+        scheduler=scheduler,
+        pool_settings=pool_settings,
+        bulk_strong=manager_settings.bulk_strong,
+        clock=manager_settings.clock,
+        dispatch_cycles=manager_settings.dispatch_cycles,
     )

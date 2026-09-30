@@ -333,6 +333,7 @@ def test_a_declared_weak_run_on_a_ported_store_delays_the_decode_only():
     ported_ticks = declared_run.reaction_ticks(ported)
 
     assert isinstance(
-        ported.weak_syndrome_buffer, ported_syndrome_buffer.PortedSyndromeBuffer
+        ported.readout.weak_syndrome_buffer,
+        ported_syndrome_buffer.PortedSyndromeBuffer,
     )
     assert ported_ticks[3] > free_ticks[3]

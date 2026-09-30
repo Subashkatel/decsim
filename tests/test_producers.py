@@ -98,7 +98,7 @@ def test_memory_patches_runs_one_memory_per_patch_at_once(tmp_path):
     shots = machine.observation.sampled_shots.shots_by_operation
 
     assert result.terminal_status == "complete"
-    assert [operation.patches for operation in machine.operations] == [
+    assert [operation.patches for operation in machine.plan.all_operations] == [
         (0,),
         (1,),
         (2,),
@@ -203,8 +203,8 @@ def test_the_yaml_live_deltakit_memory_runs_what_the_live_tool_runs(tmp_path):
     )
     tool_machine = machine_module.Machine.build(tool_settings, 17)
     tool_result = tool_machine.run()
-    measurements = machine.syndrome_source.sampled_measurements(stream_id)
-    tool_source = tool_machine.syndrome_source
+    measurements = machine.qpu.syndrome_source.sampled_measurements(stream_id)
+    tool_source = tool_machine.qpu.syndrome_source
     tool_measurements = tool_source.sampled_measurements(stream_id)
 
     assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)

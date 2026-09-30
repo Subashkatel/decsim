@@ -19,12 +19,13 @@ outcomes.deliver_weak, job.on_decoded.
 
 A run has one manager per side: the chip's over the default pool and,
 when windows may escalate, the host's over the strong pool, two
-instances of this class in the assembly file, which is LATTE's shape
+instances of this class in the decoders part (decsim/build/decoders.py),
+which is LATTE's shape
 (2509.03954 lines 24-25 and 705-720: the local decoder on the control
 FPGA has no scheduler, the host's Global Dynamic Scheduler owns the
 decode queue and the thread pool). The StrongRequests ledger is one
-seat both bind, since a strong request is opened by the chip side and
-served by the host side.
+component both bind, since a strong request is opened by the chip side
+and served by the host side.
 """
 
 import functools

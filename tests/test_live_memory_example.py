@@ -285,7 +285,7 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     assert owner.patches == ("user-patch",)
     machine = machine_module.Machine.build(settings, seed=81)
     result = machine.run()
-    source = machine.syndrome_source
+    source = machine.qpu.syndrome_source
     assert result.terminal_status == "complete"
     assert source.logical_observable_truth(producers.LIVE_STREAM_ID) is not None
 
@@ -324,8 +324,8 @@ def test_the_files_row_runs_what_the_tool_builds_by_hand(
     tool_machine = machine_module.Machine.build(tool_settings, 17)
     tool_result = tool_machine.run()
     stream_id = producers.LIVE_STREAM_ID
-    yaml_source = machine.syndrome_source
-    source = tool_machine.syndrome_source
+    yaml_source = machine.qpu.syndrome_source
+    source = tool_machine.qpu.syndrome_source
     measurements = yaml_source.sampled_measurements(stream_id)
     tool_measurements = source.sampled_measurements(stream_id)
     executed = yaml_source.executed_circuit(stream_id)

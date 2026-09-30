@@ -247,7 +247,7 @@ def _strong_request_counts(tmp_path, card: dict):
     settings = point.settings
     machine = Machine.build(settings, 0)
     machine.run()
-    return machine.decoder_manager.strong_requests.counts
+    return machine.decoders.decoder_manager.strong_requests.counts
 
 
 def test_the_yaml_asks_for_the_papers_parallel_variant(tmp_path):
@@ -472,7 +472,7 @@ def test_the_serial_escalation_timeline_is_exact():
         log_lines, "START DECODE strong(mem1 W0)"
     )
     parked_start = declared_run.log_tick(log_lines, "START DECODE mem1 W1")
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     first_record = snapshot.records[0]
     expected_weak_done = decsim_config.microseconds_to_ticks(30.0)
     expected_strong_start = decsim_config.microseconds_to_ticks(39.0)
@@ -531,7 +531,7 @@ def test_the_speculative_decode_waits_for_the_context_it_reads():
     assert held < submitted
     assert submitted == last_context_round
     assert started > submitted
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
 def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
@@ -632,7 +632,7 @@ def test_a_held_speculative_decode_is_cancelled_by_a_confident_result():
         machine, "cancelled while held for its input"
     )
     assert len(cancelled) == 3
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
@@ -655,13 +655,13 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
         run_both_at_once=True,
     )
     machine.run()
-    counts = machine.decoder_manager.strong_requests.counts
+    counts = machine.decoders.decoder_manager.strong_requests.counts
     tiers = fabric.frame_tiers(machine)
 
     assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
     assert counts.cancelled == 3
     assert counts.needed == 0
-    machine.strong_syndrome_round_receiver.check_settled()
+    machine.readout.strong_syndrome_round_receiver.check_settled()
 
 
 def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
@@ -678,7 +678,7 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
         run_both_at_once=True,
     )
     machine.run()
-    counts = machine.decoder_manager.strong_requests.counts
+    counts = machine.decoders.decoder_manager.strong_requests.counts
     tiers = fabric.frame_tiers(machine)
 
     assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
@@ -703,12 +703,12 @@ def test_a_pinned_speculative_decode_is_planned_when_its_weak_job_unparks():
         run_both_at_once=True,
     )
     machine.run()
-    counts = machine.decoder_manager.strong_requests.counts
+    counts = machine.decoders.decoder_manager.strong_requests.counts
     tiers = fabric.frame_tiers(machine)
 
     assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
     assert counts.needed == 3
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
 def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
@@ -732,8 +732,8 @@ def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
     def ended_on_host(job, _result, _outcome, _ticks):
         host_kinds.add(job.kind)
 
-    chip = machine.decoder_manager
-    host = machine.strong_decoder_manager
+    chip = machine.decoders.decoder_manager
+    host = machine.decoders.strong_decoder_manager
     chip.outcomes.trace.request_ended.connect(ended_on_chip)
     host.outcomes.trace.request_ended.connect(ended_on_host)
     machine.run()
@@ -756,11 +756,11 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
     commit releases them at 87.5 us, after the strong commit at 74.0.
     """
     machine = fabric.switching_machine(rounds=6, escalated_windows={0})
-    probe = declared_run.OccupancyProbe(machine.window_manager)
+    probe = declared_run.OccupancyProbe(machine.windows.window_manager)
     machine.engine.action_done.connect(probe.observe)
     machine.run()
     timeline = probe.strong_timeline
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     strong_record = snapshot.records[0]
     expected_committed = decsim_config.microseconds_to_ticks(74.0)
     expected_timeline = [

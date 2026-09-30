@@ -295,7 +295,7 @@ def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
     assert stage_events != []
 
 
-def _bare_observe(observation, engine, seats, **fixtures):
+def _bare_observe(observation, engine, **parts):
     """The narrator and the three listeners the run result reads, no more.
 
     No trace writer, no data movement, no flight recorder input, no stage
@@ -309,17 +309,17 @@ def _bare_observe(observation, engine, seats, **fixtures):
     log = log_writers.LogWriter()
     engine.line.connect(log.write)
     engine.io_line.connect(log.write)
-    traffic_ledger = fixtures["traffic_ledger"]
-    links = seats["links"]
+    traffic_ledger = parts["traffic_ledger"]
+    links = parts["links"]
     links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
     result_ledger = result_ledger_module.ResultLedger()
-    window_manager = seats["window_manager"]
+    window_manager = parts["windows"].window_manager
     results = window_manager.results
     results.trace.operation_result_delivered.connect(
         result_ledger.operation_result_delivered
     )
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
-    execution_runtime = seats["execution_runtime"]
+    execution_runtime = parts["control"].execution_runtime
     execution_runtime.trace.body_finished.connect(runtime_stamps.body_finished)
     return _bare_observation(
         engine, log, traffic_ledger, result_ledger, runtime_stamps

@@ -139,7 +139,7 @@ def _weak_gaps(machine) -> list[float]:
 
 def _strong_frame_writes(machine) -> int:
     """The frame's commits that the strong tier wrote."""
-    frame = machine.pauli_frame.snapshot()
+    frame = machine.control.pauli_frame.snapshot()
     return sum(1 for record in frame.records if record.tier == "strong")
 
 
@@ -208,7 +208,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     strong_frame_writes = _strong_frame_writes(machine)
     assert len(weak_gaps) == 10
     assert below == 3
-    assert machine.decoder_manager.strong_requests.counts.needed == 3
+    assert machine.decoders.decoder_manager.strong_requests.counts.needed == 3
     assert strong_frame_writes == 3
 
 
@@ -403,7 +403,7 @@ def test_a_double_window_ending_on_a_commit_edge_builds(
 ):
     settings = _double_window_settings(commit_rounds, buffer_rounds)
     machine = machine_module.Machine.build(settings, 0)
-    assert machine.window_manager.strong_redecode is not None
+    assert machine.windows.window_manager.strong_redecode is not None
 
 
 def test_an_online_source_under_a_double_window_is_refused_as_serial():
@@ -466,7 +466,7 @@ def test_a_policy_row_added_to_the_table_runs_a_switching_point(monkeypatch):
         rounds=9, escalated_windows=set(), escalation=escalation
     )
     machine.run()
-    assert machine.decoder_manager.strong_requests.counts.needed == 3
+    assert machine.decoders.decoder_manager.strong_requests.counts.needed == 3
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "strong"),
         ((1, 1), "strong"),
@@ -594,14 +594,15 @@ def test_a_fourth_escalation_row_gets_the_boundaries_pools_and_join(
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
-    boundary_policy = machine.window_manager.courier.boundary_policy
+    boundary_policy = machine.windows.window_manager.courier.boundary_policy
     assert isinstance(boundary_policy, boundary_policies.Held)
-    assert machine.window_manager.requester.gap_join is not None
-    assert machine.decoder_manager.pool.name == "default"
-    assert machine.strong_decoder_manager.pool.name == "strong"
-    chip_decoder = machine.decoder_manager.decoder
-    assert machine.strong_decoder_manager.decoder is not chip_decoder
-    assert machine.window_manager.planner.scheme.has_trailing_tail_context
+    assert machine.windows.window_manager.requester.gap_join is not None
+    assert machine.decoders.decoder_manager.pool.name == "default"
+    assert machine.decoders.strong_decoder_manager.pool.name == "strong"
+    chip_decoder = machine.decoders.decoder_manager.decoder
+    assert machine.decoders.strong_decoder_manager.decoder is not chip_decoder
+    planner = machine.windows.window_manager.planner
+    assert planner.scheme.has_trailing_tail_context
     result = machine.run()
     assert result.terminal_status == "complete"
 
@@ -660,7 +661,7 @@ def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    assert machine.decoder_manager.strong_requests.counts.needed == 0
+    assert machine.decoders.decoder_manager.strong_requests.counts.needed == 0
 
 
 class _Draws:
@@ -830,7 +831,7 @@ def test_a_windowing_scheme_named_in_a_yaml_runs_under_switching(
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
-    planner_scheme = machine.window_manager.planner.scheme
+    planner_scheme = machine.windows.window_manager.planner.scheme
 
     assert isinstance(planner_scheme, DelegatingWindowScheme)
     result = machine.run()
@@ -873,7 +874,7 @@ def test_held_boundaries_named_in_a_yaml_are_the_rows_the_run_gets(tmp_path):
     )
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
-    boundary_policy = machine.window_manager.courier.boundary_policy
+    boundary_policy = machine.windows.window_manager.courier.boundary_policy
 
     assert settings.windows.boundaries == "held"
     assert isinstance(boundary_policy, boundary_policies.Held)

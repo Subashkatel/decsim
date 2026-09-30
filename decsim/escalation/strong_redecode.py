@@ -6,7 +6,7 @@ the window's selection over weak_decoder_to_strong_decoder, tells the
 decoder side to await the request's result (the DecodeQueue port), and
 submits the job now or when the conditions the shape declared fire: the
 commits of the weak windows it named, or the stored rounds of an
-operation. The ledger of held windows is its own seat, the pending
+operation. The ledger of held windows is its own component, the pending
 strong windows (pending_strong_windows.py), reached through a port, so
 a new shape row names its own condition rather than adding a hook.
 The rounds a strong window reads go up with the escalation: Toshio et

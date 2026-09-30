@@ -30,7 +30,13 @@ import pymatching
 import pytest
 import stim
 
+import decsim.build.control as control_part
+import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
+import decsim.build.plan as plan_build
+import decsim.build.qpu as qpu_part
+import decsim.build.readout as readout_part
+import decsim.build.windows as windows_part
 import decsim.collect as collect
 import decsim.config as config
 import decsim.controller.policies as idle_policies
@@ -219,7 +225,7 @@ def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    assert type(machine.active_decoder.decoder) is FakeWeakDecoder
+    assert type(machine.decoders.primary_decoder.decoder) is FakeWeakDecoder
     decode_lines = [
         line for line in machine.observation.log.lines if "decode" in line
     ]
@@ -243,7 +249,7 @@ def test_a_second_table_row_runs_gate_point_one():
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    inner = machine.active_decoder.decoder
+    inner = machine.decoders.primary_decoder.decoder
     assert type(inner) is union_find_decoder.UnionFindDecoder
     assert result.operation_results[0].logical_observables is not None
 
@@ -336,10 +342,140 @@ def test_the_wiring_reaches_its_components():
     """Every cross-reference is bound, by port or by constructor."""
     settings = machine_settings.MachineSettings()
     machine = machine_module.Machine.build(settings)
-    assert machine.qpu.readout_receiver is machine.controller
-    assert machine.execution_runtime.issuer is machine.issuer
-    manager = machine.decoder_manager
-    assert machine.window_manager.requester.decode_queue is manager
+    control = machine.control
+    assert machine.qpu.device.readout_receiver is machine.readout.controller
+    assert control.execution_runtime.issuer is control.issuer
+    manager = machine.decoders.decoder_manager
+    assert machine.windows.window_manager.requester.decode_queue is manager
+
+
+@pytest.mark.parametrize(
+    "run", [declared_run.weak_only_run, declared_run.switching_run]
+)
+def test_every_required_port_is_bound_once_the_parts_connect(run):
+    """No component of any part meets an unbound neighbour at run time.
+
+    OMNeT++ refuses a gate left unconnected before a network runs, and
+    lets one marked @loose stay so (src/sim/cmodule.cc
+    checkInternalConnections, lines 1253-1282); an optional port is the
+    loose gate here, and a required one raises its own name when read.
+    """
+    machine = run()
+
+    _read_every_required_port(machine)
+
+
+def test_the_trace_names_the_escalation_distance_and_seed_it_is_of():
+    qpu = declared_run.declared_qpu()
+    observation = observe_settings.ObservationSettings(trace="chrome")
+    settings = machine_settings.MachineSettings(
+        qpu=qpu, observation=observation
+    )
+
+    machine = machine_module.Machine.build(settings, 7)
+
+    trace_writer = machine.observation.trace_writer
+    assert trace_writer.process_name == "decsim weak_baseline d3 seed7"
+
+
+def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
+    """The steps of docs/tutorials/build_a_machine.md, and what they print.
+
+    The parts are whole inside once built, a port to another part is
+    bound only by assemble, and the machine assembled by hand gives the
+    result Machine.build gives.
+    """
+    config = experiment.load_experiment("configs/examples/two_tiers.yaml")
+    point = config.first_point_task()
+    settings = point.shot_settings()
+    engine = engine_module.Engine()
+    escalation_policy = escalation_build.build_escalation_policy(
+        settings.escalation, settings.weak_decoder
+    )
+    plan = plan_build.build_plan(settings, escalation_policy)
+    burst_detector = escalation_build.build_burst_detector(
+        settings, engine, plan, escalation_policy
+    )
+    detection_events = readout_part.build_detection_events(
+        settings, plan.device, escalation_policy, burst_detector
+    )
+    pool = decoders_part.build_decoder_pool(
+        settings, plan, escalation_policy, detection_events
+    )
+    links = machine_module.build_links(settings, engine)
+    qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
+    control = control_part.Control.build(
+        settings.controller, settings.pauli_frame, engine, plan, links
+    )
+    readout = readout_part.Readout.build(
+        settings, engine, escalation_policy, detection_events, links
+    )
+    windows = windows_part.Windows.build(
+        settings, engine, plan, escalation_policy, burst_detector, links
+    )
+    decoders = decoders_part.Decoders.build(
+        settings.decoder_manager, engine, pool, escalation_policy
+    )
+    sender = readout.syndrome_round_sender
+    unbound = "SyndromeRoundSender.windows was read before it was bound"
+
+    assert isinstance(escalation_policy, escalation_policies.Switching)
+    assert plan.round_ticks == 1_000_000
+    assert readout.controller.assembler is readout.assembler
+    with pytest.raises(RuntimeError, match=unbound):
+        assert sender.windows is None
+
+    machine = machine_module.Machine.assemble(
+        settings, engine, plan, links, qpu, control, readout, windows, decoders
+    )
+    result = machine.run()
+    whole_machine = machine_module.Machine.build(settings, 0)
+    whole = whole_machine.run()
+
+    requester = windows.window_manager.requester
+    assert sender.windows is windows.window_manager
+    assert requester.decode_queue is decoders.decoder_manager
+    assert result.terminal_status == "complete"
+    assert result.fully_done_ticks == 67_608_000
+    assert result.operation_results[0].logical_failure is False
+    assert result == whole
+
+
+def _read_every_required_port(machine) -> None:
+    """Read each required port of the links and of every part's component.
+
+    A part's None field is a neighbour the run does not have, and None
+    declares no port.
+    """
+    parts = (
+        machine.qpu,
+        machine.control,
+        machine.readout,
+        machine.windows,
+        machine.decoders,
+    )
+    components = [machine.links]
+    for part in parts:
+        fields = vars(part)
+        components += fields.values()
+    for component in components:
+        names = _required_port_names(component)
+        for name in names:
+            getattr(component, name)
+
+
+def _required_port_names(component) -> list:
+    """The required ports the component's class and its bases declare."""
+    component_class = type(component)
+    declared = []
+    for owner in component_class.__mro__:
+        namespace = vars(owner)
+        declared += namespace.values()
+    names = []
+    for value in declared:
+        if isinstance(value, ports.Port) and not value.optional:
+            names.append(value.name)
+    return names
 
 
 MEMORY_ROUNDS = 6
@@ -460,7 +596,7 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     )
     run = _run(settings)
     assert max(run.strong_occupancies) <= window_bits
-    units = run.machine.decoder_manager.pool.units
+    units = run.machine.decoders.decoder_manager.pool.units
     memory = units[0].memory.snapshot()
     assert memory.capacity_bits == window_bits
     assert memory.peak_occupied_bits == window_bits
@@ -518,7 +654,7 @@ def test_single_terminal_window_matches_direct_pymatching(
     circuit = run.shots[0][0].circuit
     detector_model = circuit.detector_error_model(decompose_errors=True)
     matching = pymatching.Matching.from_detector_error_model(detector_model)
-    events = run.machine.syndrome_source.sampled_detection_events(100)
+    events = run.machine.qpu.syndrome_source.sampled_detection_events(100)
     assert any(events)
     prediction = matching.decode(events)
     assert tuple(prediction) == (1,)
@@ -1016,7 +1152,7 @@ def test_joint_live_memory_can_use_the_weak_primary_tier(
     _assert_joint_acquisitions(run)
     assert run.result.terminal_status == "complete"
     assert run.result.event_queue_empty
-    assert run.machine.weak_syndrome_buffer.occupancy == 0
+    assert run.machine.readout.weak_syndrome_buffer.occupancy == 0
     assert run.weak_writes
     paths = _transfer_paths(run)
     assert "controller_to_weak_buffer" in paths
@@ -1341,11 +1477,11 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    assert type(machine.weak_syndrome_buffer) is CountingSyndromeBuffer
+    assert type(machine.readout.weak_syndrome_buffer) is CountingSyndromeBuffer
     fired = [
         line for line in machine.observation.log.lines if "fires round" in line
     ]
-    assert machine.weak_syndrome_buffer.stored_count == len(fired)
+    assert machine.readout.weak_syndrome_buffer.stored_count == len(fired)
     assert fired
 
 
@@ -1383,7 +1519,7 @@ def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     tiers = [record.tier for record in snapshot.records]
     assert tiers
     assert set(tiers) == {"strong"}
@@ -1446,7 +1582,7 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
     )
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
-    assert isinstance(machine.factory, AlwaysReadyFactory)
+    assert isinstance(machine.qpu.factory, AlwaysReadyFactory)
     assert result.terminal_status == "complete"
 
 
@@ -1490,7 +1626,8 @@ def test_the_run_result_carries_the_factorys_supply_stall():
     result = machine.run()
 
     assert result.magic_state_stall_ticks == attempt_ticks + return_ticks
-    assert result.magic_state_stall_ticks == machine.factory.total_stall_ticks
+    built_factory = machine.qpu.factory
+    assert result.magic_state_stall_ticks == built_factory.total_stall_ticks
 
 
 class RecordingBoundaryPolicy:
@@ -1518,13 +1655,15 @@ def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
     settings = machine_settings.MachineSettings()
     first = machine_module.Machine.build(settings)
     second = machine_module.Machine.build(settings)
-    first_boundary = first.window_manager.courier.boundary_policy
-    second_boundary = second.window_manager.courier.boundary_policy
+    first_boundary = first.windows.window_manager.courier.boundary_policy
+    second_boundary = second.windows.window_manager.courier.boundary_policy
     assert type(first_boundary) is boundary_policies.Eager
     assert type(second_boundary) is boundary_policies.Eager
     assert first_boundary is not second_boundary
-    assert type(first.idle_rounds.policy) is (idle_policies.SeparateDecodeJobs)
-    assert first.idle_rounds.policy is not second.idle_rounds.policy
+    first_idle_policy = first.control.idle_rounds.policy
+    second_idle_policy = second.control.idle_rounds.policy
+    assert type(first_idle_policy) is idle_policies.SeparateDecodeJobs
+    assert first_idle_policy is not second_idle_policy
 
 
 def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
@@ -1537,14 +1676,14 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     idle_row = controller_settings.IdlePolicySettings(policy=idle_policy)
     idle_settings = machine_settings.MachineSettings(idle_policy=idle_row)
     with_idle = machine_module.Machine.build(idle_settings)
-    assert with_boundary.window_manager.courier.boundary_policy is (
+    assert with_boundary.windows.window_manager.courier.boundary_policy is (
         boundary_policy
     )
-    assert type(with_boundary.idle_rounds.policy) is (
+    assert type(with_boundary.control.idle_rounds.policy) is (
         idle_policies.SeparateDecodeJobs
     )
-    assert with_idle.idle_rounds.policy is idle_policy
-    assert type(with_idle.window_manager.courier.boundary_policy) is (
+    assert with_idle.control.idle_rounds.policy is idle_policy
+    assert type(with_idle.windows.window_manager.courier.boundary_policy) is (
         boundary_policies.Eager
     )
 
@@ -1658,7 +1797,7 @@ class OutsideCodeCard:
 
 def _resolved_geometry(machine):
     """The geometry the run resolved, read off the issuer's table."""
-    resolved = machine.issuer.resolved_operation_by_id.values()
+    resolved = machine.control.issuer.resolved_operation_by_id.values()
     first = next(iter(resolved))
     return first.code_geometry
 
@@ -1978,9 +2117,10 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
     """
     machine = declared_run.switching_run(escalation_probability=1.0, rounds=9)
 
-    assert machine.weak_syndrome_buffer.occupancy == 0
-    assert machine.strong_syndrome_buffer.occupancy == 0
-    assert machine.strong_syndrome_round_receiver.reserved_bits_by_round == {}
+    assert machine.readout.weak_syndrome_buffer.occupancy == 0
+    assert machine.readout.strong_syndrome_buffer.occupancy == 0
+    receiver = machine.readout.strong_syndrome_round_receiver
+    assert receiver.reserved_bits_by_round == {}
 
 
 def test_the_execution_and_the_decoding_views_agree_on_the_workload():
@@ -1993,9 +2133,9 @@ def test_the_execution_and_the_decoding_views_agree_on_the_workload():
     arrivals never meet, leaves rounds with no readiness account.
     """
     machine = declared_run.weak_only_run(rounds=6)
-    sequencer = machine.execution_runtime
-    tracker = machine.window_manager.tracker
-    planner = machine.window_manager.planner
+    sequencer = machine.control.execution_runtime
+    tracker = machine.windows.window_manager.tracker
+    planner = machine.windows.window_manager.planner
     planned_round_count = planner.round_count_of(1)
     arrived_round_count = tracker.rounds_arrived(1)
 
@@ -2023,7 +2163,7 @@ def test_every_program_operation_is_registered_even_with_no_detector_data():
     measured = declared_run.memory_operation(2)
     operations = [quiet, measured]
     machine = declared_run.weak_only_run(rounds=6, operations=operations)
-    tracker = machine.window_manager.tracker
+    tracker = machine.windows.window_manager.tracker
     stamps = machine.observation.runtime_stamps
 
     assert set(tracker.operation_by_id) == {1, 2}
@@ -2214,9 +2354,9 @@ def test_a_policy_object_decodes_where_its_name_decodes():
     object_settings = strong_primary_settings(by_object)
     object_machine = machine_module.Machine.build(object_settings, 0)
     object_result = object_machine.run()
-    assert object_machine.active_decoder is not None
-    assert type(object_machine.active_decoder) is type(
-        named_machine.active_decoder
+    assert object_machine.decoders.primary_decoder is not None
+    assert type(object_machine.decoders.primary_decoder) is type(
+        named_machine.decoders.primary_decoder
     )
     assert object_result.fully_done_ticks == named_result.fully_done_ticks
     named_observables = named_result.operation_results[0].logical_observables
@@ -2286,7 +2426,7 @@ def late_landing_shot(directory, links):
 
 def frame_commit_ticks(machine):
     """The tick every frame record committed on, in commit order."""
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     ticks = []
     for record in snapshot.records:
         ticks.append(record.committed_ticks)
@@ -2316,7 +2456,8 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
     free = late_landing_shot(free_directory, free_links)
 
     assert priced.result.terminal_status == "complete"
-    assert priced.machine.strong_syndrome_round_receiver.store.occupancy == 0
+    receiver = priced.machine.readout.strong_syndrome_round_receiver
+    assert receiver.store.occupancy == 0
     assert frame_commit_ticks(priced.machine) == frame_commit_ticks(
         free.machine
     )
@@ -2413,9 +2554,10 @@ def timed_and_untimed_decodes(folder, arrangement):
         settings = task.shot_settings(models)
         machine = machine_module.Machine.build(settings, seed)
         untimed = machine_module.Machine.build(settings, seed)
-        reference = untimed.active_decoder.decoder
+        reference = untimed.decoders.primary_decoder.decoder
         listener = functools.partial(record_one_decode, decodes, reference)
-        machine.decoder_manager.outcomes.trace.request_ended.connect(listener)
+        outcomes = machine.decoders.decoder_manager.outcomes
+        outcomes.trace.request_ended.connect(listener)
         machine.run()
     return decodes
 
@@ -2640,8 +2782,8 @@ def test_a_released_pulse_on_a_protected_patch_waits_for_one_boundary():
     def heard_command(event):
         commands[(event.kind, event.command.operation.id)] = event.tick
 
-    machine.instruction_output.trace.output_event.connect(heard_output)
-    machine.qpu.trace.command_event.connect(heard_command)
+    machine.control.instruction_output.trace.output_event.connect(heard_output)
+    machine.qpu.device.trace.command_event.connect(heard_command)
     machine.run()
 
     decided = outputs[("DECISION_AVAILABLE", 3)]
@@ -2649,7 +2791,8 @@ def test_a_released_pulse_on_a_protected_patch_waits_for_one_boundary():
     arrived = commands[("ARRIVED", 3)]
     started = commands[("STARTED", 3)]
     assert issued == decided
-    assert started == machine.qpu.boundary_at_or_after(arrived) == 7_700_000
+    boundary = machine.qpu.device.boundary_at_or_after(arrived)
+    assert started == boundary == 7_700_000
 
 
 def test_a_released_feedback_source_binds_to_the_round_it_starts_at():
@@ -2692,10 +2835,10 @@ def test_a_released_feedback_source_binds_to_the_round_it_starts_at():
     def heard_command(event):
         starts[(event.kind, event.command.operation.id)] = event.tick
 
-    machine.qpu.trace.command_event.connect(heard_command)
+    machine.qpu.device.trace.command_event.connect(heard_command)
     machine.run()
 
-    binding = machine.issuer.stream_binding_for(3)
+    binding = machine.control.issuer.stream_binding_for(3)
     assert starts[("STARTED", 3)] == 8_800_000
     assert (binding.stream_id, binding.stream_offset) == (100, 7)
 
@@ -2748,10 +2891,11 @@ def test_an_operation_claims_every_idle_cycle_before_it_starts():
         del operation_id, round_index
         idle_patches.append(patch)
 
-    machine.idle_rounds.trace.idle_round_emitted.connect(heard_idle_round)
+    idle_rounds = machine.control.idle_rounds
+    idle_rounds.trace.idle_round_emitted.connect(heard_idle_round)
     machine.run()
 
-    window = machine.window_manager.planner.plan.windows[(3, 0)]
+    window = machine.windows.window_manager.planner.plan.windows[(3, 0)]
     assert idle_patches.count(1) == idle_patches.count(2) == 31
     assert window.batched_preceding_idle_round_count == 31
 
@@ -2903,20 +3047,21 @@ def _run(
     """One run of the machine: one shot of the source at the seed."""
     machine = machine_module.Machine.build(settings, seed)
     shots = []
-    source = machine.syndrome_source
+    source = machine.qpu.syndrome_source
     source.shot_sampled.connect(lambda *sample: shots.append(sample))
     packets = []
     weak_writes = []
     strong_occupancies = []
-    machine.qpu.trace.round_emitted.connect(packets.append)
-    machine.weak_syndrome_buffer.trace.round_stored.connect(
+    machine.qpu.device.trace.round_emitted.connect(packets.append)
+    machine.readout.weak_syndrome_buffer.trace.round_stored.connect(
         lambda *event: weak_writes.append(event)
     )
     observe = functools.partial(
         _record_strong_occupancy, machine, strong_occupancies
     )
-    if machine.strong_syndrome_buffer is not None:
-        machine.strong_syndrome_buffer.trace.round_stored.connect(observe)
+    if machine.readout.strong_syndrome_buffer is not None:
+        strong_store = machine.readout.strong_syndrome_buffer
+        strong_store.trace.round_stored.connect(observe)
     result = machine.run()
     return _Run(
         machine, result, packets, shots, weak_writes, strong_occupancies
@@ -2930,8 +3075,8 @@ def _record_strong_occupancy(
     _packet: round_records.SyndromeRoundPacket,
 ) -> None:
     """The strong store's bits held and reserved, as its room test sums them."""
-    stored_bits = machine.strong_syndrome_buffer.occupied_bits
-    receiver = machine.strong_syndrome_round_receiver
+    stored_bits = machine.readout.strong_syndrome_buffer.occupied_bits
+    receiver = machine.readout.strong_syndrome_round_receiver
     reserved_widths = receiver.reserved_bits_by_round.values()
     reserved_bits = sum(reserved_widths)
     taken = stored_bits + reserved_bits
@@ -2970,7 +3115,7 @@ def _assert_actual_truth(run: _Run) -> None:
     events, truth = converter.convert(
         measurements=raw, separate_observables=True
     )
-    source = run.machine.syndrome_source
+    source = run.machine.qpu.syndrome_source
     actual_events = source.sampled_detection_events(100)
     actual_truth = source.logical_observable_truth(100)
     numpy.testing.assert_array_equal(actual_events, events[0])
@@ -2982,11 +3127,11 @@ def _assert_actual_truth(run: _Run) -> None:
 
 
 def _assert_drained(run: _Run) -> None:
-    assert run.machine.weak_syndrome_buffer.occupancy == 0
-    assert run.machine.strong_syndrome_buffer.occupancy == 0
-    receiver = run.machine.strong_syndrome_round_receiver
+    assert run.machine.readout.weak_syndrome_buffer.occupancy == 0
+    assert run.machine.readout.strong_syndrome_buffer.occupancy == 0
+    receiver = run.machine.readout.strong_syndrome_round_receiver
     assert receiver.reserved_bits_by_round == {}
-    units = run.machine.decoder_manager.pool.units
+    units = run.machine.decoders.decoder_manager.pool.units
     occupied = [unit.memory.occupied_bits for unit in units]
     assert occupied == [0] * len(units)
 
@@ -3152,14 +3297,15 @@ def _run_static(
 ) -> tuple[_Run, dict]:
     machine = machine_module.Machine.build(settings, seed)
     weak_writes = []
-    machine.weak_syndrome_buffer.trace.round_stored.connect(
+    machine.readout.weak_syndrome_buffer.trace.round_stored.connect(
         lambda *event: weak_writes.append(event)
     )
     release_ticks_by_round = {}
     released = functools.partial(
         _record_release, machine, release_ticks_by_round
     )
-    machine.strong_syndrome_buffer.trace.round_released.connect(released)
+    strong_store = machine.readout.strong_syndrome_buffer
+    strong_store.trace.round_released.connect(released)
     result = machine.run()
     run = _Run(machine, result, [], [], weak_writes, [])
     return run, release_ticks_by_round
@@ -3339,7 +3485,7 @@ def _operations_on_group(operations: tuple, patches: tuple) -> tuple:
 
 
 def _assert_joint_acquisitions(run: _Run) -> None:
-    source = run.machine.syndrome_source
+    source = run.machine.qpu.syndrome_source
     identities = [
         (packet.operation_id, packet.round_index) for packet in run.packets
     ]
@@ -3426,7 +3572,7 @@ def _direct_bp_osd_prediction(run: _Run) -> tuple[int, ...]:
         osd_method="osd_cs",
         osd_order=0,
     )
-    source = run.machine.syndrome_source
+    source = run.machine.qpu.syndrome_source
     events = source.sampled_detection_events(100)
     syndrome = numpy.array(events, dtype=numpy.uint8)
     correction = backend.decode(syndrome)

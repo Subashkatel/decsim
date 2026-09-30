@@ -19,7 +19,6 @@ window ready, on the declared card of tests/declared_run.py.
 
 import pytest
 
-import decsim.assembly as assembly
 import decsim.config as config
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -147,25 +146,7 @@ def room_side(
 
 
 class StoreWithoutSettlement:
-    """A store row with every SyndromeBuffer method but check_settled."""
-
-    occupied_bits = 0
-
-    def has_room(self, round_key, bits, reserved_bits_by_round):
-        del round_key, bits, reserved_bits_by_round
-        return True
-
-    def accept_packed_round(self, packet, *, publication_tick):
-        del packet, publication_tick
-
-    def release_round(self, round_key):
-        del round_key
-
-    def capacity_bits(self):
-        return None
-
-    def held_rounds_description(self):
-        return "empty"
+    """A store row that answers no check_settled."""
 
 
 class RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
@@ -482,7 +463,7 @@ def test_a_strong_primary_window_is_ready_on_the_room_side_landing():
     machine = declared_run.strong_only_run(rounds=6)
     windows = machine.observation.windows.windows
     window = windows[(1, 0)]
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     (record,) = snapshot.records
     expected_first_round = config.microseconds_to_ticks(13.0)
     expected_data_complete = config.microseconds_to_ticks(18.0)
@@ -528,22 +509,16 @@ class _ArrivalConsumer:
         self.store.register_hold(reads, [round_key])
 
 
-def test_a_store_row_without_check_settled_does_not_bind_to_the_strong_end():
-    """The strong end calls check_settled, so the port it binds says so."""
+def test_a_store_row_without_check_settled_stops_the_strong_end():
+    """The strong end calls check_settled, so a row without it stops there."""
     engine = engine_module.Engine()
     receiver = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(
         engine
     )
-    seats = {
-        "strong_syndrome_round_receiver": receiver,
-        "strong_syndrome_buffer": StoreWithoutSettlement(),
-    }
-    wires = (
-        ("strong_syndrome_round_receiver.store", "strong_syndrome_buffer"),
-    )
+    receiver.store = StoreWithoutSettlement()
 
-    with pytest.raises(ValueError, match="does not answer"):
-        assembly.bind(wires, seats)
+    with pytest.raises(AttributeError, match="check_settled"):
+        receiver.check_settled()
 
 
 def test_a_region_asks_the_store_for_each_round_beside_the_ones_before_it():

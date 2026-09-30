@@ -70,7 +70,7 @@ class FactoryCollaborators:
     rather than as a signature per subclass
     (gem5 src/python/m5/SimObject.py:204-205). The decode
     queue a row submits its correction decodes to is not here: it is a
-    port, decode_queue, which the root binds once every seat exists.
+    port, decode_queue, which the machine binds once every part exists.
     """
 
     engine: decsim.engine.Engine

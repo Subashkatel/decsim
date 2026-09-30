@@ -94,7 +94,7 @@ def test_a_modelled_window_never_reads_the_next_operations_rounds():
     machine = _chained_stim_run("flush")
     machine.run()
 
-    assert machine.window_manager.planner.total_windows == 4
+    assert machine.windows.window_manager.planner.total_windows == 4
 
 
 def _publication_of(window) -> tuple:
@@ -297,7 +297,7 @@ def test_a_round_arriving_after_the_last_window_committed_is_refused():
         fragment_index=0,
     )
     packet = round_records.SyndromeRoundPacket(0, 2, (fragment,))
-    window_manager = machine.window_manager
+    window_manager = machine.windows.window_manager
     with pytest.raises(
         RuntimeError, match="arrived after the op's last window committed"
     ):

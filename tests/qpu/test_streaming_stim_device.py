@@ -175,8 +175,8 @@ def test_a_longer_feedback_wait_moves_the_actual_physical_readout() -> None:
     slower, second_source = _protected_machine(8.0)
     first_packets = []
     second_packets = []
-    faster.qpu.trace.round_emitted.connect(first_packets.append)
-    slower.qpu.trace.round_emitted.connect(second_packets.append)
+    faster.qpu.device.trace.round_emitted.connect(first_packets.append)
+    slower.qpu.device.trace.round_emitted.connect(second_packets.append)
     first_result = faster.run()
     second_result = slower.run()
     assert first_result.terminal_status == "complete"
@@ -222,7 +222,7 @@ def test_deltakit_rounds_use_the_same_live_machine_and_record_oracle(
     )
     machine, source = _protected_machine(4.0, program, period_microseconds)
     packets = []
-    machine.qpu.trace.round_emitted.connect(packets.append)
+    machine.qpu.device.trace.round_emitted.connect(packets.append)
     result = machine.run()
     circuit = source.executed_circuit(100)
     measurements = source.sampled_measurements(100)

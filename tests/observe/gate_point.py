@@ -60,9 +60,9 @@ def log_sha256(machine) -> str:
 def captured_fields(machine, result) -> dict:
     """Every field the gate's capture.py hashes, from one finished run."""
     observation = machine.observation
-    frame = machine.pauli_frame.snapshot()
+    frame = machine.control.pauli_frame.snapshot()
     stamps = observation.runtime_stamps
-    strong_requests = machine.decoder_manager.strong_requests
+    strong_requests = machine.decoders.decoder_manager.strong_requests
     traffic_text = json.dumps(result.link_traffic, sort_keys=True)
     traffic_bytes = traffic_text.encode()
     traffic_digest = hashlib.sha256(traffic_bytes)

@@ -1,32 +1,24 @@
-"""Register the workload with every component, and name every seed root."""
+"""Register the workload with every component that reads it."""
 
+import decsim.build.control as control_part
 import decsim.build.plan as plan_build
+import decsim.build.windows as windows_part
 import decsim.records.program as program_records
-import decsim.records.seeds as seed_records
-
-
-def build_seed_roots(**parts) -> tuple:
-    """The seed path of every stochastic owner; the segments are results."""
-    roots = []
-    for name, value in parts.items():
-        path = (seed_records.RunSeedPathSegment("field", name),)
-        roots.append((path, value))
-    return tuple(roots)
 
 
 def load_program(
     plan: plan_build.Plan,
-    conditional_release,
-    window_manager,
-    streams,
-    idle_rounds,
-    execution_runtime,
+    control: control_part.Control,
+    windows: windows_part.Windows,
 ) -> None:
     """Register the workload with every component that reads it.
 
-    The streams first, then every operation with the windows, then the
-    idle accounting, then the runtime starts the roots.
+    The blocked operations with the release first, then every operation
+    with the windows, then the streams, the idle accounting, and last
+    the runtime, which starts the roots.
     """
+    conditional_release = control.conditional_release
+    window_manager = windows.window_manager
     for operation in plan.operations:
         if operation.blocked_by is not None:
             conditional_release.register_blocked_operation(
@@ -43,11 +35,11 @@ def load_program(
         plan.dynamic_streams,
         plan.protected_regions,
     )
-    streams.load(program, source_round_limit_by_stream)
+    control.streams.load(program, source_round_limit_by_stream)
     for operation in program.operations:
         window_manager.register_operation(operation)
-    idle_rounds.load(program)
-    execution_runtime.load_program(program)
+    control.idle_rounds.load(program)
+    control.execution_runtime.load_program(program)
 
 
 def _register_streams(plan, window_manager) -> dict:

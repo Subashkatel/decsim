@@ -3,7 +3,7 @@
 # Tutorials
 
 A tutorial is a lesson: you follow it at the keyboard and something
-happens at every step. These three build on each other, so do them in
+happens at every step. These four build on each other, so do them in
 order. Each was run end to end, and every output on its page is from
 that run, so if your screen disagrees with the page, the page is out of
 date and worth reporting.
@@ -17,6 +17,9 @@ date and worth reporting.
 - [Two tiers](two_tiers.md): run a machine with a fast decoder and an
   accurate one, and watch the trace of one window that was kept and one
   that was escalated. Ten minutes.
+- [Build a machine step by step](build_a_machine.md): build the two-tier
+  machine one part at a time, see which wires each part makes and which
+  the machine makes between them, and run it. Ten minutes.
 
 When you have done them, the [how-to guides](../how-to/README.md) take
 over: one task per page, no teaching.

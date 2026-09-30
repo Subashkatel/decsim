@@ -1,6 +1,6 @@
 """Every listener of one run, built from the observation section and wired.
 
-The Machine builds the components; this module builds what watches them
+The Machine builds the parts; this module builds what watches them
 and connects each listener to the sources it hears, in pipeline order.
 It is the only place that knows which yaml key builds which listener, so
 a new listener is one class in observe/ and one connection here
@@ -16,7 +16,6 @@ afterwards would miss them.
 """
 
 import functools
-from collections.abc import Mapping
 from typing import Any, Optional
 
 import decsim.decoders.decoder_pool as decoder_pool
@@ -47,76 +46,73 @@ import decsim.observe.window_ledger as window_ledger_module
 def observe(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
-    seats: Mapping[str, Any],
     *,
+    links: Any,
+    qpu: Any,
+    control: Any,
+    readout: Any,
+    windows: Any,
+    decoders: Any,
     process_name: str,
     operations: tuple,
     traffic_ledger: link_traffic.TrafficLedger,
-    syndrome_source,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
-    A listener names the component it hears by the name the assembly
-    file gave that seat. The seats a run may have none of are read with
-    get, and the listeners that hear them take None; the decoder
+    A listener reaches the component it hears through the machine's part
+    that holds it (decsim/build); the parts sit above this package in the
+    package order, so they arrive untyped. A component a run may not have
+    reads as None, and the listeners that hear it take None; the decoder
     managers, one per side, are heard as one tuple by every listener of
-    the decode path. The syndrome source and the operations are the run's
-    fixtures rather than seats, so they arrive on their own. It stays
-    whole past the size prompt: it is the run's one list of listeners, in
-    pipeline order, one built or connected per line, and a split would
-    only hand the list from one half to the other.
+    the decode path. It stays whole past the size prompt: it is the run's
+    one list of listeners, in pipeline order, one built or connected per
+    line, and a split would only hand the list from one half to the
+    other.
     """
-    strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
-    strong_syndrome_round_receiver = seats.get("strong_syndrome_round_receiver")
-    pauli_frame = seats.get("pauli_frame")
-    decoder_managers = _decoder_managers(seats)
+    window_manager = windows.window_manager
+    decoder_managers = _decoder_managers(decoders)
     log = _connect_log(observation, engine)
-    links = seats["links"]
     links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
-    round_events = _connect_round_events(
-        engine,
-        qpu=seats["qpu"],
-        assembler=seats["assembler"],
-        held_rounds=seats["held_rounds"],
-        transmitter=seats["transmitter"],
-        weak_syndrome_round_receiver=seats["weak_syndrome_round_receiver"],
-        instruction_output=seats["instruction_output"],
-        strong_syndrome_buffer=strong_syndrome_buffer,
-        strong_syndrome_round_receiver=strong_syndrome_round_receiver,
-    )
+    round_events = _connect_round_events(engine, qpu, control, readout)
     syndrome_buffer_occupancy = _syndrome_buffer_occupancy(
-        observation, engine, seats["weak_syndrome_buffer"]
+        observation, engine, readout.weak_syndrome_buffer
     )
-    window_ledger = _connect_window_ledger(seats["window_manager"])
-    result_ledger = _connect_result_ledger(seats["window_manager"])
+    window_ledger = _connect_window_ledger(window_manager)
+    result_ledger = _connect_result_ledger(window_manager)
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
     _connect_runtime_stamps(
-        seats["execution_runtime"], seats["factory"], runtime_stamps
+        control.execution_runtime, qpu.factory, runtime_stamps
     )
     queue_depth = _connect_queue_depth(decoder_managers)
-    controller_counters = _connect_controller_counters(seats["idle_rounds"])
-    command_events = _connect_command_events(seats["qpu"])
-    stages = _connect_stage_records(seats)
-    referee_audit = _connect_referee_audit(seats)
-    sampled_shots = _connect_sampled_shots(syndrome_source)
+    controller_counters = _connect_controller_counters(control.idle_rounds)
+    command_events = _connect_command_events(qpu.device)
+    stages = _connect_stage_records(decoders)
+    referee_audit = _connect_referee_audit(decoders)
+    sampled_shots = _connect_sampled_shots(qpu.syndrome_source)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
     confidence = _connect_confidence(
-        seats["escalation_policy"], decoder_managers
+        windows.escalation_policy, decoder_managers
     )
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
-    _connect_data_path(trace_writer, data_movement, seats)
+    if data_movement is not None:
+        _connect_data_movement(
+            data_movement, links, qpu, readout, windows, decoders
+        )
+    if trace_writer is not None:
+        _connect_trace_writer(
+            trace_writer, links, qpu, control, readout, windows, decoders
+        )
     decode_backlog = _decode_backlog(
-        observation, engine, seats["window_manager"], decoder_managers
+        observation, engine, window_manager, decoder_managers
     )
     decoder_utilization = _decoder_utilization(engine, decoder_managers)
     decoder_memory_occupancy = _decoder_memory_occupancy(
         observation, engine, decoder_managers
     )
-    frame_corrections = _frame_corrections(pauli_frame)
-    burst_detector = seats.get("burst_detector")
-    burst_flags = _connect_burst_flags(burst_detector)
+    frame_corrections = _frame_corrections(control.pauli_frame)
+    burst_flags = _connect_burst_flags(windows.burst_detector)
     flight_recorder = flight_recorder_module.FlightRecorder(
         round_events,
         window_ledger,
@@ -174,20 +170,19 @@ def _connect_result_ledger(window_manager) -> result_ledger_module.ResultLedger:
     return ledger
 
 
-def _decoder_managers(seats: Mapping[str, Any]) -> tuple:
+def _decoder_managers(decoders) -> tuple:
     """The chip's manager and, when the run escalates, the host's."""
-    managers = [seats["decoder_manager"]]
-    strong = seats.get("strong_decoder_manager")
+    managers = [decoders.decoder_manager]
+    strong = decoders.strong_decoder_manager
     if strong is not None:
         managers.append(strong)
     return tuple(managers)
 
 
-def _decoder_rows(seats: Mapping[str, Any]) -> list:
-    """Every decoder row of the run's two decoder seats, either absent."""
-    primary = seats.get("primary_decoder")
-    strong = seats.get("strong_decoder")
-    return decoder_pool.decoder_rows((primary, strong))
+def _decoder_rows(decoders) -> list:
+    """Every decoder row of the run's two decoder units, either absent."""
+    units = (decoders.primary_decoder, decoders.strong_decoder)
+    return decoder_pool.decoder_rows(units)
 
 
 def _connect_queue_depth(decoder_managers) -> queue_depth_module.QueueDepthLog:
@@ -250,93 +245,85 @@ def _data_movement(
     return data_movement_module.DataMovement()
 
 
-def _connect_data_path(
-    trace_writer: Optional[trace_writer_module.TraceWriter],
-    data_movement: Optional[data_movement_module.DataMovement],
-    seats: Mapping[str, Any],
-) -> None:
-    """Hand the trace and the counters every source of the data path.
-
-    The hops and residences of the data path's hop table, each from
-    the component where it happens; a run with neither listener connects
-    nothing and fires into empty lists.
-    """
-    if data_movement is not None:
-        _connect_data_movement(data_movement, seats)
-    if trace_writer is not None:
-        _connect_trace_writer(trace_writer, seats)
-
-
 def _connect_data_movement(
-    data_movement: data_movement_module.DataMovement, seats: Mapping[str, Any]
+    data_movement: data_movement_module.DataMovement,
+    links,
+    qpu,
+    readout,
+    windows,
+    decoders,
 ) -> None:
-    """The counters hear every copy, reference and residence."""
-    qpu = seats["qpu"]
-    qpu.trace.round_emitted.connect(data_movement.round_emitted)
-    links = seats["links"]
+    """The counters hear every copy, reference and residence.
+
+    The hops and residences of the data path's hop table, each from the
+    component where it happens.
+    """
+    qpu.device.trace.round_emitted.connect(data_movement.round_emitted)
     links.trace.transfer_delivered.connect(data_movement.transfer_delivered)
-    _connect_store_counts(data_movement, seats["weak_syndrome_buffer"])
-    strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
+    _connect_store_counts(data_movement, readout.weak_syndrome_buffer)
+    strong_syndrome_buffer = readout.strong_syndrome_buffer
     if strong_syndrome_buffer is not None:
         _connect_store_counts(data_movement, strong_syndrome_buffer)
-    for manager in _decoder_managers(seats):
+    for manager in _decoder_managers(decoders):
         for source in manager.reference_sources():
             source.connect(data_movement.hold_registered)
-    for source in _copy_sources(seats):
+    for source in _copy_sources(readout, windows, decoders):
         source.connect(data_movement.copy_made)
-    formation = seats["detection_events"]
+    formation = readout.detection_events
     formation.trace.state_held.connect(data_movement.formation_state_held)
 
 
 def _connect_trace_writer(
     trace_writer: trace_writer_module.TraceWriter,
-    seats: Mapping[str, Any],
+    links,
+    qpu,
+    control,
+    readout,
+    windows,
+    decoders,
 ) -> None:
     """The trace hears every hop and residence, in the order of the path."""
-    qpu = seats["qpu"]
-    qpu.trace.round_emitted.connect(trace_writer.round_emitted)
-    qpu.trace.command_event.connect(trace_writer.command_event)
-    links = seats["links"]
+    device = qpu.device
+    device.trace.round_emitted.connect(trace_writer.round_emitted)
+    device.trace.command_event.connect(trace_writer.command_event)
     links.trace.transfer_delivered.connect(trace_writer.transfer_delivered)
     links.trace.frame_landed.connect(trace_writer.frame_landed)
-    for source in _copy_sources(seats):
+    for source in _copy_sources(readout, windows, decoders):
         source.connect(trace_writer.copy_made)
-    _connect_controller_trace(trace_writer, seats)
+    _connect_controller_trace(trace_writer, readout)
     _connect_store_trace(
-        trace_writer, seats["weak_syndrome_buffer"], "weak syndrome buffer"
+        trace_writer, readout.weak_syndrome_buffer, "weak syndrome buffer"
     )
-    strong_syndrome_buffer = seats.get("strong_syndrome_buffer")
+    strong_syndrome_buffer = readout.strong_syndrome_buffer
     if strong_syndrome_buffer is not None:
         _connect_store_trace(
             trace_writer, strong_syndrome_buffer, "strong syndrome buffer"
         )
-    decoder_managers = _decoder_managers(seats)
+    decoder_managers = _decoder_managers(decoders)
     for index, manager in enumerate(decoder_managers):
         _connect_decoder_trace(trace_writer, index, manager)
-    decoder_rows = _decoder_rows(seats)
+    decoder_rows = _decoder_rows(decoders)
     for decoder in decoder_rows:
         decoder.stage_recorded.connect(trace_writer.stage_recorded)
     _connect_window_trace(
-        trace_writer, seats["window_manager"], decoder_managers
+        trace_writer, windows.window_manager, decoder_managers
     )
-    pauli_frame = seats.get("pauli_frame")
-    _connect_frame_trace(trace_writer, pauli_frame)
+    _connect_frame_trace(trace_writer, control.pauli_frame)
 
 
 def _connect_controller_trace(
-    trace_writer: trace_writer_module.TraceWriter,
-    seats: Mapping[str, Any],
+    trace_writer: trace_writer_module.TraceWriter, readout
 ) -> None:
     """The packing stage, the line in front of it and the one after it."""
-    assembler = seats["assembler"]
+    assembler = readout.assembler
     capacity = assembler.settings.packing_rounds_in_flight
     in_assembly = functools.partial(trace_writer.round_in_assembly, capacity)
     assembler.trace.round_event.connect(in_assembly)
     waiting = functools.partial(
         trace_writer.round_waiting_for_a_place, capacity
     )
-    seats["packing_line"].trace.round_event.connect(waiting)
-    held_rounds = seats["held_rounds"]
+    readout.packing_line.trace.round_event.connect(waiting)
+    held_rounds = readout.held_rounds
     held_rounds.trace.round_event.connect(trace_writer.round_held_for_room)
 
 
@@ -363,24 +350,20 @@ def _connect_store_counts(
     store.trace.hold_released.connect(data_movement.hold_released)
 
 
-def _copy_sources(seats: Mapping[str, Any]) -> list:
+def _copy_sources(readout, windows, decoders) -> list:
     """Every copy_made source of the data path, in hop order."""
-    controller = seats["controller"]
-    assembler = seats["assembler"]
-    weak_syndrome_round_receiver = seats["weak_syndrome_round_receiver"]
     sources = [
-        controller.trace.copy_made,
-        assembler.trace.copy_made,
-        weak_syndrome_round_receiver.trace.copy_made,
+        readout.controller.trace.copy_made,
+        readout.assembler.trace.copy_made,
+        readout.weak_syndrome_round_receiver.trace.copy_made,
     ]
-    strong_syndrome_round_receiver = seats.get("strong_syndrome_round_receiver")
+    strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
     if strong_syndrome_round_receiver is not None:
         sources.append(strong_syndrome_round_receiver.trace.copy_made)
-    for manager in _decoder_managers(seats):
+    for manager in _decoder_managers(decoders):
         for source in manager.copy_sources():
             sources.append(source)
-    window_manager = seats["window_manager"]
-    for source in window_manager.copy_sources():
+    for source in windows.window_manager.copy_sources():
         sources.append(source)
     return sources
 
@@ -506,29 +489,23 @@ def _connect_runtime_stamps(
 
 
 def _connect_round_events(
-    engine: engine_module.Engine,
-    *,
-    qpu,
-    assembler,
-    held_rounds,
-    transmitter,
-    weak_syndrome_round_receiver,
-    instruction_output,
-    strong_syndrome_buffer,
-    strong_syndrome_round_receiver,
+    engine: engine_module.Engine, qpu, control, readout
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing."""
     round_events = round_events_module.RoundEventRecorder(engine)
     components = (
-        qpu,
-        assembler,
-        held_rounds,
-        transmitter,
-        weak_syndrome_round_receiver,
+        qpu.device,
+        readout.assembler,
+        readout.held_rounds,
+        readout.transmitter,
+        readout.weak_syndrome_round_receiver,
     )
     for component in components:
         component.trace.round_event.connect(round_events.record)
+    instruction_output = control.instruction_output
     instruction_output.trace.output_event.connect(round_events.output)
+    strong_syndrome_buffer = readout.strong_syndrome_buffer
+    strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
     if strong_syndrome_buffer is not None:
         strong_syndrome_buffer.trace.round_stored.connect(
             round_events.round_stored
@@ -540,23 +517,19 @@ def _connect_round_events(
     return round_events
 
 
-def _connect_stage_records(
-    seats: Mapping[str, Any],
-) -> stage_records_module.StageLedger:
+def _connect_stage_records(decoders) -> stage_records_module.StageLedger:
     """The run's stage history, heard from every decoder row."""
     stages = stage_records_module.StageLedger()
-    decoder_rows = _decoder_rows(seats)
+    decoder_rows = _decoder_rows(decoders)
     for decoder in decoder_rows:
         decoder.stage_recorded.connect(stages.stage_recorded)
     return stages
 
 
-def _connect_referee_audit(
-    seats: Mapping[str, Any],
-) -> referee_audit_module.RefereeAudit:
+def _connect_referee_audit(decoders) -> referee_audit_module.RefereeAudit:
     """The referee's checks, heard from every decoder row."""
     audit = referee_audit_module.RefereeAudit()
-    decoder_rows = _decoder_rows(seats)
+    decoder_rows = _decoder_rows(decoders)
     for decoder in decoder_rows:
         decoder.window_checked.connect(audit.window_checked)
     return audit

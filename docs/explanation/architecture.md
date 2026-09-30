@@ -2,9 +2,10 @@
 
 # Architecture
 
-decsim is one root object and a row of components, in the order a
-readout travels. This page says what each component is, what it owns and
-what it hands on, and why the tree is shaped that way.
+decsim is a row of components, in the order a readout travels, held in
+six parts that one machine connects. This page says what each part and
+each component is, what it owns and what it hands on, and why the tree
+is shaped that way.
 
 ## The shape, and where it comes from
 
@@ -19,21 +20,55 @@ replaced without any other component knowing. That is gem5's modular
 port interface, quoted in
 [The principles behind the shape](principles.md#6-model-objects-a-separate-configuration-script-a-port-api-timing-apart-from-function).
 
-**A pluggable part is a table of rows.** A row is one name a yaml may
-write and one class the machine builds for it. That is sinter's shape,
-its `BUILT_IN_DECODERS` dictionary plus one abstract class per pluggable
-part, and `decsim/tables.py` is the single function that reads every
+**A pluggable component is a table of rows.** A row is one name a yaml
+may write and one class the machine builds for it. That is sinter's
+shape, its `BUILT_IN_DECODERS` dictionary plus one abstract class per
+pluggable component, and `decsim/tables.py` is the single function that reads every
 table, so a name that is not on a table is refused the same
 way everywhere.
 
-**One root wires everything.** `decsim/machine.py` builds every
-component from its settings, then binds each port to the neighbour that
-answers it. No component builds or looks up another. gem5's configuration script does
-the same job, naming each component once and assigning its ports.
+**Each part wires its own inside, and the machine connects the parts.**
+A part is a small record in `decsim/build/` of the components one stage
+of the loop holds. Its `build` makes those components from their
+settings and binds the ports between them. `Machine.assemble` in
+`decsim/machine.py` then binds the ports that cross from one part to
+another, so its four `connect` calls are the whole list of those. The
+one exception is the link fabric: every hop rides it, so it is built
+first and handed to each part's `build`. No
+component builds or looks up another. That is gem5's standard library,
+where a board is handed a processor, a memory and a cache hierarchy that
+each wire their own inside, and OMNeT++'s compound module, which shows
+its parent only its own gates.
 
 `decsim/ports.py` is therefore the map of the pipeline, and a reader who
 wants to follow a readout starts there. [The ports](../reference/ports.md) is
 that file as a page.
+
+## The six parts
+
+| Part | File | It holds | Its `connect` binds it to |
+| --- | --- | --- | --- |
+| QPU | `decsim/build/qpu.py` | the device, its syndrome source, the magic state factory | the controller it reads out to, the runtime and the idle rounds it reports to, the decoder manager a factory decodes on |
+| Control | `decsim/build/control.py` | the execution runtime, the issuer, the instruction output, the Pauli frame, the conditional release | the QPU it drives, and the window manager it hands each stream |
+| Readout | `decsim/build/readout.py` | the controller, the packing stage, both syndrome buffers and their receivers | the window manager each stored round is published to |
+| Windows | `decsim/build/windows.py` | the planner, the window manager, the verdict, the strong re-decode | the stores, the decoders, the frame and the release |
+| Decoders | `decsim/build/decoders.py` | each tier's units and the manager that schedules them | nothing: the other parts bind to it |
+| Links | `decsim/machine.py` `build_links` | the link fabric | nothing: every part sends on it |
+
+`Machine.build` compiles what every part is built for (the escalation
+policy, the plan, the burst detector, the detection event formation and
+the decoder pool), then builds the parts one line each and hands them to
+`Machine.assemble`. A script that replaces one part does the same steps
+and builds its own part in that part's line.
+[Build a machine step by step](../tutorials/build_a_machine.md) walks
+through it.
+
+A part also answers for its components at the two ends of a run.
+`start` readies them once every wire is made (the managers learn their
+decoders, the planner builds its window models), `check_settled` stops
+the run if anything is still held at the end, and `seed_roots` names
+the components that draw random numbers, each by the path its seed is
+derived from.
 
 ## The components, in the order a readout travels
 
@@ -106,10 +141,10 @@ Observation is reached through callbacks a component fires, never
 through a port, so every component runs with no observer at all. That is
 why `observe/` can be switched off without a single other line changing.
 
-## The pluggable parts
+## The pluggable components
 
 Every table is listed with every row in [The plug-in tables](../reference/tables.md).
-The parts a study is most likely to change:
+The ones a study is most likely to change:
 
 - the **syndrome source**, which is what the QPU reads out
   (`SYNDROME_SOURCES`);

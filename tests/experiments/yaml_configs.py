@@ -77,8 +77,16 @@ def measure_point_shot(
 
 
 def run_sweep(tasks: list, shots: int) -> list:
-    """Seeds 0 to shots - 1 of every task of a sweep, measured, unsaved."""
-    return collect.collect(tasks, shots, measure.measure_shot)
+    """Seeds 0 to shots - 1 of every task of a sweep, measured, unsaved.
+
+    A task named twice runs once, as a collect runs it.
+    """
+    measurements = []
+    for task in collect.unique_tasks(tasks):
+        unit = collect.Unit(task, 0, shots)
+        outcome = collect.run_unit(unit, measure.measure_shot)
+        measurements.extend(outcome.rows)
+    return measurements
 
 
 def folded_run(tmp_path, measurements: list) -> tuple:

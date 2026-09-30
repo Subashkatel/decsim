@@ -251,19 +251,20 @@ def test_a_swept_section_keeps_its_column_beside_every_measured_one(
 def test_a_task_named_by_two_blocks_runs_once(tmp_path):
     raw = _reference_yaml()
     raw["sweep"] = [raw["sweep"][0], dict(raw["sweep"][0])]
+    raw["collection"]["max_shots"] = 2
     twice_path = tmp_path / "twice.yaml"
     twice = _written_yaml(raw, twice_path)
     config = experiment.load_experiment(twice)
     tasks = config.tasks()
+    out_dir = tmp_path / "out"
+
+    run_dir, _ = run.run_experiment(twice, out_dir)
+
+    shots_path = run_dir / "shots.csv"
+    shots = _csv_rows(shots_path)
+    seeds = [shot["seed"] for shot in shots]
     assert len(tasks) == 2
-    seeds = []
-
-    def record_seed(shot: collect.Shot) -> int:
-        seeds.append(shot.seed)
-        return shot.seed
-
-    collect.collect(tasks, 2, record_seed)
-    assert seeds == [0, 1]
+    assert seeds == ["0", "1"]
 
 
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
@@ -284,7 +285,7 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         "the rows are " + re.escape(repr(rows))
     )
     with pytest.raises(ValueError, match=sentence):
-        collect.collect([unknown], 1, measure_shot.measure_shot)
+        collect.run_shot(unknown, 0)
 
 
 def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
@@ -359,21 +360,6 @@ def test_a_machine_built_alone_builds_its_own_models():
     settings = task.shot_settings()
 
     assert settings.workload.built_models is None
-
-
-def test_a_task_is_one_unit_of_all_its_seeds():
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-
-    units = collect.work_units([task], 5)
-
-    assert units == [collect.Unit(task, 0, 5)]
 
 
 def test_two_points_under_one_cache_do_not_share_models():
@@ -588,11 +574,13 @@ def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
     narrow, wide = _bandwidth_tasks(tmp_path, (8, 64))
 
     unique = collect.unique_tasks([narrow, wide])
-    rows = collect.collect([narrow, wide], 1, _readout_rate)
+    narrow_shot = collect.run_shot(narrow, 0)
+    wide_shot = collect.run_shot(wide, 0)
 
     assert narrow.strong_id() != wide.strong_id()
     assert len(unique) == 2
-    assert rows == ["2000", "16000"]
+    assert _readout_rate(narrow_shot) == "2000"
+    assert _readout_rate(wide_shot) == "16000"
     assert collect.json_value(narrow.settings) != collect.json_value(
         wide.settings
     )

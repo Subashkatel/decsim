@@ -24,6 +24,12 @@ class _MemoryWatcher:
         self.occupancy = occupancy
         self.unit = unit
         self.samples: list = []
+        self.deposited_inputs: list = []
+
+    def deposited(self, job, decoder_input) -> None:
+        """One deposit: the input that landed, then the two counts."""
+        self.deposited_inputs.append(decoder_input)
+        self.changed(job, decoder_input)
 
     def changed(self, _job, _decoder_input) -> None:
         """One deposit or take: the listener's count beside the memory's."""
@@ -69,7 +75,7 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     occupancy = machine.observation.decoder_memory_occupancy
     (unit,) = machine.decoders.decoder_manager.pool.units
     watcher = _MemoryWatcher(occupancy, unit)
-    unit.memory.trace.deposited.connect(watcher.changed)
+    unit.memory.trace.deposited.connect(watcher.deposited)
     unit.memory.trace.taken.connect(watcher.changed)
 
     machine.run()
@@ -79,15 +85,17 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     memory_bits = [memory for _listener, memory in watcher.samples]
     assert listener_bits == memory_bits
     rows = occupancy.rows()
-    snapshot = unit.memory.snapshot()
+    input_sizes = [
+        decoder_input.size_bits() for decoder_input in watcher.deposited_inputs
+    ]
     assert rows == [
         {
             "unit": "default#0",
-            "capacity_bits": snapshot.capacity_bits,
-            "occupied_bits": snapshot.occupied_bits,
-            "peak_occupied_bits": snapshot.peak_occupied_bits,
-            "admissions": snapshot.admissions,
-            "unsized_admission_count": snapshot.unsized_admission_count,
+            "capacity_bits": unit.memory.capacity_bits,
+            "occupied_bits": unit.memory.occupied_bits,
+            "peak_occupied_bits": max(memory_bits),
+            "admissions": len(watcher.deposited_inputs),
+            "unsized_admission_count": input_sizes.count(None),
         }
     ]
 
@@ -103,6 +111,34 @@ class _HeldInput:
 
     def size_bits(self) -> int:
         return self.bits
+
+
+class _UnsizedInput:
+    """A decoder input whose rounds state no size, so it holds no bits."""
+
+    def held_bits(self) -> int:
+        return 0
+
+    def size_bits(self) -> None:
+        return None
+
+
+def test_an_input_of_no_stated_size_is_admitted_and_counted_apart():
+    """An unbounded memory admits rounds of no size and holds no bits.
+
+    They are counted apart, as the links count a transfer of unknown
+    width (decsim/observe/link_traffic.py).
+    """
+    engine = types.SimpleNamespace(now=0)
+    occupancy = metrics.DecoderMemoryOccupancy(engine, {"unit": None})
+    unsized = _UnsizedInput()
+    occupancy.deposited("unit", None, unsized)
+
+    (row,) = occupancy.rows()
+
+    assert row["occupied_bits"] == 0
+    assert row["admissions"] == 1
+    assert row["unsized_admission_count"] == 1
 
 
 def test_a_memory_used_a_tenth_of_the_run_is_a_tenth_occupied():

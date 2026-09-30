@@ -33,6 +33,7 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
@@ -145,7 +146,7 @@ def test_a_second_reader_of_one_input_is_one_copy_held_until_both_are_done():
     assert memory.holds(second) is True
     memory.add_reader(second)
     assert memory.occupied_bits == window_bits
-    assert memory.statistics.admissions == 1
+    assert memory.resident_input_count == 1
 
     memory.take(first)
     assert memory.occupied_bits == window_bits
@@ -184,15 +185,14 @@ def test_a_bounded_memory_refuses_rounds_that_state_no_size():
         memory.deposit(job)
 
 
-def test_an_unbounded_memory_admits_unsized_rounds_and_counts_them_apart():
+def test_an_unbounded_memory_admits_unsized_rounds_holding_no_bits():
     memory = decoder_memory.DecoderMemory("default", 0, None)
     job = unsized_job("w0", 3)
 
     memory.deposit(job)
 
     assert memory.occupied_bits == 0
-    assert memory.statistics.admissions == 1
-    assert memory.statistics.unsized_admission_count == 1
+    assert memory.resident_input_count == 1
 
 
 def test_a_deposited_job_occupies_its_bits_until_it_is_taken():
@@ -203,7 +203,6 @@ def test_a_deposited_job_occupies_its_bits_until_it_is_taken():
 
     memory.deposit(job)
     assert memory.occupied_bits == window_bits
-    assert memory.statistics.peak_occupied_bits == window_bits
 
     memory.take(job)
     assert memory.occupied_bits == 0
@@ -265,8 +264,14 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     weak_decoder = decoder_settings.DecoderSettings(
         decoder=decoder, units=unit_count, unit_memory=unit_memory
     )
+    observation = observe_settings.ObservationSettings(
+        decoder_memory_occupancy=True
+    )
     return machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=weak_decoder,
+        observation=observation,
     )
 
 
@@ -280,7 +285,9 @@ def test_every_unit_has_its_own_memory_and_ends_the_run_empty():
     units = machine.decoders.decoder_manager.pool.units
     names = [unit.name for unit in units]
     occupied = [unit.memory.occupied_bits for unit in units]
-    admissions = [unit.memory.statistics.admissions for unit in units]
+    occupancy = machine.observation.decoder_memory_occupancy.result()
+    per_unit = occupancy["per_unit"]
+    admissions = [per_unit[name]["admissions"] for name in names]
     assert names == ["default#0", "default#1"]
     assert occupied == [0, 0]
     assert sum(admissions) >= 2

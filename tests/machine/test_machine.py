@@ -623,19 +623,24 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     links = _price_path(
         settings.links, "strong_buffer_to_strong_decoder", 3_000_000
     )
+    observation = dataclasses.replace(
+        settings.observation, decoder_memory_occupancy=True
+    )
     settings = dataclasses.replace(
         settings,
         strong_syndrome_buffer=buffer,
         strong_decoder=decoder,
         links=links,
+        observation=observation,
     )
     run = _run(settings)
     assert max(run.strong_occupancies) <= window_bits
     units = run.machine.decoders.decoder_manager.pool.units
-    memory = units[0].memory.snapshot()
-    assert memory.capacity_bits == window_bits
-    assert memory.peak_occupied_bits == window_bits
-    assert memory.admissions > 1
+    occupancy = run.machine.observation.decoder_memory_occupancy.result()
+    memory = occupancy["per_unit"][units[0].name]
+    assert memory["capacity_bits"] == window_bits
+    assert memory["peak_occupied_bits"] == window_bits
+    assert memory["admissions"] > 1
     _assert_direct_strong_path(run)
     _assert_actual_truth(run)
     _assert_drained(run)

@@ -326,6 +326,7 @@ def switching_run(
     seed=0,
     io_trace=False,
     record=False,
+    memory_occupancy=False,
     weak_memory_bits=None,
     round_microseconds=ROUND_MICROSECONDS,
     bulk_strong=False,
@@ -377,7 +378,9 @@ def switching_run(
     )
     links = declared_profile()
     observation = observe_settings.ObservationSettings(
-        log_component_io=io_trace, record_switching_windows=record
+        log_component_io=io_trace,
+        record_switching_windows=record,
+        decoder_memory_occupancy=memory_occupancy,
     )
     qpu = declared_qpu(round_microseconds)
     controller = declared_controller()

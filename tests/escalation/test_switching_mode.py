@@ -946,7 +946,7 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
         for row in document
         if row["ph"] == "X" and row["name"].endswith(" input in memory")
     ]
-    windows = shot.machine.observation.windows.final_rows()
+    windows = shot.machine.observation.windows.windows
 
     assert len(residences) == len(windows)
     for row in residences:

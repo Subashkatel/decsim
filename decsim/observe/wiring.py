@@ -156,7 +156,6 @@ def _connect_window_ledger(window_manager) -> window_ledger_module.WindowLedger:
     sources = window_manager.window_sources()
     sources.window_planned.connect(ledger.window_planned)
     sources.window_committed.connect(ledger.window_committed)
-    sources.window_absorbed.connect(ledger.window_absorbed)
     return ledger
 
 

@@ -296,7 +296,7 @@ docstring.
 - `decsim/observe/stage_records.py`: One run's decoder stage records, kept per operation and window.
 - `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's occupancy over time, and how long each round stayed.
 - `decsim/observe/trace_writer.py`: One shot's Chrome trace: where every round and window sat and moved.
-- `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
+- `decsim/observe/window_ledger.py`: The window ledger: every window's record, heard as the plan grows.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.
 
 ### sinter_adapters

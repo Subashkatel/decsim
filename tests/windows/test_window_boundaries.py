@@ -93,23 +93,24 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     boundary_v1 = {4: [1, 0, 0]}
     boundary_v2 = {4: [0, 1, 0]}
 
-    def send_v2():
-        courier.invalidate(source)
-        courier.send(source, operation, boundary_v2, source_request_key=key)
-
     engine.schedule(
         0,
         lambda: courier.send(
             source, operation, boundary_v1, source_request_key=key
         ),
     )
-    engine.schedule(1, send_v2)  # decoded again before version 1 could land
+    engine.schedule(  # decoded again before version 1 could land
+        1,
+        lambda: courier.send(
+            source, operation, boundary_v2, source_request_key=key
+        ),
+    )
     engine.run()
 
     assert dependent.deps_remaining == 0
     assert dict(dependent.boundary_in) == {4: [0, 1, 0]}
     assert len(checks) == 2
-    courier._receive_boundary((1, 1), 1, boundary_v2, (1, 0), 2, 2)
+    courier._receive_boundary((1, 1), 1, boundary_v1, (1, 0), 1, 1)
     assert dependent.deps_remaining == 0
     assert dict(dependent.boundary_in) == {4: [0, 1, 0]}
 

@@ -100,7 +100,7 @@ class DispatchSteps:
 
     def submit(
         self, request: decoding_records.DecodeJob, running: int
-    ) -> measured_table.Ticket:
+    ) -> decoding_records.Ticket:
         """Decode with decsim's Relay-BP now; its steps follow from it."""
         del running
         result = self.decoder.decode(request)
@@ -110,16 +110,16 @@ class DispatchSteps:
         iterations = result.iterations or 0
         microseconds = kernel.decode_microseconds(iterations)
         decode_ticks = config.microseconds_to_ticks(microseconds)
-        return measured_table.Ticket(result, decode_ticks)
+        return decoding_records.Ticket(result, decode_ticks)
 
-    def steps(self, ticket: measured_table.Ticket) -> tuple:
+    def steps(self, ticket: decoding_records.Ticket) -> tuple:
         """The path's steps for this decode, in the order they run."""
         if self.settings.path == "device":
             return self._device_steps(ticket.decode_ticks)
         return self._host_steps(ticket.decode_ticks)
 
     def result(
-        self, ticket: measured_table.Ticket
+        self, ticket: decoding_records.Ticket
     ) -> decoding_records.DecodeResult:
         """The region's answer from decsim's own Relay-BP decode."""
         return ticket.result

@@ -506,6 +506,19 @@ class DecodeResult:
     no_correction_reason: Optional[BackendFailureReason] = None
 
 
+@dataclass(frozen=True)
+class Ticket:
+    """One submitted strong decode: decsim's answer and its priced ticks.
+
+    The strong backends that decode with decsim's own Relay-BP and price
+    the decode from a measured device (measured_table, dispatch_steps)
+    issue it.
+    """
+
+    result: DecodeResult
+    decode_ticks: int
+
+
 @dataclass
 class Submission:
     """One decode job an escalation policy wants enqueued, with its input send.

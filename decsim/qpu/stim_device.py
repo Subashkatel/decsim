@@ -408,9 +408,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             prior_faults=prior_faults,
         )
 
-    def _prepare_run_seed_state(self, effective_seed):
-        return effective_seed
-
     def _install_run_seed_state(self, prepared_state) -> None:
         """A fresh run keeps the declarations and drops what it sampled."""
         self._seed = prepared_state

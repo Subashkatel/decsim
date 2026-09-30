@@ -536,13 +536,10 @@ def _connect_sampled_shots(
 def _frame_corrections(
     pauli_frame,
 ) -> frame_corrections_module.FrameCorrections:
-    """The frame's accepted and landed corrections."""
+    """The frame's landed corrections."""
     corrections = frame_corrections_module.FrameCorrections()
     if pauli_frame is None:
         return corrections
-    pauli_frame.trace.correction_accepted.connect(
-        corrections.correction_accepted
-    )
     pauli_frame.trace.correction_committed.connect(
         corrections.correction_committed
     )

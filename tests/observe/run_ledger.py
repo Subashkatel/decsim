@@ -2,9 +2,10 @@
 
 A test oracle over the listeners a run already keeps. It reads the
 round event recorder, the window ledger, the runtime stamps, the command
-events and the frame corrections of one finished machine, and walks them
-in pipeline order, giving each transition its causal predecessor so a
-round or a window can be followed from the QPU to the frame. The
+events, the frame's records and its landed corrections of one finished
+machine, and walks them in pipeline order, giving each transition its
+causal predecessor so a round or a window can be followed from the QPU
+to the frame. The
 program's operations come from the machine's plan, because the
 dependency edge between two operations is a fact of the workload and
 not of any listener. `RunLedgerView.check` is the oracle's law: every
@@ -30,8 +31,11 @@ def ledger_of(machine) -> "RunLedgerView":
     stored = _store_landings(rows, round_events.stored_rounds, rounds)
     windows = observation.windows.windows
     frame_prev = _window_chains(rows, windows, rounds, stored)
+    frame = machine.control.pauli_frame.snapshot()
     corrections = observation.frame_corrections
-    committed_of_op = _frame_commits(rows, corrections, frame_prev)
+    committed_of_op = _frame_commits(
+        rows, frame.records, corrections.committed, frame_prev
+    )
     operations = _operations_by_id(machine.plan.operations)
     outputs = _output_path(
         rows, round_events.output_events, operations, committed_of_op
@@ -344,16 +348,19 @@ def _window_stamp_rows(
     return row
 
 
-def _frame_commits(rows: _LedgerRows, corrections, frame_prev: dict) -> dict:
+def _frame_commits(
+    rows: _LedgerRows, accepted: tuple, committed: list, frame_prev: dict
+) -> dict:
     """Every correction as accepted then committed; the last commit per op.
 
-    A correction the frame accepted but whose write never landed has an
-    accepted row and no committed row, so the ledger says what happened
-    rather than what was expected to.
+    The frame keeps every correction it accepted, in accept order. A
+    correction whose write never landed has an accepted row and no
+    committed row, so the ledger says what happened rather than what was
+    expected to.
     """
     committed_of_op: dict = {}
-    landed = _landed_identities(corrections.committed)
-    for record in corrections.accepted:
+    landed = _landed_identities(committed)
+    for record in accepted:
         operation_id, window_id = record.window_key
         prev = frame_prev.get(record.window_key)
         accepted = rows.add(

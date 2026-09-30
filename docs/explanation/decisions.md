@@ -1264,7 +1264,12 @@ absorbed windows no weak decode read, in the primary store
 them: the window before it reads them and holds them until it lands in
 the same decoder, which forms them there and keeps them in its ring,
 so a round leaves the store when no reader needs it there, as it does
-when nothing forms. The plan places a finite operation's holds before the operation
+when nothing forms. On a live stream a window is admitted only once its
+commit region begins, so with no buffer the window before it can commit
+first; when the strong side forms, that window's potential strong read
+then lasts until the next window registers its own
+(`release_committed_strong_read`), the order the stream path keeps for
+every hold: a read claims its rounds before a release could free them. The plan places a finite operation's holds before the operation
 begins, so it reads the operation's recipes off the same circuit the
 source will (`build/plan.py`, `_formation_tables`); the holds the run
 places while it goes ask the placement, whose source's table a live
@@ -1315,7 +1320,8 @@ gained `replace_restart_reads`.
 (`rounds_needed_before`, `rounds_read_before`),
 `decsim/frontends/planner.py` (`FormationReads`),
 `decsim/windows/round_retention.py` (`strong_rounds_before`,
-`primary_rounds_before`, `replace_restart_reads`), `decsim/syndrome_buffer/round_output.py`
+`primary_rounds_before`, `replace_restart_reads`,
+`release_committed_strong_read`), `decsim/syndrome_buffer/round_output.py`
 (`_read_the_rounds_before`),
 `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
 (`_land_formed`);

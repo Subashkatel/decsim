@@ -81,8 +81,7 @@ class OperationResults:
         for dependent_key in window.dependents:
             self.retention.release_restart_reads(dependent_key)
         if is_final and self.retention.strong_store is not None:
-            potential = decoding_records.PotentialStrong(window.key)
-            self.retention.release_strong_hold_if_live(potential)
+            self.retention.release_committed_strong_read(window)
 
     # ---- delivery
 

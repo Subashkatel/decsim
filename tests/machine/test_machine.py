@@ -54,6 +54,7 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
@@ -661,6 +662,55 @@ def test_an_unbuffered_live_reader_forms_each_window_from_its_own_ring(
         settings.windows, commit_rounds=commit_rounds, buffer_rounds=0
     )
     settings = dataclasses.replace(settings, windows=windows)
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
+def _escalate_window_one(job) -> bool:
+    return job.window_id == 1
+
+
+@pytest.mark.parametrize(
+    "formed_at",
+    [
+        ("weak_decoder", "strong_decoder"),
+        ("weak_decoder", "strong_syndrome_buffer"),
+    ],
+)
+def test_an_unbuffered_live_region_finds_the_round_before_it_held(
+    formed_at: tuple,
+) -> None:
+    """Window 0 commits before round 2 arrives; window 1's region reads 1.
+
+    The strong side never formed round 1, so window 0's potential strong
+    read keeps it until window 1 registers its own.
+    """
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", "controller")
+    weak = declared_run.DeclaredConfidenceDecoder(0.1, _escalate_window_one)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(
+        settings.escalation, kind="switching", policy=policy
+    )
+    seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    settings = dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+        detection_events=seats,
+        windows=windows,
+    )
 
     run = _run(settings)
 

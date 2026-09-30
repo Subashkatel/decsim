@@ -110,7 +110,12 @@ class RoundRetention:
     def register_window(
         self, key: tuple, window: window_records.Window
     ) -> None:
-        """Register the primary read and any possible escalation context."""
+        """Register the primary read and any possible escalation context.
+
+        A committed window before it may still keep its potential strong
+        read for this one (release_committed_strong_read); that hold
+        ends once this window has claimed its own rounds.
+        """
         primary_reads = self.primary_read_keys(window)
         strong_context = self.strong_context_read_keys(window, primary_reads)
         reads = decoding_records.WindowReads(key)
@@ -119,6 +124,25 @@ class RoundRetention:
         held = primary_reads + strong_context
         for store in self._strong_context_stores():
             store.register_hold(potential, held)
+        self._release_the_committed_window_before(window)
+
+    def release_committed_strong_read(
+        self, window: window_records.Window
+    ) -> None:
+        """A final window's potential strong read ends, or waits for the next.
+
+        A strong side that forms reads the rounds before a strong
+        region's commit, which are the tail of the window before it. On
+        a live stream whose next window is not admitted yet, this hold
+        is what keeps them, so it ends when the next window registers
+        (register_window), the order the stream path keeps for every
+        hold: a read claims its rounds before the release that would
+        free them.
+        """
+        if self._keeps_for_the_next_window(window):
+            return
+        potential = decoding_records.PotentialStrong(window.key)
+        self.release_strong_hold_if_live(potential)
 
     def replace_window_reads(
         self, key: tuple, window: window_records.Window
@@ -542,6 +566,32 @@ class RoundRetention:
             )
 
     # ---- private
+
+    def _keeps_for_the_next_window(self, window: window_records.Window) -> bool:
+        """Whether a strong read of the next window may need this hold."""
+        if not self.strong_side_forms:
+            return False
+        operation_id = window.operation_id
+        if self.tracker.is_sealed(operation_id):
+            return False
+        next_key = (operation_id, window.window_index + 1)
+        return next_key not in self.planner.windows_by_key
+
+    def _release_the_committed_window_before(
+        self, window: window_records.Window
+    ) -> None:
+        """End the potential strong read a committed window kept for this.
+
+        Only a strong side that forms keeps one (_keeps_for_the_next_window).
+        """
+        if not self.strong_side_forms:
+            return
+        previous_key = (window.operation_id, window.window_index - 1)
+        previous = self.planner.windows_by_key.get(previous_key)
+        if previous is None or not previous.committed:
+            return
+        potential = decoding_records.PotentialStrong(previous_key)
+        self.release_strong_hold_if_live(potential)
 
     def _repoint_reads(
         self, key: tuple, window: window_records.Window, primary_reads: list

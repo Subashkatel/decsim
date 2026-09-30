@@ -42,20 +42,18 @@ import decsim.trace_source as trace_source
 # stands for them in every signature below.
 
 
-class TimingOnlyDevice:
-    """Emits payloads with a size and no bit values: timing alone.
+class CircuitlessSource:
+    """What a syndrome source with no circuit answers, whatever it emits.
 
-    A round's size is the code card's: a rotated surface code "requires
-    d2 - 1 syndrome qubits" a round (Barber et al. 2309.05558 lines
-    947-951), and the last round of an operation adds its data qubits
-    (_round_widths), so every link and every memory the round crosses
-    can price it.
+    It draws no shot, so it knows no truth; no circuit fixes a stream's
+    length or builds a window's model; a readout leaves the chip at the
+    boundary it was read out at; and each operation's last round, the
+    one its data qubits are read out on, is kept by decode identity.
     """
 
     operation_circuit_scope = "none"
     takes_code_card = True
-    emits_bit_values = False
-    # nothing is sampled here, so the port's shot source never fires
+    # nothing is sampled per shot, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
 
     def __init__(self, code: ports.CodeModel) -> None:
@@ -82,6 +80,44 @@ class TimingOnlyDevice:
         del segment_round_count, round_period_ticks
         target = program_records.decode_identity(operation)
         self.round_count_by_identity[target] = source_round_count
+
+    def declare_stream(
+        self,
+        stream_operation: program_records.Operation,
+        round_count: int,
+    ) -> None:
+        """No physical circuit constrains this stream's length."""
+
+    def validate_stream_length(
+        self,
+        stream_operation: program_records.Operation,
+        stream_round_count: int,
+    ) -> None:
+        """No circuit, so any length is fine."""
+
+    def readout_departure_tick(
+        self, readout: round_records.QPUReadout, readout_tick: int
+    ) -> int:
+        """The readout leaves the chip at the boundary it was read out at."""
+        del readout
+        return readout_tick
+
+    def window_model_source(self) -> "NoWindowModels":
+        """No circuit, so no window has a model to build."""
+        return NO_WINDOW_MODELS
+
+
+class TimingOnlyDevice(CircuitlessSource):
+    """Emits payloads with a size and no bit values: timing alone.
+
+    A round's size is the code card's: a rotated surface code "requires
+    d2 - 1 syndrome qubits" a round (Barber et al. 2309.05558 lines
+    947-951), and the last round of an operation adds its data qubits
+    (_round_widths), so every link and every memory the round crosses
+    can price it.
+    """
+
+    emits_bit_values = False
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
@@ -142,33 +178,8 @@ class TimingOnlyDevice:
         )
         return [readout]
 
-    def declare_stream(
-        self,
-        stream_operation: program_records.Operation,
-        round_count: int,
-    ) -> None:
-        """No physical circuit constrains this stream's length."""
 
-    def validate_stream_length(
-        self,
-        stream_operation: program_records.Operation,
-        stream_round_count: int,
-    ) -> None:
-        """No circuit, so any length is fine."""
-
-    def readout_departure_tick(
-        self, readout: round_records.QPUReadout, readout_tick: int
-    ) -> int:
-        """The readout leaves the chip at the boundary it was read out at."""
-        del readout
-        return readout_tick
-
-    def window_model_source(self) -> "NoWindowModels":
-        """No circuit, so no window has a model to build."""
-        return NO_WINDOW_MODELS
-
-
-class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
+class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     """Emits seeded random bits shaped like the code card's syndrome.
 
     Each payload draws from a generator of its own, seeded by the
@@ -179,18 +190,7 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
     timing decides.
     """
 
-    operation_circuit_scope = "none"
-    takes_code_card = True
     emits_bit_values = True
-    # the bits are drawn per round, not per shot, so nothing fires here
-    shot_sampled = trace_source.SILENT
-
-    def logical_observable_truth(
-        self, operation_id: Any
-    ) -> Optional[tuple[int, ...]]:
-        """This source draws no shot, so it knows no truth."""
-        del operation_id
-        return None
 
     def __init__(
         self,
@@ -198,30 +198,16 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
         seed: Optional[int] = None,
         one_payload_per_patch: bool = False,
     ):
-        self.code = code
+        source = super()
+        source.__init__(code)
         self.one_payload_per_patch = one_payload_per_patch
         self._seed = seed
-        # decode identity -> the source's rounds, its last read out
-        self.round_count_by_identity: dict = {}
         self._initialize_run_seed_binding(seed)
 
     def run_seed_children(self) -> tuple[seed_records.RunSeedChild, ...]:
         """The code card, which shapes every payload."""
         segment = seed_records.RunSeedPathSegment("field", "code")
         return (seed_records.RunSeedChild((segment,), self.code),)
-
-    def begin_operation(
-        self,
-        operation: program_records.Operation,
-        segment_round_count: int,
-        source_round_count: int,
-        *,
-        round_period_ticks: int,
-    ) -> None:
-        """Nothing to sample; the round the data qubits are read out on."""
-        del segment_round_count, round_period_ticks
-        target = program_records.decode_identity(operation)
-        self.round_count_by_identity[target] = source_round_count
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
@@ -263,31 +249,6 @@ class SyndromeBitDevice(seeding._AtomicRunSeedConsumer):
             payload = self._payload(target, patch_ids, final_round, widths)
             payloads.append(payload)
         return payloads
-
-    def declare_stream(
-        self,
-        stream_operation: program_records.Operation,
-        round_count: int,
-    ) -> None:
-        """No physical circuit constrains this stream's length."""
-
-    def validate_stream_length(
-        self,
-        stream_operation: program_records.Operation,
-        stream_round_count: int,
-    ) -> None:
-        """No circuit, so any length is fine."""
-
-    def readout_departure_tick(
-        self, readout: round_records.QPUReadout, readout_tick: int
-    ) -> int:
-        """The readout leaves the chip at the boundary it was read out at."""
-        del readout
-        return readout_tick
-
-    def window_model_source(self) -> "NoWindowModels":
-        """No circuit, so no window has a model to build."""
-        return NO_WINDOW_MODELS
 
     def _install_run_seed_state(self, prepared_state) -> None:
         self._seed = prepared_state

@@ -733,7 +733,7 @@ def _check_probability(name: str, value) -> None:
 
 
 def _with_numbers(section: Mapping, section_name: str, keys: tuple) -> dict:
-    """The section's keys, each named one read as config.finite_number."""
+    """YAML 1.1 loads 1e-3 as text, so each number is read before use."""
     fields = dict(section)
     for key in keys:
         if key in fields:

@@ -57,7 +57,6 @@ def _close_boundaries(tracker, stream_id, boundaries) -> None:
 
 
 def _arrive_through(tracker, operation_id, last_round: int) -> None:
-    """Rounds 1 through last_round arrive, in order."""
     past_the_last = last_round + 1
     for round_index in range(1, past_the_last):
         tracker.note_arrival(operation_id, round_index)

@@ -261,30 +261,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        exclude_faults_touching: Optional[tuple] = None,
-        prior_faults: Optional[dict] = None,
-    ) -> fault_models.WindowErrorModel:
-        """Build a strong context with one range assigned to its neighbour."""
-        exclusions = ()
-        if exclude_faults_touching is not None:
-            exclusions = (exclude_faults_touching,)
-        return self.strong_window_model_for_operation_with_exclusions(
-            operation,
-            window,
-            round_count,
-            fault_model_requirement=fault_model_requirement,
-            fault_exclusion_ranges=exclusions,
-            prior_faults=prior_faults,
-        )
-
-    def strong_window_model_for_operation_with_exclusions(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        fault_exclusion_ranges: tuple,
+        fault_exclusion_ranges: tuple = (),
         prior_faults: Optional[dict] = None,
     ) -> fault_models.WindowErrorModel:
         """Keep strong priors in the stream's stable fault namespace."""

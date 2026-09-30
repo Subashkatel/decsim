@@ -105,12 +105,6 @@ class _FiniteSource:
         del operation, window, round_count
         return None
 
-    def strong_window_model_for_operation_with_exclusions(
-        self, operation, window, round_count, **_arguments
-    ):
-        del operation, window, round_count
-        return None
-
 
 class _Decoder:
     """The decoder, as the models ask it what a model must offer."""

@@ -1666,27 +1666,15 @@ class WindowModelSource(Protocol):
         round_count: int,
         *,
         fault_model_requirement,
-        exclude_faults_touching=None,
+        fault_exclusion_ranges: tuple = (),
         prior_faults=None,
     ):
-        """One strong window's model, with one non-owned range excluded.
+        """One strong window's model, its non-owned round ranges excluded.
 
         prior_faults names the faults a pinned face's neighbour has
         already committed; they are no columns of this model at all
         (Bombin et al. 2303.04846 lines 775-788).
         """
-
-    def strong_window_model_for_operation_with_exclusions(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement,
-        fault_exclusion_ranges: tuple,
-        prior_faults=None,
-    ):
-        """The same, with several non-owned ranges excluded."""
 
 
 # -------------------------------------------------- every hop rides a link

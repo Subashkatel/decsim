@@ -382,19 +382,7 @@ class NoWindowModels:
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        exclude_faults_touching: Optional[tuple] = None,
-        prior_faults: Optional[dict] = None,
-    ) -> None:
-        """No circuit, so no strong re-decode has an error model."""
-
-    def strong_window_model_for_operation_with_exclusions(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        fault_exclusion_ranges: tuple,
+        fault_exclusion_ranges: tuple = (),
         prior_faults: Optional[dict] = None,
     ) -> None:
         """No circuit, so no strong re-decode has an error model."""

@@ -358,44 +358,15 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        exclude_faults_touching: Optional[tuple] = None,
+        fault_exclusion_ranges: tuple = (),
         prior_faults: Optional[dict] = None,
     ) -> Optional[fault_models.WindowErrorModel]:
         """An independent window model for a strong re-decode.
 
-        One optional inclusive range is assigned to another seam side,
-        and a pinned face's neighbour supplies the faults it has already
+        Each inclusive round range is assigned to another seam side, and
+        a pinned face's neighbour supplies the faults it has already
         committed, which are no columns of this model.
         """
-        if operation.circuit is None:
-            return None
-        key = program_records.decode_identity(operation)
-        detector_rounds = self._bind_source(key, operation.circuit, round_count)
-        span = _window_span(window)
-        fault_exclusion_ranges = ()
-        if exclude_faults_touching is not None:
-            fault_exclusion_ranges = (exclude_faults_touching,)
-        return window_models.build_single_window_error_model(
-            operation.circuit,
-            span,
-            round_count=round_count,
-            detector_rounds=detector_rounds,
-            fault_model_requirement=fault_model_requirement,
-            fault_exclusion_ranges=fault_exclusion_ranges,
-            prior_faults=prior_faults,
-        )
-
-    def strong_window_model_for_operation_with_exclusions(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        fault_exclusion_ranges: tuple,
-        prior_faults: Optional[dict] = None,
-    ) -> Optional[fault_models.WindowErrorModel]:
-        """A strong re-decode model with several non-owned inclusive ranges."""
         if operation.circuit is None:
             return None
         key = program_records.decode_identity(operation)

@@ -347,17 +347,17 @@ def _row_index(rows: list) -> dict:
 
 def _timeline_lanes(document) -> _TimelineLanes:
     """The links this shot moved data on, and the store it filled."""
-    channels = document.channels()
+    paths = document.link_paths()
     store_path = "controller_to_weak_buffer"
     store_name = "weak syndrome buffer"
     input_path = "weak_buffer_to_weak_decoder"
     output_path = "weak_decoder_to_frame"
-    if store_path not in channels:
+    if store_path not in paths:
         store_path = "controller_to_strong_buffer"
         store_name = "strong syndrome buffer"
-    if input_path not in channels:
+    if input_path not in paths:
         input_path = "strong_buffer_to_strong_decoder"
-    if output_path not in channels:
+    if output_path not in paths:
         output_path = "strong_decoder_to_frame"
     return _TimelineLanes(
         input_path=input_path,
@@ -371,15 +371,17 @@ def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
     """One link move filed under the round or the window it carried.
 
     A window decoded twice crosses a link twice, and each move is kept,
-    the rule _timeline_stages keeps for its stages.
+    the rule _timeline_stages keeps for its stages. A move is filed by
+    its path, the thread it sits on, since its channel may be a shared
+    wire's name.
     """
-    channel = event["args"].get("channel")
-    if channel is None:
+    if not trace_file.is_move(event):
         return
+    path = event["thread"]
     span = _span_of(event)
     window_key = trace_file.window_key_of(event)
     if window_key is not None:
-        moves = by_window.setdefault((channel, window_key), [])
+        moves = by_window.setdefault((path, window_key), [])
         moves.append(span)
         return
     rounds = event["args"].get("rounds_by_operation")
@@ -388,7 +390,7 @@ def _index_move(event: dict, by_round: dict, by_window: dict) -> None:
     # a move that names no window carries one round of one operation
     ((operation, rounds_text),) = rounds.items()
     round_lo, _round_hi = trace_file.range_of(rounds_text)
-    by_round[(channel, (operation, round_lo))] = span
+    by_round[(path, (operation, round_lo))] = span
 
 
 def _timeline_windows(document) -> dict:

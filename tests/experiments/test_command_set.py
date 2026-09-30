@@ -1337,6 +1337,31 @@ def _write_a_saved_piece(
     (folder / pieces.PIECE_FILE).write_text("{}")
 
 
+def test_a_collect_of_no_processes_is_refused_before_its_folder(
+    tmp_path, capsys
+):
+    """Zero processes would deal no piece and finish having run nothing."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(SystemExit):
+        command.main(
+            [
+                "collect",
+                str(config_path),
+                "--out",
+                str(out_dir),
+                "--processes=0",
+            ]
+        )
+
+    printed = capsys.readouterr()
+    assert "processes must be a whole number of at least 1, got 0" in (
+        printed.err
+    )
+    assert not out_dir.exists()
+
+
 def test_a_sweep_block_that_says_shots_is_refused(tmp_path, capsys):
     """A block's shots are its collection's max_shots, and nothing else."""
     card = {"sweep": [{"axes": NOISY_AXES, "shots": 2}]}

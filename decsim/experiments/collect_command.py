@@ -204,6 +204,7 @@ def run_experiment(
     configuration's run folder, combined/<name>-<id8>/, and its summary
     rows.
     """
+    _check_processes(processes)
     config = experiment.load_experiment(config_path)
     experiment_dir = run_folder.run_dir_for(config, out_dir)
     configuration_id = run_folder.configuration_id(config)
@@ -271,6 +272,7 @@ def run_planned(
     it had not saved. Each piece records its round and task, and the
     task's manifest goes in round<k>/<task>/.
     """
+    _check_processes(processes)
     round_dir = plan_path.parent
     experiment_dir = round_dir.parent
     task_pieces = _pieces_of_the_task(plan_path, task_number)
@@ -318,6 +320,23 @@ def recorded_points(experiment_dir: pathlib.Path, configs_by_id: dict) -> list:
         point = _point_collection(experiment_dir, resolved, planned)
         owned_points.append((resolved.configuration_id, point))
     return owned_points
+
+
+def _check_processes(processes) -> None:
+    """The worker count is a whole number of at least one.
+
+    A round deals a point its share of the processes, so zero deals no
+    piece and the collect would finish having run nothing; sinter
+    refuses the same count (sinter/_command/_main_collect.py:319-327).
+    """
+    is_whole_number = isinstance(processes, int) and not isinstance(
+        processes, bool
+    )
+    if is_whole_number and processes >= 1:
+        return
+    raise refusal.RefusalError(
+        f"processes must be a whole number of at least 1, got {processes!r}"
+    )
 
 
 def _task_as_the_piece_left_it(

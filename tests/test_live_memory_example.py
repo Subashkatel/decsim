@@ -235,8 +235,9 @@ def test_a_replay_names_the_circuit_its_saved_fragments_hold(
     _run_example(saved, replay)
     made = _read_json(original, "arguments.json")
     replayed = _read_json(replay, "arguments.json")
-    for name in example.CIRCUIT_VALUES:
-        assert replayed[name] == made[name]
+    replayed_circuit = {name: replayed[name] for name in example.CIRCUIT_VALUES}
+    made_circuit = {name: made[name] for name in example.CIRCUIT_VALUES}
+    assert replayed_circuit == made_circuit
     assert replayed["basis"] == "X"
     assert _executed_circuit(replay) == _executed_circuit(original)
 

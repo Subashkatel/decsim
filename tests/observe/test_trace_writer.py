@@ -344,10 +344,7 @@ def test_a_withdrawn_request_leaves_the_queue_when_it_is_withdrawn(tmp_path):
     queued = _rows_with(complete_rows, "cat", "window,queue")
     withdrawn_rows = _rows_with_arg(queued, "request", "1:3:weak:6")
     withdrawn = withdrawn_rows[0]
-    reasons = set()
-    for row in queued:
-        reason = row["args"].get("freed_reason")
-        reasons.add(reason)
+    reasons = {row["args"].get("freed_reason") for row in queued}
 
     assert withdrawn["args"]["freed_reason"] == "withdrawn"
     assert withdrawn["ts"] == 15.008

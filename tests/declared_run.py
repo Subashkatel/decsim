@@ -374,13 +374,13 @@ class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
     it; gap 1.0 elsewhere, so the weak result is kept.
     """
 
-    def __init__(self, latency_us, is_escalated):
-        self.latency_us = latency_us
+    def __init__(self, latency_microseconds, is_escalated):
+        self.latency_microseconds = latency_microseconds
         self.is_escalated = is_escalated
 
     def latency(self, job):
         del job
-        return config.microseconds_to_ticks(self.latency_us)
+        return config.microseconds_to_ticks(self.latency_microseconds)
 
     def decode(self, job):
         confidence_gap = 1.0

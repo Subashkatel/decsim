@@ -71,9 +71,8 @@ def fold_the_experiment(experiment_dir: pathlib.Path) -> list:
         point_swept = run_folder.swept_values(experiment_dir, point_ids)
         swept.update(point_swept)
     status_path = experiment_dir / STATUS_FILE
-    staging = run_folder.staging_path(status_path)
-    report.write_csv(rows, staging, swept)
-    staging.replace(status_path)
+    with run_folder.staged_replacement(status_path) as staging:
+        report.write_csv(rows, staging, swept)
     return rows
 
 

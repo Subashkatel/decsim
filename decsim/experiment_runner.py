@@ -322,16 +322,14 @@ def _point_seed(labels: Mapping) -> int:
 
 def _write_rows_once(path: pathlib.Path, rows: list) -> None:
     """The rows as CSV, staged beside path and renamed over it."""
-    random_suffix = secrets.token_hex(8)
-    staging = path.with_name(f".{path.name}.{random_suffix}")
     columns = list(rows[0])
-    with staging.open("w", newline="") as staging_file:
-        writer = csv.DictWriter(
-            staging_file, fieldnames=columns, lineterminator="\n"
-        )
-        writer.writeheader()
-        writer.writerows(rows)
-    os.replace(staging, path)
+    with run_folder.staged_replacement(path) as staging:
+        with staging.open("w", newline="") as staging_file:
+            writer = csv.DictWriter(
+                staging_file, fieldnames=columns, lineterminator="\n"
+            )
+            writer.writeheader()
+            writer.writerows(rows)
 
 
 def _combine_rows(folder: pathlib.Path, points: list) -> None:

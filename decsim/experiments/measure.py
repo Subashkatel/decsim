@@ -705,7 +705,7 @@ def collect_samples(
     samples["cwb_stall_per_round"] = round_stall_delays_us(weak_keys, waits)
     samples["csb_stall_per_round"] = round_stall_delays_us(strong_keys, waits)
     window_items = observation.windows.windows.items()
-    all_windows = sorted(window_items)
+    all_windows = sorted(window_items, key=_window_order)
     stages = observation.stages
     for window_key, window in all_windows:
         frame_record = frame_by_window.get(window_key)
@@ -1480,6 +1480,16 @@ def parallel_processes_needed(
     both_layers_service_us = 2 * service_us
     processes = both_layers_service_us / committed_rounds_us
     return math.ceil(processes)
+
+
+def _window_order(window_item: tuple) -> bytes:
+    """A (window key, window) pair's place: the key's canonical bytes.
+
+    An operation id may be an int or a str, which Python does not order
+    against each other (records/identity.py).
+    """
+    window_key, _window = window_item
+    return identity_records.stable_identity_order_key(window_key)
 
 
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:

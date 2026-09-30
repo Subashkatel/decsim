@@ -642,6 +642,38 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     assert measurement.strong_busy_fraction > 0.0
 
 
+def test_patches_named_by_an_int_and_a_str_are_measured(tmp_path):
+    """Windows are ordered by records/identity.py, not Python's comparison."""
+    config_path = write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        {
+            yaml_configs.ERROR_RATE_PATH: 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        }
+    )
+    workload = producers.memory_patches(
+        "surface_code:rotated_memory_z", 3, 2, 3, 0.001
+    )
+    first, second = workload.operations
+    named = dataclasses.replace(second, id="b")
+    round_counts = {1: 3, "b": 3}
+    mixed = dataclasses.replace(
+        workload, operations=(first, named), round_counts=round_counts
+    )
+    section = workload_settings.WorkloadSettings()
+    lowered = section.running(mixed)
+    settings = dataclasses.replace(task.settings, workload=lowered)
+    mixed_task = collect.Task(settings, {})
+    shot = collect.run_shot(mixed_task, 0)
+
+    measured = measure.measure_shot(shot)
+
+    assert measured.predictions == '{"1":"0","b":"0"}'
+    assert measured.decoded_windows == 2
+
+
 def test_the_window_sizes_and_period_are_the_card_the_qpu_ran(tmp_path):
     """The plan lays its windows out by the card; the qpu names no distance.
 

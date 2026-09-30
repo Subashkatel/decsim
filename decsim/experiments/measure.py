@@ -189,9 +189,14 @@ class ShotMeasurement:
     seed: int
     decoded_windows: int
     logical_failure: bool
-    # the patch-rounds the scored owners read out, the shot's horizon
-    # that a per-round rate divides by
+    # the patch-rounds the scored owners read out, added up; the owners
+    # scored, each an independent output the shot fails on when it is
+    # wrong; and the patch-rounds each ran, 0 when they ran apart. A
+    # per-round rate reads the last two (failure_statistics
+    # per_output_round_rate)
     executed_rounds: int
+    scored_outputs: int
+    rounds_per_output: int
     samples: dict  # point -> us list, one per window (per round for cwb)
     # the tier whose decode the frame committed, one per window in the
     # samples' order: weak for a kept window, strong for an escalated one
@@ -820,7 +825,10 @@ def _measurement(
     """
     owners = _scored_owners(result)
     sample_digest = _sample_digest(observation, owners)
-    executed_rounds = _executed_rounds(observation, owners)
+    rounds_by_owner = _rounds_by_owner(observation, owners)
+    owner_rounds = rounds_by_owner.values()
+    executed_rounds = sum(owner_rounds)
+    rounds_per_output = _one_length(owner_rounds)
     samples, window_tiers = collect_samples(observation, result)
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
@@ -857,6 +865,8 @@ def _measurement(
         decoded_windows=decoded_windows,
         logical_failure=is_scored_failure,
         executed_rounds=executed_rounds,
+        scored_outputs=len(owners),
+        rounds_per_output=rounds_per_output,
         samples=samples,
         window_tiers=window_tiers,
         means=means,
@@ -1043,25 +1053,37 @@ def _scored_owners(result: result_records.RunResult) -> tuple:
     return tuple(owners)
 
 
-def _executed_rounds(
+def _rounds_by_owner(
     observation: observation_module.Observation, owners: tuple
-) -> int:
-    """The patch-rounds the scored owners read out this shot.
+) -> dict:
+    """Each scored owner's patch-rounds read out this shot.
 
     A round of a patch counts once, whenever it ran: a live stream's
     rounds include those it idled through while its feedback waited,
     which only the run knows, and all of them reach the owner's circuit.
     """
-    owner_ids = set()
+    rounds_by_owner = {}
     for owner in owners:
-        owner_ids.add(owner.operation_id)
-    patch_rounds = set()
+        rounds_by_owner[owner.operation_id] = set()
     for event in observation.round_events.events:
-        if event.kind != "EMITTED" or event.operation_id not in owner_ids:
+        patch_rounds = rounds_by_owner.get(event.operation_id)
+        if event.kind != "EMITTED" or patch_rounds is None:
             continue
         for patch in event.patch_ids:
-            patch_rounds.add((event.operation_id, event.round_index, patch))
-    return len(patch_rounds)
+            patch_rounds.add((event.round_index, patch))
+    counts = {}
+    for owner_id, patch_rounds in rounds_by_owner.items():
+        counts[owner_id] = len(patch_rounds)
+    return counts
+
+
+def _one_length(owner_rounds) -> int:
+    """The patch-rounds every scored owner ran; 0 when they ran apart."""
+    lengths = set(owner_rounds)
+    if len(lengths) != 1:
+        return 0
+    (length,) = lengths
+    return length
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:

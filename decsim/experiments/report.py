@@ -968,10 +968,10 @@ def _add_estimate_columns(row: dict, prefix: collection.PrefixTracker) -> None:
     row["logical_error_rate_low"] = estimate.low
     row["logical_error_rate_high"] = estimate.high
     row["logical_error_rate_plan_unbiased"] = _plan_unbiased(prefix)
-    rounds = prefix.rounds_per_shot()
-    row["logical_error_rate_per_round"] = _per_round(estimate.rate, rounds)
-    row["logical_error_rate_per_round_low"] = _per_round(estimate.low, rounds)
-    row["logical_error_rate_per_round_high"] = _per_round(estimate.high, rounds)
+    shape = prefix.round_shape()
+    row["logical_error_rate_per_round"] = _per_round(estimate.rate, shape)
+    row["logical_error_rate_per_round_low"] = _per_round(estimate.low, shape)
+    row["logical_error_rate_per_round_high"] = _per_round(estimate.high, shape)
     row["is_shot_rate_above_half"] = _is_above_half(estimate.rate)
     row["prefix_shots"] = counts.shots
     row["prefix_scored_shots"] = counts.scored_shots
@@ -1012,17 +1012,18 @@ def _plan_unbiased(prefix: collection.PrefixTracker) -> Optional[float]:
     )
 
 
-def _per_round(shot_rate: Optional[float], rounds: Optional[int]):
-    """A shot's rate as a round's, when both are known."""
-    if shot_rate is None or rounds is None:
+def _per_round(shot_rate: Optional[float], round_shape: Optional[tuple]):
+    """A shot's rate as one output's for one round, when both are known."""
+    if shot_rate is None or round_shape is None:
         return None
-    return failure_statistics.per_round_rate(shot_rate, rounds)
+    outputs, rounds = round_shape
+    return failure_statistics.per_output_round_rate(shot_rate, outputs, rounds)
 
 
 def _is_above_half(shot_rate: Optional[float]) -> Optional[bool]:
     """Whether the shot rate is past one half.
 
-    There the per-round map takes its complement
+    With one output, there the per-round map takes its complement
     (failure_statistics.per_round_rate), and for an even round count no
     round-flip probability gives the rate at all.
     """

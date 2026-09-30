@@ -310,25 +310,39 @@ def test_an_unscored_shot_counts_toward_the_cap_and_not_the_failures():
     assert tracker.counts.scored_shots == 0
 
 
-def test_a_prefix_whose_shots_ran_one_length_is_converted_by_it():
+def test_a_prefix_whose_shots_ran_one_shape_is_converted_by_it():
     settings = _settings(max_shots=2)
     rule = collection.PointRule(settings, False)
-    rows = [_shot_row(0, executed_rounds=8), _shot_row(1, executed_rounds=8)]
+    rows = [
+        _shot_row(0, outputs=4, rounds=8),
+        _shot_row(1, outputs=4, rounds=8),
+    ]
 
     tracker = _tracked(rule, rows)
 
-    assert tracker.rounds_per_shot() == 8
+    assert tracker.round_shape() == (4, 8)
 
 
-def test_a_prefix_whose_shots_ran_different_lengths_has_no_one_length():
+def test_a_prefix_whose_shots_ran_different_lengths_has_no_one_shape():
     """A live stream's feedback wait can differ from shot to shot."""
     settings = _settings(max_shots=2)
     rule = collection.PointRule(settings, False)
-    rows = [_shot_row(0, executed_rounds=8), _shot_row(1, executed_rounds=9)]
+    rows = [_shot_row(0, rounds=8), _shot_row(1, rounds=9)]
 
     tracker = _tracked(rule, rows)
 
-    assert tracker.rounds_per_shot() is None
+    assert tracker.round_shape() is None
+
+
+def test_a_prefix_whose_outputs_ran_apart_has_no_one_shape():
+    """Its shots record no one length per output, which reads as 0."""
+    settings = _settings(max_shots=1)
+    rule = collection.PointRule(settings, False)
+    rows = [_shot_row(0, outputs=2, rounds=0)]
+
+    tracker = _tracked(rule, rows)
+
+    assert tracker.round_shape() is None
 
 
 def _settings(**keys) -> collection.CollectionSettings:
@@ -377,14 +391,15 @@ def _decsim_stop_shot(outcomes, settings) -> int:
     return None
 
 
-def _shot_row(seed, is_scored=True, failed=False, executed_rounds=15):
+def _shot_row(seed, is_scored=True, failed=False, outputs=1, rounds=15):
     """A shot row as shots.csv holds it, the fields a prefix reads."""
     return {
         "seed": str(seed),
         "is_scored": str(is_scored),
         "logical_failure": str(failed),
         "sim_wall_seconds": "0.5",
-        "executed_rounds": str(executed_rounds),
+        "scored_outputs": str(outputs),
+        "rounds_per_output": str(rounds),
     }
 
 

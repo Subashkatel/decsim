@@ -202,8 +202,8 @@ class PrefixTracker:
         self.counts = PrefixCounts()
         self.stop_kind = None
         self.is_open = True
-        # each distinct count of rounds the prefix's shots ran
-        self.executed_rounds = set()
+        # each distinct (outputs, rounds per output) the prefix's shots ran
+        self.round_shapes = set()
 
     def add(self, row: Mapping) -> None:
         """One shot row: onto the prefix while the prefix is open."""
@@ -215,8 +215,8 @@ class PrefixTracker:
             return
         shot_counts = _shot_counts_of(row)
         self.counts.add(shot_counts)
-        rounds = fold.number_of(row["executed_rounds"])
-        self.executed_rounds.add(rounds)
+        round_shape = _round_shape_of(row)
+        self.round_shapes.add(round_shape)
         if self.rule.settings is None:
             return
         self.stop_kind = self.rule.settings.stop_kind(self.counts)
@@ -247,18 +247,22 @@ class PrefixTracker:
             return False
         return self.rule.settings.is_time_cap(self.counts)
 
-    def rounds_per_shot(self) -> Optional[int]:
-        """The rounds every shot of the prefix ran; None when they differ.
+    def round_shape(self) -> Optional[tuple]:
+        """The (outputs, rounds per output) every prefix shot ran, or None.
 
-        A per-round rate inverts one shot length R (sinter 1.16.0
-        shot_error_rate_to_piece_error_rate, _probability_util.py:465-475).
-        A live stream idles through its feedback wait, so two of its
-        shots can run different R, and no one R converts their rate.
+        A per-round rate inverts one shape (failure_statistics
+        per_output_round_rate). A live stream idles through its
+        feedback wait, so two of its shots can run different rounds, and
+        outputs that ran apart have no one length; no one shape converts
+        such a prefix's rate.
         """
-        if len(self.executed_rounds) != 1:
+        if len(self.round_shapes) != 1:
             return None
-        (rounds,) = self.executed_rounds
-        return rounds
+        (round_shape,) = self.round_shapes
+        _outputs, rounds = round_shape
+        if rounds == 0:
+            return None
+        return round_shape
 
     def stop_kind_for_limits(self) -> failure_statistics.StopKind:
         """The kind whose limits hold for the prefix as it stands.
@@ -280,6 +284,13 @@ def _shot_counts_of(row: Mapping) -> PrefixCounts:
     scored_shots = int(bool(is_scored))
     failures = int(bool(failed))
     return PrefixCounts(1, scored_shots, failures, core_seconds)
+
+
+def _round_shape_of(row: Mapping) -> tuple:
+    """One shot row's outputs and rounds per output, as numbers."""
+    outputs = fold.number_of(row["scored_outputs"])
+    rounds = fold.number_of(row["rounds_per_output"])
+    return (outputs, rounds)
 
 
 def _add_section(merged: dict, section: Optional[Mapping], name: str) -> None:

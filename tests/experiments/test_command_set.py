@@ -1351,10 +1351,13 @@ def _write_a_saved_piece(
     count = len(failed)
     folder = pieces.piece_dir(experiment_dir, point_id, first_seed, count)
     folder.mkdir(parents=True)
-    lines = ["seed,is_scored,logical_failure,sim_wall_seconds,executed_rounds"]
+    lines = [
+        "seed,is_scored,logical_failure,sim_wall_seconds,scored_outputs,"
+        "rounds_per_output"
+    ]
     for offset, is_failure in enumerate(failed):
         seed = first_seed + offset
-        lines.append(f"{seed},True,{is_failure},0.5,15")
+        lines.append(f"{seed},True,{is_failure},0.5,1,15")
     shots_text = "\n".join(lines) + "\n"
     (folder / "shots.csv").write_text(shots_text)
     (folder / pieces.PIECE_FILE).write_text("{}")

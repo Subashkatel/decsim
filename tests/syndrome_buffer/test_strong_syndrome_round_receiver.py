@@ -229,6 +229,37 @@ def test_the_reserved_bits_count_against_the_room_until_the_round_lands():
     assert receiver.store.occupancy == 1
 
 
+def test_a_round_being_formed_here_keeps_its_room_until_it_is_stored():
+    """gem5's packet store clears a reserve only in the push that fills it.
+
+    src/dev/net/pktfifo.hh: reserve(len) adds to _reserved and push()
+    moves the length into _size, so avail() never counts a slot twice nor
+    frees one early. Here the round lands at 0.5 us and forms for five
+    cycles of a 10-tick clock; between the two its bits are still taken.
+    """
+    engine = engine_module.Engine()
+    former = FormingInCycles()
+    receiver = room_side(engine, bits=BITS_PER_ROUND, detection_events=former)
+    receiver.store.open_operation(1)
+    reads = decoding_records.WindowReads((1, 0))
+    receiver.store.register_hold(reads, [(1, 1)])
+    asked = packed_round(2)
+    rooms_asked = []
+
+    def ask_room() -> None:
+        has_room = receiver.has_room(asked)
+        rooms_asked.append(has_room)
+
+    while_forming = LANDING_TICKS + 1
+    cross(engine, receiver, 1)
+    engine.schedule(while_forming, ask_room)
+    engine.run()
+
+    assert rooms_asked == [False]
+    assert receiver.reserved_bits_by_round == {}
+    assert receiver.store.occupied_bits == BITS_PER_ROUND
+
+
 def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
     engine = engine_module.Engine()
     receiver = room_side(engine)

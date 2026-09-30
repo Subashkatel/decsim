@@ -7,6 +7,7 @@ E[W_q] = rho S / (2 (1 - rho)). Both laws
 are computed inside the tests; the random-trace tests say so in their
 names. The batching law's referent is Toshio et al. 2510.25222, Sec.
 III C, where the accurate decoder processes its assigned data in bulk.
+The withdrawal's referent is Ciw's reneging (ciw/node.py renege).
 """
 
 import functools
@@ -177,6 +178,29 @@ def test_the_depth_is_reported_at_every_change():
     depths = [depth for _tick, depth in depth_log.samples]
     assert depths == [1, 0, 1, 0]
     assert depth_log.peak == 1
+
+
+def test_a_withdrawn_job_leaves_the_depth_when_it_leaves_the_queue():
+    """The depth drops at the withdrawal, not at the next dispatch.
+
+    Ciw's renege lowers the node's count and records the state change at
+    the reneging (ciw/node.py renege): a customer queued at 0 behind a
+    one-unit service and reneging at 0.5 takes the queue from 1 to 0 at
+    0.5.
+    """
+    engine = engine_module.Engine()
+    manager = _manager(engine, 1)
+    depth_log = queue_depth.QueueDepthLog()
+    depth_changed = functools.partial(depth_log.depth_changed, "default")
+    manager.queue.trace.depth_changed.connect(depth_changed)
+    _submit(manager, "a")
+    _submit(manager, "b")
+    waiting = manager.queue.waiting
+    withdrawn = waiting[0]
+    withdrawal_tick = SERVICE_TICKS // 2
+    engine.schedule(withdrawal_tick, lambda: manager.queue.remove(withdrawn))
+    engine.run()
+    assert depth_log.samples == [(0, 1), (0, 0), (0, 1), (withdrawal_tick, 0)]
 
 
 def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():

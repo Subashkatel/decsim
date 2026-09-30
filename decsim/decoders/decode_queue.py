@@ -67,6 +67,7 @@ class WaitingJobs:
             return False
         self.waiting.remove(job)
         self.trace.job_withdrawn.fire(job)
+        self.sample_depth()
         return True
 
     def sample_depth(self) -> None:

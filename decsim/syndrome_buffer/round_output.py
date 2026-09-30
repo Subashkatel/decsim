@@ -213,9 +213,8 @@ class SyndromeBufferOutput:
     ) -> int:
         """Start the move when the read completes; the delay expected.
 
-        The link is asked what a send at the read's end would pay, which
-        is exact whenever no later request overtakes it there, the same
-        estimate a send made now answers (links/channel.py
+        The link is asked what a send at the read's end would pay, the
+        same estimate a send made now answers (links/channel.py
         expected_delay_ticks).
         """
         move = functools.partial(self._move, job, payload_bits, on_landed)

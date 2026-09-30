@@ -135,8 +135,8 @@ class DecoderOutput:
         at its end; a bit is priced by the memory it leaves, at the tick
         it leaves. The send is in the strong request's name and carries
         that name and the rounds (EscalatedRegion.message_bits); returns
-        the delay expected, the read then the link, which is exact
-        whenever no later request overtakes it.
+        the delay expected, the read then the link's estimate
+        (links/channel.py expected_delay_ticks).
         """
         round_keys = _region_round_keys(region)
         read_tick = self.weak_store.book_read(round_keys)

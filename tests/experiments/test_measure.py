@@ -1456,6 +1456,26 @@ def test_throughput_counts_the_rounds_the_shot_read_out():
     assert rounds_per_window * decoded_windows == pytest.approx(60)
 
 
+def test_a_shot_with_no_pauli_frame_got_no_window_through():
+    """A machine built with no frame commits nothing, and its rates are zero.
+
+    Throughput runs from the first round to the last frame commit, and
+    a Python-built machine whose pauli_frame is None commits no window,
+    so no window and no round got through; the rounds it read out are
+    still measured.
+    """
+    settings = seam_streams_settings(1)
+    frameless = dataclasses.replace(settings, pauli_frame=None)
+    task = collect.Task(frameless, {})
+    shot = collect.run_shot(task, 0)
+    measured = measure.measure_shot(shot)
+
+    assert measured.decoded_windows == 0
+    assert measured.throughput_windows_per_us == 0.0
+    assert measured.throughput_rounds_per_us == 0.0
+    assert measured.executed_rounds == 30
+
+
 def test_every_streams_window_is_measured_against_its_own_frame_record():
     """Two streams commit eighteen corrections and none is dropped.
 

@@ -1231,8 +1231,15 @@ def _throughput_per_microsecond(
     Operations that run at once add their rounds: the rate is the load
     the shared decoders serve, which the backlog condition weighs against
     their service rate (Holmes 2004.04794 section III), not the QEC
-    cycle rate, which is one over the round period by construction.
+    cycle rate, which is one over the round period by construction. A
+    shot that commits nothing into a frame, a machine built with no
+    pauli_frame, got nothing through, and both rates are zero, as a
+    tier the run does not have measures zero.
     """
+    if not observation.frame_corrections.committed:
+        return _Throughput(
+            windows_per_microsecond=0.0, rounds_per_microsecond=0.0
+        )
     decoded_windows = len(samples["service"])
     rounds_this_shot = _emitted_round_count(observation)
     span_us = _decoded_span_microseconds(observation)

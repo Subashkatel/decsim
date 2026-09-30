@@ -408,6 +408,11 @@ class TraceWriter:
         )
         self._start_window_flow("Window planner", window_key)
 
+    def job_withdrawn(self, job: decoding_records.DecodeJob) -> None:
+        """The job left the ready queue unserved; its wait ends here."""
+        closing = {"freed_reason": "withdrawn"}
+        self._end_residence("Window planner", job.request_key, closing)
+
     def depth_changed(self, manager, tick: int, depth: int) -> None:
         """One manager's waiting jobs changed; the counter is the sum."""
         self.queue_depth_by_manager[manager] = depth

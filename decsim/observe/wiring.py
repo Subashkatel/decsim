@@ -399,6 +399,7 @@ def _connect_decoder_trace(
     """One manager's ready queue, its units' services and their memories."""
     queue = decoder_manager.queue
     queue.trace.job_enqueued.connect(trace_writer.job_enqueued)
+    queue.trace.job_withdrawn.connect(trace_writer.job_withdrawn)
     depth_changed = functools.partial(trace_writer.depth_changed, index)
     queue.trace.depth_changed.connect(depth_changed)
     service = decoder_manager.service

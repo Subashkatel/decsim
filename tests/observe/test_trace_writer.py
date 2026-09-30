@@ -41,6 +41,21 @@ ONE_MICROSECOND_WEAK = {
         "release_cycles_per_round": 0,
     },
 }
+# the withdrawal run of test_measure: a five-microsecond weak card under
+# double_window, which takes back a queued request when it re-slices
+RE_SLICED_WINDOWS = {
+    "escalation": {
+        "kind": "switching",
+        "gap_threshold_db": 20.0,
+        "strong_window": "double_window",
+    },
+    "weak_decoder": {
+        "kind": 5.0,
+        "units": 1,
+        "unit_memory": {"bits": None},
+        "engine": measure_tests.ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
+    },
+}
 
 
 def _settings(trace_path=None, data_movement=False):
@@ -308,6 +323,36 @@ def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
     assert len(service_lanes) > 2
     assert set(stage_spans_by_tid) == service_lanes
     assert _lanes_with_overlapping_spans(stage_spans_by_tid) == []
+
+
+def test_a_withdrawn_request_leaves_the_queue_when_it_is_withdrawn(tmp_path):
+    """A queued request taken back ends its queue slice there.
+
+    double_window withdraws window 3's queued request 1:3:weak:6 when it
+    re-slices the window, 1.132 us after it joined the queue, the wait
+    measure books as that window's admission_wait. Ciw ends a reneging
+    customer's record at the reneging (ciw/node.py
+    write_reneging_record), so the slice ends there too rather than at
+    the end of the run.
+    """
+    trace_path = tmp_path / "withdrawn.trace.json"
+    observation = {"trace": str(trace_path)}
+    sections = {**RE_SLICED_WINDOWS, "observation": observation}
+    shot = measure_tests.switching_run(tmp_path, 20.0, sections=sections)
+    document = shot.machine.observation.trace_writer.document()
+    complete_rows = _by_phase(document, "X")
+    queued = _rows_with(complete_rows, "cat", "window,queue")
+    withdrawn_rows = _rows_with_arg(queued, "request", "1:3:weak:6")
+    withdrawn = withdrawn_rows[0]
+    reasons = set()
+    for row in queued:
+        reason = row["args"].get("freed_reason")
+        reasons.add(reason)
+
+    assert withdrawn["args"]["freed_reason"] == "withdrawn"
+    assert withdrawn["ts"] == 15.008
+    assert withdrawn["dur"] == 1.132
+    assert "end of run" not in reasons
 
 
 def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():

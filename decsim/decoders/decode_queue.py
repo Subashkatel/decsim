@@ -34,8 +34,9 @@ class WaitingJobs:
     """The pool's ready queue, and the depth reported at every change.
 
     Trace sources: job_enqueued(job) as a job joins the queue, the job
-    naming the rounds it references in the store; depth_changed(tick,
-    depth) whenever the jobs waiting change.
+    naming the rounds it references in the store; job_withdrawn(job) as
+    one leaves it unserved; depth_changed(tick, depth) whenever the jobs
+    waiting change.
     """
 
     def __init__(
@@ -65,6 +66,7 @@ class WaitingJobs:
         if job not in self.waiting:
             return False
         self.waiting.remove(job)
+        self.trace.job_withdrawn.fire(job)
         return True
 
     def sample_depth(self) -> None:
@@ -171,4 +173,5 @@ class _TraceSources:
     """
 
     job_enqueued: trace_source.TraceSource = trace_source.new_source()
+    job_withdrawn: trace_source.TraceSource = trace_source.new_source()
     depth_changed: trace_source.TraceSource = trace_source.new_source()

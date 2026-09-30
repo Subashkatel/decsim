@@ -16,7 +16,9 @@ import decsim.observe.settings as observe_settings
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
+import tests.experiments.test_measure as measure_tests
 import tests.observe.gate_point as gate_point
+import tests.observe.test_trace_writer as trace_writer_tests
 
 
 @pytest.fixture(scope="module")
@@ -167,6 +169,25 @@ def test_window_zeros_path_runs_from_its_queue_to_the_frame(traced):
     correction = _row_of(followed, "Frame", "residence")
     assert correction.tick == 6_108_000
     assert "committed 6.112" in correction.what
+
+
+def test_a_withdrawn_request_reads_as_withdrawn_when_it_left(tmp_path):
+    """double_window takes back 1:3:weak:6 1.132 us after it queued."""
+    path = tmp_path / "withdrawn.trace.json"
+    observation = {"trace": str(path)}
+    sections = {
+        **trace_writer_tests.RE_SLICED_WINDOWS,
+        "observation": observation,
+    }
+    shot = measure_tests.switching_run(tmp_path, 20.0, sections=sections)
+    shot.machine.observation.trace_writer.write(str(path))
+    traced = trace_file.load(path)
+
+    followed = trace_follow.follow(traced, "window", "1:3")
+
+    queued = _row_of(followed, "Window planner", "queued, withdrawn")
+    assert queued.tick == 15_008_000
+    assert queued.duration_ticks == 1_132_000
 
 
 def test_window_zeros_stages_are_the_units_own_lanes(traced):

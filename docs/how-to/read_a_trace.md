@@ -138,7 +138,7 @@ component.
 
 | In the file | What it is |
 | --- | --- |
-| a complete event (`X`) on a component's lane | a residence or a service. A residence is one round's or one window's stay in a store or a unit's memory. A service is one decode's fetch, algorithm and release, without anything it waited for. Its arguments carry the capacity, when the slot was taken, when the data was ready, and why it was freed |
+| a complete event (`X`) on a component's lane | a residence or a service. A residence is one round's or one window's stay in a store or a unit's memory. A service is one decode's fetch, algorithm and release, without anything it waited for. Its arguments carry the capacity, when the slot was taken, when the data was ready, and why it was freed. A request's wait in the ready queue ends at its dispatch, or at its withdrawal when it is taken back unserved |
 | a complete event on a link path's lane | a move, from its send tick to its delivery tick, with the bits it carried and the request it served |
 | an instant event (`i`) | something with no duration: a hold registered, transferred or released, a verdict, a selection, a copy made |
 | a counter event (`C`) | an occupancy at every change: each syndrome buffer's rounds and its bits, a unit's memory bits, the ready queue's depth, the controller's packing workspace, and the rounds the controller holds while it waits for room in a store |

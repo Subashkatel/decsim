@@ -1643,7 +1643,6 @@ def _confidence_coverage_of(piece: dict):
 
 
 def _code_of(piece: dict) -> tuple:
-    """The tree a piece ran: its commit and whether it was dirty."""
     return (piece["commit"], piece["dirty"])
 
 

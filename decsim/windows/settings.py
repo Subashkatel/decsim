@@ -14,7 +14,6 @@ import decsim.windows.schemes.naive_online as naive_online_scheme
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.schemes.sandwich as sandwich_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
-import decsim.windows.window_interactions as window_interactions
 
 # windows.kind names one of these rows: how the stream is cut into
 # windows.
@@ -74,11 +73,10 @@ class WindowSettings:
     escalation/policies.py and escalation/strong_window_shapes.py):
     held when the escalation may escalate and the strong window does not
     absorb the weak windows it covers, and eager otherwise. A
-    Python-built scheme, boundary policy or window interaction is used as
-    it is; the root's defaults are the sliding scheme, Eager shipping and
-    the default interaction. row_settings is the scheme row's own
-    Settings, read from the section's keys outside WINDOWS_KEYS, or None
-    for a row that declares none.
+    Python-built scheme or boundary policy is used as it is; the root's
+    defaults are the sliding scheme and Eager shipping. row_settings is
+    the scheme row's own Settings, read from the section's keys outside
+    WINDOWS_KEYS, or None for a row that declares none.
     """
 
     clock: Optional[config.Clock] = None
@@ -91,7 +89,6 @@ class WindowSettings:
     boundaries: Optional[str] = None
     scheme: Optional[ports.WindowingScheme] = None
     boundary_policy: Optional[ports.BoundaryPolicy] = None
-    window_interaction: Optional[window_interactions.WindowInteraction] = None
     # the scheme row's own Settings record, opaque to the section
     row_settings: Optional[Any] = None
 

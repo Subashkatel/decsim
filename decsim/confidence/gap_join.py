@@ -116,9 +116,10 @@ class WindowGapJoin:
         Two things the same computation decides go to two different
         solves. The soft output goes on the answering solve, whose
         result carries the window's correction. The ticks go on the
-        solve that delivered last, because that is the one whose
-        deliver_weak ends a service after this returns
-        (decoders/decode_outcomes.py), so the unit that produced the
+        solve that delivered last, because its unit is the one the
+        decoder manager has not yet given back when this returns; it
+        gives that unit back once the ticks pass
+        (decoders/decoder_manager.py), so the unit that produced the
         evidence carries the work (decision D8). On a one-solve window
         the two are the same solve. A signal that only subtracts reports
         no ticks and the answer goes on at once.

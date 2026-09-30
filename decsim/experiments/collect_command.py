@@ -331,10 +331,7 @@ def _check_processes(processes) -> None:
     piece and the collect would finish having run nothing; sinter
     refuses the same count (sinter/_command/_main_collect.py:319-327).
     """
-    is_whole_number = isinstance(processes, int) and not isinstance(
-        processes, bool
-    )
-    if is_whole_number and processes >= 1:
+    if isinstance(processes, int) and processes >= 1:
         return
     raise refusal.RefusalError(
         f"processes must be a whole number of at least 1, got {processes!r}"

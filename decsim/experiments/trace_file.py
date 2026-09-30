@@ -2,7 +2,7 @@
 
 The file `decsim run --trace` writes (observe/trace_writer.py, the
 Chrome Trace Event Format's JSON Array Format). A reader asks for events
-by phase, by name and by the link channel they crossed; the exact
+by phase, by name and by the link path they crossed; the exact
 integer tick is always `args.tick`, never the viewer's `ts`, because
 `ts` is microseconds as a float (trace_and_viewer.md section 2).
 """
@@ -41,14 +41,23 @@ class TraceDocument:
                 found.append(event)
         return found
 
-    def channels(self) -> set:
-        """Every link path a move crossed in this shot."""
+    def link_paths(self) -> set:
+        """Every link path a move crossed in this shot.
+
+        A move sits on its path's thread and names the physical channel
+        it crossed in its args; two paths may share one named channel
+        (links/settings.py ChannelSettings), so the thread is the path.
+        """
         found = set()
         for event in self.of_phase("X"):
-            channel = event["args"].get("channel")
-            if channel is not None:
-                found.add(channel)
+            if is_move(event):
+                found.add(event["thread"])
         return found
+
+
+def is_move(event: dict) -> bool:
+    """Whether an event is a link move: only a move names its channel."""
+    return "channel" in event["args"]
 
 
 def load(path) -> TraceDocument:

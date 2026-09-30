@@ -88,7 +88,9 @@ folder, then applies this file's keys over it (`decsim/experiments/experiment.py
 section this file names replaces the base's section whole, so a `sweep`
 written here replaces the base's sweep rather than adding to it.
 `manifest.json` records the whole chain, nearest first, and `config/`
-in the run folder holds a verbatim copy of every file in it.
+in the run folder holds a verbatim copy of every file in it. A chain
+that reaches one of its own files again is refused, naming the files in
+the order it followed them.
 
 ## The sweep
 

@@ -90,14 +90,14 @@ def test_saved_fragments_reproduce_results_trace_and_actual_history(
 def test_a_rerun_from_a_run_folders_fragments_runs_its_recorded_point(
     tmp_path: pathlib.Path,
 ) -> None:
-    """The point's distance and probability come back from its record."""
+    """The point's distance comes back from its record."""
     program = memory_programs.memory_program(distance=5)
     program = dataclasses.replace(program, round_period_microseconds=1.1)
     inputs = tmp_path / "distance_5" / "fragments"
     _write_fragments(inputs, program)
     original = tmp_path / "original"
     replay = tmp_path / "replay"
-    physical = ("--distance", "5", "--physical-error-probability", "0.002")
+    physical = ("--distance", "5")
     _run_example(inputs, original, physical=physical)
     saved = _saved_fragments(original)
     _run_example(saved, replay)
@@ -191,6 +191,55 @@ def test_replay_refuses_a_round_period_the_fragments_do_not_declare(
     )
     assert refused.returncode != 0
     assert "period differs from the QPU cadence" in refused.stderr
+
+
+def test_a_replay_refuses_a_flag_that_would_relabel_its_circuit(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The loaded fragments' basis is their circuit's, not the flag's."""
+    inputs = _canonical_inputs(tmp_path)
+    output = tmp_path / "relabelled"
+    command = [
+        sys.executable,
+        "tools/live_memory_example.py",
+        "--input",
+        str(inputs),
+        "--output",
+        str(output),
+        "--basis",
+        "X",
+    ]
+    refused = subprocess.run(
+        command, check=False, capture_output=True, text=True
+    )
+    assert refused.returncode != 0
+    assert "--basis cannot change the fragments" in refused.stderr
+    assert not output.exists()
+
+
+def test_a_replay_names_the_circuit_its_saved_fragments_hold(
+    tmp_path: pathlib.Path,
+) -> None:
+    """An X-basis memory with physical noise is replayed under its name.
+
+    The replay's arguments come from the record the producing run left
+    beside the fragments, and its executed history is the original's.
+    """
+    pytest.importorskip("deltakit_explorer")
+    original = tmp_path / "original"
+    command = _producer_command(original, "physical")
+    command.extend(["--basis", "X"])
+    subprocess.run(command, check=True, capture_output=True)
+    saved = _saved_fragments(original)
+    replay = tmp_path / "replay"
+    _run_example(saved, replay)
+    made = _read_json(original, "arguments.json")
+    replayed = _read_json(replay, "arguments.json")
+    replayed_circuit = {name: replayed[name] for name in example.CIRCUIT_VALUES}
+    made_circuit = {name: made[name] for name in example.CIRCUIT_VALUES}
+    assert replayed_circuit == made_circuit
+    assert replayed["basis"] == "X"
+    assert _executed_circuit(replay) == _executed_circuit(original)
 
 
 def test_fragments_that_bind_no_period_replay_at_the_chosen_one(

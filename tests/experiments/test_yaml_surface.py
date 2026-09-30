@@ -18,6 +18,7 @@ import decsim.collect as collect
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
+import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
@@ -1084,6 +1085,31 @@ def test_a_base_past_a_linked_folder_is_the_one_the_filesystem_finds(
     config = experiment.load_experiment(linked_child)
 
     assert config.sections["workload"] == real_workload
+
+
+def test_an_extends_chain_that_returns_to_a_file_is_refused(tmp_path):
+    """A file is named once however the chain spells it."""
+    first_path = tmp_path / "first.yaml"
+    second_path = tmp_path / "second.yaml"
+    (tmp_path / "sub").mkdir()
+    first_path.write_text("extends: second.yaml\n")
+    second_path.write_text("extends: sub/../first.yaml\n")
+    chain = f"{first_path} -> {second_path} -> {first_path}"
+    sentence = f"the extends chain {chain} forms a cycle"
+    pattern = re.escape(sentence)
+
+    with pytest.raises(refusal.RefusalError, match=pattern):
+        experiment.load_experiment(first_path)
+
+
+def test_a_file_that_extends_itself_is_refused(tmp_path):
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text("extends: run.yaml\n")
+    sentence = f"the extends chain {config_path} -> {config_path} forms"
+    pattern = re.escape(sentence)
+
+    with pytest.raises(refusal.RefusalError, match=pattern):
+        experiment.load_experiment(config_path)
 
 
 def test_two_config_files_of_one_name_are_both_copied(tmp_path):

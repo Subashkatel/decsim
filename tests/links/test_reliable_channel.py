@@ -409,6 +409,43 @@ def test_a_window_of_one_waits_for_each_acknowledgement():
     assert delivered[0].delivery_ticks == 1678
 
 
+def test_the_expected_delay_leaves_out_the_window_wait():
+    """The forecast is the unstalled wire, a lower bound on stop and wait.
+
+    Without the window's wait p1 would follow p0 on the wire, 354 +
+    338 = 692 ticks, and land at 992; the delivery waits for the ACK
+    and lands at 1678 (the stop and wait timeline above).
+    """
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(0.0, window_packets=1, ack_every_packets=1)
+    channel = seeded_channel(engine, settings, 1)
+    payload_bits = 512 * 8
+    framed = channel_module.FramedPayload(payload_bits)
+    expected = channel.expected_delay_ticks(framed, 0, 0)
+    delivered = []
+    send_at(engine, channel, 0, 512, delivered)
+
+    engine.run()
+
+    assert expected == 992
+    assert delivered[0].delivery_ticks == 1678
+
+
+def test_the_expected_delay_is_the_delivery_within_the_window():
+    engine = decsim.engine.Engine()
+    settings = reliable_settings(0.0)
+    channel = seeded_channel(engine, settings, 1)
+    payload_bits = 512 * 8
+    framed = channel_module.FramedPayload(payload_bits)
+    expected = channel.expected_delay_ticks(framed, 0, 0)
+    delivered = []
+    send_at(engine, channel, 0, 512, delivered)
+
+    engine.run()
+
+    assert delivered[0].delivery_ticks == expected
+
+
 def _delivered_under_seed(seed: int) -> list:
     engine = decsim.engine.Engine()
     settings = reliable_settings(0.0001)

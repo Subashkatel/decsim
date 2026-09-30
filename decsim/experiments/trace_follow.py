@@ -444,11 +444,14 @@ def _rounds_text(rounds_by_operation: dict) -> str:
 
 
 def _queue_phrase(args: dict) -> str:
-    """The wait in the ready queue, and the unit that ended it."""
+    """The wait in the ready queue, and the unit or reason that ended it."""
     words = ["queued"]
     unit = args.get("unit")
     if unit is not None:
         words.append(f"dispatched to {unit}")
+    reason = args.get("freed_reason")
+    if reason is not None:
+        words.append(reason)
     return ", ".join(words)
 
 

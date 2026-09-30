@@ -3,65 +3,89 @@
 `python plot.py <results folder>` writes the folder's plots/: for each
 decoder, the logical error rate per round against the physical error
 rate, a curve per distance, a panel per basis; and for each basis, the
-four decoders compared, a panel per distance. The rate per round is the
-one the Tesseract paper reports (Beni et al. 2503.10988, eq. 8).
+decoders compared, a panel per distance. The rate per round is the one
+the Tesseract paper reports (Beni et al. 2503.10988, eq. 8).
+
+The decoders, bases, distances, rates and rounds are the ones in the
+folder's own run.py, the script that made its stats: the runner copies
+it there and refuses another text beside it (decsim/experiment_runner.py
+_record_the_run), and this directory's run.py is today's recipe, which
+may name other decoders.
 """
 
+import importlib.util
 import pathlib
 import sys
+import types
 
 import matplotlib.axes
-import run
 import sinter
 
 import decsim.plots as plots
 
-# every panel spans the swept rates, so a panel still filling reads on
-# the same axis as a full one
-LOWEST_RATE = min(run.ERROR_RATES)
-HIGHEST_RATE = max(run.ERROR_RATES)
-X_LIMITS = (LOWEST_RATE * 0.8, HIGHEST_RATE * 1.25)
-# a label at every swept rate, since a log axis over one decade shows one
-RATE_LABELS = [f"{rate:g}" for rate in run.ERROR_RATES]
-
 
 def main(folder: pathlib.Path) -> None:
     """Every figure of the folder's stats.csv, into its plots/."""
+    recipe = recipe_of(folder)
     stats_path = folder / "stats.csv"
     stats = sinter.read_stats_from_csv_files(stats_path)
     plots_folder = folder / "plots"
     plots_folder.mkdir(exist_ok=True)
-    for decoder in run.DECODERS:
-        figure, axis_by_basis = plots.panels("basis", run.BASES)
+    for decoder in recipe.DECODERS:
+        figure, axis_by_basis = plots.panels("basis", recipe.BASES)
         for basis, axis in axis_by_basis.items():
             points = plots.chosen(stats, decoder=decoder, basis=basis)
-            draw(axis, points, "d", run.DISTANCES)
+            draw(axis, points, "d", recipe.DISTANCES, recipe)
         figure.suptitle(decoder)
         path = plots_folder / f"{decoder}.png"
         plots.save(figure, path)
-    for basis in run.BASES:
-        figure, axis_by_distance = plots.panels("d", run.DISTANCES)
+    for basis in recipe.BASES:
+        figure, axis_by_distance = plots.panels("d", recipe.DISTANCES)
         for distance, axis in axis_by_distance.items():
             points = plots.chosen(stats, basis=basis, d=distance)
-            draw(axis, points, "decoder", run.DECODERS)
+            draw(axis, points, "decoder", recipe.DECODERS, recipe)
         figure.suptitle(f"memory {basis}, decoders compared")
         path = plots_folder / f"decoders_{basis}.png"
         plots.save(figure, path)
 
 
+def recipe_of(folder: pathlib.Path) -> types.ModuleType:
+    """The run.py the folder's stats were made by, loaded as a module.
+
+    It is loaded under another name than __main__, so its points are
+    not built and nothing runs.
+    """
+    path = folder / "run.py"
+    specification = importlib.util.spec_from_file_location("recipe", path)
+    recipe = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(recipe)
+    return recipe
+
+
 def draw(
-    axis: matplotlib.axes.Axes, points: list, curve: str, order: list
+    axis: matplotlib.axes.Axes,
+    points: list,
+    curve: str,
+    order: list,
+    recipe: types.ModuleType,
 ) -> None:
     """One panel: the rate per round against p, on the swept rates.
 
     order lists every value of curve, so a curve keeps its colour in a
-    panel another has not reached yet.
+    panel another has not reached yet. Every panel spans the swept
+    rates, so a panel still filling reads on the same axis as a full
+    one, and carries a label at every swept rate, since a log axis over
+    one decade shows one.
     """
     plots.error_rate(
-        axis, points, x="p", curve=curve, rounds=run.ROUNDS, order=order
+        axis, points, x="p", curve=curve, rounds=recipe.ROUNDS, order=order
     )
-    axis.set_xlim(X_LIMITS)
-    axis.set_xticks(run.ERROR_RATES, RATE_LABELS, rotation=45)
+    rates = recipe.ERROR_RATES
+    left_limit = min(rates) * 0.8
+    right_limit = max(rates) * 1.25
+    axis.set_xlim(left_limit, right_limit)
+    rate_labels = [f"{rate:g}" for rate in rates]
+    axis.set_xticks(rates, rate_labels, rotation=45)
     axis.set_xlabel("physical error rate p")
 
 

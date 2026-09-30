@@ -127,7 +127,10 @@ PYTHONPATH=. python experiments/decoder_baseline/plot.py results/2026-09-27_deco
 
 This draws the folder's `plots/` from its `stats.csv`: the logical
 error rate per round against the physical error rate, a figure per
-decoder and one comparing the decoders for each basis. The script is a
+decoder and one comparing the decoders for each basis. Its decoders,
+distances, rates and rounds come from the folder's own `run.py`, the
+script that made its `stats.csv`, so an older folder is drawn by the
+recipe that made it and not today's. The script is a
 few lines because `decsim/plots.py` holds the figure kinds (an error
 rate, a share of two counts, plain values, a distribution, a heat map)
 and their one axis style; another experiment's plot.py draws with the

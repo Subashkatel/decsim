@@ -190,7 +190,11 @@ def _plot(argv: list) -> None:
     parser.add_argument(
         "--figure", default="timeline", help="which figure to draw"
     )
-    parser.add_argument("--out", default=None, help="where the figure goes")
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="where the figure goes; beside its source if unset",
+    )
     parsed = parser.parse_args(argv)
     out_path = plots.figure(parsed.figure, parsed.run_dir, parsed.out)
     print(out_path)

@@ -155,8 +155,10 @@ class Channel:
         The setup engine's and the wire's queues as they stand now, the
         serialization and the propagation. A transfer with a setup is
         ready after every transfer now in setup, so each of those takes
-        the wire ahead of it. A scheduler's estimate, exact whenever no
-        later request overtakes it on the wire and nothing is lost.
+        the wire ahead of it. A scheduler's estimate: on the ideal and
+        credit rows it is exact whenever no later request overtakes it
+        on the wire; on the reliable row it is a lower bound, because a
+        packet's wait for the acknowledgement window is left out.
         """
         ready_ticks = self._ready_ticks(now_ticks, setup_ticks)
         wire = self._wire_as_it_stands()

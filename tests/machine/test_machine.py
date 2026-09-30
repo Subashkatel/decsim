@@ -61,6 +61,7 @@ import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.ports as ports
+import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.magic_state_factories as magic_state_factories
@@ -502,6 +503,40 @@ def test_streams_decode_only_on_the_strong_path_with_actual_truth(
     assert len(store_transfers) == len(run.packets)
     expected_bits = _stored_bit_count(run, placement)
     _assert_stored_bit_count(store_transfers, expected_bits)
+
+
+def test_a_string_stream_owner_beside_integer_operations_is_captured():
+    """Result rows follow the canonical identity order, ints before strs.
+
+    records/identity.py orders every identity by its type-tagged bytes,
+    since Python refuses to compare an int with a str.
+    """
+    program = memory_programs.memory_program()
+    settings = live_example.live_settings(
+        program,
+        distance=3,
+        round_period_microseconds=1.1,
+        prefix_round_count=3,
+        patch="memory-patch",
+        feedback_microseconds=4.0,
+        decoder_microseconds=0.1,
+    )
+    workload = producers.live_memory(program, 3)
+    first, *rest = workload.operations
+    prefix = dataclasses.replace(first, stream_id="live")
+    operations = (prefix, *rest)
+    named = dataclasses.replace(workload, operations=operations)
+    section = workload_settings.WorkloadSettings()
+    lowered = section.running(named)
+    settings = dataclasses.replace(settings, workload=lowered)
+
+    machine = machine_module.Machine.build(settings, 17)
+    result = machine.run()
+
+    rows = result.operation_results
+    owner = rows[-1]
+    assert [row.operation_id for row in rows] == [1, 2, 3, 4, "live"]
+    assert owner.observable_truth is not None
 
 
 @pytest.mark.parametrize("final_round", [4, 6, 7, 9])

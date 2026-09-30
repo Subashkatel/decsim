@@ -160,6 +160,27 @@ def per_round_rate(shot_rate: float, rounds: int) -> float:
     return -negative_round_flip / 2
 
 
+def per_output_round_rate(shot_rate: float, outputs: int, rounds: int) -> float:
+    """One output's per-round rate, when a shot fails if any output does.
+
+    sinter 1.16.0 shot_error_rate_to_piece_error_rate with values
+    (_probability_util.py:463-465), before its last step, which joins
+    the outputs again: the outputs are independent or-pieces, each the
+    xor of its rounds, so one output survives a shot with probability
+    (1 - P)^(1 / outputs), and its rate is converted over its own rounds
+    (per_round_rate). Several memory patches are such
+    outputs, each drawing its own shot; one entangled circuit is one
+    output, its rounds across both codes (Tesseract 2503.10988 eq. 8).
+    """
+    # log1p(-1) is minus infinity: at a rate of one every output failed,
+    # and one output's rate is the shot's
+    if outputs == 1 or shot_rate == 1:
+        return per_round_rate(shot_rate, rounds)
+    output_log_survival = math.log1p(-shot_rate) / outputs
+    output_rate = -math.expm1(output_log_survival)
+    return per_round_rate(output_rate, rounds)
+
+
 def mcnemar_p_value(
     first_only_failures: int, second_only_failures: int
 ) -> float:

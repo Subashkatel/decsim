@@ -82,6 +82,7 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.wiring as wiring
 import decsim.ports as ports
+import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
@@ -376,8 +377,11 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
     operation_by_id = {}
     for operation in machine.plan.all_operations:
         operation_by_id[operation.id] = operation
+    ordered_ids = sorted(
+        operation_by_id, key=identity_records.stable_identity_order_key
+    )
     rows = []
-    for operation_id in sorted(operation_by_id):
+    for operation_id in ordered_ids:
         operation = operation_by_id[operation_id]
         row = _operation_result(machine, operation, truth_for)
         rows.append(row)

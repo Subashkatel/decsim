@@ -56,6 +56,8 @@ import decsim.machine as machine_module
 import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.producers as producers
+import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -67,6 +69,8 @@ import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 import tests.experiments.yaml_configs as yaml_configs
+import tests.qpu.memory_programs as memory_programs
+import tools.live_memory_example as live_memory_example
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
@@ -494,6 +498,7 @@ def test_a_gpu_decode_that_finds_the_dispatcher_busy_waits_in_its_own_point(
     175.007 us, 164.687 us. The algorithm point holds that wait and the
     device's own time after it.
     """
+    pytest.importorskip("relay_bp")
     strong_decoder = {
         "kind": "measured_table",
         "units": 2,
@@ -636,6 +641,71 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     assert measurement.weak_busy_fraction == 0.0
     assert measurement.strong_queue_max == measurement.max_queued_windows
     assert measurement.strong_busy_fraction > 0.0
+
+
+def test_patches_named_by_an_int_and_a_str_are_measured(tmp_path):
+    """Windows are ordered by records/identity.py, not Python's comparison."""
+    config_path = write_config(tmp_path, {})
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        {
+            yaml_configs.ERROR_RATE_PATH: 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        }
+    )
+    workload = producers.memory_patches(
+        "surface_code:rotated_memory_z", 3, 2, 3, 0.001
+    )
+    first, second = workload.operations
+    named = dataclasses.replace(second, id="b")
+    round_counts = {1: 3, "b": 3}
+    mixed = dataclasses.replace(
+        workload, operations=(first, named), round_counts=round_counts
+    )
+    section = workload_settings.WorkloadSettings()
+    lowered = section.running(mixed)
+    settings = dataclasses.replace(task.settings, workload=lowered)
+    mixed_task = collect.Task(settings, {})
+    shot = collect.run_shot(mixed_task, 0)
+
+    measured = measure.measure_shot(shot)
+
+    assert measured.predictions == '{"1":"0","b":"0"}'
+    assert measured.decoded_windows == 2
+
+
+def test_the_window_sizes_and_period_are_the_card_the_qpu_ran(tmp_path):
+    """The plan lays its windows out by the card; the qpu names no distance.
+
+    The card commits 2 rounds, buffers 1 and keeps its own 2 us round,
+    so a window arrives every 4 us, whatever the section's period says.
+    """
+    workload = memory_workload(9)
+    config_path = write_config(tmp_path, {"workload": workload})
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        {
+            yaml_configs.ERROR_RATE_PATH: 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        }
+    )
+    card = code_geometry.SurfaceCodeModel(
+        distance=3,
+        round_microseconds=2.0,
+        commit_rounds_override=2,
+        buffer_rounds_override=1,
+    )
+    qpu = dataclasses.replace(task.settings.qpu, distance=None, code=card)
+    settings = dataclasses.replace(task.settings, qpu=qpu)
+    carded = collect.Task(settings, {})
+    shot = collect.run_shot(carded, 0)
+
+    measured = measure.measure_shot(shot)
+
+    assert measured.commit_rounds == 2
+    assert measured.window_period_us == 4.0
 
 
 def test_skorics_process_count_is_two_services_over_the_window_period(
@@ -1386,6 +1456,26 @@ def test_throughput_counts_the_rounds_the_shot_read_out():
     assert rounds_per_window * decoded_windows == pytest.approx(60)
 
 
+def test_a_shot_with_no_pauli_frame_got_no_window_through():
+    """A machine built with no frame commits nothing, and its rates are zero.
+
+    Throughput runs from the first round to the last frame commit, and
+    a Python-built machine whose pauli_frame is None commits no window,
+    so no window and no round got through; the rounds it read out are
+    still measured.
+    """
+    settings = seam_streams_settings(1)
+    frameless = dataclasses.replace(settings, pauli_frame=None)
+    task = collect.Task(frameless, {})
+    shot = collect.run_shot(task, 0)
+    measured = measure.measure_shot(shot)
+
+    assert measured.decoded_windows == 0
+    assert measured.throughput_windows_per_us == 0.0
+    assert measured.throughput_rounds_per_us == 0.0
+    assert measured.executed_rounds == 30
+
+
 def test_every_streams_window_is_measured_against_its_own_frame_record():
     """Two streams commit eighteen corrections and none is dropped.
 
@@ -1715,9 +1805,7 @@ def test_a_source_that_samples_no_shot_is_refused_with_a_sentence(tmp_path):
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
 
-    with pytest.raises(
-        refusal.RefusalError, match="sampled none for operation"
-    ):
+    with pytest.raises(refusal.RefusalError, match="sampled none"):
         measure_point_shot(
             config,
             physical_error_probability=0.001,
@@ -1725,6 +1813,39 @@ def test_a_source_that_samples_no_shot_is_refused_with_a_sentence(tmp_path):
             round_period_microseconds=1.0,
             seed=0,
         )
+
+
+def test_a_live_stream_is_scored_through_its_owner_over_its_run_rounds():
+    """The owner's own Stim circuit is the shot sinter would score.
+
+    Its segments and the operations that hold and resume its patch have
+    no truth of their own. Its horizon is its circuit's rounds, which
+    include the rounds it idled through while the prefix's answer came
+    back; a d=3 memory round holds 8 of Stim's detectors.
+    """
+    program = memory_programs.memory_program()
+    live = live_memory_example.live_settings(
+        program,
+        distance=3,
+        round_period_microseconds=1.1,
+        prefix_round_count=3,
+        patch="memory-patch",
+        feedback_microseconds=4.0,
+        decoder_microseconds=0.1,
+    )
+    frame = pauli_frame_module.PauliFrameConfig()
+    settings = dataclasses.replace(live, pauli_frame=frame)
+    task = collect.Task(settings, {})
+    shot = collect.run_shot(task, 17)
+    measured = measure.measure_shot(shot)
+    sampled = shot.machine.observation.sampled_shots.shots_by_operation
+    owner_shot = sampled[producers.LIVE_STREAM_ID]
+    stim_rounds = owner_shot.circuit.num_detectors // 8
+
+    assert list(sampled) == [producers.LIVE_STREAM_ID]
+    assert measured.executed_rounds == stim_rounds
+    assert stim_rounds > 3 + 1
+    assert measured.logical_failure is False
 
 
 # A whole-patch burst from round 12 on the 30-round switching shot; the

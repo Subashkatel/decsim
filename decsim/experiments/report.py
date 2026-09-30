@@ -111,7 +111,7 @@ SHOT_MEANS = (
     *LOAD_MEANS,
 )
 SHOT_MAXES = (
-    # one value per point, the yaml's or d, so its largest is that value
+    # one value per point, the code card's, so its largest is that value
     "commit_rounds",
     "window_period_us",
     "max_queued_windows",
@@ -676,6 +676,23 @@ def fold_pieces(
     return _fold_into(folders, point_ids, order, out_dir, rules)
 
 
+def refuse_pieces_of_another_tree(folders: list) -> None:
+    """Refuse a collect onto a point whose saved pieces ran another tree.
+
+    A collect names this tree in its run folder's manifest before its
+    first shot and folds the pieces it adds with the saved ones, so it
+    asks the fold's own refusal first, this tree standing for the pieces
+    it would add, and a refused collect spends no shot and leaves the
+    run folder as the earlier tree wrote it.
+    """
+    identity = run_folder.piece_identity()
+    this_code = _code_of(identity)
+    code_by_point = _pieces_by_point_and_value(folders, _code_of)
+    for by_code in code_by_point.values():
+        by_code.setdefault(this_code, "this collect")
+    _refuse_a_point_of_two_trees(code_by_point)
+
+
 def swept_values_of(report_dir: Path) -> dict:
     """The swept values of every point a run folder's manifest lists."""
     manifest = _manifest_of(report_dir)
@@ -760,6 +777,7 @@ def _refused_or_ordered(folders: list, point_ids: list):
     _refuse_folders_of_different_columns(folders)
     _refuse_a_point_this_tree_cannot_place(folders)
     _refuse_pieces_that_recorded_confidence_apart(folders)
+    _refuse_pieces_that_ran_different_code(folders)
     _refuse_a_repeated_shot(folders, order)
     return order
 
@@ -967,10 +985,10 @@ def _add_estimate_columns(row: dict, prefix: collection.PrefixTracker) -> None:
     row["logical_error_rate_low"] = estimate.low
     row["logical_error_rate_high"] = estimate.high
     row["logical_error_rate_plan_unbiased"] = _plan_unbiased(prefix)
-    rounds = prefix.rule.rounds_per_shot
-    row["logical_error_rate_per_round"] = _per_round(estimate.rate, rounds)
-    row["logical_error_rate_per_round_low"] = _per_round(estimate.low, rounds)
-    row["logical_error_rate_per_round_high"] = _per_round(estimate.high, rounds)
+    shape = prefix.round_shape()
+    row["logical_error_rate_per_round"] = _per_round(estimate.rate, shape)
+    row["logical_error_rate_per_round_low"] = _per_round(estimate.low, shape)
+    row["logical_error_rate_per_round_high"] = _per_round(estimate.high, shape)
     row["is_shot_rate_above_half"] = _is_above_half(estimate.rate)
     row["prefix_shots"] = counts.shots
     row["prefix_scored_shots"] = counts.scored_shots
@@ -1011,17 +1029,18 @@ def _plan_unbiased(prefix: collection.PrefixTracker) -> Optional[float]:
     )
 
 
-def _per_round(shot_rate: Optional[float], rounds: Optional[int]):
-    """A shot's rate as a round's, when both are known."""
-    if shot_rate is None or rounds is None:
+def _per_round(shot_rate: Optional[float], round_shape: Optional[tuple]):
+    """A shot's rate as one output's for one round, when both are known."""
+    if shot_rate is None or round_shape is None:
         return None
-    return failure_statistics.per_round_rate(shot_rate, rounds)
+    outputs, rounds = round_shape
+    return failure_statistics.per_output_round_rate(shot_rate, outputs, rounds)
 
 
 def _is_above_half(shot_rate: Optional[float]) -> Optional[bool]:
     """Whether the shot rate is past one half.
 
-    There the per-round map takes its complement
+    With one output, there the per-round map takes its complement
     (failure_statistics.per_round_rate), and for an even round count no
     round-flip probability gives the rate at all.
     """
@@ -1580,15 +1599,65 @@ def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
     fewer shots there than in the sweep row. A piece.json without the
     line is such an older piece, and it reads as None.
     """
-    coverage_by_point = {}
-    for run_dir in run_dirs:
-        piece = _piece_of(run_dir)
-        coverage = piece.get("confidence_shot_count")
-        by_coverage = coverage_by_point.setdefault(piece["point_id"], {})
-        by_coverage.setdefault(coverage, run_dir)
+    coverage_by_point = _pieces_by_point_and_value(
+        run_dirs, _confidence_coverage_of
+    )
     for point_id, by_coverage in coverage_by_point.items():
         if len(by_coverage) > 1:
             _refuse_the_confidence_coverage(point_id, by_coverage)
+
+
+def _refuse_pieces_that_ran_different_code(run_dirs: list) -> None:
+    """A point's pieces must have run one tree: one commit, clean or dirty.
+
+    A point's estimate pools its pieces' shots, and the run folder's
+    manifest names one tree, the folding process's, so pieces of two
+    trees would pool two simulators under one name. A dirty tree's
+    changes are not recorded per piece, so two dirty pieces of one
+    commit pass, and a clean and a dirty one do not.
+    """
+    code_by_point = _pieces_by_point_and_value(run_dirs, _code_of)
+    _refuse_a_point_of_two_trees(code_by_point)
+
+
+def _refuse_a_point_of_two_trees(code_by_point: dict) -> None:
+    for point_id, by_code in code_by_point.items():
+        if len(by_code) > 1:
+            _refuse_the_code(point_id, by_code)
+
+
+def _pieces_by_point_and_value(run_dirs: list, value_of) -> dict:
+    """Each point's first piece folder for every value value_of reads."""
+    folders_by_point = {}
+    for run_dir in run_dirs:
+        piece = _piece_of(run_dir)
+        value = value_of(piece)
+        by_value = folders_by_point.setdefault(piece["point_id"], {})
+        by_value.setdefault(value, run_dir)
+    return folders_by_point
+
+
+def _confidence_coverage_of(piece: dict):
+    """The shots a piece recorded confidence for; None for an older piece."""
+    return piece.get("confidence_shot_count")
+
+
+def _code_of(piece: dict) -> tuple:
+    return (piece["commit"], piece["dirty"])
+
+
+def _refuse_the_code(point_id: str, by_code: dict):
+    """Say which pieces of the point ran which tree."""
+    pieces_named = []
+    for (commit, is_dirty), run_dir in by_code.items():
+        pieces_named.append(f"{run_dir} (commit {commit}, dirty {is_dirty})")
+    listed = ", ".join(pieces_named)
+    raise refusal.RefusalError(
+        f"the pieces of point {point_id} ran different code: {listed}; "
+        "one estimate would pool two simulators under one manifest, so "
+        "collect the point into a new experiment folder, or move one "
+        "tree's pieces out of this one"
+    )
 
 
 def _piece_of(run_dir) -> dict:

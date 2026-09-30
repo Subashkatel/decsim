@@ -165,6 +165,38 @@ def test_the_per_round_rate_is_sinters(shot_rate, rounds):
 
 
 @pytest.mark.parametrize(
+    ("shot_rate", "outputs", "rounds"),
+    [
+        (0.19, 2, 1),
+        (0.1, 4, 30),
+        (0.53, 8, 50),
+        (0.05, 1, 100),
+        (1.0, 4, 30),
+    ],
+)
+def test_one_outputs_per_round_rate_is_sinters_before_it_joins_them(
+    shot_rate, outputs, rounds
+):
+    """With values, sinter returns 1 - (1 - e)^values; e is one output's."""
+    per_round = failure_statistics.per_output_round_rate(
+        shot_rate, outputs, rounds
+    )
+
+    joined = sinter.shot_error_rate_to_piece_error_rate(
+        shot_rate, pieces=rounds, values=outputs
+    )
+    one_output = 1 - (1 - joined) ** (1 / outputs)
+    assert per_round == pytest.approx(one_output, rel=1e-9, abs=0)
+
+
+def test_two_one_round_patches_failing_a_tenth_each_are_a_tenth():
+    """0.19 is 1 - 0.9 squared: each patch's own round is 0.1."""
+    per_round = failure_statistics.per_output_round_rate(0.19, 2, 1)
+
+    assert per_round == pytest.approx(0.1, rel=1e-12)
+
+
+@pytest.mark.parametrize(
     ("shot_rate", "rounds"),
     [
         (1e-12, 1),

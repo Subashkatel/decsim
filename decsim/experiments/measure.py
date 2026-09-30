@@ -1,10 +1,11 @@
 """One collected shot -> one shot's numbers. Nothing is built here.
 
 A shot is one circuit through the whole reaction path. `measure_shot`
-reads the run's listeners (`machine.observation`) and its RunResult, and
-no component: the window ledger, the stage ledger, the frame's
-corrections, the queue depth log, the referee's audit, the sampled shot
-and the link traffic of the result. The input and output transfers are
+reads the run's listeners (`machine.observation`), its RunResult, and
+the code card and cadence its QPU ran, and no other component: the
+window ledger, the stage ledger, the frame's corrections, the queue
+depth log, the referee's audit, the sampled shot and the link traffic
+of the result. The input and output transfers are
 named by role, not by wire, and which wire carries each role follows
 from the escalation row's declared primary_tier (ports.py
 EscalationPolicy), so a row written outside decsim is measured like any
@@ -27,7 +28,7 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
-import decsim.observe.sampled_shots as sampled_shots_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
@@ -188,6 +189,14 @@ class ShotMeasurement:
     seed: int
     decoded_windows: int
     logical_failure: bool
+    # the patch-rounds the scored owners read out, added up; the owners
+    # scored, each an independent output the shot fails on when it is
+    # wrong; and the patch-rounds each ran, 0 when they ran apart. A
+    # per-round rate reads the last two (failure_statistics
+    # per_output_round_rate)
+    executed_rounds: int
+    scored_outputs: int
+    rounds_per_output: int
     samples: dict  # point -> us list, one per window (per round for cwb)
     # the tier whose decode the frame committed, one per window in the
     # samples' order: weak for a kept window, strong for an escalated one
@@ -281,8 +290,9 @@ class ShotMeasurement:
     is_scored: bool
     unscored_reason: str
     provisional_no_correction_windows: int
-    # sha256 of every operation's sampled detection events and observable
-    # truth, so two points' shots of one seed are checked to be one draw
+    # sha256 of every scored owner's sampled detection events and
+    # observable truth, so two points' shots of one seed are checked to
+    # be one draw
     sample_digest: str
     # the windows' confidence gaps, None when no confidence signal
     # decided the escalation; its own files hold it, not shots.csv
@@ -312,10 +322,16 @@ def measure_shot(
     trace_path = None
     if run_dir is not None:
         trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
+    device = shot.machine.qpu.device
+    round_period_microseconds = config_module.ticks_to_microseconds(
+        device.clock.period_ticks
+    )
     return _measurement(
         settings,
         observation,
         shot.result,
+        code=device.code,
+        round_period_microseconds=round_period_microseconds,
         point_id=point_id,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
@@ -694,7 +710,7 @@ def collect_samples(
     samples["cwb_stall_per_round"] = round_stall_delays_us(weak_keys, waits)
     samples["csb_stall_per_round"] = round_stall_delays_us(strong_keys, waits)
     window_items = observation.windows.windows.items()
-    all_windows = sorted(window_items)
+    all_windows = sorted(window_items, key=_window_order)
     stages = observation.stages
     for window_key, window in all_windows:
         frame_record = frame_by_window.get(window_key)
@@ -749,16 +765,6 @@ def chain_load(samples: dict, window_period_us: float) -> float:
     return chain_us / window_period_us
 
 
-def commit_round_count(
-    settings: machine_settings.MachineSettings, distance: int
-) -> int:
-    """r_com: the rounds a window commits, the code distance when null."""
-    commit_rounds = settings.windows.commit_rounds
-    if commit_rounds is None:
-        return distance
-    return commit_rounds
-
-
 def active_decoder_kind(settings: machine_settings.MachineSettings):
     """The kind of the tier that decodes the plan's windows."""
     tier = escalation_build.primary_tier(settings.escalation)
@@ -801,6 +807,8 @@ def _measurement(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
+    code: ports.CodeModel,
+    round_period_microseconds: float,
     point_id: str,
     seed: int,
     wall_seconds: float,
@@ -808,20 +816,26 @@ def _measurement(
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records.
 
+    code and round_period_microseconds are the card and the cadence the
+    QPU ran, so a window's sizes are the ones the plan laid out.
+
     It stays whole past the size prompt: each number is read once, named,
     and placed in the record, top to bottom, and a split would put the
     reading and the placing of one number in two places.
     """
-    sample_digest = _sample_digest(observation, result)
+    owners = _scored_owners(result)
+    sample_digest = _sample_digest(observation, owners)
+    rounds_by_owner = _rounds_by_owner(observation, owners)
+    owner_rounds = rounds_by_owner.values()
+    executed_rounds = sum(owner_rounds)
+    rounds_per_output = _one_length(owner_rounds)
     samples, window_tiers = collect_samples(observation, result)
-    logical_failure = _logical_failure(result)
+    logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
-    distance = settings.qpu.distance
-    round_period_microseconds = settings.qpu.round_period_microseconds
-    commit_rounds = commit_round_count(settings, distance)
+    commit_rounds = code.commit_rounds()
     window_period_us = commit_rounds * round_period_microseconds
     load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
@@ -832,7 +846,7 @@ def _measurement(
     tiers = _tier_records(observation)
     backlog_peak = _backlog_peak_rounds(observation)
     processes = parallel_processes_needed(
-        samples, settings, distance, round_period_microseconds
+        samples, code, round_period_microseconds
     )
     totals = link_totals(result.link_traffic)
     means = _means(samples)
@@ -850,6 +864,9 @@ def _measurement(
         seed=seed,
         decoded_windows=decoded_windows,
         logical_failure=is_scored_failure,
+        executed_rounds=executed_rounds,
+        scored_outputs=len(owners),
+        rounds_per_output=rounds_per_output,
         samples=samples,
         window_tiers=window_tiers,
         means=means,
@@ -918,9 +935,11 @@ def _burst_catch(
     A detector's delay is its first alarm at or after the onset less the
     onset, and it catches the burst within k rounds when that delay is
     at most k, as detection delay is scored for change-point detectors
-    (Xie et al. 2104.04186 lines 161-171). A shot with no burst counts
-    from round 1, so any flag on it is a false alarm. (None, None)
-    without a detector.
+    (Xie et al. 2104.04186 lines 161-171). The delay counts the rounds
+    the detector read, not the tick its flag was published, which its
+    pipeline puts later and the switching waits for. A shot with no
+    burst counts from round 1, so any flag on it is a false alarm.
+    (None, None) without a detector.
     """
     flags = observation.burst_flags
     if flags is None:
@@ -988,47 +1007,90 @@ def _provisional_no_correction_windows(
 
 
 def _sample_digest(
-    observation: observation_module.Observation,
-    result: result_records.RunResult,
+    observation: observation_module.Observation, owners: tuple
 ) -> str:
-    """sha256 of each operation's sampled detection events and truth.
+    """sha256 of each scored owner's sampled detection events and truth.
 
     The events are the ones the source fired on shot_sampled
     (qpu/stim_device.py) and the truth is the observable flips it drew
-    with them, one byte a bit, operation by operation in the result's
-    order. Two points that differ only in their decoder draw the same
-    shot at the same seed, so pairing their shots can be checked rather
-    than assumed.
+    with them, one byte a bit, owner by owner in the result's order.
+    Two points that differ only in their decoder draw the same shot at
+    the same seed, so pairing their shots can be checked rather than
+    assumed.
     """
+    shots_by_operation = observation.sampled_shots.shots_by_operation
     digest = hashlib.sha256()
-    for operation_result in result.operation_results:
-        operation_id = operation_result.operation_id
-        shot = _sampled_shot(observation, operation_id)
+    for owner in owners:
+        shot = shots_by_operation[owner.operation_id]
         event_bytes = bytes(shot.detection_events)
-        truth_bytes = bytes(operation_result.observable_truth)
+        truth_bytes = bytes(owner.observable_truth)
         digest.update(event_bytes)
         digest.update(truth_bytes)
     return digest.hexdigest()
 
 
-def _sampled_shot(
-    observation: observation_module.Observation, operation_id
-) -> sampled_shots_module.SampledShot:
-    """The shot the source drew for an operation, heard at sampling time.
+def _scored_owners(result: result_records.RunResult) -> tuple:
+    """The operations whose logical output the source sampled a truth for.
 
-    A source that draws no shot (qpu.kind timing_only and syndrome_bits)
-    leaves the loop no truth to be scored against, so the shot is
-    refused rather than counted as right or wrong.
+    A live stream's segments and the operations that only hold or
+    resume its patch drive its timing and have no truth of their own:
+    their rounds reach the stream owner's one circuit, which is scored
+    once, as sinter scores a complete circuit's predictions against its
+    observables (sinter/_decoding/_stim_then_decode_sampler.py:76). A
+    source that draws no shot (qpu.kind timing_only and syndrome_bits)
+    leaves no owner, and the shot is refused rather than counted as
+    right or wrong.
     """
-    shots_by_operation = observation.sampled_shots.shots_by_operation
-    if operation_id not in shots_by_operation:
+    owners = []
+    for operation_result in result.operation_results:
+        if operation_result.observable_truth is not None:
+            owners.append(operation_result)
+    if not owners:
         raise refusal.RefusalError(
             "decsim collect scores every shot against the logical "
             "observables its syndrome source sampled, and the source "
-            f"sampled none for operation {operation_id}; name a qpu.kind "
-            "that samples the circuit, such as stim_device"
+            "sampled none; name a qpu.kind that samples the circuit, such "
+            "as stim_device"
         )
-    return shots_by_operation[operation_id]
+    return tuple(owners)
+
+
+def _rounds_by_owner(
+    observation: observation_module.Observation, owners: tuple
+) -> dict:
+    """Each scored owner's patch-rounds read out this shot.
+
+    A round of a patch counts once, whenever it ran: a live stream's
+    rounds include those it idled through while its feedback waited,
+    which only the run knows, and all of them reach the owner's circuit.
+    """
+    rounds_by_owner = {}
+    for owner in owners:
+        rounds_by_owner[owner.operation_id] = set()
+    for event in observation.round_events.events:
+        _add_the_emitted_patch_rounds(rounds_by_owner, event)
+    counts = {}
+    for owner_id, patch_rounds in rounds_by_owner.items():
+        counts[owner_id] = len(patch_rounds)
+    return counts
+
+
+def _add_the_emitted_patch_rounds(rounds_by_owner: dict, event) -> None:
+    """An emitted round's patch-rounds, added to its scored owner's set."""
+    patch_rounds = rounds_by_owner.get(event.operation_id)
+    if event.kind != "EMITTED" or patch_rounds is None:
+        return
+    for patch in event.patch_ids:
+        patch_rounds.add((event.round_index, patch))
+
+
+def _one_length(owner_rounds) -> int:
+    """The patch-rounds every scored owner ran; 0 when they ran apart."""
+    lengths = set(owner_rounds)
+    if len(lengths) != 1:
+        return 0
+    (length,) = lengths
+    return length
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:
@@ -1123,17 +1185,17 @@ class _TierRecords:
     strong_held_in_units_max: Optional[int] = None
 
 
-def _logical_failure(result: result_records.RunResult) -> bool:
+def _logical_failure(owners: tuple) -> bool:
     """Whether the loop's observables missed the truth.
 
-    A shot fails when any of its operations reads a wrong observable, as
-    a computation fails when any of its logical qubits does; a workload
+    A shot fails when any of its owners reads a wrong observable, as a
+    computation fails when any of its logical qubits does; a workload
     of several patches is judged over all of them.
     """
     is_logical_failure = False
-    for operation_result in result.operation_results:
-        truth = tuple(operation_result.observable_truth)
-        loop_prediction = tuple(operation_result.logical_observables)
+    for owner in owners:
+        truth = tuple(owner.observable_truth)
+        loop_prediction = tuple(owner.logical_observables)
         is_logical_failure |= loop_prediction != truth
     return is_logical_failure
 
@@ -1174,8 +1236,15 @@ def _throughput_per_microsecond(
     Operations that run at once add their rounds: the rate is the load
     the shared decoders serve, which the backlog condition weighs against
     their service rate (Holmes 2004.04794 section III), not the QEC
-    cycle rate, which is one over the round period by construction.
+    cycle rate, which is one over the round period by construction. A
+    shot that commits nothing into a frame, a machine built with no
+    pauli_frame, got nothing through, and both rates are zero, as a
+    tier the run does not have measures zero.
     """
+    if not observation.frame_corrections.committed:
+        return _Throughput(
+            windows_per_microsecond=0.0, rounds_per_microsecond=0.0
+        )
     decoded_windows = len(samples["service"])
     rounds_this_shot = _emitted_round_count(observation)
     span_us = _decoded_span_microseconds(observation)
@@ -1422,10 +1491,7 @@ def _backlog_peak_rounds(
 
 
 def parallel_processes_needed(
-    samples: dict,
-    settings: machine_settings.MachineSettings,
-    distance: int,
-    round_period_microseconds: float,
+    samples: dict, code: ports.CodeModel, round_period_microseconds: float
 ) -> int:
     """Skoric's least count of parallel decoding processes for no backlog.
 
@@ -1435,15 +1501,14 @@ def parallel_processes_needed(
     lines 1625-1631). Layer A commits n_com rounds and layer B its
     whole window, and n_W is the window with a buffer on each side,
     n_com + 2 n_buf, "nW = 3w" at the paper's sizes (lines 388-390).
-    tau_W is this shot's mean service and the sizes are the window
-    scheme's, d when null. It is the count the parallel window scheme
-    needs; the serial chain's own condition is chain_load.
+    tau_W is this shot's mean service and the sizes are the code card's,
+    the ones the plan laid its windows out by. It is the count the
+    parallel window scheme needs; the serial chain's own condition is
+    chain_load.
     """
     service_us = _mean_or_zero(samples["service"])
-    commit_rounds = commit_round_count(settings, distance)
-    buffer_rounds = settings.windows.buffer_rounds
-    if buffer_rounds is None:
-        buffer_rounds = distance
+    commit_rounds = code.commit_rounds()
+    buffer_rounds = code.buffer_rounds()
     both_buffers_round_count = 2 * buffer_rounds
     window_round_count = commit_rounds + both_buffers_round_count
     committed_round_count = commit_rounds + window_round_count
@@ -1451,6 +1516,16 @@ def parallel_processes_needed(
     both_layers_service_us = 2 * service_us
     processes = both_layers_service_us / committed_rounds_us
     return math.ceil(processes)
+
+
+def _window_order(window_item: tuple) -> bytes:
+    """A (window key, window) pair's place: the key's canonical bytes.
+
+    An operation id may be an int or a str, which Python does not order
+    against each other (records/identity.py).
+    """
+    window_key, _window = window_item
+    return identity_records.stable_identity_order_key(window_key)
 
 
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:

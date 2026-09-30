@@ -145,7 +145,11 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         return credit_channel.CreditWire(self._settings, protocol)
 
     def _wire_as_it_stands(self) -> credit_channel.CreditWire:
-        """The wire once every packet queued now has crossed, none lost."""
+        """The wire once every packet queued now has crossed, none lost.
+
+        No packet waits here for an acknowledgement, so a message wider
+        than the window lands later than this wire says.
+        """
         wire = self._wire.copy()
         now_ticks = self._engine.now
         packets = self._sending.packets

@@ -894,6 +894,30 @@ def test_pieces_of_one_point_that_recorded_confidence_apart_are_refused(
     assert not out_dir.exists()
 
 
+def test_pieces_of_one_point_that_ran_different_commits_are_refused(
+    tmp_path,
+):
+    """A resumed collect from another tree would pool two simulators.
+
+    The second piece is saved as a process at another commit saves it;
+    the fold names both trees' pieces and writes nothing.
+    """
+    experiment_dir = _pieces_of_one_point(tmp_path, 2, 1)
+    folders = _piece_folders(experiment_dir)
+    later = folders[1]
+    other_commit = "b" * 40
+    _as_a_piece_run_at_commit(later, other_commit)
+    out_dir = tmp_path / "folded"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        _folded(experiment_dir, folders, out_dir)
+
+    said = str(refused.value)
+    assert "ran different code" in said
+    assert f"{later} (commit {other_commit}" in said
+    assert not out_dir.exists()
+
+
 def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():
     ten_decibels_in_nats = 2.302585092994046
 
@@ -1004,6 +1028,16 @@ def _the_one_piece(tmp_path, out) -> dict:
     (piece_path,) = experiment_dir.glob("pieces/*/*/piece.json")
     piece_text = piece_path.read_text()
     return json.loads(piece_text)
+
+
+def _as_a_piece_run_at_commit(folder, commit: str) -> None:
+    """The piece as a process at another commit would have saved it."""
+    piece_path = folder / "piece.json"
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    piece["commit"] = commit
+    other_text = json.dumps(piece)
+    piece_path.write_text(other_text)
 
 
 def _as_a_piece_from_before_the_confidence_files(folder) -> None:

@@ -968,6 +968,29 @@ def test_a_configuration_line_is_staged_under_its_writers_own_name(tmp_path):
     assert list(configurations) == [run_folder.configuration_id(config)]
 
 
+def test_a_configuration_path_with_a_comma_quote_and_semicolon_reads_back(
+    tmp_path,
+):
+    """Python's csv module reads the row decsim wrote, and reopens its yaml."""
+    folder = tmp_path / "semi;colon"
+    folder.mkdir()
+    written_path = yaml_configs.write_config(folder, FOUR_POINT_SWEEP)
+    config_path = folder / 'my,"quoted".yaml'
+    written_path.rename(config_path)
+    config = experiment.load_experiment(config_path)
+    experiment_dir = tmp_path / "experiment"
+    experiment_dir.mkdir()
+
+    run_folder.record_configuration(experiment_dir, config)
+
+    configurations_path = experiment_dir / "configurations.csv"
+    (row,) = _csv_rows(configurations_path)
+    configurations = run_folder.recorded_configurations(experiment_dir)
+    (reopened,) = configurations[row["configuration_id"]]
+    assert row["name"] == 'my,"quoted"'
+    assert reopened.config_files[0] == config.config_files[0]
+
+
 def test_a_piece_records_its_counts_rounds_and_configuration(tmp_path):
     """piece.json's lines against the piece's own shots.csv, summed by csv.
 
@@ -1093,6 +1116,48 @@ def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     raised_pieces = _piece_names(raised_dir)
     assert len(first_pieces) < len(raised_pieces)
     assert raised_rows == whole_rows
+
+
+def test_a_collect_onto_pieces_of_another_commit_is_refused_before_a_shot(
+    tmp_path,
+):
+    """The saved piece is rewritten as a process at another commit saves it.
+
+    Raising the cap would add this tree's pieces to it, so the collect is
+    refused before it runs a shot, and the run folder keeps the earlier
+    tree's manifest and summary byte for byte.
+    """
+    experiment_dir = tmp_path / "experiment"
+    run_dir = _collected_noisy_point(
+        tmp_path, "first", {"max_shots": 1}, experiment_dir
+    )
+    (piece_path,) = experiment_dir.glob("pieces/*/0-0/piece.json")
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    other_commit = "b" * 40
+    piece["commit"] = other_commit
+    other_text = json.dumps(piece)
+    piece_path.write_text(other_text)
+    manifest_path = run_dir / "manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    sweep_path = run_dir / "sweep.csv"
+    sweep_bytes = sweep_path.read_bytes()
+    second_dir = tmp_path / "second"
+    second_dir.mkdir()
+    raised = {"max_shots": 2, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
+    card = {"sweep": [{"axes": NOISY_AXES, "collection": raised}]}
+    config_path = yaml_configs.write_config(second_dir, card)
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(config_path, experiment_dir)
+
+    said = str(refused.value)
+    assert "ran different code" in said
+    assert f"(commit {other_commit}, dirty" in said
+    assert "this collect (commit" in said
+    assert _piece_names(experiment_dir) == ["0-0"]
+    assert manifest_path.read_bytes() == manifest_bytes
+    assert sweep_path.read_bytes() == sweep_bytes
 
 
 def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
@@ -1328,13 +1393,41 @@ def _write_a_saved_piece(
     count = len(failed)
     folder = pieces.piece_dir(experiment_dir, point_id, first_seed, count)
     folder.mkdir(parents=True)
-    lines = ["seed,is_scored,logical_failure,sim_wall_seconds"]
+    lines = [
+        "seed,is_scored,logical_failure,sim_wall_seconds,scored_outputs,"
+        "rounds_per_output"
+    ]
     for offset, is_failure in enumerate(failed):
         seed = first_seed + offset
-        lines.append(f"{seed},True,{is_failure},0.5")
+        lines.append(f"{seed},True,{is_failure},0.5,1,15")
     shots_text = "\n".join(lines) + "\n"
     (folder / "shots.csv").write_text(shots_text)
     (folder / pieces.PIECE_FILE).write_text("{}")
+
+
+def test_a_collect_of_no_processes_is_refused_before_its_folder(
+    tmp_path, capsys
+):
+    """Zero processes would deal no piece and finish having run nothing."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(SystemExit):
+        command.main(
+            [
+                "collect",
+                str(config_path),
+                "--out",
+                str(out_dir),
+                "--processes=0",
+            ]
+        )
+
+    printed = capsys.readouterr()
+    assert "processes must be a whole number of at least 1, got 0" in (
+        printed.err
+    )
+    assert not out_dir.exists()
 
 
 def test_a_sweep_block_that_says_shots_is_refused(tmp_path, capsys):

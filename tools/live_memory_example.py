@@ -35,6 +35,17 @@ METADATA_PATHS = {
     "distance": "qpu.distance",
     "round_period_microseconds": "qpu.round_period_microseconds",
 }
+# The values a loaded fragments folder's circuit already holds. A replay
+# reads them from the record beside the fragments, as unknown when none
+# names them, and refuses a flag for one, which could only relabel a
+# circuit it does not change.
+CIRCUIT_VALUES = (
+    "basis",
+    "physical_error_probability",
+    "noise_model",
+    "relaxation_time_microseconds",
+    "dephasing_time_microseconds",
+)
 
 
 def main() -> None:
@@ -161,19 +172,20 @@ def _recorded_values(fragments) -> dict:
     """The physical values recorded beside a fragments folder.
 
     physical.json's period when it binds one, and, for a run folder's
-    inputs/<id>/fragments, the point's values in resolved/<id>.json, so
-    a rerun from them runs the recorded point.
+    inputs/<id>/fragments, the arguments the run that made them recorded
+    and the point's values in resolved/<id>.json, so a rerun from them
+    runs, and names, the recorded point.
     """
     if fragments is None:
         return {}
     physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
     physical = _read_json(physical_path)
-    recorded = {}
+    point_folder = fragments.parent
+    run_dir = point_folder.parent.parent
+    recorded = _recorded_arguments(run_dir)
     for name, value in physical.items():
         if value is not None:
             recorded[name] = value
-    point_folder = fragments.parent
-    run_dir = point_folder.parent.parent
     resolved_path = (
         run_dir / run_folder.RESOLVED_FOLDER / f"{point_folder.name}.json"
     )
@@ -182,6 +194,19 @@ def _recorded_values(fragments) -> dict:
         metadata_values = _metadata_values(record["metadata"])
         recorded.update(metadata_values)
     return recorded
+
+
+def _recorded_arguments(run_dir: pathlib.Path) -> dict:
+    """The circuit's values the run that saved the fragments recorded."""
+    arguments_path = run_dir / "arguments.json"
+    if not arguments_path.exists():
+        return {}
+    arguments = _read_json(arguments_path)
+    values = {}
+    for name in CIRCUIT_VALUES:
+        if name in arguments:
+            values[name] = arguments[name]
+    return values
 
 
 def _metadata_values(metadata: dict) -> dict:
@@ -196,7 +221,8 @@ def _metadata_values(metadata: dict) -> dict:
 def _physical_parameters(arguments: argparse.Namespace, recorded: dict) -> dict:
     """The command line's physical parameters over the recorded ones.
 
-    The defaults stand where neither names a value.
+    The defaults stand where neither names a value; loaded fragments
+    take no default for a value their circuit holds.
     """
     defaults = {
         "distance": 3,
@@ -207,6 +233,10 @@ def _physical_parameters(arguments: argparse.Namespace, recorded: dict) -> dict:
         "relaxation_time_microseconds": None,
         "dephasing_time_microseconds": None,
     }
+    if arguments.input is not None:
+        _refuse_a_circuit_flag(arguments)
+        for name in CIRCUIT_VALUES:
+            defaults[name] = None
     parameters = {}
     for name, default in defaults.items():
         selected = getattr(arguments, name)
@@ -214,6 +244,18 @@ def _physical_parameters(arguments: argparse.Namespace, recorded: dict) -> dict:
         if selected is not None:
             parameters[name] = selected
     return parameters
+
+
+def _refuse_a_circuit_flag(arguments: argparse.Namespace) -> None:
+    """A flag for a value the loaded circuit holds would relabel it."""
+    for name in CIRCUIT_VALUES:
+        if getattr(arguments, name) is None:
+            continue
+        flag = name.replace("_", "-")
+        raise SystemExit(
+            f"--{flag} cannot change the fragments --input loads, whose "
+            "circuit already holds it; the record beside them names it"
+        )
 
 
 def _program(

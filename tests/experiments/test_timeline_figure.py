@@ -17,6 +17,7 @@ import pytest
 import decsim.experiments.experiment as experiment
 import decsim.experiments.plots as plots
 import decsim.experiments.trace_file as trace_file
+import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.records.identity as identity_records
 import tests.experiments.test_measure as measure_tests
@@ -293,6 +294,32 @@ def test_the_timeline_moves_are_the_results_own_transfers(tmp_path):
     assert drawn_by_window == sorted(by_window)
 
 
+def test_moves_on_channels_named_apart_from_their_paths_are_drawn_by_path(
+    tmp_path,
+):
+    """A move's lane is its path, not the name of the wire it crossed.
+
+    A channel's name is a wire's identity, which two paths may share
+    (links/settings.py ChannelSettings).
+    """
+    trace_path = tmp_path / "point1.trace.json"
+    settings = gate_point.settings(trace=str(trace_path))
+    links = _with_every_channel_renamed(settings.links)
+    renamed = dataclasses.replace(settings, links=links)
+    machine = machine_module.Machine.build(renamed, gate_point.SEED)
+    result = machine.run()
+    machine.observation.trace_writer.write(str(trace_path))
+    document = trace_file.load(trace_path)
+
+    shot = plots.timeline_shot(document)
+
+    transfers = result.link_traffic["transfers"]
+    by_round, by_window = _transfer_spans(transfers)
+    drawn_by_round = _drawn_spans(shot.moves_by_round, by_round)
+    assert drawn_by_round == by_round
+    assert "weak_buffer_to_weak_decoder_wire" not in document.link_paths()
+
+
 def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
     trace_path = tmp_path / "point1.trace.json"
     _machine, _result = _traced_run(trace_path)
@@ -313,6 +340,19 @@ def test_the_timeline_figure_is_written_from_the_file(tmp_path):
     plots.timeline_plot(trace_path, figure_path)
     status = figure_path.stat()
     assert status.st_size > 0
+
+
+def test_a_trace_file_with_no_out_path_draws_its_timeline_beside_it(
+    tmp_path,
+):
+    """A file is no folder to write into: the figure takes its name."""
+    trace_path = tmp_path / "point1.trace.json"
+    _traced_run(trace_path)
+
+    drawn = plots.figure("timeline", trace_path)
+
+    assert drawn == tmp_path / "point1.timeline.png"
+    assert drawn.is_file()
 
 
 @pytest.mark.parametrize(
@@ -440,3 +480,18 @@ def _rename_the_escalation(trace_path, escalation_kind: str) -> None:
             event["args"]["name"] = " ".join(words)
     renamed_text = json.dumps(events)
     trace_path.write_text(renamed_text)
+
+
+def _with_every_channel_renamed(links):
+    """The fabric with each path's channel named <path>_wire, alike else."""
+    renamed = {}
+    for field in dataclasses.fields(links):
+        path_settings = getattr(links, field.name)
+        if not isinstance(path_settings, link_settings.PathSettings):
+            continue
+        name = f"{field.name}_wire"
+        channel = dataclasses.replace(path_settings.channel, name=name)
+        renamed[field.name] = dataclasses.replace(
+            path_settings, channel=channel
+        )
+    return dataclasses.replace(links, **renamed)

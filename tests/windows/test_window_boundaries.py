@@ -110,6 +110,9 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     assert dependent.deps_remaining == 0
     assert dict(dependent.boundary_in) == {4: [0, 1, 0]}
     assert len(checks) == 2
+    courier._receive_boundary((1, 1), 1, boundary_v2, (1, 0), 2, 2)
+    assert dependent.deps_remaining == 0
+    assert dict(dependent.boundary_in) == {4: [0, 1, 0]}
     courier._receive_boundary((1, 1), 1, boundary_v1, (1, 0), 1, 1)
     assert dependent.deps_remaining == 0
     assert dict(dependent.boundary_in) == {4: [0, 1, 0]}

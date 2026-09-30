@@ -329,11 +329,11 @@ def test_a_decode_job_is_priced_for_the_rounds_it_reads():
     """
     requests = declared_run.EndedRequests()
     declared_run.switching_run(rounds=9, probes=(requests,))
-    by_window = {}
-    for ended in requests.ended:
-        by_window[ended.job.request_key.window_id] = ended.job
-    regular = by_window[1]
-    tail = by_window[2]
+    (_, regular_request, tail_request) = requests.ended
+    regular = regular_request.job
+    tail = tail_request.job
+    assert regular.request_key.window_id == 1
+    assert tail.request_key.window_id == 2
     assert regular.request_key.tier is window_records.DecoderTier.WEAK
     assert (regular.window.start_round, regular.window.buffer_hi) == (4, 9)
     assert regular.round_count == 6

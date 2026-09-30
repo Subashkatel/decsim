@@ -469,30 +469,23 @@ def _outcome_of(
         physical_faults.check, correction
     )
     correction_tuple = decoder_module.bit_tuple(correction)
-    reconstructed_tuple = decoder_module.bit_tuple(reconstructed)
     if low_confidence:
         return _failed_outcome(
             status=_Status.LOW_CONFIDENCE,
             reason=_Reason.SEARCH_LIMIT_EXHAUSTED,
             physical_correction=correction_tuple,
-            reconstructed_syndrome=reconstructed_tuple,
         )
     if not numpy.array_equal(reconstructed, syndrome_array):
         return _failed_outcome(
             status=_Status.INVALID_CORRECTION,
             reason=_Reason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
             physical_correction=correction_tuple,
-            reconstructed_syndrome=reconstructed_tuple,
         )
     return backend_outcome.BackendDecodeOutcome(
         status=_Status.SUCCEEDED,
         failure_reason=None,
         physical_correction=correction_tuple,
-        component_correction=None,
-        reconstructed_syndrome=reconstructed_tuple,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )
 
 
@@ -501,15 +494,10 @@ def _failed_outcome(
     status: decoding_records.BackendDecodeStatus,
     reason: decoding_records.BackendFailureReason,
     physical_correction=None,
-    reconstructed_syndrome=None,
 ) -> backend_outcome.BackendDecodeOutcome:
     return backend_outcome.BackendDecodeOutcome(
         status=status,
         failure_reason=reason,
         physical_correction=physical_correction,
-        component_correction=None,
-        reconstructed_syndrome=reconstructed_syndrome,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )

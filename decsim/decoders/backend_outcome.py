@@ -11,7 +11,6 @@ discard, counted apart and never as an error
 """
 
 import dataclasses
-import math
 import numbers
 from typing import Optional
 
@@ -45,11 +44,7 @@ class BackendDecodeOutcome:
     status: _Status
     failure_reason: Optional[_Reason]
     physical_correction: Optional[tuple[int, ...]]
-    component_correction: Optional[tuple[int, ...]]
-    reconstructed_syndrome: Optional[tuple[int, ...]]
     iterations: Optional[int]
-    iteration_limit: Optional[int]
-    posterior_log_likelihood_ratios: Optional[tuple[float, ...]]
 
     def __post_init__(self) -> None:
         _check_status_reason(self.status, self.failure_reason)
@@ -59,30 +54,9 @@ class BackendDecodeOutcome:
             name="physical_correction",
             allow_none=may_lack_correction,
         )
-        reconstructed_syndrome = _binary_tuple(
-            self.reconstructed_syndrome,
-            name="reconstructed_syndrome",
-            allow_none=may_lack_correction,
-        )
-        component_correction = _binary_tuple(
-            self.component_correction, name="component_correction"
-        )
         iterations = _nonnegative_integer(self.iterations, name="iterations")
-        iteration_limit = _nonnegative_integer(
-            self.iteration_limit, name="iteration_limit"
-        )
-        posterior = _float_tuple(
-            self.posterior_log_likelihood_ratios,
-            name="posterior_log_likelihood_ratios",
-        )
         object.__setattr__(self, "physical_correction", physical_correction)
-        object.__setattr__(self, "component_correction", component_correction)
-        object.__setattr__(
-            self, "reconstructed_syndrome", reconstructed_syndrome
-        )
         object.__setattr__(self, "iterations", iterations)
-        object.__setattr__(self, "iteration_limit", iteration_limit)
-        object.__setattr__(self, "posterior_log_likelihood_ratios", posterior)
 
     @property
     def succeeded(self) -> bool:
@@ -95,16 +69,13 @@ def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
 
     A nonzero syndrome on a model with no fault columns is unsatisfiable.
     """
-    detector_count = syndrome.shape[0]
-    reconstructed = (0,) * detector_count
     if numpy.any(syndrome):
         return _empty_model_outcome(
             _Status.EMPTY_MODEL_UNSATISFIABLE,
             _Reason.NONZERO_SYNDROME_WITHOUT_FAULTS,
             None,
-            reconstructed,
         )
-    return _empty_model_outcome(_Status.SUCCEEDED, None, (), reconstructed)
+    return _empty_model_outcome(_Status.SUCCEEDED, None, ())
 
 
 def window_decode_of(
@@ -165,7 +136,7 @@ def _check_status_reason(
         )
 
 
-def _binary_tuple(value, *, name: str, allow_none: bool = True):
+def _binary_tuple(value, *, name: str, allow_none: bool):
     if value is None:
         if allow_none:
             return None
@@ -183,27 +154,6 @@ def _is_bit(bit) -> bool:
     if not isinstance(bit, numbers.Integral):
         return False
     return int(bit) in (0, 1)
-
-
-def _float_tuple(value, *, name: str):
-    if value is None:
-        return None
-    values = _one_dimensional(value, name)
-    normalized = []
-    for index, item in enumerate(values):
-        if not _is_real(item):
-            raise TypeError(f"{name}[{index}] must be a real number")
-        number = float(item)
-        if math.isnan(number):
-            raise ValueError(f"{name}[{index}] cannot be NaN")
-        normalized.append(number)
-    return tuple(normalized)
-
-
-def _is_real(item) -> bool:
-    if isinstance(item, bool):
-        return False
-    return isinstance(item, numbers.Real)
 
 
 def _one_dimensional(value, name: str) -> tuple:
@@ -228,15 +178,10 @@ def _empty_model_outcome(
     status: _Status,
     reason: Optional[_Reason],
     physical_correction,
-    reconstructed: tuple,
 ) -> BackendDecodeOutcome:
     return BackendDecodeOutcome(
         status=status,
         failure_reason=reason,
         physical_correction=physical_correction,
-        component_correction=None,
-        reconstructed_syndrome=reconstructed,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )

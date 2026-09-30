@@ -63,9 +63,21 @@ class RoundTracker:
     # ---- arrivals
 
     def note_arrival(self, operation_id, round_index: int) -> int:
-        """Advance the readiness counter; returns the rounds arrived now."""
+        """Advance the readiness counter; returns the rounds arrived now.
+
+        The counter is the rounds arrived from round 1 without a gap. A
+        store with several write ports completes a narrow round before a
+        wider one written ahead of it, so a round past a gap waits here
+        until the gap fills, as gem5's reorder buffer retires only its
+        head once it is ready (src/cpu/o3/rob.cc isHeadReady).
+        """
         arrivals = self.arrivals_by_operation[operation_id]
-        arrivals.rounds = max(arrivals.rounds, round_index)
+        arrivals.rounds_past_a_gap.add(round_index)
+        next_round = arrivals.rounds + 1
+        while next_round in arrivals.rounds_past_a_gap:
+            arrivals.rounds_past_a_gap.remove(next_round)
+            arrivals.rounds = next_round
+            next_round = arrivals.rounds + 1
         return arrivals.rounds
 
     def note_memory_round(self, operation_id) -> int:
@@ -86,7 +98,7 @@ class RoundTracker:
         return self.operation_by_id[operation_id]
 
     def rounds_arrived(self, operation_id) -> int:
-        """The highest round the arrival authority has published."""
+        """The rounds the arrival authority has published from round 1."""
         arrivals = self.arrivals_by_operation.get(operation_id)
         if arrivals is None:
             return 0
@@ -264,6 +276,8 @@ class _Arrivals:
 
     def __init__(self) -> None:
         self.rounds = 0
+        # published rounds above the first round still missing
+        self.rounds_past_a_gap: set = set()
         self.memory_rounds = 0
         self.strong_rounds = 0
 

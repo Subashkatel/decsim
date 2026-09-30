@@ -56,6 +56,13 @@ def _close_boundaries(tracker, stream_id, boundaries) -> None:
         tracker.close_boundary(stream_id, boundary)
 
 
+def _arrive_through(tracker, operation_id, last_round: int) -> None:
+    """Rounds 1 through last_round arrive, in order."""
+    past_the_last = last_round + 1
+    for round_index in range(1, past_the_last):
+        tracker.note_arrival(operation_id, round_index)
+
+
 def _tracker(
     round_counts: dict, successors: dict
 ) -> round_tracker.RoundTracker:
@@ -72,9 +79,30 @@ def test_a_window_is_complete_exactly_when_rounds_through_buffer_hi_arrived():
     operation_1 = _operation(1)
     tracker.register_operation(operation_1)
     window = _window(1, 1, 3, 5)
-    tracker.note_arrival(1, 4)
+    _arrive_through(tracker, 1, 4)
     assert not tracker.is_data_complete(window)
     tracker.note_arrival(1, 5)
+    assert tracker.is_data_complete(window)
+
+
+def test_a_round_past_a_gap_counts_only_once_the_gap_arrives():
+    """Several write ports can finish round 3 before round 2.
+
+    The counter is the prefix from round 1 without a gap, gem5's reorder
+    buffer retiring only its ready head (src/cpu/o3/rob.cc isHeadReady).
+    """
+    tracker = _tracker({1: 9}, {1: []})
+    operation_1 = _operation(1)
+    tracker.register_operation(operation_1)
+    window = _window(1, 1, 1, 2)
+
+    after_round_1 = tracker.note_arrival(1, 1)
+    after_round_3 = tracker.note_arrival(1, 3)
+    is_complete_past_the_gap = tracker.is_data_complete(window)
+    after_round_2 = tracker.note_arrival(1, 2)
+
+    assert (after_round_1, after_round_3, after_round_2) == (1, 1, 3)
+    assert is_complete_past_the_gap is False
     assert tracker.is_data_complete(window)
 
 
@@ -85,7 +113,7 @@ def test_an_overflow_past_the_end_is_satisfied_by_a_successors_rounds():
     operation_2 = _operation(2)
     tracker.register_operation(operation_2)
     window = _window(1, 1, 3, 5)
-    tracker.note_arrival(1, 4)
+    _arrive_through(tracker, 1, 4)
     assert not tracker.is_data_complete(window)
     tracker.note_arrival(2, 1)
     assert tracker.is_data_complete(window)
@@ -98,7 +126,7 @@ def test_an_overflow_past_the_end_is_satisfied_by_memory_rounds():
     operation_2 = _operation(2)
     tracker.register_operation(operation_2)
     window = _window(1, 1, 3, 5)
-    tracker.note_arrival(1, 4)
+    _arrive_through(tracker, 1, 4)
     assert tracker.note_memory_round(1) == 1
     assert tracker.is_data_complete(window)
 
@@ -110,7 +138,7 @@ def test_a_closed_tail_completes_the_window_at_the_operations_end():
     tracker.register_operation(source)
     tracker.register_operation(blocked)
     window = _window(1, 1, 3, 5)
-    tracker.note_arrival(1, 4)
+    _arrive_through(tracker, 1, 4)
     assert tracker.closed_boundary_round_for_window(window) == 4
     assert tracker.effective_round_count_for_window(1, window) == 4
     assert tracker.is_data_complete(window)
@@ -157,7 +185,7 @@ def test_an_open_streams_round_count_is_the_windows_read_end_or_arrivals():
     tracker = _tracker({}, {"open": []})
     operation_open = _operation("open")
     tracker.register_stream(operation_open, None)
-    tracker.note_arrival("open", 4)
+    _arrive_through(tracker, "open", 4)
     window = _window("open", 1, 3, 8)
     assert tracker.round_count_for_window("open", window) == 8
     assert tracker.round_count_for_window("open", None) == 4
@@ -167,7 +195,7 @@ def test_a_capped_stream_seals_when_its_limit_arrives():
     tracker = _tracker({}, {"capped": []})
     operation_capped = _operation("capped")
     tracker.register_stream(operation_capped, 5)
-    tracker.note_arrival("capped", 4)
+    _arrive_through(tracker, "capped", 4)
     assert not tracker.reaches_source_limit("capped")
     tracker.note_arrival("capped", 5)
     assert tracker.reaches_source_limit("capped")
@@ -178,6 +206,6 @@ def test_registration_is_idempotent_for_a_known_operation():
     tracker = _tracker({1: 6}, {1: []})
     operation = _operation(1)
     assert tracker.register_operation(operation) is True
-    tracker.note_arrival(1, 3)
+    _arrive_through(tracker, 1, 3)
     assert tracker.register_operation(operation) is False
     assert tracker.rounds_arrived(1) == 3

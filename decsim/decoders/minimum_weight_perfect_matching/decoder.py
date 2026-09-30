@@ -191,19 +191,25 @@ def _warm_up(matching, faults) -> None:
     satisfiable on any graph (a boundaryless toric component would
     reject an arbitrary detector pair).
     """
-    check = faults.check
+    syndromes = _warm_up_syndromes(faults.check)
+    for _column, syndrome in syndromes:
+        matching.decode(syndrome)
+
+
+def _warm_up_syndromes(check) -> list:
+    """(column, syndrome) for the first columns that flip any detector."""
     detector_count = check.shape[0]
-    warmed = 0
+    syndromes = []
     for column in range(check.shape[1]):
+        if len(syndromes) == WARM_UP_COLUMNS:
+            break
         rows = _column_rows(check, column)
         if rows.size == 0:
             continue
         syndrome = numpy.zeros(detector_count, dtype=numpy.uint8)
         syndrome[rows] = 1
-        matching.decode(syndrome)
-        warmed += 1
-        if warmed == WARM_UP_COLUMNS:
-            return
+        syndromes.append((column, syndrome))
+    return syndromes
 
 
 def _unpinnable_observable_reason(faults) -> Optional[str]:
@@ -265,21 +271,11 @@ def _warm_up_forced(matching, faults, observable_row) -> None:
     detector carries that column's own observable bit, so the pinned
     syndrome is satisfiable.
     """
-    check = faults.check
-    detector_count = check.shape[0]
-    warmed = 0
-    for column in range(check.shape[1]):
-        rows = _column_rows(check, column)
-        if rows.size == 0:
-            continue
-        syndrome = numpy.zeros(detector_count, dtype=numpy.uint8)
-        syndrome[rows] = 1
+    syndromes = _warm_up_syndromes(faults.check)
+    for column, syndrome in syndromes:
         observable_bit = int(observable_row[column])
         pinned = _with_pinned_observable(syndrome, observable_bit)
         matching.decode(pinned)
-        warmed += 1
-        if warmed == WARM_UP_COLUMNS:
-            return
 
 
 def _with_pinned_observable(syndrome, observable_bit: int):

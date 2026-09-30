@@ -261,10 +261,7 @@ class WindowPlan:
     # operation_id -> [window keys, in window_index order]
     op_windows: dict
     successors: dict  # operation_id -> [op ids listing it as predecessor]
-    # operation_id -> per-round graph size for a latency model
-    spatial_nodes: dict
     rounds_by_operation: dict  # operation_id -> resolved positive round count
-    code_names: dict  # operation_id -> exact resolved code name
     total_windows: int
     windowed_by_operation: dict
     batch_preceding_idle_rounds_by_operation: dict

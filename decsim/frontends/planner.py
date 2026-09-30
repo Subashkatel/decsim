@@ -630,9 +630,7 @@ def _operation_tables(rows: list) -> dict:
     tables = {
         "window_count": _table(rows, _window_count_of),
         "op_windows": _table(rows, _window_indices_of),
-        "spatial_nodes": _table(rows, _spatial_nodes_of),
         "rounds_by_operation": _table(rows, _round_count_of),
-        "code_names": _table(rows, _code_name_of),
         "windowed_by_operation": _table(rows, _windowed_of),
         "batch_preceding_idle_rounds_by_operation": _table(
             rows, _batch_idle_of
@@ -660,19 +658,9 @@ def _window_indices_of(resolved, operation_plan) -> list:
     return list(range(count))
 
 
-def _spatial_nodes_of(resolved, operation_plan) -> int:
-    del operation_plan
-    return resolved.spatial_node_count
-
-
 def _round_count_of(resolved, operation_plan) -> int:
     del operation_plan
     return resolved.round_count
-
-
-def _code_name_of(resolved, operation_plan) -> str:
-    del operation_plan
-    return resolved.code_geometry.code_name
 
 
 def _windowed_of(resolved, operation_plan) -> bool:

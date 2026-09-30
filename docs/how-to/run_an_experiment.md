@@ -132,8 +132,7 @@ distances, rates and rounds come from the folder's own `run.py`, the
 script that made its `stats.csv`, so an older folder is drawn by the
 recipe that made it and not today's. The script is a
 few lines because `decsim/plots.py` holds the figure kinds (an error
-rate, a share of two counts, plain values, a distribution, a heat map)
-and their one axis style; another experiment's plot.py draws with the
+rate and plain values) and their one axis style; another experiment's plot.py draws with the
 same calls. The repository
 tracks a results folder's `stats.csv`, `commit.txt`, script copy and
 `plots/`, so every experiment's results live beside the code that made

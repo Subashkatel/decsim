@@ -950,8 +950,10 @@ weak_syndrome_buffer:            # the weak syndrome buffer, on the decoder chip
   read_cycles: 0                   # one read of a decode's rounds, paid when
                                    # they leave the store at dispatch, for copy
                                    # (then the move) or in_place (then the
-                                   # decode), and one read of an escalated
-                                   # region's rounds before they go up. A read
+                                   # decode), one read of an escalated
+                                   # region's rounds before they go up, and
+                                   # one read of a timing-only idle round
+                                   # before it goes to the decoder. A read
                                    # never waits for another.
                                    # Both default to zero, with no edge rounding.
                                    # Positive costs finish on this clock's edge.

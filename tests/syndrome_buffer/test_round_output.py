@@ -217,6 +217,36 @@ def test_an_input_leaves_when_the_stores_read_of_it_completes():
     assert landed == [40]
 
 
+def test_an_idle_round_leaves_when_the_stores_read_of_it_completes():
+    """A timing-only round leaves by a read of the store, like an input.
+
+    gem5 prices an access where the memory serves it
+    (src/mem/simple_mem.cc:154-174). From tick 1 on a 10-tick clock, 3
+    read cycles end at the edge 40; the send starts there and the slot
+    frees at its delivery.
+    """
+    engine = engine_module.Engine()
+    engine.now = 1
+    transfers = _Transfers()
+    store = _store(engine, read_cycles=3)
+    output = _output(engine, transfers, store)
+    idle_round = round_records.QPUReadout(("idle", 1, 0), (0,), 1, size_bits=2)
+    packet = round_records.SyndromeRoundPacket(("idle", 1, 0), 1, (idle_round,))
+    route = round_records.SyndromePacketRoute.feedback_memory_round(1)
+    packed = round_records.PackedRound(packet, route, 2)
+    store.accept_packed_round(packet, publication_tick=None)
+    delivered = []
+
+    output.send_memory_round(packed, lambda: delivered.append(engine.now))
+    sent_before_the_read_ends = list(transfers.sends)
+    engine.run()
+
+    assert sent_before_the_read_ends == []
+    assert transfers.sends == [(output.path, 2)]
+    assert delivered == [40]
+    assert store.occupancy == 0
+
+
 def test_an_input_read_in_place_lands_at_the_reads_end_and_rides_no_link():
     """The unit reads the store's words: one read, priced once, no move."""
     engine = engine_module.Engine()

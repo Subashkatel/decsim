@@ -13,9 +13,9 @@ accelerator's invoke, then DMA into the unit's memory, then compute),
 and this port executes the move, so the link a store's rounds ride is
 the store's own fact and not the window side's. And a timing-only
 feedback-memory round, which the controller packs and asks for: the
-store sends it and frees its own slot at the delivery. What lands in
-the store is the round receiver's (weak_syndrome_round_receiver.py); this
-one sends.
+store reads it, sends it and frees its own slot at the delivery. What
+lands in the store is the round receiver's
+(weak_syndrome_round_receiver.py); this one sends.
 
 A job's input is read out of the store when its bits leave, at
 dispatch: the store is asked when the read of the job's rounds
@@ -140,19 +140,33 @@ class SyndromeBufferOutput:
         packed: round_records.PackedRound,
         on_delivered: Callable[[], None],
     ) -> None:
-        """Send one timing-only round to the decoder side it feeds.
+        """Read one timing-only round, then send it to the decoder side.
 
         The controller packs the round and asks; the store executes the
-        send, because it is the end the round leaves from. The slot the
-        round held is this store's, so the store frees it at the
-        delivery and the asker hears of the landing after that.
+        send, because it is the end the round leaves from, and the round
+        leaves by a read of the store like any other (gem5 prices an
+        access where the memory serves it, src/mem/simple_mem.cc:154-174),
+        so it waits its turn on the store's ports. The slot the round
+        held is this store's, so the store frees it at the delivery and
+        the asker hears of the landing after that.
         """
         landed = functools.partial(
             self._free_memory_round, packed, on_delivered
         )
-        self.transfers.send_for_round(
-            self.path, packed.packet, packed.wire_bits, landed
+        send = functools.partial(
+            self.transfers.send_for_round,
+            self.path,
+            packed.packet,
+            packed.wire_bits,
+            landed,
         )
+        round_keys = (packed.round_key,)
+        read_tick = self.store.book_read(round_keys)
+        if read_tick == self.engine.now:
+            send()
+            return
+        read_delay = read_tick - self.engine.now
+        self.engine.schedule(read_delay, send, label="syndrome buffer read")
 
     def _free_memory_round(
         self,

@@ -51,6 +51,15 @@ def test_the_tail_law_is_the_exact_tail_where_faults_cancel(prior, fault_count):
     _assert_the_law_is_the_exact_tail(priors, incidence, exact_tails)
 
 
+def test_a_fault_prior_of_one_half_is_refused():
+    """Its parity rate is infinite, so no fault count covers the tail."""
+    priors = numpy.array([1e-2, 0.5])
+    incidence = numpy.eye(2, dtype=numpy.uint8)
+
+    with pytest.raises(ValueError, match="below one half"):
+        tail_law.TailLaw.from_priors(priors, incidence, 1e-6)
+
+
 def test_a_budget_just_above_the_exact_tail_takes_the_exact_threshold():
     """20 faults at 1e-2: count 4 has tail 4.26e-5, over a 4.2e-5 budget."""
     priors = numpy.full(20, 1e-2)

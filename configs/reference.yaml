@@ -347,7 +347,9 @@ burst_detector:
 #                                  # calibrated from the operation's own
 #                                  # circuit: its faults' exact law, the
 #                                  # tail estimated by draws, so a
-#                                  # noiseless circuit fires on one event
+#                                  # noiseless circuit fires on one event;
+#                                  # a fault prior of one half or more is
+#                                  # refused, its parity rate infinite
 #   rate_tracking_rounds: 10000    # time constant of each position's usual
 #                                  # rate, an exponential average frozen
 #                                  # while a flag fires (DGR 2311.16214

@@ -760,6 +760,7 @@ def _refused_or_ordered(folders: list, point_ids: list):
     _refuse_folders_of_different_columns(folders)
     _refuse_a_point_this_tree_cannot_place(folders)
     _refuse_pieces_that_recorded_confidence_apart(folders)
+    _refuse_pieces_that_ran_different_code(folders)
     _refuse_a_repeated_shot(folders, order)
     return order
 
@@ -1580,15 +1581,62 @@ def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
     fewer shots there than in the sweep row. A piece.json without the
     line is such an older piece, and it reads as None.
     """
-    coverage_by_point = {}
-    for run_dir in run_dirs:
-        piece = _piece_of(run_dir)
-        coverage = piece.get("confidence_shot_count")
-        by_coverage = coverage_by_point.setdefault(piece["point_id"], {})
-        by_coverage.setdefault(coverage, run_dir)
+    coverage_by_point = _pieces_by_point_and_value(
+        run_dirs, _confidence_coverage_of
+    )
     for point_id, by_coverage in coverage_by_point.items():
         if len(by_coverage) > 1:
             _refuse_the_confidence_coverage(point_id, by_coverage)
+
+
+def _refuse_pieces_that_ran_different_code(run_dirs: list) -> None:
+    """A point's pieces must have run one tree: one commit, clean or dirty.
+
+    A point's estimate pools its pieces' shots, and the run folder's
+    manifest names one tree, the folding process's, so pieces of two
+    trees would pool two simulators under one name. A dirty tree's
+    changes are not recorded per piece, so two dirty pieces of one
+    commit pass, and a clean and a dirty one do not.
+    """
+    code_by_point = _pieces_by_point_and_value(run_dirs, _code_of)
+    for point_id, by_code in code_by_point.items():
+        if len(by_code) > 1:
+            _refuse_the_code(point_id, by_code)
+
+
+def _pieces_by_point_and_value(run_dirs: list, value_of) -> dict:
+    """Each point's first piece folder for every value value_of reads."""
+    folders_by_point = {}
+    for run_dir in run_dirs:
+        piece = _piece_of(run_dir)
+        value = value_of(piece)
+        by_value = folders_by_point.setdefault(piece["point_id"], {})
+        by_value.setdefault(value, run_dir)
+    return folders_by_point
+
+
+def _confidence_coverage_of(piece: dict):
+    """The shots a piece recorded confidence for; None for an older piece."""
+    return piece.get("confidence_shot_count")
+
+
+def _code_of(piece: dict) -> tuple:
+    """The tree a piece ran: its commit and whether it was dirty."""
+    return (piece["commit"], piece["dirty"])
+
+
+def _refuse_the_code(point_id: str, by_code: dict):
+    """Say which pieces of the point ran which tree."""
+    pieces_named = []
+    for (commit, is_dirty), run_dir in by_code.items():
+        pieces_named.append(f"{run_dir} (commit {commit}, dirty {is_dirty})")
+    listed = ", ".join(pieces_named)
+    raise refusal.RefusalError(
+        f"the pieces of point {point_id} ran different code: {listed}; "
+        "one estimate would pool two simulators under one manifest, so "
+        "collect the point into a new experiment folder, or move one "
+        "tree's pieces out of this one"
+    )
 
 
 def _piece_of(run_dir) -> dict:

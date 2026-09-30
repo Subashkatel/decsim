@@ -204,9 +204,7 @@ class ReadoutRoute:
             raise ValueError("readout route patches must be stable identities")
         if not patches or len(set(patches)) != len(patches):
             raise ValueError("a readout route needs nonempty unique patches")
-        ordered = sorted(
-            patches, key=identity_records.stable_identity_order_key
-        )
+        ordered = sorted(patches, key=identity_records.stable_identity_bytes)
         object.__setattr__(self, "patch_ids", tuple(ordered))
 
 

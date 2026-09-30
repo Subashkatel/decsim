@@ -90,4 +90,4 @@ def _waiting_by_pool(decoder_managers) -> dict:
 
 
 def _first_identity_order(item) -> tuple:
-    return identity_records.stable_identity_order_key(item[0])
+    return identity_records.stable_identity_bytes(item[0])

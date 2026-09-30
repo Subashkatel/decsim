@@ -174,4 +174,4 @@ def _waiting_on(index: dict, condition_key) -> list:
 
 
 def _work_record_order(record: tuple) -> bytes:
-    return identity_records.stable_identity_order_key(record[0])
+    return identity_records.stable_identity_bytes(record[0])

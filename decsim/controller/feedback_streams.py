@@ -900,9 +900,7 @@ class _StreamTable:
             return
         ordered_streams = tuple(sorted(touched_stream_ids))
         ordered_patches = tuple(
-            sorted(
-                touched_patches, key=identity_records.stable_identity_order_key
-            )
+            sorted(touched_patches, key=identity_records.stable_identity_bytes)
         )
         raise ValueError(
             f"external source {source.id} from {source_role} participates "

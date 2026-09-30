@@ -1525,7 +1525,7 @@ def _window_order(window_item: tuple) -> bytes:
     against each other (records/identity.py).
     """
     window_key, _window = window_item
-    return identity_records.stable_identity_order_key(window_key)
+    return identity_records.stable_identity_bytes(window_key)
 
 
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:

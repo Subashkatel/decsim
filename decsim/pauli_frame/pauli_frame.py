@@ -182,7 +182,7 @@ class PauliFrame:
         """A frozen copy of what the frame holds now."""
         stream_ids = sorted(
             self._state.windows_by_stream,
-            key=identity_records.stable_identity_order_key,
+            key=identity_records.stable_identity_bytes,
         )
         frames = []
         for stream_id in stream_ids:

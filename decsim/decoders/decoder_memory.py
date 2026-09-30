@@ -356,7 +356,7 @@ def _drop_reader(
 def _round_order_key(item: tuple) -> tuple:
     identity, _fragments = item
     operation_id, round_index = identity
-    order = identity_records.stable_identity_order_key(operation_id)
+    order = identity_records.stable_identity_bytes(operation_id)
     return order, round_index
 
 

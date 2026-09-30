@@ -72,12 +72,8 @@ def test_canonical_identity_bytes_are_injective_across_identity_kinds():
     assert identity_records.stable_identity_bytes("π") == encoded_unicode
 
 
-def test_stable_identity_ordering_and_json_preserve_typed_structure():
-    """The order key is the canonical bytes, and the json keeps the types."""
+def test_stable_identity_json_preserves_typed_structure():
     identity = (3, "patch", (4,))
-    assert identity_records.stable_identity_order_key(
-        identity
-    ) == identity_records.stable_identity_bytes(identity)
     assert identity_records.stable_identity_json(identity) == {
         "kind": "tuple",
         "value": None,

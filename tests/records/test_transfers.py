@@ -31,7 +31,7 @@ def test_a_rounds_patches_are_ordered_by_the_stable_identity_bytes():
     expected = tuple(
         sorted(
             ("patch-b", 2, "patch-a", 10),
-            key=identity_records.stable_identity_order_key,
+            key=identity_records.stable_identity_bytes,
         )
     )
     assert attribution.patch_ids == expected

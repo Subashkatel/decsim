@@ -98,7 +98,7 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """One round of one operation, its patches in stable order."""
         ordered_patch_ids = tuple(
-            sorted(patch_ids, key=identity_records.stable_identity_order_key)
+            sorted(patch_ids, key=identity_records.stable_identity_bytes)
         )
         return cls(
             operation_id=operation_id,
@@ -119,7 +119,7 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """A window's transfer: the operation's patches, the rounds it reads."""
         ordered_patches = sorted(
-            operation.patches, key=identity_records.stable_identity_order_key
+            operation.patches, key=identity_records.stable_identity_bytes
         )
         first_round, last_round = _read_range(window)
         relation = RequestTransferRelation(request_key)
@@ -141,7 +141,7 @@ class TransferAttribution:
         payloads = job.payloads or ()
         patches = round_records.fragment_patch_ids(payloads)
         ordered_patches = sorted(
-            patches, key=identity_records.stable_identity_order_key
+            patches, key=identity_records.stable_identity_bytes
         )
         patch_ids = tuple(ordered_patches)
         window = job.window
@@ -178,7 +178,7 @@ class TransferAttribution:
             round_keys.append((packet.operation_id, packet.round_index))
         patch_ids = round_records.fragment_patch_ids(fragments)
         ordered_patch_ids = tuple(
-            sorted(patch_ids, key=identity_records.stable_identity_order_key)
+            sorted(patch_ids, key=identity_records.stable_identity_bytes)
         )
         relation = RequestTransferRelation(region.request_key)
         return cls(

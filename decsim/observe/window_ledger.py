@@ -106,4 +106,4 @@ class WindowLedger:
 
 
 def _first_identity_order(item) -> tuple:
-    return identity_records.stable_identity_order_key(item[0])
+    return identity_records.stable_identity_bytes(item[0])

@@ -378,7 +378,7 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
     for operation in machine.plan.all_operations:
         operation_by_id[operation.id] = operation
     ordered_ids = sorted(
-        operation_by_id, key=identity_records.stable_identity_order_key
+        operation_by_id, key=identity_records.stable_identity_bytes
     )
     rows = []
     for operation_id in ordered_ids:

@@ -230,7 +230,7 @@ class RoundTracker:
         """What the scheme sees when deciding whether a window has its data."""
         successor_ids = sorted(
             self.planner.successors_by_operation[window.operation_id],
-            key=identity_records.stable_identity_order_key,
+            key=identity_records.stable_identity_bytes,
         )
         successors = []
         for successor_id in successor_ids:

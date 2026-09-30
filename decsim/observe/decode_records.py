@@ -188,7 +188,7 @@ class ConfidenceLedger:
 def _window_order(key: tuple) -> tuple:
     """A window key's place: its operation's identity, then its index."""
     operation_id, window_id = key
-    operation_order = identity_records.stable_identity_order_key(operation_id)
+    operation_order = identity_records.stable_identity_bytes(operation_id)
     return (operation_order, window_id)
 
 

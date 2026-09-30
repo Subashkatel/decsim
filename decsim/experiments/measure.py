@@ -1068,15 +1068,20 @@ def _rounds_by_owner(
     for owner in owners:
         rounds_by_owner[owner.operation_id] = set()
     for event in observation.round_events.events:
-        patch_rounds = rounds_by_owner.get(event.operation_id)
-        if event.kind != "EMITTED" or patch_rounds is None:
-            continue
-        for patch in event.patch_ids:
-            patch_rounds.add((event.round_index, patch))
+        _add_the_emitted_patch_rounds(rounds_by_owner, event)
     counts = {}
     for owner_id, patch_rounds in rounds_by_owner.items():
         counts[owner_id] = len(patch_rounds)
     return counts
+
+
+def _add_the_emitted_patch_rounds(rounds_by_owner: dict, event) -> None:
+    """An emitted round's patch-rounds, added to its scored owner's set."""
+    patch_rounds = rounds_by_owner.get(event.operation_id)
+    if event.kind != "EMITTED" or patch_rounds is None:
+        return
+    for patch in event.patch_ids:
+        patch_rounds.add((event.round_index, patch))
 
 
 def _one_length(owner_rounds) -> int:

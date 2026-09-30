@@ -1572,12 +1572,12 @@ class DetectionEventPlacement(Protocol):
         """Whether the seat forms the rounds that cross it."""
 
     def form_at(
-        self, seat: str, fragments: tuple, round_before: tuple = ()
+        self, seat: str, fragments: tuple, rounds_before: tuple = ()
     ) -> tuple:
         """The fragments as they leave the seat: formed, or as they came.
 
-        round_before is the raw round before the first fragment, held by
-        the seat for that round's detectors and never returned.
+        rounds_before are the raw rounds before the first fragment, held
+        by the seat for that round's detectors and never returned.
         """
 
     def width_at(self, seat: str, fragments: tuple) -> Optional[int]:

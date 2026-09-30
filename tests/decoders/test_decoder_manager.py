@@ -257,7 +257,7 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     manager.check_decode_work_settled()
 
 
-def test_the_round_before_is_held_by_the_tier_and_not_deposited():
+def test_the_rounds_before_are_held_by_the_tier_and_not_deposited():
     """The unit's memory takes the job's rounds; the tier's logic the rest."""
     engine = engine_module.Engine()
     at_the_weak_decoder = event_settings.DetectionEventSettings(
@@ -287,7 +287,7 @@ def test_the_round_before_is_held_by_the_tier_and_not_deposited():
     )
     round_two = dataclasses.replace(round_one, round_index=2)
     job.payloads = [round_two]
-    job.round_before = (round_one,)
+    job.rounds_before = (round_one,)
     on_decoded = _resolving(manager)
 
     manager.enqueue(job, None, on_decoded)
@@ -295,7 +295,7 @@ def test_the_round_before_is_held_by_the_tier_and_not_deposited():
 
     assert [fragment.round_index for fragment in deposited] == [2]
     assert deposited[0].bits == (0,)
-    assert job.round_before == ()
+    assert job.rounds_before == ()
 
 
 def test_an_escalation_routed_to_a_pipelined_unit_is_refused():

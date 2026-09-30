@@ -1096,7 +1096,7 @@ with a count of the rounds a round's recipes read.
 **Where to see it.** `decsim/detector_error_model/settings.py`,
 `decsim/detector_error_model/detection_event_formation.py`,
 `decsim/build/readout.py` (`build_detection_events`) and
-`decsim/syndrome_buffer/round_output.py` (`_read_the_round_before`).
+`decsim/syndrome_buffer/round_output.py` (`_read_the_rounds_before`).
 `tests/machine/test_copy_versus_reference.py` holds every seat on every
 path against Stim's own converter on the rows the QPU emitted, read
 where each decoder unit's memory takes them.
@@ -1259,7 +1259,14 @@ them. The plan places a finite operation's holds before the operation
 begins, so it reads the operation's recipes off the same circuit the
 source will (`build/plan.py`, `_formation_tables`); the holds the run
 places while it goes ask the placement, whose source's table a live
-stream extends as its rounds execute.
+stream extends as its rounds execute. The counted rounds ride the
+read's one transfer as more payload: a job's rounds before
+(`DecodeJob.rounds_before`) and a region's
+(`EscalatedRegion.rounds_before`) are priced as their bits on the link and as read
+words on the store's port in the job's own booking, under the one
+request name, with no header per round. They land raw in the strong
+syndrome buffer, take their raw bits of its room, and are never
+formed as events.
 
 **Why.** A detection event is the parity of the records a detector
 names, however far back, so the same round's events are the same at
@@ -1275,11 +1282,20 @@ measurements a decoder's detectors read (`libs/qec/lib/decoder.cpp`
 lines 115-127); a detector compares a round against earlier ones
 (LILLIPUT 2108.06569 lines 499-510). An HEVC decoder keeps each
 picture the current reference set names, whatever else it holds
-(FFmpeg `hevc/refs.c` lines 486-517).
+(FFmpeg `hevc/refs.c` lines 486-517). One gem5 DMA request covers its
+whole byte range (`src/dev/dma_device.cc` lines 195-207), a Garnet
+message becomes `divCeil(size, bitWidth)` flits and an SST event is
+its header plus its payload (`NetworkInterface.cc` lines 386-387,
+`memHierarchy/memNIC.cc` lines 133-134): the transport cuts a message
+by size, never by what the bytes mean. A crossbar is busy
+`divCeil(size, width)` cycles and SimpleMemory `size` times its
+bandwidth (`src/mem/xbar.cc` lines 133-136, `src/mem/simple_mem.cc`
+line 154).
 
 **What it cost the port file.** `DetectionEventPlacement` lost
 `needs_the_round_before` and gained `rounds_needed_before` and
-`rounds_read_before`; `WindowRetention.strong_round_before` became
+`rounds_read_before`, and `form_at` takes `rounds_before` in place of
+`round_before`; `WindowRetention.strong_round_before` became
 `strong_rounds_before`.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
@@ -1288,7 +1304,10 @@ picture the current reference set names, whatever else it holds
 (`rounds_needed_before`, `rounds_read_before`),
 `decsim/frontends/planner.py` (`FormationReads`),
 `decsim/windows/round_retention.py` (`strong_rounds_before`,
-`primary_rounds_before`);
+`primary_rounds_before`), `decsim/syndrome_buffer/round_output.py`
+(`_read_the_rounds_before`),
+`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
+(`_land_formed`);
 `tests/detector_error_model/test_detection_event_formation.py` forms
 the surface code, the two-round lookback and the color code at every
 seat against Stim's converter.

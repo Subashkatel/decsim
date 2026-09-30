@@ -138,7 +138,7 @@ class DecoderOutput:
         the delay expected, the read then the link's estimate
         (links/channel.py expected_delay_ticks).
         """
-        round_keys = _region_round_keys(region)
+        round_keys = region.round_keys
         read_tick = self.weak_store.book_read(round_keys)
         if read_tick == self.engine.now:
             return self._send_region(region, on_delivered)
@@ -194,11 +194,3 @@ def result_payload_bits(
         return len(result.logical_observables)
     patch_count = len(operation.patches)
     return max(1, patch_count)
-
-
-def _region_round_keys(region: round_records.EscalatedRegion) -> tuple:
-    """The (operation, round) key of every round the region carries."""
-    round_keys = []
-    for packet in region.packets:
-        round_keys.append((packet.operation_id, packet.round_index))
-    return tuple(round_keys)

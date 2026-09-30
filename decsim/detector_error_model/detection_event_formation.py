@@ -80,22 +80,22 @@ class SeatedFormation:
         return seat in self.history_by_seat
 
     def form_at(
-        self, seat: str, fragments: tuple, round_before: tuple = ()
+        self, seat: str, fragments: tuple, rounds_before: tuple = ()
     ) -> tuple:
         """The fragments as they leave the seat: formed there, or as they came.
 
         A seat outside a decoder unit sends the events on at their own
         width; a decoder seat keeps the width that landed, since the
         unit's input memory was written the raw round and a memory
-        counts what is written into it. round_before is the raw round
-        before the first of the fragments, given to a seat that needs it
-        (rounds_needed_before): the seat holds it for that round's
-        detectors and neither forms nor returns it.
+        counts what is written into it. rounds_before are the raw rounds
+        before the first of the fragments, in order, given to a seat that
+        needs them (rounds_needed_before): the seat holds them for that
+        round's detectors and neither forms nor returns them.
         """
         history = self.history_by_seat.get(seat)
         if history is None:
             return fragments
-        history.hold(round_before)
+        history.hold(rounds_before)
         return history.form(fragments)
 
     def width_at(self, seat: str, fragments: tuple) -> Optional[int]:

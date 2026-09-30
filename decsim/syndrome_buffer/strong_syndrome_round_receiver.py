@@ -110,7 +110,7 @@ class StrongSyndromeRoundReceiver:
             packets = (packed.packet,)
             packet_bits = (packed.wire_bits,)
             self._form_then_land(
-                packets, packet_bits, CONTROLLER_WRITE, False, _nothing
+                (), packets, packet_bits, CONTROLLER_WRITE, _nothing
             )
             return
         del self.reserved_bits_by_round[packed.round_key]
@@ -127,7 +127,8 @@ class StrongSyndromeRoundReceiver:
         """
         reserved = dict(self.reserved_bits_by_round)
         widths = self._stored_widths(region)
-        for packet, bits in zip(region.packets, widths, strict=True):
+        carried = region.carried_packets
+        for packet, bits in zip(carried, widths, strict=True):
             round_key = (packet.operation_id, packet.round_index)
             if not self.store.has_room(round_key, bits, reserved):
                 self._refuse_region(region, widths)
@@ -145,31 +146,29 @@ class StrongSyndromeRoundReceiver:
         seat has formed them when it forms them.
         """
         packet_bits = []
-        for packet in region.packets:
+        for packet in region.carried_packets:
             bits = round_records.fragment_wire_bits(packet.fragments)
             packet_bits.append(bits)
         self._form_then_land(
+            region.rounds_before,
             region.packets,
             packet_bits,
             ESCALATION,
-            region.carries_the_round_before,
             on_stored,
         )
 
     def _stored_widths(self, region: round_records.EscalatedRegion) -> list:
-        """Each round's width as the store will hold it.
+        """Each carried round's width as the store will hold it.
 
-        The round before lands raw, as it came (_land_formed); every other
-        round at the width this seat forms it to.
+        The rounds before land raw, as they came (_land_formed), and take
+        their raw bits of the store's room; every other round the width
+        this seat forms it to.
         """
-        packets = region.packets
         widths = []
-        if region.carries_the_round_before:
-            round_before = packets[0]
-            raw_bits = round_records.fragment_wire_bits(round_before.fragments)
+        for raw_round in region.rounds_before:
+            raw_bits = round_records.fragment_wire_bits(raw_round.fragments)
             widths.append(raw_bits)
-            packets = packets[1:]
-        for packet in packets:
+        for packet in region.packets:
             width = self._stored_width(packet)
             widths.append(width)
         return widths
@@ -185,7 +184,8 @@ class StrongSyndromeRoundReceiver:
     ) -> None:
         """An escalated region that does not fit stops the run, by the yaml."""
         capacity = self.store.capacity_bits()
-        round_count = len(region.packets)
+        carried = region.carried_packets
+        round_count = len(carried)
         region_bits = sum(widths)
         reserved_widths = self.reserved_bits_by_round.values()
         reserved_bits = sum(reserved_widths)
@@ -228,10 +228,10 @@ class StrongSyndromeRoundReceiver:
 
     def _form_then_land(
         self,
-        packets,
+        rounds_before: tuple,
+        packets: tuple,
         packet_bits,
         hop: _Hop,
-        carries_the_round_before: bool,
         on_stored: Callable[[], None],
     ) -> None:
         """Land the rounds once this seat has formed them, if it forms them.
@@ -239,16 +239,17 @@ class StrongSyndromeRoundReceiver:
         The rounds of one landing are formed together, a pipelined
         stage's fixed latency once and its rate for every round after
         the first (detection_events, detector_error_model/settings.py).
-        A round carried as the round before is not formed.
+        The rounds before are not formed. packet_bits are the carried
+        rounds' bits, the rounds before first.
         """
-        round_count = len(packets) - int(carries_the_round_before)
+        round_count = len(packets)
         cycles = self.detection_events.cycles_at(_SEAT, round_count)
         land = functools.partial(
             self._land_formed,
+            rounds_before,
             packets,
             packet_bits,
             hop,
-            carries_the_round_before,
             on_stored,
         )
         if cycles == 0:
@@ -261,28 +262,31 @@ class StrongSyndromeRoundReceiver:
 
     def _land_formed(
         self,
-        packets,
+        rounds_before: tuple,
+        packets: tuple,
         packet_bits,
         hop: _Hop,
-        carries_the_round_before: bool,
         on_stored: Callable[[], None],
     ) -> None:
         """Each round as the store holds it; its copy reports the hop's bits.
 
-        The round before lands raw, as it came, and this seat holds it
-        for the first round's detectors when it forms them.
+        The rounds before land raw, as they came, never formed as events,
+        and this seat holds them for the first round's detectors when it
+        forms them.
         """
-        round_before = ()
-        if carries_the_round_before:
-            round_before = packets[0].fragments
-            self._land(packets[0], packet_bits[0], hop)
-            packets = packets[1:]
-            packet_bits = packet_bits[1:]
-        for packet, bits in zip(packets, packet_bits, strict=True):
+        raw_count = len(rounds_before)
+        raw_bits = packet_bits[:raw_count]
+        formed_bits = packet_bits[raw_count:]
+        held = []
+        for raw_round, bits in zip(rounds_before, raw_bits, strict=True):
+            self._land(raw_round, bits, hop)
+            held.extend(raw_round.fragments)
+        held_fragments = tuple(held)
+        for packet, bits in zip(packets, formed_bits, strict=True):
             fragments = self.detection_events.form_at(
-                _SEAT, packet.fragments, round_before
+                _SEAT, packet.fragments, held_fragments
             )
-            round_before = ()
+            held_fragments = ()
             stored = dataclasses.replace(packet, fragments=fragments)
             self._land(stored, bits, hop)
         on_stored()

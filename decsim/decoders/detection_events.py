@@ -48,14 +48,14 @@ class TierFormation:
         self.seat = seat
         self.formed_round_keys: set = set()
 
-    def form(self, payloads: list, round_before: tuple = ()) -> list:
+    def form(self, payloads: list, rounds_before: tuple = ()) -> list:
         """One job's rounds, their detection events in place of outcomes.
 
-        round_before is the raw round before the first, which the tier
+        rounds_before are the raw rounds before the first, which the tier
         holds for that round's detectors and does not return.
         """
         fragments = tuple(payloads)
-        formed = self.placement.form_at(self.seat, fragments, round_before)
+        formed = self.placement.form_at(self.seat, fragments, rounds_before)
         return list(formed)
 
     def cycles_for(self, job: decoding_records.DecodeJob) -> int:

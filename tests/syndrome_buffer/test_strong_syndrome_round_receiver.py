@@ -98,8 +98,8 @@ class RecordingFormer:
         self.cycles_asked.append((seat, round_count))
         return 0
 
-    def form_at(self, seat, fragments, round_before=()):
-        held = tuple(fragment.round_index for fragment in round_before)
+    def form_at(self, seat, fragments, rounds_before=()):
+        held = tuple(fragment.round_index for fragment in rounds_before)
         self.formed.append((seat, fragments[0].round_index, held))
         return fragments
 
@@ -350,24 +350,26 @@ def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
     ]
 
 
-def test_the_round_before_a_region_lands_raw_and_forms_the_first_round():
-    """The seat holds it for the region's first round and forms it not."""
+def test_the_rounds_before_a_region_land_raw_and_form_its_first_round():
+    """The seat holds rounds 1 and 2 for round 3 and forms neither."""
     engine = engine_module.Engine()
     former = RecordingFormer()
     receiver = room_side(engine, detection_events=former)
     reads = decoding_records.WindowReads((1, 0))
-    receiver.store.register_hold(reads, [(1, 1), (1, 2), (1, 3)])
-    carried = region(1, 2, 3, first_round=2)
+    receiver.store.register_hold(reads, [(1, 1), (1, 2), (1, 3), (1, 4)])
+    carried = region(1, 2, 3, 4, first_round=3)
 
     receiver.reserve_region(carried)
     receiver.receive_region(carried, _nothing)
 
     seat = "strong_syndrome_buffer"
-    assert carried.carries_the_round_before
-    assert carried.wire_bits == 3 * BITS_PER_ROUND
+    assert carried.wire_bits == 4 * BITS_PER_ROUND
     assert receiver.detection_events.cycles_asked == [(seat, 2)]
-    assert receiver.detection_events.formed == [(seat, 2, (1,)), (seat, 3, ())]
-    assert receiver.store.occupancy == 3
+    assert receiver.detection_events.formed == [
+        (seat, 3, (1, 2)),
+        (seat, 4, ()),
+    ]
+    assert receiver.store.occupancy == 4
 
 
 def test_a_region_formed_here_is_reported_stored_once_every_round_is():
@@ -433,29 +435,32 @@ def test_the_room_is_weighed_at_the_width_this_seat_stores():
     assert has_room is True
 
 
-def test_a_region_reserves_its_formed_rounds_and_its_raw_round_before():
-    """The round before lands raw; the rounds formed here take one bit."""
+def test_a_region_reserves_its_formed_rounds_and_its_raw_rounds_before():
+    """The rounds before land raw; the rounds formed here take one bit."""
     engine = engine_module.Engine()
     settings = event_settings.DetectionEventSettings(
         formed_at=("strong_syndrome_buffer",)
     )
     here = formation.SeatedFormation(None, settings)
-    receiver = room_side(engine, bits=5, detection_events=here)
+    room_bits = 2 * BITS_PER_ROUND + 2
+    receiver = room_side(engine, bits=room_bits, detection_events=here)
     request_key = window_records.DecoderRequestKey(
         1, 0, window_records.DecoderTier.STRONG, 1
     )
-    packets = []
-    for round_index in (1, 2, 3):
-        packed = stated_event_round(round_index)
-        packets.append(packed.packet)
-    carried = round_records.EscalatedRegion.of(request_key, tuple(packets), 2)
+    first = stated_event_round(1)
+    second = stated_event_round(2)
+    third = stated_event_round(3)
+    fourth = stated_event_round(4)
+    packets = (first.packet, second.packet, third.packet, fourth.packet)
+    carried = round_records.EscalatedRegion.of(request_key, packets, 3)
 
     receiver.reserve_region(carried)
 
     assert receiver.reserved_bits_by_round == {
         (1, 1): BITS_PER_ROUND,
-        (1, 2): 1,
+        (1, 2): BITS_PER_ROUND,
         (1, 3): 1,
+        (1, 4): 1,
     }
 
 

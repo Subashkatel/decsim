@@ -19,11 +19,14 @@ import pathlib
 
 import numpy
 import pytest
+import stim
 
 import decsim.build.decoders as decoder_build
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
+import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
+import decsim.records.workload as workload_records
 
 CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
@@ -765,6 +768,78 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     expected = _stims_events_by_round(machine, emitted)
     mismatched = _mismatched_rounds(landed, expected)
     assert landed
+    assert mismatched == []
+
+
+def _lookback_workload(settings):
+    """Ten rounds of one qubit whose detector reads two rounds back.
+
+    Round r's detector is rec[-1] ^ rec[-3], so a seat that joins at a
+    region reads two raw rounds before it.
+    """
+    noisy_round = "X_ERROR(0.05) 0\nM(0.05) 0\n"
+    circuit = stim.Circuit(
+        f"R 0\n{noisy_round}DETECTOR rec[-1]\n"
+        f"{noisy_round}DETECTOR rec[-1]\n"
+        f"REPEAT 8 {{\n{noisy_round}DETECTOR rec[-1] rec[-3]\n}}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+    workload = workload_records.Workload((operation,), {1: 10}, physical)
+    return settings.workload.running(workload)
+
+
+def _lookback_switching_machine(formed_at, seed):
+    """Union-find switching on the lookback circuit, windows of 2 + 2."""
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        formed_at,
+    )
+    settings = machine.settings
+    workload = _lookback_workload(settings)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=2, buffer_rounds=2
+    )
+    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
+    escalation = dataclasses.replace(
+        settings.escalation, confidence="cluster_gap", gap_threshold_db=15.0
+    )
+    settings = dataclasses.replace(
+        settings,
+        workload=workload,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, seed)
+
+
+# a seed that escalates a window whose predecessor stayed weak
+LOOKBACK_SEED = 5
+
+
+@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
+def test_a_switching_run_on_a_two_round_lookback_consumes_stims_events(
+    formed_at,
+):
+    """A region after a weak window lands Stim's events at every unit.
+
+    The strong side joins that region mid-stream and is given the two
+    raw rounds its first round reads (stim.Circuit.compile_m2d_converter
+    on the rows the QPU emitted is the referent).
+    """
+    machine = _lookback_switching_machine(formed_at, LOOKBACK_SEED)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
     assert mismatched == []
 
 

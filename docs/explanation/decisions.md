@@ -1318,7 +1318,7 @@ gained `replace_restart_reads`.
 (`FormationTable.rounds_read_before`, `rounds_read_before_first`),
 `decsim/detector_error_model/detection_event_formation.py`
 (`rounds_needed_before`, `rounds_read_before`),
-`decsim/frontends/planner.py` (`FormationReads`),
+`decsim/records/windows.py` (`FormationReads`),
 `decsim/windows/round_retention.py` (`strong_rounds_before`,
 `primary_rounds_before`, `replace_restart_reads`,
 `release_committed_strong_read`), `decsim/syndrome_buffer/round_output.py`

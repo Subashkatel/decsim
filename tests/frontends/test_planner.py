@@ -260,7 +260,7 @@ def compiled_plan(operations, planned_ids, **overrides):
     reread_regions = overrides.pop("restart_reread_buffer_regions", 0)
     open_ended = overrides.pop("open_ended", False)
     formation_reads = overrides.pop(
-        "formation_reads", planner.NO_FORMING_READER
+        "formation_reads", window_records.NO_FORMING_READER
     )
     views = []
     for operation in operations:
@@ -718,7 +718,9 @@ def seven_round_plan(formation_reads, retain_strong_context=True):
 def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
     """Its former reads round 2 for round 3's surface-code detectors."""
     table = surface_code_table()
-    reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
+    reads = window_records.FormationReads(
+        strong_side_forms=True, tables={1: table}
+    )
 
     plan = seven_round_plan(reads)
 
@@ -729,7 +731,9 @@ def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
 def test_a_strong_side_that_forms_holds_every_round_the_commit_reads():
     """Round 3's detector is rec[-1] ^ rec[-3]: it reads round 1."""
     table = lookback_table()
-    reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
+    reads = window_records.FormationReads(
+        strong_side_forms=True, tables={1: table}
+    )
 
     plan = seven_round_plan(reads)
 
@@ -740,7 +744,9 @@ def test_a_strong_side_that_forms_holds_every_round_the_commit_reads():
 def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
     """Round 3 reads only itself; round 4 of the same read reads round 1."""
     table = reach_growing_table()
-    reads = planner.FormationReads(strong_side_forms=True, tables={1: table})
+    reads = window_records.FormationReads(
+        strong_side_forms=True, tables={1: table}
+    )
 
     plan = seven_round_plan(reads)
 
@@ -749,7 +755,7 @@ def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
 
 
 def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
-    reads = planner.FormationReads(strong_side_forms=True)
+    reads = window_records.FormationReads(strong_side_forms=True)
 
     plan = seven_round_plan(reads)
 
@@ -760,7 +766,9 @@ def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
 def test_a_forming_decoders_window_read_holds_no_round_before_its_start():
     """An earlier read holds round 1 until its decoder forms it."""
     table = surface_code_table()
-    reads = planner.FormationReads(primary_reader_forms=True, tables={1: table})
+    reads = window_records.FormationReads(
+        primary_reader_forms=True, tables={1: table}
+    )
 
     plan = seven_round_plan(reads, retain_strong_context=False)
 

@@ -6,8 +6,11 @@ run-wide ordinal; DecoderTier and DecoderRequestKey live here because a
 window records which request finally published its correction. The
 window itself is the window manager's live bookkeeping, so it and the
 plan records that carry live state are the folder's unfrozen ones.
+FormationReads says which reads also hold the raw rounds before them;
+the plan builder and the planner share it.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional
@@ -431,3 +434,54 @@ class WindowReadiness:
     successors: tuple[SuccessorReadiness, ...]
     memory_rounds_arrived: int
     tail_closed: bool
+
+
+@dataclass(frozen=True)
+class FormationReads:
+    """Which reads also hold the raw rounds their rounds' recipes read.
+
+    A seat that forms the events and starts mid-stream is given every
+    raw round before its first that its rounds' recipes read
+    (FormationTable rounds_read_before_first), so the read that carries
+    those rounds holds them, as an HEVC decoder keeps each picture the
+    current reference set names (FFmpeg hevc/refs.c:486-517).
+    strong_side_forms is a seat past the weak syndrome buffer that
+    forms; primary_reader_forms is the decoder the primary store feeds,
+    forming. tables maps an operation id to its formation table; an
+    operation with none reads nothing before its first round.
+    """
+
+    strong_side_forms: bool = False
+    primary_reader_forms: bool = False
+    tables: Mapping = field(default_factory=dict)
+
+    def strong_read_start(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> int:
+        """The first round a strong read of these rounds holds."""
+        if not self.strong_side_forms:
+            return first_round
+        return self._earliest_round_read(operation_id, first_round, last_round)
+
+    def primary_read_start(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> int:
+        """The first round a primary read of these rounds holds."""
+        if not self.primary_reader_forms:
+            return first_round
+        return self._earliest_round_read(operation_id, first_round, last_round)
+
+    def _earliest_round_read(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> int:
+        table = self.tables.get(operation_id)
+        if table is None:
+            return first_round
+        stop_round = last_round + 1
+        read_rounds = range(first_round, stop_round)
+        reach_count = table.rounds_read_before_first(first_round, read_rounds)
+        return first_round - reach_count
+
+
+# a run whose reading seats form nothing holds no round before a read
+NO_FORMING_READER = FormationReads()

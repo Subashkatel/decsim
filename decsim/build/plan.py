@@ -61,7 +61,7 @@ class Plan:
     resource_claims: dict
     device: Any
     error_model_provider: Any
-    formation_reads: planner.FormationReads
+    formation_reads: window_records.FormationReads
 
     @property
     def round_ticks(self) -> int:
@@ -544,7 +544,7 @@ def _formation_reads(
     settings: machine_settings.MachineSettings,
     escalation_policy,
     tables: Mapping,
-) -> planner.FormationReads:
+) -> window_records.FormationReads:
     """Which reads also hold the raw rounds their first round reads.
 
     The primary store feeds the primary tier's decoder, whose seat
@@ -556,7 +556,7 @@ def _formation_reads(
     if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
         primary_seat = "strong_decoder"
     primary_reader_forms = primary_seat in detection_events.formed_at
-    return planner.FormationReads(
+    return window_records.FormationReads(
         strong_side_forms=strong_side_forms,
         primary_reader_forms=primary_reader_forms,
         tables=tables,

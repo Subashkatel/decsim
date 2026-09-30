@@ -182,7 +182,7 @@ def test_the_double_window_leaves_once_its_far_boundary_is_determined():
     assert len(submitted_lines) == 1
     assert submitted_lines[0].startswith("[ 87.000 us]")
     assert restart_lines[0].startswith("[ 87.000 us]")
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
 def test_the_double_window_at_the_operations_end_waits_for_terminal_data():
@@ -199,7 +199,7 @@ def test_the_double_window_at_the_operations_end_waits_for_terminal_data():
         ((1, 1), "weak"),
         ((1, 2), "strong"),
     ]
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
 def test_a_region_at_a_back_to_back_seam_waits_for_its_own_weak_commit():
@@ -229,7 +229,7 @@ def _recorded_waits(machine) -> dict:
     def held(_request_key, window_key, waits_for, _rounds) -> None:
         waits[window_key] = waits_for
 
-    redecode = machine.window_manager.strong_redecode
+    redecode = machine.windows.window_manager.strong_redecode
     redecode.trace.strong_window_held.connect(held)
     return waits
 
@@ -239,7 +239,7 @@ def test_a_second_escalation_of_one_window_is_refused():
         rounds=9, escalated_windows={2}, strong_window="double_window"
     )
     machine.run()
-    shape = machine.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.strong_redecode.shape
     again = decoding_records.DecodeJob(
         operation_id=1,
         window_id=2,
@@ -309,7 +309,7 @@ def _log_index(machine, needle: str) -> int:
 
 
 def _claim(machine, window_index: int):
-    store = machine.window_manager.retention.weak_store
+    store = machine.windows.window_manager.retention.weak_store
     claim = decoding_records.PotentialRestart((1, window_index))
     if not store.has_hold(claim):
         return None
@@ -366,7 +366,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
     ) in resliced[0]
     withdrawn_restart = _log_index(machine, "WITHDRAW memory W6")
     assert withdrawn_restart < machine.observation.log.lines.index(resliced[0])
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
 def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
@@ -466,7 +466,7 @@ def test_the_double_window_lands_in_the_declared_backlog_regime():
         "restart window (1, 4) re-sliced across strong window edge 12"
         in (resliced[0])
     )
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
 # ---- a shape row added from outside decsim
@@ -534,7 +534,7 @@ def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
         machine.run()
     finally:
         del table["recording_redo_window"]
-    shape = machine.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is RecordingRedoWindow
     assert shape.planned_windows == [2]
     # the row pins its past face on W1, the neighbour that committed
@@ -588,7 +588,7 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
         machine.run()
     finally:
         del table["recording_double_window"]
-    shape = machine.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is RecordingDoubleWindow
     assert shape.planned_windows == [0]
     assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
@@ -602,7 +602,7 @@ def test_the_shipped_components_fill_the_shapes_six_window_side_ports():
     the root binds there answer the whole port.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows=set())
-    shape = machine.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.strong_redecode.shape
     assert isinstance(shape.planner, ports.WindowPlan)
     assert isinstance(shape.retention, ports.WindowRetention)
     assert isinstance(shape.builder, ports.WindowJobBuilder)
@@ -907,7 +907,7 @@ def test_a_yaml_names_the_redo_window_row_and_its_pin_crosses_the_wire():
     """
     machine = _gate_machine("redo_window")
     result = machine.run()
-    shape = machine.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is strong_window_shapes.RedoWindow
     strong_windows = _strong_window_keys(machine)
     pinned = _pinned_boundary_transfers(result)
@@ -1085,11 +1085,11 @@ def test_a_yaml_names_the_double_window_row_and_it_runs():
     """
     machine = _gate_machine("double_window")
     result = machine.run()
-    shape = machine.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is strong_window_shapes.DoubleWindow
     statuses = _run_statuses(result)
     assert statuses == [(1, "logical_observables")]
-    assert not machine.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
 def test_a_re_reading_restart_window_owns_the_faults_the_far_pin_carries():

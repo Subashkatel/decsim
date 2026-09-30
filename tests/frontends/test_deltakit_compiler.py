@@ -137,7 +137,7 @@ def test_machine_decodes_the_compiled_noisy_experiment(
     )
     machine = machine_module.Machine.build(settings, seed=73)
     result = machine.run()
-    source = machine.syndrome_source
+    source = machine.qpu.syndrome_source
     detection = source.sampled_detection_events(1)
     matcher = pymatching.Matching.from_detector_error_model(model)
     prediction = matcher.decode(detection)

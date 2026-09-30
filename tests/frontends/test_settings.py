@@ -81,7 +81,7 @@ def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
     rounds = settings.workload.rounds_policy.rounds_by_operation
 
     assert result.terminal_status == "complete"
-    assert len(machine.operations) == 2
+    assert len(machine.plan.all_operations) == 2
     assert rounds == {1: 4, 2: 7}
 
 
@@ -196,7 +196,7 @@ def test_the_merge_probe_runs_from_an_operations_file(tmp_path):
     settings = _point(config_path, AT_DISTANCE_3)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
-    merge = machine.operations[2]
+    merge = machine.plan.all_operations[2]
     policy = settings.workload.rounds_policy
 
     assert result.terminal_status == "complete"

@@ -127,7 +127,7 @@ def _weak_input_traffic(machine) -> tuple:
 
 def _committed_observables(machine) -> list:
     committed = []
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     for record in snapshot.records:
         committed.append((record.window_key, record.logical_observables))
     return committed
@@ -180,8 +180,8 @@ def _walks_and_next_starts(machine) -> list:
 
     One unit, so the unit's decodes start in the order recorded here.
     """
-    service = machine.decoder_manager.service
-    outcomes = machine.decoder_manager.outcomes
+    service = machine.decoders.decoder_manager.service
+    outcomes = machine.decoders.decoder_manager.outcomes
     engine = machine.engine
     starts = []
     ends = {}
@@ -247,7 +247,7 @@ def test_a_windows_two_requests_are_one_attempt_in_the_ledger():
 def test_a_window_whose_other_solve_never_arrives_refuses_the_run():
     """A solve nobody joins is unsettled state, refused at the run's end."""
     machine = _switching_machine(1)
-    join = machine.window_manager.requester.gap_join
+    join = machine.windows.window_manager.requester.gap_join
     joined_solves = join.accept_result
 
     def hold_the_first_solve_alone(job, result):

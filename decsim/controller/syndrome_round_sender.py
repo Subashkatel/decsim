@@ -185,7 +185,7 @@ class SyndromeRoundSender:
 
         A strong-primary plan reads its windows from the room side, so
         every round takes one hop into the strong store. The
-        window side settles that when the root wires it and never moves it
+        window side settles that when the machine connects it and never moves it
         again, so the sender reads it here rather than at every admit.
         """
         reads_from_buffer_zero = self.windows.reads_windows_from(

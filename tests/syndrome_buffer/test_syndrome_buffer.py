@@ -594,7 +594,7 @@ def test_the_weak_primary_pipeline_runs_on_the_declared_ticks():
     machine = declared_run.weak_only_run(rounds=6)
     windows = machine.observation.windows.windows
     window = windows[(1, 0)]
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     (record,) = snapshot.records
     expected_first_round = config.microseconds_to_ticks(10.0)
     expected_data_complete = config.microseconds_to_ticks(15.0)
@@ -642,7 +642,7 @@ def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
     assert first_window.t_data_complete == expected_data_complete
     assert published == expected_data_complete
     assert room_side_landings == []
-    assert machine.strong_syndrome_buffer.occupancy == 0
+    assert machine.readout.strong_syndrome_buffer.occupancy == 0
 
 
 def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():

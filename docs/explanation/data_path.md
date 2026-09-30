@@ -256,7 +256,7 @@ the same kind of hop as hop 3.
 
 The strong region into the strong unit. Ends: `syndrome_buffer` to
 `decoders`; the same store output port as hop 4, bound to this path for
-the strong syndrome buffer (`decsim/build/stores.py`).
+the strong syndrome buffer (`decsim/build/readout.py`).
 
 What crosses: the strong window's assigned rounds, `r_com + 2 r_buf` of
 them under Toshio's assumption, in one transfer. The bit count is again

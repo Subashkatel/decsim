@@ -222,7 +222,7 @@ def declared_profile(escalation_microseconds: Optional[float] = None):
 
 def frame_tiers(machine) -> list:
     """(window key, tier) of every frame record, in commit order."""
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     tiers = []
     for record in snapshot.records:
         tiers.append((record.window_key, record.tier))

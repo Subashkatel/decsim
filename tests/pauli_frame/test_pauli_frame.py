@@ -303,9 +303,9 @@ def test_a_frame_row_written_outside_decsim_runs_from_a_yaml(
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
 
-    assert isinstance(machine.pauli_frame, CountingFrame)
+    assert isinstance(machine.control.pauli_frame, CountingFrame)
     assert result.terminal_status == "complete"
-    assert machine.pauli_frame.committed_windows != []
+    assert machine.control.pauli_frame.committed_windows != []
 
 
 def test_a_frame_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
@@ -382,9 +382,11 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     (operation_result,) = result.operation_results
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     strong_flips = _strong_flips(snapshot)
-    frame = machine.pauli_frame.frame_for_stream(operation_result.operation_id)
+    frame = machine.control.pauli_frame.frame_for_stream(
+        operation_result.operation_id
+    )
 
     assert (1,) in strong_flips
     assert frame == tuple(operation_result.logical_observables)

@@ -21,8 +21,7 @@ import decsim.config as config
 
 # The points on the path from the controller to a decoder where the
 # former may sit, in path order: the controller's assembler, the two
-# stores' receiving ends, and the two decoder units' input
-# (decsim/assembly.py SEATS).
+# stores' receiving ends, and the two decoder units' input.
 SEATS = (
     "controller",
     "weak_syndrome_buffer",
@@ -61,7 +60,7 @@ class DetectionEventSettings:
 
     formed_at lists the seats, each named once; every path a round takes
     to a decoder crosses exactly one of them, which the build checks
-    against the run's paths (build/controller_side.py). One conversion
+    against the run's paths (build/readout.py). One conversion
     costs latency_cycles, plus cycles_per_round for every round after
     the first when a seat forms several rounds together, on clock, the
     clock of the logic that forms them: a pipelined stage takes a round

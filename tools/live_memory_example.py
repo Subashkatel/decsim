@@ -239,7 +239,7 @@ def _write_execution(
     folder: pathlib.Path, machine: machine_module.Machine
 ) -> None:
     """The history feedback selected: the executed circuit and its readout."""
-    source = machine.syndrome_source
+    source = machine.qpu.syndrome_source
     stream_id = producers.LIVE_STREAM_ID
     circuit = source.executed_circuit(stream_id)
     circuit_path = folder / "executed.stim"

@@ -53,7 +53,7 @@ def test_separate_live_models_never_execute_a_physical_history(
     empty = stim.Circuit()
     assert source.executed_circuit(100) == empty
     packets = []
-    machine.qpu.trace.round_emitted.connect(packets.append)
+    machine.qpu.device.trace.round_emitted.connect(packets.append)
     result = machine.run()
     assert result.terminal_status == "complete"
     assert result.decode_work_settled
@@ -78,8 +78,8 @@ def test_separate_models_preserve_the_prefix_across_feedback_waits(
     slower, longer = _live_machine(program, 8.0)
     first_packets = []
     second_packets = []
-    faster.qpu.trace.round_emitted.connect(first_packets.append)
-    slower.qpu.trace.round_emitted.connect(second_packets.append)
+    faster.qpu.device.trace.round_emitted.connect(first_packets.append)
+    slower.qpu.device.trace.round_emitted.connect(second_packets.append)
     first_result = faster.run()
     second_result = slower.run()
     assert first_result.terminal_status == "complete"
@@ -115,7 +115,7 @@ def test_finite_source_keeps_one_shot_with_separate_models(
     assert source.sampled_truth() == {}
     assert samples == []
     packets = []
-    machine.qpu.trace.round_emitted.connect(packets.append)
+    machine.qpu.device.trace.round_emitted.connect(packets.append)
     result = machine.run()
     assert result.terminal_status == "complete"
     assert result.decode_work_settled
@@ -195,7 +195,7 @@ def test_timing_only_source_preserves_the_finite_models_circuit_copy() -> None:
     models = stim_device.StimDevice()
     workload = _workload(circuit, 24, 24)
     machine = _machine(source, models, workload, 4.0)
-    copied = machine.operations[0].circuit
+    copied = machine.plan.all_operations[0].circuit
     assert copied == circuit
     assert copied is not circuit
     assert models.sampled_truth() == {}

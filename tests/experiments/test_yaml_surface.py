@@ -100,9 +100,9 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     )
     settings = point.settings
     completed = machine_module.Machine.build(settings, 0)
-    built = completed.controller.settings
+    built = completed.readout.controller.settings
     assert built.clock.edge(27, 0) == config_module.microseconds_to_ticks(0.054)
-    output = completed.instruction_output
+    output = completed.control.instruction_output
     assert output.pulse_cycles == 8
     assert output.clock.edge(8, 0) == config_module.microseconds_to_ticks(0.016)
 
@@ -278,7 +278,7 @@ def test_a_factory_row_named_in_the_yaml_is_built_with_its_own_keys(
 
     machine = machine_module.Machine.build(settings, 0)
 
-    built = machine.factory
+    built = machine.qpu.factory
     level = built.levels[0]
     assert built.card.preparation_unit_count == 4
     assert (level.unit_count, level.distance) == (2, 5)
@@ -677,7 +677,7 @@ def test_the_code_card_row_named_in_the_yaml_is_built_with_its_own_keys(
 
     machine = machine_module.Machine.build(settings, 0)
 
-    code = machine.syndrome_source.code
+    code = machine.qpu.syndrome_source.code
     assert code.name == "bivariate-bicycle code [[30,8,2]]"
     assert code.syndrome_bits_per_round(1) == 30
 
@@ -718,8 +718,8 @@ def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
     machine = machine_module.Machine.build(settings, 0)
 
     own_settings = _SplitBits.Settings(one_payload_per_patch=True)
-    assert machine.syndrome_source.settings == own_settings
-    assert machine.syndrome_source.one_payload_per_patch is True
+    assert machine.qpu.syndrome_source.settings == own_settings
+    assert machine.qpu.syndrome_source.one_payload_per_patch is True
 
 
 def test_the_burst_rows_keys_reach_the_source_that_runs(tmp_path):
@@ -754,7 +754,7 @@ def test_the_burst_rows_keys_reach_the_source_that_runs(tmp_path):
         burst_error_probability=0.1,
         burst_channels=("idle", "measurement"),
     )
-    assert machine.syndrome_source.burst == burst
+    assert machine.qpu.syndrome_source.burst == burst
     assert len(result.operation_results) == 1
 
 

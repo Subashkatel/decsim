@@ -666,7 +666,7 @@ def _speculative_way_to_the_queue(machine) -> dict:
 def _speculative_request_after_decision(machine) -> dict:
     """Window index -> its speculative request tick less its decision's end."""
     records = _speculative_records(machine)
-    windows = machine.window_manager.planner.windows_by_key
+    windows = machine.windows.window_manager.planner.windows_by_key
     after = {}
     for (_operation_id, window_id), window in windows.items():
         record = records[window_id]

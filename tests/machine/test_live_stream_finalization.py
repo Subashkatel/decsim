@@ -48,7 +48,7 @@ def test_final_readout_uses_the_final_model_before_same_tick_decoding(
     workload = _workload(final_round)
     machine, source = _machine(workload, data_hop_ticks)
     packets = []
-    machine.qpu.trace.round_emitted.connect(packets.append)
+    machine.qpu.device.trace.round_emitted.connect(packets.append)
     result = machine.run()
     assert result.terminal_status == "complete"
     assert result.decode_work_settled
@@ -102,7 +102,7 @@ def test_a_region_a_released_operation_starts_keeps_the_qpu_cycle(
     machine, source = _machine(workload, 0)
     emission_ticks = []
     listener = _emission_recorder(machine, emission_ticks)
-    machine.qpu.trace.round_emitted.connect(listener)
+    machine.qpu.device.trace.round_emitted.connect(listener)
     result = machine.run()
     assert result.terminal_status == "complete"
     after_last_round = readout_round + 1
@@ -183,7 +183,7 @@ def test_a_finite_group_stream_gives_its_last_round_once() -> None:
         del operation_id
         idle_rounds[patch].append(round_index)
 
-    machine.idle_rounds.trace.idle_round_emitted.connect(listener)
+    machine.control.idle_rounds.trace.idle_round_emitted.connect(listener)
 
     result = machine.run()
 
@@ -232,7 +232,7 @@ def test_a_second_continuation_follows_the_idle_rounds_before_it() -> None:
 
     result = machine.run()
 
-    binding = machine.issuer.stream_binding_for(5)
+    binding = machine.control.issuer.stream_binding_for(5)
     assert result.terminal_status == "complete"
     assert rounds == list(range(1, 21))
     assert binding.stream_offset == 13
@@ -284,7 +284,7 @@ def test_a_released_continuation_s_result_is_its_own_windows(
 
     result = machine.run()
 
-    binding = machine.issuer.stream_binding_for(2)
+    binding = machine.control.issuer.stream_binding_for(2)
     assert result.terminal_status == "complete"
     assert rounds == list(range(1, 25))
     assert binding.stream_offset == 7
@@ -326,7 +326,7 @@ def test_a_continuation_s_last_round_ends_a_window_of_its_source() -> None:
 
     result = machine.run()
 
-    binding = machine.issuer.stream_binding_for(2)
+    binding = machine.control.issuer.stream_binding_for(2)
     assert result.terminal_status == "complete"
     assert rounds == list(range(1, 25))
     assert binding.stream_offset == 19
@@ -585,7 +585,7 @@ def _committed_windows(
     )
     machine = machine_module.Machine.build(settings, 5)
     windows = []
-    sources = machine.window_manager.window_sources()
+    sources = machine.windows.window_manager.window_sources()
     recorder = _window_recorder(windows)
     sources.window_committed.connect(recorder)
     result = machine.run()
@@ -750,7 +750,7 @@ def _emitted_rounds(machine: machine_module.Machine) -> list:
     def listener(packet) -> None:
         rounds.append(packet.round_index)
 
-    machine.qpu.trace.round_emitted.connect(listener)
+    machine.qpu.device.trace.round_emitted.connect(listener)
     return rounds
 
 
@@ -843,7 +843,7 @@ def _prefix_run(operations: tuple, mode: str) -> tuple:
     )
     machine = machine_module.Machine.build(settings, 0)
     commit_ticks = {}
-    sources = machine.window_manager.window_sources()
+    sources = machine.windows.window_manager.window_sources()
     recorder = _commit_recorder(machine, commit_ticks)
     sources.window_committed.connect(recorder)
     events, _ = _events_and_end(machine)
@@ -961,7 +961,7 @@ def _events_and_end(machine: machine_module.Machine) -> tuple:
     guard = _refuse_past(1_000_000_000)
     machine.engine.action_done.connect(guard)
     events = []
-    trace = machine.execution_runtime.trace
+    trace = machine.control.execution_runtime.trace
     finished = _recorder(events, "finished")
     released = _recorder(events, "released")
     started = _recorder(events, "started")

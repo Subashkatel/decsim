@@ -76,7 +76,8 @@ class Streams(Protocol):
 class NoFeedbackStreams:
     """A run whose operations share no streams and declare no regions."""
 
-    # the row takes the wires the other row does: a seat has one shape
+    # the row takes the wires the other row does, so the control part
+    # wires either the same way
     runtime = ports.Port(ports.OperationRuntime)
     qpu = ports.Port(ports.Qpu)
     windows = ports.Port(ports.WindowInput)

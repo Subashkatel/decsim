@@ -134,7 +134,7 @@ def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
 
 def commit_tick_of(machine, window_key):
     """The tick the frame committed one window's correction."""
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     for record in snapshot.records:
         if record.window_key == window_key:
             return record.committed_ticks
@@ -206,7 +206,7 @@ def test_the_feedback_chain_is_the_frame_commit_plus_each_stage_once():
     output_path_ticks = pulse_ticks + to_qpu
     expected_start = expected_release + output_path_ticks
     stamps = machine.observation.runtime_stamps
-    sequencer = machine.execution_runtime
+    sequencer = machine.control.execution_runtime
     (arrival,) = command_arrivals_for(machine, 2)
 
     assert blocker_commit == config.microseconds_to_ticks(33.0)

@@ -245,7 +245,7 @@ def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():
         machine, "START DECODE strong-batch"
     )
     admissions = []
-    for unit in machine.strong_decoder_manager.pool.units:
+    for unit in machine.decoders.strong_decoder_manager.pool.units:
         admissions.append(unit.memory.statistics.admissions)
     assert every_batch
     assert admissions == [0]

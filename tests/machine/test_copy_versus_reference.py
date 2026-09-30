@@ -201,7 +201,7 @@ def _landed_rounds(machine) -> list:
 
 def _raw_rounds(machine) -> dict:
     """Every round's raw bits as the QPU emits them, and each operation."""
-    device = machine.syndrome_source
+    device = machine.qpu.syndrome_source
     emitted = {"bits": {}, "operations": {}}
     emit = device.round_payloads
 
@@ -229,7 +229,7 @@ def _mismatched_rounds(landed: list, expected: dict) -> list:
 
 def _stims_events_by_round(machine, emitted) -> dict:
     """Stim's own converter's events on the emitted rows, by round."""
-    device = machine.syndrome_source
+    device = machine.qpu.syndrome_source
     events_by_round = {}
     for operation_id, operation in emitted["operations"].items():
         table = device.formation_table(operation_id)
@@ -273,7 +273,8 @@ def _timing_only_machine_formed_at(where: str):
 def _decode_spans(machine) -> list:
     """Each window's ticks from its dispatch to its decode's end."""
     spans = []
-    for window in machine.window_manager.planner.windows_by_key.values():
+    planner = machine.windows.window_manager.planner
+    for window in planner.windows_by_key.values():
         span = window.t_done - window.t_dispatch
         spans.append(span)
     return spans
@@ -337,9 +338,9 @@ def _formed_at(settings, where: str):
 
 def _services(machine) -> list:
     """The decode service of each side's manager, the chip's then the host's."""
-    services = [machine.decoder_manager.service]
-    if machine.strong_decoder_manager is not None:
-        services.append(machine.strong_decoder_manager.service)
+    services = [machine.decoders.decoder_manager.service]
+    if machine.decoders.strong_decoder_manager is not None:
+        services.append(machine.decoders.strong_decoder_manager.service)
     return services
 
 

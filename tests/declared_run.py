@@ -403,7 +403,7 @@ def log_lines_containing(machine, needle):
 
 def frame_tiers(machine):
     """(window key, tier) of every frame record, in commit order."""
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     tiers = []
     for record in snapshot.records:
         tiers.append((record.window_key, record.tier))
@@ -442,9 +442,9 @@ class OccupancyProbe:
 
 def reaction_ticks(machine) -> tuple:
     """One window's readiness, queue, dispatch, decode and frame ticks."""
-    windows = machine.window_manager.planner.windows_by_key.values()
+    windows = machine.windows.window_manager.planner.windows_by_key.values()
     (window,) = windows
-    snapshot = machine.pauli_frame.snapshot()
+    snapshot = machine.control.pauli_frame.snapshot()
     (record,) = snapshot.records
     return (
         window.t_data_complete,

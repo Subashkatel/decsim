@@ -150,7 +150,7 @@ def test_without_the_strong_receivers_landing_callback_the_room_side_deadlocks(
 ):
     """The cycle: the writer lands a round, the window manager waits for it.
 
-    The assembly file binds the writer's windows port to the window
+    The readout part binds the writer's windows port to the window
     manager; a window side that hears every landing and tells nobody
     leaves every room-side round unread.
     """

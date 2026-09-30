@@ -43,7 +43,7 @@ outline button at the top of any page lists that page's sections.
 
 ## Tutorials
 
-Three lessons, to do in order.
+Four lessons, to do in order.
 
 - [Your first run](tutorials/first_run.md): one shot, the run folder,
   and one round followed through the machine.
@@ -51,18 +51,21 @@ Three lessons, to do in order.
   bars, and shards folded back into one report.
 - [Two tiers](tutorials/two_tiers.md): a machine with two decoders, and
   one window decoded twice.
+- [Build a machine step by step](tutorials/build_a_machine.md): the six
+  parts, built and connected by hand.
 
 ## How-to guides
 
 Each guide is one task for a reader who has done the tutorials.
 
-**Plug something in.** decsim is built so that a new part is one class
-and one table row. These guides are the recipe and its variants.
+**Plug something in.** decsim is built so that a new pluggable
+component is one class and one table row. These guides are the recipe and its variants.
 
 - [How to add a row to a table](how-to/add_a_table_row.md)
 - [How to add a decoder backend](how-to/add_a_decoder_backend.md)
 - [How to add a burst detector](how-to/add_a_burst_detector.md)
 - [How to plug a component in without a table row](how-to/plug_in_without_a_table_row.md)
+- [How to add a component to a part](how-to/add_a_component_to_a_part.md)
 - [How to add a yaml key](how-to/add_a_yaml_key.md)
 - [How to plug in a workload maker](how-to/plug_in_a_workload_maker.md)
 

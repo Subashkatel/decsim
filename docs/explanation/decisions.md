@@ -86,9 +86,9 @@ compatible beyond the MWPM decoder.
 over the weak pool, and, in a run whose windows may escalate, the
 host's over the strong pool. The escalation side and a window's
 speculative strong decode submit to the host's; the ledger of strong
-requests is one seat both take (a seat is a named slot in `decsim/assembly.py` that the root
-fills with one built component and wires to its neighbours), since the chip's side opens a request and the host's serves
-it; a kept weak result halts its request through the escalation side.
+requests is one component both are wired to (the decoders part's
+`strong_requests`), since the chip's side opens a request and the host's
+serves it; a kept weak result halts its request through the escalation side.
 Each manager's own work is charged: `decoder_manager.dispatch_cycles`
 on a named clock, defaulting to zero, the one card both read.
 
@@ -108,8 +108,7 @@ strong computation halted on a confident weak result); Skoric's
 parallel-decoder condition, StarPU's scheduling handbook, and Caune's
 measured 250 to 370 cycles of dispatch work.
 
-**Where to see it.** `decsim/assembly.py`, the `decoder_manager` and
-`strong_decoder_manager` rows; `configs/reference.yaml`, the
+**Where to see it.** `decsim/build/decoders.py`, `Decoders.build`; `configs/reference.yaml`, the
 `decoder_manager` section.
 
 ## D5. The strong buffer hop is a priced link like every other
@@ -1088,7 +1087,7 @@ gained `retained_fragments`.
 
 **Where to see it.** `decsim/detector_error_model/settings.py`,
 `decsim/detector_error_model/detection_event_formation.py`,
-`decsim/build/controller_side.py` (`build_detection_events`) and
+`decsim/build/readout.py` (`build_detection_events`) and
 `decsim/syndrome_buffer/round_output.py` (`_read_the_round_before`).
 `tests/machine/test_copy_versus_reference.py` holds every seat on every
 path against Stim's own converter on the rows the QPU emitted, read

@@ -11,7 +11,7 @@ schedules a decode, the decoder returns a result, the frame commits the
 correction, the frame releases the controller, the controller instructs
 the QPU, and every hop between components rides a link.
 
-The pluggable parts (SyndromeSource, SyndromeBuffer, Decoder,
+The pluggable components (SyndromeSource, SyndromeBuffer, Decoder,
 StrongBackend, Link, EscalationPolicy, BurstDetector, ThresholdSource,
 ConfidenceSignal, WindowingScheme, IdlePolicy) have their abstract
 class here, sinter's Decoder shape
@@ -22,7 +22,9 @@ traffic ledger, the trace) reaches a component through callbacks it
 fires, never through a port, so every component runs with no observer.
 
 A component names its neighbours by declaring a Port (below) for each
-one, and the root binds them by assignment once every component exists.
+one. The part that holds the component binds them by assignment, those
+inside the part when it is built and those to another part when the
+machine connects the parts (decsim/build/, decsim/machine.py).
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -42,9 +44,9 @@ class Port:
     """One neighbour a component talks to, named on the class, bound once.
 
     A component declares a port as a class attribute and reads it as an
-    ordinary attribute; the root binds it by assignment once every
-    component exists, which is gem5's script assigning one port to
-    another (gem5 configs/learning_gem5/part1/simple.py:68).
+    ordinary attribute; the part that holds it binds it by assignment,
+    which is gem5's script assigning one port to another
+    (gem5 configs/learning_gem5/part1/simple.py:68).
     The port carries the Protocol its peer answers, so a class points at
     this file rather than the other way about.
 
@@ -56,13 +58,12 @@ class Port:
     (gem5 src/mem/port.cc:62-65); an optional port reads as
     None instead, which is the neighbour a run does not have.
 
-    Whether the peer answers the Protocol is not asked here. Every bind
-    site is decsim's own build code, so no yaml and no call on the
+    Whether the peer answers the Protocol is not asked. Every bind site
+    is decsim's own build code, so no yaml and no call on the
     experiments layer can offer a stranger, and one that a change offered
     would raise at its first call naming the method it lacks. The
-    question belongs where the wiring becomes input, which is the root
-    reading a table of wires, and it is asked of the protocol this port
-    carries.
+    Protocol is what the port promises its reader, and what a new
+    component written for it must answer.
 
     The name arrives at class creation rather than at construction,
     because a descriptor learns what it was called only once the class
@@ -1103,7 +1104,7 @@ class Decoder(Protocol):
     A row that wraps another is asked for it under the seeding protocol,
     not under this port: decoder_pool's decoder_rows walks
     run_seed_children (decsim/seeding.py RunSeedComposite) down from each
-    decoder seat, so a wrapping row that does not answer it hides the
+    decoder unit, so a wrapping row that does not answer it hides the
     row inside it from the trace, the stage ledger and the referee
     audit. StagedDecoder, SampledConfidenceDecoder and
     TesseractCheckedDecoder are the shipped rows that answer it.
@@ -2157,10 +2158,10 @@ class MagicStateFactory(Protocol):
     FactoryCollaborators record. The runtime asks and is called back; a
     factory that produces on demand answers at once. A row that produces
     ahead of demand queues its first attempt in start, never in its
-    constructor, so the order the root builds its components in cannot
-    move a tick (gem5's startup, the place to schedule initial events,
-    gem5 src/sim/sim_object.hh lines 194 and 280). A row
-    declares a decode_queue port (a DecodeQueue), which the root binds
+    constructor, so the order the machine builds its components in
+    cannot move a tick (gem5's startup, the place to schedule initial
+    events, gem5 src/sim/sim_object.hh lines 194 and 280). A row
+    declares a decode_queue port (a DecodeQueue), which the machine binds
     to the run's decoder manager; a row whose card corrects nothing
     leaves it unread.
 

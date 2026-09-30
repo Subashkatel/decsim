@@ -110,7 +110,7 @@ def test_feedback_restart_obeys_the_declared_clock(
         period_microseconds, 4.0, instruction_microseconds
     )
     readouts = []
-    machine.qpu.trace.round_emitted.connect(readouts.append)
+    machine.qpu.device.trace.round_emitted.connect(readouts.append)
     result = machine.run()
     events = machine.observation.command_events.events
     arrival = _command_tick(events, "ARRIVED", 3)
@@ -188,7 +188,7 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
     settings = dataclasses.replace(settings, qpu=qpu)
     machine = machines.Machine.build(settings, 0)
     readouts = []
-    machine.qpu.trace.round_emitted.connect(readouts.append)
+    machine.qpu.device.trace.round_emitted.connect(readouts.append)
     result = machine.run()
     emitted = tuple(bit for packet in readouts for bit in packet.bits)
     assert emitted == tuple(measurements[0])

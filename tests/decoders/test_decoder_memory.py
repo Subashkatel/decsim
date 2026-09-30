@@ -276,7 +276,7 @@ def test_every_unit_has_its_own_memory_and_ends_the_run_empty():
     settings = _two_patch_memory_run(six_rounds_bits, unit_count=2)
     machine = machine_module.Machine.build(settings)
     machine.run()
-    units = machine.decoder_manager.pool.units
+    units = machine.decoders.decoder_manager.pool.units
     names = [unit.name for unit in units]
     occupied = [unit.memory.occupied_bits for unit in units]
     admissions = [unit.memory.statistics.admissions for unit in units]

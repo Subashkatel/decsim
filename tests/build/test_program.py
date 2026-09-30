@@ -1,50 +1,25 @@
-"""Registering the workload with every component, and naming the seed roots.
+"""Registering the workload with every component that reads it.
 
-Every stochastic owner is bound under a path in the run's seed tree
-(decsim/seeding.py), and this module is where the root names the path of
-each one, so a component draws the same numbers whatever else the run
-holds. The load order is the other rule here: streams first, then every
-operation with the windows, then the idle accounting, then the runtime.
+The load order is the rule here: the blocked operations with the
+release first, then every operation with the windows, then the streams,
+the idle accounting, and last the runtime, which starts the roots.
 """
 
+import types
 from collections.abc import Callable
 from typing import Optional
 
 import pytest
 
 import decsim.build.escalation as escalation_build
-import decsim.build.listeners as listener_build
 import decsim.build.plan as plan_build
+import decsim.build.program as program_build
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
-import decsim.records.seeds as seed_records
 import decsim.settings as machine_settings
-
-
-def test_each_stochastic_owner_is_named_by_the_field_it_arrived_under():
-    owners = {"qpu": "the device", "weak_decoder": "the weak unit"}
-
-    roots = listener_build.build_seed_roots(**owners)
-
-    assert roots == (
-        (
-            (seed_records.RunSeedPathSegment("field", "qpu"),),
-            "the device",
-        ),
-        (
-            (seed_records.RunSeedPathSegment("field", "weak_decoder"),),
-            "the weak unit",
-        ),
-    )
-
-
-def test_a_run_with_no_stochastic_owner_names_no_root():
-    roots = listener_build.build_seed_roots()
-
-    assert roots == ()
 
 
 @pytest.mark.parametrize("source_round_limit", [None, 11])
@@ -56,13 +31,9 @@ def test_the_workload_reaches_every_component_in_the_stated_order(
     device = _PhysicalDevice(order, source_round_limit)
     planned_round_count = 9
     plan = _plan(device, planned_round_count)
-    release = _Recorder("conditional_release", order)
-    windows = _Recorder("window_manager", order)
-    streams = _Recorder("streams", order)
-    idle = _Recorder("idle_rounds", order)
-    runtime = _Recorder("execution_runtime", order)
+    control, windows = _recording_parts(order)
 
-    listener_build.load_program(plan, release, windows, streams, idle, runtime)
+    program_build.load_program(plan, control, windows)
 
     assert order == [
         "conditional_release.register_blocked_operation",
@@ -76,12 +47,30 @@ def test_the_workload_reaches_every_component_in_the_stated_order(
         "execution_runtime.load_program",
     ]
     stream = plan.dynamic_streams[0]
+    window_manager = windows.window_manager
     assert device.declared_streams == [(stream, planned_round_count)]
-    assert windows.calls[2] == (
+    assert window_manager.calls[2] == (
         "register_stream",
         (stream, source_round_limit),
         {},
     )
+
+
+def _recording_parts(order: list[str]) -> tuple:
+    """The control and windows parts, each component a recorder."""
+    release = _Recorder("conditional_release", order)
+    streams = _Recorder("streams", order)
+    idle = _Recorder("idle_rounds", order)
+    runtime = _Recorder("execution_runtime", order)
+    control = types.SimpleNamespace(
+        conditional_release=release,
+        streams=streams,
+        idle_rounds=idle,
+        execution_runtime=runtime,
+    )
+    window_manager = _Recorder("window_manager", order)
+    windows = types.SimpleNamespace(window_manager=window_manager)
+    return control, windows
 
 
 def _plan(device: "_PhysicalDevice", round_count: int) -> plan_build.Plan:

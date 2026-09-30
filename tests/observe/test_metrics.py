@@ -67,7 +67,7 @@ def test_the_memory_occupancy_is_the_memorys_own_count_at_every_change():
     point = gate_point.settings(decoder_memory_occupancy=True)
     machine = machine_module.Machine.build(point, gate_point.SEED)
     occupancy = machine.observation.decoder_memory_occupancy
-    (unit,) = machine.decoder_manager.pool.units
+    (unit,) = machine.decoders.decoder_manager.pool.units
     watcher = _MemoryWatcher(occupancy, unit)
     unit.memory.trace.deposited.connect(watcher.changed)
     unit.memory.trace.taken.connect(watcher.changed)

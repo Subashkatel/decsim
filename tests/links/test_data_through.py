@@ -308,7 +308,7 @@ def traffic_of(transfers: list) -> Traffic:
 
 def commit_extents(machine) -> tuple:
     """The commit region of every window the run laid, in plan order."""
-    windows = machine.window_manager.planner.windows_by_key
+    windows = machine.windows.window_manager.planner.windows_by_key
     planned = windows.items()
     in_plan_order = sorted(planned)
     extents = []

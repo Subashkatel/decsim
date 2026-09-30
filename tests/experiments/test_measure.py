@@ -1607,8 +1607,8 @@ class StrongResidentsWaitingOnCompute:
     def __init__(self, machine) -> None:
         self.units = []
         for manager in (
-            machine.decoder_manager,
-            machine.strong_decoder_manager,
+            machine.decoders.decoder_manager,
+            machine.decoders.strong_decoder_manager,
         ):
             if manager is not None:
                 self.units.extend(manager.service.pool.units)

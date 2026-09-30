@@ -935,9 +935,11 @@ def _burst_catch(
     A detector's delay is its first alarm at or after the onset less the
     onset, and it catches the burst within k rounds when that delay is
     at most k, as detection delay is scored for change-point detectors
-    (Xie et al. 2104.04186 lines 161-171). A shot with no burst counts
-    from round 1, so any flag on it is a false alarm. (None, None)
-    without a detector.
+    (Xie et al. 2104.04186 lines 161-171). The delay counts the rounds
+    the detector read, not the tick its flag was published, which its
+    pipeline puts later and the switching waits for. A shot with no
+    burst counts from round 1, so any flag on it is a false alarm.
+    (None, None) without a detector.
     """
     flags = observation.burst_flags
     if flags is None:

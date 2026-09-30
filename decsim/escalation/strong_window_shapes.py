@@ -567,7 +567,7 @@ class DoubleWindow(StrongWindowPorts):
     ) -> None:
         """Install the restart window's re-sliced reads and their model."""
         restart = self.planner.reslice_window(restart_key, buffer_lo, model)
-        self.retention.replace_window_reads(restart_key, restart)
+        self.retention.replace_restart_reads(restart_key, restart)
         seam_owner_name = seam_owner.name.lower()
         self.engine.log(
             log_sources.DECODER_MANAGER,

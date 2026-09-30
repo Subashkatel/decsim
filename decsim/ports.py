@@ -649,6 +649,11 @@ class WindowRetention(Protocol):
     ) -> None:
         """Re-point the window's live holds at its reads."""
 
+    def replace_restart_reads(
+        self, key: tuple, window: window_records.Window
+    ) -> None:
+        """Re-point a re-sliced restart window's holds, rounds before too."""
+
     def release_restart_reads(self, key: tuple) -> None:
         """No earlier escalation can re-slice the window: its claim ends."""
 

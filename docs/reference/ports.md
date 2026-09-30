@@ -181,6 +181,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `escalated_rounds` | The weak syndrome buffer's packets of these rounds, to carry up. |
 | `guard_restart_reads` | Hold the restart window's strong context while a plan lands. |
 | `replace_window_reads` | Re-point the window's live holds at its reads. |
+| `replace_restart_reads` | Re-point a re-sliced restart window's holds, rounds before too. |
 | `release_restart_reads` | No earlier escalation can re-slice the window: its claim ends. |
 | `release_hold_if_live` | Drop a hold that is still live; nothing for one already gone. |
 | `release_strong_hold_if_live` | Drop a room-side hold when it is still registered. |

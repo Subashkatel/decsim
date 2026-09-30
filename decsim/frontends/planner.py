@@ -443,16 +443,16 @@ def _hold_window(
 ) -> None:
     """The window's weak syndrome buffer holds: the weak read, the restart read.
 
-    The weak decode reads the window from its start to its buffer, and
-    the raw rounds before its start when its decoder forms the events.
+    The weak decode reads the window from its start to its buffer. The
+    raw rounds before its start sit in an earlier window's read, which
+    holds them until it lands in the same decoder, and that decoder
+    forms them there and keeps them in its ring, so this read holds
+    none of them.
     """
     operation_id = window.operation_id
     key = (operation_id, window.window_index)
-    first_read = formation_reads.primary_read_start(
-        operation_id, window.start_round, window.buffer_hi
-    )
     round_keys = _read_keys(
-        execution, operation_id, first_read, window.buffer_hi
+        execution, operation_id, window.start_round, window.buffer_hi
     )
     reads = decoding_records.WindowReads(key)
     weak.add(reads, round_keys)

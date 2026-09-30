@@ -1256,10 +1256,15 @@ whole read is counted, not its first round. A round the seat formed sits
 in its former's one ring of `max_record_span + 1` packets and is not
 given again. The recipe table owns the law (`rounds_read_before` per
 round, `rounds_read_before_first` per read).
-Every read whose reader forms holds the rounds its whole read reaches under its own hold,
-in both stores for a strong read and in the primary store for a
-decoder's read, so the reader never depends on the store still having
-them. The plan places a finite operation's holds before the operation
+A read whose reader forms and never read the rounds before its first
+holds the rounds its whole read reaches under its own hold: a strong
+read in both stores, and a restart read past a strong region, whose
+absorbed windows no weak decode read, in the primary store
+(`replace_restart_reads`). A window's own weak read holds none of
+them: the window before it reads them and holds them until it lands in
+the same decoder, which forms them there and keeps them in its ring,
+so a round leaves the store when no reader needs it there, as it does
+when nothing forms. The plan places a finite operation's holds before the operation
 begins, so it reads the operation's recipes off the same circuit the
 source will (`build/plan.py`, `_formation_tables`); the holds the run
 places while it goes ask the placement, whose source's table a live
@@ -1301,7 +1306,8 @@ line 154).
 for a read's first and last round) and `rounds_read_before` (a count,
 for the same two), and `form_at` takes `rounds_before` in place of
 `round_before`; `WindowRetention.strong_round_before` became
-`strong_rounds_before`, which takes the read's last round too.
+`strong_rounds_before`, which takes the read's last round too, and
+gained `replace_restart_reads`.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`, `rounds_read_before_first`),
@@ -1309,7 +1315,7 @@ for the same two), and `form_at` takes `rounds_before` in place of
 (`rounds_needed_before`, `rounds_read_before`),
 `decsim/frontends/planner.py` (`FormationReads`),
 `decsim/windows/round_retention.py` (`strong_rounds_before`,
-`primary_rounds_before`), `decsim/syndrome_buffer/round_output.py`
+`primary_rounds_before`, `replace_restart_reads`), `decsim/syndrome_buffer/round_output.py`
 (`_read_the_rounds_before`),
 `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
 (`_land_formed`);

@@ -217,13 +217,9 @@ def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
     assert retention.strong_rounds_before(1, 5, 5) == []
 
 
-def test_a_forming_decoders_window_holds_the_rounds_its_start_reads():
-    """Its decode reads rounds 3 and 4 raw, under the window's own hold."""
-    store = _store()
-    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
-    table = _lookback_table()
-    retention.detection_events = _placement(table)
-    window = window_records.Window(
+def _forming_decoder_window():
+    """Window 2 of a lookback run: rounds 5 to 8, its round 5 reads 3."""
+    return window_records.Window(
         operation_id=1,
         window_index=2,
         commit_lo=5,
@@ -232,34 +228,36 @@ def test_a_forming_decoders_window_holds_the_rounds_its_start_reads():
         round_count=4,
     )
 
+
+def test_a_forming_decoders_window_holds_no_round_before_its_start():
+    """Window 1 holds rounds 3 and 4 until its decoder forms them."""
+    store = _store()
+    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
+    table = _lookback_table()
+    retention.detection_events = _placement(table)
+    window = _forming_decoder_window()
+
     retention.register_window((1, 2), window)
+
+    reads = decoding_records.WindowReads((1, 2))
+    held = store.hold_round_identities(reads)
+    assert held == ((1, 5), (1, 6), (1, 7), (1, 8))
+
+
+def test_a_restart_read_holds_the_rounds_before_its_start():
+    """No weak decode read the absorbed rounds 3 and 4 its round 5 reads."""
+    store = _store()
+    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
+    table = _lookback_table()
+    retention.detection_events = _placement(table)
+    window = _forming_decoder_window()
+    retention.register_window((1, 2), window)
+
+    retention.replace_restart_reads((1, 2), window)
 
     reads = decoding_records.WindowReads((1, 2))
     held = store.hold_round_identities(reads)
     assert held == ((1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8))
-
-
-def test_a_clipped_tail_of_a_forming_decoder_keeps_its_rounds_before():
-    store = _store()
-    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
-    table = _lookback_table()
-    retention.detection_events = _placement(table)
-    window = window_records.Window(
-        operation_id=1,
-        window_index=2,
-        commit_lo=5,
-        commit_hi=6,
-        buffer_hi=8,
-        round_count=4,
-    )
-    retention.register_window((1, 2), window)
-    window.buffer_hi = 7
-
-    retention.reset_clipped_window_reads(window)
-
-    reads = decoding_records.WindowReads((1, 2))
-    held = store.hold_round_identities(reads)
-    assert held == ((1, 3), (1, 4), (1, 5), (1, 6))
 
 
 def test_a_context_round_still_crossing_is_told_apart_from_one_released():

@@ -110,9 +110,6 @@ SIX_ROUND_WINDOW_BITS = {
     "decoder": 5 * BITS_PER_ROUND + BITS_PER_ROUND + 9,
     "controller": 5 * BITS_PER_ROUND + BITS_PER_ROUND + 4,
 }
-# A decoder that forms the events reads the raw round before a window's
-# first, and the window's store holds it with the window's own rounds.
-ROUND_BEFORE_BITS = {"decoder": BITS_PER_ROUND, "controller": 0}
 # the decoder engines of these runs: 250 MHz and 100 MHz
 FAST_ENGINE_CLOCK = config.Clock(4000)
 FAST_ENGINE_CARD = decoder_settings.EngineSettings(clock=FAST_ENGINE_CLOCK)
@@ -616,9 +613,7 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     program = memory_programs.memory_program()
     settings = _settings(program, "live", placement)
     window_bits = SIX_ROUND_WINDOW_BITS[placement]
-    round_before_bits = ROUND_BEFORE_BITS[placement]
-    store_bits = window_bits + round_before_bits
-    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=store_bits)
+    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
     # a three microsecond strong input keeps the live stream running
@@ -638,7 +633,7 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
         observation=observation,
     )
     run = _run(settings)
-    assert max(run.strong_occupancies) <= store_bits
+    assert max(run.strong_occupancies) <= window_bits
     units = run.machine.decoders.decoder_manager.pool.units
     occupancy = run.machine.observation.decoder_memory_occupancy.result()
     memory = occupancy["per_unit"][units[0].name]

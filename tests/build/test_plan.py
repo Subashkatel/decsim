@@ -18,7 +18,9 @@ import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
+import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -212,33 +214,53 @@ def _lookback_workload():
     return section.running(workload)
 
 
-def _second_window_reads(plan) -> tuple:
-    """The rounds the plan holds for the second window's weak read."""
-    holds = dict(plan.run_plan.buffering.weak_holds)
-    reads = decoding_records.WindowReads((1, 1))
-    return holds[reads]
+def _second_window_strong_hold(plan) -> tuple:
+    """The rounds the plan holds for a strong redo of the second window."""
+    holds = dict(plan.run_plan.buffering.potential_holds)
+    potential = decoding_records.PotentialStrong((1, 1))
+    return holds[potential]
 
 
-def test_a_forming_decoders_read_holds_what_its_circuit_reads_before_it():
-    """The second window starts at round 4, whose detector reads round 2."""
+FIXED_THRESHOLD = threshold_sources.FixedThreshold(0.5)
+DECLARED_COLLABORATORS = escalation_policies.EscalationCollaborators(
+    threshold=FIXED_THRESHOLD,
+    expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+)
+SWITCHING_POLICY = escalation_policies.Switching(DECLARED_COLLABORATORS)
+SWITCHING = escalation_settings.EscalationSettings(policy=SWITCHING_POLICY)
+STRONG_SIDE_FORMS = event_settings.DetectionEventSettings(
+    formed_at=("weak_decoder", "strong_decoder")
+)
+
+
+def test_a_forming_strong_read_holds_what_its_circuit_reads_before_it():
+    """The second window commits from round 4, whose detector reads 2."""
     source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
     workload = _lookback_workload()
-    seats = event_settings.DetectionEventSettings(formed_at=("weak_decoder",))
 
-    plan = _plan(qpu=source, workload=workload, detection_events=seats)
+    plan = _plan(
+        qpu=source,
+        workload=workload,
+        escalation=SWITCHING,
+        detection_events=STRONG_SIDE_FORMS,
+    )
 
-    held = _second_window_reads(plan)
+    held = _second_window_strong_hold(plan)
     assert held[:3] == ((1, 2), (1, 3), (1, 4))
 
 
 def test_a_source_with_no_recipes_holds_nothing_before_a_read():
     source = qpu_settings.QpuSettings(kind="syndrome_bits", distance=3)
     workload = _lookback_workload()
-    seats = event_settings.DetectionEventSettings(formed_at=("weak_decoder",))
 
-    plan = _plan(qpu=source, workload=workload, detection_events=seats)
+    plan = _plan(
+        qpu=source,
+        workload=workload,
+        escalation=SWITCHING,
+        detection_events=STRONG_SIDE_FORMS,
+    )
 
-    held = _second_window_reads(plan)
+    held = _second_window_strong_hold(plan)
     assert held[0] == (1, 4)
 
 

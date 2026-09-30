@@ -98,7 +98,7 @@ class DispatchSteps:
 
     def submit(
         self, request: decoding_records.DecodeJob, running: int
-    ) -> "_Ticket":
+    ) -> measured_table.Ticket:
         """Decode with decsim's Relay-BP now; its steps follow from it."""
         del running
         result = self.decoder.decode(request)
@@ -108,15 +108,17 @@ class DispatchSteps:
         iterations = result.iterations or 0
         microseconds = kernel.decode_microseconds(iterations)
         decode_ticks = config.microseconds_to_ticks(microseconds)
-        return _Ticket(result, decode_ticks)
+        return measured_table.Ticket(result, decode_ticks)
 
-    def steps(self, ticket: "_Ticket") -> tuple:
+    def steps(self, ticket: measured_table.Ticket) -> tuple:
         """The path's steps for this decode, in the order they run."""
         if self.settings.path == "device":
             return self._device_steps(ticket.decode_ticks)
         return self._host_steps(ticket.decode_ticks)
 
-    def result(self, ticket: "_Ticket") -> decoding_records.DecodeResult:
+    def result(
+        self, ticket: measured_table.Ticket
+    ) -> decoding_records.DecodeResult:
         """The region's answer from decsim's own Relay-BP decode."""
         return ticket.result
 
@@ -162,12 +164,6 @@ class DispatchStepsDecoder(strong_backend.StrongBackendDecoder):
             settings = DispatchStepsSettings()
         backend = DispatchSteps(settings)
         strong_backend.StrongBackendDecoder.__init__(self, backend)
-
-
-@dataclasses.dataclass(frozen=True)
-class _Ticket:
-    result: decoding_records.DecodeResult
-    decode_ticks: int
 
 
 def _echo_step(name: str, resource: Optional[str]) -> decoding_records.Step:

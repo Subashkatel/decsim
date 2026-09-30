@@ -20,6 +20,7 @@ from typing import Any, Optional
 import numpy
 import stim
 
+import decsim.config as config
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -943,8 +944,7 @@ def _detector_ids_by_key(declared: Optional[dict]) -> dict:
 
 
 def _check_onset_round(value) -> None:
-    is_count = isinstance(value, int) and not isinstance(value, bool)
-    if is_count and value >= 1:
+    if config.is_whole_count(value):
         return
     raise ValueError(
         f"qpu.burst_onset_round is a one-based round, at least 1; got {value!r}"
@@ -952,8 +952,7 @@ def _check_onset_round(value) -> None:
 
 
 def _check_rise_rounds(value) -> None:
-    is_count = isinstance(value, int) and not isinstance(value, bool)
-    if is_count and value >= 1:
+    if config.is_whole_count(value):
         return
     raise ValueError(
         f"qpu.burst_rise_rounds is a whole number of rounds, at least 1 "

@@ -57,6 +57,7 @@ import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.producers as producers
+import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -639,6 +640,39 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     assert measurement.weak_busy_fraction == 0.0
     assert measurement.strong_queue_max == measurement.max_queued_windows
     assert measurement.strong_busy_fraction > 0.0
+
+
+def test_the_window_sizes_and_period_are_the_card_the_qpu_ran(tmp_path):
+    """The plan lays its windows out by the card; the qpu names no distance.
+
+    The card commits 2 rounds, buffers 1 and keeps its own 2 us round,
+    so a window arrives every 4 us, whatever the section's period says.
+    """
+    workload = memory_workload(9)
+    config_path = write_config(tmp_path, {"workload": workload})
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(
+        {
+            yaml_configs.ERROR_RATE_PATH: 0.001,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        }
+    )
+    card = code_geometry.SurfaceCodeModel(
+        distance=3,
+        round_microseconds=2.0,
+        commit_rounds_override=2,
+        buffer_rounds_override=1,
+    )
+    qpu = dataclasses.replace(task.settings.qpu, distance=None, code=card)
+    settings = dataclasses.replace(task.settings, qpu=qpu)
+    carded = collect.Task(settings, {})
+    shot = collect.run_shot(carded, 0)
+
+    measured = measure.measure_shot(shot)
+
+    assert measured.commit_rounds == 2
+    assert measured.window_period_us == 4.0
 
 
 def test_skorics_process_count_is_two_services_over_the_window_period(

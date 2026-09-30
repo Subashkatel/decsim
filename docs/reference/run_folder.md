@@ -113,8 +113,8 @@ and unit are its key's in `configs/reference.yaml`.
 | `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_sum_us` | the windows the strong tier committed, the rounds its decodes read, and their service added up; a sweep point divides the sum by the windows |
-| `commit_rounds` | r_com, the rounds a window commits: `windows.commit_rounds`, or the code distance when it is null |
-| `window_period_us` | a window's inter-arrival, `commit_rounds` times the QPU's round period: what `load` divides by, and the deadline a window's decode must beat |
+| `commit_rounds` | r_com, the rounds a window commits, as the code card the QPU ran sizes it: `windows.commit_rounds`, or the card's own when it is null (the code distance for both shipped cards) |
+| `window_period_us` | a window's inter-arrival, `commit_rounds` times the round period the QPU ran (the card's own when it has one): what `load` divides by, and the deadline a window's decode must beat |
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
 | `weak_syndrome_weight_mean`, `weak_syndrome_weight_max` | the set bits of each weak decode's input, its detection events when they are formed ahead of the decoder; only when `observation.record_switching_windows` is on |
 | `weak_service_mean_us` | each weak decode's compute, its first stage's start to its last stage's end; the same switch |

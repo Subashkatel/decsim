@@ -1,10 +1,11 @@
 """One collected shot -> one shot's numbers. Nothing is built here.
 
 A shot is one circuit through the whole reaction path. `measure_shot`
-reads the run's listeners (`machine.observation`) and its RunResult, and
-no component: the window ledger, the stage ledger, the frame's
-corrections, the queue depth log, the referee's audit, the sampled shot
-and the link traffic of the result. The input and output transfers are
+reads the run's listeners (`machine.observation`), its RunResult, and
+the code card and cadence its QPU ran, and no other component: the
+window ledger, the stage ledger, the frame's corrections, the queue
+depth log, the referee's audit, the sampled shot and the link traffic
+of the result. The input and output transfers are
 named by role, not by wire, and which wire carries each role follows
 from the escalation row's declared primary_tier (ports.py
 EscalationPolicy), so a row written outside decsim is measured like any
@@ -27,6 +28,7 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
@@ -315,10 +317,16 @@ def measure_shot(
     trace_path = None
     if run_dir is not None:
         trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
+    device = shot.machine.qpu.device
+    round_period_microseconds = config_module.ticks_to_microseconds(
+        device.clock.period_ticks
+    )
     return _measurement(
         settings,
         observation,
         shot.result,
+        code=device.code,
+        round_period_microseconds=round_period_microseconds,
         point_id=point_id,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
@@ -752,16 +760,6 @@ def chain_load(samples: dict, window_period_us: float) -> float:
     return chain_us / window_period_us
 
 
-def commit_round_count(
-    settings: machine_settings.MachineSettings, distance: int
-) -> int:
-    """r_com: the rounds a window commits, the code distance when null."""
-    commit_rounds = settings.windows.commit_rounds
-    if commit_rounds is None:
-        return distance
-    return commit_rounds
-
-
 def active_decoder_kind(settings: machine_settings.MachineSettings):
     """The kind of the tier that decodes the plan's windows."""
     tier = escalation_build.primary_tier(settings.escalation)
@@ -804,12 +802,17 @@ def _measurement(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
+    code: ports.CodeModel,
+    round_period_microseconds: float,
     point_id: str,
     seed: int,
     wall_seconds: float,
     trace_path: Optional[str],
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records.
+
+    code and round_period_microseconds are the card and the cadence the
+    QPU ran, so a window's sizes are the ones the plan laid out.
 
     It stays whole past the size prompt: each number is read once, named,
     and placed in the record, top to bottom, and a split would put the
@@ -824,9 +827,7 @@ def _measurement(
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
     decoded_windows = len(samples["service"])
-    distance = settings.qpu.distance
-    round_period_microseconds = settings.qpu.round_period_microseconds
-    commit_rounds = commit_round_count(settings, distance)
+    commit_rounds = code.commit_rounds()
     window_period_us = commit_rounds * round_period_microseconds
     load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
@@ -837,7 +838,7 @@ def _measurement(
     tiers = _tier_records(observation)
     backlog_peak = _backlog_peak_rounds(observation)
     processes = parallel_processes_needed(
-        samples, settings, distance, round_period_microseconds
+        samples, code, round_period_microseconds
     )
     totals = link_totals(result.link_traffic)
     means = _means(samples)
@@ -1454,10 +1455,7 @@ def _backlog_peak_rounds(
 
 
 def parallel_processes_needed(
-    samples: dict,
-    settings: machine_settings.MachineSettings,
-    distance: int,
-    round_period_microseconds: float,
+    samples: dict, code: ports.CodeModel, round_period_microseconds: float
 ) -> int:
     """Skoric's least count of parallel decoding processes for no backlog.
 
@@ -1467,15 +1465,14 @@ def parallel_processes_needed(
     lines 1625-1631). Layer A commits n_com rounds and layer B its
     whole window, and n_W is the window with a buffer on each side,
     n_com + 2 n_buf, "nW = 3w" at the paper's sizes (lines 388-390).
-    tau_W is this shot's mean service and the sizes are the window
-    scheme's, d when null. It is the count the parallel window scheme
-    needs; the serial chain's own condition is chain_load.
+    tau_W is this shot's mean service and the sizes are the code card's,
+    the ones the plan laid its windows out by. It is the count the
+    parallel window scheme needs; the serial chain's own condition is
+    chain_load.
     """
     service_us = _mean_or_zero(samples["service"])
-    commit_rounds = commit_round_count(settings, distance)
-    buffer_rounds = settings.windows.buffer_rounds
-    if buffer_rounds is None:
-        buffer_rounds = distance
+    commit_rounds = code.commit_rounds()
+    buffer_rounds = code.buffer_rounds()
     both_buffers_round_count = 2 * buffer_rounds
     window_round_count = commit_rounds + both_buffers_round_count
     committed_round_count = commit_rounds + window_round_count

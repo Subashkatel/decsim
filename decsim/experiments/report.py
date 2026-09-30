@@ -111,7 +111,7 @@ SHOT_MEANS = (
     *LOAD_MEANS,
 )
 SHOT_MAXES = (
-    # one value per point, the yaml's or d, so its largest is that value
+    # one value per point, the code card's, so its largest is that value
     "commit_rounds",
     "window_period_us",
     "max_queued_windows",

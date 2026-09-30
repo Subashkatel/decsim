@@ -17,7 +17,7 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.machine as machine_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
-import decsim.observe.flight_recorder as flight_recorder_module
+import decsim.observe.frame_corrections as frame_corrections_module
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
@@ -354,7 +354,7 @@ def _bare_observation(
 ):
     """The record those three listeners hang on, every other field empty."""
     windows = window_ledger_module.WindowLedger()
-    corrections = flight_recorder_module.FrameCorrections()
+    corrections = frame_corrections_module.FrameCorrections()
     queue_depth = queue_depth_module.QueueDepthLog()
     counters = controller_counters_module.ControllerCounters()
     commands = command_events_module.CommandEvents()

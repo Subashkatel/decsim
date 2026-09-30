@@ -20,7 +20,7 @@ import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
 import decsim.observe.decode_records as decode_records_module
-import decsim.observe.flight_recorder as flight_recorder_module
+import decsim.observe.frame_corrections as frame_corrections_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
@@ -44,7 +44,7 @@ class Observation:
     windows: window_ledger_module.WindowLedger
     results: result_ledger_module.ResultLedger
     traffic: link_traffic.TrafficLedger
-    frame_corrections: flight_recorder_module.FrameCorrections
+    frame_corrections: frame_corrections_module.FrameCorrections
     trace_writer: Optional[trace_writer_module.TraceWriter]
     data_movement: Optional[data_movement_module.DataMovement]
     decode_records: Optional[decode_records_module.DecodeRecordLedger]

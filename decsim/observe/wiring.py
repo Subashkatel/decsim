@@ -25,7 +25,7 @@ import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
 import decsim.observe.decode_records as decode_records_module
-import decsim.observe.flight_recorder as flight_recorder_module
+import decsim.observe.frame_corrections as frame_corrections_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
@@ -536,9 +536,9 @@ def _connect_sampled_shots(
 
 def _frame_corrections(
     pauli_frame,
-) -> flight_recorder_module.FrameCorrections:
+) -> frame_corrections_module.FrameCorrections:
     """The frame's accepted and landed corrections."""
-    corrections = flight_recorder_module.FrameCorrections()
+    corrections = frame_corrections_module.FrameCorrections()
     if pauli_frame is None:
         return corrections
     pauli_frame.trace.correction_accepted.connect(

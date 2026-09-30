@@ -88,7 +88,7 @@ def whole_count(
     )
 
 
-def is_whole_count(value, minimum: int = 1) -> bool:
+def is_whole_count(value: object, minimum: int = 1) -> bool:
     """Whether a yaml value is a whole number of at least minimum.
 
     A bool is refused though Python counts it an int (bool is a subtype

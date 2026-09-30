@@ -124,7 +124,7 @@ class ControllerSettings:
         bound = self.packing_rounds_in_flight
         if bound is None:
             return
-        if _is_round_count(bound):
+        if config.is_whole_count(bound):
             return
         raise ValueError(
             "controller.packing_rounds_in_flight must be a whole count of "
@@ -180,12 +180,3 @@ class IdlePolicySettings:
             row, "idle_policy", section, _IDLE_POLICY_KEYS
         )
         return cls(kind=kind, row_settings=row_settings)
-
-
-def _is_round_count(value) -> bool:
-    """A number of rounds a stage can hold: a whole count, never a flag."""
-    if isinstance(value, bool):
-        return False
-    if not isinstance(value, int):
-        return False
-    return value >= 1

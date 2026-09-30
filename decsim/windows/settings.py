@@ -166,20 +166,12 @@ def _check_window_rounds(key: str, rounds, least: int) -> None:
     """
     if rounds is None:
         return
-    if _is_round_count(rounds, least):
+    if config.is_whole_count(rounds, least):
         return
     raise ValueError(
         f"{key} is a whole number of rounds, at least {least}, or null "
         f"for the code's own size (got {rounds!r})"
     )
-
-
-def _is_round_count(rounds, least: int) -> bool:
-    if isinstance(rounds, bool):
-        return False
-    if not isinstance(rounds, int):
-        return False
-    return rounds >= least
 
 
 def _check_terminal_policy(terminal_policy) -> None:

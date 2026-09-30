@@ -290,8 +290,7 @@ def required_key(section: Mapping, key: str, section_name: str) -> object:
 def positive_count_key(section: Mapping, key: str, section_name: str) -> int:
     """A key a link card needs: a positive whole number, never a boolean."""
     value = required_key(section, key, section_name)
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and value > 0:
+    if config.is_whole_count(value):
         return value
     raise ValueError(
         f"{section_name}.{key} is {value!r}; it is a positive whole number"

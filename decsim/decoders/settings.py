@@ -469,8 +469,7 @@ def _check_word_bits(key: str, word_bits) -> None:
     """A word is a whole number of bits, at least one; null has none."""
     if word_bits is None:
         return
-    is_count = isinstance(word_bits, int) and not isinstance(word_bits, bool)
-    if is_count and word_bits >= 1:
+    if config.is_whole_count(word_bits):
         return
     raise ValueError(
         f"{key} must be a whole number of bits, at least one, or null "
@@ -481,21 +480,12 @@ def _check_word_bits(key: str, word_bits) -> None:
 def _unit_count(section: Mapping, section_name: str) -> int:
     """A tier's engine count, checked where it enters."""
     units = section["units"]
-    if _is_engine_count(units):
+    if config.is_whole_count(units):
         return units
     raise ValueError(
         f"{section_name}.units must be a whole number of engines, at least "
         f"one (got {units!r})"
     )
-
-
-def _is_engine_count(units) -> bool:
-    """A count of engines: a whole number at least one, never a flag."""
-    if isinstance(units, bool):
-        return False
-    if not isinstance(units, int):
-        return False
-    return units >= 1
 
 
 def _decoder_row(kind, section_name: str):

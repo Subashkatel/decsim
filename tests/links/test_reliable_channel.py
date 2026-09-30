@@ -354,30 +354,40 @@ class _Delivery:
 def test_an_acknowledged_message_is_let_go_under_loss():
     """A message is let go once acknowledged, as rxe_comp.c retires one.
 
-    Forty messages on a lossy wire, each delivered and acknowledged: the
-    channel keeps none of their callbacks once the run is over.
+    Two 200-byte messages at 0, the first packet lost: m0 goes 0-298, m1
+    298-596 and lands out of order at 896, and its NAK, 896-982, is back
+    at 1282. The go-back resends m0 1282-1580 and m1 1580-1878, which
+    land at 1880 and 2178 and are acknowledged; the channel then keeps
+    neither callback.
     """
+    seed = seed_losing((True, False, False, False, False, False))
     engine = decsim.engine.Engine()
-    settings = reliable_settings(0.00003)
-    channel = seeded_channel(engine, settings, 5)
+    settings = reliable_settings(BIT_ERROR_RATE)
+    channel = seeded_channel(engine, settings, seed)
     delivered = []
-    callbacks = []
-    for index in range(40):
-        callback = _Delivery(delivered)
-        reference = weakref.ref(callback)
-        callbacks.append(reference)
-        framed = channel_module.FramedPayload(800)
-        send_tick = index * 2000
-        send = functools.partial(channel.send, framed, send_tick, 0, callback)
-        engine.schedule(send_tick, send)
-        del callback, send
+    first_callback = _Delivery(delivered)
+    second_callback = _Delivery(delivered)
+    first_reference = weakref.ref(first_callback)
+    second_reference = weakref.ref(second_callback)
+    first_payload = channel_module.FramedPayload(1600)
+    second_payload = channel_module.FramedPayload(1600)
+    first_send = functools.partial(
+        channel.send, first_payload, 0, 0, first_callback
+    )
+    second_send = functools.partial(
+        channel.send, second_payload, 0, 0, second_callback
+    )
+    engine.schedule(0, first_send)
+    engine.schedule(0, second_send)
+    del first_callback, second_callback, first_send, second_send
 
     engine.run()
     gc.collect()
 
-    alive = [reference for reference in callbacks if reference() is not None]
-    assert len(delivered) == 40
-    assert alive == []
+    delivery_ticks = [transfer.delivery_ticks for transfer in delivered]
+    assert delivery_ticks == [1880, 2178]
+    assert first_reference() is None
+    assert second_reference() is None
 
 
 def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():

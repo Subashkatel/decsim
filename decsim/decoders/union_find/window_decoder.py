@@ -154,13 +154,13 @@ def _edges(check, priors, baseline, observables, weight_step: float) -> list:
 def _refuse_lengths_past_the_counters(
     edges: list, weight_step: float, location: str
 ) -> None:
-    """A weight_step so fine that the compiled sums would wrap is refused.
+    """A weight_step so fine that the compiled sums could wrap is refused.
 
     The cluster gap's shortest odd walk crosses each edge at most once in
-    each parity layer and relaxes one edge past that, so no sum the
-    compiled decoder forms passes three times the edges' total length;
-    a signed 64-bit sum past its largest value wraps negative without a
-    word (C11 6.5p5 leaves it undefined).
+    each parity layer and relaxes one edge past that, so three times the
+    edges' total length is an upper bound on every sum the compiled
+    decoder forms; a signed 64-bit sum past its largest value wraps
+    negative without a word (C11 6.5p5 leaves it undefined).
     """
     total_half_ticks = 0
     for edge in edges:
@@ -170,8 +170,8 @@ def _refuse_lengths_past_the_counters(
     raise ValueError(
         f"{location}: at weight_step {weight_step} the graph's edges are "
         f"{total_half_ticks} half ticks long together, and the compiled "
-        "decoder's 64-bit sums reach three times that; raise the "
-        "decoder's weight_step"
+        "decoder's 64-bit sums can reach up to three times that; raise "
+        "the decoder's weight_step"
     )
 
 

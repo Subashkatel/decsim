@@ -255,6 +255,12 @@ class DecoderMemory:
             return None
         return resident.decoder_input
 
+    def is_rewritten(self, job: decoding_records.DecodeJob) -> bool:
+        """Whether a job has already written the input this job reads."""
+        key = _memory_key(job)
+        resident = self._inputs[key]
+        return resident.rewritten
+
     def rewrite(
         self, job: decoding_records.DecodeJob, decoder_input: DecoderInput
     ) -> DecoderInput:

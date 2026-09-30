@@ -110,3 +110,31 @@ def test_a_fold_in_place_with_no_unit_memory_is_refused():
 
     with pytest.raises(RuntimeError, match="in_place needs the unit's own"):
         staging.fold_in_place(job, landed)
+
+
+def test_a_companion_that_joins_after_the_fold_reads_the_written_rounds():
+    """The second forced-class solve of a window lands after the first wrote.
+
+    It reads the written rounds and writes nothing, the bits the copy fold
+    gives it too (cudaq-x sliding_window.cpp:287-293 masks each window
+    once); a second write would fold the one boundary twice.
+    """
+    engine = engine_module.Engine()
+    staging = _staging(engine)
+    memory = decoder_memory.DecoderMemory("default", 0, None)
+    first = _job_with_rounds()
+    first.input_key = "window 7's request"
+    first.decoder_input = memory.deposit(first)
+    first.memory = memory
+    masked = dataclasses.replace(first.decoder_input)
+    staging.fold_in_place(first, masked)
+    companion = _job_with_rounds()
+    companion.input_key = "window 7's request"
+    companion.decoder_input = memory.add_reader(companion)
+    companion.memory = memory
+    masked_again = dataclasses.replace(companion.decoder_input)
+
+    staging.fold_in_place(companion, masked_again)
+
+    assert companion.decoder_input is masked
+    assert memory.input_of(companion) is masked

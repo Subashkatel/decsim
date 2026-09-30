@@ -13,6 +13,7 @@ import dataclasses
 
 import decsim.config as config
 import decsim.controller.settings as controller_settings
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
@@ -26,6 +27,7 @@ import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -81,6 +83,15 @@ DECLARED_EDGE_NAMES = (
     "controller_to_qpu",
 )
 ESCALATION_THRESHOLD = 0.5
+DECLARED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
+    method="declared_confidence",
+    cluster_origin="declared",
+    growth_schedule="declared_per_window",
+    gap_units="branch_marker",
+    correction="none",
+    weight_step_natural_log=None,
+    references=("declared by the test",),
+)
 
 
 def lookahead_sliding_scheme():
@@ -262,12 +273,44 @@ def strong_only_run(
     return run_machine(settings, seed)
 
 
-def switching_decoders(escalation_probability, probability_for):
-    """The weak tier that reports a sampled confidence, and its strong."""
-    latency = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
-    weak = decoders.SampledConfidenceDecoder(
-        latency, escalation_probability, probability_for=probability_for
-    )
+class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
+    """A preset latency whose confidence gap each window declares.
+
+    A timing-only decoder has no syndrome to compute a confidence from,
+    so the test declares it: gap 0.0, under every threshold these runs
+    set, for a window is_escalated(job) names, so Switching escalates
+    it; gap 1.0 elsewhere, so the weak result is kept.
+    """
+
+    def __init__(self, latency_us, is_escalated):
+        self.latency_us = latency_us
+        self.is_escalated = is_escalated
+
+    def latency(self, job):
+        del job
+        return config.microseconds_to_ticks(self.latency_us)
+
+    def decode(self, job):
+        confidence_gap = 1.0
+        if self.is_escalated(job):
+            confidence_gap = 0.0
+        soft_output = decoding_records.SoftOutput(
+            gap=confidence_gap, source=DECLARED_CONFIDENCE_SOURCE
+        )
+        return decoding_records.DecodeResult(
+            job.operation_id, job.window_id, soft_output=soft_output
+        )
+
+
+def switching_decoders(escalates):
+    """The weak tier that declares its confidence, and its strong."""
+
+    def is_escalated(job):
+        del job
+        return escalates
+
+    weak_microseconds = DECLARED_MICROSECONDS["weak"]
+    weak = DeclaredConfidenceDecoder(weak_microseconds, is_escalated)
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     return weak, strong
 
@@ -275,14 +318,13 @@ def switching_decoders(escalation_probability, probability_for):
 def switching_run(
     *,
     rounds=6,
-    escalation_probability=0.0,
+    escalates=False,
     operations=None,
     run_both_at_once=False,
     strong_window="redo_window",
     weak_units=1,
     seed=0,
     io_trace=False,
-    probability_for=None,
     record=False,
     weak_memory_bits=None,
     round_microseconds=ROUND_MICROSECONDS,
@@ -295,11 +337,10 @@ def switching_run(
 ):
     """Weak-primary switching on the declared fabric.
 
-    A probability of 0.0 or 1.0, or a per-job probability_for returning
-    one of the two, keeps the run deterministic: the sampled gap is 1.0
-    (keep the weak result) or 0.0 (escalate) against the threshold.
+    escalates declares every window's confidence gap 0.0 (escalate)
+    rather than 1.0 (keep the weak result) against the threshold.
     """
-    weak, strong = switching_decoders(escalation_probability, probability_for)
+    weak, strong = switching_decoders(escalates)
     weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
     weak_decoder = decoder_settings.DecoderSettings(
         decoder=weak, units=weak_units, unit_memory=weak_memory
@@ -310,7 +351,7 @@ def switching_run(
     threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
-        expected_source=decoders.SAMPLED_CONFIDENCE_SOURCE,
+        expected_source=DECLARED_CONFIDENCE_SOURCE,
         run_both_at_once=run_both_at_once,
     )
     policy = escalation_policies.Switching(collaborators)
@@ -355,17 +396,6 @@ def switching_run(
         observation=observation,
     )
     return run_machine(settings, seed, probes)
-
-
-def escalate_only(window_ids):
-    """A per-job probability of 1.0 for those windows and 0.0 elsewhere."""
-
-    def probability(job):
-        if job.window_id in window_ids:
-            return 1.0
-        return 0.0
-
-    return probability
 
 
 def log_tick(log_lines, needle):

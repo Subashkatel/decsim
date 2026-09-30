@@ -19,7 +19,6 @@ import types
 
 import pytest
 
-import decsim.decoders.decoders as decoders
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
@@ -66,6 +65,13 @@ class RecordingLeaf:
 
     def cancel_run_seed(self, reservation):
         self.events.append(("cancel", self.name, reservation.proposed_seed))
+
+
+class GeneratorLeaf(seeding._RandomSeedConsumer):
+    """A stochastic leaf that draws from the generator its binding installs."""
+
+    def __init__(self, seed):
+        self._initialize_run_seed_state(seed)
 
 
 class RecordingComposite:
@@ -263,20 +269,17 @@ def test_a_cycle_in_the_component_graph_is_refused_naming_both_paths():
 def test_a_components_own_seed_conflicts_with_the_runs_root_seed():
     """A component seeded by hand cannot also take a derived seed.
 
-    A sampled-confidence decoder built with its own seed is the case
-    that reaches this: the run would silently overwrite the seed the
-    caller asked for, so the binding is refused instead.
+    The run would silently overwrite the seed the caller asked for, so
+    the binding is refused instead.
     """
-    inner = decoders.PresetLatencyDecoder(0.0)
-    decoder = decoders.SampledConfidenceDecoder(inner, 0.5, seed=5)
+    leaf = GeneratorLeaf(seed=5)
     with pytest.raises(ValueError, match="explicit seed that conflicts"):
-        decoder.reserve_run_seed(9)
+        leaf.reserve_run_seed(9)
 
 
 def seeded_generator_leaf():
     """A stochastic leaf that draws from one seeded random.Random."""
-    inner = decoders.PresetLatencyDecoder(0.0)
-    return decoders.SampledConfidenceDecoder(inner, 0.5)
+    return GeneratorLeaf(seed=None)
 
 
 def test_a_reserved_generator_is_installed_only_at_commit():

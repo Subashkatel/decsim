@@ -226,7 +226,7 @@ def test_a_full_escalation_runs_ledger_passes_its_check():
     accounting has to hold across the second decode as well as the
     first.
     """
-    machine = declared_run.switching_run(rounds=6, escalation_probability=1.0)
+    machine = declared_run.switching_run(rounds=6, escalates=True)
     ledger = machine.observation.flight_recorder.ledger
 
     ledger.check()
@@ -343,19 +343,19 @@ def strong_mode(_generator, rounds):
 
 def switching_keep_mode(_generator, rounds):
     """Weak primary, every window keeping its weak result."""
-    return declared_run.switching_run(rounds=rounds, escalation_probability=0.0)
+    return declared_run.switching_run(rounds=rounds, escalates=False)
 
 
 def switching_escalate_mode(_generator, rounds):
     """Weak primary, every window escalating to the strong tier."""
-    return declared_run.switching_run(rounds=rounds, escalation_probability=1.0)
+    return declared_run.switching_run(rounds=rounds, escalates=True)
 
 
 def switching_parallel_mode(_generator, rounds):
     """Both tiers started at once."""
     return declared_run.switching_run(
         rounds=rounds,
-        escalation_probability=1.0,
+        escalates=True,
         run_both_at_once=True,
     )
 
@@ -364,7 +364,7 @@ def switching_double_window_mode(_generator, rounds):
     """Escalation under the double window, which holds no boundary."""
     return declared_run.switching_run(
         rounds=rounds,
-        escalation_probability=1.0,
+        escalates=True,
         strong_window="double_window",
     )
 

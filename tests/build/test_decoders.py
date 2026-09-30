@@ -274,7 +274,7 @@ def test_a_weak_only_run_has_no_host_manager():
 
 def test_each_side_has_its_own_manager_pool_and_one_ledger():
     """The chip side opens a strong request and the host side serves it."""
-    machine = declared_run.switching_run(escalation_probability=1.0)
+    machine = declared_run.switching_run(escalates=True)
     decode_side = machine.decoders
     chip = decode_side.decoder_manager
     host = decode_side.strong_decoder_manager
@@ -311,13 +311,13 @@ class _SeedRecordingScheduler(schedulers.FifoScheduler):
 
 
 def test_each_managers_scheduler_is_seeded_on_its_own_path():
-    weak, strong = declared_run.switching_decoders(0.0, None)
+    weak, strong = declared_run.switching_decoders(False)
     weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
     strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
     manager_settings = decoder_settings.DecoderManagerSettings(
         scheduler=_SeedRecordingScheduler
     )
-    switching = declared_run.switching_run(escalation_probability=1.0)
+    switching = declared_run.switching_run(escalates=True)
     settings = dataclasses.replace(
         switching.settings,
         weak_decoder=weak_decoder,

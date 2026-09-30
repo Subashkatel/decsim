@@ -2150,7 +2150,7 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
     longest-lived holds the machine has: the room-side context of a
     window is held across its whole strong decode.
     """
-    machine = declared_run.switching_run(escalation_probability=1.0, rounds=9)
+    machine = declared_run.switching_run(escalates=True, rounds=9)
 
     assert machine.readout.weak_syndrome_buffer.occupancy == 0
     assert machine.readout.strong_syndrome_buffer.occupancy == 0

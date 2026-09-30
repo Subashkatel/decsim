@@ -2,10 +2,9 @@
 
 Every link and stage has a declared tick value and every decoder a
 preset latency, so what a test asserts follows from arithmetic over the
-declared ticks, never from measured host time. The sampled confidence
-decoder with probability 0.0 or 1.0 per window keeps a run
-deterministic: the sampled gap is 1.0 (keep) or 0.0 (escalate) against
-the threshold 0.5.
+declared ticks, never from measured host time. The weak tier declares
+each window's confidence gap, 1.0 (keep) or 0.0 (escalate) against the
+threshold 0.5, so a run is deterministic.
 """
 
 import dataclasses
@@ -32,6 +31,7 @@ import decsim.settings as machine_settings
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 
 DECLARED_MICROSECONDS = {
     "qpu_to_controller": 2.0,
@@ -78,14 +78,12 @@ DECLARED_EDGE_NAMES = (
 
 
 def escalate_only(window_ids) -> callable:
-    """A per-job probability: 1.0 for the listed windows, 0.0 elsewhere."""
+    """Whether a job's window is one of the listed windows."""
 
-    def probability(job) -> float:
-        if job.window_id in window_ids:
-            return 1.0
-        return 0.0
+    def is_escalated(job) -> bool:
+        return job.window_id in window_ids
 
-    return probability
+    return is_escalated
 
 
 def switching_machine(
@@ -110,10 +108,10 @@ def switching_machine(
     sliding windows with a caller's own windowing scheme; decision_cycles
     is the window side's decision, on the declared clock.
     """
-    probability = escalate_only(escalated_windows)
-    weak_latency = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
-    weak = decoders.SampledConfidenceDecoder(
-        weak_latency, 0.0, probability_for=probability
+    is_escalated = escalate_only(escalated_windows)
+    weak_microseconds = DECLARED_MICROSECONDS["weak"]
+    weak = declared_run.DeclaredConfidenceDecoder(
+        weak_microseconds, is_escalated
     )
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
@@ -121,7 +119,7 @@ def switching_machine(
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
-        expected_source=decoders.SAMPLED_CONFIDENCE_SOURCE,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
         run_both_at_once=run_both_at_once,
     )
     policy = escalation_policies.Switching(collaborators)

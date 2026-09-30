@@ -1106,8 +1106,8 @@ class Decoder(Protocol):
     run_seed_children (decsim/seeding.py RunSeedComposite) down from each
     decoder unit, so a wrapping row that does not answer it hides the
     row inside it from the trace, the stage ledger and the referee
-    audit. StagedDecoder, SampledConfidenceDecoder and
-    TesseractCheckedDecoder are the shipped rows that answer it.
+    audit. StagedDecoder and TesseractCheckedDecoder are the shipped rows
+    that answer it.
     """
 
     fault_model_requirement: Any

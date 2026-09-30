@@ -206,7 +206,7 @@ def test_the_wrapper_adds_no_time_when_it_has_no_hardware_stages():
     (staged_decoder.py, StagedDecoder.latency), so an empty stage list
     leaves the wrapped decoder's own service time untouched.
     """
-    inner = decoders.PerRoundDecoder(tau_us=0.5)
+    inner = decoders.PresetLatencyDecoder(2.0)
     timing = staged_decoder.UnitTiming((), (), CLOCK)
     decoder = staged_decoder.StagedDecoder(inner, timing)
     job = decode_job(round_count=4)

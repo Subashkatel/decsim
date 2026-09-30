@@ -48,7 +48,7 @@ def test_a_switching_run_builds_only_the_window_side_it_names():
     Its policy decides on no confidence and it names no burst detector,
     so it has no confidence signal, no gap join and no detector.
     """
-    machine = declared_run.switching_run(escalation_probability=1.0)
+    machine = declared_run.switching_run(escalates=True)
     windows = machine.windows
 
     assert windows.strong_redecode is not None
@@ -58,7 +58,7 @@ def test_a_switching_run_builds_only_the_window_side_it_names():
 
 
 def test_the_strong_side_submits_to_the_hosts_manager():
-    machine = declared_run.switching_run(escalation_probability=1.0)
+    machine = declared_run.switching_run(escalates=True)
     chip = machine.decoders.decoder_manager
     host = machine.decoders.strong_decoder_manager
     requester = machine.windows.requester

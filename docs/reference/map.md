@@ -206,7 +206,7 @@ docstring.
 - `decsim/decoders/decoder_output.py`: The decoder side's outgoing sends: the frame, the strong tier, a peer.
 - `decsim/decoders/decoder_pool.py`: A manager's pool: its units, the free ones, the unit a job is offered.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
-- `decsim/decoders/decoders.py`: Timing-only decoders and the sampled-confidence wrapper.
+- `decsim/decoders/decoders.py`: The timing-only decoder.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
 - `decsim/decoders/dispatch_steps/__init__.py`: The dispatch_steps row: Relay-BP behind a CUDA-Q dispatcher, step by step.
 - `decsim/decoders/dispatch_steps/decoder.py`: Relay-BP on a GPU behind a CUDA-Q dispatcher, step by step.

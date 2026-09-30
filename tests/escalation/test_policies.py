@@ -18,7 +18,6 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
 import decsim.config as config
-import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
@@ -415,7 +414,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
     """
     online = _always_auditing_online_threshold(threshold=2.0)
     collaborators = policies.EscalationCollaborators(
-        threshold=online, expected_source=decoders.SAMPLED_CONFIDENCE_SOURCE
+        threshold=online, expected_source=SOURCE
     )
     policy = policies.Switching(collaborators)
     escalation = escalation_settings.EscalationSettings(

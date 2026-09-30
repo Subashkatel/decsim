@@ -69,8 +69,7 @@ class SurfaceCodeModel:
         d*d - 1 detector nodes per round (Stim's bulk layer, read off
         stim.Circuit.generated at d=3, 5 and 7 as 8, 24 and 48), one
         fewer per patch than this returns. No shipped decoder row reads
-        the number; the reader is a caller-supplied latency function
-        (decoders/decoders.py FunctionLatencyDecoder), where the
+        the number; a latency model a study supplies would, where the
         difference is a scale factor and reaches no correction. The seam
         strip is the one line of d intermediate qubits a lattice-surgery
         merge of two patches adds (Horsman et al. arXiv:1111.4022 Sec.

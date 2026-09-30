@@ -194,6 +194,18 @@ def test_a_card_key_no_card_reads_is_refused_naming_the_card_keys():
     )
 
 
+def test_unknown_card_keys_of_mixed_types_are_refused_naming_them():
+    card = dict(GOOD_CARD)
+    card[2] = 1
+    card["bad"] = 2
+    with pytest.raises(ValueError) as refusal:
+        _load_readout_card(card)
+    message = str(refusal.value)
+    assert message.startswith(
+        "links.qpu_to_controller does not know [2, 'bad']; its keys are "
+    )
+
+
 @pytest.mark.parametrize(
     "bits_per_cycle", [True, "fast", 0, -1.0, float("nan"), float("inf")]
 )

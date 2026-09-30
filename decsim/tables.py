@@ -87,7 +87,8 @@ def refuse_unknown_keys(
     unknown = set(section) - set(known_keys)
     if not unknown:
         return
-    listed = sorted(unknown)
+    # A yaml mapping may mix integer and string keys, so they sort as text.
+    listed = sorted(unknown, key=str)
     raise ValueError(
         f"{section_name} does not know {listed}; its keys are "
         f"{list(known_keys)}"

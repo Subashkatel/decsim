@@ -609,7 +609,11 @@ def _built_values(plan: plan_build.Plan) -> dict:
 
 
 def _rounds_per_shot(plan: plan_build.Plan) -> int:
-    """A shot's QEC rounds: every patch's rounds, added up.
+    """A shot's QEC rounds as planned: every patch's rounds, added up.
+
+    They size a point's pieces before any shot runs. A live stream also
+    idles through its feedback wait, rounds only its run knows, so a
+    shot's own count is measured (measure.py executed_rounds).
 
     A round is one patch's syndrome extraction, whenever its operation
     starts. Tesseract 2503.10988 lines 287-290 set a two-code shot's r

@@ -56,6 +56,7 @@ import decsim.machine as machine_module
 import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.producers as producers
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -67,6 +68,8 @@ import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 import tests.experiments.yaml_configs as yaml_configs
+import tests.qpu.memory_programs as memory_programs
+import tools.live_memory_example as live_memory_example
 from tests.experiments.yaml_configs import (
     CONFIGS_DIR,
     MINIMAL_CONFIG,
@@ -1715,9 +1718,7 @@ def test_a_source_that_samples_no_shot_is_refused_with_a_sentence(tmp_path):
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
 
-    with pytest.raises(
-        refusal.RefusalError, match="sampled none for operation"
-    ):
+    with pytest.raises(refusal.RefusalError, match="sampled none"):
         measure_point_shot(
             config,
             physical_error_probability=0.001,
@@ -1725,6 +1726,39 @@ def test_a_source_that_samples_no_shot_is_refused_with_a_sentence(tmp_path):
             round_period_microseconds=1.0,
             seed=0,
         )
+
+
+def test_a_live_stream_is_scored_through_its_owner_over_its_run_rounds():
+    """The owner's own Stim circuit is the shot sinter would score.
+
+    Its segments and the operations that hold and resume its patch have
+    no truth of their own. Its horizon is its circuit's rounds, which
+    include the rounds it idled through while the prefix's answer came
+    back; a d=3 memory round holds 8 of Stim's detectors.
+    """
+    program = memory_programs.memory_program()
+    live = live_memory_example.live_settings(
+        program,
+        distance=3,
+        round_period_microseconds=1.1,
+        prefix_round_count=3,
+        patch="memory-patch",
+        feedback_microseconds=4.0,
+        decoder_microseconds=0.1,
+    )
+    frame = pauli_frame_module.PauliFrameConfig()
+    settings = dataclasses.replace(live, pauli_frame=frame)
+    task = collect.Task(settings, {})
+    shot = collect.run_shot(task, 17)
+    measured = measure.measure_shot(shot)
+    sampled = shot.machine.observation.sampled_shots.shots_by_operation
+    owner_shot = sampled[producers.LIVE_STREAM_ID]
+    stim_rounds = owner_shot.circuit.num_detectors // 8
+
+    assert list(sampled) == [producers.LIVE_STREAM_ID]
+    assert measured.executed_rounds == stim_rounds
+    assert stim_rounds > 3 + 1
+    assert measured.logical_failure is False
 
 
 # A whole-patch burst from round 12 on the 30-round switching shot; the

@@ -27,7 +27,6 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.observe.observation as observation_module
-import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
@@ -188,6 +187,9 @@ class ShotMeasurement:
     seed: int
     decoded_windows: int
     logical_failure: bool
+    # the patch-rounds the scored owners read out, the shot's horizon
+    # that a per-round rate divides by
+    executed_rounds: int
     samples: dict  # point -> us list, one per window (per round for cwb)
     # the tier whose decode the frame committed, one per window in the
     # samples' order: weak for a kept window, strong for an escalated one
@@ -281,8 +283,9 @@ class ShotMeasurement:
     is_scored: bool
     unscored_reason: str
     provisional_no_correction_windows: int
-    # sha256 of every operation's sampled detection events and observable
-    # truth, so two points' shots of one seed are checked to be one draw
+    # sha256 of every scored owner's sampled detection events and
+    # observable truth, so two points' shots of one seed are checked to
+    # be one draw
     sample_digest: str
     # the windows' confidence gaps, None when no confidence signal
     # decided the escalation; its own files hold it, not shots.csv
@@ -812,9 +815,11 @@ def _measurement(
     and placed in the record, top to bottom, and a split would put the
     reading and the placing of one number in two places.
     """
-    sample_digest = _sample_digest(observation, result)
+    owners = _scored_owners(result)
+    sample_digest = _sample_digest(observation, owners)
+    executed_rounds = _executed_rounds(observation, owners)
     samples, window_tiers = collect_samples(observation, result)
-    logical_failure = _logical_failure(result)
+    logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
     throughput = _throughput_per_microsecond(observation, samples)
     referee = _referee_counts(observation)
@@ -850,6 +855,7 @@ def _measurement(
         seed=seed,
         decoded_windows=decoded_windows,
         logical_failure=is_scored_failure,
+        executed_rounds=executed_rounds,
         samples=samples,
         window_tiers=window_tiers,
         means=means,
@@ -988,47 +994,73 @@ def _provisional_no_correction_windows(
 
 
 def _sample_digest(
-    observation: observation_module.Observation,
-    result: result_records.RunResult,
+    observation: observation_module.Observation, owners: tuple
 ) -> str:
-    """sha256 of each operation's sampled detection events and truth.
+    """sha256 of each scored owner's sampled detection events and truth.
 
     The events are the ones the source fired on shot_sampled
     (qpu/stim_device.py) and the truth is the observable flips it drew
-    with them, one byte a bit, operation by operation in the result's
-    order. Two points that differ only in their decoder draw the same
-    shot at the same seed, so pairing their shots can be checked rather
-    than assumed.
+    with them, one byte a bit, owner by owner in the result's order.
+    Two points that differ only in their decoder draw the same shot at
+    the same seed, so pairing their shots can be checked rather than
+    assumed.
     """
+    shots_by_operation = observation.sampled_shots.shots_by_operation
     digest = hashlib.sha256()
-    for operation_result in result.operation_results:
-        operation_id = operation_result.operation_id
-        shot = _sampled_shot(observation, operation_id)
+    for owner in owners:
+        shot = shots_by_operation[owner.operation_id]
         event_bytes = bytes(shot.detection_events)
-        truth_bytes = bytes(operation_result.observable_truth)
+        truth_bytes = bytes(owner.observable_truth)
         digest.update(event_bytes)
         digest.update(truth_bytes)
     return digest.hexdigest()
 
 
-def _sampled_shot(
-    observation: observation_module.Observation, operation_id
-) -> sampled_shots_module.SampledShot:
-    """The shot the source drew for an operation, heard at sampling time.
+def _scored_owners(result: result_records.RunResult) -> tuple:
+    """The operations whose logical output the source sampled a truth for.
 
-    A source that draws no shot (qpu.kind timing_only and syndrome_bits)
-    leaves the loop no truth to be scored against, so the shot is
-    refused rather than counted as right or wrong.
+    A live stream's segments and the operations that only hold or
+    resume its patch drive its timing and have no truth of their own:
+    their rounds reach the stream owner's one circuit, which is scored
+    once, as sinter scores a complete circuit's predictions against its
+    observables (sinter/_decoding/_stim_then_decode_sampler.py:76). A
+    source that draws no shot (qpu.kind timing_only and syndrome_bits)
+    leaves no owner, and the shot is refused rather than counted as
+    right or wrong.
     """
-    shots_by_operation = observation.sampled_shots.shots_by_operation
-    if operation_id not in shots_by_operation:
+    owners = []
+    for operation_result in result.operation_results:
+        if operation_result.observable_truth is not None:
+            owners.append(operation_result)
+    if not owners:
         raise refusal.RefusalError(
             "decsim collect scores every shot against the logical "
             "observables its syndrome source sampled, and the source "
-            f"sampled none for operation {operation_id}; name a qpu.kind "
-            "that samples the circuit, such as stim_device"
+            "sampled none; name a qpu.kind that samples the circuit, such "
+            "as stim_device"
         )
-    return shots_by_operation[operation_id]
+    return tuple(owners)
+
+
+def _executed_rounds(
+    observation: observation_module.Observation, owners: tuple
+) -> int:
+    """The patch-rounds the scored owners read out this shot.
+
+    A round of a patch counts once, whenever it ran: a live stream's
+    rounds include those it idled through while its feedback waited,
+    which only the run knows, and all of them reach the owner's circuit.
+    """
+    owner_ids = set()
+    for owner in owners:
+        owner_ids.add(owner.operation_id)
+    patch_rounds = set()
+    for event in observation.round_events.events:
+        if event.kind != "EMITTED" or event.operation_id not in owner_ids:
+            continue
+        for patch in event.patch_ids:
+            patch_rounds.add((event.operation_id, event.round_index, patch))
+    return len(patch_rounds)
 
 
 def _burst_onset_round(qpu_row_settings) -> Optional[int]:
@@ -1123,17 +1155,17 @@ class _TierRecords:
     strong_held_in_units_max: Optional[int] = None
 
 
-def _logical_failure(result: result_records.RunResult) -> bool:
+def _logical_failure(owners: tuple) -> bool:
     """Whether the loop's observables missed the truth.
 
-    A shot fails when any of its operations reads a wrong observable, as
-    a computation fails when any of its logical qubits does; a workload
+    A shot fails when any of its owners reads a wrong observable, as a
+    computation fails when any of its logical qubits does; a workload
     of several patches is judged over all of them.
     """
     is_logical_failure = False
-    for operation_result in result.operation_results:
-        truth = tuple(operation_result.observable_truth)
-        loop_prediction = tuple(operation_result.logical_observables)
+    for owner in owners:
+        truth = tuple(owner.observable_truth)
+        loop_prediction = tuple(owner.logical_observables)
         is_logical_failure |= loop_prediction != truth
     return is_logical_failure
 

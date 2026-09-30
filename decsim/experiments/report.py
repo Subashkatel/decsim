@@ -967,7 +967,7 @@ def _add_estimate_columns(row: dict, prefix: collection.PrefixTracker) -> None:
     row["logical_error_rate_low"] = estimate.low
     row["logical_error_rate_high"] = estimate.high
     row["logical_error_rate_plan_unbiased"] = _plan_unbiased(prefix)
-    rounds = prefix.rule.rounds_per_shot
+    rounds = prefix.rounds_per_shot()
     row["logical_error_rate_per_round"] = _per_round(estimate.rate, rounds)
     row["logical_error_rate_per_round_low"] = _per_round(estimate.low, rounds)
     row["logical_error_rate_per_round_high"] = _per_round(estimate.high, rounds)

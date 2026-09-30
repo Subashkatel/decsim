@@ -125,9 +125,7 @@ class PointCollection:
     def rule(self) -> collection_module.PointRule:
         """What the point's summary reads its prefix by."""
         is_adaptive = self.task.online_threshold is not None
-        return collection_module.PointRule(
-            self.settings, is_adaptive, self.rounds_per_shot
-        )
+        return collection_module.PointRule(self.settings, is_adaptive)
 
     def task_as_its_last_piece_left_it(
         self, experiment_dir: pathlib.Path
@@ -428,7 +426,7 @@ def _run_the_planned_pieces(
     report_dir = run_folder.combined_folder(experiment_dir, config)
     report_dir.mkdir(parents=True, exist_ok=True)
     measure_shot = _shot_measure(unique, report_dir)
-    save = _planned_piece_saver(experiment_dir, config, units, facts)
+    save = _planned_piece_saver(experiment_dir, config, facts)
     independent, online = _independent_and_online(units)
     collect.run_units(
         independent, measure_shot, on_unit_done=save, processes=processes
@@ -441,24 +439,15 @@ def _run_the_planned_pieces(
 def _planned_piece_saver(
     experiment_dir: pathlib.Path,
     config: experiment.ExperimentConfig,
-    units: list,
     facts: dict,
 ):
     """The unit callback that saves a planned unit as its piece.
 
-    Each piece names its configuration beside the round's facts, and
-    counts its rounds by its point's record, which the plan wrote.
+    Each piece names its configuration beside the round's facts.
     """
-    records = run_folder.resolved_by_point(experiment_dir)
-    rounds_by_point = {}
-    for unit in units:
-        point_id = unit.task.strong_id()
-        rounds_by_point[point_id] = records[point_id]["rounds_per_shot"]
     configuration_id = run_folder.configuration_id(config)
     piece_facts = {"configuration_id": configuration_id, **facts}
-    return functools.partial(
-        _save_the_piece, experiment_dir, piece_facts, rounds_by_point
-    )
+    return functools.partial(_save_the_piece, experiment_dir, piece_facts)
 
 
 def _independent_and_online(units: list) -> tuple:
@@ -787,13 +776,7 @@ def _collect_until_stopped(
     its stop. Each piece names its configuration.
     """
     facts = {"configuration_id": configuration_id}
-    rounds_by_point = {}
-    for point in points:
-        point_id = point.task.strong_id()
-        rounds_by_point[point_id] = point.rounds_per_shot
-    save = functools.partial(
-        _save_the_piece, experiment_dir, facts, rounds_by_point
-    )
+    save = functools.partial(_save_the_piece, experiment_dir, facts)
     while True:
         units = _next_round(points, experiment_dir, processes)
         if not units:
@@ -844,7 +827,6 @@ def _say_the_point_stopped(point: PointCollection) -> None:
 def _save_the_piece(
     experiment_dir: pathlib.Path,
     facts: dict,
-    rounds_by_point: dict,
     unit: collect.Unit,
     outcome: result_records.UnitOutcome,
 ) -> None:
@@ -852,16 +834,16 @@ def _save_the_piece(
 
     facts are the lines every piece of the run takes in piece.json: its
     configuration id, and a planned piece's round and task. The piece
-    counts its rounds, since a shot's cost grows with its rounds, and
-    the peak memory of the process that ran it. An adaptive point's
-    piece keeps its calibrator as the unit's shots left it.
+    counts the rounds its shots ran, since a shot's cost grows with its
+    rounds, and the peak memory of the process that ran it. An adaptive
+    point's piece keeps its calibrator as the unit's shots left it.
     """
     point_id = unit.task.strong_id()
     rows = outcome.rows
-    rounds_per_shot = rounds_by_point[point_id]
+    rounds = sum(row.executed_rounds for row in rows)
     piece_facts = {
         **facts,
-        "rounds": rounds_per_shot * len(rows),
+        "rounds": rounds,
         "peak_memory_mb": outcome.peak_memory_mb,
     }
     state = unit.task.online_threshold

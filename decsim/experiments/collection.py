@@ -170,13 +170,11 @@ class PointRule:
     settings is its collection, None for shots a caller fixed in advance,
     whose run is a cap at the shots it ran. is_adaptive says its
     threshold learns online, so its shots are not independent draws
-    and have no interval here. rounds_per_shot turns a shot's rate into
-    a round's, None when nobody recorded it.
+    and have no interval here.
     """
 
     settings: Optional[CollectionSettings] = None
     is_adaptive: bool = False
-    rounds_per_shot: Optional[int] = None
 
     @classmethod
     def from_record(cls, record: Mapping) -> "PointRule":
@@ -188,7 +186,7 @@ class PointRule:
         """
         facts = record["experiment"]
         settings = CollectionSettings(**facts["collection"])
-        return cls(settings, facts["adaptive"], record["rounds_per_shot"])
+        return cls(settings, facts["adaptive"])
 
 
 class PrefixTracker:
@@ -204,6 +202,8 @@ class PrefixTracker:
         self.counts = PrefixCounts()
         self.stop_kind = None
         self.is_open = True
+        # each distinct count of rounds the prefix's shots ran
+        self.executed_rounds = set()
 
     def add(self, row: Mapping) -> None:
         """One shot row: onto the prefix while the prefix is open."""
@@ -215,6 +215,8 @@ class PrefixTracker:
             return
         shot_counts = _shot_counts_of(row)
         self.counts.add(shot_counts)
+        rounds = fold.number_of(row["executed_rounds"])
+        self.executed_rounds.add(rounds)
         if self.rule.settings is None:
             return
         self.stop_kind = self.rule.settings.stop_kind(self.counts)
@@ -244,6 +246,19 @@ class PrefixTracker:
         if self.stop_kind is not failure_statistics.StopKind.CAP:
             return False
         return self.rule.settings.is_time_cap(self.counts)
+
+    def rounds_per_shot(self) -> Optional[int]:
+        """The rounds every shot of the prefix ran; None when they differ.
+
+        A per-round rate inverts one shot length R (sinter 1.16.0
+        shot_error_rate_to_piece_error_rate, _probability_util.py:465-475).
+        A live stream idles through its feedback wait, so two of its
+        shots can run different R, and no one R converts their rate.
+        """
+        if len(self.executed_rounds) != 1:
+            return None
+        (rounds,) = self.executed_rounds
+        return rounds
 
     def stop_kind_for_limits(self) -> failure_statistics.StopKind:
         """The kind whose limits hold for the prefix as it stands.

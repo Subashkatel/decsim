@@ -4,7 +4,7 @@
 rounds_to_90_p<p>.png, one per p, the rounds until 90% of bursts are
 caught against burst size, a line per strength and a panel per d, at 1
 false alarm per second, a class that never gets there within the 1,000
-rounds after onset marked open in a grey "never" band; and
+rounds after onset marked open at "never"; and
 false_alarms.png, the false alarms measured against each target line.
 """
 
@@ -25,11 +25,9 @@ SHARE = 0.9
 HORIZON_ROUNDS = run.ROUNDS - run.ONSET_ROUND
 SIZES = list(run.RADIUS_BY_SIZE)
 PLACES = numpy.arange(len(SIZES))
-COLOR = {"weak": "#4f6b8a", "strong": "#d17a22", "saturating": "#b0302a"}
-MARKER = {"weak": "o", "strong": "s", "saturating": "^"}
 NEVER_OFFSET = {"weak": -0.12, "strong": 0.0, "saturating": 0.12}
 NEVER_ROUNDS = 1800
-NEVER_BAND = (1200, 3000)
+ROUND_LIMITS = (0.8, 3000)
 ROUND_TICKS = [1, 3, 10, 30, 100, 300, 1000, NEVER_ROUNDS]
 ROUND_LABELS = ["1", "3", "10", "30", "100", "300", "1000", "never"]
 
@@ -72,16 +70,15 @@ def draw_rounds_to_share(
     A class the rows lack is drawn as never reaching SHARE.
     """
     distances = sorted({key[1] for key in rounds_by_class})
-    figure, axis_by_distance = plots.panels("d", distances)
+    figure, axis_by_distance = plots.panels("distance", distances)
     for distance, axis in axis_by_distance.items():
         for strength in run.MULTIPLE_BY_STRENGTH:
             keys = [(error_rate, distance, strength, size) for size in SIZES]
             rounds = [rounds_by_class.get(key, math.nan) for key in keys]
             _draw_strength(axis, strength, rounds)
         _name_round_axes(axis)
-    handles, labels = axis.get_legend_handles_labels()
-    figure.legend(handles, labels, title="burst strength", loc="outside right")
-    figure.suptitle(f"p = {error_rate:g}, 1 false alarm per second")
+    title = f"error rate {error_rate:g}, alarm line at 1 false alarm per second"
+    figure.suptitle(title)
     path = folder / f"rounds_to_90_p{error_rate:g}.png"
     plots.save(figure, path)
 
@@ -110,6 +107,7 @@ def draw_false_alarms(quiet_rows: list, folder: pathlib.Path) -> None:
     for line, axis in axis_by_line.items():
         line_rows = plots.chosen(rows, alarm_line=line)
         plots.values(axis, line_rows, "p", "measured", "d", "low", "high")
+        axis.legend(title="distance")
         axis.axhline(line, color="grey", linestyle="--")
         axis.set_xscale("log")
         axis.set_yscale("log")
@@ -117,36 +115,37 @@ def draw_false_alarms(quiet_rows: list, folder: pathlib.Path) -> None:
         axis.set_xticks([], minor=True)
         # six rates in one decade: slanted, their labels do not meet
         axis.tick_params(axis="x", labelrotation=45)
-        axis.set_xlabel("physical error rate p")
+        axis.set_xlabel("physical error rate")
         axis.set_ylabel("false alarms per second")
     path = folder / "false_alarms.png"
     plots.save(figure, path)
 
 
 def _draw_strength(axis, strength: str, rounds: list) -> None:
-    """One strength's line; a class never at SHARE is open in the band."""
+    """One strength's line; a class never at SHARE is open at never."""
     values = numpy.array(rounds)
     is_never = values > HORIZON_ROUNDS
     caught = numpy.where(is_never, numpy.nan, values)
     # a catch in the onset round is drawn at 1, the log axis's floor
     shown = numpy.maximum(caught, 1)
-    style = {"color": COLOR[strength], "marker": MARKER[strength]}
-    axis.plot(PLACES, shown, label=strength, linewidth=2, **style)
+    (line,) = axis.plot(PLACES, shown, "o-", label=strength)
     never_places = PLACES[is_never] + NEVER_OFFSET[strength]
     never_rounds = numpy.full(len(never_places), NEVER_ROUNDS)
-    open_style = {"linestyle": "none", "markerfacecolor": "none"} | style
-    axis.plot(never_places, never_rounds, markeredgewidth=2, **open_style)
+    color = line.get_color()
+    open_style = {"color": color, "markerfacecolor": "none"}
+    axis.plot(never_places, never_rounds, "o", **open_style)
 
 
 def _name_round_axes(axis) -> None:
     axis.set_yscale("log")
-    axis.set_ylim(0.8, NEVER_BAND[1])
-    axis.axhspan(*NEVER_BAND, color="#eee", zorder=0)
+    axis.set_ylim(*ROUND_LIMITS)
     axis.set_yticks(ROUND_TICKS, ROUND_LABELS)
     axis.minorticks_off()
     axis.set_xticks(PLACES, SIZES)
     axis.set_xlabel("burst size")
     axis.set_ylabel("rounds until 90% of bursts are caught")
+    axis.grid(alpha=plots.MINOR_GRID_ALPHA)
+    axis.legend(title="burst strength")
     axis.label_outer()
 
 

@@ -16,6 +16,7 @@ import datetime
 import functools
 import hashlib
 import importlib.metadata
+import io
 import json
 import os
 import pathlib
@@ -41,6 +42,7 @@ INPUTS_FOLDER = "inputs"
 HASHES_FILE = "hashes.json"
 COMBINED_FOLDER = "combined"
 CONFIGURATIONS_FILE = "configurations.csv"
+CONFIGURATION_COLUMNS = ("configuration_id", "name", "config_chain")
 # What the launcher saw of the tree it was about to run, for a process
 # whose interpreter has no git of its own (a job script exports it):
 # "1" dirty, "0" clean, unset means nobody looked.
@@ -159,30 +161,38 @@ def recorded_combined_folders(experiment_dir: pathlib.Path) -> dict:
 def record_configuration(
     experiment_dir: pathlib.Path, config: experiment.ExperimentConfig
 ) -> None:
-    """The configuration's line in configurations.csv, once.
+    """The configuration's row in configurations.csv, once.
 
-    A line is its id, its name and its config chain, nearest file first,
+    A row is its id, its name and its config chain, nearest file first,
     so a status over the experiment finds every configuration it ran.
+    The csv module quotes a name or a path that holds a comma or a
+    quote, and the chain is a json list, so a path that holds any
+    character reads back whole, as sinter writes its json_metadata cell
+    (sinter/_data/_csv_out.py:8-13, 34-57).
     """
     path = experiment_dir / CONFIGURATIONS_FILE
-    lines = []
+    rows = []
     if path.is_file():
-        text = path.read_text()
-        lines = text.splitlines()
+        rows = _configuration_lines(experiment_dir)
     identity = configuration_id(config)
     chain = []
     for config_file in config.config_files:
         chain.append(str(config_file))
-    chain_text = ";".join(chain)
-    line = f"{identity},{config.name},{chain_text}"
-    if not lines:
-        lines.append("configuration_id,name,config_chain")
-    if line in lines:
+    chain_text = json.dumps(chain)
+    row = {
+        "configuration_id": identity,
+        "name": config.name,
+        "config_chain": chain_text,
+    }
+    if row in rows:
         return
-    lines.append(line)
-    text = "\n".join(lines)
-    ended = text + "\n"
-    _replace_file(path, ended)
+    rows.append(row)
+    text = io.StringIO()
+    writer = csv.DictWriter(text, fieldnames=CONFIGURATION_COLUMNS)
+    writer.writeheader()
+    writer.writerows(rows)
+    written = text.getvalue()
+    _replace_file(path, written)
 
 
 def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
@@ -194,7 +204,7 @@ def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
     """
     files_by_id = {}
     for line in _configuration_lines(experiment_dir):
-        chain = line["config_chain"].split(";")
+        chain = json.loads(line["config_chain"])
         files = files_by_id.setdefault(line["configuration_id"], [])
         if chain[0] not in files:
             files.append(chain[0])

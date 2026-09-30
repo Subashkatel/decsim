@@ -968,6 +968,29 @@ def test_a_configuration_line_is_staged_under_its_writers_own_name(tmp_path):
     assert list(configurations) == [run_folder.configuration_id(config)]
 
 
+def test_a_configuration_path_with_a_comma_quote_and_semicolon_reads_back(
+    tmp_path,
+):
+    """Python's csv module reads the row decsim wrote, and reopens its yaml."""
+    folder = tmp_path / "semi;colon"
+    folder.mkdir()
+    written_path = yaml_configs.write_config(folder, FOUR_POINT_SWEEP)
+    config_path = folder / 'my,"quoted".yaml'
+    written_path.rename(config_path)
+    config = experiment.load_experiment(config_path)
+    experiment_dir = tmp_path / "experiment"
+    experiment_dir.mkdir()
+
+    run_folder.record_configuration(experiment_dir, config)
+
+    configurations_path = experiment_dir / "configurations.csv"
+    (row,) = _csv_rows(configurations_path)
+    configurations = run_folder.recorded_configurations(experiment_dir)
+    (reopened,) = configurations[row["configuration_id"]]
+    assert row["name"] == 'my,"quoted"'
+    assert reopened.config_files[0] == config.config_files[0]
+
+
 def test_a_piece_records_its_counts_rounds_and_configuration(tmp_path):
     """piece.json's lines against the piece's own shots.csv, summed by csv.
 

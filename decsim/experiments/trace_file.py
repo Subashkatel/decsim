@@ -2,7 +2,7 @@
 
 The file `decsim run --trace` writes (observe/trace_writer.py, the
 Chrome Trace Event Format's JSON Array Format). A reader asks for events
-by phase, by name and by the link path they crossed; the exact
+by phase and for the link paths the moves crossed; the exact
 integer tick is always `args.tick`, never the viewer's `ts`, because
 `ts` is microseconds as a float (trace_and_viewer.md section 2).
 """
@@ -30,14 +30,6 @@ class TraceDocument:
         found = []
         for event in self.events:
             if event["ph"] == phase:
-                found.append(event)
-        return found
-
-    def named(self, phase: str, name: str) -> list:
-        """Every event of one phase with exactly this name."""
-        found = []
-        for event in self.of_phase(phase):
-            if event["name"] == name:
                 found.append(event)
         return found
 

@@ -213,6 +213,8 @@ def run_experiment(
     points = [point for _configuration_id, point in owned_points]
     unique = [point.task for point in points]
     point_ids = _point_ids(unique)
+    saved_pieces = pieces.folders_of(experiment_dir, point_ids)
+    report.refuse_pieces_of_another_tree(saved_pieces)
     started_utc = run_folder.start_run(config, report_dir, point_ids)
     first_task = unique[0]
     _echo_description(config, first_task.settings, report_dir)

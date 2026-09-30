@@ -676,6 +676,23 @@ def fold_pieces(
     return _fold_into(folders, point_ids, order, out_dir, rules)
 
 
+def refuse_pieces_of_another_tree(folders: list) -> None:
+    """Refuse a collect onto a point whose saved pieces ran another tree.
+
+    A collect names this tree in its run folder's manifest before its
+    first shot and folds the pieces it adds with the saved ones, so it
+    asks the fold's own refusal first, this tree standing for the pieces
+    it would add, and a refused collect spends no shot and leaves the
+    run folder as the earlier tree wrote it.
+    """
+    identity = run_folder.piece_identity()
+    this_code = _code_of(identity)
+    code_by_point = _pieces_by_point_and_value(folders, _code_of)
+    for by_code in code_by_point.values():
+        by_code.setdefault(this_code, "this collect")
+    _refuse_a_point_of_two_trees(code_by_point)
+
+
 def swept_values_of(report_dir: Path) -> dict:
     """The swept values of every point a run folder's manifest lists."""
     manifest = _manifest_of(report_dir)
@@ -1600,6 +1617,10 @@ def _refuse_pieces_that_ran_different_code(run_dirs: list) -> None:
     commit pass, and a clean and a dirty one do not.
     """
     code_by_point = _pieces_by_point_and_value(run_dirs, _code_of)
+    _refuse_a_point_of_two_trees(code_by_point)
+
+
+def _refuse_a_point_of_two_trees(code_by_point: dict) -> None:
     for point_id, by_code in code_by_point.items():
         if len(by_code) > 1:
             _refuse_the_code(point_id, by_code)

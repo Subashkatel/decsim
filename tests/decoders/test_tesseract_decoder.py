@@ -26,6 +26,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.tesseract.window_decoder as tesseract_window
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 from tests.decoders import windows
 
 ROUNDS = 3
@@ -384,3 +385,30 @@ def test_a_measured_decode_charges_the_search_and_not_the_build(monkeypatch):
 
     assert (first_ns, second_ns) == (10, 10)
     assert clock.now_ns == 1020
+
+
+def test_a_beam_the_backend_cannot_build_leaves_the_shot_unscored():
+    """The yaml takes a beam of 2**31, which the backend's build refuses.
+
+    TesseractConfig takes det_beam as a C++ int (tesseract-decoder
+    src/tesseract.pybind.h:57), so the build raises at compile and again
+    at the decode, which answers with no correction and the upstream
+    exception as its reason, as a search that raises does.
+    """
+    pytest.importorskip("tesseract_decoder")
+    section = {"detector_beam": 2**31}
+    settings = tesseract.TesseractDecoder.Settings.from_yaml(
+        section, None, "strong_decoder"
+    )
+    row = tesseract.TesseractDecoder(settings=settings)
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    detection_events, _ = windows.sampled_shots(circuit, 1, 3)
+    job = windows.job_for(model, detection_events[0])
+
+    result, _elapsed_ns = row.decode_timed(job)
+
+    reasons = decoding_records.BackendFailureReason
+    assert result.no_correction_reason is reasons.UPSTREAM_EXCEPTION

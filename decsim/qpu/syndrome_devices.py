@@ -42,6 +42,19 @@ import decsim.trace_source as trace_source
 # stands for them in every signature below.
 
 
+def boundary_departure_tick(
+    readout: round_records.QPUReadout, readout_tick: int
+) -> int:
+    """The readout leaves the chip at the boundary it was read out at.
+
+    Every shipped source departs this way; a source whose readout
+    arrives with a fixed delay or a jitter names a later tick of its
+    own (ports.SyndromeSource.readout_departure_tick).
+    """
+    del readout
+    return readout_tick
+
+
 class CircuitlessSource:
     """What a syndrome source with no circuit answers, whatever it emits.
 
@@ -95,12 +108,7 @@ class CircuitlessSource:
     ) -> None:
         """No circuit, so any length is fine."""
 
-    def readout_departure_tick(
-        self, readout: round_records.QPUReadout, readout_tick: int
-    ) -> int:
-        """The readout leaves the chip at the boundary it was read out at."""
-        del readout
-        return readout_tick
+    readout_departure_tick = staticmethod(boundary_departure_tick)
 
     def window_model_source(self) -> "NoWindowModels":
         """No circuit, so no window has a model to build."""

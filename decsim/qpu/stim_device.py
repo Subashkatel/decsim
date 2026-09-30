@@ -25,6 +25,7 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -112,12 +113,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             return None
         return _as_int_bits(shot.truth)
 
-    def readout_departure_tick(
-        self, readout: round_records.QPUReadout, readout_tick: int
-    ) -> int:
-        """The readout leaves the chip at the boundary it was read out at."""
-        del readout
-        return readout_tick
+    readout_departure_tick = staticmethod(
+        syndrome_devices.boundary_departure_tick
+    )
 
     def window_model_source(self) -> "StimDevice":
         """This source: the circuit it samples is the window models' too."""

@@ -443,15 +443,19 @@ def _observation_lines(observation) -> list:
     return [log_line, f"trace: {observation.trace}"]
 
 
-def _yaml_sections(path: pathlib.Path) -> tuple:
+def _yaml_sections(path: pathlib.Path, chain: tuple = ()) -> tuple:
     """The file's sections with `extends` applied, their folders, its files.
 
     The files come this file first, then the base it extends, and so on.
     A key this file names replaces the base's key whole: a child that
     declares `sweep` ignores the base's sweep entirely. So a relative
     path in a section is the one its own file wrote, and it resolves
-    against that file's folder, as a relative `extends` does.
+    against that file's folder, as a relative `extends` does. chain is
+    the files followed to reach this one, so a file its own chain
+    reaches again is refused rather than read forever.
     """
+    followed = chain + (path,)
+    _refuse_an_extends_cycle(followed)
     with open(path) as handle:
         sections = yaml.safe_load(handle)
     base_name = sections.pop("extends", None)
@@ -459,11 +463,38 @@ def _yaml_sections(path: pathlib.Path) -> tuple:
     if base_name is None:
         return sections, folders, (path,)
     base_path = path.parent / base_name
-    base_sections, base_folders, base_paths = _yaml_sections(base_path)
+    base_sections, base_folders, base_paths = _yaml_sections(
+        base_path, followed
+    )
     base_sections.update(sections)
     base_folders.update(folders)
     files = (path,) + base_paths
     return base_sections, base_folders, files
+
+
+def _refuse_an_extends_cycle(followed: tuple) -> None:
+    """The chain, when its last file is one it already followed.
+
+    A file is the one the filesystem opens, so two spellings of one
+    file, or a link to it, are the same file.
+    """
+    *earlier, last = followed
+    earlier_files = set()
+    for path in earlier:
+        real_path = os.path.realpath(path)
+        earlier_files.add(real_path)
+    last_file = os.path.realpath(last)
+    if last_file not in earlier_files:
+        return
+    names = []
+    for path in followed:
+        plain = _plain_path(path)
+        names.append(str(plain))
+    cycle = " -> ".join(names)
+    raise refusal.RefusalError(
+        f"the extends chain {cycle} forms a cycle; each file extends the "
+        "next, so the chain never reaches a file without a base"
+    )
 
 
 def _plain_path(path: pathlib.Path) -> pathlib.Path:

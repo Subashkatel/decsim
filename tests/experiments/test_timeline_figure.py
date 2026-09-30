@@ -320,21 +320,6 @@ def test_moves_on_channels_named_apart_from_their_paths_are_drawn_by_path(
     assert "weak_buffer_to_weak_decoder_wire" not in document.link_paths()
 
 
-def _with_every_channel_renamed(links):
-    """The fabric with each path's channel named <path>_wire, alike else."""
-    renamed = {}
-    for field in dataclasses.fields(links):
-        path_settings = getattr(links, field.name)
-        if not isinstance(path_settings, link_settings.PathSettings):
-            continue
-        name = f"{field.name}_wire"
-        channel = dataclasses.replace(path_settings.channel, name=name)
-        renamed[field.name] = dataclasses.replace(
-            path_settings, channel=channel
-        )
-    return dataclasses.replace(links, **renamed)
-
-
 def test_the_timeline_reads_the_lanes_and_the_period_off_the_file(tmp_path):
     trace_path = tmp_path / "point1.trace.json"
     _machine, _result = _traced_run(trace_path)
@@ -495,3 +480,18 @@ def _rename_the_escalation(trace_path, escalation_kind: str) -> None:
             event["args"]["name"] = " ".join(words)
     renamed_text = json.dumps(events)
     trace_path.write_text(renamed_text)
+
+
+def _with_every_channel_renamed(links):
+    """The fabric with each path's channel named <path>_wire, alike else."""
+    renamed = {}
+    for field in dataclasses.fields(links):
+        path_settings = getattr(links, field.name)
+        if not isinstance(path_settings, link_settings.PathSettings):
+            continue
+        name = f"{field.name}_wire"
+        channel = dataclasses.replace(path_settings.channel, name=name)
+        renamed[field.name] = dataclasses.replace(
+            path_settings, channel=channel
+        )
+    return dataclasses.replace(links, **renamed)

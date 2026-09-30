@@ -24,7 +24,9 @@ from typing import Optional
 
 import numpy
 
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.records.decoder_evidence as evidence_records
 
 BOUNDARY = -1
@@ -51,12 +53,12 @@ def graph_from_model(
     priors = raw_priors.astype(float, copy=False)
     likely = priors > 0.5
     baseline = likely.astype(numpy.uint8)
-    baseline_syndrome = _parity_product(check, baseline)
+    baseline_syndrome = decoder_module.parity_product(check, baseline)
     edges = _edges(check, priors, baseline, observables, weight_step)
     _refuse_lengths_past_the_counters(edges, weight_step, location)
     logical_columns = _logical_columns(observables, fault_count)
-    baseline_faults = _int_tuple(baseline)
-    baseline_syndrome = _int_tuple(baseline_syndrome)
+    baseline_faults = decoder_module.int_tuple(baseline)
+    baseline_syndrome = decoder_module.int_tuple(baseline_syndrome)
     return evidence_records.UnionFindGraph(
         detector_count=check.shape[0],
         fault_count=fault_count,
@@ -77,16 +79,16 @@ def decode_graph(
     baseline_syndrome = numpy.asarray(
         graph.baseline_syndrome, dtype=numpy.uint8
     )
-    syndrome_bits = _int_tuple(syndrome_array)
+    syndrome_bits = decoder_module.int_tuple(syndrome_array)
     residual_syndrome = syndrome_array ^ baseline_syndrome
-    residual_bits = _int_tuple(residual_syndrome)
+    residual_bits = decoder_module.int_tuple(residual_syndrome)
     outcome = compiled_decoder.decode(graph, residual_syndrome)
     selected_edges = outcome.selected_edges
     selected_faults = _selected_faults(graph, selected_edges)
     reproduced = _reproduced_syndrome(graph, baseline_syndrome, selected_edges)
     mismatch = reproduced ^ syndrome_array
     unmatched = numpy.nonzero(mismatch)
-    unmatched_detectors = _int_tuple(unmatched[0])
+    unmatched_detectors = decoder_module.int_tuple(unmatched[0])
     logical_observables = _logical_observables(graph, selected_faults)
     contact_faults = _fault_indices(graph, outcome.contact_edges)
     erasure_forest_faults = _fault_indices(graph, outcome.forest_edges)
@@ -190,16 +192,6 @@ def _check_priors(raw_priors, fault_count: int, location: str) -> None:
         raise ValueError(f"{location} priors must lie in [0, 1]")
 
 
-def _parity_product(matrix, vector):
-    """The matrix times the vector over GF(2), as a flat array."""
-    matrix_integers = matrix.astype(numpy.int64)
-    vector_integers = vector.astype(numpy.int64)
-    product = matrix_integers @ vector_integers
-    product = numpy.asarray(product)
-    flat = product.ravel()
-    return flat % 2
-
-
 def _edge_of(
     check, priors, baseline, observables, fault_index: int, weight_step: float
 ) -> Optional[evidence_records.UnionFindEdge]:
@@ -214,7 +206,7 @@ def _edge_of(
     log_odds = _natural_log_odds(residual_probability)
     weight_ticks = _quantize_weight_ticks(log_odds, weight_step)
     column = observables[:, fault_index]
-    logical_observables = _int_tuple(column)
+    logical_observables = decoder_module.int_tuple(column)
     length_half_ticks = 2 * weight_ticks
     return evidence_records.UnionFindEdge(
         fault_index=fault_index,
@@ -227,9 +219,7 @@ def _edge_of(
 
 def _endpoints(check, fault_index: int) -> tuple:
     """The two detectors of a column; a missing one is the boundary."""
-    start = check.indptr[fault_index]
-    end = check.indptr[fault_index + 1]
-    detectors = _int_tuple(check.indices[start:end])
+    detectors = basis_split.column_rows(check, fault_index)
     if len(detectors) == 0:
         return BOUNDARY, BOUNDARY
     if len(detectors) == 1:
@@ -243,16 +233,9 @@ def _logical_columns(observables, fault_count: int) -> tuple:
     columns = []
     for fault_index in range(fault_count):
         column = observables[:, fault_index]
-        bits = _int_tuple(column)
+        bits = decoder_module.int_tuple(column)
         columns.append(bits)
     return tuple(columns)
-
-
-def _int_tuple(values) -> tuple:
-    integers = []
-    for value in values:
-        integers.append(int(value))
-    return tuple(integers)
 
 
 def _fault_indices(

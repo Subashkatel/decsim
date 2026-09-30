@@ -7,6 +7,7 @@ MINIMAL_CONFIG is a complete machine small enough for a functional test.
 """
 
 import pathlib
+import tempfile
 
 import numpy
 import pymatching
@@ -15,6 +16,9 @@ import yaml
 import decsim.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
+import decsim.experiments.pieces as pieces
+import decsim.experiments.report as report
+import decsim.experiments.run_folder as run_folder
 
 _THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
@@ -73,8 +77,48 @@ def measure_point_shot(
 
 
 def run_sweep(tasks: list, shots: int) -> list:
-    """Seeds 0 to shots - 1 of every task of a sweep, measured, unsaved."""
-    return collect.collect(tasks, shots, measure.measure_shot)
+    """Seeds 0 to shots - 1 of every task of a sweep, measured, unsaved.
+
+    A task named twice runs once, as a collect runs it.
+    """
+    measurements = []
+    for task in collect.unique_tasks(tasks):
+        unit = collect.Unit(task, 0, shots)
+        outcome = collect.run_unit(unit, measure.measure_shot)
+        measurements.extend(outcome.rows)
+    return measurements
+
+
+def folded_run(tmp_path, measurements: list) -> tuple:
+    """The shots folded into a run folder as a collect folds its pieces.
+
+    Each point's shots are one piece, in the order they are given, and
+    the point's resolved record names no swept path, so the run folder's
+    files hold only what the shots measured. Returns the sweep rows the
+    fold computed, before csv turns an empty cell into text, and the
+    run folder, whose links.csv and data_movement.csv the fold wrote.
+    """
+    temporary_dir = tempfile.mkdtemp(dir=tmp_path)
+    experiment_dir = pathlib.Path(temporary_dir)
+    measurements_by_point = {}
+    for measurement in measurements:
+        at_point = measurements_by_point.setdefault(measurement.point_id, [])
+        at_point.append(measurement)
+    folders = []
+    for point_id, at_point in measurements_by_point.items():
+        _write_a_bare_point_record(experiment_dir, point_id)
+        first_seed = at_point[0].seed
+        folder = pieces.write(
+            experiment_dir, point_id, first_seed, at_point, {}
+        )
+        folders.append(folder)
+    point_ids = list(measurements_by_point)
+    seeds_by_point = pieces.seed_ranges_of(folders)
+    run_dir = experiment_dir / "run"
+    rows = report.fold_pieces(
+        experiment_dir, folders, point_ids, seeds_by_point, run_dir
+    )
+    return rows, run_dir
 
 
 def whole_circuit_predictions(shot: collect.Shot) -> list:
@@ -310,3 +354,12 @@ def example_tool_config(
     config_text = yaml.safe_dump(raw)
     config_path.write_text(config_text)
     return config_path
+
+
+def _write_a_bare_point_record(experiment_dir, point_id: str) -> None:
+    """A resolved record holding only what the fold reads of a point."""
+    resolved_dir = experiment_dir / run_folder.RESOLVED_FOLDER
+    resolved_dir.mkdir(exist_ok=True)
+    record = {"id": point_id, "metadata": {}, "sections": None}
+    record_path = resolved_dir / f"{point_id}.json"
+    run_folder.write_json(record_path, record)

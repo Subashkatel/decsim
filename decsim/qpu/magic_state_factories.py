@@ -28,7 +28,6 @@ request at the top propagates demand down the chain, so no level
 free-runs unless production_mode is "continuous".
 """
 
-import collections
 import dataclasses
 import functools
 import math
@@ -40,20 +39,8 @@ import decsim.engine
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
+import decsim.tables as tables
 import decsim.trace_source as trace_source
-
-
-@dataclasses.dataclass
-class StateTrace:
-    """When one magic state was distilled, corrected, released, delivered."""
-
-    state_id: int
-    distill_start_tick: int
-    physical_done_tick: int
-    correction_submit_tick: int
-    correction_done_tick: Optional[int] = None
-    released_tick: Optional[int] = None
-    delivered_tick: Optional[int] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,8 +95,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     Demand mode starts an attempt only for an unmet request; continuous
     mode also keeps buffer_capacity states in the pipeline. A state with
     no correction decodes to wait on is released one return trip after
-    the physical attempt. initial_store warm-starts the store with states
-    that carry no trace.
+    the physical attempt. initial_store warm-starts the store.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -155,7 +141,9 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             """The keys the yaml wrote; the three with no default must be."""
             required = ("unit_count", "attempt_ticks", "correction_round_count")
             _check_required_keys("distillation", section, required)
-            fields = _with_numbers(section, ("success_probability",))
+            fields = _with_numbers(
+                section, "magic_state_factory", ("success_probability",)
+            )
             return cls(**fields)
 
     # the run's decoder manager, where the correction decodes compete
@@ -177,9 +165,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
     def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Deliver a state now if one is in stock, else when one is ready."""
-        request = (operation_id, callback)
-        self.waiting.append(request)
-        self._stall_start_by_operation_id[operation_id] = self.engine.now
+        self.waiting.add(operation_id, callback)
         waiting_count = len(self.waiting)
         self.engine.log(
             log_sources.MAGIC_STATE_FACTORY,
@@ -193,34 +179,15 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         """Stop launching attempts; the program is complete."""
         self._is_shut_down = True
 
-    def latency_aggregate_snapshot(self) -> dict:
-        """Exact totals over every delivery, whatever traces were evicted."""
-        snapshot = {}
-        totals = self._latency_totals
-        for stage, total in totals.sum_by_stage.items():
-            snapshot[stage] = {
-                "sum": total,
-                "max": totals.max_by_stage[stage],
-                "n": totals.delivered_count,
-            }
-        return snapshot
-
     def _reset_state(self, initial_store: int) -> None:
         self.stored_state_count = initial_store
-        self.waiting: list[tuple[int, Callable[[], None]]] = []
+        self.waiting = _WaitingRequests(self.engine)
         self.produced_count = 0
         self.in_flight_count = 0
         self.busy_unit_count = 0
         self.peak_in_flight_count = 0
         self.total_stall_ticks = 0
-        self._stall_start_by_operation_id: dict[int, int] = {}
         self._is_shut_down = False
-        self.traces: collections.deque = collections.deque(maxlen=4096)
-        sum_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
-        max_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
-        self._latency_totals = _LatencyTotals(0, sum_by_stage, max_by_stage)
-        self._ready_traces: list[StateTrace] = []
-        self._next_state_id = 0
 
     def _start_attempts(self) -> None:
         """Launch attempts while demand is unmet or the pipeline is short."""
@@ -266,22 +233,12 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self.peak_in_flight_count = max(
             self.peak_in_flight_count, self.in_flight_count
         )
-        now = self.engine.now
-        distill_start_tick = now - self.card.attempt_ticks
-        trace = StateTrace(
-            state_id=self._next_state_id,
-            distill_start_tick=distill_start_tick,
-            physical_done_tick=now,
-            correction_submit_tick=now,
-        )
-        self._next_state_id += 1
         if not self.card.correction_decode_count:
             # Nothing to wait on: the state returns after the physical
             # attempt, as it does in the multi-level factory.
-            trace.correction_done_tick = now
             self.engine.schedule(
                 self.card.return_ticks,
-                lambda: self._release(trace),
+                self._release,
                 label="distill_release",
             )
             return
@@ -291,7 +248,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             f"{self.card.correction_decode_count} correction-qubit decode jobs "
             f"to the cluster (parallel)",
         )
-        batch = _CorrectionBatch(self.card.correction_decode_count, trace)
+        batch = _CorrectionBatch(self.card.correction_decode_count)
         on_done = functools.partial(self._finish_correction_decode, batch)
         for _ in range(self.card.correction_decode_count):
             self.decode_queue.enqueue_without_input(
@@ -304,21 +261,17 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         batch.remaining_count -= 1
         if batch.remaining_count != 0:
             return
-        trace = batch.trace
-        trace.correction_done_tick = self.engine.now
         self.engine.schedule(
             self.card.return_ticks,
-            lambda: self._release(trace),
+            self._release,
             label="distill_release",
         )
 
-    def _release(self, trace: StateTrace) -> None:
+    def _release(self) -> None:
         """A corrected state reaches the store and serves the oldest request."""
         self.in_flight_count -= 1
         self.stored_state_count += 1
         self.produced_count += 1
-        trace.released_tick = self.engine.now
-        self._ready_traces.append(trace)
         self.engine.log(
             log_sources.MAGIC_STATE_FACTORY,
             f"magic state ready (store now {self.stored_state_count})",
@@ -329,9 +282,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     def _deliver_to_waiting(self) -> None:
         while self.stored_state_count > 0 and self.waiting:
             self.stored_state_count -= 1
-            self._stamp_delivered_trace()
-            operation_id, callback = self.waiting.pop(0)
-            waited_ticks = self._stall_ticks_of(operation_id)
+            operation_id, callback, waited_ticks = self.waiting.serve_oldest()
             self.total_stall_ticks += waited_ticks
             self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
@@ -341,34 +292,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
                 f"(store now {self.stored_state_count}){tag}",
             )
             callback()
-
-    def _stamp_delivered_trace(self) -> None:
-        # A warm-start state has no trace.
-        if not self._ready_traces:
-            return
-        trace = self._ready_traces.pop(0)
-        trace.delivered_tick = self.engine.now
-        self._record_delivered_trace(trace)
-        self.traces.append(trace)
-
-    def _stall_ticks_of(self, operation_id: int) -> int:
-        now = self.engine.now
-        started = self._stall_start_by_operation_id.pop(operation_id, now)
-        return now - started
-
-    def _record_delivered_trace(self, trace: StateTrace) -> None:
-        ticks_by_stage = {
-            "distill": trace.physical_done_tick - trace.distill_start_tick,
-            "corr_decode": trace.correction_done_tick
-            - trace.physical_done_tick,
-            "deliver": trace.delivered_tick - trace.correction_done_tick,
-            "total": trace.delivered_tick - trace.distill_start_tick,
-        }
-        totals = self._latency_totals
-        totals.delivered_count += 1
-        for stage, ticks in ticks_by_stage.items():
-            totals.sum_by_stage[stage] += ticks
-            totals.max_by_stage[stage] = max(totals.max_by_stage[stage], ticks)
 
 
 @dataclasses.dataclass
@@ -460,7 +383,9 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             _check_required_keys("multi_level", section, ("levels",))
             levels = _levels_from_yaml(section["levels"])
             probability_keys = ("preparation_success_probability",)
-            fields = _with_numbers(section, probability_keys)
+            fields = _with_numbers(
+                section, "magic_state_factory", probability_keys
+            )
             fields["levels"] = levels
             return cls(**fields)
 
@@ -486,9 +411,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Record the demand for a final state and pull the chain."""
-        request = (operation_id, callback)
-        self.waiting.append(request)
-        self._stall_start_by_operation_id[operation_id] = self.engine.now
+        self.waiting.add(operation_id, callback)
         top_counters = self.counters_by_level[len(self.levels)]
         top_store = top_counters.stored_state_count
         waiting_count = len(self.waiting)
@@ -517,9 +440,8 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self.counters_by_level = {}
         for level in range(0, above_top_level):
             self.counters_by_level[level] = _LevelCounters()
-        self.waiting: list[tuple[int, Callable[[], None]]] = []
+        self.waiting = _WaitingRequests(self.engine)
         self.total_stall_ticks = 0
-        self._stall_start_by_operation_id: dict[int, int] = {}
         self.peak_in_flight_count = 0
         self._is_shut_down = False
 
@@ -527,8 +449,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         top_counters = self.counters_by_level[len(self.levels)]
         while top_counters.stored_state_count > 0 and self.waiting:
             top_counters.stored_state_count -= 1
-            operation_id, callback = self.waiting.pop(0)
-            waited_ticks = self._stall_ticks_of(operation_id)
+            operation_id, callback, waited_ticks = self.waiting.serve_oldest()
             self.total_stall_ticks += waited_ticks
             self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
@@ -537,11 +458,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
                 f"  -> delivered final state to op#{operation_id}{tag}",
             )
             callback()
-
-    def _stall_ticks_of(self, operation_id: int) -> int:
-        now = self.engine.now
-        started = self._stall_start_by_operation_id.pop(operation_id, now)
-        return now - started
 
     def _start_work(self) -> None:
         """Deliver what is ready, then start every round the demand allows."""
@@ -731,16 +647,34 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self._start_work()
 
 
-_LATENCY_STAGES = ("distill", "corr_decode", "deliver", "total")
+class _WaitingRequests:
+    """The requests waiting for a magic state, served oldest first.
 
+    A request's stall runs from the tick it asked to the tick it is
+    served, so a request served at once waited nothing.
+    """
 
-@dataclasses.dataclass
-class _LatencyTotals:
-    """Exact sums and maxima per latency stage over every delivery."""
+    def __init__(self, engine: decsim.engine.Engine) -> None:
+        self.engine = engine
+        self._requests: list[tuple[int, Callable[[], None]]] = []
+        self._stall_start_by_operation_id: dict[int, int] = {}
 
-    delivered_count: int
-    sum_by_stage: dict
-    max_by_stage: dict
+    def __len__(self) -> int:
+        return len(self._requests)
+
+    def add(self, operation_id: int, callback: Callable[[], None]) -> None:
+        """Queue a request behind every earlier one."""
+        request = (operation_id, callback)
+        self._requests.append(request)
+        self._stall_start_by_operation_id[operation_id] = self.engine.now
+
+    def serve_oldest(self) -> tuple[int, Callable[[], None], int]:
+        """The oldest request's operation, its callback, the ticks it waited."""
+        operation_id, callback = self._requests.pop(0)
+        now = self.engine.now
+        started = self._stall_start_by_operation_id.pop(operation_id, now)
+        waited_ticks = now - started
+        return operation_id, callback, waited_ticks
 
 
 @dataclasses.dataclass
@@ -758,7 +692,6 @@ class _CorrectionBatch:
     """The correction decodes one distilled state is waiting on."""
 
     remaining_count: int
-    trace: StateTrace
 
 
 @dataclasses.dataclass
@@ -799,17 +732,14 @@ def _check_probability(name: str, value) -> None:
         raise ValueError(f"{name} must be finite and in [0, 1]")
 
 
-def _with_numbers(section: Mapping, keys: tuple) -> dict:
-    """The section's keys, each named one read as the number it writes.
-
-    YAML 1.1 loads `1e-3` as text, so a probability the yaml writes that
-    way arrives as a string, as escalation's online card reads it too
-    (decsim/escalation/settings.py _online_float).
-    """
+def _with_numbers(section: Mapping, section_name: str, keys: tuple) -> dict:
+    """YAML 1.1 loads 1e-3 as text, so each number is read before use."""
     fields = dict(section)
     for key in keys:
         if key in fields:
-            fields[key] = float(fields[key])
+            fields[key] = config.finite_number(
+                section, section_name, key, fields[key]
+            )
     return fields
 
 
@@ -831,14 +761,11 @@ def _levels_from_yaml(level_sections) -> tuple:
     level_keys = _distill_level_keys()
     levels = []
     for index, level_section in enumerate(level_sections):
-        unknown = set(level_section) - set(level_keys)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"magic_state_factory.levels[{index}] does not know "
-                f"{listed}; its keys are {list(level_keys)}"
-            )
-        level_fields = _with_numbers(level_section, ("success_probability",))
+        level_name = f"magic_state_factory.levels[{index}]"
+        tables.refuse_unknown_keys(level_name, level_section, level_keys)
+        level_fields = _with_numbers(
+            level_section, level_name, ("success_probability",)
+        )
         level = DistillLevel(**level_fields)
         levels.append(level)
     return tuple(levels)

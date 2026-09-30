@@ -15,6 +15,7 @@ import decsim.detector_error_model.detector_formation as formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.stim_stream_models as stream_models
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -162,12 +163,9 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
             return None
         return truth
 
-    def readout_departure_tick(
-        self, readout: round_records.QPUReadout, readout_tick: int
-    ) -> int:
-        """The readout leaves the chip at the boundary it was read out at."""
-        del readout
-        return readout_tick
+    readout_departure_tick = staticmethod(
+        syndrome_devices.boundary_departure_tick
+    )
 
     def window_model_source(self) -> "StreamingStimDevice":
         """This source: the fragments it executes grow the window models."""
@@ -263,30 +261,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        exclude_faults_touching: Optional[tuple] = None,
-        prior_faults: Optional[dict] = None,
-    ) -> fault_models.WindowErrorModel:
-        """Build a strong context with one range assigned to its neighbour."""
-        exclusions = ()
-        if exclude_faults_touching is not None:
-            exclusions = (exclude_faults_touching,)
-        return self.strong_window_model_for_operation_with_exclusions(
-            operation,
-            window,
-            round_count,
-            fault_model_requirement=fault_model_requirement,
-            fault_exclusion_ranges=exclusions,
-            prior_faults=prior_faults,
-        )
-
-    def strong_window_model_for_operation_with_exclusions(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        fault_exclusion_ranges: tuple,
+        fault_exclusion_ranges: tuple = (),
         prior_faults: Optional[dict] = None,
     ) -> fault_models.WindowErrorModel:
         """Keep strong priors in the stream's stable fault namespace."""

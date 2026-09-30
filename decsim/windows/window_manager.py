@@ -365,7 +365,7 @@ class WindowManager:
         rows = []
         ordered_ids = sorted(
             self.tracker.operation_by_id,
-            key=identity_records.stable_identity_order_key,
+            key=identity_records.stable_identity_bytes,
         )
         for operation_id in ordered_ids:
             operation = self.tracker.operation_by_id[operation_id]

@@ -34,6 +34,8 @@ Devices: an NVIDIA A100-SXM4-80GB (x86 host) and a GH200 144G HBM3e
 
 import dataclasses
 
+import decsim.decoders.measured_table.measurements as measured_times
+
 
 @dataclasses.dataclass(frozen=True)
 class KernelTime:
@@ -47,9 +49,12 @@ class KernelTime:
 
     def decode_microseconds(self, iterations: int) -> float:
         """The line at these iterations, floored at the fastest kernel."""
-        per_iteration = self.microseconds_per_iteration * iterations
-        line_microseconds = self.intercept_microseconds + per_iteration
-        return max(line_microseconds, self.fastest_kernel_microseconds)
+        return measured_times.floored_line_microseconds(
+            self.intercept_microseconds,
+            self.microseconds_per_iteration,
+            self.fastest_kernel_microseconds,
+            iterations,
+        )
 
 
 @dataclasses.dataclass(frozen=True)

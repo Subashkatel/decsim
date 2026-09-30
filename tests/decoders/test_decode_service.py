@@ -205,11 +205,14 @@ def _recording(manager, engine):
     return starts
 
 
-def latency_for_window(job):
+class _WindowLatencyDecoder(decoders.PresetLatencyDecoder):
     """A row whose response depends on the window it decodes."""
-    if job.window_id == 0:
-        return 100.0
-    return 50.0
+
+    def latency(self, job):
+        microseconds = 50.0
+        if job.window_id == 0:
+            microseconds = 100.0
+        return config.microseconds_to_ticks(microseconds)
 
 
 def strong_primary_run(decoder):
@@ -483,7 +486,7 @@ def test_a_pipelined_unit_refuses_two_in_flight_response_times():
     timing = staged_decoder.UnitTiming(
         (), (), UNIT_CLOCK, initiation_interval_us=1.0
     )
-    algorithm = decoders.FunctionLatencyDecoder(latency_for_window)
+    algorithm = _WindowLatencyDecoder()
     decoder = staged_decoder.StagedDecoder(algorithm, timing)
     manager = _manager(engine, decoder)
     first = _job(0)

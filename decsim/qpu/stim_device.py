@@ -20,11 +20,13 @@ from typing import Any, Optional
 import numpy
 import stim
 
+import decsim.config as config
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -112,12 +114,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             return None
         return _as_int_bits(shot.truth)
 
-    def readout_departure_tick(
-        self, readout: round_records.QPUReadout, readout_tick: int
-    ) -> int:
-        """The readout leaves the chip at the boundary it was read out at."""
-        del readout
-        return readout_tick
+    readout_departure_tick = staticmethod(
+        syndrome_devices.boundary_departure_tick
+    )
 
     def window_model_source(self) -> "StimDevice":
         """This source: the circuit it samples is the window models' too."""
@@ -360,13 +359,13 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         round_count: int,
         *,
         fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        exclude_faults_touching: Optional[tuple] = None,
+        fault_exclusion_ranges: tuple = (),
         prior_faults: Optional[dict] = None,
     ) -> Optional[fault_models.WindowErrorModel]:
         """An independent window model for a strong re-decode.
 
-        One optional inclusive range is assigned to another seam side,
-        and a pinned face's neighbour supplies the faults it has already
+        Each inclusive round range is assigned to another seam side, and
+        a pinned face's neighbour supplies the faults it has already
         committed, which are no columns of this model.
         """
         if operation.circuit is None:
@@ -380,38 +379,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
-            exclude_faults_touching=exclude_faults_touching,
-            prior_faults=prior_faults,
-        )
-
-    def strong_window_model_for_operation_with_exclusions(
-        self,
-        operation: program_records.Operation,
-        window: window_records.Window,
-        round_count: int,
-        *,
-        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
-        fault_exclusion_ranges: tuple,
-        prior_faults: Optional[dict] = None,
-    ) -> Optional[fault_models.WindowErrorModel]:
-        """A strong re-decode model with several non-owned inclusive ranges."""
-        if operation.circuit is None:
-            return None
-        key = program_records.decode_identity(operation)
-        detector_rounds = self._bind_source(key, operation.circuit, round_count)
-        span = _window_span(window)
-        return window_models.build_single_window_error_model_with_exclusions(
-            operation.circuit,
-            span,
-            round_count=round_count,
-            detector_rounds=detector_rounds,
-            fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=fault_exclusion_ranges,
             prior_faults=prior_faults,
         )
-
-    def _prepare_run_seed_state(self, effective_seed):
-        return effective_seed
 
     def _install_run_seed_state(self, prepared_state) -> None:
         """A fresh run keeps the declarations and drops what it sampled."""
@@ -974,8 +944,7 @@ def _detector_ids_by_key(declared: Optional[dict]) -> dict:
 
 
 def _check_onset_round(value) -> None:
-    is_count = isinstance(value, int) and not isinstance(value, bool)
-    if is_count and value >= 1:
+    if config.is_whole_count(value):
         return
     raise ValueError(
         f"qpu.burst_onset_round is a one-based round, at least 1; got {value!r}"
@@ -983,8 +952,7 @@ def _check_onset_round(value) -> None:
 
 
 def _check_rise_rounds(value) -> None:
-    is_count = isinstance(value, int) and not isinstance(value, bool)
-    if is_count and value >= 1:
+    if config.is_whole_count(value):
         return
     raise ValueError(
         f"qpu.burst_rise_rounds is a whole number of rounds, at least 1 "

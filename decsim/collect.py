@@ -3,9 +3,9 @@
 sinter's shape (sinter/_data/_task.py Task, sinter/_collection/
 _collection.py collect, sinter/_data/_task_stats.py the rows) adapted
 to a work unit of one seeded run. A Task is one settings record at one
-sweep point with json metadata; collect runs seeds 0 to shots - 1
-serially per task, builds and runs a Machine per seed, and
-hands each Shot to the caller's measure, which returns the caller's row.
+sweep point with json metadata; a unit runs its seeds serially, builds
+and runs a Machine per seed, and hands each Shot to the caller's
+measure, which returns the caller's row.
 Two tasks with the same strong id (sinter's content hash, _task.py
 strong_id_value: the json text of the values, sha256) are one task. The
 online threshold calibrator lives on the task so every shot of a point
@@ -18,14 +18,12 @@ sinter/_collection/_collection_worker_state.py, capped by
 _main_collect.py:83) runs whole units. A unit's window error models are
 built by its first shot and read by the rest, as sinter compiles its
 decoder once per task. A pool hands each unit on the moment it ends, so
-a caller saves it while slower units run; collect puts the rows back in
-task and seed order.
+a caller saves it while slower units run.
 """
 
 import concurrent.futures
 import dataclasses
 import enum
-import functools
 import hashlib
 import json
 import numbers
@@ -122,34 +120,6 @@ class Shot:
     wall_seconds: float
 
 
-def collect(
-    tasks: Iterable[Task],
-    shots: int,
-    measure: Callable[[Shot], Any],
-    on_task_done: Optional[Callable[[Task], None]] = None,
-    *,
-    processes: int = 1,
-) -> list:
-    """Seeds 0 to shots - 1 of every task, measured; a row per shot, in order.
-
-    A task named twice runs once. Each task is one work unit.
-    on_task_done runs after a task's unit, sinter's progress_callback;
-    `processes` above one runs whole units in a worker pool, so
-    `measure` must be a module-level callable or a partial of one.
-    """
-    unique = unique_tasks(tasks)
-    units = work_units(unique, shots)
-    rows_by_task = {}
-    keep_rows = functools.partial(_keep_rows, rows_by_task, on_task_done)
-    run_units(units, measure, on_unit_done=keep_rows, processes=processes)
-    rows = []
-    for task in unique:
-        task_id = task.strong_id()
-        task_rows = rows_by_task[task_id]
-        rows.extend(task_rows)
-    return rows
-
-
 def run_units(
     units: list,
     measure: Callable[[Shot], Any],
@@ -171,15 +141,6 @@ def run_units(
         unit = units[position]
         ran_unit = dataclasses.replace(unit, task=outcome.task)
         on_unit_done(ran_unit, outcome)
-
-
-def work_units(tasks: list, shots: int) -> list:
-    """Every task's seeds 0 to shots - 1 as one work unit, in task order."""
-    units = []
-    for task in tasks:
-        unit = Unit(task, 0, shots)
-        units.append(unit)
-    return units
 
 
 def run_unit(
@@ -266,19 +227,6 @@ def json_value(value: Any, *, keep_labels: bool = True) -> Any:
     if isinstance(value, (list, tuple)):
         return _json_list(value, keep_labels)
     return _json_scalar(value, keep_labels)
-
-
-def _keep_rows(
-    rows_by_task: dict,
-    on_task_done: Optional[Callable[[Task], None]],
-    unit: Unit,
-    outcome: result_records.UnitOutcome,
-) -> None:
-    """A unit callback that keeps a task's rows; its unit is the whole task."""
-    task_id = unit.task.strong_id()
-    rows_by_task[task_id] = outcome.rows
-    if on_task_done is not None:
-        on_task_done(unit.task)
 
 
 def _peak_memory_mb() -> float:

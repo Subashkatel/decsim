@@ -328,7 +328,7 @@ def test_a_split_regions_answer_joins_its_two_parts_decoded_alone():
     parts = part_by_basis.values()
     observables, flipped = _decoded_alone(reference, parts, detection_events[0])
     joined = decoder.decode(job)
-    expected_observables = decoder_module.bit_tuple(observables)
+    expected_observables = decoder_module.int_tuple(observables)
     assert joined.logical_observables == expected_observables
     assert joined.boundary_data.detector_ids == tuple(sorted(flipped))
 

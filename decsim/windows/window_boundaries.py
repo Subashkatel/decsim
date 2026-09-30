@@ -110,28 +110,6 @@ class BoundaryCourier:
             return None
         return record.committed
 
-    def invalidate(self, window: window_records.Window) -> None:
-        """A window is about to be decoded again.
-
-        A boundary already in transit belongs to the invalidated decode,
-        so advancing the versions makes its scheduled delivery a no-op;
-        its own shipped and held boundaries are gone.
-        """
-        record = self._record(window.key)
-        record.version += 1
-        for dependency in window.deps:
-            source = self._record(dependency)
-            delivery_version = source.delivery_version_by_dependent.get(
-                window.key, 0
-            )
-            source.delivery_version_by_dependent[window.key] = (
-                delivery_version + 1
-            )
-            source.released_dependents.discard(window.key)
-        record.committed = None
-        record.committed_request_key = None
-        record.held = None
-
     # ---- delivery
 
     def send(

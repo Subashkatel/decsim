@@ -422,7 +422,7 @@ def test_a_slicer_asked_for_no_fault_model_builds_no_catalog_and_no_link():
     """The decoders' default requirement: a timing-only run needs no model.
 
     decsim/decoders/decoder.py defaults to NO_FAULT_MODEL_REQUIRED, so a
-    preset-latency or per-round decoder costs nothing at build: no
+    preset-latency decoder costs nothing at build: no
     catalog is read out of Stim and the window carries neither view.
     """
     circuit = chain_circuit()

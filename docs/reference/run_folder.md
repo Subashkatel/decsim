@@ -42,10 +42,10 @@ one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
 | `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
-| `sweep.csv` | `decsim/experiments/report.py`, `summarize` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
-| `links.csv` | `decsim/experiments/report.py`, `link_rows` | one row per sweep point per link, averaged over that point's shots |
+| `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
+| `links.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point per link, averaged over that point's shots |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
-| `data_movement.csv` | `decsim/experiments/report.py`, `data_movement_rows` | one row per sweep point per path, then per memory class, averaged over the point's shots |
+| `data_movement.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point per path, then per memory class, averaged over the point's shots |
 | `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `manifest.json` | `decsim/experiments/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
 | `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain, each at its place relative to the others, so every `extends` still resolves |

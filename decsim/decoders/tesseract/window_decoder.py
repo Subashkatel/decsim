@@ -21,6 +21,7 @@ import stim
 
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
@@ -364,11 +365,9 @@ def _append_errors(detector_error_model, check, observables, priors) -> None:
 
 
 def _error_targets(check, observables, fault_index: int) -> list:
-    start = check.indptr[fault_index]
-    end = check.indptr[fault_index + 1]
+    detectors = basis_split.column_rows(check, fault_index)
     targets = []
-    for detector_index in check.indices[start:end]:
-        detector = int(detector_index)
+    for detector in detectors:
         target = stim.DemTarget.relative_detector_id(detector)
         targets.append(target)
     column = observables[:, fault_index]
@@ -468,31 +467,24 @@ def _outcome_of(
     reconstructed = decoder_module.parity_product(
         physical_faults.check, correction
     )
-    correction_tuple = decoder_module.bit_tuple(correction)
-    reconstructed_tuple = decoder_module.bit_tuple(reconstructed)
+    correction_tuple = decoder_module.int_tuple(correction)
     if low_confidence:
         return _failed_outcome(
             status=_Status.LOW_CONFIDENCE,
             reason=_Reason.SEARCH_LIMIT_EXHAUSTED,
             physical_correction=correction_tuple,
-            reconstructed_syndrome=reconstructed_tuple,
         )
     if not numpy.array_equal(reconstructed, syndrome_array):
         return _failed_outcome(
             status=_Status.INVALID_CORRECTION,
             reason=_Reason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
             physical_correction=correction_tuple,
-            reconstructed_syndrome=reconstructed_tuple,
         )
     return backend_outcome.BackendDecodeOutcome(
         status=_Status.SUCCEEDED,
         failure_reason=None,
         physical_correction=correction_tuple,
-        component_correction=None,
-        reconstructed_syndrome=reconstructed_tuple,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )
 
 
@@ -501,15 +493,10 @@ def _failed_outcome(
     status: decoding_records.BackendDecodeStatus,
     reason: decoding_records.BackendFailureReason,
     physical_correction=None,
-    reconstructed_syndrome=None,
 ) -> backend_outcome.BackendDecodeOutcome:
     return backend_outcome.BackendDecodeOutcome(
         status=status,
         failure_reason=reason,
         physical_correction=physical_correction,
-        component_correction=None,
-        reconstructed_syndrome=reconstructed_syndrome,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )

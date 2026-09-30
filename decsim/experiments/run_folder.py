@@ -11,6 +11,7 @@ same way, out of the code tree and never overwritten
 (src/python/m5/main.py --outdir).
 """
 
+import contextlib
 import csv
 import datetime
 import functools
@@ -25,7 +26,7 @@ import shutil
 import subprocess
 import sys
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Optional
 
 import decsim.build.escalation as escalation_build
@@ -192,7 +193,8 @@ def record_configuration(
     writer.writeheader()
     writer.writerows(rows)
     written = text.getvalue()
-    _replace_file(path, written)
+    with staged_replacement(path) as staging:
+        staging.write_text(written)
 
 
 def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
@@ -483,15 +485,20 @@ def publish_the_fold(staging: pathlib.Path, run_dir: pathlib.Path) -> None:
             _remove_the_fold(folder)
 
 
-def staging_path(path: pathlib.Path) -> pathlib.Path:
-    """A hidden name beside path that only this writer uses.
+@contextlib.contextmanager
+def staged_replacement(path: pathlib.Path) -> Iterator[pathlib.Path]:
+    """A hidden name beside path to write, renamed over path at the end.
 
     Two tasks of one experiment may replace one file at once, so each
     stages its copy under a random name, and neither moves the other's.
+    The rename is atomic (rename(2)), so a reader sees the old file or
+    the new one whole, never a part.
     """
     identifier = uuid.uuid4()
     token = identifier.hex
-    return path.with_name(f".{path.name}.{token}.partial")
+    staging = path.with_name(f".{path.name}.{token}.partial")
+    yield staging
+    os.replace(staging, path)
 
 
 def utc_now() -> str:
@@ -946,10 +953,3 @@ def _versions() -> dict:
     for name in names:
         ordered[name] = packages[name]
     return {"python": python_version, "packages": ordered}
-
-
-def _replace_file(path: pathlib.Path, text: str) -> None:
-    """The file's new text, whole: written beside it and renamed over it."""
-    staging = staging_path(path)
-    staging.write_text(text)
-    os.replace(staging, path)

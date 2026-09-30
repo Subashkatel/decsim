@@ -88,14 +88,16 @@ class ControllerSettings:
             self.decision_to_pulse_cycles,
         )
         self._check_rounds_in_flight()
-        self._check_clock()
 
     @classmethod
     def from_yaml(
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "ControllerSettings":
         """The `controller` section: its cycle counts, and its clock."""
-        _check_section_keys(section)
+        tables.refuse_unknown_keys("controller", section, _CONTROLLER_KEYS)
+        tables.refuse_missing_keys(
+            "controller", section, _REQUIRED_CONTROLLER_KEYS
+        )
         clock = clocks.clock(section["clock"])
         readout_cycles = section["readout_to_bits_cycles"]
         packing_cycles = section["packing_cycles_per_round"]
@@ -121,25 +123,12 @@ class ControllerSettings:
         bound = self.packing_rounds_in_flight
         if bound is None:
             return
-        if _is_round_count(bound):
+        if config.is_whole_count(bound):
             return
         raise ValueError(
             "controller.packing_rounds_in_flight must be a whole count of "
             f"rounds, at least one, or null for no bound (got {bound!r})"
         )
-
-    def _check_clock(self) -> None:
-        """A charged cost names the clock domain its cycles are counted on."""
-        if self.clock is not None:
-            return
-        charged = self.readout_to_bits_cycles
-        charged += self.packing_cycles_per_round
-        charged += self.decision_to_pulse_cycles
-        if charged > 0:
-            raise ValueError(
-                "a charged controller cost needs the clock domain its "
-                "cycles are counted on"
-            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -177,35 +166,3 @@ class IdlePolicySettings:
             row, "idle_policy", section, _IDLE_POLICY_KEYS
         )
         return cls(kind=kind, row_settings=row_settings)
-
-
-def _check_section_keys(section: Mapping) -> None:
-    """The section names its required keys and no key it does not have.
-
-    gem5 refuses a parameter its class does not declare
-    (src/python/m5/SimObject.py:932-936), as the decoder_manager and
-    escalation sections here do.
-    """
-    unknown = set(section) - set(_CONTROLLER_KEYS)
-    if unknown:
-        listed = sorted(unknown)
-        raise ValueError(
-            f"controller does not know {listed}; its keys are "
-            f"{list(_CONTROLLER_KEYS)}"
-        )
-    missing = set(_REQUIRED_CONTROLLER_KEYS) - set(section)
-    if missing:
-        listed = sorted(missing)
-        raise ValueError(
-            f"controller needs the keys {listed}; configs/reference.yaml "
-            "holds every key with its unit"
-        )
-
-
-def _is_round_count(value) -> bool:
-    """A number of rounds a stage can hold: a whole count, never a flag."""
-    if isinstance(value, bool):
-        return False
-    if not isinstance(value, int):
-        return False
-    return value >= 1

@@ -198,8 +198,6 @@ def _resource_claims(operations, view_by_id, layout):
 
 
 def _window_interaction(settings, reread_regions):
-    if settings.window_interaction is not None:
-        return settings.window_interaction
     payload_row = tables.row(
         window_settings.BOUNDARY_PAYLOADS,
         "windows.boundary_payload",

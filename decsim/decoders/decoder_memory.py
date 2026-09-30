@@ -110,19 +110,6 @@ class ResidentInput:
     rewritten: bool = False
 
 
-@dataclasses.dataclass(frozen=True)
-class DecoderMemorySnapshot:
-    """Immutable observation of one unit's memory."""
-
-    pool: str
-    unit: int
-    capacity_bits: Optional[int]
-    occupied_bits: int
-    peak_occupied_bits: int
-    admissions: int
-    unsized_admission_count: int
-
-
 def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
     """Build one immutable decoder memory input from a job's fragments."""
     fragments_by_round: dict = {}
@@ -167,7 +154,6 @@ class DecoderMemory:
         self.unit = unit
         self.capacity_bits = capacity_bits
         self._inputs: dict = {}  # input key -> ResidentInput
-        self.statistics = _MemoryStatistics()
         self.trace = _TraceSources()
 
     @property
@@ -231,12 +217,6 @@ class DecoderMemory:
         needed = self.occupied_bits + decoder_input.held_bits()
         self._check_capacity(needed)
         self._inputs[key] = ResidentInput(decoder_input, [job])
-        self.statistics.peak_occupied_bits = max(
-            self.statistics.peak_occupied_bits, needed
-        )
-        self.statistics.admissions += 1
-        if bits is None:
-            self.statistics.unsized_admission_count += 1
         self.trace.deposited.fire(job, decoder_input)
         return decoder_input
 
@@ -303,18 +283,6 @@ class DecoderMemory:
         del self._inputs[key]
         self.trace.taken.fire(job, resident.decoder_input)
 
-    def snapshot(self) -> DecoderMemorySnapshot:
-        """The memory's counters as one immutable record."""
-        return DecoderMemorySnapshot(
-            self.pool,
-            self.unit,
-            self.capacity_bits,
-            self.occupied_bits,
-            self.statistics.peak_occupied_bits,
-            self.statistics.admissions,
-            self.statistics.unsized_admission_count,
-        )
-
     def _check_capacity(self, needed_bits: int) -> None:
         """A bounded memory refuses the input that does not fit it."""
         if self.capacity_bits is None:
@@ -356,7 +324,7 @@ def _drop_reader(
 def _round_order_key(item: tuple) -> tuple:
     identity, _fragments = item
     operation_id, round_index = identity
-    order = identity_records.stable_identity_order_key(operation_id)
+    order = identity_records.stable_identity_bytes(operation_id)
     return order, round_index
 
 
@@ -444,21 +412,3 @@ class _TraceSources:
 
     deposited: trace_source.TraceSource = trace_source.new_source()
     taken: trace_source.TraceSource = trace_source.new_source()
-
-
-@dataclasses.dataclass
-class _MemoryStatistics:
-    """What one unit's memory has held, over the run.
-
-    peak_occupied_bits is the high-water mark a study sizes the SRAM
-    by; admissions counts the inputs that landed, and
-    unsized_admission_count those of them whose rounds state no size and
-    so hold no bits here, the count the links keep for a transfer of
-    unknown width (observe/link_traffic.py). gem5 keeps a component's
-    counters in one Group member
-    (gem5 src/base/stats/group.hh:60-92).
-    """
-
-    peak_occupied_bits: int = 0
-    admissions: int = 0
-    unsized_admission_count: int = 0

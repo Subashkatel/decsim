@@ -71,8 +71,10 @@ class DispatchStepsSettings:
         del clocks
         device = section.get("device", "gh200")
         path = section.get("path", "device")
-        workers = section.get("workers", 1)
         _check_path(section_name, device, path)
+        workers = config.whole_count(
+            section, section_name, "workers", 1, "graph workers"
+        )
         _check_workers(section_name, path, workers)
         return cls(device=device, path=path, workers=workers)
 
@@ -98,7 +100,7 @@ class DispatchSteps:
 
     def submit(
         self, request: decoding_records.DecodeJob, running: int
-    ) -> "_Ticket":
+    ) -> decoding_records.Ticket:
         """Decode with decsim's Relay-BP now; its steps follow from it."""
         del running
         result = self.decoder.decode(request)
@@ -108,15 +110,17 @@ class DispatchSteps:
         iterations = result.iterations or 0
         microseconds = kernel.decode_microseconds(iterations)
         decode_ticks = config.microseconds_to_ticks(microseconds)
-        return _Ticket(result, decode_ticks)
+        return decoding_records.Ticket(result, decode_ticks)
 
-    def steps(self, ticket: "_Ticket") -> tuple:
+    def steps(self, ticket: decoding_records.Ticket) -> tuple:
         """The path's steps for this decode, in the order they run."""
         if self.settings.path == "device":
             return self._device_steps(ticket.decode_ticks)
         return self._host_steps(ticket.decode_ticks)
 
-    def result(self, ticket: "_Ticket") -> decoding_records.DecodeResult:
+    def result(
+        self, ticket: decoding_records.Ticket
+    ) -> decoding_records.DecodeResult:
         """The region's answer from decsim's own Relay-BP decode."""
         return ticket.result
 
@@ -164,12 +168,6 @@ class DispatchStepsDecoder(strong_backend.StrongBackendDecoder):
         strong_backend.StrongBackendDecoder.__init__(self, backend)
 
 
-@dataclasses.dataclass(frozen=True)
-class _Ticket:
-    result: decoding_records.DecodeResult
-    decode_ticks: int
-
-
 def _echo_step(name: str, resource: Optional[str]) -> decoding_records.Step:
     """A step the link card's echo already prices, shown with no ticks."""
     return decoding_records.Step(name, 0, resource, priced_on=ECHO)
@@ -204,21 +202,10 @@ def _check_path(section_name: str, device: str, path: str) -> None:
     )
 
 
-def _check_workers(section_name: str, path: str, workers) -> None:
-    """A whole count of at least one, named only on the host path."""
+def _check_workers(section_name: str, path: str, workers: int) -> None:
+    """Workers other than the one are named only on the host path."""
     if path == "device" and workers != 1:
         raise ValueError(
             f"{section_name}.workers is the host path's; the device path "
             "decodes on its one dispatcher"
         )
-    if not _is_worker_count(workers):
-        raise ValueError(
-            f"{section_name}.workers must be a whole number of at least 1, "
-            f"not {workers!r}"
-        )
-
-
-def _is_worker_count(workers) -> bool:
-    if isinstance(workers, bool) or not isinstance(workers, int):
-        return False
-    return workers >= 1

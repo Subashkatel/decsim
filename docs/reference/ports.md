@@ -491,8 +491,7 @@ Who builds the decoder-facing error model of one window.
 | `window_model_for_stream` | The model of one window of a dynamic stream, laid at runtime. |
 | `register_dynamic_stream` | Note a dynamic stream; the rounds it can supply, or None. |
 | `finalize_stream_models` | Bind the terminal boundary; return whether pending models changed. |
-| `strong_window_model_for_operation` | One strong window's model, with one non-owned range excluded. |
-| `strong_window_model_for_operation_with_exclusions` | The same, with several non-owned ranges excluded. |
+| `strong_window_model_for_operation` | One strong window's model, its non-owned round ranges excluded. |
 
 ## every hop rides a link
 

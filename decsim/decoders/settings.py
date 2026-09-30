@@ -151,13 +151,8 @@ class UnitMemorySettings:
         cls, section: Mapping, section_name: str
     ) -> "UnitMemorySettings":
         """The unit_memory block: one capacity, checked where it enters."""
-        unknown = set(section) - set(UNIT_MEMORY_KEYS)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"{section_name}.unit_memory does not know {listed}; its "
-                f"keys are {list(UNIT_MEMORY_KEYS)}"
-            )
+        block_name = f"{section_name}.unit_memory"
+        tables.refuse_unknown_keys(block_name, section, UNIT_MEMORY_KEYS)
         bits = section.get("bits")
         key = f"{section_name}.unit_memory.bits"
         config.check_capacity_bits(key, bits)
@@ -255,7 +250,9 @@ class DecoderSettings:
         section_name: str,
     ) -> "DecoderSettings":
         """A tier section: kind, units, unit memory and the engine card."""
-        _check_required_keys(section, section_name)
+        tables.refuse_missing_keys(
+            section_name, section, _REQUIRED_DECODER_KEYS
+        )
         kind = section["kind"]
         row = _decoder_row(kind, section_name)
         row_settings = tables.row_settings(
@@ -321,13 +318,9 @@ class DecoderManagerSettings:
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "DecoderManagerSettings":
         """The `decoder_manager` section: its knobs, cycles resolved once."""
-        unknown = set(section) - set(DECODER_MANAGER_KEYS)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"decoder_manager does not know {listed}; its keys are "
-                f"{list(DECODER_MANAGER_KEYS)}"
-            )
+        tables.refuse_unknown_keys(
+            "decoder_manager", section, DECODER_MANAGER_KEYS
+        )
         bulk_strong = section.get("bulk_strong", False)
         _check_boolean("decoder_manager", "bulk_strong", bulk_strong)
         dispatch_cycles = section.get("dispatch_cycles", 0)
@@ -357,18 +350,6 @@ def _dispatch_clock(
     )
 
 
-def _check_required_keys(section: Mapping, section_name: str) -> None:
-    """A tier section names every key it cannot do without."""
-    missing = set(_REQUIRED_DECODER_KEYS) - set(section)
-    if not missing:
-        return
-    listed = sorted(missing)
-    raise ValueError(
-        f"{section_name} needs the keys {listed}; configs/reference.yaml "
-        "holds every key with its unit"
-    )
-
-
 def _block(section: Mapping, section_name: str, key: str) -> Mapping:
     """A nested block of the section, which is a mapping of its own keys.
 
@@ -388,27 +369,11 @@ def _engine_card(
     engine: Mapping, clocks: config.ClockSettings, section_name: str
 ) -> EngineSettings:
     """The engine card: its clock and every stage it prices."""
-    _check_engine_keys(engine, section_name)
+    card_name = f"{section_name}.engine"
+    tables.refuse_unknown_keys(card_name, engine, _ENGINE_KEYS)
     cycles = _engine_stage_cycles(engine, section_name)
     clock = _engine_clock(engine, clocks, section_name)
     return EngineSettings(clock=clock, **cycles)
-
-
-def _check_engine_keys(engine: Mapping, section_name: str) -> None:
-    """An engine card holds no key it does not price.
-
-    gem5 refuses a parameter its class does not declare
-    (src/python/m5/SimObject.py:932-936), so a misspelt stage key is
-    refused rather than left at nothing.
-    """
-    unknown = set(engine) - set(_ENGINE_KEYS)
-    if not unknown:
-        return
-    listed = sorted(unknown)
-    raise ValueError(
-        f"{section_name}.engine does not know {listed}; its keys are "
-        f"{list(_ENGINE_KEYS)}"
-    )
 
 
 def _engine_clock(
@@ -504,8 +469,7 @@ def _check_word_bits(key: str, word_bits) -> None:
     """A word is a whole number of bits, at least one; null has none."""
     if word_bits is None:
         return
-    is_count = isinstance(word_bits, int) and not isinstance(word_bits, bool)
-    if is_count and word_bits >= 1:
+    if config.is_whole_count(word_bits):
         return
     raise ValueError(
         f"{key} must be a whole number of bits, at least one, or null "
@@ -516,21 +480,12 @@ def _check_word_bits(key: str, word_bits) -> None:
 def _unit_count(section: Mapping, section_name: str) -> int:
     """A tier's engine count, checked where it enters."""
     units = section["units"]
-    if _is_engine_count(units):
+    if config.is_whole_count(units):
         return units
     raise ValueError(
         f"{section_name}.units must be a whole number of engines, at least "
         f"one (got {units!r})"
     )
-
-
-def _is_engine_count(units) -> bool:
-    """A count of engines: a whole number at least one, never a flag."""
-    if isinstance(units, bool):
-        return False
-    if not isinstance(units, int):
-        return False
-    return units >= 1
 
 
 def _decoder_row(kind, section_name: str):

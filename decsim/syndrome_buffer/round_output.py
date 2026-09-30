@@ -28,6 +28,7 @@ src/mem/simple_mem.cc:154-174).
 """
 
 import functools
+import operator
 from collections.abc import Callable
 from typing import Optional
 
@@ -115,7 +116,8 @@ class SyndromeBufferOutput:
         fragments = self.store.retained_fragments(round_key)
         if fragments is None:
             return
-        job.round_before = tuple(sorted(fragments, key=_fragment_order))
+        by_fragment_index = operator.attrgetter("fragment_index")
+        job.round_before = tuple(sorted(fragments, key=by_fragment_index))
 
     def land_held_input(
         self,
@@ -247,7 +249,3 @@ def _payload_round_keys(payloads) -> tuple:
         round_keys.append((payload.operation_id, payload.round_index))
     unique = dict.fromkeys(round_keys)
     return tuple(unique)
-
-
-def _fragment_order(fragment) -> int:
-    return fragment.fragment_index

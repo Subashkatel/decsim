@@ -41,7 +41,9 @@ def stable_identity_bytes(identity: Any) -> bytes:
     """The identity's bytes, type-tagged and length-framed.
 
     An int, a str and a tuple never encode alike, and a tuple frames
-    every item, so no two identities share an encoding.
+    every item, so no two identities share an encoding. The bytes are
+    also the sort key: sorting mixed identity types sorts these bytes,
+    which is total and does not depend on the types' own comparisons.
     """
     if type(identity) is int:
         text = str(identity)
@@ -65,15 +67,6 @@ def stable_identity_bytes(identity: Any) -> bytes:
         framed_items.append(framed_item)
     joined_items = b"".join(framed_items)
     return b"T" + framed_count + joined_items
-
-
-def stable_identity_order_key(identity: Any) -> bytes:
-    """The sort key of an identity: its canonical bytes.
-
-    Sorting mixed identity types is therefore sorting those bytes, which
-    is total and does not depend on the types' own comparisons.
-    """
-    return stable_identity_bytes(identity)
 
 
 def stable_identity_json(identity: Any) -> dict:

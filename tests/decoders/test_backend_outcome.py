@@ -57,16 +57,12 @@ def window_of(faults, detector_count):
 
 
 def outcome_of(status, failure_reason, physical_correction):
-    """One backend call's outcome, diagnostics left out."""
+    """One backend call's outcome, its iteration count left out."""
     return backend_outcome.BackendDecodeOutcome(
         status=status,
         failure_reason=failure_reason,
         physical_correction=physical_correction,
-        component_correction=None,
-        reconstructed_syndrome=None,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )
 
 

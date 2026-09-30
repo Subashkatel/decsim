@@ -1,7 +1,8 @@
 """When each command arrived at the QPU and when it started.
 
-A listener on the QPU's command_event(event); the flight recorder reads
-the events to close every command's chain at the QPU.
+A listener on the QPU's command_event(event); the run command reads the
+events, and the run ledger the tests check closes every command's chain
+at the QPU with them (tests/observe/run_ledger.py).
 """
 
 

@@ -187,8 +187,8 @@ def test_without_the_qpus_readout_callback_the_run_ends_with_nothing_decoded(
     broken_result = run_bounded(broken)
     assert broken_result.terminal_status == "complete"
     assert broken_result.fully_done_ticks < wired_result.fully_done_ticks
-    assert wired.observation.windows.contribution_by_key != {}
-    assert broken.observation.windows.contribution_by_key == {}
+    assert _committed_windows(wired) != []
+    assert _committed_windows(broken) == []
     assert _transfers(wired_result, "qpu_to_controller") == 6
     assert _transfers(broken_result, "qpu_to_controller") == 0
 
@@ -201,6 +201,16 @@ def test_the_bounded_run_of_the_wired_weak_machine_needs_far_fewer_actions():
     machine.engine.action_done.connect(counter.action_done)
     machine.run()
     assert counter.count < ACTION_BUDGET // 4
+
+
+def _committed_windows(machine) -> list:
+    """The key of every window whose decode committed."""
+    windows = machine.observation.windows.windows
+    committed = []
+    for key, window in windows.items():
+        if window.committed:
+            committed.append(key)
+    return committed
 
 
 def _transfers(result, path: str) -> int:

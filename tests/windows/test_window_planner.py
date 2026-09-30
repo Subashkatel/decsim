@@ -36,9 +36,7 @@ def _empty_plan() -> window_records.WindowPlan:
         window_count={},
         op_windows={},
         successors={},
-        spatial_nodes={},
         rounds_by_operation={},
-        code_names={},
         total_windows=0,
         windowed_by_operation={},
         batch_preceding_idle_rounds_by_operation={},
@@ -100,12 +98,6 @@ class _FiniteSource:
         return None
 
     def strong_window_model_for_operation(
-        self, operation, window, round_count, **_arguments
-    ):
-        del operation, window, round_count
-        return None
-
-    def strong_window_model_for_operation_with_exclusions(
         self, operation, window, round_count, **_arguments
     ):
         del operation, window, round_count

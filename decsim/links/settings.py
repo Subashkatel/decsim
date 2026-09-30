@@ -204,9 +204,7 @@ class ReadoutRoute:
             raise ValueError("readout route patches must be stable identities")
         if not patches or len(set(patches)) != len(patches):
             raise ValueError("a readout route needs nonempty unique patches")
-        ordered = sorted(
-            patches, key=identity_records.stable_identity_order_key
-        )
+        ordered = sorted(patches, key=identity_records.stable_identity_bytes)
         object.__setattr__(self, "patch_ids", tuple(ordered))
 
 
@@ -290,8 +288,7 @@ def required_key(section: Mapping, key: str, section_name: str) -> object:
 def positive_count_key(section: Mapping, key: str, section_name: str) -> int:
     """A key a link card needs: a positive whole number, never a boolean."""
     value = required_key(section, key, section_name)
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and value > 0:
+    if config.is_whole_count(value):
         return value
     raise ValueError(
         f"{section_name}.{key} is {value!r}; it is a positive whole number"

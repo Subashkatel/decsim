@@ -1,22 +1,11 @@
 """The ready-queue discipline of a decoder pool: which waiting job is next.
 
-The Scheduler port stays a research knob: Triage (2605.04459) makes the
-M-for-N scheduler the thing to vary.
+A scheduler is a class with pop(queue), named by the decoder manager's
+scheduler setting. It stays a research knob: Triage (2605.04459) makes
+the M-for-N scheduler the thing to vary.
 """
 
-from typing import Protocol, runtime_checkable
-
 import decsim.records.decoding as decoding_records
-
-
-@runtime_checkable
-class Scheduler(Protocol):
-    """Which ready job a decoder pool serves next."""
-
-    def pop(
-        self, queue: list[decoding_records.DecodeJob]
-    ) -> decoding_records.DecodeJob:
-        """Remove and return the next job of one pool's ready queue."""
 
 
 class FifoScheduler:

@@ -68,6 +68,7 @@ import decsim.records.windows as window_records
 import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
 import tests.qpu.memory_programs as memory_programs
 import tools.live_memory_example as live_memory_example
@@ -763,8 +764,7 @@ def test_toshios_per_decode_bound_is_commit_time_over_escalated_share(
     ten times the round time must be.
     """
     measurement = switching_shot(tmp_path, 1000000.0)
-    record = report.record_of([measurement])
-    rows = report.summarize(record.shots, record.window_samples)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [measurement])
 
     assert measurement.escalated_windows == 10
     assert measurement.strong_decoded_rounds == 57
@@ -784,8 +784,7 @@ def test_a_points_strong_service_is_its_strong_decodes_mean(tmp_path):
     """
     quiet = switching_shot(tmp_path, 5.0, seed=0)
     escalating = switching_shot(tmp_path, 5.0, seed=1)
-    record = report.record_of([quiet, escalating])
-    rows = report.summarize(record.shots, record.window_samples)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [quiet, escalating])
 
     assert quiet.escalated_windows == 0
     assert escalating.escalated_windows == 2
@@ -831,8 +830,7 @@ def test_a_point_with_no_strong_decode_has_no_strong_service(tmp_path):
     decoded in no time.
     """
     quiet = switching_shot(tmp_path, 5.0, seed=0)
-    record = report.record_of([quiet])
-    rows = report.summarize(record.shots, record.window_samples)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [quiet])
 
     assert rows[0]["strong_service_mean_us"] is None
 
@@ -851,7 +849,7 @@ def test_the_per_decode_bound_reads_r_com_off_the_commit_rounds_column(
     shot = switching_run(tmp_path, 1000000.0, commit_rounds=2)
     measurement = measure.measure_shot(shot)
     record = report.record_of([measurement])
-    rows = report.summarize(record.shots, record.window_samples)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [measurement])
 
     assert record.shots[0]["commit_rounds"] == 2
     assert measurement.decoded_windows == 15
@@ -1786,8 +1784,8 @@ def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):
     _, kept = escalating_shot(tmp_path, 1)
     bare_record = report.record_of([bare])
     kept_record = report.record_of([kept])
-    bare_rows = report.summarize(bare_record.shots, bare_record.window_samples)
-    kept_rows = report.summarize(kept_record.shots, kept_record.window_samples)
+    bare_rows, _bare_dir = yaml_configs.folded_run(tmp_path, [bare])
+    kept_rows, _kept_dir = yaml_configs.folded_run(tmp_path, [kept])
 
     assert "strong_wait_max_us" not in bare_record.shots[0]
     assert "escalated_fraction" not in bare_rows[0]
@@ -1912,17 +1910,19 @@ def test_the_point_holds_the_shares_flagged_and_caught_in_time(tmp_path):
     """Two shots, one caught in time, folded as one point's shots.
 
     The two deadlines are two settings, so two points; the late shot
-    takes the caught shot's point id to be summed with it.
+    takes the caught shot's point id and the next seed to be summed with
+    it, since a fold refuses two shots of one seed.
     """
     caught = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
     late_alone = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
-    late = dataclasses.replace(late_alone, point_id=caught.point_id)
+    next_seed = caught.seed + 1
+    late = dataclasses.replace(
+        late_alone, point_id=caught.point_id, seed=next_seed
+    )
     quiet = burst_detector_shot(tmp_path, 0.0)
-    burst_record = report.record_of([caught, late])
-    quiet_record = report.record_of([quiet])
 
-    burst_rows = report.summarize(burst_record.shots, [])
-    quiet_rows = report.summarize(quiet_record.shots, [])
+    burst_rows, _burst_dir = yaml_configs.folded_run(tmp_path, [caught, late])
+    quiet_rows, _quiet_dir = yaml_configs.folded_run(tmp_path, [quiet])
 
     assert burst_rows[0]["flagged_share"] == 1.0
     assert burst_rows[0]["caught_in_time_share"] == 0.5
@@ -1933,7 +1933,7 @@ def test_the_point_holds_the_shares_flagged_and_caught_in_time(tmp_path):
 def test_a_run_without_a_detector_writes_no_burst_column(tmp_path):
     measurement = switching_shot(tmp_path, 1000000.0)
     record = report.record_of([measurement])
-    rows = report.summarize(record.shots, record.window_samples)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [measurement])
 
     assert "burst_first_flag_round" not in record.shots[0]
     assert "burst_caught_in_time" not in record.shots[0]
@@ -1986,7 +1986,7 @@ def test_the_status_columns_count_the_statuses_the_decoder_returned(
         seed=0,
     )
     record = report.record_of([measurement])
-    rows = report.summarize(record.shots, record.window_samples)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [measurement])
     expected = collections.Counter(
         f"{status.value}_windows" for status in returned if status is not None
     )
@@ -2167,8 +2167,7 @@ def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
     measurement = measure.measure_shot(shot)
 
     audit = shot.machine.observation.referee_audit
-    record = report.record_of([measurement])
-    (row,) = report.summarize(record.shots, record.window_samples)
+    (row,), _run_dir = yaml_configs.folded_run(tmp_path, [measurement])
     assert audit.windows_checked == measurement.decoded_windows
     assert measurement.referee_windows_checked == audit.windows_checked
     assert (
@@ -2352,33 +2351,38 @@ def _is_within(name: str, modules) -> bool:
     return False
 
 
-def test_a_windows_confidence_is_the_gap_the_decode_record_ledger_holds(
+def test_a_windows_confidence_is_the_gap_its_verdict_request_ended_with(
     tmp_path,
 ):
-    """Each verdict's gap and escalation, as the request records end them.
+    """Each verdict's gap and escalation, as the requests end them.
 
-    The decode-record ledger keeps every request's soft output and
-    terminal outcome; the kept and the escalated weak requests are the
-    windows whose confidence the verdict read (Toshio et al. 2510.25222
-    Sec. III A step 3).
+    A probe on the requests' end hears every request's soft output and
+    terminal outcome, apart from the confidence ledger the rows are read
+    from; the kept and the escalated weak requests are the windows whose
+    confidence the verdict read (Toshio et al. 2510.25222 Sec. III A
+    step 3).
     """
     overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"record_switching_windows": True}
     config_path = yaml_configs.write_config(tmp_path, overrides)
     config = experiment.load_experiment(config_path)
-    shot = yaml_configs.point_shot(
-        config,
-        physical_error_probability=0.003,
-        distance=3,
-        round_period_microseconds=1.0,
-        seed=0,
+    task = config.point_task(
+        {
+            yaml_configs.ERROR_RATE_PATH: 0.003,
+            "qpu.distance": 3,
+            "qpu.round_period_microseconds": 1.0,
+        },
     )
+    settings = task.shot_settings()
+    machine = machine_module.Machine.build(settings, 0)
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
+    result = machine.run()
+    shot = collect.Shot(task, 0, machine, result, 0.0)
 
     measurement = measure.measure_shot(shot)
-    ledger = shot.machine.observation.decode_records
     rows = report.window_confidence_rows([measurement])
 
-    assert _verdicts_of_rows(rows) == _verdicts_of_ledger(ledger)
+    assert _verdicts_of_rows(rows) == _verdicts_of_requests(requests)
     assert {row["seed"] for row in rows} == {0}
     assert any(row["escalated"] for row in rows)
 
@@ -2392,21 +2396,22 @@ def _verdicts_of_rows(rows) -> dict:
     return verdicts
 
 
-def _verdicts_of_ledger(ledger) -> dict:
+def _verdicts_of_requests(requests) -> dict:
     """Each verdict request's window: its gap, and whether it escalated."""
     escalated = decoding_records.RequestProcessingOutcome.WEAK_AWAITED_STRONG
     verdicts = {}
-    for record in ledger.requests:
-        outcome = record.terminal_processing_outcome
-        if outcome not in decode_records.VERDICT_OUTCOMES:
+    for ended in requests.ended:
+        if ended.outcome not in decode_records.VERDICT_OUTCOMES:
             continue
-        key = (record.request_key.operation_id, record.request_key.window_id)
-        verdicts[key] = (_gap_of(record.soft_output), outcome is escalated)
+        request_key = ended.job.request_key
+        key = (request_key.operation_id, request_key.window_id)
+        gap = _gap_of(ended.result)
+        verdicts[key] = (gap, ended.outcome is escalated)
     return verdicts
 
 
-def _gap_of(soft_output):
+def _gap_of(result):
     """A request's gap, None when the signal gave none."""
-    if soft_output is None:
+    if result is None or result.soft_output is None:
         return None
-    return soft_output.gap
+    return result.soft_output.gap

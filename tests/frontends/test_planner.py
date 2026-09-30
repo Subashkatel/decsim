@@ -121,14 +121,14 @@ def resolved_geometry(name="surface"):
     )
 
 
-def resolved_operation(operation_id, nodes=10):
+def resolved_operation(operation_id):
     geometry = resolved_geometry()
     return program_records.ResolvedOperationPlanning(
         operation_id=operation_id,
         code_geometry=geometry,
         round_count=4,
         round_ticks=config.TICKS_PER_MICROSECOND,
-        spatial_node_count=nodes,
+        spatial_node_count=10,
     )
 
 
@@ -451,8 +451,8 @@ def test_every_exit_window_feeds_every_entry_window_of_a_successor():
     geometries = (window_geometry(1, 1), window_geometry(2, 2))
     source_plan = operation_window_plan(1, geometries)
     destination_plan = operation_window_plan(2, geometries)
-    source_resolved = resolved_operation(1, nodes=11)
-    destination_resolved = resolved_operation(2, nodes=12)
+    source_resolved = resolved_operation(1)
+    destination_resolved = resolved_operation(2)
 
     plan = planner._materialize_execution_plan(
         (source, destination),
@@ -465,7 +465,6 @@ def test_every_exit_window_feeds_every_entry_window_of_a_successor():
     assert plan.windows[(1, 0)].dependents == [(2, 0), (2, 1)]
     assert plan.windows[(2, 0)].deps_remaining == 2
     assert plan.total_windows == 4
-    assert plan.spatial_nodes == {1: 11, 2: 12}
 
 
 def test_a_windows_own_predecessor_inside_one_operation_is_kept():
@@ -493,9 +492,7 @@ def overlapping_successor_plan():
         window_count={1: 1, 2: 1, 3: 1},
         op_windows={1: [0]},
         successors={1: [2, 3], 2: [3], 3: []},
-        spatial_nodes={1: 1, 2: 1, 3: 1},
         rounds_by_operation={1: 5, 2: 3, 3: 3},
-        code_names={1: "surface", 2: "surface", 3: "surface"},
         total_windows=3,
         windowed_by_operation={1: True, 2: True, 3: True},
         batch_preceding_idle_rounds_by_operation={1: False, 2: False, 3: False},
@@ -571,9 +568,7 @@ def chained_sliding_windows():
         window_count={1: 4},
         op_windows={1: [0, 1, 2, 3]},
         successors={1: []},
-        spatial_nodes={1: 1},
         rounds_by_operation={1: 15},
-        code_names={1: "surface"},
         total_windows=4,
         windowed_by_operation={1: True},
         batch_preceding_idle_rounds_by_operation={1: False},
@@ -621,9 +616,7 @@ def one_window_with_a_successor():
         window_count={1: 1},
         op_windows={1: [0]},
         successors={1: [2], 2: []},
-        spatial_nodes={1: 1, 2: 1},
         rounds_by_operation={1: 7, 2: 4},
-        code_names={1: "surface", 2: "surface"},
         total_windows=1,
         windowed_by_operation={1: True},
         batch_preceding_idle_rounds_by_operation={1: False},

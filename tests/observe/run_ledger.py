@@ -1,88 +1,54 @@
-"""The flight recorder: one causal row per hardware transition of a run.
+"""The run ledger: one causal row per hardware transition of a run.
 
-A listener over listeners. It holds the round event recorder, the window
-ledger, the runtime stamps, the command events and the frame
-corrections of one run, and on `events` walks them in pipeline order,
-giving each transition its causal predecessor so a round or a window can
-be followed from the QPU to the frame. The program's operations are
-handed to it at build, because the dependency edge between two
-operations is a fact of the workload and not of any listener. It reads
-no component, records nothing itself and writes nothing back.
+A test oracle over the listeners a run already keeps. It reads the
+round event recorder, the window ledger, the runtime stamps, the command
+events, the frame's records and its landed corrections of one finished
+machine, and walks them in pipeline order, giving each transition its
+causal predecessor so a round or a window can be followed from the QPU
+to the frame. The
+program's operations come from the machine's plan, because the
+dependency edge between two operations is a fact of the workload and
+not of any listener. `RunLedgerView.check` is the oracle's law: every
+effect follows its cause, and every emitted round ends exactly once.
 """
 
 import dataclasses
 from typing import Optional
 
 
-class FlightRecorder:
-    """The listeners of one run, walked into one causal event list."""
+def ledger_of(machine) -> "RunLedgerView":
+    """Assemble the causal record of a finished run.
 
-    def __init__(
-        self,
-        round_events,
-        windows,
-        runtime_stamps,
-        command_events,
-        corrections: "FrameCorrections",
-        operations: tuple,
-    ) -> None:
-        self.round_events = round_events
-        self.windows = windows
-        self.runtime_stamps = runtime_stamps
-        self.command_events = command_events
-        self.corrections = corrections
-        # the workload's operations, for the dependency edges
-        self.operations = operations
-
-    @property
-    def ledger(self) -> "RunLedgerView":
-        """Assemble the causal record of the run so far.
-
-        The chains are added in pipeline order: every round's controller
-        chain, the strong store's landings, every window's chain, the
-        frame commits, the controller's output path, the runtime's
-        releases, the QPU's command arrivals and the result returns.
-        """
-        rows = _LedgerRows()
-        round_events = self.round_events
-        rounds = _round_chains(rows, round_events.events)
-        stored = _store_landings(rows, round_events.stored_rounds, rounds)
-        frame_prev = _window_chains(rows, self.windows.windows, rounds, stored)
-        committed_of_op = _frame_commits(rows, self.corrections, frame_prev)
-        operations = _operations_by_id(self.operations)
-        outputs = _output_path(
-            rows, round_events.output_events, operations, committed_of_op
-        )
-        stamps = self.runtime_stamps
-        released_of_op = _releases(
-            rows, stamps.decode_release, operations, outputs, committed_of_op
-        )
-        _rewire_commands_through_releases(outputs, released_of_op)
-        _qpu_commands(rows, self.command_events.events, outputs)
-        _result_returns(rows, stamps.result_return, outputs)
-        numbered = rows.numbered_events()
-        return RunLedgerView(events=numbered)
-
-
-class FrameCorrections:
-    """The frame's corrections, as accepted and as landed.
-
-    A listener on PauliFrame.correction_accepted and
-    correction_committed; the flight recorder pairs the two for each
-    window's write, and the frame keeps no reader of its own.
+    The chains are added in pipeline order: every round's controller
+    chain, the strong store's landings, every window's chain, the
+    frame commits, the controller's output path, the runtime's
+    releases, the QPU's command arrivals and the result returns.
     """
-
-    def __init__(self) -> None:
-        self.accepted: list = []
-        self.committed: list = []
-
-    def correction_accepted(self, record) -> None:
-        """One window's correction was taken and its write charged."""
-        self.accepted.append(record)
-
-    def correction_committed(self, record) -> None:
-        """One window's write has landed in the frame."""
-        self.committed.append(record)
+    observation = machine.observation
+    rows = _LedgerRows()
+    round_events = observation.round_events
+    rounds = _round_chains(rows, round_events.events)
+    stored = _store_landings(rows, round_events.stored_rounds, rounds)
+    windows = observation.windows.windows
+    frame_prev = _window_chains(rows, windows, rounds, stored)
+    frame = machine.control.pauli_frame.snapshot()
+    corrections = observation.frame_corrections
+    committed_of_op = _frame_commits(
+        rows, frame.records, corrections.committed, frame_prev
+    )
+    operations = _operations_by_id(machine.plan.operations)
+    outputs = _output_path(
+        rows, round_events.output_events, operations, committed_of_op
+    )
+    stamps = observation.runtime_stamps
+    released_of_op = _releases(
+        rows, stamps.decode_release, operations, outputs, committed_of_op
+    )
+    _rewire_commands_through_releases(outputs, released_of_op)
+    _qpu_commands(rows, observation.command_events.events, outputs)
+    _result_returns(rows, stamps.result_return, outputs)
+    numbered = rows.numbered_events()
+    return RunLedgerView(events=numbered)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -383,17 +349,18 @@ def _window_stamp_rows(
 
 
 def _frame_commits(
-    rows: _LedgerRows, corrections: "FrameCorrections", frame_prev: dict
+    rows: _LedgerRows, accepted: tuple, committed: list, frame_prev: dict
 ) -> dict:
     """Every correction as accepted then committed; the last commit per op.
 
-    A correction the frame accepted but whose write never landed has an
-    accepted row and no committed row, so the ledger says what happened
-    rather than what was expected to.
+    The frame keeps every correction it accepted, in accept order. A
+    correction whose write never landed has an accepted row and no
+    committed row, so the ledger says what happened rather than what was
+    expected to.
     """
     committed_of_op: dict = {}
-    landed = _landed_identities(corrections.committed)
-    for record in corrections.accepted:
+    landed = _landed_identities(committed)
+    for record in accepted:
         operation_id, window_id = record.window_key
         prev = frame_prev.get(record.window_key)
         accepted = rows.add(

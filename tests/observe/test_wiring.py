@@ -1,12 +1,14 @@
 """The wiring: every listener connected once, and no source heard twice.
 
 decsim/observe/wiring.py is the one place that connects a listener to
-the sources it hears, so the census below is the whole picture: walk the
-built machine, find every trace source, and read who hears it. A source
-with two listeners of one class is a connection made twice, which would
-double a count without failing anything.
+the sources it hears, so the census below is the whole picture: record
+every connection made while the machine is built, then walk the built
+machine and find every trace source. A source with two listeners of one
+class is a connection made twice, which would double a count without
+failing anything.
 """
 
+import collections
 import dataclasses
 
 import decsim.config
@@ -15,7 +17,7 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.machine as machine_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
-import decsim.observe.flight_recorder as flight_recorder_module
+import decsim.observe.frame_corrections as frame_corrections_module
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
@@ -52,6 +54,16 @@ def _listener_class(listener):
     if owner is None:
         return type(bound)
     return type(owner)
+
+
+def _listener_classes_by_source(connections) -> collections.defaultdict:
+    """The class of every listener connected to each source, by identity."""
+    classes_by_source = collections.defaultdict(list)
+    for source, listener in connections:
+        heard_by = _listener_class(listener)
+        source_identity = id(source)
+        classes_by_source[source_identity].append(heard_by)
+    return classes_by_source
 
 
 def _walk(root) -> list:
@@ -130,18 +142,29 @@ def _sources_on(owner) -> list:
     return sources
 
 
-def test_no_source_is_heard_twice_by_one_listener_class():
-    """One connection per (source, listener class), with every knob on."""
+def test_no_source_is_heard_twice_by_one_listener_class(monkeypatch):
+    """One connection per (source, listener class), with every knob on.
+
+    A listener reaches a source only through connect, so the connections
+    recorded while the machine is built are every listener it holds.
+    """
+    connections = []
+    connect = trace_source.TraceSource.connect
+
+    def recording_connect(source, listener):
+        connections.append((source, listener))
+        connect(source, listener)
+
+    monkeypatch.setattr(trace_source.TraceSource, "connect", recording_connect)
     point = gate_point.settings(**EVERY_KNOB)
     machine = machine_module.Machine.build(point, gate_point.SEED)
 
     census = _walk(machine)
+    classes_by_source = _listener_classes_by_source(connections)
     doubled = []
     for owner_name, source_name, source in census:
-        classes = []
-        for listener in source.listeners:
-            heard_by = _listener_class(listener)
-            classes.append(heard_by)
+        source_identity = id(source)
+        classes = classes_by_source[source_identity]
         if len(classes) != len(set(classes)):
             doubled.append((owner_name, source_name, classes))
 
@@ -298,9 +321,9 @@ def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
 def _bare_observe(observation, engine, **parts):
     """The narrator and the three listeners the run result reads, no more.
 
-    No trace writer, no data movement, no flight recorder input, no stage
-    ledger, no referee audit, no metrics, no window ledger, no round
-    events, no command events, no queue depth, no occupancy. The narrator
+    No trace writer, no data movement, no stage ledger, no referee
+    audit, no metrics, no window ledger, no round events, no command
+    events, no queue depth, no occupancy. The narrator
     hears both of the engine's line sources, as the real wiring does when
     observation.log_component_io is on, because a source with no listener
     is never fired at all (decsim/engine.py log_io).
@@ -331,8 +354,7 @@ def _bare_observation(
 ):
     """The record those three listeners hang on, every other field empty."""
     windows = window_ledger_module.WindowLedger()
-    recorder = _bare_flight_recorder(engine, runtime_stamps)
-    corrections = flight_recorder_module.FrameCorrections()
+    corrections = frame_corrections_module.FrameCorrections()
     queue_depth = queue_depth_module.QueueDepthLog()
     counters = controller_counters_module.ControllerCounters()
     commands = command_events_module.CommandEvents()
@@ -346,7 +368,6 @@ def _bare_observation(
         windows=windows,
         results=result_ledger,
         traffic=traffic_ledger,
-        flight_recorder=recorder,
         frame_corrections=corrections,
         trace_writer=None,
         data_movement=None,
@@ -365,22 +386,6 @@ def _bare_observation(
         sampled_shots=shots,
         burst_flags=None,
         confidence=None,
-    )
-
-
-def _bare_flight_recorder(engine, runtime_stamps):
-    """A recorder over empty ledgers, so no component is heard through it."""
-    rounds = round_events_module.RoundEventRecorder(engine)
-    windows = window_ledger_module.WindowLedger()
-    commands = command_events_module.CommandEvents()
-    corrections = flight_recorder_module.FrameCorrections()
-    return flight_recorder_module.FlightRecorder(
-        rounds,
-        windows,
-        runtime_stamps,
-        commands,
-        corrections,
-        (),
     )
 
 

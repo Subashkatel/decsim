@@ -645,16 +645,37 @@ def _last_rounds_data_ready(document, ready) -> list:
     return ticks
 
 
-def test_the_unit_memory_counter_peaks_at_the_memorys_high_water_mark(traced):
-    """The C track of the unit's memory is the memory's own occupancy."""
-    machine, _result, document = traced
+class _HeldBits:
+    """The memory's own occupied bits, read at every deposit and take."""
+
+    def __init__(self, memory) -> None:
+        self.memory = memory
+        self.values: list = []
+
+    def changed(self, _job, _decoder_input) -> None:
+        """One deposit or take: the bits the memory holds after it."""
+        self.values.append(self.memory.occupied_bits)
+
+
+def test_the_unit_memory_counter_is_the_memorys_own_occupancy(tmp_path):
+    """The C track of the unit's memory steps with the memory's own count."""
+    path = tmp_path / "point1.trace.json"
+    point = _settings(path, data_movement=True)
+    machine = machine_module.Machine.build(point, SEED)
     (unit,) = machine.decoders.decoder_manager.pool.units
+    held = _HeldBits(unit.memory)
+    unit.memory.trace.deposited.connect(held.changed)
+    unit.memory.trace.taken.connect(held.changed)
+    machine.run()
+    machine.observation.trace_writer.write(str(path))
+    text = path.read_text()
+    document = json.loads(text)
     name = f"{unit.memory.name} bits"
+
     values = _counter_values(document, name, "bits")
 
     assert values
-    assert max(values) == unit.memory.statistics.peak_occupied_bits
-    assert values[-1] == unit.memory.occupied_bits
+    assert values == held.values
 
 
 def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):

@@ -128,19 +128,7 @@ class WindowModels:
         if self.provider is None:
             return None
         requirement = self.requirement()
-        if len(fault_exclusion_ranges) <= 1:
-            exclusion = None
-            if fault_exclusion_ranges:
-                exclusion = fault_exclusion_ranges[0]
-            return self.provider.strong_window_model_for_operation(
-                operation,
-                window,
-                round_count,
-                fault_model_requirement=requirement,
-                exclude_faults_touching=exclusion,
-                prior_faults=prior_faults,
-            )
-        return self.provider.strong_window_model_for_operation_with_exclusions(
+        return self.provider.strong_window_model_for_operation(
             operation,
             window,
             round_count,

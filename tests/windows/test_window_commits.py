@@ -12,7 +12,6 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
-import decsim.decoders.decoders as decoders
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
@@ -89,11 +88,10 @@ class _Transfers:
 
 def _strong_admissions(requests) -> list:
     """The tick each strong request was admitted, in request order."""
-    strong = window_records.DecoderTier.STRONG
+    strong = requests.of_tier(window_records.DecoderTier.STRONG)
     admissions = []
-    for row in requests:
-        if row.request_key.tier is strong:
-            admissions.append(row.admitted_ticks)
+    for ended in strong:
+        admissions.append(ended.job.request_admitted_ticks)
     return admissions
 
 
@@ -342,16 +340,14 @@ def test_a_frameless_run_commits_at_the_delivery():
     assert committed == [4]
 
 
-@pytest.mark.parametrize("probability", [0.0, 1.0])
-def test_threshold_cycles_delay_kept_and_escalated_frame_points(probability):
+@pytest.mark.parametrize("escalates", [False, True])
+def test_threshold_cycles_delay_kept_and_escalated_frame_points(escalates):
     clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
     clock = clocks.clock("decisions")
-    free = declared_run.switching_run(
-        rounds=3, escalation_probability=probability
-    )
+    free = declared_run.switching_run(rounds=3, escalates=escalates)
     charged = declared_run.switching_run(
         rounds=3,
-        escalation_probability=probability,
+        escalates=escalates,
         clock=clock,
         threshold_cycles=3,
     )
@@ -366,15 +362,17 @@ def test_threshold_cycles_delay_kept_and_escalated_frame_points(probability):
 def test_switch_cycles_delay_the_strong_request_and_frame_points():
     clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
     clock = clocks.clock("decisions")
+    free_requests = declared_run.EndedRequests()
+    charged_requests = declared_run.EndedRequests()
     free = declared_run.switching_run(
-        rounds=3, escalation_probability=1.0, record=True
+        rounds=3, escalates=True, probes=(free_requests,)
     )
     charged = declared_run.switching_run(
         rounds=3,
-        escalation_probability=1.0,
+        escalates=True,
         clock=clock,
         switch_cycles=3,
-        record=True,
+        probes=(charged_requests,),
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)
@@ -382,8 +380,6 @@ def test_switch_cycles_delay_the_strong_request_and_frame_points():
     shifts = [charged_tick - free_tick for charged_tick, free_tick in paired]
     expected = 3 * clock.period_ticks
     assert shifts == [0, 0, 0, 0, expected, expected]
-    free_requests = free.observation.decode_records.requests
-    charged_requests = charged.observation.decode_records.requests
     free_admissions = _strong_admissions(free_requests)
     charged_admissions = _strong_admissions(charged_requests)
     assert len(free_admissions) == 1
@@ -392,10 +388,10 @@ def test_switch_cycles_delay_the_strong_request_and_frame_points():
 
 def test_a_kept_verdict_pays_no_switch_cycles():
     clock = config.Clock(1_000_000)
-    free = declared_run.switching_run(rounds=3, escalation_probability=0.0)
+    free = declared_run.switching_run(rounds=3, escalates=False)
     charged = declared_run.switching_run(
         rounds=3,
-        escalation_probability=0.0,
+        escalates=False,
         clock=clock,
         switch_cycles=3,
     )
@@ -422,7 +418,7 @@ def test_threshold_and_switch_cycles_are_charged_in_sequence():
     fixture = _Fixture(clock=clock, threshold_cycles=2, switch_cycles=3)
     fixture.engine.now = 1
     job = fixture.job(window_records.DecoderTier.WEAK, 0, awaiting=True)
-    source = decoders.SAMPLED_CONFIDENCE_SOURCE
+    source = declared_run.DECLARED_CONFIDENCE_SOURCE
     soft_output = decoding_records.SoftOutput(0.0, source)
     result = decoding_records.DecodeResult(4, 1, soft_output=soft_output)
 

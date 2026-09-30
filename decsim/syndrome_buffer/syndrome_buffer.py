@@ -409,7 +409,7 @@ class SyndromeBuffer:
                 round_key[0], operation_id
             ):
                 stored.append(round_key)
-        return sorted(stored, key=identity_records.stable_identity_order_key)
+        return sorted(stored, key=identity_records.stable_identity_bytes)
 
     def _open_operation_ids(self) -> set:
         open_ids = set()

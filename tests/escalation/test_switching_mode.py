@@ -371,7 +371,7 @@ def test_unreachable_threshold_escalates_every_window(tmp_path):
     assert links["weak_decoder_to_frame"]["transfers"] == 0
 
 
-def gaps_by_window(view, weak_tier) -> dict:
+def gaps_by_window(requests, weak_tier) -> dict:
     """Every window's gap, keyed by the window it decoded.
 
     A window's two forced-class requests are one attempt: the request
@@ -379,7 +379,7 @@ def gaps_by_window(view, weak_tier) -> dict:
     carries none.
     """
     gaps = {}
-    for record in view.requests:
+    for record in requests:
         if record.request_key.tier is not weak_tier:
             continue
         if record.soft_output is None:
@@ -412,7 +412,6 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
 
     import decsim.records.windows as window_records
     from decsim.machine import Machine
-    from decsim.observe.run_views import switching_records_view
 
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)
@@ -435,13 +434,12 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
         settings = replace(settings, observation=observation)
         completed = Machine.build(settings, seed)
         completed.run()
-        view = switching_records_view(
-            completed.observation.windows, completed.observation.decode_records
-        )
-        gap_by_window = gaps_by_window(view, weak_tier)
-        for row in view.windows:
-            gap = gap_by_window[row.destination_key]
-            selected_tier = row.selected_request_key.tier
+        requests = completed.observation.decode_records.requests
+        gap_by_window = gaps_by_window(requests, weak_tier)
+        windows = completed.observation.windows.windows
+        for key, window in windows.items():
+            gap = gap_by_window[key]
+            selected_tier = window.published_request_key.tier
             expected_tier = expected_tier_of(
                 gap, threshold_nats, weak_tier, strong_tier
             )
@@ -820,17 +818,8 @@ def _confidence_charges(machine) -> list:
     return charged
 
 
-def _weak_services(machine) -> list:
-    """The decode services of the weak pool, in the order they ended."""
-    weak = []
-    for service in machine.observation.decode_records.services:
-        if service.pool == "default":
-            weak.append(service)
-    return weak
-
-
 def _walk_card_machine(tmp_path, microseconds):
-    """One d=3 shot of the walk card, built and run through the yaml."""
+    """One d=3 shot of the walk card through the yaml, and its decodes."""
     from decsim.machine import Machine
 
     card = _walk_card(microseconds, "union_find", "cluster_gap")
@@ -845,8 +834,10 @@ def _walk_card_machine(tmp_path, microseconds):
     )
     settings = point.settings
     machine = Machine.build(settings, 0)
+    decodes = declared_run.FinishedDecodes()
+    decodes.attach(machine)
     machine.run()
-    return machine
+    return machine, decodes
 
 
 def test_a_priced_confidence_walk_charges_its_card_once_per_window(tmp_path):
@@ -859,12 +850,12 @@ def test_a_priced_confidence_walk_charges_its_card_once_per_window(tmp_path):
     window, so a yaml experiment can price it the way a decoder tier is
     priced.
     """
-    machine = _walk_card_machine(tmp_path, 12.0)
+    machine, decodes = _walk_card_machine(tmp_path, 12.0)
     expected_ticks = decsim_config.microseconds_to_ticks(12.0)
     charged = _confidence_charges(machine)
-    weak_services = _weak_services(machine)
+    weak_decodes = decodes.of_pool("default")
     assert charged
-    assert len(charged) == len(weak_services)
+    assert len(charged) == len(weak_decodes)
     for ticks in charged:
         assert ticks == expected_ticks
 
@@ -948,7 +939,7 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
         for row in document
         if row["ph"] == "X" and row["name"].endswith(" input in memory")
     ]
-    windows = shot.machine.observation.windows.final_rows()
+    windows = shot.machine.observation.windows.windows
 
     assert len(residences) == len(windows)
     for row in residences:

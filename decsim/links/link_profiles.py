@@ -672,6 +672,18 @@ def nvqlink_measured_profile() -> settings.FabricSettings:
     )
 
 
+def build_protocol_fabric(
+    card: settings.FabricSettings, engine: decsim.engine.Engine
+) -> ports.Link:
+    """The fabric every shipped row carries its transfers on.
+
+    Each row's build is this one function: the rows differ only in the
+    card their base_card supplies, and a row with its own fabric model
+    defines its own build.
+    """
+    return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+
+
 class LogicalReferenceFabric:
     """The default row: the reference card's latencies and rates.
 
@@ -685,12 +697,7 @@ class LogicalReferenceFabric:
         """The numbers a yaml's per-path cards override."""
         return logical_reference_profile()
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class BandwidthLimitedFabric:
@@ -717,12 +724,7 @@ class BandwidthLimitedFabric:
             "the machine's links setting"
         )
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class RoceV2CpuFabric:
@@ -741,12 +743,7 @@ class RoceV2CpuFabric:
         """The numbers a yaml's per-path cards override."""
         return roce_v2_measured_profile("cpu")
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class RoceV2GpuFabric:
@@ -767,12 +764,7 @@ class RoceV2GpuFabric:
         """The numbers a yaml's per-path cards override."""
         return roce_v2_measured_profile("gpu")
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 class NvqlinkGpuFabric:
@@ -791,12 +783,7 @@ class NvqlinkGpuFabric:
         """The numbers a yaml's per-path cards override."""
         return nvqlink_measured_profile()
 
-    @staticmethod
-    def build(
-        card: settings.FabricSettings, engine: decsim.engine.Engine
-    ) -> ports.Link:
-        """The object that carries this run's transfers."""
-        return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    build = staticmethod(build_protocol_fabric)
 
 
 # links.kind names one of these rows: which fabric model carries the
@@ -961,12 +948,7 @@ def _check_card(path_name: str, card) -> None:
             f"{card_name} holds {card!r}; a path's card is a mapping of "
             f"{list(_CARD_KEYS)}, or null for the row's own numbers"
         )
-    unknown = [key for key in card if key not in _CARD_KEYS]
-    if unknown:
-        raise ValueError(
-            f"{card_name} does not know {unknown}; its keys are "
-            f"{list(_CARD_KEYS)}"
-        )
+    tables.refuse_unknown_keys(card_name, card, _CARD_KEYS)
     missing = [key for key in _REQUIRED_CARD_KEYS if key not in card]
     if missing:
         raise ValueError(
@@ -1011,7 +993,7 @@ def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
 
 def _check_lane_count(card_name: str, lane_count) -> None:
     """A card's lanes are a positive whole number, never a yaml boolean."""
-    if _is_positive_whole_number(lane_count):
+    if config.is_whole_count(lane_count):
         return
     raise ValueError(
         f"{card_name}.channels is {lane_count!r}; it is the positive whole "
@@ -1021,29 +1003,13 @@ def _check_lane_count(card_name: str, lane_count) -> None:
 
 def _check_header_bits(card_name: str, header_bits) -> None:
     """A card's framing is a whole number of bits, zero or more."""
-    if _is_whole_number(header_bits):
+    if config.is_whole_count(header_bits, 0):
         return
     raise ValueError(
         f"{card_name}.header_bits_per_transfer is {header_bits!r}; it is "
         f"the whole number of framing bits every transfer of the path "
         f"carries, zero or more"
     )
-
-
-def _is_positive_whole_number(value) -> bool:
-    """A whole number above zero, never a yaml boolean."""
-    if not _is_whole_number(value):
-        return False
-    return value > 0
-
-
-def _is_whole_number(value) -> bool:
-    """A whole number of zero or more, never a yaml boolean."""
-    if isinstance(value, bool):
-        return False
-    if not isinstance(value, int):
-        return False
-    return value >= 0
 
 
 def _is_positive_number(value) -> bool:

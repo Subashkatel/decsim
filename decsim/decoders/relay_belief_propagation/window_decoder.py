@@ -180,8 +180,6 @@ class _DetailedEvidence:
 
     decoded_detectors: tuple
     iterations: int
-    iteration_limit: int
-    posterior_log_likelihood_ratios: tuple
     succeeded: bool
 
 
@@ -296,43 +294,25 @@ def _binary_vector(value, *, expected_size: int) -> tuple:
     is_bit = is_zero | is_one
     if not numpy.all(is_bit):
         raise _NonbinaryCorrectionError
-    return decoder_module.bit_tuple(vector)
-
-
-def _float_tuple(values) -> tuple:
-    floats = []
-    for value in values:
-        floats.append(float(value))
-    return tuple(floats)
+    return decoder_module.int_tuple(vector)
 
 
 def _reconstruct(check, correction) -> tuple:
     correction_array = numpy.asarray(correction)
     parity = decoder_module.parity_product(check, correction_array)
-    return decoder_module.bit_tuple(parity)
+    return decoder_module.int_tuple(parity)
 
 
 def _detailed_evidence(detailed, faults) -> _DetailedEvidence:
-    """The answer's diagnostics, each checked for its arity."""
+    """The answer's evidence, its decoded detectors checked for arity."""
     decoded_detectors = _binary_vector(
         detailed.decoded_detectors, expected_size=faults.check.shape[0]
     )
     iterations = int(detailed.iterations)
-    iteration_limit = int(detailed.max_iter)
-    posterior = numpy.asarray(detailed.posterior_ratios)
-    if posterior.ndim != 1 or posterior.shape[0] != faults.check.shape[1]:
-        raise ValueError("Relay posterior ratios have the wrong arity")
-    as_float = posterior.astype(float)
-    is_nan = numpy.isnan(as_float)
-    if numpy.any(is_nan):
-        raise ValueError("Relay posterior ratios cannot contain NaN")
     succeeded = bool(detailed.success)
-    posterior_log_likelihood_ratios = _float_tuple(posterior)
     return _DetailedEvidence(
         decoded_detectors=decoded_detectors,
         iterations=iterations,
-        iteration_limit=iteration_limit,
-        posterior_log_likelihood_ratios=posterior_log_likelihood_ratios,
         succeeded=succeeded,
     )
 
@@ -342,7 +322,7 @@ def _outcome_of(
 ) -> backend_outcome.BackendDecodeOutcome:
     """The outcome of one answer: inconsistent, nonconverged or succeeded."""
     reconstructed = _reconstruct(faults.check, correction)
-    syndrome_bits = decoder_module.bit_tuple(syndrome)
+    syndrome_bits = decoder_module.int_tuple(syndrome)
     is_inconsistent = evidence.decoded_detectors != reconstructed
     if evidence.succeeded and reconstructed != syndrome_bits:
         is_inconsistent = True
@@ -370,13 +350,7 @@ def _detailed_outcome(
         status=status,
         failure_reason=reason,
         physical_correction=correction,
-        component_correction=None,
-        reconstructed_syndrome=evidence.decoded_detectors,
         iterations=evidence.iterations,
-        iteration_limit=evidence.iteration_limit,
-        posterior_log_likelihood_ratios=(
-            evidence.posterior_log_likelihood_ratios
-        ),
     )
 
 
@@ -385,11 +359,7 @@ def _invalid_outcome(reason) -> backend_outcome.BackendDecodeOutcome:
         status=_Status.INVALID_CORRECTION,
         failure_reason=reason,
         physical_correction=None,
-        component_correction=None,
-        reconstructed_syndrome=None,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )
 
 
@@ -398,9 +368,5 @@ def _backend_error_outcome() -> backend_outcome.BackendDecodeOutcome:
         status=_Status.BACKEND_ERROR,
         failure_reason=_Reason.UPSTREAM_EXCEPTION,
         physical_correction=None,
-        component_correction=None,
-        reconstructed_syndrome=None,
         iterations=None,
-        iteration_limit=None,
-        posterior_log_likelihood_ratios=None,
     )

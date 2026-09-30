@@ -24,6 +24,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
 
@@ -92,18 +93,20 @@ def _weak_decode_starts(machine) -> list:
     return weak_starts
 
 
-def _companions_and_answers(machine) -> tuple:
-    """The weak requests the ledger marks companions, and those answered."""
+def _companions_and_answers(requests) -> tuple:
+    """The weak requests that ended as companions, and those answered."""
     outcomes = decoding_records.RequestProcessingOutcome
     companion = outcomes.WEAK_FORCED_CLASS_COMPANION
     companions = []
     answered = []
-    for record in _weak_requests(machine):
-        if record.terminal_processing_outcome is companion:
-            companions.append(record)
+    for ended in requests.of_tier(window_records.DecoderTier.WEAK):
+        if ended.outcome is companion:
+            companions.append(ended)
             continue
-        if record.soft_output is not None:
-            answered.append(record)
+        if ended.result is None:
+            continue
+        if ended.result.soft_output is not None:
+            answered.append(ended)
     return companions, answered
 
 
@@ -189,11 +192,11 @@ def _walks_and_next_starts(machine) -> list:
     def started(job, _unit) -> None:
         starts.append((engine.now, job))
 
-    def ended(job, ended_ticks) -> None:
-        ends[id(job)] = ended_ticks
+    def answered(job, _result, _outcome, answered_ticks) -> None:
+        ends[id(job)] = answered_ticks
 
     service.trace.job_started.connect(started)
-    outcomes.trace.service_ended.connect(ended)
+    outcomes.trace.request_ended.connect(answered)
     machine.run()
     pairs = []
     pair_count = len(starts) - 1
@@ -234,11 +237,13 @@ def test_the_first_solve_is_held_and_the_join_names_the_windows_gap():
     assert "gap " in joined[0]
 
 
-def test_a_windows_two_requests_are_one_attempt_in_the_ledger():
+def test_a_windows_two_requests_are_one_attempt():
     """One attempt, two forced-class requests, one of them the answer."""
     machine = _switching_machine(1)
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
     machine.run()
-    companions, answered = _companions_and_answers(machine)
+    companions, answered = _companions_and_answers(requests)
     windows = len(machine.observation.windows.windows)
     assert len(companions) == windows
     assert len(answered) == windows
@@ -384,13 +389,13 @@ def _two_solve_join(signal_ticks: int):
 
 
 def test_the_walk_is_charged_to_the_solve_that_delivered_last():
-    """Two solves, and the ticks go where a service still closes.
+    """Two solves, and the ticks go to the unit that is still busy.
 
     The answering solve is the lightest, which is not in general the last
-    to arrive. decode_outcomes.deliver_weak ends a service at
-    now + job.soft_output_ticks for the job it is delivering, which is
-    the last one; the lightest solve's service record may have closed
-    already. The complementary gap's card
+    to arrive. The decoder manager gives a unit back
+    job.soft_output_ticks after it delivers that unit's job, which is
+    the last one; the lightest solve's unit may have gone back already.
+    The complementary gap's card
     (escalation.confidence_walk_microseconds) is the only way to price
     the walk at all, and it defaults to null, so no shipped config sees
     this.

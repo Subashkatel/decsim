@@ -723,6 +723,11 @@ neighbour takes everything that neighbour owns, and a face pinned on the
 window's own commit takes only the faults crossing behind it, because
 the rest of that commit is exactly what the region decodes again.
 
+**Narrowed since.** A strong window's model is one `WindowModelSource`
+method, `strong_window_model_for_operation`, which takes every round
+range the window may not commit; one range is a one-element tuple, so
+the port needs no second method for it.
+
 **Where to see it.** `decsim/escalation/strong_regions.py`
 (`double_window_near_face`), `decsim/escalation/strong_window_shapes.py`
 (`DoubleWindow`), `decsim/windows/window_boundaries.py`

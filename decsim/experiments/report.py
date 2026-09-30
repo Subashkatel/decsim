@@ -11,18 +11,15 @@ seconds and a Counter of custom counts, __add__ sums them, and every
 rate or interval is computed from the summed row); gem5 keeps its
 Distribution statistics the same way, as counts per bucket summed
 across simulations. So sweep.csv and links.csv read the same whether
-one process ran every shot or many ran a piece each, and the fold of
-an experiment's pieces builds them through this module's own summarize
-and link_rows.
+one process ran every shot or many ran a piece each: a run's shots are
+pieces too, and the fold of the pieces builds both files.
 
 What a summary needs off those rows is a count, a true count, a sum, a
 max and an exact mean per sweep point, and none of those grows with the
 shots, so the rows reach them one at a time: the accumulators, the row
 streams and the merge that orders them are in experiments/fold.py, and
-this module says which field plays which role. A single run feeds the
-rows it measured through the same accumulators a fold feeds an
-experiment's pieces and folders through, so one code path produces
-every summary.
+this module says which field plays which role. The fold is the one
+code path that produces every summary.
 
 The per-value counts file stays small because every sample is a whole
 number of ticks divided by the ticks in a microsecond
@@ -296,28 +293,6 @@ def summarize_point(
     return row
 
 
-def summarize(
-    shots: list, window_samples: list, rules: Optional[dict] = None
-) -> list:
-    """One row per sweep point, in a stable order.
-
-    The two arguments are the additive files a run folder writes: the
-    per-shot rows and the per-value counts. The same code runs whether
-    they were just measured in this process or read back out of an
-    experiment's pieces, whose fold streams them into the same totals
-    rather than holding a list of them. rules maps a point id to the
-    collection.PointRule its prefix is read by; a point it does not
-    name ran a shot count fixed in advance.
-    """
-    counts = _counts_of_rows(window_samples)
-    totals = {}
-    prefixes = {}
-    for row in shots:
-        _add_a_shot(totals, row)
-        _add_to_the_prefix(prefixes, rules, row)
-    return summary_rows(totals, counts, prefixes)
-
-
 def summary_rows(totals: dict, counts: dict, prefixes: dict) -> list:
     """One row per sweep point whose shots were totalled, in point order.
 
@@ -385,32 +360,6 @@ def terminal_lines(rows: list, report_dir: Path) -> list:
             "counted no copies, references or moves"
         )
     return lines
-
-
-def link_rows(shot_links: list) -> list:
-    """One row per sweep point per link, averaged over the point's shots.
-
-    The totals came straight off each shot's TrafficCounters; nothing
-    here re-counts transfers.
-    """
-    totals = _link_totals_by_point(shot_links)
-    return _link_rows_of(totals)
-
-
-def data_movement_rows(shot_data_movement: list) -> list:
-    """One row per sweep point per path, then one per memory class.
-
-    Two tables in one file, told apart by the grouping column. The
-    second one is the grouping the classical sources ask for: a DRAM
-    access costs "a couple of orders-of-magnitude higher than the cost
-    of an internal cache access" (Horowitz, ISSCC 2014 lines 232-247)
-    and an accelerator's access costs what the memory it reads costs
-    (Dally, CACM 2020 lines 231-234), so a copy into a register and a
-    copy across a cryostat link may not be summed into one count. Every
-    number is a mean over the point's shots.
-    """
-    totals = _movement_totals_by_point(shot_data_movement)
-    return _movement_rows_of(totals)
 
 
 def shot_data_movement_rows(measurements: list) -> list:
@@ -661,7 +610,7 @@ def fold_pieces(
     one run over every piece would write them: its points in task order,
     then its seeds. Two pieces may not share a shot, which would be
     counted twice. rules maps a point id to the collection.PointRule
-    its estimate is read by (summarize).
+    its estimate is read by.
 
     An experiment's pieces can hold more rows than a process can: 500
     pieces of a million-shot sweep are 115 million link rows. So the
@@ -1204,14 +1153,6 @@ def _add_a_shot(totals: dict, row: dict) -> None:
     at_point.add(row)
 
 
-def _link_totals_by_point(shot_links: list) -> dict:
-    """Each sweep point's totals per link, the rows read once."""
-    totals = {}
-    for row in shot_links:
-        _add_a_shot_link(totals, row)
-    return totals
-
-
 def _add_a_shot_link(totals: dict, row: dict) -> None:
     """One shot's row on one link into that point's and link's totals."""
     point = sweep_point_of(row)
@@ -1238,14 +1179,6 @@ def _link_rows_of(totals: dict) -> list:
     return rows
 
 
-def _movement_totals_by_point(shot_data_movement: list) -> dict:
-    """Each sweep point's data-movement totals, the rows read once."""
-    totals = {}
-    for row in shot_data_movement:
-        _add_a_movement_row(totals, row)
-    return totals
-
-
 def _add_a_movement_row(totals: dict, row: dict) -> None:
     """One shot's row on one path into its sweep point's totals."""
     point = sweep_point_of(row)
@@ -1257,7 +1190,17 @@ def _add_a_movement_row(totals: dict, row: dict) -> None:
 
 
 def _movement_rows_of(totals: dict) -> list:
-    """One point's paths and then its memory classes, point by point."""
+    """One point's paths and then its memory classes, point by point.
+
+    Two tables in one file, told apart by the grouping column. The
+    second one is the grouping the classical sources ask for: a DRAM
+    access costs "a couple of orders-of-magnitude higher than the cost
+    of an internal cache access" (Horowitz, ISSCC 2014 lines 232-247)
+    and an accelerator's access costs what the memory it reads costs
+    (Dally, CACM 2020 lines 231-234), so a copy into a register and a
+    copy across a cryostat link may not be summed into one count. Every
+    number is a mean over the point's shots.
+    """
     rows = []
     for point in totals:
         at_point = totals[point]
@@ -1364,13 +1307,6 @@ def _multiset_over_tiers(counts: dict, point: tuple, name: str) -> dict:
             already = merged.get(value, 0)
             merged[value] = already + count
     return merged
-
-
-def _counts_of_rows(window_samples: list) -> dict:
-    """The same multisets, read back off window_samples.csv rows."""
-    counts = {}
-    _add_counts_of_rows(counts, window_samples)
-    return counts
 
 
 def _add_counts_of_rows(counts: dict, window_samples: list) -> None:

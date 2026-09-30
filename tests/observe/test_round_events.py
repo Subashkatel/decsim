@@ -1,6 +1,6 @@
 """The flight recorder keeps every round event it is told, in order.
 
-The rows are the run ledger's source (decsim/observe/run_views.py); the
+The rows are the run ledger's source (tests/observe/run_ledger.py); the
 recorder is a listener on the components' round_event, output_event and
 round_stored sources and never schedules or decides.
 """

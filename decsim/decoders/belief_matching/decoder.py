@@ -21,6 +21,7 @@ import scipy.special
 
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
+import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.records.decoding as decoding_records
@@ -140,9 +141,7 @@ def _distinct_hyperedges(physical) -> tuple:
     columns = []
     priors = []
     for column in range(check.shape[1]):
-        start = check.indptr[column]
-        end = check.indptr[column + 1]
-        detectors = tuple(check.indices[start:end])
+        detectors = basis_split.column_rows(check, column)
         prior = float(physical.priors[column])
         position = position_by_detectors.get(detectors)
         if position is None:

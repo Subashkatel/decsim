@@ -28,6 +28,7 @@ formed once.
 """
 
 import dataclasses
+import operator
 from typing import Any, Optional
 
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -348,15 +349,12 @@ def _rounds_in_order(fragments) -> list:
         key = (fragment.operation_id, fragment.round_index)
         group = fragments_by_round.setdefault(key, [])
         group.append(fragment)
+    by_fragment_index = operator.attrgetter("fragment_index")
     ordered = []
     for group in fragments_by_round.values():
-        in_measurement_order = sorted(group, key=_fragment_order)
+        in_measurement_order = sorted(group, key=by_fragment_index)
         ordered.append(in_measurement_order)
     return ordered
-
-
-def _fragment_order(fragment):
-    return fragment.fragment_index
 
 
 @dataclasses.dataclass(frozen=True)

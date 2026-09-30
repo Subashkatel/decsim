@@ -1,9 +1,9 @@
 """The figure kinds an experiment's plot.py draws, styled in one place.
 
-Rates follow sinter: a binomial rate is drawn with sinter.plot_custom,
+Rates follow sinter: an error rate is drawn with sinter.plot_error_rate,
 its line through the most likely rate and its band over every rate
-within a likelihood factor of it (sinter/_plotting.py:317-419). The
-other kinds read plain rows, one dict per row, as decsim.results.load
+within a likelihood factor of it (sinter/_plotting.py:317-419). Values
+read plain rows, one dict per row, as decsim.results.load
 returns them. A key names a column of a row; on a sinter.TaskStats it
 names a json_metadata field, except "decoder", which is the stat's own.
 
@@ -21,8 +21,6 @@ import pathlib
 from collections.abc import Mapping
 from typing import Optional, Union
 
-import matplotlib
-import matplotlib.colors
 import matplotlib.pyplot as pyplot
 import matplotlib.ticker
 import numpy
@@ -31,10 +29,6 @@ import sinter
 DOTS_PER_INCH = 150
 PANEL_WIDTH_INCHES = 5.0
 PANEL_HEIGHT_INCHES = 4.2
-# sinter.plot_error_rate's own band, 1e3 times less likely than the best
-# fit (sinter/_plotting.py:328)
-LIKELIHOOD_FACTOR = 1e3
-HISTOGRAM_BINS = 30
 MINOR_GRID_ALPHA = 0.3
 # sinter's marker order (sinter/_plotting.py:15), so a curve reads the
 # same here as in a figure sinter draws itself
@@ -124,36 +118,6 @@ def error_rate(
     _style(axis, x, f"logical error rate per {unit}", legend_title)
 
 
-def count_rate(
-    axis: pyplot.Axes,
-    stats: list,
-    x: str,
-    hits: str,
-    total: str,
-    curve: str,
-    order: Optional[list] = None,
-) -> None:
-    """The share hits of total against x, both custom counts, with a band.
-
-    The band is the one error_rate draws, from sinter.fit_binomial over
-    the two counts (sinter/_probability_util.py:327).
-    """
-    x_of = functools.partial(_value, key=x)
-    share_of = functools.partial(_count_share, hits=hits, total=total)
-    group_of = functools.partial(_group, curve=curve, marker=None)
-    style_of = _sinter_style(stats, curve, None, order)
-    sinter.plot_custom(
-        ax=axis,
-        stats=stats,
-        x_func=x_of,
-        y_func=share_of,
-        group_func=group_of,
-        plot_args_func=style_of,
-    )
-    _log_axes(axis)
-    _style(axis, x, f"{hits} / {total}", curve)
-
-
 def values(
     axis: pyplot.Axes,
     rows: list,
@@ -171,79 +135,6 @@ def values(
         style["label"] = str(curve_value)
         _draw_values(axis, curve_rows, (x, y, low, high), style)
     _style(axis, x, y, curve)
-
-
-def distribution(
-    axis: pyplot.Axes,
-    rows: list,
-    value: str,
-    curve: str,
-    count: Optional[str] = None,
-    order: Optional[list] = None,
-) -> None:
-    """A histogram of value per curve, each summing to one, its median dashed.
-
-    count names a column holding how many times its row's value was
-    seen; without it every row is seen once.
-    """
-    all_values = [row[value] for row in rows]
-    edges = numpy.histogram_bin_edges(all_values, bins=HISTOGRAM_BINS)
-    curves = _curves(rows, curve, value)
-    for curve_value, curve_rows in curves.items():
-        seen_values, counts = _seen_values(curve_rows, value, count)
-        weights = counts / counts.sum()
-        style = _curve_style(curve_value, curves, order)
-        color = style["color"]
-        label = str(curve_value)
-        axis.hist(
-            seen_values,
-            bins=edges,
-            weights=weights,
-            histtype="step",
-            color=color,
-            label=label,
-        )
-        median = _median(seen_values, counts)
-        axis.axvline(median, color=color, linestyle="--")
-    _style(axis, value, "share", curve)
-
-
-def heatmap(
-    axis: pyplot.Axes, rows: list, x: str, y: str, value: str, label: str
-) -> None:
-    """The value column on an x by y grid, log colours, zero cells white."""
-    xs = sorted({row[x] for row in rows})
-    ys = sorted({row[y] for row in rows})
-    grid = numpy.zeros((len(ys), len(xs)))
-    for row in rows:
-        column = xs.index(row[x])
-        line = ys.index(row[y])
-        grid[line, column] = row[value]
-    masked = numpy.ma.masked_equal(grid, 0)
-    colormap = matplotlib.colormaps["viridis"]
-    white_zeros = colormap.with_extremes(bad="white")
-    norm = matplotlib.colors.LogNorm()
-    mesh = axis.pcolormesh(
-        xs, ys, masked, shading="nearest", cmap=white_zeros, norm=norm
-    )
-    figure = axis.figure
-    figure.colorbar(mesh, ax=axis, label=label)
-    axis.set_xlabel(x)
-    axis.set_ylabel(y)
-
-
-def share_below(values: list, counts: list, thresholds: list) -> numpy.ndarray:
-    """The share of the counted values strictly below each threshold."""
-    value_array = numpy.asarray(values)
-    count_array = numpy.asarray(counts)
-    order = numpy.argsort(value_array)
-    sorted_values = value_array[order]
-    sorted_counts = count_array[order]
-    running = numpy.cumsum(sorted_counts)
-    cumulative = numpy.concatenate(([0], running))
-    positions = numpy.searchsorted(sorted_values, thresholds, side="left")
-    below = cumulative[positions]
-    return below / cumulative[-1]
 
 
 def save(figure: pyplot.Figure, path: Union[str, pathlib.Path]) -> None:
@@ -292,17 +183,6 @@ def _group(stat: sinter.TaskStats, curve: str, marker: Optional[str]) -> dict:
     return group
 
 
-def _count_share(stat: sinter.TaskStats, hits: str, total: str) -> sinter.Fit:
-    """The share of hits in total, the likeliest value and its band."""
-    hit_count = stat.custom_counts[hits]
-    total_count = stat.custom_counts[total]
-    return sinter.fit_binomial(
-        num_shots=total_count,
-        num_hits=hit_count,
-        max_likelihood_factor=LIKELIHOOD_FACTOR,
-    )
-
-
 def _curves(rows: list, curve: str, order: str) -> dict:
     """The rows of each curve value, the values sorted, each curve by order."""
     rows_by_curve = collections.defaultdict(list)
@@ -337,26 +217,6 @@ def _draw_values(
     above = highs - ys
     bars = numpy.array([below, above])
     axis.errorbar(xs, ys, yerr=bars, capsize=3, **style)
-
-
-def _seen_values(rows: list, value: str, count: Optional[str]) -> tuple:
-    """A curve's values and how many times each was seen."""
-    seen = numpy.array([row[value] for row in rows])
-    if count is None:
-        return seen, numpy.ones(len(seen))
-    counts = numpy.array([row[count] for row in rows])
-    return seen, counts
-
-
-def _median(seen_values: numpy.ndarray, counts: numpy.ndarray) -> float:
-    """The lower median of values seen counts times each."""
-    order = numpy.argsort(seen_values)
-    sorted_values = seen_values[order]
-    sorted_counts = counts[order]
-    cumulative = numpy.cumsum(sorted_counts)
-    half = cumulative[-1] / 2
-    position = numpy.searchsorted(cumulative, half, side="left")
-    return sorted_values[position]
 
 
 def _has_errors(stat: sinter.TaskStats) -> bool:

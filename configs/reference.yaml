@@ -1533,13 +1533,13 @@ observation:                       # what a run records beyond its results
                                    # link path
   trace_shots: [0]                 # the shots the trace is written for; a sweep point
                                    # of 2000 shots writes one file, not 2000
-  record_switching_windows: false  # true keeps every decode request and service record
+  record_switching_windows: false  # true keeps every decode request record
                                    # for the switching study's per-window rows
   syndrome_buffer_occupancy: false # true samples the weak syndrome buffer's
                                    # held-round count at every change: the
                                    # buffer's occupancy over time
   backlog_trace: false             # true samples the undecoded-round backlog after
-                                   # every action: the backlog over time, as a step function
+                                   # every action for its peak, backlog_peak_rounds
   decoder_memory_occupancy: false  # true samples each unit memory's held-bit count,
                                    # for a sweep over unit_memory.bits
   data_movement: false             # true counts the copies, references and moves of

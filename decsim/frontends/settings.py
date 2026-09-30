@@ -65,11 +65,6 @@ class RoundsPerShot:
             return self.fixed
         return self.per_distance * distance
 
-    def __str__(self) -> str:
-        if self.fixed is not None:
-            return str(self.fixed)
-        return f"{self.per_distance}d"
-
 
 @dataclasses.dataclass(frozen=True)
 class WorkloadSettings:

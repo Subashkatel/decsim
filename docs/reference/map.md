@@ -206,7 +206,7 @@ docstring.
 - `decsim/decoders/decoder_output.py`: The decoder side's outgoing sends: the frame, the strong tier, a peer.
 - `decsim/decoders/decoder_pool.py`: A manager's pool: its units, the free ones, the unit a job is offered.
 - `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
-- `decsim/decoders/decoders.py`: Timing-only decoders and the sampled-confidence wrapper.
+- `decsim/decoders/decoders.py`: The timing-only decoder.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
 - `decsim/decoders/dispatch_steps/__init__.py`: The dispatch_steps row: Relay-BP behind a CUDA-Q dispatcher, step by step.
 - `decsim/decoders/dispatch_steps/decoder.py`: Relay-BP on a GPU behind a CUDA-Q dispatcher, step by step.
@@ -279,8 +279,8 @@ docstring.
 - `decsim/observe/command_events.py`: When each command arrived at the QPU and when it started.
 - `decsim/observe/controller_counters.py`: The controller's counters: how many idle rounds it emitted.
 - `decsim/observe/data_movement.py`: How often a run copied bits, referenced them and moved them.
-- `decsim/observe/decode_records.py`: The switching study's terminal records: per request, per service, per gap.
-- `decsim/observe/flight_recorder.py`: The flight recorder: one causal row per hardware transition of a run.
+- `decsim/observe/decode_records.py`: The switching study's terminal records: per request and per gap.
+- `decsim/observe/frame_corrections.py`: The frame's corrections: every window's write, as it landed.
 - `decsim/observe/link_traffic.py`: The traffic ledger: what the links carried, and the JSON the run exports.
 - `decsim/observe/log_writers.py`: The two listeners of the engine's narrator: the record and the console.
 - `decsim/observe/metrics.py`: The integrated metrics: step functions of time over one run.
@@ -289,14 +289,14 @@ docstring.
 - `decsim/observe/referee_audit.py`: The window referee's audit: what it re-decoded and where it disagreed.
 - `decsim/observe/result_ledger.py`: The logical observables each operation delivered.
 - `decsim/observe/round_events.py`: The flight recorder of the readout path: what happened to every round.
-- `decsim/observe/run_views.py`: Frozen views of a run's state.
+- `decsim/observe/run_views.py`: A frozen view of a run's decode backlog.
 - `decsim/observe/runtime_stamps.py`: The ticks of every operation's life, heard from the execution runtime.
 - `decsim/observe/sampled_shots.py`: The shots the syndrome source sampled, by the operation that asked.
 - `decsim/observe/settings.py`: The observation settings: what a run records beyond its results.
 - `decsim/observe/stage_records.py`: One run's decoder stage records, kept per operation and window.
 - `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's occupancy over time, and how long each round stayed.
 - `decsim/observe/trace_writer.py`: One shot's Chrome trace: where every round and window sat and moved.
-- `decsim/observe/window_ledger.py`: The window ledger: every window's record, what owns it, what absorbed it.
+- `decsim/observe/window_ledger.py`: The window ledger: every window's record, heard as the plan grows.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.
 
 ### sinter_adapters

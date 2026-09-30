@@ -71,9 +71,28 @@ class MeasuredTime:
 
     def decode_microseconds(self, iterations: int) -> float:
         """The line at these iterations, floored at the fastest decode."""
-        per_iteration = self.microseconds_per_iteration * iterations
-        line_microseconds = self.intercept_microseconds + per_iteration
-        return max(line_microseconds, self.fastest_decode_microseconds)
+        return floored_line_microseconds(
+            self.intercept_microseconds,
+            self.microseconds_per_iteration,
+            self.fastest_decode_microseconds,
+            iterations,
+        )
+
+
+def floored_line_microseconds(
+    intercept_microseconds: float,
+    microseconds_per_iteration: float,
+    fastest_microseconds: float,
+    iterations: int,
+) -> float:
+    """A time line in Relay-BP iterations, floored at the fastest measured.
+
+    A line fit to the long decodes can read below the fastest decode
+    measured at few iterations, or cross zero, so it is floored there.
+    """
+    per_iteration = microseconds_per_iteration * iterations
+    line_microseconds = intercept_microseconds + per_iteration
+    return max(line_microseconds, fastest_microseconds)
 
 
 # Rows in device, partition, bases, then region order; the comment above

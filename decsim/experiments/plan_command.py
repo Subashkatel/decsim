@@ -510,9 +510,8 @@ def _write_rows_atomically(
     path: pathlib.Path, columns: tuple, rows: list
 ) -> None:
     """A csv written under a temporary name and renamed into place."""
-    staging = run_folder.staging_path(path)
-    with open(staging, "w", newline="") as handle:
-        writer = csv.DictWriter(handle, columns)
-        writer.writeheader()
-        writer.writerows(rows)
-    staging.replace(path)
+    with run_folder.staged_replacement(path) as staging:
+        with open(staging, "w", newline="") as handle:
+            writer = csv.DictWriter(handle, columns)
+            writer.writeheader()
+            writer.writerows(rows)

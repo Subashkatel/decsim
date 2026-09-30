@@ -26,6 +26,7 @@ line the sender keeps in front of the stores (HeldRounds).
 
 import dataclasses
 import functools
+import operator
 from typing import Optional
 
 import decsim.controller.round_transmission as round_transmission
@@ -340,10 +341,6 @@ def _round_identity(fragment, route) -> tuple:
     )
 
 
-def _fragment_index(fragment: round_records.RetainedSyndromeFragment) -> int:
-    return fragment.fragment_index
-
-
 def _merge_adjacent_fragments(fragments) -> tuple:
     """Coalesce adjacent acquisitions without permuting measurement records.
 
@@ -351,7 +348,8 @@ def _merge_adjacent_fragments(fragments) -> tuple:
     with another acquisition between them cannot be concatenated here.
     """
     merged = []
-    ordered = sorted(fragments, key=_fragment_index)
+    by_fragment_index = operator.attrgetter("fragment_index")
+    ordered = sorted(fragments, key=by_fragment_index)
     for fragment in ordered:
         if not merged:
             merged.append(fragment)

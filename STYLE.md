@@ -339,7 +339,8 @@ confirm `decsim.__file__` is the worktree before trusting any result.
 
 Two files are not Python: the Union-Find decoder's growth, forest and
 peeling, `decsim/decoders/union_find/union_find.c`, and the cluster
-gap's walk, `cluster_gap.c` beside it, each with its header. The LLVM
+gap's walk, `cluster_gap.c` beside it, each with its header, and
+`graph_workspace.h`, the two helpers they share. The LLVM
 Coding Standards bind there, in these points: 80 columns, two
 spaces and no tab; early exits and flat control flow; one function does
 one thing; names that are full words; a file header comment saying what

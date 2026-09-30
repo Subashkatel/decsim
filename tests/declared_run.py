@@ -10,9 +10,12 @@ tests/controller/test_round_assembly.py).
 """
 
 import dataclasses
+import functools
+from typing import Optional
 
 import decsim.config as config
 import decsim.controller.settings as controller_settings
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
@@ -26,6 +29,7 @@ import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -81,6 +85,15 @@ DECLARED_EDGE_NAMES = (
     "controller_to_qpu",
 )
 ESCALATION_THRESHOLD = 0.5
+DECLARED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
+    method="declared_confidence",
+    cluster_origin="declared",
+    growth_schedule="declared_per_window",
+    gap_units="branch_marker",
+    correction="none",
+    weight_step_natural_log=None,
+    references=("declared by the test",),
+)
 
 
 def lookahead_sliding_scheme():
@@ -168,12 +181,102 @@ def declared_workload(operations, rounds):
 
 
 def run_machine(settings, seed=0, probes=()):
-    """Build the machine, connect the test's probes, run it."""
+    """Build the machine, attach the test's probes to it, run it."""
     machine = machine_module.Machine.build(settings, seed)
     for probe in probes:
-        machine.engine.action_done.connect(probe.observe)
+        probe.attach(machine)
     machine.run()
     return machine
+
+
+@dataclasses.dataclass(frozen=True)
+class EndedRequest:
+    """One decode request at its end: its job, its result, its outcome."""
+
+    job: decoding_records.DecodeJob
+    result: Optional[decoding_records.DecodeResult]
+    outcome: decoding_records.RequestProcessingOutcome
+
+
+class EndedRequests:
+    """A probe that hears every decode request end, on both sides.
+
+    It listens on the decode outcomes' request_ended, the source the
+    package's record ledgers hear, so a test reads a request's window,
+    ticks and outcome off the job itself. Attach it before the run.
+    """
+
+    def __init__(self) -> None:
+        self.ended: list = []
+
+    def attach(self, machine) -> None:
+        """Hear the requests of both decoder managers the run has."""
+        part = machine.decoders
+        managers = (part.decoder_manager, part.strong_decoder_manager)
+        for manager in managers:
+            if manager is None:
+                continue
+            manager.outcomes.trace.request_ended.connect(self.request_ended)
+
+    def request_ended(self, job, result, outcome, decode_output_ticks) -> None:
+        """One request reached its terminal outcome."""
+        del decode_output_ticks
+        ended = EndedRequest(job, result, outcome)
+        self.ended.append(ended)
+
+    def of_tier(self, tier) -> list:
+        """The requests of one tier, in the order they ended."""
+        requests = []
+        for ended in self.ended:
+            if ended.job.request_key.tier is tier:
+                requests.append(ended)
+        return requests
+
+
+@dataclasses.dataclass(frozen=True)
+class FinishedDecode:
+    """One decode whose unit gave its compute back, with its two ticks."""
+
+    job: decoding_records.DecodeJob
+    dispatch_ticks: int
+    finish_ticks: int
+
+
+class FinishedDecodes:
+    """A probe that hears every decode give its unit back, on both sides.
+
+    It listens on each decode service's job_finished, which fires when
+    the unit's compute goes back, so a decode's span runs from its
+    dispatch to the end of any confidence walk charged on its unit.
+    Attach it before the run.
+    """
+
+    def __init__(self) -> None:
+        self.finished: list = []
+
+    def attach(self, machine) -> None:
+        """Hear the decode services of both decoder managers the run has."""
+        part = machine.decoders
+        managers = (part.decoder_manager, part.strong_decoder_manager)
+        listener = functools.partial(self.job_finished, machine.engine)
+        for manager in managers:
+            if manager is None:
+                continue
+            manager.service.trace.job_finished.connect(listener)
+
+    def job_finished(self, engine, job, unit) -> None:
+        """One decode's unit took its compute back at this tick."""
+        del unit
+        finished = FinishedDecode(job, job.service_dispatch_ticks, engine.now)
+        self.finished.append(finished)
+
+    def of_pool(self, pool: str) -> list:
+        """The decodes of one pool, in the order they finished."""
+        decodes = []
+        for finished in self.finished:
+            if finished.job.pool == pool:
+                decodes.append(finished)
+        return decodes
 
 
 def operations_or_one(operations):
@@ -262,12 +365,44 @@ def strong_only_run(
     return run_machine(settings, seed)
 
 
-def switching_decoders(escalation_probability, probability_for):
-    """The weak tier that reports a sampled confidence, and its strong."""
-    latency = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
-    weak = decoders.SampledConfidenceDecoder(
-        latency, escalation_probability, probability_for=probability_for
-    )
+class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
+    """A preset latency whose confidence gap each window declares.
+
+    A timing-only decoder has no syndrome to compute a confidence from,
+    so the test declares it: gap 0.0, under every threshold these runs
+    set, for a window is_escalated(job) names, so Switching escalates
+    it; gap 1.0 elsewhere, so the weak result is kept.
+    """
+
+    def __init__(self, latency_microseconds, is_escalated):
+        self.latency_microseconds = latency_microseconds
+        self.is_escalated = is_escalated
+
+    def latency(self, job):
+        del job
+        return config.microseconds_to_ticks(self.latency_microseconds)
+
+    def decode(self, job):
+        confidence_gap = 1.0
+        if self.is_escalated(job):
+            confidence_gap = 0.0
+        soft_output = decoding_records.SoftOutput(
+            gap=confidence_gap, source=DECLARED_CONFIDENCE_SOURCE
+        )
+        return decoding_records.DecodeResult(
+            job.operation_id, job.window_id, soft_output=soft_output
+        )
+
+
+def switching_decoders(escalates):
+    """The weak tier that declares its confidence, and its strong."""
+
+    def is_escalated(job):
+        del job
+        return escalates
+
+    weak_microseconds = DECLARED_MICROSECONDS["weak"]
+    weak = DeclaredConfidenceDecoder(weak_microseconds, is_escalated)
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     return weak, strong
 
@@ -275,15 +410,15 @@ def switching_decoders(escalation_probability, probability_for):
 def switching_run(
     *,
     rounds=6,
-    escalation_probability=0.0,
+    escalates=False,
     operations=None,
     run_both_at_once=False,
     strong_window="redo_window",
     weak_units=1,
     seed=0,
     io_trace=False,
-    probability_for=None,
     record=False,
+    memory_occupancy=False,
     weak_memory_bits=None,
     round_microseconds=ROUND_MICROSECONDS,
     bulk_strong=False,
@@ -295,11 +430,10 @@ def switching_run(
 ):
     """Weak-primary switching on the declared fabric.
 
-    A probability of 0.0 or 1.0, or a per-job probability_for returning
-    one of the two, keeps the run deterministic: the sampled gap is 1.0
-    (keep the weak result) or 0.0 (escalate) against the threshold.
+    escalates declares every window's confidence gap 0.0 (escalate)
+    rather than 1.0 (keep the weak result) against the threshold.
     """
-    weak, strong = switching_decoders(escalation_probability, probability_for)
+    weak, strong = switching_decoders(escalates)
     weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
     weak_decoder = decoder_settings.DecoderSettings(
         decoder=weak, units=weak_units, unit_memory=weak_memory
@@ -310,7 +444,7 @@ def switching_run(
     threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
-        expected_source=decoders.SAMPLED_CONFIDENCE_SOURCE,
+        expected_source=DECLARED_CONFIDENCE_SOURCE,
         run_both_at_once=run_both_at_once,
     )
     policy = escalation_policies.Switching(collaborators)
@@ -336,7 +470,9 @@ def switching_run(
     )
     links = declared_profile()
     observation = observe_settings.ObservationSettings(
-        log_component_io=io_trace, record_switching_windows=record
+        log_component_io=io_trace,
+        record_switching_windows=record,
+        decoder_memory_occupancy=memory_occupancy,
     )
     qpu = declared_qpu(round_microseconds)
     controller = declared_controller()
@@ -355,17 +491,6 @@ def switching_run(
         observation=observation,
     )
     return run_machine(settings, seed, probes)
-
-
-def escalate_only(window_ids):
-    """A per-job probability of 1.0 for those windows and 0.0 elsewhere."""
-
-    def probability(job):
-        if job.window_id in window_ids:
-            return 1.0
-        return 0.0
-
-    return probability
 
 
 def log_tick(log_lines, needle):

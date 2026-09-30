@@ -420,7 +420,7 @@ class _RegionJoin:
 def _part_job(
     job: decoding_records.DecodeJob, basis: str, part_model, part_syndrome
 ) -> decoding_records.DecodeJob:
-    bits = decoder_module.bit_tuple(part_syndrome)
+    bits = decoder_module.int_tuple(part_syndrome)
     fragment = round_records.RetainedSyndromeFragment(
         operation_id=job.operation_id,
         patch_ids=(),
@@ -449,7 +449,7 @@ def _joined_observables(parts: list) -> tuple:
     flips = numpy.zeros(len(parts[0].logical_observables), dtype=numpy.uint8)
     for part in parts:
         flips ^= numpy.asarray(part.logical_observables, dtype=numpy.uint8)
-    return decoder_module.bit_tuple(flips)
+    return decoder_module.int_tuple(flips)
 
 
 def _joined_status(

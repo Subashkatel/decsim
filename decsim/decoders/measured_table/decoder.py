@@ -116,7 +116,7 @@ class MeasuredTable:
 
     def submit(
         self, request: decoding_records.DecodeJob, running: int
-    ) -> "_Ticket":
+    ) -> decoding_records.Ticket:
         """Decode with decsim's Relay-BP now; price it by the device's line."""
         result = self.decoder.decode(request)
         detectors = _region_detectors(request)
@@ -126,9 +126,9 @@ class MeasuredTable:
         iterations = _iterations_of(result)
         microseconds = cell.decode_microseconds(iterations)
         decode_ticks = config.microseconds_to_ticks(microseconds)
-        return _Ticket(result, decode_ticks)
+        return decoding_records.Ticket(result, decode_ticks)
 
-    def steps(self, ticket: "_Ticket") -> tuple:
+    def steps(self, ticket: decoding_records.Ticket) -> tuple:
         """One step, the measured decode, holding the dispatcher throughout.
 
         The measured line is one decode() call with its copies and its
@@ -139,7 +139,9 @@ class MeasuredTable:
         )
         return (decode,)
 
-    def result(self, ticket: "_Ticket") -> decoding_records.DecodeResult:
+    def result(
+        self, ticket: decoding_records.Ticket
+    ) -> decoding_records.DecodeResult:
         """The region's answer from decsim's own Relay-BP decode."""
         return ticket.result
 
@@ -171,12 +173,6 @@ def nearest_in_size(rows: tuple, detectors: int):
         if abs(size_difference) < abs(nearest_difference):
             nearest = row
     return nearest
-
-
-@dataclasses.dataclass(frozen=True)
-class _Ticket:
-    result: decoding_records.DecodeResult
-    decode_ticks: int
 
 
 def _measured_rows(device: str, partition: str, bases: str) -> tuple:

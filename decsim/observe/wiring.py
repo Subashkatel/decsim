@@ -25,7 +25,7 @@ import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
 import decsim.observe.decode_records as decode_records_module
-import decsim.observe.flight_recorder as flight_recorder_module
+import decsim.observe.frame_corrections as frame_corrections_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
@@ -54,7 +54,6 @@ def observe(
     windows: Any,
     decoders: Any,
     process_name: str,
-    operations: tuple,
     traffic_ledger: link_traffic.TrafficLedger,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
@@ -113,20 +112,11 @@ def observe(
     )
     frame_corrections = _frame_corrections(control.pauli_frame)
     burst_flags = _connect_burst_flags(windows.burst_detector)
-    flight_recorder = flight_recorder_module.FlightRecorder(
-        round_events,
-        window_ledger,
-        runtime_stamps,
-        command_events,
-        frame_corrections,
-        operations,
-    )
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
         results=result_ledger,
         traffic=traffic_ledger,
-        flight_recorder=flight_recorder,
         frame_corrections=frame_corrections,
         trace_writer=trace_writer,
         data_movement=data_movement,
@@ -156,7 +146,6 @@ def _connect_window_ledger(window_manager) -> window_ledger_module.WindowLedger:
     sources = window_manager.window_sources()
     sources.window_planned.connect(ledger.window_planned)
     sources.window_committed.connect(ledger.window_committed)
-    sources.window_absorbed.connect(ledger.window_absorbed)
     return ledger
 
 
@@ -455,13 +444,12 @@ def _connect_decode_records(
     decoder_managers: tuple,
     decode_records: Optional[decode_records_module.DecodeRecordLedger],
 ) -> None:
-    """The ledger hears both terminal outcomes of either side's manager."""
+    """The ledger hears every request's end on either side's manager."""
     if decode_records is None:
         return
     for manager in decoder_managers:
         outcomes = manager.outcomes
         outcomes.trace.request_ended.connect(decode_records.request_ended)
-        outcomes.trace.service_ended.connect(decode_records.service_ended)
 
 
 def _connect_confidence(
@@ -547,14 +535,11 @@ def _connect_sampled_shots(
 
 def _frame_corrections(
     pauli_frame,
-) -> flight_recorder_module.FrameCorrections:
-    """The frame's accepted and landed corrections, for the recorder."""
-    corrections = flight_recorder_module.FrameCorrections()
+) -> frame_corrections_module.FrameCorrections:
+    """The frame's landed corrections."""
+    corrections = frame_corrections_module.FrameCorrections()
     if pauli_frame is None:
         return corrections
-    pauli_frame.trace.correction_accepted.connect(
-        corrections.correction_accepted
-    )
     pauli_frame.trace.correction_committed.connect(
         corrections.correction_committed
     )

@@ -52,7 +52,7 @@ def check_capacity_bits(key: str, value) -> None:
     """
     if value is None:
         return
-    if _is_whole_bit_count(value):
+    if is_whole_count(value):
         return
     raise ValueError(
         f"{key} must be at least one bit, or null for an unbounded "
@@ -78,19 +78,27 @@ def whole_count(
     unit: str,
     minimum: int = 1,
 ) -> int:
-    """A count of at least minimum, read from a yaml section's key.
-
-    A bool is refused though Python counts it an int, so true never
-    stands for one.
-    """
+    """A count of at least minimum, read from a yaml section's key."""
     value = section.get(key, default)
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and value >= minimum:
+    if is_whole_count(value, minimum):
         return value
     raise ValueError(
         f"{section_name}.{key} must be a whole number of {unit}, at least "
         f"{minimum} (got {value!r})"
     )
+
+
+def is_whole_count(value: object, minimum: int = 1) -> bool:
+    """Whether a yaml value is a whole number of at least minimum.
+
+    A bool is refused though Python counts it an int (bool is a subtype
+    of int), so a yaml `true` never stands for one of anything.
+    """
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, int):
+        return False
+    return value >= minimum
 
 
 def whole_counts(
@@ -124,6 +132,28 @@ def boolean(
     raise ValueError(
         f"{section_name}.{key} must be true or false, got {value!r}"
     )
+
+
+def finite_number(
+    section: Mapping, section_name: str, key: str, default: float
+) -> float:
+    """A finite number the yaml wrote, the default when it is silent.
+
+    YAML 1.1 loads `1e-3`, a number with no decimal point, as text, so
+    text that reads as a number is one; a bool is refused though float
+    takes it, since a flag is never a rate or a probability.
+    """
+    value = section.get(key, default)
+    sentence = f"{section_name}.{key} must be a finite number (got {value!r})"
+    if isinstance(value, bool):
+        raise ValueError(sentence)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(sentence) from None
+    if not math.isfinite(number):
+        raise ValueError(sentence)
+    return number
 
 
 def is_number(value: object) -> bool:
@@ -261,15 +291,6 @@ def _missing_setting_sentence(
         f"{reader} names {path}, but {where} has no key {missing}; its keys "
         f"are {keys}"
     )
-
-
-def _is_whole_bit_count(value) -> bool:
-    """A capacity a memory can have: a whole number of bits, never a flag."""
-    if value is True or value is False:
-        return False
-    if not isinstance(value, int):
-        return False
-    return value >= 1
 
 
 def _is_frequency(value) -> bool:

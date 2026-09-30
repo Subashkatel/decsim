@@ -42,7 +42,7 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | --- | --- | --- |
 | `run_dir` | required | the folder to read, or a trace file to draw |
 | `--figure` | 'timeline' | which figure to draw |
-| `--out` | None | where the figure goes |
+| `--out` | None | where the figure goes; beside its source if unset |
 
 ## `decsim run`
 

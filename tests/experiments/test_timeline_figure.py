@@ -357,6 +357,19 @@ def test_the_timeline_figure_is_written_from_the_file(tmp_path):
     assert status.st_size > 0
 
 
+def test_a_trace_file_with_no_out_path_draws_its_timeline_beside_it(
+    tmp_path,
+):
+    """A file is no folder to write into: the figure takes its name."""
+    trace_path = tmp_path / "point1.trace.json"
+    _traced_run(trace_path)
+
+    drawn = plots.figure("timeline", trace_path)
+
+    assert drawn == tmp_path / "point1.timeline.png"
+    assert drawn.is_file()
+
+
 @pytest.mark.parametrize(
     ("escalation_kind", "title"),
     [

@@ -204,7 +204,8 @@ def figure(name: str, run_dir, out_path=None) -> pathlib.Path:
     """Draw one named figure from a run folder, and return where it went.
 
     The names are the rows of FIGURES. The timeline also reads a trace
-    file named in place of the folder.
+    file named in place of the folder, and with no out_path draws
+    beside it.
     """
     import matplotlib
 
@@ -216,7 +217,7 @@ def figure(name: str, run_dir, out_path=None) -> pathlib.Path:
         )
     run_dir = pathlib.Path(run_dir)
     if out_path is None:
-        out_path = run_dir / FIGURES[name]
+        out_path = _default_out_path(name, run_dir)
     out_path = pathlib.Path(out_path)
     if name == "timeline":
         trace_path = _timeline_source(run_dir)
@@ -224,6 +225,23 @@ def figure(name: str, run_dir, out_path=None) -> pathlib.Path:
         return out_path
     stage_breakdown_plot(run_dir, out_path)
     return out_path
+
+
+def _default_out_path(name: str, source: pathlib.Path) -> pathlib.Path:
+    """Where a figure goes when no path is named: beside what it read.
+
+    A folder takes the figure's file name. A trace file takes its own
+    name, the trace's suffixes (measure.trace_path_for_shot) swapped for
+    the figure's, in the folder that holds it: normal.trace.json draws
+    normal.timeline.png.
+    """
+    figure_name = FIGURES[name]
+    if not source.is_file():
+        return source / figure_name
+    stem = source.name
+    for suffix in (".gz", ".json", ".trace"):
+        stem = stem.removesuffix(suffix)
+    return source.with_name(f"{stem}.{figure_name}")
 
 
 def _timeline_source(run_dir: pathlib.Path) -> pathlib.Path:

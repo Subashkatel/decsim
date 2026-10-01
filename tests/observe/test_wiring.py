@@ -40,7 +40,6 @@ import tests.observe.gate_point as gate_point
 EVERY_KNOB = {
     "record_switching_windows": True,
     "backlog_trace": True,
-    "decoder_memory_occupancy": True,
     "data_movement": True,
     "trace": "chrome",
 }
@@ -206,13 +205,11 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     assert asked.observation.decode_records is not None
     assert asked.observation.decode_backlog is not None
     assert asked.observation.decoder_utilization is not None
-    assert asked.observation.decoder_memory_occupancy is not None
     assert silent.observation.trace_writer is None
     assert silent.observation.data_movement is None
     assert silent.observation.decode_records is None
     assert silent.observation.decode_backlog is None
     assert silent.observation.decoder_utilization is not None
-    assert silent.observation.decoder_memory_occupancy is None
 
 
 class PortOnlyDecoder:
@@ -376,7 +373,6 @@ def _bare_observation(
         stages=stages,
         decode_backlog=None,
         decoder_utilization=utilization,
-        decoder_memory_occupancy=None,
         round_events=rounds,
         referee_audit=audit,
         sampled_shots=shots,

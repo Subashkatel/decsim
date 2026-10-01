@@ -25,7 +25,6 @@ OBSERVATION_KEYS = (
     "check_windows_with",
     "record_switching_windows",
     "backlog_trace",
-    "decoder_memory_occupancy",
     "trace",
     "trace_shots",
     "data_movement",
@@ -49,25 +48,23 @@ class ObservationSettings:
     Tesseract referee and counts disagreements, never priced.
     record_switching_windows keeps every request record for the switching
     study; backlog_trace builds the sampler of the rounds waiting to be
-    decoded; decoder_memory_occupancy builds the memory sweep's sampler (the
-    decoder utilization is always integrated, every run's pool columns read
-    it); data_movement builds the copy, reference and move counters the
-    RunResult carries. confidence_shot_count is how many shots of each
-    point, from seed 0, write their windows' confidence gaps to
+    decoded (the decoder utilization is always integrated, every run's pool
+    columns read it); data_movement builds the copy, reference and move
+    counters the RunResult carries. confidence_shot_count is how many shots
+    of each point, from seed 0, write their windows' confidence gaps to
     window_confidence.csv when a confidence signal decides the escalation;
     None writes every scored shot's.
 
-    The keys that only record the run, the log, the trace, the memory
-    occupancy listener and confidence_shot_count, are labels
-    (compare=False) and no part of a point's id, as sinter keeps its
-    output options out of a task's strong id
-    (sinter/_data/_task.py:167-204): each writer and listener schedules
-    nothing and calls no component (observe/trace_writer.py), so the
-    shots' rows are the same with them or without. The others
-    stay in the id because they change a shot's row: the referee fills
-    the referee columns, record_switching_windows and backlog_trace add
-    the wait and backlog columns (experiments/measure.py), and
-    data_movement adds the shot_data_movement rows.
+    The keys that only record the run, the log, the trace and
+    confidence_shot_count, are labels (compare=False) and no part of a
+    point's id, as sinter keeps its output options out of a task's strong id
+    (sinter/_data/_task.py:167-204): each writer schedules nothing and
+    calls no component (observe/trace_writer.py), so the shots'
+    rows are the same with them or without. The others stay in the id
+    because they change a shot's row: the referee fills the referee columns,
+    record_switching_windows and backlog_trace add the wait and backlog
+    columns (experiments/measure.py), and data_movement adds the
+    shot_data_movement rows.
     """
 
     log: str = dataclasses.field(compare=False, default="off")
@@ -75,9 +72,6 @@ class ObservationSettings:
     check_windows_with: str = "none"
     record_switching_windows: bool = False
     backlog_trace: bool = False
-    decoder_memory_occupancy: bool = dataclasses.field(
-        compare=False, default=False
-    )
     trace: str = dataclasses.field(compare=False, default="off")
     trace_shots: tuple = dataclasses.field(compare=False, default=(0,))
     data_movement: bool = False
@@ -101,9 +95,6 @@ class ObservationSettings:
             section, "observation", "record_switching_windows"
         )
         backlog_trace = config.boolean(section, "observation", "backlog_trace")
-        decoder_memory_occupancy = config.boolean(
-            section, "observation", "decoder_memory_occupancy"
-        )
         data_movement = config.boolean(section, "observation", "data_movement")
         confidence_shot_count = _confidence_shot_count(section)
         return cls(
@@ -114,7 +105,6 @@ class ObservationSettings:
             check_windows_with=check_windows_with,
             record_switching_windows=record_switching_windows,
             backlog_trace=backlog_trace,
-            decoder_memory_occupancy=decoder_memory_occupancy,
             data_movement=data_movement,
             confidence_shot_count=confidence_shot_count,
         )

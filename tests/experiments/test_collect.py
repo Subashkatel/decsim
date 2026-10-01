@@ -143,7 +143,6 @@ RECORDING_ONLY_OBSERVATION = {
     "trace_shots": [0, 1],
     "log": "print",
     "log_component_io": True,
-    "decoder_memory_occupancy": True,
     "confidence_shot_count": 7,
 }
 

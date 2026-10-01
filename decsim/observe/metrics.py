@@ -4,18 +4,14 @@ Each holds one quantity as a step function and integrates it, so a peak
 and a time average come out exact. A time average runs over the whole
 run, from tick 0 to the tick it is read, as gem5's AvgStor integrates
 from its last reset to curTick() (src/base/stats/storage.hh:130-213).
-DecoderUtilization and DecoderMemoryOccupancy step where the quantity
-changes, on the decoder
-pool's and the unit memories' own sources; DecodeBacklog keeps only its
-peak, sampled after every action.
-DecoderUtilization is always built, since every run's pool columns read
-each tier's busy fraction off it; the other two are built only when the
-observation section asks, backlog_trace for DecodeBacklog and
-decoder_memory_occupancy for DecoderMemoryOccupancy.
+DecoderUtilization steps where the quantity changes, on the decoder
+pool's own sources; DecodeBacklog keeps only its peak, sampled after
+every action. DecoderUtilization is always built, since every run's
+pool columns read each tier's busy fraction off it; DecodeBacklog is
+built only when the observation section asks for backlog_trace.
 """
 
 from collections.abc import Mapping
-from typing import Optional
 
 import decsim.observe.run_views as run_views
 
@@ -81,77 +77,6 @@ class DecoderUtilization:
             self._per_pool[pool].observe(tick, busy)
 
 
-class DecoderMemoryOccupancy:
-    """Bits held in each unit's input memory: now, peak, time average.
-
-    A listener on every unit memory's deposited and taken sources: the
-    held-bit count steps at the deposit and at the take, so the peak and
-    the integral are exact and nothing is sampled. The fraction of
-    capacity is reported when the unit's memory is finite, and an input
-    whose rounds state no size holds no bits and is counted as an
-    unsized admission instead.
-    """
-
-    def __init__(
-        self, engine, capacity_by_unit: Mapping[str, Optional[int]]
-    ) -> None:
-        self.engine = engine
-        self.by_unit: dict = {}
-        for unit_name, capacity_bits in capacity_by_unit.items():
-            self.by_unit[unit_name] = _UnitMemoryOccupancy(capacity_bits)
-
-    def deposited(self, unit_name: str, _job, decoder_input) -> None:
-        """One job's rounds landed in that unit's memory."""
-        occupancy = self.by_unit[unit_name]
-        bits = decoder_input.held_bits()
-        occupancy.deposit(self.engine.now, bits)
-        if decoder_input.size_bits() is None:
-            occupancy.unsized_admission_count += 1
-
-    def taken(self, unit_name: str, _job, decoder_input) -> None:
-        """One job's rounds were freed from that unit's memory."""
-        occupancy = self.by_unit[unit_name]
-        bits = decoder_input.held_bits()
-        occupancy.take(self.engine.now, bits)
-
-    def rows(self) -> list:
-        """One record per unit with its current and peak occupancy."""
-        rows = []
-        for unit_name, occupancy in self.by_unit.items():
-            unsized_admission_count = occupancy.unsized_admission_count
-            rows.append(
-                {
-                    "unit": unit_name,
-                    "capacity_bits": occupancy.capacity_bits,
-                    "occupied_bits": occupancy.held_bits,
-                    "peak_occupied_bits": occupancy.peak_bits,
-                    "admissions": occupancy.admissions,
-                    "unsized_admission_count": unsized_admission_count,
-                }
-            )
-        return rows
-
-    def result(self) -> dict:
-        """Per unit: capacity, occupancy now, peak, time average, fraction."""
-        per_unit = {}
-        for unit_name, occupancy in self.by_unit.items():
-            occupancy.integral.observe(self.engine.now, occupancy.held_bits)
-            average = occupancy.integral.time_average()
-            fraction = None
-            if occupancy.capacity_bits is not None:
-                fraction = average / occupancy.capacity_bits
-            per_unit[unit_name] = {
-                "capacity_bits": occupancy.capacity_bits,
-                "occupied_bits": occupancy.held_bits,
-                "peak_occupied_bits": occupancy.peak_bits,
-                "time_avg_occupied_bits": average,
-                "time_avg_occupied_fraction": fraction,
-                "admissions": occupancy.admissions,
-                "unsized_admission_count": occupancy.unsized_admission_count,
-            }
-        return {"per_unit": per_unit}
-
-
 class DecodeBacklog:
     """The most rounds of syndrome data produced and not yet decoded.
 
@@ -171,30 +96,6 @@ class DecodeBacklog:
             self.window_manager, self.decoder_managers
         )
         self.peak = max(self.peak, view.total_rounds)
-
-
-class _UnitMemoryOccupancy:
-    """One unit memory's held bits as its own events describe them."""
-
-    def __init__(self, capacity_bits: Optional[int]) -> None:
-        self.capacity_bits = capacity_bits
-        self.held_bits = 0
-        self.peak_bits = 0
-        self.admissions = 0
-        self.unsized_admission_count = 0
-        self.integral = _StepIntegral()
-
-    def deposit(self, tick: int, bits: int) -> None:
-        """Bits landed here; the count rises from this tick."""
-        self.held_bits += bits
-        self.peak_bits = max(self.peak_bits, self.held_bits)
-        self.admissions += 1
-        self.integral.observe(tick, self.held_bits)
-
-    def take(self, tick: int, bits: int) -> None:
-        """Bits were freed; the count falls from this tick."""
-        self.held_bits -= bits
-        self.integral.observe(tick, self.held_bits)
 
 
 class _StepIntegral:

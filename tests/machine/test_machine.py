@@ -623,24 +623,19 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     links = _price_path(
         settings.links, "strong_buffer_to_strong_decoder", 3_000_000
     )
-    observation = dataclasses.replace(
-        settings.observation, decoder_memory_occupancy=True
-    )
     settings = dataclasses.replace(
         settings,
         strong_syndrome_buffer=buffer,
         strong_decoder=decoder,
         links=links,
-        observation=observation,
     )
     run = _run(settings)
     assert max(run.strong_occupancies) <= window_bits
     units = run.machine.decoders.decoder_manager.pool.units
-    occupancy = run.machine.observation.decoder_memory_occupancy.result()
-    memory = occupancy["per_unit"][units[0].name]
-    assert memory["capacity_bits"] == window_bits
-    assert memory["peak_occupied_bits"] == window_bits
-    assert memory["admissions"] > 1
+    unit = units[0]
+    assert unit.memory.capacity_bits == window_bits
+    assert run.deposits.peak_held_bits(unit) == window_bits
+    assert run.deposits.deposit_count(unit) > 1
     _assert_direct_strong_path(run)
     _assert_actual_truth(run)
     _assert_drained(run)
@@ -3256,6 +3251,7 @@ class _Run:
     weak_writes: list
     strong_occupancies: list[int]
     decodes: declared_run.FinishedDecodes
+    deposits: declared_run.UnitMemoryDeposits
 
 
 def _program(producer: str) -> circuit_records.RepeatedStimCircuit:
@@ -3353,6 +3349,8 @@ def _run(
         strong_store.trace.round_stored.connect(observe)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
+    deposits = declared_run.UnitMemoryDeposits()
+    deposits.attach(machine)
     result = machine.run()
     return _Run(
         machine,
@@ -3362,6 +3360,7 @@ def _run(
         weak_writes,
         strong_occupancies,
         decodes,
+        deposits,
     )
 
 
@@ -3605,8 +3604,10 @@ def _run_static(
     strong_store.trace.round_released.connect(released)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
+    deposits = declared_run.UnitMemoryDeposits()
+    deposits.attach(machine)
     result = machine.run()
-    run = _Run(machine, result, [], [], weak_writes, [], decodes)
+    run = _Run(machine, result, [], [], weak_writes, [], decodes, deposits)
     return run, release_ticks_by_round
 
 

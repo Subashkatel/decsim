@@ -55,9 +55,7 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     bare = machine_module.Machine.build(settings, 0)
     bare.run()
     every_listener = dataclasses.replace(
-        settings.observation,
-        backlog_trace=True,
-        decoder_memory_occupancy=True,
+        settings.observation, backlog_trace=True
     )
     heard_settings = dataclasses.replace(settings, observation=every_listener)
     heard = machine_module.Machine.build(heard_settings, 0)

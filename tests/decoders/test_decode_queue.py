@@ -257,6 +257,7 @@ def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():
     operations = [
         declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
     ]
+    deposits = declared_run.UnitMemoryDeposits()
     machine = declared_run.switching_run(
         rounds=6,
         operations=operations,
@@ -264,15 +265,14 @@ def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():
         weak_units=4,
         bulk_strong=True,
         strong_input="in_place",
-        memory_occupancy=True,
+        probes=(deposits,),
     )
     every_batch = declared_run.log_lines_containing(
         machine, "START DECODE strong-batch"
     )
-    occupancy = machine.observation.decoder_memory_occupancy.result()
-    per_unit = occupancy["per_unit"]
     admissions = []
     for unit in machine.decoders.strong_decoder_manager.pool.units:
-        admissions.append(per_unit[unit.name]["admissions"])
+        deposit_count = deposits.deposit_count(unit)
+        admissions.append(deposit_count)
     assert every_batch
     assert admissions == [0]

@@ -33,7 +33,6 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.observe.settings as observe_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
@@ -41,6 +40,7 @@ import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 
 # one round of these test jobs: one fragment of two bits
 BITS_PER_ROUND = 2
@@ -264,14 +264,8 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     weak_decoder = decoder_settings.DecoderSettings(
         decoder=decoder, units=unit_count, unit_memory=unit_memory
     )
-    observation = observe_settings.ObservationSettings(
-        decoder_memory_occupancy=True
-    )
     return machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak_decoder,
-        observation=observation,
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
 
 
@@ -281,13 +275,13 @@ def test_every_unit_has_its_own_memory_and_ends_the_run_empty():
     six_rounds_bits = 6 * stabilizer_bits_per_round
     settings = _two_patch_memory_run(six_rounds_bits, unit_count=2)
     machine = machine_module.Machine.build(settings)
+    deposits = declared_run.UnitMemoryDeposits()
+    deposits.attach(machine)
     machine.run()
     units = machine.decoders.decoder_manager.pool.units
     names = [unit.name for unit in units]
     occupied = [unit.memory.occupied_bits for unit in units]
-    occupancy = machine.observation.decoder_memory_occupancy.result()
-    per_unit = occupancy["per_unit"]
-    admissions = [per_unit[name]["admissions"] for name in names]
+    admissions = [deposits.deposit_count(unit) for unit in units]
     assert names == ["default#0", "default#1"]
     assert occupied == [0, 0]
     assert sum(admissions) >= 2

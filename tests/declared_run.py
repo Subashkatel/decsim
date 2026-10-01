@@ -279,6 +279,50 @@ class FinishedDecodes:
         return decodes
 
 
+class UnitMemoryDeposits:
+    """A probe that hears every unit memory's deposits, on both sides.
+
+    It listens on each unit memory's deposited source and reads the
+    memory's own held bits there, which already count the input that
+    landed, so the most a memory ever held is the most it read here.
+    Attach it before the run.
+    """
+
+    def __init__(self) -> None:
+        self.held_bits_by_unit: dict = {}
+
+    def attach(self, machine) -> None:
+        """Hear the unit memories of both decoder managers the run has."""
+        part = machine.decoders
+        managers = (part.decoder_manager, part.strong_decoder_manager)
+        for manager in managers:
+            if manager is None:
+                continue
+            for unit in manager.pool.units:
+                self._hear(unit)
+
+    def deposit_count(self, unit) -> int:
+        """How many inputs landed in the unit's memory."""
+        held_bits = self.held_bits_by_unit[unit.name]
+        return len(held_bits)
+
+    def peak_held_bits(self, unit) -> int:
+        """The most bits the unit's memory held at once."""
+        held_bits = self.held_bits_by_unit[unit.name]
+        return max(held_bits)
+
+    def _hear(self, unit) -> None:
+        """Start the unit's list and connect its memory's deposits."""
+        self.held_bits_by_unit[unit.name] = []
+        listener = functools.partial(self._deposited, unit)
+        unit.memory.trace.deposited.connect(listener)
+
+    def _deposited(self, unit, _job, _decoder_input) -> None:
+        """The memory's held bits right after one input landed."""
+        held_bits = self.held_bits_by_unit[unit.name]
+        held_bits.append(unit.memory.occupied_bits)
+
+
 def operations_or_one(operations):
     """The operations given, or one memory operation on patch 1."""
     if operations is not None:
@@ -418,7 +462,6 @@ def switching_run(
     seed=0,
     io_trace=False,
     record=False,
-    memory_occupancy=False,
     weak_memory_bits=None,
     round_microseconds=ROUND_MICROSECONDS,
     bulk_strong=False,
@@ -472,7 +515,6 @@ def switching_run(
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace,
         record_switching_windows=record,
-        decoder_memory_occupancy=memory_occupancy,
     )
     qpu = declared_qpu(round_microseconds)
     controller = declared_controller()

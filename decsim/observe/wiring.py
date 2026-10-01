@@ -103,9 +103,6 @@ def observe(
         observation, engine, window_manager, decoder_managers
     )
     decoder_utilization = _decoder_utilization(engine, decoder_managers)
-    decoder_memory_occupancy = _decoder_memory_occupancy(
-        observation, engine, decoder_managers
-    )
     frame_corrections = _frame_corrections(control.pauli_frame)
     burst_flags = _connect_burst_flags(windows.burst_detector)
     return observation_module.Observation(
@@ -126,7 +123,6 @@ def observe(
         sampled_shots=sampled_shots,
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
-        decoder_memory_occupancy=decoder_memory_occupancy,
         round_events=round_events,
         burst_flags=burst_flags,
         confidence=confidence,
@@ -570,29 +566,6 @@ def _decode_backlog(
     decode_backlog = metrics.DecodeBacklog(window_manager, decoder_managers)
     engine.action_done.connect(decode_backlog.observe)
     return decode_backlog
-
-
-def _decoder_memory_occupancy(
-    observation: observe_settings.ObservationSettings,
-    engine: engine_module.Engine,
-    decoder_managers: tuple,
-) -> Optional[metrics.DecoderMemoryOccupancy]:
-    """The held-bit integral of every unit memory, only when asked for."""
-    if not observation.decoder_memory_occupancy:
-        return None
-    units = []
-    for manager in decoder_managers:
-        units.extend(manager.pool.units)
-    capacity_by_unit = {}
-    for unit in units:
-        capacity_by_unit[unit.name] = unit.memory.capacity_bits
-    occupancy = metrics.DecoderMemoryOccupancy(engine, capacity_by_unit)
-    for unit in units:
-        deposited = functools.partial(occupancy.deposited, unit.name)
-        unit.memory.trace.deposited.connect(deposited)
-        taken = functools.partial(occupancy.taken, unit.name)
-        unit.memory.trace.taken.connect(taken)
-    return occupancy
 
 
 def _connect_log(

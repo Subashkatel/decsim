@@ -54,7 +54,6 @@ class Observation:
     stages: stage_records_module.StageLedger
     decode_backlog: Optional[metrics.DecodeBacklog]
     decoder_utilization: metrics.DecoderUtilization
-    decoder_memory_occupancy: Optional[metrics.DecoderMemoryOccupancy]
     round_events: round_events_module.RoundEventRecorder
     referee_audit: referee_audit_module.RefereeAudit
     sampled_shots: sampled_shots_module.SampledShots

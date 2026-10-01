@@ -105,7 +105,8 @@ def test_relay_bp_5_runs_the_gpus_iterations_and_is_priced_by_its_line():
     window_decoder.commit_run_seed(reservation)
     ticket = table.submit(job, 0)
     result = table.result(ticket)
-    microseconds = 110.852 + 9.827 * 87
+    iteration_microseconds = 9.827 * 87
+    microseconds = 110.852 + iteration_microseconds
     assert result.iterations == 87
     assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(
         microseconds

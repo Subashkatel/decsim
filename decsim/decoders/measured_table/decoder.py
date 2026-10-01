@@ -221,7 +221,7 @@ def _decode_settings(
 
 
 def _keys_off_default(relay_settings: measurements.RelaySettings) -> dict:
-    """The relay_bp row's keys these settings set off its defaults."""
+    """Only what a tier changed, so a refusal names the keys to look at."""
     defaults = measurements.RelaySettings()
     keys = {}
     for field in dataclasses.fields(relay_settings):

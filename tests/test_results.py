@@ -48,6 +48,25 @@ TWO_AXIS_SWEEP = [
     }
 ]
 
+# Two blocks, of which only the second sweeps the round period.
+TWO_BLOCK_SWEEP = [
+    {
+        "axes": {
+            "workload.arguments.physical_error_probability": [0.003],
+            "qpu.distance": [3],
+        },
+        "collection": {"max_shots": 2},
+    },
+    {
+        "axes": {
+            "workload.arguments.physical_error_probability": [0.003],
+            "qpu.distance": [3],
+            "qpu.round_period_microseconds": [2.0],
+        },
+        "collection": {"max_shots": 2},
+    },
+]
+
 # The shots of a paired folder's first point: room for 25 shots that
 # only the first folder fails beside 5 that only the second fails.
 PAIRED_SHOTS = 200
@@ -669,6 +688,31 @@ def test_shots_scored_differently_print_their_paired_line(
     paired_line = _line_with(lines, " paired on ")
     assert row["unscored_shot_count"] == "2"
     assert " (2 unscored in either run, left out): " in paired_line
+
+
+def test_the_paired_csv_keeps_a_path_only_unshared_points_sweep(
+    tmp_path, capsys
+):
+    """The second folder lacks the period point; its column stays."""
+    folder = tmp_path / "two_blocks"
+    run_dir = _collected(folder, {"sweep": TWO_BLOCK_SWEEP})
+    fewer = tmp_path / "fewer"
+    shutil.copytree(run_dir, fewer)
+    sweep_path = fewer / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
+    default_period_rows = [
+        row for row in sweep_rows if row[PERIOD_AXIS] != "2.0"
+    ]
+    (shared_row,) = default_period_rows
+    _write_csv_rows(sweep_path, [shared_row])
+    out = tmp_path / "paired.csv"
+
+    command.main(["diff", str(run_dir), str(fewer), "--out", str(out)])
+    capsys.readouterr()
+
+    (paired_row,) = _csv_rows(out)
+    assert paired_row["point_id"] == shared_row["point_id"]
+    assert paired_row[PERIOD_AXIS] == shared_row[PERIOD_AXIS]
 
 
 def _failing_seeds(first_only: int, second_only: int) -> tuple:

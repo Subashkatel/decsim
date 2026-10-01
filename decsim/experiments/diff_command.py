@@ -130,8 +130,11 @@ def main(argv: list) -> None:
     if parsed.out is None:
         return
     rows = [dataclasses.asdict(comparison) for comparison in paired]
-    point_ids = [comparison.point_id for comparison in paired]
-    swept = run_folder.swept_values(first, point_ids)
+    # every point of the first folder names the swept paths, so the csv
+    # keeps sweep.csv's columns when the second folder holds fewer points
+    first_rows = _rows_by_metadata(first)
+    first_point_ids = [row["point_id"] for row in first_rows.values()]
+    swept = run_folder.swept_values(first, first_point_ids)
     out = pathlib.Path(parsed.out)
     report.write_csv(rows, out, swept)
 

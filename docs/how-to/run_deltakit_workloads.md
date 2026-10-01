@@ -146,15 +146,11 @@ replay of the physical-noise example works without the SDK installed.
 ## Declare separate readout transport channels
 
 This is a Python configuration surface shared by all circuit providers.
-`RepeatedStimCircuit.readout_partitions` maps fragment names (`first_round`,
-`repeated_round`, `final_round`, `single_round`) to tuples of
-`records.rounds.MeasurementPartition(patch_ids, measurement_count)`. Counts
-consume the raw measurement record consecutively, cover it completely, and name
-subsets of the owner's footprint. Omitted fragments remain aggregate.
+Each emission leaves the QPU as one readout of its operation's whole patch
+footprint.
 
-For finite `StimDevice` or `RecordedStimDevice`, `readout_partitions` maps the
-emitting operation id to a mapping from one-based stream round to partitions.
-Use distinct emitting operation ids for a terminal syndrome prefix and its
+For finite `StimDevice` or `RecordedStimDevice`, use distinct emitting
+operation ids for a terminal syndrome prefix and its
 separate data finalizer. Their declared fragment slots cover the combined round.
 The finite source currently infers separate terminal data only for its supported
 generated-circuit layout. With an explicit `measurement_rounds` map, keep final
@@ -168,12 +164,12 @@ names for independent queues or one name for a shared serializer. Use the
 existing `ChannelSettings` and `PathSettings` for bandwidth, propagation and
 setup. The default readout path handles any unmatched footprint.
 
-The runnable public-interface tests cover live out-of-order arrival and recorded
-measurement partitions at both detector-formation sites:
+The runnable public-interface tests cover a recorded joint stream and separate
+terminal emitters at both detector-formation sites:
 
 ```bash
 PYTHONPATH=. .venv-deltakit/bin/python -m pytest tests/machine/test_machine.py \
-  -k 'channel_reordering or interleaved_joint' -q
+  -k 'recorded_joint_stream or separate_terminal_emitters' -q
 ```
 
 This models channel transport after round completion. It does not establish
@@ -219,12 +215,11 @@ The end-to-end examples are reproducible through the public Machine tests:
 
 ```bash
 PYTHONPATH=. .venv-deltakit/bin/python -m pytest tests/machine/test_machine.py \
-  -k 'bb_block or bb_live or bb_higher or interleaved_joint' -q
+  -k 'bb_block or bb_live or bb_higher or recorded_joint_stream' -q
 ```
 
 They exercise live feedback, controller-side and decoder-side formation, full
-logical vectors, deliberate higher-index failure, and a recorded source with
-interleaved patch acquisitions. Direct Stim uses the same source contract.
+logical vectors, deliberate higher-index failure, and a recorded joint source. Direct Stim uses the same source contract.
 The hardware cadence and link/service costs remain configured model inputs;
 these checks do not establish calibrated neutral-atom transport or loss physics.
 

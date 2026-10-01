@@ -4,9 +4,9 @@ The packing time is charged once per complete round, however many
 fragments it arrived in (Caune et al. 2410.05202 measure 250 to 370 FPGA
 cycles for packetization, bus transfer, result return and the
 conditional together, an upper bound); a round arrives in several
-fragments when its source reads it out in more than one acquisition
-group (RepeatedStimCircuit.readout_partitions in decsim/records/
-circuits.py). The bound counts every round in flight
+fragments when its last checks and its data readout leave as separate
+emissions (finalize_stream_round in decsim/ports.py). The bound counts
+every round in flight
 through the stage from its emission, on the readout link, in assembly,
 held for store room or on its route (controller.packing_rounds_in_flight).
 Places are taken in emission order, and a round that finds the stage full

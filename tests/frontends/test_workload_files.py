@@ -2,11 +2,9 @@
 
 decsim.ops/1 carries every Operation field a maker sets, and the physical
 circuit is a finite .stim with its round json or the four live fragments
-with physical.json; a field or a readout group the files cannot hold is
-refused, since a run folder written without it would rerun otherwise.
+with physical.json; a field the files cannot hold is refused, since a
+run folder written without it would rerun otherwise.
 """
-
-import dataclasses
 
 import pytest
 import stim
@@ -14,7 +12,6 @@ import stim
 import decsim.frontends.workload_files as workload_files
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
-import decsim.records.rounds as round_records
 import decsim.records.workload as workload_records
 
 
@@ -87,17 +84,4 @@ def test_an_operation_field_the_file_form_does_not_carry_is_refused(tmp_path):
     workload = workload_records.Workload((staged,))
 
     with pytest.raises(ValueError, match=r"sets \['finalizes_stream_round'\]"):
-        workload_files.write_workload(workload, tmp_path)
-
-
-def test_live_fragments_with_readout_groups_are_refused(tmp_path):
-    """physical.json carries no groups, so a rerun would read out otherwise."""
-    workload = _live_workload()
-    partition = round_records.MeasurementPartition(("p",), 1)
-    program = dataclasses.replace(
-        workload.physical, readout_partitions={"repeated_round": (partition,)}
-    )
-    workload = dataclasses.replace(workload, physical=program)
-
-    with pytest.raises(ValueError, match="name readout_partitions"):
         workload_files.write_workload(workload, tmp_path)

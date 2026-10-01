@@ -946,10 +946,7 @@ measurement record even when a later round reaches the controller first.
 
 **Existing contracts.** `SyndromeSource.round_payloads` already returns ordered
 acquisitions, and `Link.send` already carries their complete patch footprint.
-They remain the handoffs. `MeasurementPartition` describes contiguous portions of
-the source's raw record. Live Stim fragments and finite/recorded Stim sources
-use that same record. Partitioning does not split or resample quantum state.
-An operation's explicit `syndrome_fragment_index` now denotes the first slot of
+They remain the handoffs. An operation's explicit `syndrome_fragment_index` now denotes the first slot of
 its contiguous group. Its fragment count covers the entire round, including a
 separate final-data emitter. This removes the former one-payload-only restriction.
 
@@ -978,13 +975,18 @@ refuses a routed readout path because it cannot select its physical channel;
 current decoder delay estimates continue through the same method.
 
 **Provider neutrality and limits.** Direct Stim, recorded workloads and optional
-Deltakit exports use the same partition and readout records. A future compiler
-can supply the same groups without changing transport, windows or decoders.
-Removing Deltakit leaves both routing and causal assembly useful. These cards
+Deltakit exports use the same readout records. Removing Deltakit leaves both routing and causal assembly useful. These cards
 model transport after a whole physical round's outcomes become available. They
 do not schedule separate analog acquisition resources or move measurements within
 a round. Unequal round durations, arbitrary decoded conditional gates and dynamic
 composition of retained histories remain separate work.
+
+**Narrowed since.** A source no longer splits one round's record into
+patch-keyed groups: each emission is one readout of its whole footprint, so a
+route selects a path per footprint. Every referent read waits for the whole
+round before decoding (Riverlane 2410.05202, IBM 2510.21600, Liu 2603.16203),
+and the measured split, one patch over several feedlines, is not a patch-keyed
+shape; per-feedline readout would be a new design keyed by qubit groups.
 
 ## D28. A strong decode runs on a backend behind one port of four methods
 

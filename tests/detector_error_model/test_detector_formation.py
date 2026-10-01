@@ -17,30 +17,6 @@ import stim
 from decsim.detector_error_model import detector_chronology, detector_formation
 
 
-def test_extending_a_live_table_keeps_the_previous_measurement() -> None:
-    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
-    first_table = detector_formation.build_formation_table(
-        first, 1, measurement_rounds={0: 1}, live_reach=1
-    )
-    former = detector_formation.StreamingDetectorFormer(first_table)
-    first_events = former.feed_packet(1, (1,))
-    assert first_events == [(0, 1)]
-    complete = first.copy()
-    complete.append_from_stim_program_text("M 0\nDETECTOR rec[-1] rec[-2]")
-    complete_table = detector_formation.build_formation_table(
-        complete, 2, measurement_rounds={0: 1, 1: 2}
-    )
-    former.extend_table(complete_table)
-    second_events = former.feed_packet(2, (1,))
-    converter = complete.compile_m2d_converter()
-    measurements = numpy.array([[1, 1]], dtype=numpy.bool_)
-    expected = converter.convert(
-        measurements=measurements, append_observables=False
-    )
-    assert first_events + second_events == [(0, 1), (1, 0)]
-    assert expected.tolist() == [[True, False]]
-
-
 def test_a_former_takes_a_table_whose_new_round_reads_a_round_never_given():
     """A seat that formed round 2 alone is given round 1 when round 3 needs it.
 
@@ -297,17 +273,6 @@ def test_a_packet_of_the_wrong_width_is_refused():
         former.feed_packet(1, [0, 1, 0])
 
 
-def test_a_former_fed_in_order_keeps_the_packet_the_next_round_reads():
-    """A surface-code round reads the one before it, and no earlier one."""
-    table = formation_table(4)
-    former = detector_formation.StreamingDetectorFormer(table)
-    empty_packet = [0] * 8
-    former.feed_packet(1, empty_packet)
-    former.feed_packet(2, empty_packet)
-    former.feed_packet(3, empty_packet)
-    assert set(former.packets) == {3}
-
-
 def test_a_former_holds_nothing_once_the_last_round_has_formed():
     """No round reads the last one, and it read the others already."""
     table = formation_table(2)
@@ -464,6 +429,46 @@ def test_a_live_former_keeps_the_rounds_its_reach_covers():
 
     assert kept_rounds == {2, 3}
     assert events == [(3, 1)]
+
+
+def test_a_live_former_forms_its_next_round_from_the_round_its_reach_kept():
+    """Round 1 stays for a round not yet run; round 2 then reads it."""
+    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
+    live_table = detector_formation.build_formation_table(
+        first, 1, measurement_rounds={0: 1}, live_reach=1
+    )
+    former = detector_formation.StreamingDetectorFormer(live_table)
+    first_events = former.feed_packet(1, (1,))
+    complete = first + stim.Circuit("M 0\nDETECTOR rec[-1] rec[-2]")
+    complete_table = detector_formation.build_formation_table(
+        complete, 2, measurement_rounds={0: 1, 1: 2}
+    )
+
+    former.extend_table(complete_table)
+    second_events = former.feed_packet(2, (1,))
+
+    converter = complete.compile_m2d_converter()
+    measurements = numpy.array([[1, 1]], dtype=numpy.bool_)
+    expected = converter.convert(
+        measurements=measurements, append_observables=False
+    )
+    assert expected.tolist() == [[True, False]]
+    assert first_events + second_events == [(0, 1), (1, 0)]
+
+
+def test_a_surface_code_former_holds_one_round_between_rounds():
+    """Each bulk round reads the one before, so each round lets the last go."""
+    table = formation_table(4)
+    former = detector_formation.StreamingDetectorFormer(table)
+    empty_packet = [0] * 8
+    former.feed_packet(1, empty_packet)
+    former.feed_packet(2, empty_packet)
+    after_second = set(former.packets)
+
+    former.feed_packet(3, empty_packet)
+
+    assert after_second == {2}
+    assert set(former.packets) == {3}
 
 
 def test_a_retired_round_lets_go_of_the_packets_it_alone_read():

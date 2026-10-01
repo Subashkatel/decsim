@@ -50,19 +50,6 @@ def test_property_live_records_match_stim_at_different_stop_lengths(
     source.validate_stream_length(owner, round_count)
 
 
-def _final_reaching_program() -> circuit_records.RepeatedStimCircuit:
-    """Round 1 reads out four times; the final round's rec[-4] reads back.
-
-    Repeated rounds read only themselves.
-    """
-    first = stim.Circuit("R 0\nREPEAT 4 {\nM 0\nDETECTOR rec[-1]\n}")
-    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
-    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
-    final = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-4]") + readout
-    single = first + readout
-    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
-
-
 def test_a_live_table_reaches_as_far_back_as_its_final_fragment_reads():
     """Two rounds in, the next may be the final one, three rounds back.
 
@@ -465,3 +452,16 @@ class _DeclaredFragments(circuit_records.RepeatedStimCircuit):
         """The fragment the base class declares."""
         declared = circuit_records.RepeatedStimCircuit.round_circuit
         return declared(self, round_index, is_final)
+
+
+def _final_reaching_program() -> circuit_records.RepeatedStimCircuit:
+    """Round 1 reads out four times; the final round's rec[-4] reads back.
+
+    Repeated rounds read only themselves.
+    """
+    first = stim.Circuit("R 0\nREPEAT 4 {\nM 0\nDETECTOR rec[-1]\n}")
+    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-4]") + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)

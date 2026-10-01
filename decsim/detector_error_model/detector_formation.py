@@ -341,10 +341,7 @@ class StreamingDetectorFormer:
     def feed_packet(
         self, round_index: int, bits: Iterable[int]
     ) -> list[tuple[int, int]]:
-        """Store one round's packet and form the detectors it completes.
-
-        take_packet then form_round.
-        """
+        """Store one round's packet and form the detectors it completes."""
         self.take_packet(round_index, bits)
         return self.form_round(round_index)
 

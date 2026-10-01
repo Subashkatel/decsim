@@ -181,24 +181,6 @@ def per_output_round_rate(shot_rate: float, outputs: int, rounds: int) -> float:
     return per_round_rate(output_rate, rounds)
 
 
-def mcnemar_p_value(
-    first_only_failures: int, second_only_failures: int
-) -> float:
-    """The exact two-sided McNemar p-value on a paired count fixed in advance.
-
-    McNemar (Psychometrika 12, 1947): with no difference, each discordant
-    seed (one point failed, the other did not) is a fair coin, so the
-    smaller count is Binomial(discordant_count, 1/2); the two-sided value
-    doubles its tail, at most one. Valid only when the paired count was
-    fixed before the run; any other stop takes the mixture sequence.
-    """
-    discordant_count = first_only_failures + second_only_failures
-    smaller = min(first_only_failures, second_only_failures)
-    tail = scipy.stats.binom.cdf(smaller, discordant_count, 0.5)
-    doubled_tail = 2 * tail
-    return float(min(doubled_tail, 1.0))
-
-
 def is_mixture_difference(
     first_only_failures: int, second_only_failures: int
 ) -> bool:

@@ -8,7 +8,6 @@
 - Per-round rate: sinter 1.16.0 shot_error_rate_to_piece_error_rate, and
   the root at 60 digits in mpmath 1.3.0 (installed with the test extra,
   through qldpc's sympy).
-- McNemar: scipy.stats.binomtest.
 - Mixture: the ratio of scipy's betabinom and binom probabilities; at a
   billion seeds, the beta function at 60 digits in mpmath; its crossing
   rate under the null, by a seeded simulation.
@@ -217,18 +216,6 @@ def test_the_per_round_rate_is_the_exact_root(shot_rate, rounds):
         exact = (1 - root) / 2
     expected = float(exact)
     assert per_round == pytest.approx(expected, rel=1e-12, abs=0)
-
-
-@pytest.mark.parametrize(
-    ("first_only", "second_only"),
-    [(12, 3), (3, 12), (7, 7), (0, 6), (40, 22), (1, 0)],
-)
-def test_mcnemar_is_the_exact_binomial_test(first_only, second_only):
-    p_value = failure_statistics.mcnemar_p_value(first_only, second_only)
-
-    discordant_count = first_only + second_only
-    binomial = scipy.stats.binomtest(first_only, discordant_count, 0.5)
-    assert p_value == pytest.approx(binomial.pvalue, rel=1e-12, abs=0)
 
 
 @pytest.mark.parametrize(

@@ -208,6 +208,8 @@ def _result_lines(first: pathlib.Path, second: pathlib.Path) -> tuple:
         comparison = _Comparison(point, first_shots, second_shots)
         point_lines = comparison.lines(first_row, second_row)
         lines.extend(point_lines)
+        if _fail_alike(point_paired):
+            continue
         point_text = _point_text(point)
         paired_line = _paired_line(point_text, point_paired)
         lines.append(paired_line)
@@ -385,6 +387,20 @@ def _with_paired_statistics(
         difference_low=low,
         difference_high=high,
     )
+
+
+def _fail_alike(paired: PairedComparison) -> bool:
+    """Whether every pair failed in both runs or in neither.
+
+    Two runs of one yaml decode the same shots to the same answers, and
+    a line saying so on every point would bury the lines that differ.
+    """
+    if paired.digest_mismatch_count or not paired.scored_pair_count:
+        return False
+    discordant_count = (
+        paired.first_only_failure_count + paired.second_only_failure_count
+    )
+    return discordant_count == 0
 
 
 def _paired_line(point_text: str, paired: PairedComparison) -> str:

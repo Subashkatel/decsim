@@ -53,12 +53,6 @@ TWO_AXIS_SWEEP = [
 PAIRED_SHOTS = 200
 # The seeds both paired folders fail.
 SHARED_FAILING_SEEDS = (0, 1, 2, 3, 4)
-# The paired line of a point whose 20 shots failed alike in both runs.
-SAME_SHOTS_TEXT = (
-    " paired on the 20 shots both runs scored of 20 shared shots (0 "
-    "unscored in either run, left out): 0 failed in the first only, 0 in "
-    "the second only; no difference shown by the mixture test;"
-)
 
 # Swept paths, each a column of sweep.csv.
 PROBABILITY_AXIS = "workload.arguments.physical_error_probability"
@@ -137,23 +131,17 @@ def _rewritten(run_dir, tmp_path, name: str, values: dict):
 
 
 def test_two_runs_of_one_yaml_are_the_same(runs, capsys):
-    """Nothing differs, and every shared point's shots fail alike."""
+    """Shots that fail alike in both runs add no line."""
     lines = _diff_printed(capsys, runs["first"], runs["second"])
 
-    low_point = _point_text(0.003)
-    high_point = _point_text(0.01)
-    low_line = _line_with(lines, low_point)
-    high_line = _line_with(lines, high_point)
-    assert lines[:5] == [
+    assert lines == [
         "settings:",
         "  the same",
         "inputs:",
         "  the same",
         "results:",
+        "  the same",
     ]
-    assert len(lines) == 7
-    assert SAME_SHOTS_TEXT in low_line
-    assert SAME_SHOTS_TEXT in high_line
 
 
 def test_diff_names_the_setting_and_the_input_that_changed(runs, capsys):
@@ -202,8 +190,9 @@ def test_diff_judges_a_logical_error_rate_by_its_exact_interval(
     apart_rate = _line_with(apart_lines, " logical_error_rate_estimate: ")
     assert inside_rate.endswith(", within error bars")
     assert apart_rate.endswith(", beyond error bars")
-    # the rate's line and each of the two points' paired lines
-    assert len(apart_lines) == 8
+    # the rate's line alone: the rewritten rows kept their shots, which
+    # fail alike in both folders and so add no paired line
+    assert len(apart_lines) == 6
 
 
 def test_diff_makes_no_comparison_of_a_rate_with_no_interval(

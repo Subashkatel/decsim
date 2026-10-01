@@ -64,9 +64,10 @@ its exact interval (with no interval on either side, no statistical
 comparison is possible, and `diff` says that), a mean over shots by the
 standard error of its shots in `shots.csv`. A column with no error bar (a median, a p99, a
 maximum, a count) is compared exactly. `sim_wall_seconds_per_shot` is
-the host's own time and is never compared. `results` then gives every
-point both folders hold its paired line (below), even when no column
-differs. A section with nothing to list says `the same`.
+the host's own time and is never compared. `results` then gives a
+point both folders hold its paired line (below) unless every pair
+failed in both runs or in neither. A section with nothing to list says
+`the same`.
 
 Two runs of one yaml on one commit give the same numbers when every
 decoder is priced by a card. A decoder charged its measured wall clock
@@ -86,7 +87,8 @@ while the two intervals still overlap.
 So `diff` also compares every point both folders hold shot by shot,
 and prints the result on a line after the point's results, whether or
 not its rate differs: two runs can print the same rate and still
-differ on the shots they share. It never assumes the shots are the
+differ on the shots they share. A point whose pairs all failed alike
+gets no line, so two runs of one yaml still read `the same`. It never assumes the shots are the
 same:
 
 - It takes the seeds both runs hold from seed 0 up to where the shorter

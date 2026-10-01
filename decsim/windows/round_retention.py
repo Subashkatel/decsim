@@ -15,26 +15,26 @@ read as a potential restart read (PotentialRestart, planned in
 frontends/planner.py), past its own request and landing: an earlier
 escalation may re-slice it as the restart window, which re-reads
 escalation.restart_reread_buffer_regions buffer regions of the strong
-region (Toshio et al. 2510.25222 Sec. III C). A read whose reader forms
-the detection events and never read the rounds before its first (a
-strong read, a restart read past a strong region) also holds the raw
-rounds before its first that its rounds' recipes read, under the
-read's own hold, as an HEVC decoder keeps each picture the current
-reference set names (FFmpeg hevc/refs.c:486-517). An escalation carries
-only those its strong seat has not formed (strong_rounds_before): that
-seat's former keeps a round an earlier strong read landed while a round
-it has not formed reads it. A window's own weak read holds none:
-the earlier window's read holds those rounds until it lands in the same
-decoder, which forms them and keeps each packet while a round it has
-not formed reads it (detector_formation.StreamingDetectorFormer), even
-when it forms a later block first, so the hold ends
-when the reader no longer needs the round in the store, as on a read of
-no formation. The read ends when the window before it commits, or when
-the window is re-sliced or absorbed. The stores hold slots and
-holders; which rounds a window needs is decided here, gem5's split
-between the cache that allocates a miss buffer and the queue that holds
-the entry
-(src/mem/cache/base.hh allocateMissBuffer).
+region (Toshio et al. 2510.25222 Sec. III C). When the strong side
+forms the detection events, a window's potential strong read also holds
+the raw rounds before its first that its rounds' recipes read, as an
+HEVC decoder keeps each picture the current reference set names (FFmpeg
+hevc/refs.c:486-517); an escalation carries only those its strong seat
+lacks (strong_rounds_before), since that seat's former keeps a round an
+earlier strong read landed while a round it has not formed reads it. A
+weak read holds none: the earlier window's read holds those rounds
+until it lands in the same decoder, which forms them and keeps each
+packet while a round it has not formed reads it
+(detector_formation.StreamingDetectorFormer), even when it forms a
+later block first, and a restart window's rounds before its start are
+in the strong region, whose request keeps them until the restart window
+commits. The hold ends when the reader no longer needs the round in the
+store, as on a read of no formation. The read ends when the window
+before it commits, or when the window is re-sliced or absorbed. The
+stores hold slots and holders; which rounds a window needs is decided
+here, gem5's split between the cache that allocates a miss buffer and
+the queue that holds the entry (src/mem/cache/base.hh
+allocateMissBuffer).
 """
 
 import functools
@@ -66,7 +66,6 @@ class RoundRetention:
         is_strong_context_retained: bool,
         primary_tier: window_records.DecoderTier,
         strong_side_seat: Optional[str] = None,
-        primary_reader_forms: bool = False,
     ) -> None:
         self.is_strong_context_retained = is_strong_context_retained
         self.primary_tier = primary_tier
@@ -74,8 +73,6 @@ class RoundRetention:
         # that forms the detection events (detection_events.formed_at),
         # None when none does
         self.strong_side_seat = strong_side_seat
-        # the decoder the primary store feeds forms the detection events
-        self.primary_reader_forms = primary_reader_forms
 
     # ---- the stores
 
@@ -166,23 +163,6 @@ class RoundRetention:
         the fresh request reads, the re-read range among them.
         """
         primary_reads = self.primary_read_keys(window)
-        self._repoint_reads(key, window, primary_reads)
-
-    def replace_restart_reads(
-        self, key: tuple, window: window_records.Window
-    ) -> None:
-        """Re-point a re-sliced restart window's live holds at its reads.
-
-        The restart window starts inside a strong region whose absorbed
-        windows no weak decode read, so its decoder never formed the
-        rounds before its start: when it forms the events, its read
-        also holds the raw rounds before its start that its rounds read
-        (primary_rounds_before).
-        """
-        primary_reads = self.primary_rounds_before(
-            window.operation_id, window.start_round, window.buffer_hi
-        )
-        primary_reads += self.primary_read_keys(window)
         self._repoint_reads(key, window, primary_reads)
 
     def release_restart_reads(self, key: tuple) -> None:
@@ -285,20 +265,6 @@ class RoundRetention:
         for round_index in needed_rounds:
             round_keys.append((operation_id, round_index))
         return round_keys
-
-    def primary_rounds_before(
-        self, operation_id: Any, first_round: int, last_round: int
-    ) -> list:
-        """The raw rounds a primary read of these rounds reads before them.
-
-        A decoder that forms the events and joins at first_round without
-        having formed it reads the rounds its recipes name before it
-        (detection_events, rounds_needed_before); which of them it still
-        needs is known only at the read, so the hold keeps them all.
-        """
-        if not self.primary_reader_forms:
-            return []
-        return self._rounds_read_before(operation_id, first_round, last_round)
 
     # ---- holds moving between owners
 

@@ -763,20 +763,6 @@ def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
     assert held_rounds == tuple((1, index) for index in range(3, 7))
 
 
-def test_a_forming_decoders_window_read_holds_no_round_before_its_start():
-    """An earlier read holds round 1 until its decoder forms it."""
-    table = surface_code_table()
-    reads = window_records.FormationReads(
-        primary_reader_forms=True, tables={1: table}
-    )
-
-    plan = seven_round_plan(reads, retain_strong_context=False)
-
-    owner, held_rounds = plan.buffering.weak_holds[0]
-    assert owner == decoding_records.WindowReads((1, 0))
-    assert held_rounds == ((1, 2), (1, 3), (1, 4), (1, 5), (1, 6))
-
-
 def test_a_double_windows_strong_hold_ends_at_the_operations_end():
     """The double-window region is clamped at the operation's last round.
 

@@ -338,7 +338,6 @@ def _retention(
         is_strong_context_retained=escalation_policy.requires_strong_context,
         primary_tier=escalation_policy.primary_tier,
         strong_side_seat=formation_reads.strong_side_seat,
-        primary_reader_forms=formation_reads.primary_reader_forms,
     )
 
 

@@ -142,9 +142,7 @@ def build_plan(
     formation_tables = _formation_tables(
         device, planned_operations, physical_tables, rounds_policy, code
     )
-    formation_reads = _formation_reads(
-        settings, escalation_policy, formation_tables
-    )
+    formation_reads = _formation_reads(settings, formation_tables)
     run_plan = planner.plan_execution(
         operations=views,
         planned_operation_ids=tuple(planned_ids),
@@ -541,25 +539,15 @@ def _operation_formation_table(operation, rounds_policy, code):
 
 
 def _formation_reads(
-    settings: machine_settings.MachineSettings,
-    escalation_policy,
-    tables: Mapping,
+    settings: machine_settings.MachineSettings, tables: Mapping
 ) -> window_records.FormationReads:
     """Which reads also hold the raw rounds their first round reads.
 
-    The primary store feeds the primary tier's decoder, whose seat
-    forms when detection_events.formed_at names it.
+    A strong read does, when a seat past the weak syndrome buffer forms.
     """
-    detection_events = settings.detection_events
-    strong_side_seat = detection_events.strong_side_seat()
-    primary_seat = "weak_decoder"
-    if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
-        primary_seat = "strong_decoder"
-    primary_reader_forms = primary_seat in detection_events.formed_at
+    strong_side_seat = settings.detection_events.strong_side_seat()
     return window_records.FormationReads(
-        strong_side_seat=strong_side_seat,
-        primary_reader_forms=primary_reader_forms,
-        tables=tables,
+        strong_side_seat=strong_side_seat, tables=tables
     )
 
 

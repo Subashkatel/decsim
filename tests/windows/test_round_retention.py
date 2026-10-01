@@ -37,9 +37,7 @@ def _store() -> syndrome_buffer_module.SyndromeBuffer:
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
 
-def _retention(
-    store, round_counts: dict, successors: dict, primary_reader_forms=False
-):
+def _retention(store, round_counts: dict, successors: dict):
     planner = types.SimpleNamespace(successors_by_operation=successors)
 
     def effective_round_count_for_window(operation_id, _window):
@@ -53,7 +51,6 @@ def _retention(
     retention = round_retention.RoundRetention(
         is_strong_context_retained=False,
         primary_tier=window_records.DecoderTier.WEAK,
-        primary_reader_forms=primary_reader_forms,
     )
     retention.weak_store = store
     retention.planner = planner
@@ -244,49 +241,6 @@ def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
     retention.detection_events = formation.SeatedFormation(None, settings)
 
     assert retention.strong_rounds_before(1, 5, 5) == []
-
-
-def _forming_decoder_window():
-    """Window 2 of a lookback run: rounds 5 to 8, its round 5 reads 3."""
-    return window_records.Window(
-        operation_id=1,
-        window_index=2,
-        commit_lo=5,
-        commit_hi=6,
-        buffer_hi=8,
-        round_count=4,
-    )
-
-
-def test_a_forming_decoders_window_holds_no_round_before_its_start():
-    """Window 1 holds rounds 3 and 4 until its decoder forms them."""
-    store = _store()
-    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
-    table = _lookback_table()
-    retention.detection_events = _placement(table)
-    window = _forming_decoder_window()
-
-    retention.register_window((1, 2), window)
-
-    reads = decoding_records.WindowReads((1, 2))
-    held = store.hold_round_identities(reads)
-    assert held == ((1, 5), (1, 6), (1, 7), (1, 8))
-
-
-def test_a_restart_read_holds_the_rounds_before_its_start():
-    """No weak decode read the absorbed rounds 3 and 4 its round 5 reads."""
-    store = _store()
-    retention = _retention(store, {1: 10}, {1: []}, primary_reader_forms=True)
-    table = _lookback_table()
-    retention.detection_events = _placement(table)
-    window = _forming_decoder_window()
-    retention.register_window((1, 2), window)
-
-    retention.replace_restart_reads((1, 2), window)
-
-    reads = decoding_records.WindowReads((1, 2))
-    held = store.hold_round_identities(reads)
-    assert held == ((1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8))
 
 
 def test_a_context_round_still_crossing_is_told_apart_from_one_released():

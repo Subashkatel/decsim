@@ -264,6 +264,34 @@ def test_a_source_with_no_recipes_holds_nothing_before_a_read():
     assert held[0] == (1, 4)
 
 
+def test_a_restart_read_holds_no_round_before_its_restart_start():
+    """Window 3 restarts at round 7, re-reading one buffer of three.
+
+    Round 7's detector reads round 5, inside the strong region, whose
+    request keeps its rounds until the restart window commits, so the
+    restart read holds none before round 7.
+    """
+    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    workload = _lookback_workload()
+    escalation = escalation_settings.EscalationSettings(
+        policy=SWITCHING_POLICY, strong_window="double_window"
+    )
+    weak_decoder_forms = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder", "strong_decoder")
+    )
+
+    plan = _plan(
+        qpu=source,
+        workload=workload,
+        escalation=escalation,
+        detection_events=weak_decoder_forms,
+    )
+
+    holds = dict(plan.run_plan.buffering.weak_holds)
+    restart = decoding_records.PotentialRestart((1, 3))
+    assert holds[restart][0] == (1, 7)
+
+
 def test_a_run_that_never_escalates_gets_the_flush_tail():
     plan = _plan()
 

@@ -358,14 +358,15 @@ def _plan_syndrome_buffering(
             window = execution.windows[(operation_id, index)]
             _hold_window(
                 execution,
+                operation_id,
                 window,
                 weak,
                 absorbs_weak_windows,
                 restart_reread_buffer_regions,
-                formation_reads,
             )
             _hold_strong_context(
                 execution,
+                operation_id,
                 window,
                 strong,
                 retain_strong_context,
@@ -388,21 +389,16 @@ def _plan_syndrome_buffering(
 
 def _hold_window(
     execution,
+    operation_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
-    formation_reads: window_records.FormationReads,
 ) -> None:
     """The window's weak syndrome buffer holds: the weak read, the restart read.
 
-    The weak decode reads the window from its start to its buffer. The
-    raw rounds before its start sit in an earlier window's read, which
-    holds them until it lands in the same decoder, and that decoder
-    forms them there and keeps them in its ring, so this read holds
-    none of them.
+    The weak decode reads the window from its start to its buffer.
     """
-    operation_id = window.operation_id
     key = (operation_id, window.window_index)
     round_keys = _read_keys(
         execution, operation_id, window.start_round, window.buffer_hi
@@ -411,21 +407,21 @@ def _hold_window(
     weak.add(reads, round_keys)
     _hold_restart_reads(
         execution,
+        operation_id,
         window,
         weak,
         absorbs_weak_windows,
         restart_reread_buffer_regions,
-        formation_reads,
     )
 
 
 def _hold_restart_reads(
     execution,
+    operation_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
-    formation_reads: window_records.FormationReads,
 ) -> None:
     """Under an absorbing strong window, a bounded window keeps its reads.
 
@@ -437,7 +433,6 @@ def _hold_restart_reads(
     window's own request and landing, until the window before it commits
     (round_retention.release_restart_reads).
     """
-    operation_id = window.operation_id
     if not absorbs_weak_windows:
         return
     if not _has_same_operation_dependency(window, operation_id):
@@ -448,10 +443,7 @@ def _hold_restart_reads(
         restart_reread_buffer_regions, buffer_rounds
     )
     lower_start = window.commit_lo - reread_rounds
-    restart_start = max(1, lower_start)
-    lower = formation_reads.primary_read_start(
-        operation_id, restart_start, window.buffer_hi
-    )
+    lower = max(1, lower_start)
     round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
     owner = decoding_records.PotentialRestart(
         (operation_id, window.window_index)
@@ -469,6 +461,7 @@ def _has_same_operation_dependency(window, operation_id) -> bool:
 
 def _hold_strong_context(
     execution,
+    operation_id,
     window,
     strong: "_HoldSet",
     retain_strong_context: bool,
@@ -485,7 +478,6 @@ def _hold_strong_context(
     that forms the events also reads the raw rounds before the commit
     that the region's rounds' recipes read.
     """
-    operation_id = window.operation_id
     if not retain_strong_context:
         return
     bounds = window_records.strong_context_bounds(window)

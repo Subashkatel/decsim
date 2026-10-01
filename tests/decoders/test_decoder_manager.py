@@ -141,15 +141,6 @@ def _window_job():
     )
 
 
-def _second_operations_job():
-    """The window job, reading round 1 of operation 2."""
-    job = _window_job()
-    job.operation_id = 2
-    second = dataclasses.replace(job.payloads[0], operation_id=2)
-    job.payloads = [second]
-    return job
-
-
 def test_a_fake_row_through_the_pool_decodes_the_window_once():
     engine = engine_module.Engine()
     log = log_writers.LogWriter()
@@ -636,3 +627,12 @@ def test_a_startable_job_with_input_starts_when_a_central_fifo_queue_would():
     expected_microseconds = (0, 0, 1, 2)
     expected = [config.microseconds_to_ticks(t) for t in expected_microseconds]
     assert starts == expected
+
+
+def _second_operations_job():
+    """The window job, reading round 1 of operation 2."""
+    job = _window_job()
+    job.operation_id = 2
+    second = dataclasses.replace(job.payloads[0], operation_id=2)
+    job.payloads = [second]
+    return job

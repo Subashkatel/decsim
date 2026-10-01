@@ -515,6 +515,22 @@ def test_a_seat_that_joins_late_knows_the_rounds_that_left_before_it():
     assert history.former_by_operation[1].packets == {}
 
 
+def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
+    """Rounds retire out of order; the watermark closes over all three."""
+    placement = seated(("weak_decoder",))
+    placement.form_at("weak_decoder", rounds(1, 2, 3))
+
+    placement.retire_round((1, 1))
+    placement.retire_round((1, 3))
+    placement.retire_round((1, 2))
+
+    history = placement.history_by_seat["weak_decoder"]
+    done_rounds = history.done_by_operation[1]
+    assert history.events_by_round == {}
+    assert done_rounds.through == 3
+    assert done_rounds.above == set()
+
+
 def test_a_seat_still_holding_a_raw_round_at_the_end_is_named():
     """Round 1 waits for round 2, which never formed here nor left a store."""
     placement = seated(("strong_decoder",))

@@ -322,7 +322,7 @@ class StreamingDetectorFormer:
     """
 
     def __init__(
-        self, table: FormationTable, done_rounds: Optional[set] = None
+        self, table: FormationTable, done_rounds: Optional["DoneRounds"] = None
     ):
         """done_rounds is the seat's record of the operation's done rounds.
 
@@ -333,7 +333,7 @@ class StreamingDetectorFormer:
         self.table = table
         self.packets: dict[int, tuple[int, ...]] = {}
         if done_rounds is None:
-            done_rounds = set()
+            done_rounds = DoneRounds()
         # the rounds whose reads of a packet are done here: formed here,
         # or retired, which no read forms here again
         self.done_rounds = done_rounds
@@ -448,6 +448,38 @@ class StreamingDetectorFormer:
                 )
             value ^= packet[slot]
         return value
+
+
+class DoneRounds:
+    """One operation's rounds done at a seat, in memory that does not grow.
+
+    Every round up to `through` is done, and the done rounds above it
+    are listed in `above`, as TCP acknowledges every byte below its
+    cumulative ACK and lists only the blocks received above it (RFC
+    2018, section 3). Every round is formed or retired once, in about
+    round order, so the watermark keeps up and `above` holds only the
+    rounds done ahead of an earlier one.
+    """
+
+    def __init__(self) -> None:
+        self.through = 0
+        self.above: set[int] = set()
+
+    def add(self, round_index: int) -> None:
+        """Mark the round done, moving the watermark over any run it closes."""
+        if round_index <= self.through:
+            return
+        self.above.add(round_index)
+        next_round = self.through + 1
+        while next_round in self.above:
+            self.above.remove(next_round)
+            self.through = next_round
+            next_round += 1
+
+    def __contains__(self, round_index: int) -> bool:
+        if round_index <= self.through:
+            return True
+        return round_index in self.above
 
 
 def split_measurements_into_packets(

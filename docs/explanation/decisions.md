@@ -1263,7 +1263,11 @@ forms it after, and a seat that forms only some rounds, the strong one
 above all, lets go of what only the others read. A seat records each
 retirement even before it has a former for the operation, and a
 former it makes later starts from that record, so a strong seat that
-joins late does not wait on rounds that left before it. At the end of a run no
+joins late does not wait on rounds that left before it. That record is
+a low watermark below which every round is done plus the rounds done
+above it (`DoneRounds`, as TCP keeps a cumulative ACK and its SACK
+blocks, RFC 2018), and a round's remembered events go when it retires,
+so nothing a seat keeps grows with the run. At the end of a run no
 seat holds a raw round (`check_settled`). On a live stream the
 former also keeps the last k packets, k the program's reach: how far
 back any detector of a fragment the stream can run reads, read off its
@@ -1363,7 +1367,8 @@ and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`, `rounds_read_by`,
 `rounds_read_before_first`, `rounds_reading`, `earlier_rounds_read`, `live_reach`,
-`rounds_read_back`, `StreamingDetectorFormer`, `form_shot`),
+`rounds_read_back`, `StreamingDetectorFormer`, `DoneRounds`,
+`form_shot`),
 `decsim/qpu/streaming_stim_device.py` (`_program_reach`),
 `decsim/detector_error_model/detection_event_formation.py`
 (`rounds_needed_before`, `earlier_rounds_read`, `retire_round`,

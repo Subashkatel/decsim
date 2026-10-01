@@ -885,6 +885,29 @@ def test_padded_and_heralded_records_shift_the_lookbacks_after_them():
     forms_like_stim(circuit, 2)
 
 
+def test_a_round_done_ahead_of_an_earlier_one_is_listed_above_the_mark():
+    done_rounds = detector_formation.DoneRounds()
+
+    done_rounds.add(1)
+    done_rounds.add(3)
+
+    assert done_rounds.through == 1
+    assert done_rounds.above == {3}
+    assert 3 in done_rounds
+    assert 2 not in done_rounds
+
+
+def test_the_round_that_closes_a_gap_moves_the_mark_over_the_rounds_after():
+    done_rounds = detector_formation.DoneRounds()
+    done_rounds.add(3)
+    done_rounds.add(2)
+
+    done_rounds.add(1)
+
+    assert done_rounds.through == 3
+    assert done_rounds.above == set()
+
+
 def _first_round_observed_circuit() -> stim.Circuit:
     """Three one-bit rounds; the observable reads rounds 1 and 3."""
     return stim.Circuit(

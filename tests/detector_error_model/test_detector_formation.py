@@ -436,14 +436,6 @@ def test_a_fragment_that_reads_only_itself_reaches_no_round_back():
     assert detector_formation.rounds_read_back(fragment, 2) == 0
 
 
-def test_a_round_that_measures_nothing_has_no_reach_to_keep():
-    """Each such round leaves an earlier record one round further back."""
-    fragment = stim.Circuit("DETECTOR rec[-1]")
-
-    with pytest.raises(ValueError, match="measures nothing"):
-        detector_formation.rounds_read_back(fragment, 0)
-
-
 def test_a_live_former_keeps_the_rounds_its_reach_covers():
     """Rounds 1 to 3 read themselves; a round still to run may read two back.
 

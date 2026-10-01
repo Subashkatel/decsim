@@ -149,11 +149,11 @@ both folders hold, for you to plot or test further:
 | --- | --- |
 | `point` | the point's metadata, as `diff` names it |
 | `first_point_id`, `second_point_id` | the point's id in each folder |
-| `shared_shots` | the seeds both runs hold, from 0 to the shorter run's stop |
-| `digest_mismatches` | shared seeds whose `sample_digest` differs; above 0, nothing is paired and the columns below are empty |
-| `unscored_shots` | shared seeds either run left unscored, left out of the pairs |
-| `scored_pairs` | the shared seeds both runs scored |
-| `first_only_failures`, `second_only_failures` | pairs that only the first run failed, and only the second |
+| `shared_shot_count` | the seeds both runs hold, from 0 to the shorter run's stop |
+| `digest_mismatch_count` | shared seeds whose `sample_digest` differs; above 0, nothing is paired and the columns below are empty |
+| `unscored_shot_count` | shared seeds either run left unscored, left out of the pairs |
+| `scored_pair_count` | the shared seeds both runs scored |
+| `first_only_failure_count`, `second_only_failure_count` | pairs that only the first run failed, and only the second |
 | `is_mixture_difference` | whether the mixture test says the two differ |
 | `difference_low`, `difference_high` | the 95 percent interval on the first run's failure rate on the pairs minus the second's; empty with no pair |
 

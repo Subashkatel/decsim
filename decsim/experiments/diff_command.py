@@ -68,12 +68,12 @@ class PairedComparison:
     point: str
     first_point_id: str
     second_point_id: str
-    shared_shots: int
-    digest_mismatches: int
-    unscored_shots: int
-    scored_pairs: Optional[int] = None
-    first_only_failures: Optional[int] = None
-    second_only_failures: Optional[int] = None
+    shared_shot_count: int
+    digest_mismatch_count: int
+    unscored_shot_count: int
+    scored_pair_count: Optional[int] = None
+    first_only_failure_count: Optional[int] = None
+    second_only_failure_count: Optional[int] = None
     is_mixture_difference: Optional[bool] = None
     difference_low: Optional[float] = None
     difference_high: Optional[float] = None
@@ -280,19 +280,22 @@ def _paired_comparison(
     second_by_seed = _shots_by_seed(second_shots, stop)
     first_held = _contiguous_seed_count(first_by_seed)
     second_held = _contiguous_seed_count(second_by_seed)
-    shared_shots = min(first_held, second_held)
-    mismatches, unscored, first_failures, second_failures = _shared_seeds(
-        first_by_seed, second_by_seed, shared_shots
-    )
+    shared_shot_count = min(first_held, second_held)
+    (
+        digest_mismatch_count,
+        unscored_shot_count,
+        first_failures,
+        second_failures,
+    ) = _shared_seeds(first_by_seed, second_by_seed, shared_shot_count)
     unpaired = PairedComparison(
         point=point,
         first_point_id=first_row["point_id"],
         second_point_id=second_row["point_id"],
-        shared_shots=shared_shots,
-        digest_mismatches=mismatches,
-        unscored_shots=unscored,
+        shared_shot_count=shared_shot_count,
+        digest_mismatch_count=digest_mismatch_count,
+        unscored_shot_count=unscored_shot_count,
     )
-    if mismatches:
+    if digest_mismatch_count:
         return unpaired
     return _with_paired_statistics(unpaired, first_failures, second_failures)
 
@@ -315,28 +318,33 @@ def _contiguous_seed_count(by_seed: dict) -> int:
 
 
 def _shared_seeds(
-    first_by_seed: dict, second_by_seed: dict, shared_shots: int
+    first_by_seed: dict, second_by_seed: dict, shared_shot_count: int
 ) -> tuple:
     """Digest mismatches, unscored shots, and each pair's two failures.
 
     A shot either folder left unscored got no correction there, so it
     has no failure bit to pair and is counted apart.
     """
-    mismatches = 0
-    unscored = 0
+    digest_mismatch_count = 0
+    unscored_shot_count = 0
     first_failures = []
     second_failures = []
-    for seed in range(shared_shots):
+    for seed in range(shared_shot_count):
         first_shot = first_by_seed[seed]
         second_shot = second_by_seed[seed]
         if first_shot["sample_digest"] != second_shot["sample_digest"]:
-            mismatches += 1
+            digest_mismatch_count += 1
         if not first_shot["is_scored"] or not second_shot["is_scored"]:
-            unscored += 1
+            unscored_shot_count += 1
             continue
         first_failures.append(first_shot["logical_failure"])
         second_failures.append(second_shot["logical_failure"])
-    return mismatches, unscored, first_failures, second_failures
+    return (
+        digest_mismatch_count,
+        unscored_shot_count,
+        first_failures,
+        second_failures,
+    )
 
 
 def _with_paired_statistics(
@@ -351,10 +359,10 @@ def _with_paired_statistics(
     second_only = second & first_survived
     first_only_count = numpy.count_nonzero(first_only)
     second_only_count = numpy.count_nonzero(second_only)
-    first_only_failures = int(first_only_count)
-    second_only_failures = int(second_only_count)
+    first_only_failure_count = int(first_only_count)
+    second_only_failure_count = int(second_only_count)
     is_difference = failure_statistics.is_mixture_difference(
-        first_only_failures, second_only_failures
+        first_only_failure_count, second_only_failure_count
     )
     interval = failure_statistics.difference_sequence(first, second)
     low = None
@@ -363,9 +371,9 @@ def _with_paired_statistics(
         low, high = interval
     return dataclasses.replace(
         unpaired,
-        scored_pairs=len(first),
-        first_only_failures=first_only_failures,
-        second_only_failures=second_only_failures,
+        scored_pair_count=len(first),
+        first_only_failure_count=first_only_failure_count,
+        second_only_failure_count=second_only_failure_count,
         is_mixture_difference=is_difference,
         difference_low=low,
         difference_high=high,
@@ -379,10 +387,10 @@ def _paired_line(point_text: str, paired: PairedComparison) -> str:
     shared seeds, because a run's own rate in sweep.csv also counts the
     shots past the shorter stop and the shots the other left unscored.
     """
-    if paired.digest_mismatches:
+    if paired.digest_mismatch_count:
         return (
-            f"  {point_text} not paired: {paired.digest_mismatches} of "
-            f"{paired.shared_shots} shared shots hold a different "
+            f"  {point_text} not paired: {paired.digest_mismatch_count} of "
+            f"{paired.shared_shot_count} shared shots hold a different "
             "sample_digest, so the two points did not decode the same shots"
         )
     verdict = "no difference shown"
@@ -394,11 +402,11 @@ def _paired_line(point_text: str, paired: PairedComparison) -> str:
             f"[{paired.difference_low:.6g}, {paired.difference_high:.6g}]"
         )
     return (
-        f"  {point_text} paired on the {paired.scored_pairs} shots both "
-        f"runs scored of {paired.shared_shots} shared shots "
-        f"({paired.unscored_shots} unscored in either run, left out): "
-        f"{paired.first_only_failures} failed in the first only, "
-        f"{paired.second_only_failures} in the second only; {verdict} by "
+        f"  {point_text} paired on the {paired.scored_pair_count} shots both "
+        f"runs scored of {paired.shared_shot_count} shared shots "
+        f"({paired.unscored_shot_count} unscored in either run, left out): "
+        f"{paired.first_only_failure_count} failed in the first only, "
+        f"{paired.second_only_failure_count} in the second only; {verdict} by "
         "the mixture test; on these pairs, not the whole runs, the failure "
         f"rate of the first minus the second is in {interval}"
     )

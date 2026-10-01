@@ -427,8 +427,8 @@ def test_the_paired_verdict_is_the_beta_binomial_mixture_against_twenty(
     log_evidence = log_beta + discordant_count * math.log(2)
     is_difference = log_evidence >= math.log(20)
     paired_line = _line_with(lines, " paired on ")
-    assert row["first_only_failures"] == str(first_only)
-    assert row["second_only_failures"] == str(second_only)
+    assert row["first_only_failure_count"] == str(first_only)
+    assert row["second_only_failure_count"] == str(second_only)
     assert row["is_mixture_difference"] == str(is_difference)
     assert f"; {word} by the mixture test;" in paired_line
 
@@ -449,7 +449,7 @@ def test_the_paired_interval_is_equation_24_on_the_shifted_differences(
     high = float(row["difference_high"])
     assert low == pytest.approx(expected_low, rel=1e-12, abs=0)
     assert high == pytest.approx(expected_high, rel=1e-12, abs=0)
-    assert row["scored_pairs"] == str(PAIRED_SHOTS)
+    assert row["scored_pair_count"] == str(PAIRED_SHOTS)
 
 
 def test_a_shared_shot_drawn_differently_refuses_the_pairing(
@@ -472,8 +472,8 @@ def test_a_shared_shot_drawn_differently_refuses_the_pairing(
 
     paired_line = _line_with(lines, " not paired: ")
     rate_line = _line_with(lines, " logical_error_rate_estimate: ")
-    assert row["digest_mismatches"] == "1"
-    assert row["scored_pairs"] == ""
+    assert row["digest_mismatch_count"] == "1"
+    assert row["scored_pair_count"] == ""
     assert row["is_mixture_difference"] == ""
     assert paired_line.endswith(
         " not paired: 1 of 200 shared shots hold a different "
@@ -499,9 +499,9 @@ def test_a_shot_either_run_left_unscored_is_counted_and_left_out(
     lines, row = _paired_diff(capsys, tmp_path, first, second)
 
     paired_line = _line_with(lines, " paired on ")
-    assert row["unscored_shots"] == "1"
-    assert row["scored_pairs"] == "199"
-    assert row["second_only_failures"] == "4"
+    assert row["unscored_shot_count"] == "1"
+    assert row["scored_pair_count"] == "199"
+    assert row["second_only_failure_count"] == "4"
     assert (
         " paired on the 199 shots both runs scored of 200 shared shots "
         "(1 unscored in either run, left out): "
@@ -527,8 +527,8 @@ def test_the_pairs_end_where_the_shorter_prefix_stopped(runs, tmp_path, capsys):
 
     _lines, row = _paired_diff(capsys, tmp_path, first, second)
 
-    assert row["shared_shots"] == "150"
-    assert row["first_only_failures"] == "25"
+    assert row["shared_shot_count"] == "150"
+    assert row["first_only_failure_count"] == "25"
 
 
 def test_equal_rates_still_print_the_paired_difference(runs, tmp_path, capsys):
@@ -552,8 +552,8 @@ def test_equal_rates_still_print_the_paired_difference(runs, tmp_path, capsys):
     paired_line = _line_with(lines, " paired on ")
     rate_lines = [line for line in lines if "logical_error_rate_est" in line]
     assert rate_lines == []
-    assert row["first_only_failures"] == "25"
-    assert row["second_only_failures"] == "5"
+    assert row["first_only_failure_count"] == "25"
+    assert row["second_only_failure_count"] == "5"
     assert "; differ by the mixture test;" in paired_line
 
 

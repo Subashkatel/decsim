@@ -498,6 +498,23 @@ def test_a_round_that_left_the_store_lets_its_seat_go_of_what_it_read():
     assert history.former_by_operation[1].packets == {}
 
 
+def test_a_seat_that_joins_late_knows_the_rounds_that_left_before_it():
+    """Round 1 is read by rounds 2 and 3; round 2 left before this seat formed.
+
+    The strong seat forms round 3 from round 1 given raw, and round 2's
+    read of round 1 was done already, so it holds nothing after.
+    """
+    placement = _twice_read_seated(("strong_decoder",))
+    placement.retire_round((1, 2))
+    third = (fragment(3, bits=(0,)),)
+    first = (fragment(1, bits=(0,)),)
+
+    placement.form_at("strong_decoder", third, first)
+
+    history = placement.history_by_seat["strong_decoder"]
+    assert history.former_by_operation[1].packets == {}
+
+
 def test_a_seat_still_holding_a_raw_round_at_the_end_is_named():
     """Round 1 waits for round 2, which never formed here nor left a store."""
     placement = seated(("strong_decoder",))
@@ -696,3 +713,17 @@ def _as_rows(events) -> list:
         bits = tuple(int(bit) for bit in shot)
         rows.append(bits)
     return rows
+
+
+def _twice_read_seated(formed_at) -> formation.SeatedFormation:
+    """Three one-bit rounds; rounds 2 and 3 each read round 1."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1] rec[-2]\n"
+        "M 0\nDETECTOR rec[-1] rec[-3]"
+    )
+    table = detector_formation.build_formation_table(
+        circuit, 3, measurement_rounds={0: 1, 1: 2, 2: 3}
+    )
+    settings = event_settings.DetectionEventSettings(formed_at=formed_at)
+    source = CircuitSource(table)
+    return formation.SeatedFormation(source, settings)

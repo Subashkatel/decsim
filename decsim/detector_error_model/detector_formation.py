@@ -321,12 +321,22 @@ class StreamingDetectorFormer:
     observable, which no seat reads (form_shot keeps them).
     """
 
-    def __init__(self, table: FormationTable):
+    def __init__(
+        self, table: FormationTable, done_rounds: Optional[set] = None
+    ):
+        """done_rounds is the seat's record of the operation's done rounds.
+
+        A seat that forms only some rounds may make its former after
+        rounds have already left the store, so the seat keeps that
+        record and the former shares it.
+        """
         self.table = table
         self.packets: dict[int, tuple[int, ...]] = {}
+        if done_rounds is None:
+            done_rounds = set()
         # the rounds whose reads of a packet are done here: formed here,
         # or retired, which no read forms here again
-        self.done_rounds: set[int] = set()
+        self.done_rounds = done_rounds
 
     def feed_packet(
         self, round_index: int, bits: Iterable[int]

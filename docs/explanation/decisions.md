@@ -1260,7 +1260,10 @@ round is retired at every seat once it leaves the store the plan's
 windows read (`retire_round`): every read, an escalation's included,
 holds its rounds there until they have landed and formed, so no read
 forms it after, and a seat that forms only some rounds, the strong one
-above all, lets go of what only the others read. At the end of a run no
+above all, lets go of what only the others read. A seat records each
+retirement even before it has a former for the operation, and a
+former it makes later starts from that record, so a strong seat that
+joins late does not wait on rounds that left before it. At the end of a run no
 seat holds a raw round (`check_settled`). On a live stream the
 former also keeps the last k packets, k the program's reach: how far
 back any detector of a fragment the stream can run reads, read off its

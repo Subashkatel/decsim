@@ -205,6 +205,9 @@ class _SeatHistory:
         # placement, silent for a history on its own
         self.state_held = trace_source.SILENT
         self.former_by_operation: dict = {}
+        # per operation, the rounds formed here or retired, kept from
+        # the first retirement on, so a former made later knows them
+        self.done_by_operation: dict = {}
         self.events_by_round: dict = {}
 
     @property
@@ -278,10 +281,13 @@ class _SeatHistory:
     def retire(self, operation_id: Any, round_index: int) -> None:
         """No read forms this round here again; held packets may go.
 
-        The former takes the source's newest table first, so a live
-        stream that has since run its final round no longer keeps rounds
-        for a round still to run.
+        A seat with no former yet records the round, for the former it
+        makes later. The former takes the source's newest table first,
+        so a live stream that has since run its final round no longer
+        keeps rounds for a round still to run.
         """
+        done_rounds = self.done_by_operation.setdefault(operation_id, set())
+        done_rounds.add(round_index)
         if operation_id not in self.former_by_operation:
             return
         former = self._former_for(operation_id)
@@ -404,7 +410,10 @@ class _SeatHistory:
         table = self.recipes.formation_table(operation_id)
         former = self.former_by_operation.get(operation_id)
         if former is None:
-            former = detector_formation.StreamingDetectorFormer(table)
+            done_rounds = self.done_by_operation.setdefault(operation_id, set())
+            former = detector_formation.StreamingDetectorFormer(
+                table, done_rounds
+            )
             self.former_by_operation[operation_id] = former
             return former
         if former.table is not table:

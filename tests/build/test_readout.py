@@ -470,7 +470,6 @@ class _OneRoundSource:
             readout_slot_start=None,
             detectors=(recipe,),
             observables=(),
-            max_record_span=0,
         )
 
     @staticmethod

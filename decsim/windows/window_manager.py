@@ -195,6 +195,7 @@ class WindowManager:
         if models_changed:
             self.planner.refresh_stream_models(stream_id)
         self.tracker.seal(stream_id, stream_round_count)
+        self.retention.release_later_stream_reads(stream_id)
         self.check_windows_for_operation(stream_id)
         self.results.finish_workload_if_ready()
 

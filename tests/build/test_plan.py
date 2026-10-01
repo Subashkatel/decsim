@@ -17,7 +17,10 @@ import decsim.build.plan as plan_build
 import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
+import decsim.detector_error_model.settings as event_settings
+import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -35,6 +38,8 @@ import tests.declared_run as declared_run
 
 # the decoder manager section a run gets when the test names none
 NO_BULK_STRONG = decoder_settings.DecoderManagerSettings()
+# the detection events section a run gets when the test names none
+CONTROLLER_FORMS = event_settings.DetectionEventSettings()
 
 
 def _plan(
@@ -45,6 +50,7 @@ def _plan(
     idle_policy=None,
     workload=None,
     decoder_manager=NO_BULK_STRONG,
+    detection_events=CONTROLLER_FORMS,
 ):
     """The plan of a six-round memory run with the given sections."""
     if idle_policy is None:
@@ -70,6 +76,7 @@ def _plan(
         windows=windows,
         idle_policy=idle_policy,
         decoder_manager=decoder_manager,
+        detection_events=detection_events,
     )
     policy = escalation_build.build_escalation_policy(
         escalation, settings.weak_decoder
@@ -191,6 +198,98 @@ def test_live_fragments_build_the_streaming_source_from_a_yaml_kind():
     plan = _plan(qpu=source, workload=workload)
 
     assert isinstance(plan.device, streaming_stim_device.StreamingStimDevice)
+
+
+def _lookback_workload():
+    """Ten rounds of one qubit; round r's detector is rec[-1] ^ rec[-3]."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\n"
+        "REPEAT 8 {\nM 0\nDETECTOR rec[-1] rec[-3]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    operation = declared_run.memory_operation()
+    workload = workload_records.Workload((operation,), {1: 10}, physical)
+    section = declared_run.declared_workload(None, 10)
+    return section.running(workload)
+
+
+def _second_window_strong_hold(plan) -> tuple:
+    """The rounds the plan holds for a strong redo of the second window."""
+    holds = dict(plan.run_plan.buffering.potential_holds)
+    potential = decoding_records.PotentialStrong((1, 1))
+    return holds[potential]
+
+
+FIXED_THRESHOLD = threshold_sources.FixedThreshold(0.5)
+DECLARED_COLLABORATORS = escalation_policies.EscalationCollaborators(
+    threshold=FIXED_THRESHOLD,
+    expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+)
+SWITCHING_POLICY = escalation_policies.Switching(DECLARED_COLLABORATORS)
+SWITCHING = escalation_settings.EscalationSettings(policy=SWITCHING_POLICY)
+STRONG_SIDE_FORMS = event_settings.DetectionEventSettings(
+    formed_at=("weak_decoder", "strong_decoder")
+)
+
+
+def test_a_forming_strong_read_holds_what_its_circuit_reads_before_it():
+    """The second window commits from round 4, whose detector reads 2."""
+    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    workload = _lookback_workload()
+
+    plan = _plan(
+        qpu=source,
+        workload=workload,
+        escalation=SWITCHING,
+        detection_events=STRONG_SIDE_FORMS,
+    )
+
+    held = _second_window_strong_hold(plan)
+    assert held[:3] == ((1, 2), (1, 3), (1, 4))
+
+
+def test_a_source_with_no_recipes_holds_nothing_before_a_read():
+    source = qpu_settings.QpuSettings(kind="syndrome_bits", distance=3)
+    workload = _lookback_workload()
+
+    plan = _plan(
+        qpu=source,
+        workload=workload,
+        escalation=SWITCHING,
+        detection_events=STRONG_SIDE_FORMS,
+    )
+
+    held = _second_window_strong_hold(plan)
+    assert held[0] == (1, 4)
+
+
+def test_a_restart_read_holds_no_round_before_its_restart_start():
+    """Window 3 restarts at round 7, re-reading one buffer of three.
+
+    Round 7's detector reads round 5, inside the strong region, whose
+    request keeps its rounds until the restart window commits, so the
+    restart read holds none before round 7.
+    """
+    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    workload = _lookback_workload()
+    escalation = escalation_settings.EscalationSettings(
+        policy=SWITCHING_POLICY, strong_window="double_window"
+    )
+    weak_decoder_forms = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder", "strong_decoder")
+    )
+
+    plan = _plan(
+        qpu=source,
+        workload=workload,
+        escalation=escalation,
+        detection_events=weak_decoder_forms,
+    )
+
+    holds = dict(plan.run_plan.buffering.weak_holds)
+    restart = decoding_records.PotentialRestart((1, 3))
+    assert holds[restart][0] == (1, 7)
 
 
 def test_a_run_that_never_escalates_gets_the_flush_tail():

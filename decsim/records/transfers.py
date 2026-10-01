@@ -166,14 +166,16 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """An escalated region's transfer: its rounds, in its request's name.
 
-        The footprint covers every packet; the round range names the first
-        and last packets.
+        The footprint covers every packet, the rounds before the strong
+        window's first among them; the round range names the first and
+        last packets.
         """
-        first_packet = region.packets[0]
-        last_packet = region.packets[-1]
+        carried = region.carried_packets
+        first_packet = carried[0]
+        last_packet = carried[-1]
         fragments = []
         round_keys = []
-        for packet in region.packets:
+        for packet in carried:
             fragments.extend(packet.fragments)
             round_keys.append((packet.operation_id, packet.round_index))
         patch_ids = round_records.fragment_patch_ids(fragments)

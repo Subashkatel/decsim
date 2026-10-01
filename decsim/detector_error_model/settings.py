@@ -117,12 +117,16 @@ class DetectionEventSettings:
             cycles_per_round=cycles_per_round,
         )
 
-    def forms_on_the_strong_side(self) -> bool:
-        """Whether a seat past the weak syndrome buffer forms the events."""
+    def strong_side_seat(self) -> Optional[str]:
+        """The seat past the weak syndrome buffer that forms; None for none.
+
+        Every path crosses exactly one forming seat (formed_at), so the
+        escalation path has at most one past the weak syndrome buffer.
+        """
         for seat in self.formed_at:
             if seat in STRONG_SIDE_SEATS:
-                return True
-        return False
+                return seat
+        return None
 
     def cycles_for(self, round_count: int) -> int:
         """The cycles of forming round_count rounds together; none for none."""

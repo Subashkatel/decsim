@@ -15,15 +15,22 @@ processing on the decoder's own chip (2510.21600 lines 235-237).
 """
 
 import dataclasses
+import functools
 import pathlib
 
 import numpy
 import pytest
+import stim
 
 import decsim.build.decoders as decoder_build
+import decsim.escalation.policies as escalation_policies
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
+import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
+import decsim.records.workload as workload_records
+import tests.declared_run as declared_run
 
 CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
@@ -768,6 +775,135 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     assert mismatched == []
 
 
+# a seed that escalates a window whose predecessor stayed weak
+LOOKBACK_SEED = 5
+
+
+@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
+def test_a_switching_run_on_a_two_round_lookback_consumes_stims_events(
+    formed_at,
+):
+    """A region after a weak window lands Stim's events at every unit.
+
+    The strong side joins that region mid-stream and is given the two
+    raw rounds its first round reads (stim.Circuit.compile_m2d_converter
+    on the rows the QPU emitted is the referent).
+    """
+    machine = _lookback_switching_machine(formed_at, LOOKBACK_SEED)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert mismatched == []
+
+
+@pytest.mark.parametrize("unit_count", [1, 3])
+def test_a_seam_formed_after_a_later_block_reads_the_rounds_it_kept(
+    unit_count: int,
+):
+    """Round 4 reads round 2, formed two blocks before; Stim agrees.
+
+    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
+    the referent for every unit's landed rounds.
+    """
+    machine = _parallel_lookback_machine(unit_count)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert landed
+    assert mismatched == []
+
+
+@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
+def test_a_strong_region_is_given_every_round_its_later_rounds_read(
+    formed_at,
+):
+    """Round 4 of the region from round 3 reads round 1; Stim agrees.
+
+    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
+    the referent for every unit's landed rounds.
+    """
+    machine = _reach_growing_machine(formed_at)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert mismatched == []
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_a_strong_seat_lets_go_of_rounds_only_the_weak_side_forms(
+    round_count: int,
+):
+    """The rounds that read a region's rounds form at the weak side alone.
+
+    They leave the store once formed there, so the strong seat lets go
+    of the packets they read: it holds at most five one-bit packets at
+    48 rounds as at 24, the regions in flight and the rounds they read,
+    and none at the end.
+    """
+    machine = _every_third_escalating_machine(round_count)
+    held_by_seat = {}
+    note = functools.partial(_note_packets, held_by_seat)
+    machine.readout.detection_events.trace.state_held.connect(note)
+
+    machine.run()
+
+    held = held_by_seat["strong_decoder"]
+    assert max(held) <= 5
+    assert held[-1] == 0
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_no_seat_or_store_keeps_a_round_for_an_observable(round_count: int):
+    """Every round's bit is in the observable, which folds as it arrives.
+
+    Each seat holds the two rounds back its detectors read, and the weak
+    store the rounds in flight, at 48 rounds as at 24.
+    """
+    machine = _every_third_escalating_machine(round_count, EVERY_ROUND_OBSERVED)
+    held_by_seat = {}
+    note = functools.partial(_note_packets, held_by_seat)
+    machine.readout.detection_events.trace.state_held.connect(note)
+    store = machine.readout.weak_syndrome_buffer
+    stored_rounds = []
+    count = functools.partial(_note_stored_rounds, store, stored_rounds)
+    store.trace.round_stored.connect(count)
+
+    machine.run()
+
+    assert max(held_by_seat["weak_decoder"]) <= 3
+    assert max(held_by_seat["strong_decoder"]) <= 3
+    assert max(stored_rounds) <= 3
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_no_seat_keeps_a_record_of_rounds_once_the_run_ends(round_count: int):
+    """Every round has retired: no events, claims or done rounds stay."""
+    machine = _every_third_escalating_machine(round_count)
+
+    machine.run()
+
+    weak = _bookkeeping_of(machine, "weak_decoder")
+    strong = _bookkeeping_of(machine, "strong_decoder")
+    assert weak == {"events": 0, "claims": 0, "done_above": 0}
+    assert strong == {"events": 0, "claims": 0, "done_above": 0}
+
+
+# an observable record of the round just measured, after its detector
+EVERY_ROUND_OBSERVED = "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+
+
 def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
     """Five cycles at the strong buffer: formed after it lands, sent once.
 
@@ -812,3 +948,232 @@ def test_the_forming_seat_reports_the_two_raw_rounds_it_holds(where, seat):
 
     data_movement = machine.observation.data_movement
     assert data_movement.formation_state_bits_by_seat == {seat: 25}
+
+
+def _lookback_workload(
+    settings, noisy_round: str = "X_ERROR(0.05) 0\nM(0.05) 0\n"
+):
+    """Ten rounds of one qubit whose detector reads two rounds back.
+
+    Round r's detector is rec[-1] ^ rec[-3], so a seat that joins at a
+    region reads two raw rounds before it.
+    """
+    circuit = stim.Circuit(
+        f"R 0\n{noisy_round}DETECTOR rec[-1]\n"
+        f"{noisy_round}DETECTOR rec[-1]\n"
+        f"REPEAT 8 {{\n{noisy_round}DETECTOR rec[-1] rec[-3]\n}}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+    workload = workload_records.Workload((operation,), {1: 10}, physical)
+    return settings.workload.running(workload)
+
+
+def _lookback_switching_machine(formed_at, seed):
+    """Union-find switching on the lookback circuit, windows of 2 + 2."""
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        formed_at,
+    )
+    settings = machine.settings
+    workload = _lookback_workload(settings)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=2, buffer_rounds=2
+    )
+    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
+    escalation = dataclasses.replace(
+        settings.escalation, confidence="cluster_gap", gap_threshold_db=15.0
+    )
+    settings = dataclasses.replace(
+        settings,
+        workload=workload,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, seed)
+
+
+def _parallel_lookback_machine(unit_count: int):
+    """Skoric's blocks of one round plus one on the two-round lookback.
+
+    The weak decoder forms, on unit_count units: rounds 1 to 3, then 5
+    to 7, then the seam 3 to 5, whose round 4 reads round 2.
+    """
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        BOTH_DECODERS,
+    )
+    settings = machine.settings
+    # a flipped readout alone, so no fault straddles two blocks' commits
+    workload = _lookback_workload(settings, "M(0.15) 0\n")
+    windows = dataclasses.replace(
+        settings.windows, kind="parallel", commit_rounds=1, buffer_rounds=1
+    )
+    # a declared decoder decodes no syndrome, so no fault's ownership is
+    # asked of the blocks; the landed events are the check
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_no_window)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, decoder=weak, units=unit_count
+    )
+    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
+    collaborators = escalation_policies.EscalationCollaborators()
+    policy = escalation_policies.Baseline(collaborators)
+    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    settings = dataclasses.replace(
+        settings,
+        workload=workload,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _is_no_window(job) -> bool:
+    del job
+    return False
+
+
+def _reach_growing_machine(formed_at):
+    """The second window of a reach-growing circuit escalates, alone.
+
+    Ten rounds of rec[-1], then rec[-1] ^ rec[-4] from round 4 on, in
+    windows of two plus two, so the strong region from round 3 reads
+    round 3 alone first and round 1 for its round 4. The weak decoder
+    declares the confidence, so only window 1 escalates.
+    """
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        formed_at,
+    )
+    settings = machine.settings
+    noisy_round = "M(0.15) 0\n"
+    circuit = stim.Circuit(
+        f"R 0\nREPEAT 3 {{\n{noisy_round}DETECTOR rec[-1]\n}}\n"
+        f"REPEAT 7 {{\n{noisy_round}DETECTOR rec[-1] rec[-4]\n}}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+    workload = workload_records.Workload((operation,), {1: 10}, physical)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=2, buffer_rounds=2
+    )
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_window_one)
+    weak_decoder = dataclasses.replace(settings.weak_decoder, decoder=weak)
+    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    running = settings.workload.running(workload)
+    settings = dataclasses.replace(
+        settings,
+        workload=running,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _is_window_one(job) -> bool:
+    return job.window_id == 1
+
+
+def _every_third_escalating_machine(round_count: int, observed: str = ""):
+    """Rounds reading two back; windows of one round; every third escalates.
+
+    The strong side forms the escalated windows' rounds, and the weak
+    side every round, on three units each. observed follows each
+    round's detector: an observable's record of the round, or nothing.
+    """
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        BOTH_DECODERS,
+    )
+    settings = machine.settings
+    noisy_round = "M(0.15) 0\n"
+    later_rounds = round_count - 2
+    circuit = stim.Circuit(
+        f"R 0\nREPEAT 2 {{\n{noisy_round}DETECTOR rec[-1]\n{observed}}}\n"
+        f"REPEAT {later_rounds} {{\n{noisy_round}DETECTOR rec[-1] rec[-3]\n"
+        f"{observed}}}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(round_count)}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+    workload = workload_records.Workload(
+        (operation,), {1: round_count}, physical
+    )
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_every_third)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, decoder=weak, units=3
+    )
+    strong_decoder = dataclasses.replace(
+        settings.strong_decoder, kind=0.2, units=3
+    )
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    running = settings.workload.running(workload)
+    settings = dataclasses.replace(
+        settings,
+        workload=running,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _is_every_third(job) -> bool:
+    return job.window_id % 3 == 0
+
+
+def _note_packets(held_by_seat: dict, seat, operation_id, bits) -> None:
+    del operation_id
+    held = held_by_seat.setdefault(seat, [])
+    held.append(bits)
+
+
+def _bookkeeping_of(machine, seat: str) -> dict:
+    placement = machine.readout.detection_events
+    history = placement.history_by_seat[seat]
+    done_rounds = history.memory.done_by_operation[1]
+    return {
+        "events": len(history.memory.events_by_round),
+        "claims": len(history.memory.claimed_keys),
+        "done_above": len(done_rounds.above),
+    }
+
+
+def _note_stored_rounds(store, stored_rounds: list, *stored) -> None:
+    del stored
+    stored_rounds.append(len(store.round_by_key))

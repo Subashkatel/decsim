@@ -160,6 +160,48 @@ def test_a_region_crosses_as_its_rounds_behind_the_requests_name():
     assert region.message_bits() == 64 + 2
 
 
+def test_a_regions_rounds_before_ride_under_its_one_name():
+    """Two raw rounds before round 3 add their bits and no second name.
+
+    One gem5 DMA request covers its whole range (src/dev/dma_device.cc
+    lines 195-207), so the message is the name and six bits.
+    """
+    request_key = window_records.DecoderRequestKey(
+        7, 0, window_records.DecoderTier.STRONG, 1
+    )
+    two_bits = make_fragment()
+    first = round_records.SyndromeRoundPacket(7, 1, (two_bits,))
+    second = round_records.SyndromeRoundPacket(7, 2, (two_bits,))
+    third = round_records.SyndromeRoundPacket(7, 3, (two_bits,))
+
+    region = round_records.EscalatedRegion.of(
+        request_key, (first, second, third), 3
+    )
+
+    assert region.rounds_before == (first, second)
+    assert region.packets == (third,)
+    assert region.message_bits() == 64 + 6
+
+
+def test_a_successors_rounds_are_never_rounds_before():
+    """Round 1 of operation 8 follows the window; round 2 of 7 precedes it."""
+    request_key = window_records.DecoderRequestKey(
+        7, 0, window_records.DecoderTier.STRONG, 1
+    )
+    two_bits = make_fragment()
+    before = round_records.SyndromeRoundPacket(7, 2, (two_bits,))
+    own = round_records.SyndromeRoundPacket(7, 3, (two_bits,))
+    successor = round_records.SyndromeRoundPacket(8, 1, (two_bits,))
+
+    region = round_records.EscalatedRegion.of(
+        request_key, (before, own, successor), 3
+    )
+
+    assert region.rounds_before == (before,)
+    assert region.packets == (own, successor)
+    assert region.round_keys == ((7, 2), (7, 3), (8, 1))
+
+
 def test_a_region_of_unsized_rounds_states_no_message_size():
     unsized = make_fragment(bits=None, size_bits=None)
     region = region_of(unsized)

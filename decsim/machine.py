@@ -212,6 +212,7 @@ class Machine:
             frame=control.pauli_frame,
             conditional_release=control.conditional_release,
             factory=qpu.factory,
+            detection_events=readout.detection_events,
         )
         control.connect(
             qpu=qpu.device,

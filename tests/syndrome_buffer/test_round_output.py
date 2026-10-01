@@ -5,12 +5,20 @@ input leaves from is the store that holds the rounds
 (omnetpp src/sim/csimplemodule.cc:333-334, omnetpp-6.1.0;
 gem5 packet.hh:424-431). The other half of that
 rule is here too: an input the decoder reads in place rides no link, and
-the store lands it without asking the fabric for anything.
+the store lands it without asking the fabric for anything. The raw
+rounds a forming decoder needs before a job's first ride the job's one
+read and one transfer, as one gem5 DMA request covers its whole range
+(src/dev/dma_device.cc:195-207), and are priced as the read words and
+bits they are (src/mem/simple_mem.cc:154).
 """
 
 import pytest
+import stim
 
 import decsim.config as config
+import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -93,29 +101,64 @@ def _store(engine, read_cycles=0) -> syndrome_buffer_module.SyndromeBuffer:
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
 
-class _DecoderThatFormedNothing:
-    """The placement port, whose decoder seat has formed no round yet."""
+class _OneTable:
+    """A source whose recipes are one circuit's, for every operation."""
 
-    clock = None
+    def __init__(self, table) -> None:
+        self.table = table
 
-    def __init__(self) -> None:
-        self.asked = []
+    def formation_table(self, operation_id):
+        """The one table."""
+        del operation_id
+        return self.table
 
-    def forms_at(self, seat) -> bool:
-        del seat
-        return True
 
-    def form_at(self, seat, fragments, round_before=()) -> tuple:
-        del seat, round_before
-        return fragments
+def _lookback_placement():
+    """The real placement at the weak decoder, over a two-round lookback.
 
-    def needs_the_round_before(self, seat, operation_id, round_index) -> bool:
-        self.asked.append((seat, operation_id, round_index))
-        return True
+    Ten rounds of one qubit; round r's detector is rec[-1] ^ rec[-3], so
+    a decoder that joins at round 5 reads rounds 3 and 4 raw.
+    """
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\n"
+        "REPEAT 8 {\nM 0\nDETECTOR rec[-1] rec[-3]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    table = detector_formation.build_formation_table(
+        circuit, 10, measurement_rounds=measurement_rounds
+    )
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder",)
+    )
+    source = _OneTable(table)
+    return formation.SeatedFormation(source, settings)
 
-    def cycles_at(self, seat, round_count) -> int:
-        del seat, round_count
-        return 0
+
+def _ported_store(engine) -> syndrome_buffer_module.SyndromeBuffer:
+    """A store at 10 MHz whose one read port moves a word a cycle.
+
+    A word is two bits, one round of this file's fragments.
+    """
+    clocks = config.ClockSettings.from_yaml({"storage": 10})
+    section = {
+        "kind": "ported_syndrome_buffer",
+        "clock": "storage",
+        "word_bits": 2,
+    }
+    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
+        section,
+        "weak_syndrome_buffer",
+        clocks,
+        ported_syndrome_buffer.SYNDROME_BUFFERS,
+    )
+    return ported_syndrome_buffer.PortedSyndromeBuffer(settings, engine)
+
+
+def _store_rounds(store, round_indices) -> None:
+    for round_index in round_indices:
+        fragment = _fragment(round_index)
+        packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
+        store.accept_packed_round(packet, publication_tick=0)
 
 
 def _output(
@@ -152,23 +195,80 @@ def _job(round_index=1) -> decoding_records.DecodeJob:
     )
 
 
-def test_the_round_before_leaves_with_a_job_whose_decoder_needs_it():
-    """Its bits ride the job's move, and the job carries its fragments."""
+def test_the_round_before_leaves_with_a_job_whose_decoder_reads_it():
+    """Round 5 reads round 3, which rides the job's one move, and not 4."""
     engine = engine_module.Engine()
     transfers = _Transfers()
     store = _store(engine)
-    round_one = _fragment(1)
-    stored = round_records.SyndromeRoundPacket(1, 1, (round_one,))
-    store.accept_packed_round(stored, publication_tick=0)
+    _store_rounds(store, (2, 3, 4))
     output = _output(engine, transfers, store)
-    output.detection_events = _DecoderThatFormedNothing()
+    output.detection_events = _lookback_placement()
+    job = _job(5)
+
+    output.send_input(job, lambda: None)
+
+    assert job.rounds_before == (_fragment(3),)
+    assert transfers.sends == [(output.path, 4)]
+
+
+def test_a_job_whose_first_round_reads_only_itself_carries_nothing_before():
+    """Round 2's detector is rec[-1] alone: one round of two bits moves."""
+    engine = engine_module.Engine()
+    transfers = _Transfers()
+    store = _store(engine)
+    _store_rounds(store, (1,))
+    output = _output(engine, transfers, store)
+    output.detection_events = _lookback_placement()
     job = _job(2)
 
     output.send_input(job, lambda: None)
 
-    assert output.detection_events.asked == [("weak_decoder", 1, 2)]
-    assert job.round_before == (_fragment(1),)
-    assert transfers.sends == [(output.path, 4)]
+    assert job.rounds_before == ()
+    assert transfers.sends == [(output.path, 2)]
+
+
+def test_a_round_before_the_store_let_go_of_stops_the_read_by_name():
+    """Round 5 reads round 3, which a program reaching further lost."""
+    engine = engine_module.Engine()
+    store = _store(engine)
+    _store_rounds(store, (2, 4))
+    transfers = _Transfers()
+    output = _output(engine, transfers, store)
+    output.detection_events = _lookback_placement()
+    job = _job(5)
+
+    with pytest.raises(RuntimeError) as refusal:
+        output.send_input(job, lambda: None)
+
+    assert str(refusal.value) == (
+        "a job from round 5 of operation 1 reads round 3, which the weak "
+        "syndrome buffer does not hold: its holds keep the rounds the "
+        "program's declared fragments read, so a round_circuit that "
+        "reads further back than they do cannot be formed at the "
+        "weak_decoder"
+    )
+
+
+def test_the_round_before_is_read_in_the_jobs_one_port_booking():
+    """Two words on one read port, a cycle each from tick 0, then the link.
+
+    SimpleMemory is busy for the size it moves (gem5
+    src/mem/simple_mem.cc:154), so round 3, which round 5 reads, costs
+    its word in the same read as the job's own round, with no second
+    request.
+    """
+    engine = engine_module.Engine()
+    transfers = _Transfers()
+    store = _ported_store(engine)
+    _store_rounds(store, (3, 4, 5))
+    output = _output(engine, transfers, store)
+    output.detection_events = _lookback_placement()
+    job = _job(5)
+
+    delay = output.send_input(job, lambda: None)
+
+    period_ticks = store.settings.clock.period_ticks
+    assert delay == 2 * period_ticks + LINK_DELAY_TICKS
 
 
 def test_the_recording_transfers_fill_the_port():

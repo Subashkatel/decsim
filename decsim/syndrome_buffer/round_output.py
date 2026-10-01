@@ -84,9 +84,9 @@ class SyndromeBufferOutput:
         is the landing: nothing crosses the link.
         """
         self.name_this_store(job)
-        self._read_the_round_before(job)
+        self._read_the_rounds_before(job)
         payload_bits = job.payload_bits()
-        carried = job.round_before + tuple(job.payloads)
+        carried = job.rounds_before + tuple(job.payloads)
         round_keys = _payload_round_keys(carried)
         read_tick = self.store.book_read(round_keys)
         if self.reads_in_place:
@@ -95,29 +95,53 @@ class SyndromeBufferOutput:
             return self._move(job, payload_bits, on_landed)
         return self._move_at(read_tick, job, payload_bits, on_landed)
 
-    def _read_the_round_before(self, job: decoding_records.DecodeJob) -> None:
-        """Add the raw round before the job's first, when its reader needs it.
+    def _read_the_rounds_before(self, job: decoding_records.DecodeJob) -> None:
+        """Add the raw rounds before the job's first that its reader needs.
 
-        A decoder that forms the events and has not formed the job's
-        first round reads the round before it (needs_the_round_before),
-        so that round leaves the store with the job's own and is priced
-        with them. A round the store no longer holds is not read, and
-        the former says so if it was needed.
+        A decoder that forms the events needs every round before the
+        job's first that its unformed rounds' recipes read, less those
+        it holds (rounds_needed_before). They leave the store in
+        the job's own read and ride its one transfer, priced with its
+        rounds, as a gem5 DMA request covers its whole range and one
+        Garnet message is cut into flits by its size alone
+        (src/dev/dma_device.cc:195-207, NetworkInterface.cc:386-387).
         """
         if self.detection_events is None or not job.payloads:
             return
         first = job.payloads[0]
-        needs_it = self.detection_events.needs_the_round_before(
-            self.reader_seat, first.operation_id, first.round_index
+        operation_id = first.operation_id
+        last_round = _last_round_of(job.payloads, operation_id)
+        needed_rounds = self.detection_events.rounds_needed_before(
+            self.reader_seat, operation_id, first.round_index, last_round
         )
-        if not needs_it:
-            return
-        round_key = (first.operation_id, first.round_index - 1)
+        rounds_before = []
+        for round_index in needed_rounds:
+            round_key = (operation_id, round_index)
+            in_order = self._retained_round_before(round_key, first)
+            rounds_before.extend(in_order)
+        job.rounds_before = tuple(rounds_before)
+
+    def _retained_round_before(
+        self, round_key: tuple, first: round_records.RetainedSyndromeFragment
+    ) -> list:
+        """A round the job reads before its first, in fragment order.
+
+        The holds keep every round the declared fragments read, so a
+        round missing from the store is one a round_circuit reaching
+        further back lost; the read stops there by name.
+        """
         fragments = self.store.retained_fragments(round_key)
         if fragments is None:
-            return
+            raise RuntimeError(
+                f"a job from round {first.round_index} of operation "
+                f"{first.operation_id} reads round {round_key[1]}, which "
+                f"the {self.name} does not hold: its holds keep the "
+                f"rounds the program's declared fragments read, so a "
+                f"round_circuit that reads further back than they do "
+                f"cannot be formed at the {self.reader_seat}"
+            )
         by_fragment_index = operator.attrgetter("fragment_index")
-        job.round_before = tuple(sorted(fragments, key=by_fragment_index))
+        return sorted(fragments, key=by_fragment_index)
 
     def land_held_input(
         self,
@@ -249,3 +273,13 @@ def _payload_round_keys(payloads) -> tuple:
         round_keys.append((payload.operation_id, payload.round_index))
     unique = dict.fromkeys(round_keys)
     return tuple(unique)
+
+
+def _last_round_of(payloads, operation_id) -> int:
+    """The last round of the operation a job's payloads carry."""
+    last_round = 0
+    for fragment in payloads:
+        if fragment.operation_id != operation_id:
+            continue
+        last_round = max(last_round, fragment.round_index)
+    return last_round

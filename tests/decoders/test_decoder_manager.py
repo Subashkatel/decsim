@@ -68,7 +68,6 @@ class OneRoundSource:
             readout_slot_start=None,
             detectors=(recipe,),
             observables=(),
-            max_record_span=0,
         )
 
 
@@ -100,7 +99,6 @@ class TwoRoundSource:
             readout_slot_start=None,
             detectors=(first, second),
             observables=(),
-            max_record_span=1,
         )
 
 
@@ -209,13 +207,14 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
     manager.check_decode_work_settled()
 
 
-def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
+def test_a_withdrawn_windows_claim_goes_back_to_its_tier():
     """A decode that never started was never charged for forming them.
 
-    The rounds a job forms are frozen on it at the first ask, which can
-    be the dispatcher's compute prediction, before its input has landed.
-    A strong region then absorbs the window and the job is withdrawn, so
-    the job that reads those rounds next has to pay for forming them.
+    Each job claims its rounds when it is staged. The waiting window
+    reads a second operation's round, which no earlier job claimed, so
+    its claim is the round. A strong region then absorbs the window and
+    the job is withdrawn before its decode starts, so the job that reads
+    that round next has to pay for forming it.
     """
     engine = engine_module.Engine()
     row = FixedRow()
@@ -237,18 +236,18 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     busy.label = "busy"
     on_decoded = _resolving(manager)
     manager.enqueue(busy, None, on_decoded)
-    waiting = _window_job()
+    waiting = _second_operations_job()
     waiting.window_id = 1
     waiting.label = "waiting"
     waiting.request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 1
+        2, 1, window_records.DecoderTier.WEAK, 1
     )
     manager.enqueue(waiting, None, on_decoded)
     at_the_prediction = formation_stage.cycles_for(waiting)
 
-    manager.withdraw_window((1, 1))
+    manager.withdraw_window((2, 1))
 
-    strong = _window_job()
+    strong = _second_operations_job()
     strong.label = "strong"
     after_the_withdrawal = formation_stage.cycles_for(strong)
     assert at_the_prediction == 5
@@ -257,7 +256,7 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     manager.check_decode_work_settled()
 
 
-def test_the_round_before_is_held_by_the_tier_and_not_deposited():
+def test_the_rounds_before_are_held_by_the_tier_and_not_deposited():
     """The unit's memory takes the job's rounds; the tier's logic the rest."""
     engine = engine_module.Engine()
     at_the_weak_decoder = event_settings.DetectionEventSettings(
@@ -287,7 +286,7 @@ def test_the_round_before_is_held_by_the_tier_and_not_deposited():
     )
     round_two = dataclasses.replace(round_one, round_index=2)
     job.payloads = [round_two]
-    job.round_before = (round_one,)
+    job.rounds_before = (round_one,)
     on_decoded = _resolving(manager)
 
     manager.enqueue(job, None, on_decoded)
@@ -295,7 +294,7 @@ def test_the_round_before_is_held_by_the_tier_and_not_deposited():
 
     assert [fragment.round_index for fragment in deposited] == [2]
     assert deposited[0].bits == (0,)
-    assert job.round_before == ()
+    assert job.rounds_before == ()
 
 
 def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
@@ -628,3 +627,12 @@ def test_a_startable_job_with_input_starts_when_a_central_fifo_queue_would():
     expected_microseconds = (0, 0, 1, 2)
     expected = [config.microseconds_to_ticks(t) for t in expected_microseconds]
     assert starts == expected
+
+
+def _second_operations_job():
+    """The window job, reading round 1 of operation 2."""
+    job = _window_job()
+    job.operation_id = 2
+    second = dataclasses.replace(job.payloads[0], operation_id=2)
+    job.payloads = [second]
+    return job

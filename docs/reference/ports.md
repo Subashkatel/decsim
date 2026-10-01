@@ -187,7 +187,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `release_absorbed_strong_hold` | Drop the rounds an absorbed window kept; the strong request has them. |
 | `require_rounds_retained` | A strong window starts only once every round it reads is held. |
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
-| `strong_round_before` | The raw round a strong redo from first_round reads before it. |
+| `strong_rounds_before` | The raw rounds before these that a strong read of them carries. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
 | `require_strong_retained` | The same, on the strong syndrome buffer. |
 
@@ -474,7 +474,12 @@ Where the machine forms a round's detection events, and what it costs.
 | `forms_at` | Whether the seat forms the rounds that cross it. |
 | `form_at` | The fragments as they leave the seat: formed, or as they came. |
 | `width_at` | The width one round's fragments take as they leave the seat. |
-| `needs_the_round_before` | Whether the seat must be given the raw round before this one. |
+| `rounds_needed_before` | The raw rounds before a read's first round the seat must be given. |
+| `earlier_rounds_read` | The raw rounds before first_round it or any later round reads. |
+| `retire_round` | The round left the store the plan's windows read: none forms it. |
+| `claim_rounds` | The round keys no earlier job of the seat claimed, now claimed. |
+| `return_claim` | A job that never started gives its claimed round keys back. |
+| `check_settled` | At the end of a run no seat holds a raw round; a leak raises. |
 | `cycles_at` | The cycles of forming round_count rounds together at the seat. |
 
 ### `WindowModelSource`

@@ -680,8 +680,13 @@ class WindowRetention(Protocol):
     ) -> list:
         """The retained round keys of a possibly cross-operation range."""
 
-    def strong_round_before(self, operation_id: Any, first_round: int) -> list:
-        """The raw round a strong redo from first_round reads before it."""
+    def strong_rounds_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> list:
+        """The raw rounds before these that a strong read of them carries.
+
+        Those its forming seat has neither formed nor been given.
+        """
 
     def require_retained(
         self, round_keys: list, purpose: str, store=None
@@ -1572,12 +1577,12 @@ class DetectionEventPlacement(Protocol):
         """Whether the seat forms the rounds that cross it."""
 
     def form_at(
-        self, seat: str, fragments: tuple, round_before: tuple = ()
+        self, seat: str, fragments: tuple, rounds_before: tuple = ()
     ) -> tuple:
         """The fragments as they leave the seat: formed, or as they came.
 
-        round_before is the raw round before the first fragment, held by
-        the seat for that round's detectors and never returned.
+        rounds_before are the raw rounds before the first fragment, held
+        by the seat for that round's detectors and never returned.
         """
 
     def width_at(self, seat: str, fragments: tuple) -> Optional[int]:
@@ -1588,10 +1593,39 @@ class DetectionEventPlacement(Protocol):
         width is unknown.
         """
 
-    def needs_the_round_before(
-        self, seat: str, operation_id: Any, round_index: int
-    ) -> bool:
-        """Whether the seat must be given the raw round before this one."""
+    def rounds_needed_before(
+        self, seat: str, operation_id: Any, first_round: int, last_round: int
+    ) -> tuple:
+        """The raw rounds before a read's first round the seat must be given.
+
+        The rounds the read's unformed rounds' recipes read, less those
+        the seat holds raw.
+        """
+
+    def earlier_rounds_read(
+        self, operation_id: Any, first_round: int
+    ) -> tuple[int, ...]:
+        """The raw rounds before first_round it or any later round reads.
+
+        What a stream's window holds before its first round for a seat
+        that forms, whatever that seat has formed by then; on a live
+        stream as far back as its program reaches. None with no recipes.
+        """
+
+    def retire_round(self, round_key: tuple) -> None:
+        """The round left the store the plan's windows read: none forms it.
+
+        Every seat stops keeping raw packets for it.
+        """
+
+    def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
+        """The round keys no earlier job of the seat claimed, now claimed."""
+
+    def return_claim(self, seat: str, round_keys: tuple) -> None:
+        """A job that never started gives its claimed round keys back."""
+
+    def check_settled(self) -> None:
+        """At the end of a run no seat holds a raw round; a leak raises."""
 
     def cycles_at(self, seat: str, round_count: int) -> int:
         """The cycles of forming round_count rounds together at the seat."""

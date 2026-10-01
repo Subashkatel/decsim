@@ -199,7 +199,7 @@ def test_an_operation_that_has_not_begun_has_no_formation_table():
 
 def _formed(former, round_index, bits) -> tuple:
     """One round's event values, in the table's detector order."""
-    events, _ = former.feed_packet(round_index, bits)
+    events = former.feed_packet(round_index, bits)
     return tuple(value for _, value in events)
 
 

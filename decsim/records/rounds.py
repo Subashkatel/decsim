@@ -179,17 +179,19 @@ class EscalatedRegion:
     the packets' fragment sizes, the width each round left the controller
     at (PackedRound.wire_bits), and None when any fragment has no size;
     it is what the strong syndrome buffer is written. message_bits is
-    what crosses the hop: those rounds behind the request's name.
-    carries_the_round_before is true when the first packet is the raw
-    round before the strong window's first, which a strong side that
-    forms the events reads for that round's detectors
-    (windows/round_retention.py, strong_round_before).
+    what crosses the hop: those rounds behind the request's name, one
+    message with one name however many rounds it carries, as a gem5 DMA
+    request covers its whole range (src/dev/dma_device.cc:195-207).
+    packets are the strong window's rounds; rounds_before are the raw
+    rounds before its first, in order, which a strong side that forms
+    the events reads for that round's detectors
+    (windows/round_retention.py, strong_rounds_before) and never forms.
     """
 
     request_key: window_records.DecoderRequestKey
     packets: tuple[SyndromeRoundPacket, ...]
     wire_bits: Optional[int]
-    carries_the_round_before: bool = False
+    rounds_before: tuple[SyndromeRoundPacket, ...] = ()
 
     @classmethod
     def of(
@@ -200,8 +202,8 @@ class EscalatedRegion:
     ) -> "EscalatedRegion":
         """The region of these packets, its width summed from the fragments.
 
-        first_round is the strong window's first round; a packet before
-        it is the round before.
+        first_round is the strong window's first round; a packet of the
+        strong window's operation before it is a round before.
         """
         wire_bits = 0
         for packet in packets:
@@ -210,13 +212,21 @@ class EscalatedRegion:
                 wire_bits = None
                 break
             wire_bits += packet_bits
-        carries_the_round_before = packets[0].round_index < first_round
+        operation_id = request_key.operation_id
+        rounds_before, window_packets = _split_at_the_first_round(
+            packets, operation_id, first_round
+        )
         return cls(
             request_key=request_key,
-            packets=packets,
+            packets=window_packets,
             wire_bits=wire_bits,
-            carries_the_round_before=carries_the_round_before,
+            rounds_before=rounds_before,
         )
+
+    @property
+    def carried_packets(self) -> tuple:
+        """Every packet the region carries: the rounds before, then its own."""
+        return self.rounds_before + self.packets
 
     def message_bits(self) -> Optional[int]:
         """The region on the wire: the request's name, then the rounds.
@@ -234,7 +244,7 @@ class EscalatedRegion:
     def round_keys(self) -> tuple:
         """(operation_id, round_index) of every round carried, in order."""
         keys = []
-        for packet in self.packets:
+        for packet in self.carried_packets:
             keys.append((packet.operation_id, packet.round_index))
         return tuple(keys)
 
@@ -371,3 +381,22 @@ def _check_measurement_partitions(readout, partitions) -> None:
             raise ValueError(
                 "measurement partition is outside the readout footprint"
             )
+
+
+def _split_at_the_first_round(
+    packets: tuple, operation_id: Any, first_round: int
+) -> tuple:
+    """(the rounds before first_round, the rest), each in the order given.
+
+    A successor operation's rounds carry small round numbers too, so a
+    round before is one of the strong window's own operation.
+    """
+    rounds_before = []
+    window_packets = []
+    for packet in packets:
+        is_before = packet.round_index < first_round
+        if is_before and packet.operation_id == operation_id:
+            rounds_before.append(packet)
+            continue
+        window_packets.append(packet)
+    return tuple(rounds_before), tuple(window_packets)

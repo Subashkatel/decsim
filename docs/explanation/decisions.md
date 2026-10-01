@@ -827,8 +827,7 @@ changing only a display-time value cannot change physical noise consistently.
 its compile_m2d_converter converts the resulting complete raw record into
 detection events and observable flips. These installed public APIs supply the
 execution and same-record oracle. StreamingDetectorFormer extends its existing
-record-lookback recipes without changing prior packets or resurrecting discarded
-measurements. That also serves incrementally described recorded traces.
+record-lookback recipes without changing prior packets.
 
 Growing models reuse WindowSlicer and the qLDPC sequential-window ownership law
 already cited in `decsim/windows/window_planner.py`. Complete detector effects,
@@ -1062,7 +1061,14 @@ path from the controller to a decoder crosses exactly one of them, and
 the build checks the run's paths against the list. One cost law is
 charged at the seat that forms: `latency_cycles` once and
 `cycles_per_round` for each round after the first, on `clock`, the
-controller's by default. Each seat keeps its own history. A decoder
+controller's by default. The strong syndrome buffer's former is one
+such stage: a landing enters once the landing before it has entered
+all its rounds, so landings form in the order they land and a region
+never forms before the earlier region whose rounds it reads, as gem5's
+in-order functional unit takes the next instruction `issueLat` cycles
+after the last and returns results in order
+(`src/cpu/minor/func_unit.cc` lines 157-170). Each seat keeps its own
+history. A decoder
 seat that has not formed a job's first round reads the raw round
 before it with the job, and a strong side that forms reads the raw
 round before each escalated region; that round is priced as the raw
@@ -1090,10 +1096,13 @@ D20 left; `DetectionEventFormer` is `formation_table(operation_id)`;
 `WindowRetention` gained `strong_round_before` and `SyndromeBuffer`
 gained `retained_fragments`.
 
+**Widened since.** D34 replaces the yes or no for the round before
+with a count of the rounds a round's recipes read.
+
 **Where to see it.** `decsim/detector_error_model/settings.py`,
 `decsim/detector_error_model/detection_event_formation.py`,
 `decsim/build/readout.py` (`build_detection_events`) and
-`decsim/syndrome_buffer/round_output.py` (`_read_the_round_before`).
+`decsim/syndrome_buffer/round_output.py` (`_read_the_rounds_before`).
 `tests/machine/test_copy_versus_reference.py` holds every seat on every
 path against Stim's own converter on the rows the QPU emitted, read
 where each decoder unit's memory takes them.
@@ -1241,6 +1250,159 @@ and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
 (`record_point`);
 `tests/experiments/test_command_set.py`.
 
+## D34. A seat is told how many rounds before a round it must be given
+
+**Decided.** A read is given exactly the raw rounds before its first
+that its unformed rounds' recipes read, less those its seat holds raw:
+`rounds_needed_before` answers the rounds any detector of an unformed
+round of the read names, and no round between them, so a read never asks for a round its stream let
+go of. A later round of a read can reach further back than its first
+(`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the whole read is
+counted, not its first round. A round the seat formed is
+not given again: its former keeps a packet while a round that reads it
+is neither formed there nor retired, the packet's reference set, so a
+seam formed after a later block still finds the rounds it reads, and
+the parallel scheme's blocks form at a decoder seat in any order. A
+round is retired at every seat once it leaves the store the plan's
+windows read (`retire_round`): every read, an escalation's included,
+holds its rounds there until they have landed and formed, so no read
+forms it after, and a seat that forms only some rounds, the strong one
+above all, lets go of what only the others read. A seat records each
+retirement even before it has a former for the operation, and a
+former it makes later starts from that record, so a strong seat that
+joins late does not wait on rounds that left before it. That record is
+a low watermark below which every round is done plus the rounds done
+above it (`DoneRounds`, as TCP keeps a cumulative ACK and its SACK
+blocks, RFC 2018), and a round's remembered events go when it retires,
+so nothing a seat keeps grows with the run. A decoder tier's
+claims on the rounds it charges a job for live at its seat
+(`claim_rounds`) and go when their round retires: a job claims its
+rounds when it is staged on a unit, while the store still holds them
+for it, so no job, a copied one priced after its rounds left the store
+included, asks for a round after it retires. At the end of a run no
+seat holds a raw round (`check_settled`). On a live stream the
+former also keeps the last k packets, k the program's reach: how far
+back any detector of a fragment the stream can run reads, read off its
+repeated and
+final fragments when the stream is declared (`rounds_read_back`,
+`live_reach`), since the controller holds the program before it runs a
+round and a detector's lookbacks are fixed by the circuit, so whichever
+fragment runs next, last or not, finds its rounds. A program whose
+repeated round measures nothing and still reads back is refused when
+the stream is declared, since its record lies a round further back
+every round and no count bounds it. A program whose
+`round_circuit` reaches further on some round than its declared
+fragments loses the round it reads there, and the run stops where that
+round would be formed (its former does not hold it) or read from the
+store, so no event is formed without it. No seat forms an
+observable, since no seat's reader uses one: the device forms the truth
+once per shot (`form_shot`), walking the shot's complete packets in
+round order and XORing each round's records of an observable into its
+parity, so no seat keeps a round for an observable. Fed in
+order a former holds the last k packets, the ring it replaced. The
+recipe table owns the law (`rounds_read_before` per round,
+`rounds_read_by` per read, `rounds_read_before_first` per planned
+read, `rounds_reading` per packet,
+`earlier_rounds_read` per stream window).
+A window's potential strong read holds, in both stores, the rounds
+before its first that its or a later round's recipes read
+(`earlier_rounds_read`), placed before anyone knows whether it
+escalates or what the strong seat will hold by then. An
+escalation carries only the rounds its strong seat lacks
+(`strong_rounds_before`, asked when the region is planned): a round an
+earlier region landed there, formed or given raw, stays in that seat's
+former while a round it has not formed reads it, so the stores need not
+keep it for the later region. A weak read holds none of them, a restart
+read past a strong region included: the window before it reads them and
+holds them until it lands in the same decoder, which forms them there
+and keeps each packet while a round it has not formed reads it, and a
+restart window's rounds before its start are in the strong region, whose
+request keeps them until the restart window commits; so a round leaves
+the store when no reader needs it there, as it does when nothing forms.
+On a stream a window is admitted only once its commit region begins,
+so the window before it can commit, or escalate, before the next
+registers, and its potential strong read then ends or becomes a hold of
+the region it carries. When the strong side forms, the stream itself
+holds the rounds before the last admitted window's commit end that a
+later round reads (`LaterStreamReads`, from `earlier_rounds_read`),
+moved on as each window registers, after that window claims its own:
+a read claims its rounds before a release could free them. The hold
+ends when the stream seals. A stream no round of which reads back
+keeps none, so a store with room for one round runs it.
+The plan places a finite operation's holds before the operation
+begins, so it reads the operation's recipes off the same circuit the
+source will (`build/plan.py`, `_formation_tables`); the holds the run
+places while it goes ask the placement, whose source's table a live
+stream extends as its rounds execute. The counted rounds ride the
+read's one transfer as more payload: a job's rounds before
+(`DecodeJob.rounds_before`) and a region's
+(`EscalatedRegion.rounds_before`) are priced as their bits on the link and as read
+words on the store's port in the job's own booking, under the one
+request name, with no header per round. They land raw in the strong
+syndrome buffer, take their raw bits of its room, and are never
+formed as events.
+
+**Why.** A detection event is the parity of the records a detector
+names, however far back, so the same round's events are the same at
+every seat only when each seat holds those records. A surface code
+reads one round back; Stim's `color_code:memory_xyz` and a
+`rec[-1] ^ rec[-3]` memory read two, and a yes or no for one round
+could not say so. On every surface-code round the count is the one
+round the yes or no gave.
+
+**Sources.** Stim's converter reads every record a detector names
+(`stim.Circuit.compile_m2d_converter`), and cudaqx counts the
+measurements a decoder's detectors read (`libs/qec/lib/decoder.cpp`
+lines 115-127); a detector compares a round against earlier ones
+(LILLIPUT 2108.06569 lines 499-510). An HEVC decoder keeps each
+picture the current reference set names, whatever else it holds
+(FFmpeg `hevc/refs.c` lines 486-517). Stim's frame simulator XORs the
+records an OBSERVABLE_INCLUDE instruction names into its running
+`obs_record` when the instruction runs (`src/stim/simulators/frame_simulator.inl` lines
+233-243, v1.16.0), and IBM's decoder reads the observables off the
+final codeword beside the frame it accumulates (Maurer 2510.21600
+Algorithm 2, line 25). One gem5 DMA request covers its
+whole byte range (`src/dev/dma_device.cc` lines 195-207), a Garnet
+message becomes `divCeil(size, bitWidth)` flits and an SST event is
+its header plus its payload (`NetworkInterface.cc` lines 386-387,
+`memHierarchy/memNIC.cc` lines 133-134): the transport cuts a message
+by size, never by what the bytes mean. A crossbar is busy
+`divCeil(size, width)` cycles and SimpleMemory `size` times its
+bandwidth (`src/mem/xbar.cc` lines 133-136, `src/mem/simple_mem.cc`
+line 154).
+
+**What it cost the port file.** `DetectionEventPlacement` lost
+`needs_the_round_before` and gained `rounds_needed_before` (the rounds,
+for a read's first and last round), `earlier_rounds_read` (the rounds
+before a stream window's first that it or a later round reads),
+`retire_round`, `check_settled`, `claim_rounds` and `return_claim` (a
+decoder tier's claims, kept at the seat so a claim goes when its round
+retires), and `form_at` takes `rounds_before`
+in place of `round_before`; `WindowRetention.strong_round_before`
+became `strong_rounds_before`, which takes the read's last round too
+and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a
+`detection_events` port, bound on the store the plan's windows read.
+
+**Where to see it.** `decsim/detector_error_model/detector_formation.py`
+(`FormationTable.rounds_read_before`, `rounds_read_by`,
+`rounds_read_before_first`, `rounds_reading`, `earlier_rounds_read`, `live_reach`,
+`rounds_read_back`, `StreamingDetectorFormer`, `DoneRounds`,
+`form_shot`),
+`decsim/qpu/streaming_stim_device.py` (`_program_reach`),
+`decsim/detector_error_model/detection_event_formation.py`
+(`rounds_needed_before`, `earlier_rounds_read`, `retire_round`,
+`check_settled`), `decsim/records/windows.py` (`FormationReads`),
+`decsim/windows/round_retention.py` (`strong_rounds_before`,
+`_hold_later_stream_reads`), `decsim/syndrome_buffer/syndrome_buffer.py`
+(`_free_round`), `decsim/syndrome_buffer/round_output.py`
+(`_read_the_rounds_before`),
+`decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
+(`_formed_tick`, `_land_formed`);
+`tests/detector_error_model/test_detection_event_formation.py` forms
+the surface code, the two-round lookback, a memory whose reach grows
+from round 4 and the color code at every seat against Stim's
+converter.
+
 ## What is not modelled yet
 
 These are open, recorded rather than hidden, so that a reader does not
@@ -1258,13 +1420,6 @@ mistake a gap for a result.
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
   the per-point settings.
-- **O7. The parallel windowing scheme refuses the decoder-side formation
-  row.** Skoric's A and B blocks read disjoint round ranges, and the
-  formation component forms in round order, so it is asked for a later
-  round while standing at an earlier one and refuses. What it wants is a
-  former that forms in arrival order from the tier's own store, which is
-  also how LILLIPUT's block and Yang's stage run: on the stream, not on
-  the window.
 - **O8. `decsim collect` refuses a `timing_only` device.** The device
   builds and runs as a machine, but the experiments layer's per-shot
   measurement compares the loop's prediction against PyMatching on the

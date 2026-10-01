@@ -80,6 +80,7 @@ class DecoderInputStaging:
         and moves nothing. A tier that reads its input in place deposits
         nothing and sends nothing.
         """
+        self._claim_formation(job)
         if not self.copies_input:
             self._read_in_place(job, on_landed)
             return
@@ -166,16 +167,17 @@ class DecoderInputStaging:
     def _form_detection_events(self, job: decoding_records.DecodeJob) -> None:
         """This tier's event-detection logic runs on the rounds it received.
 
-        The landing is the first demand for them. The round before them,
-        when the store sent it, is held by the logic and not deposited.
-        A tier whose decoder is not a seat of detection_events.formed_at
-        holds no logic, and its rounds arrived formed.
+        The landing is the first demand for them. The rounds before them,
+        when the store sent them, are held by the logic and not
+        deposited. A tier whose decoder is not a seat of
+        detection_events.formed_at holds no logic, and its rounds arrived
+        formed.
         """
-        round_before = job.round_before
-        job.round_before = ()
+        rounds_before = job.rounds_before
+        job.rounds_before = ()
         if self.formation is None:
             return
-        job.payloads = self.formation.form(job.payloads, round_before)
+        job.payloads = self.formation.form(job.payloads, rounds_before)
 
     def _land(
         self,
@@ -295,6 +297,17 @@ class DecoderInputStaging:
         if hold is not None:
             hold()
             job.input_hold = None
+
+    def _claim_formation(self, job: decoding_records.DecodeJob) -> None:
+        """The job's tier claims the rounds it will form, while they are held.
+
+        Its rounds are held in the store until it lands or reads them,
+        and a round retires only after, so every job that reads a round
+        claims it before the round can retire and the claim can go then.
+        """
+        if self.formation is None:
+            return
+        self.formation.rounds_to_form(job)
 
     def _release_formation_claim(self, job: decoding_records.DecodeJob) -> None:
         """The job's tier takes back the rounds it claimed, never formed."""

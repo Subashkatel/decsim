@@ -13,8 +13,10 @@ zero-tick cadence never advances the clock.
 
 import numpy
 import pytest
+import stim
 
 import decsim.config as config
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.planner as planner
 import decsim.machine as machine_module
 import decsim.qpu.code_geometry as code_geometry
@@ -257,6 +259,9 @@ def compiled_plan(operations, planned_ids, **overrides):
     absorbs_weak_windows = overrides.pop("absorbs_weak_windows", False)
     reread_regions = overrides.pop("restart_reread_buffer_regions", 0)
     open_ended = overrides.pop("open_ended", False)
+    formation_reads = overrides.pop(
+        "formation_reads", window_records.NO_FORMING_READER
+    )
     views = []
     for operation in operations:
         view = planning_view(operation)
@@ -273,6 +278,7 @@ def compiled_plan(operations, planned_ids, **overrides):
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=open_ended,
+        formation_reads=formation_reads,
     )
 
 
@@ -646,24 +652,115 @@ def test_a_strong_context_hold_starts_at_the_commit():
     assert held_rounds == tuple((1, index) for index in range(3, 7))
 
 
-def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
-    """Its former reads round 2 for round 3's detectors.
+def surface_code_table():
+    """Seven rounds of a d=3 memory: each bulk round reads the one before."""
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", rounds=7, distance=3
+    )
+    return detector_formation.build_formation_table(circuit, 7)
 
-    A detector compares a round against the one before it (LILLIPUT
-    2108.06569 lines 499-510), and the strong side never formed round 2.
-    """
-    execution = one_window_with_a_successor()
 
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=True,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-        strong_side_forms=True,
+def lookback_table():
+    """Seven rounds of one qubit; round r's detector is rec[-1] ^ rec[-3]."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\n"
+        "REPEAT 5 {\nM 0\nDETECTOR rec[-1] rec[-3]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(7)}
+    return detector_formation.build_formation_table(
+        circuit, 7, measurement_rounds=measurement_rounds
     )
 
-    held_rounds = buffering.potential_holds[0][1]
+
+def reach_growing_table():
+    """Seven rounds of rec[-1], then rec[-1] ^ rec[-4] from round 4 on."""
+    circuit = stim.Circuit(
+        "R 0\nREPEAT 3 {\nM 0\nDETECTOR rec[-1]\n}\n"
+        "REPEAT 4 {\nM 0\nDETECTOR rec[-1] rec[-4]\n}\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(7)}
+    return detector_formation.build_formation_table(
+        circuit, 7, measurement_rounds=measurement_rounds
+    )
+
+
+class OneWindowScheme:
+    """A scheme that plans one window, buffered 2, committing 3 and 4."""
+
+    def plan_operation(
+        self,
+        operation_id,
+        round_count,
+        *,
+        commit_round_count,
+        buffer_round_count,
+    ):
+        del round_count, commit_round_count, buffer_round_count
+        geometry = window_records.WindowGeometry(2, 3, 4, 6)
+        return operation_window_plan(operation_id, (geometry,))
+
+
+def seven_round_plan(formation_reads, retain_strong_context=True):
+    """The plan of one seven-round operation's one window."""
+    operation = operation_of(1)
+    scheme = OneWindowScheme()
+    rounds_policy = round_policies.FixedRounds(7)
+    return compiled_plan(
+        (operation,),
+        (1,),
+        scheme=scheme,
+        rounds_policy=rounds_policy,
+        retain_strong_context=retain_strong_context,
+        formation_reads=formation_reads,
+    )
+
+
+def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
+    """Its former reads round 2 for round 3's surface-code detectors."""
+    table = surface_code_table()
+    reads = window_records.FormationReads(
+        strong_side_seat="strong_decoder", tables={1: table}
+    )
+
+    plan = seven_round_plan(reads)
+
+    held_rounds = plan.buffering.potential_holds[0][1]
     assert held_rounds == tuple((1, index) for index in range(2, 7))
+
+
+def test_a_strong_side_that_forms_holds_every_round_the_commit_reads():
+    """Round 3's detector is rec[-1] ^ rec[-3]: it reads round 1."""
+    table = lookback_table()
+    reads = window_records.FormationReads(
+        strong_side_seat="strong_decoder", tables={1: table}
+    )
+
+    plan = seven_round_plan(reads)
+
+    held_rounds = plan.buffering.potential_holds[0][1]
+    assert held_rounds == tuple((1, index) for index in range(1, 7))
+
+
+def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
+    """Round 3 reads only itself; round 4 of the same read reads round 1."""
+    table = reach_growing_table()
+    reads = window_records.FormationReads(
+        strong_side_seat="strong_decoder", tables={1: table}
+    )
+
+    plan = seven_round_plan(reads)
+
+    held_rounds = plan.buffering.potential_holds[0][1]
+    assert held_rounds == tuple((1, index) for index in range(1, 7))
+
+
+def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
+    reads = window_records.FormationReads(strong_side_seat="strong_decoder")
+
+    plan = seven_round_plan(reads)
+
+    held_rounds = plan.buffering.potential_holds[0][1]
+    assert held_rounds == tuple((1, index) for index in range(3, 7))
 
 
 def test_a_double_windows_strong_hold_ends_at_the_operations_end():

@@ -54,6 +54,7 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
@@ -642,6 +643,333 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     assert memory["admissions"] > 1
     _assert_direct_strong_path(run)
     _assert_actual_truth(run)
+    _assert_drained(run)
+
+
+@pytest.mark.parametrize("commit_rounds", [1, 2])
+def test_an_unbuffered_live_reader_forms_each_window_from_its_own_ring(
+    commit_rounds: int,
+) -> None:
+    """The round before a window is one its decoder formed and keeps.
+
+    With no buffer, the previous window's read is released before the
+    next window starts; its decoder formed that round, so the next read
+    is given nothing from the store.
+    """
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", "decoder")
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=commit_rounds, buffer_rounds=0
+    )
+    settings = dataclasses.replace(settings, windows=windows)
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
+def _escalate_window_one(job) -> bool:
+    return job.window_id == 1
+
+
+@pytest.mark.parametrize(
+    "formed_at",
+    [
+        ("weak_decoder", "strong_decoder"),
+        ("weak_decoder", "strong_syndrome_buffer"),
+    ],
+)
+def test_an_unbuffered_live_region_finds_the_round_before_it_held(
+    formed_at: tuple,
+) -> None:
+    """Window 0 commits before round 2 arrives; window 1's region reads 1.
+
+    The strong side never formed round 1, so window 0's potential strong
+    read keeps it until window 1 registers its own.
+    """
+    program = memory_programs.memory_program()
+    settings = _settings(program, "live", "controller")
+    weak = declared_run.DeclaredConfidenceDecoder(0.1, _escalate_window_one)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(
+        settings.escalation, kind="switching", policy=policy
+    )
+    seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    settings = dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+        detection_events=seats,
+        windows=windows,
+    )
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
+def _two_round_lookback_program() -> circuit_records.RepeatedStimCircuit:
+    """One qubit, two readouts in round 1, then rec[-1] ^ rec[-3] a round.
+
+    Rounds 2 and 3 read round 1's two readouts, and every round from 4
+    on reads two rounds back, so round 4 reads round 2.
+    """
+    first = stim.Circuit(
+        "R 0\nM(0.15) 0\nDETECTOR rec[-1]\nM(0.15) 0\nDETECTOR rec[-1]"
+    )
+    repeated = stim.Circuit("M(0.15) 0\nDETECTOR rec[-1] rec[-3]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = repeated + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+
+
+def _escalates_one_of(window_ids: tuple, job) -> bool:
+    return job.window_id in window_ids
+
+
+@pytest.mark.parametrize(
+    "formed_at",
+    [
+        ("weak_decoder", "strong_decoder"),
+        ("weak_decoder", "strong_syndrome_buffer"),
+    ],
+)
+@pytest.mark.parametrize("escalated", [(1, 3), (1, 2)])
+def test_a_live_region_reads_a_round_an_earlier_region_landed(
+    formed_at: tuple, escalated: tuple
+) -> None:
+    """A later region reads a round window 1's region left at its seat.
+
+    Window 1's region forms round 2 and is given round 1 raw. Round 4
+    (window 3) reads round 2 and round 3 (window 2) reads round 1; the
+    strong seat keeps both packets while those rounds are unformed
+    there, so the later escalation carries neither.
+    """
+    program = _two_round_lookback_program()
+    settings = _settings(program, "live", "controller")
+    is_escalated = functools.partial(_escalates_one_of, escalated)
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, is_escalated)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak, units=3)
+    strong_decoder = dataclasses.replace(settings.strong_decoder, units=3)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(
+        settings.escalation, kind="switching", policy=policy
+    )
+    seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    settings = dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+        detection_events=seats,
+        windows=windows,
+    )
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
+def _readout_only_program() -> circuit_records.RepeatedStimCircuit:
+    """One qubit whose every detector reads its own round alone."""
+    first = stim.Circuit("R 0\nM(0.15) 0\nDETECTOR rec[-1]")
+    repeated = stim.Circuit("M(0.15) 0\nDETECTOR rec[-1]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = repeated + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+
+
+def _escalates_none(job) -> bool:
+    del job
+    return False
+
+
+def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
+    """No detector reads an earlier round, so a committed window keeps none.
+
+    Window 0 commits before round 2 runs; round 2's instructions read
+    round 2 alone, so the weak syndrome buffer, one bit, takes round 2.
+    """
+    program = _readout_only_program()
+    settings = _settings(program, "live", "controller")
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _escalates_none)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(
+        settings.escalation, kind="switching", policy=policy
+    )
+    seats = dataclasses.replace(
+        settings.detection_events, formed_at=("weak_decoder", "strong_decoder")
+    )
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    one_round = syndrome_buffer_settings.SyndromeBufferSettings(bits=1)
+    settings = dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+        detection_events=seats,
+        windows=windows,
+        weak_syndrome_buffer=one_round,
+    )
+
+    machine = machine_module.Machine.build(settings, RUN_SEED)
+    store = machine.readout.weak_syndrome_buffer
+    stalled = functools.partial(_refuse_a_round_still_held, store)
+    machine.engine.schedule(STALL_GUARD_TICKS, stalled, label="stall guard")
+
+    machine.run()
+
+    assert store.occupied_bits == 0
+
+
+# a run that has not drained by thirty microseconds is stuck: a store
+# full of a round nothing releases holds the stream's next round out,
+# and the stream keeps the engine running
+STALL_GUARD_TICKS = 30_000_000
+
+
+def _refuse_a_round_still_held(store) -> None:
+    held_bits = store.occupied_bits
+    assert held_bits == 0, f"the store still holds {held_bits} bits"
+
+
+def _final_reaching_program() -> circuit_records.RepeatedStimCircuit:
+    """Round 1 reads out four times; the final round alone reads back.
+
+    Its rec[-4] lies three one-readout rounds before it, so whichever
+    round the controller ends the stream on reads three rounds back.
+    """
+    first = stim.Circuit("R 0\nREPEAT 4 {\nM 0\nDETECTOR rec[-1]\n}")
+    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-4]") + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+
+
+def _first_round_observed_program() -> circuit_records.RepeatedStimCircuit:
+    """The observable reads round 1 and the final round, nothing between."""
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]") + readout
+    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    final = repeated + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+
+
+def _switching_live_settings(
+    program: circuit_records.RepeatedStimCircuit, escalated: tuple
+) -> machine_settings.MachineSettings:
+    """Windows of one round, both decoders forming, these windows escalated."""
+    settings = _settings(program, "live", "controller")
+    is_escalated = functools.partial(_escalates_one_of, escalated)
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, is_escalated)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(
+        settings.escalation, kind="switching", policy=policy
+    )
+    seats = dataclasses.replace(
+        settings.detection_events, formed_at=("weak_decoder", "strong_decoder")
+    )
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    return dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+        detection_events=seats,
+        windows=windows,
+    )
+
+
+def test_a_stream_keeps_the_round_its_final_fragment_may_read():
+    """The last window's region forms the final round, which reads round 5.
+
+    Every earlier round reads only itself, yet any of them may be
+    followed by the final round, so round 5 stays through the windows
+    between.
+    """
+    program = _final_reaching_program()
+    settings = _switching_live_settings(program, (7,))
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
+def test_a_round_reaching_past_its_declared_fragments_stops_the_run():
+    """Round 5 alone reads round 1; the declared fragments reach none back.
+
+    The controller's former let round 1 go, so forming round 5 raises
+    rather than form an event from a round it was not given.
+    """
+    program = _first_round_read_by_the_fifth_program()
+    settings = _settings(program, "live", "controller")
+
+    with pytest.raises(RuntimeError, match="round 5 reads round 1"):
+        _run(settings)
+
+
+def test_an_escalation_leaves_the_rounds_a_later_window_reads_held():
+    """Window 6 escalates before window 7 registers; round 8 reads round 5.
+
+    Window 6's potential strong read becomes its region's hold, which
+    names only what the region reads, so the stream itself keeps round 5
+    for window 7.
+    """
+    program = _final_reaching_program()
+    settings = _switching_live_settings(program, (6, 7))
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
+def test_an_escalated_final_round_whose_observable_reads_round_1_drains():
+    """Window 7 forms the final round, whose detector reads only itself.
+
+    Its observable also reads round 1, but the device folds that into
+    the truth per shot (form_shot), so no seat keeps round 1 for it and
+    the run drains.
+    """
+    program = _first_round_observed_program()
+    settings = _switching_live_settings(program, (7,))
+
+    run = _run(settings)
+
     _assert_drained(run)
 
 
@@ -3686,3 +4014,29 @@ def _required_sections_but_the_qpu() -> dict:
         sections[name] = {}
     del sections["qpu"]
     return sections
+
+
+def _first_round_read_by_the_fifth_program() -> "_FifthRoundReadsTheFirst":
+    """One-bit rounds reading only themselves, but round 5 reads round 1."""
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
+    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    final = repeated + readout
+    single = first + readout
+    return _FifthRoundReadsTheFirst(first, repeated, final, single)
+
+
+@dataclasses.dataclass(frozen=True)
+class _FifthRoundReadsTheFirst(circuit_records.RepeatedStimCircuit):
+    """Round 5 alone adds a detector of rec[-1] and rec[-5], round 1."""
+
+    def round_circuit(self, round_index: int, is_final: bool) -> stim.Circuit:
+        """The declared fragment, and on round 5 one more detector."""
+        declared = circuit_records.RepeatedStimCircuit.round_circuit
+        circuit = declared(self, round_index, is_final)
+        added = _ADDED_ON_ROUND.get(round_index, _NOTHING_ADDED)
+        return circuit + added
+
+
+_ADDED_ON_ROUND = {5: stim.Circuit("DETECTOR rec[-1] rec[-5]")}
+_NOTHING_ADDED = stim.Circuit()

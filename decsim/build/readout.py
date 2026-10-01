@@ -124,6 +124,7 @@ class Readout:
         readout._wire_the_controller_path(links)
         readout._wire_the_weak_store(links)
         readout._wire_the_strong_store(links)
+        readout._wire_the_primary_store()
         return readout
 
     def connect(
@@ -147,7 +148,8 @@ class Readout:
         """No round is still on its way; the stores before the waiting line.
 
         A round held for room is the symptom, the hold that keeps the
-        store full is the cause, so the stores are asked first.
+        store full is the cause, so the stores are asked first; the
+        seats last, since every round has left the stores by then.
         """
         self.assembler.check_settled()
         self.weak_syndrome_round_receiver.check_settled()
@@ -155,6 +157,7 @@ class Readout:
             self.strong_syndrome_round_receiver.check_settled()
         self.syndrome_round_sender.check_settled()
         self.transmitter.check_settled()
+        self.detection_events.check_settled()
 
     def seed_roots(self) -> tuple:
         """This part's stochastic owners, each by the name its seed hashes."""
@@ -207,6 +210,18 @@ class Readout:
         receiver.memory_arrivals = self.memory_arrivals
         receiver.detection_events = self.detection_events
         self.syndrome_round_sender.strong_receiver = receiver
+
+    def _wire_the_primary_store(self) -> None:
+        """The store the plan's windows read tells the seats what leaves it.
+
+        Every read, the escalation's included, holds its rounds there
+        until they have landed and formed, so a round that leaves it is
+        formed nowhere after.
+        """
+        primary_store = self.weak_syndrome_buffer
+        if self.primary_output is self.strong_output:
+            primary_store = self.strong_syndrome_buffer
+        primary_store.detection_events = self.detection_events
 
 
 def build_detection_events(

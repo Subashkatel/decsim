@@ -63,6 +63,8 @@ class SeatedFormation:
     ) -> None:
         self.settings = settings
         self.clock = settings.clock
+        # the source's recipes, None when it answers none
+        self.recipes = source
         self.trace = _TraceSources()
         self.history_by_seat = {}
         for seat in settings.formed_at:
@@ -78,22 +80,22 @@ class SeatedFormation:
         return seat in self.history_by_seat
 
     def form_at(
-        self, seat: str, fragments: tuple, round_before: tuple = ()
+        self, seat: str, fragments: tuple, rounds_before: tuple = ()
     ) -> tuple:
         """The fragments as they leave the seat: formed there, or as they came.
 
         A seat outside a decoder unit sends the events on at their own
         width; a decoder seat keeps the width that landed, since the
         unit's input memory was written the raw round and a memory
-        counts what is written into it. round_before is the raw round
-        before the first of the fragments, given to a seat that needs it
-        (needs_the_round_before): the seat holds it for that round's
-        detectors and neither forms nor returns it.
+        counts what is written into it. rounds_before are the raw rounds
+        before the first of the fragments, in order, given to a seat that
+        needs them (rounds_needed_before): the seat holds them for that
+        round's detectors and neither forms nor returns them.
         """
         history = self.history_by_seat.get(seat)
         if history is None:
             return fragments
-        history.hold(round_before)
+        history.hold(rounds_before)
         return history.form(fragments)
 
     def width_at(self, seat: str, fragments: tuple) -> Optional[int]:
@@ -109,22 +111,85 @@ class SeatedFormation:
             return round_records.fragment_wire_bits(fragments)
         return history.width(fragments)
 
-    def needs_the_round_before(
-        self, seat: str, operation_id: Any, round_index: int
-    ) -> bool:
-        """Whether the seat must be given the raw round before this one.
+    def rounds_needed_before(
+        self, seat: str, operation_id: Any, first_round: int, last_round: int
+    ) -> tuple:
+        """The raw rounds before a read's first round the seat must be given.
 
-        A detector compares a round against the one before it (LILLIPUT
-        2108.06569 lines 499-510), so a seat that has not formed this
-        round reads the round before it, except on its operation's first
-        round, which compares against the reset. A round the seat formed
-        before is answered from what it remembers and needs nothing.
+        A detector compares a round against earlier ones, one round back
+        on a surface code (LILLIPUT 2108.06569 lines 499-510) and further
+        on others, so a read of first_round to last_round is given the
+        rounds its unformed rounds' recipes read and no round between
+        (detector_formation.FormationTable rounds_read_by), the rounds
+        its stream keeps for it (earlier_rounds_read). A round the seat
+        formed before is answered from what it remembers, and its former
+        keeps its packet, or the packet it was given raw, while an
+        unformed round reads it
+        (detector_formation.StreamingDetectorFormer), so it is not given
+        again.
         """
         history = self.history_by_seat.get(seat)
-        if history is None or round_index <= 1:
-            return False
-        round_key = (operation_id, round_index)
-        return not history.has_formed(round_key)
+        if history is None:
+            return ()
+        return history.rounds_needed_before(
+            operation_id, first_round, last_round
+        )
+
+    def earlier_rounds_read(
+        self, operation_id: Any, first_round: int
+    ) -> tuple[int, ...]:
+        """The raw rounds before first_round it or any later round reads.
+
+        What a stream's window holds before its first round for a seat
+        that forms, whatever that seat has formed by the time it reads
+        (detector_formation.FormationTable earlier_rounds_read): a later
+        window registers after it, so it keeps what that window reads
+        too. None for a source with no recipes, which forms nothing.
+        """
+        if self.recipes is None:
+            return ()
+        table = self.recipes.formation_table(operation_id)
+        return table.earlier_rounds_read(first_round)
+
+    def retire_round(self, round_key: tuple) -> None:
+        """No read forms this round again: every seat's reads of it are done.
+
+        The round left the store the plan's windows read, so no window
+        or escalation reads it after now, and every seat stops keeping
+        packets for it (detector_formation.StreamingDetectorFormer
+        retire_round): a round an escalation took to the strong side, a
+        sealed stream's last rounds and a clipped tail are among them.
+        """
+        operation_id, round_index = round_key
+        for history in self.history_by_seat.values():
+            history.retire(operation_id, round_index)
+
+    def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
+        """The round keys no earlier job of the seat claimed, now claimed.
+
+        A decoder tier charges a job for the rounds it is first to claim
+        (decoders/detection_events.py TierFormation). Every job claims
+        its rounds while the store still holds them for it
+        (decoder_memory_transfer.py stage), and a round retires only
+        once no read holds it, so no job claims a round after it
+        retires and its claim goes then.
+        """
+        history = self.history_by_seat[seat]
+        return history.memory.claim(round_keys)
+
+    def return_claim(self, seat: str, round_keys: tuple) -> None:
+        """A job that never started gives its claimed round keys back."""
+        history = self.history_by_seat[seat]
+        history.memory.unclaim(round_keys)
+
+    def check_settled(self) -> None:
+        """At the end of a run no seat may still hold a raw round.
+
+        Every round has formed or left the store by then, so a packet
+        still held is one no round would ever have let go of.
+        """
+        for history in self.history_by_seat.values():
+            history.check_settled()
 
     def cycles_at(self, seat: str, round_count: int) -> int:
         """What forming round_count rounds together costs the seat, on clock."""
@@ -138,10 +203,10 @@ class _SeatHistory:
 
     A detector compares this round's outcomes against the round before
     it (LILLIPUT 2108.06569 lines 499-510), so a round is formed from
-    the packets the seat holds, the last max_record_span + 1 it was
-    given (detector_formation.StreamingDetectorFormer). A round the
-    seat formed before is answered from what it remembers, and its
-    packet is held for the round after it.
+    the packets the seat holds, each kept while a round that reads it is
+    unformed here (detector_formation.StreamingDetectorFormer). A round
+    the seat formed before is answered from what it remembers, and its
+    packet is held for the rounds after it.
     """
 
     def __init__(
@@ -158,7 +223,7 @@ class _SeatHistory:
         # placement, silent for a history on its own
         self.state_held = trace_source.SILENT
         self.former_by_operation: dict = {}
-        self.events_by_round: dict = {}
+        self.memory = _SeatMemory()
 
     @property
     def keeps_landed_width(self) -> bool:
@@ -228,14 +293,78 @@ class _SeatHistory:
             former.hold_packet(first.round_index, bits)
             self._report_state(first.operation_id, former)
 
-    def has_formed(self, round_key: tuple) -> bool:
-        """Whether a source with no recipes, or this seat, formed the round.
+    def retire(self, operation_id: Any, round_index: int) -> None:
+        """No read forms this round here again; held packets may go.
 
-        A source with no recipes forms nothing, so nothing is missing.
+        Its remembered events go too, since no read asks for it here
+        again. A seat with no former yet records the round, for the
+        former it makes later. The former takes the source's newest table first,
+        so a live stream that has since run its final round no longer
+        keeps rounds for a round still to run.
+        """
+        self.memory.retire(operation_id, round_index)
+        if operation_id not in self.former_by_operation:
+            return
+        former = self._former_for(operation_id)
+        former.retire_round(round_index)
+        self._report_state(operation_id, former)
+
+    def check_settled(self) -> None:
+        """No former of this seat holds a raw round."""
+        for operation_id, former in self.former_by_operation.items():
+            if not former.packets:
+                continue
+            held_rounds = sorted(former.packets)
+            raise RuntimeError(
+                f"the {self.seat} seat still holds raw rounds {held_rounds} "
+                f"of operation {operation_id!r} at the end of the run, "
+                "though every round has formed or left the store"
+            )
+
+    def rounds_needed_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> tuple:
+        """The raw rounds before first_round that forming the read reads.
+
+        Exactly the rounds its unformed rounds' recipes read
+        (FormationTable rounds_read_by) that the seat does not hold raw:
+        a round given to it or formed there before stays in its former
+        while an unformed round reads it. A source with no recipes forms
+        nothing, so nothing is missing.
         """
         if self.recipes is None:
-            return True
-        return round_key in self.events_by_round
+            return ()
+        table = self.recipes.formation_table(operation_id)
+        stop_round = last_round + 1
+        unformed_rounds = self._unformed(operation_id, first_round, stop_round)
+        read_rounds = table.rounds_read_by(unformed_rounds)
+        return self._lacking(operation_id, read_rounds, first_round)
+
+    def _lacking(
+        self, operation_id: Any, read_rounds: set, first_round: int
+    ) -> tuple:
+        """The read rounds before first_round whose packet the seat lacks."""
+        former = self.former_by_operation.get(operation_id)
+        lacking_rounds = []
+        for round_index in sorted(read_rounds):
+            if round_index >= first_round:
+                continue
+            if former is not None and former.holds_packet(round_index):
+                continue
+            lacking_rounds.append(round_index)
+        return tuple(lacking_rounds)
+
+    def _unformed(
+        self, operation_id: Any, first_round: int, stop_round: int
+    ) -> tuple:
+        """The rounds from first_round to before stop_round never formed."""
+        done_rounds = self.memory.done_rounds_of(operation_id)
+        unformed_rounds = []
+        for round_index in range(first_round, stop_round):
+            if round_index in done_rounds:
+                continue
+            unformed_rounds.append(round_index)
+        return tuple(unformed_rounds)
 
     def _form_round(self, fragments: list) -> tuple:
         """One round's fragments as one fragment of its events.
@@ -263,15 +392,16 @@ class _SeatHistory:
         """The round's events, formed here the first time the seat sees it."""
         former = self._former_for(operation_id)
         key = (operation_id, round_index)
-        remembered = self.events_by_round.get(key)
+        remembered = self.memory.events_by_round.get(key)
         if remembered is not None:
             former.hold_packet(round_index, raw_bits)
             self._report_state(operation_id, former)
             return remembered
-        events, _ = former.feed_packet(round_index, raw_bits)
+        former.take_packet(round_index, raw_bits)
         self._report_state(operation_id, former)
+        events = former.form_round(round_index)
         values = tuple(value for _, value in events)
-        self.events_by_round[key] = values
+        self.memory.events_by_round[key] = values
         if self.observer is not None:
             self.observer.observe_round(operation_id, round_index, values)
         return values
@@ -296,12 +426,62 @@ class _SeatHistory:
         table = self.recipes.formation_table(operation_id)
         former = self.former_by_operation.get(operation_id)
         if former is None:
-            former = detector_formation.StreamingDetectorFormer(table)
+            done_rounds = self.memory.done_rounds_of(operation_id)
+            former = detector_formation.StreamingDetectorFormer(
+                table, done_rounds
+            )
             self.former_by_operation[operation_id] = former
             return former
         if former.table is not table:
             former.extend_table(table)
         return former
+
+
+class _SeatMemory:
+    """What a seat remembers of the rounds it is done with.
+
+    Read where a round is formed or retired, not where the seat is
+    wired, so it is kept apart from the seat's collaborators.
+    """
+
+    def __init__(self) -> None:
+        # per operation, the rounds formed here or retired, kept from
+        # the first retirement on, so a former made later knows them
+        self.done_by_operation: dict = {}
+        # the events of rounds formed here and not yet retired, which a
+        # second read of the round is answered from
+        self.events_by_round: dict = {}
+        # the round keys a decoder tier's jobs claimed, until retired
+        self.claimed_keys: set = set()
+
+    def done_rounds_of(
+        self, operation_id: Any
+    ) -> detector_formation.DoneRounds:
+        """The operation's rounds formed here or retired."""
+        new_record = detector_formation.DoneRounds()
+        return self.done_by_operation.setdefault(operation_id, new_record)
+
+    def retire(self, operation_id: Any, round_index: int) -> None:
+        """The round is done here; its events and claim are asked no more."""
+        done_rounds = self.done_rounds_of(operation_id)
+        done_rounds.add(round_index)
+        round_key = (operation_id, round_index)
+        self.events_by_round.pop(round_key, None)
+        self.claimed_keys.discard(round_key)
+
+    def claim(self, round_keys: tuple) -> tuple:
+        """The keys not claimed before, now claimed."""
+        fresh = []
+        for round_key in round_keys:
+            if round_key in self.claimed_keys:
+                continue
+            fresh.append(round_key)
+        self.claimed_keys.update(fresh)
+        return tuple(fresh)
+
+    def unclaim(self, round_keys: tuple) -> None:
+        """The keys are claimed no more."""
+        self.claimed_keys.difference_update(round_keys)
 
 
 def _as_stated_events(

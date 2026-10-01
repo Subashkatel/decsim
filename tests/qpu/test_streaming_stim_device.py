@@ -23,6 +23,7 @@ import decsim.observe.settings as observation_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
+import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -47,6 +48,40 @@ def test_property_live_records_match_stim_at_different_stop_lengths(
     numpy.testing.assert_array_equal(truth, expected_truth[0])
     assert source.sampled_detection_events(owner.id) == tuple(events)
     source.validate_stream_length(owner, round_count)
+
+
+def test_a_live_table_reaches_as_far_back_as_its_final_fragment_reads():
+    """Two rounds in, the next may be the final one, three rounds back.
+
+    After the readout no round follows.
+    """
+    program = _final_reaching_program()
+    source, owner = _source(program=program)
+    _run_round(source, owner, 1, is_final=False)
+    _run_round(source, owner, 2, is_final=False)
+    running = source.formation_table(owner.id)
+    _run_round(source, owner, 3, is_final=True)
+    read_out = source.formation_table(owner.id)
+
+    assert running.live_reach == 3
+    assert read_out.live_reach is None
+
+
+def test_a_program_whose_round_circuit_keeps_the_fragments_is_declared():
+    """A surface-code round reads the one before it: a reach of one."""
+    declared = memory_programs.memory_program()
+    program = _DeclaredFragments(
+        declared.first_round,
+        declared.repeated_round,
+        declared.final_round,
+        declared.single_round,
+    )
+
+    source, owner = _source(program=program)
+    _run_round(source, owner, 1, is_final=False)
+
+    running = source.formation_table(owner.id)
+    assert running.live_reach == 1
 
 
 def test_a_later_stop_keeps_the_executed_nonterminal_prefix() -> None:
@@ -266,8 +301,9 @@ def test_property_entangled_blocks_preserve_bell_parity_across_random_shots(
     assert logical_values == {0, 1}
 
 
-def _source(round_period_microseconds=None):
-    program = memory_programs.memory_program()
+def _source(round_period_microseconds=None, program=None):
+    if program is None:
+        program = memory_programs.memory_program()
     program = dataclasses.replace(
         program, round_period_microseconds=round_period_microseconds
     )
@@ -285,6 +321,17 @@ def _source(round_period_microseconds=None):
         owner, 0, fault_model_requirement=requirement
     )
     return source, owner
+
+
+def _run_round(source, owner, round_index: int, is_final: bool) -> None:
+    """Run one round of the stream at the QPU's cadence."""
+    source.idle_round_payloads(
+        owner,
+        owner.id,
+        round_index,
+        is_final=is_final,
+        round_period_ticks=1_100_000,
+    )
 
 
 def _execute(source, owner, round_count):
@@ -395,3 +442,26 @@ def _assert_complete_record_matches_stim(source, stream_id, events) -> None:
     numpy.testing.assert_array_equal(events, expected_events[0])
     truth = source.logical_observable_truth(stream_id)
     numpy.testing.assert_array_equal(truth, expected_truth[0])
+
+
+@dataclasses.dataclass(frozen=True)
+class _DeclaredFragments(circuit_records.RepeatedStimCircuit):
+    """Overrides round_circuit and returns the declared fragment unchanged."""
+
+    def round_circuit(self, round_index: int, is_final: bool) -> stim.Circuit:
+        """The fragment the base class declares."""
+        declared = circuit_records.RepeatedStimCircuit.round_circuit
+        return declared(self, round_index, is_final)
+
+
+def _final_reaching_program() -> circuit_records.RepeatedStimCircuit:
+    """Round 1 reads out four times; the final round's rec[-4] reads back.
+
+    Repeated rounds read only themselves.
+    """
+    first = stim.Circuit("R 0\nREPEAT 4 {\nM 0\nDETECTOR rec[-1]\n}")
+    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-4]") + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)

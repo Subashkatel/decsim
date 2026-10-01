@@ -16,13 +16,26 @@ frontends/planner.py), past its own request and landing: an earlier
 escalation may re-slice it as the restart window, which re-reads
 escalation.restart_reread_buffer_regions buffer regions of the strong
 region (Toshio et al. 2510.25222 Sec. III C). When the strong side
-forms the detection events, every strong read also holds the raw round
-before its first, which that side's former reads (strong_round_before).
-The read ends when the window before it commits, or when the window is
-re-sliced or absorbed. The stores hold slots and holders; which
-rounds a window needs is decided here, gem5's split between the cache
-that allocates a miss buffer and the queue that holds the entry
-(src/mem/cache/base.hh allocateMissBuffer).
+forms the detection events, a window's potential strong read also holds
+the raw rounds before its first that its or a later round's recipes
+read (a later window claims them only once it registers), as an
+HEVC decoder keeps each picture the current reference set names (FFmpeg
+hevc/refs.c:486-517); an escalation carries only those its strong seat
+lacks (strong_rounds_before), since that seat's former keeps a round an
+earlier strong read landed while a round it has not formed reads it. A
+weak read holds none: the earlier window's read holds those rounds
+until it lands in the same decoder, which forms them and keeps each
+packet while a round it has not formed reads it
+(detector_formation.StreamingDetectorFormer), even when it forms a
+later block first, and a restart window's rounds before its start are
+in the strong region, whose request keeps them until the restart window
+commits. The hold ends when the reader no longer needs the round in the
+store, as on a read of no formation. The read ends when the window
+before it commits, or when the window is re-sliced or absorbed. The
+stores hold slots and holders; which rounds a window needs is decided
+here, gem5's split between the cache that allocates a miss buffer and
+the queue that holds the entry (src/mem/cache/base.hh
+allocateMissBuffer).
 """
 
 import functools
@@ -44,19 +57,23 @@ class RoundRetention:
     strong_store = ports.Port(ports.RetainedRounds, optional=True)
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker.RoundTracker)
+    # the run's placement, asked how many rounds before a read's first
+    # round its recipes read when a seat on that read forms the events
+    detection_events = ports.Port(ports.DetectionEventPlacement)
 
     def __init__(
         self,
         *,
         is_strong_context_retained: bool,
         primary_tier: window_records.DecoderTier,
-        strong_side_forms: bool = False,
+        strong_side_seat: Optional[str] = None,
     ) -> None:
         self.is_strong_context_retained = is_strong_context_retained
         self.primary_tier = primary_tier
-        # a seat past the weak syndrome buffer on the escalation path
-        # forms the detection events (detection_events.formed_at)
-        self.strong_side_forms = strong_side_forms
+        # the seat past the weak syndrome buffer on the escalation path
+        # that forms the detection events (detection_events.formed_at),
+        # None when none does
+        self.strong_side_seat = strong_side_seat
 
     # ---- the stores
 
@@ -96,10 +113,13 @@ class RoundRetention:
     def register_window(
         self, key: tuple, window: window_records.Window
     ) -> None:
-        """Register the primary read and any possible escalation context."""
-        primary_reads = self.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
-        )
+        """Register the primary read and any possible escalation context.
+
+        Then the stream's hold for its windows still to come moves past
+        this one (_hold_later_stream_reads), after this window has
+        claimed its own rounds.
+        """
+        primary_reads = self.primary_read_keys(window)
         strong_context = self.strong_context_read_keys(window, primary_reads)
         reads = decoding_records.WindowReads(key)
         self.primary_store.register_hold(reads, primary_reads)
@@ -107,6 +127,12 @@ class RoundRetention:
         held = primary_reads + strong_context
         for store in self._strong_context_stores():
             store.register_hold(potential, held)
+        self._hold_later_stream_reads(window)
+
+    def release_later_stream_reads(self, stream_id: Any) -> None:
+        """A sealed stream has every window registered: its hold ends."""
+        later_reads = decoding_records.LaterStreamReads(stream_id)
+        self.release_strong_hold_if_live(later_reads)
 
     def replace_window_reads(
         self, key: tuple, window: window_records.Window
@@ -119,21 +145,8 @@ class RoundRetention:
         keeps its potential restart hold, which now names the rounds
         the fresh request reads, the re-read range among them.
         """
-        primary_reads = self.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
-        )
-        strong_context = self.strong_context_read_keys(window, primary_reads)
-        potential = decoding_records.PotentialStrong(key)
-        held = primary_reads + strong_context
-        for store in self._strong_context_stores():
-            if store.has_hold(potential):
-                store.replace_hold(potential, held)
-        reads = decoding_records.WindowReads(key)
-        if self.primary_store.has_hold(reads):
-            self.primary_store.replace_hold(reads, primary_reads)
-        restart = decoding_records.PotentialRestart(key)
-        if self.weak_store.has_hold(restart):
-            self.weak_store.replace_hold(restart, primary_reads)
+        primary_reads = self.primary_read_keys(window)
+        self._repoint_reads(key, window, primary_reads)
 
     def release_restart_reads(self, key: tuple) -> None:
         """No earlier escalation can re-slice the window: its claim ends."""
@@ -156,6 +169,18 @@ class RoundRetention:
         for round_index in range(window.start_round, stop_round):
             new_reads.append((window.operation_id, round_index))
         self.primary_store.replace_hold(reads, new_reads)
+
+    def primary_read_keys(self, window: window_records.Window) -> list:
+        """The rounds the window's primary decode reads, from its start.
+
+        None of the rounds before its start: an earlier window's read
+        holds them until it lands in the same decoder, which forms them
+        there and keeps each packet while a round it has not formed
+        reads it.
+        """
+        return self.read_keys_for_bounds(
+            window.operation_id, window.start_round, window.buffer_hi, window
+        )
 
     def read_keys_for_bounds(
         self,
@@ -194,25 +219,35 @@ class RoundRetention:
         bounds = window_records.strong_context_bounds(window)
         context_lo, _commit_lo, _commit_hi, context_hi = bounds
         weak = set(weak_reads)
-        strong = self.strong_round_before(window.operation_id, context_lo)
+        strong = self._strong_rounds_read_before(
+            window.operation_id, context_lo
+        )
         strong += self.read_keys_for_bounds(
             window.operation_id, context_lo, context_hi, window
         )
         return [round_key for round_key in strong if round_key not in weak]
 
-    def strong_round_before(self, operation_id, first_round: int) -> list:
-        """The raw round a strong redo from first_round reads before it.
+    def strong_rounds_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> list:
+        """The raw rounds before these that a strong read of them carries.
 
-        When the strong side forms the events, a strong read starts one
-        raw round before its first: a detector compares a round against
-        the one before it (LILLIPUT 2108.06569 lines 499-510), and the
-        strong side's former has not seen the rounds the weak side
-        decoded. None otherwise, and none before the operation's first
-        round, which compares against the reset.
+        When the strong side forms the events, its seat is given the
+        rounds before the read's first that its unformed rounds' recipes
+        read and it does not hold (rounds_needed_before): a round an
+        earlier strong read landed there stays in its former while an
+        unformed round reads it, so the stores need not keep it for this
+        read. None otherwise.
         """
-        if not self.strong_side_forms or first_round <= 1:
+        if self.strong_side_seat is None:
             return []
-        return [(operation_id, first_round - 1)]
+        needed_rounds = self.detection_events.rounds_needed_before(
+            self.strong_side_seat, operation_id, first_round, last_round
+        )
+        round_keys = []
+        for round_index in needed_rounds:
+            round_keys.append((operation_id, round_index))
+        return round_keys
 
     # ---- holds moving between owners
 
@@ -500,6 +535,73 @@ class RoundRetention:
 
     # ---- private
 
+    def _hold_later_stream_reads(self, window: window_records.Window) -> None:
+        """Keep what the stream's windows after this one read before it.
+
+        A strong read of a window carries the raw rounds before its first
+        that its recipes read (strong_rounds_before), and the window
+        after this one registers only once its first round has arrived,
+        maybe after this one's potential strong read ended at its commit
+        or became an escalation's. So the stream holds the rounds before
+        this window's commit end that a round after it reads
+        (earlier_rounds_read), and moves the hold as each window
+        registers, claiming the new rounds before letting the old go.
+        With none to keep it holds nothing, and a store with room for
+        one round runs on.
+        """
+        if self.strong_side_seat is None:
+            return
+        after_commit = window.commit_hi + 1
+        read_keys = self._strong_rounds_read_before(
+            window.operation_id, after_commit
+        )
+        later_reads = decoding_records.LaterStreamReads(window.operation_id)
+        if not read_keys:
+            self.release_strong_hold_if_live(later_reads)
+            return
+        for store in self._strong_context_stores():
+            _hold_or_replace(store, later_reads, read_keys)
+
+    def _repoint_reads(
+        self, key: tuple, window: window_records.Window, primary_reads: list
+    ) -> None:
+        """Move the window's potential strong, read and restart holds."""
+        strong_context = self.strong_context_read_keys(window, primary_reads)
+        potential = decoding_records.PotentialStrong(key)
+        held = primary_reads + strong_context
+        for store in self._strong_context_stores():
+            if store.has_hold(potential):
+                store.replace_hold(potential, held)
+        reads = decoding_records.WindowReads(key)
+        if self.primary_store.has_hold(reads):
+            self.primary_store.replace_hold(reads, primary_reads)
+        restart = decoding_records.PotentialRestart(key)
+        if self.weak_store.has_hold(restart):
+            self.weak_store.replace_hold(restart, primary_reads)
+
+    def _strong_rounds_read_before(
+        self, operation_id: Any, first_round: int
+    ) -> list:
+        """The raw rounds a strong read from first_round on may carry.
+
+        A window's potential strong read is placed before anyone knows
+        whether it escalates, or what the strong seat will have formed
+        by then, so it keeps every round before its first that its
+        rounds' recipes read, and those a later round reads, since the
+        later window claims them only once it registers
+        (earlier_rounds_read); the read itself carries only what the
+        seat lacks (strong_rounds_before).
+        """
+        if self.strong_side_seat is None:
+            return []
+        read_rounds = self.detection_events.earlier_rounds_read(
+            operation_id, first_round
+        )
+        round_keys = []
+        for round_index in read_rounds:
+            round_keys.append((operation_id, round_index))
+        return round_keys
+
     def _strong_context_stores(self) -> tuple:
         """The stores that keep a window's strong context: both, or none."""
         if self.is_strong_context_retained:
@@ -531,6 +633,14 @@ def round_identities_of(payloads) -> tuple:
     for fragment in payloads:
         identities[(fragment.operation_id, fragment.round_index)] = None
     return tuple(identities)
+
+
+def _hold_or_replace(store, holder, round_keys: list) -> None:
+    """Point the holder at these rounds, registering it the first time."""
+    if store.has_hold(holder):
+        store.replace_hold(holder, round_keys)
+        return
+    store.register_hold(holder, round_keys)
 
 
 def _from_the_first_round_on(identities: tuple, first_of: tuple) -> set:

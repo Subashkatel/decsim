@@ -206,6 +206,24 @@ def test_the_second_tier_charges_its_own_rounds():
     assert strong_cycles == 7
 
 
+def test_a_claim_lasts_until_its_round_retires():
+    """Window 1 shares round 2 with window 0, still held, and not round 1.
+
+    Every job claims its rounds while they are held, so no job asks for
+    a retired round in a run; one that did would be charged for it.
+    """
+    seated = placement()
+    tier = detection_events.TierFormation(seated, "strong_decoder")
+    window_0 = job([1, 2])
+    window_1 = job([1, 2, 3])
+    tier.rounds_to_form(window_0)
+    seated.retire_round((1, 1))
+
+    charged = tier.rounds_to_form(window_1)
+
+    assert charged == ((1, 1), (1, 3))
+
+
 def test_the_rounds_a_job_pays_for_are_frozen_at_the_first_ask():
     """The dispatcher's prediction and the stage's walk read one number."""
     formation_stage = weak_stage()

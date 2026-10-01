@@ -19,6 +19,7 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
+import decsim.ports as ports
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
@@ -60,6 +61,7 @@ class Plan:
     resource_claims: dict
     device: Any
     error_model_provider: Any
+    formation_reads: window_records.FormationReads
 
     @property
     def round_ticks(self) -> int:
@@ -102,7 +104,6 @@ def build_plan(
         settings.escalation
     )
     reread_regions = settings.escalation.restart_reread_buffer_regions
-    strong_side_forms = settings.detection_events.forms_on_the_strong_side()
     window_interaction = _window_interaction(settings.windows, reread_regions)
     if dynamic_streams and not scheme.supports_dynamic_streams:
         raise ValueError(
@@ -133,6 +134,15 @@ def build_plan(
     planned_ids = []
     for operation in planned_operations:
         planned_ids.append(operation.id)
+    physical_circuits = settings.workload.physical_circuits
+    physical_tables = _physical_formation_tables(physical_circuits)
+    device = _syndrome_source(
+        settings.qpu, code, physical_circuits, physical_tables
+    )
+    formation_tables = _formation_tables(
+        device, planned_operations, physical_tables, rounds_policy, code
+    )
+    formation_reads = _formation_reads(settings, formation_tables)
     run_plan = planner.plan_execution(
         operations=views,
         planned_operation_ids=tuple(planned_ids),
@@ -145,11 +155,9 @@ def build_plan(
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=bool(dynamic_streams),
-        strong_side_forms=strong_side_forms,
+        formation_reads=formation_reads,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
-    physical_circuits = settings.workload.physical_circuits
-    device = _syndrome_source(settings.qpu, code, physical_circuits)
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
         error_model_provider = device.window_model_source()
@@ -175,6 +183,7 @@ def build_plan(
         resource_claims=resource_claims,
         device=device,
         error_model_provider=error_model_provider,
+        formation_reads=formation_reads,
     )
 
 
@@ -410,7 +419,10 @@ def _idle_policy(settings: controller_settings.IdlePolicySettings):
 
 
 def _syndrome_source(
-    settings: qpu_settings.QpuSettings, code, physical_circuits: Mapping
+    settings: qpu_settings.QpuSettings,
+    code,
+    physical_circuits: Mapping,
+    physical_tables: Mapping,
 ):
     """The device of the qpu kind, or the Python-built one.
 
@@ -427,14 +439,18 @@ def _syndrome_source(
     if row.takes_code_card:
         arguments["code"] = code
     else:
-        circuit_arguments = _circuit_arguments(physical_circuits)
+        circuit_arguments = _circuit_arguments(
+            physical_circuits, physical_tables
+        )
         arguments.update(circuit_arguments)
     if settings.row_settings is not None:
         arguments["settings"] = settings.row_settings
     return row(**arguments)
 
 
-def _circuit_arguments(physical_circuits: Mapping) -> dict:
+def _circuit_arguments(
+    physical_circuits: Mapping, physical_tables: Mapping
+) -> dict:
     """The source's constructor arguments for the workload's circuits.
 
     A finite circuit is its measurement schedule and the round each
@@ -448,7 +464,8 @@ def _circuit_arguments(physical_circuits: Mapping) -> dict:
     for key, physical in physical_circuits.items():
         if isinstance(physical, workload_records.FiniteCircuit):
             measurement_rounds[key] = dict(physical.measurement_rounds)
-            detector_rounds[key] = _detector_rounds(physical)
+            table = physical_tables[key]
+            detector_rounds[key] = table.detector_rounds()
             continue
         programs[key] = physical
     arguments = {}
@@ -460,15 +477,78 @@ def _circuit_arguments(physical_circuits: Mapping) -> dict:
     return arguments
 
 
-def _detector_rounds(physical: workload_records.FiniteCircuit) -> dict:
-    """Each detector's round, formed off the declared measurement schedule."""
+def _physical_formation_tables(physical_circuits: Mapping) -> dict:
+    """Each finite circuit's recipes, by the stream key that runs it.
+
+    The source is declared each detector's round from this table, and
+    the plan reads from it how many rounds before a read its first
+    round's recipes reach.
+    """
+    tables = {}
+    for key, physical in physical_circuits.items():
+        if not isinstance(physical, workload_records.FiniteCircuit):
+            continue
+        tables[key] = _physical_formation_table(physical)
+    return tables
+
+
+def _physical_formation_table(
+    physical: workload_records.FiniteCircuit,
+) -> detector_formation.FormationTable:
+    """The recipes, formed off the declared measurement schedule."""
     schedule = physical.measurement_rounds
     rounds = schedule.values()
     round_count = max(rounds)
-    table = detector_formation.build_formation_table(
+    return detector_formation.build_formation_table(
         physical.circuit, round_count, measurement_rounds=schedule
     )
-    return table.detector_rounds()
+
+
+def _formation_tables(
+    device, planned_operations, physical_tables: Mapping, rounds_policy, code
+) -> dict:
+    """The recipes of every planned operation the source forms from.
+
+    The source reads an operation's recipes off its circuit when the
+    operation begins (qpu/stim_device.py, _sample_shot), after the plan
+    has placed the holds, so the plan reads the same circuit here. A
+    source that answers no recipes forms nothing, and a stream's
+    segments are planned while their stream runs, so neither has one.
+    """
+    if not isinstance(device, ports.DetectionEventFormer):
+        return {}
+    tables = {}
+    for operation in planned_operations:
+        table = physical_tables.get(operation.id)
+        if table is None:
+            table = _operation_formation_table(operation, rounds_policy, code)
+        if table is None:
+            continue
+        tables[operation.id] = table
+    return tables
+
+
+def _operation_formation_table(operation, rounds_policy, code):
+    """An operation's own circuit's recipes; None when it has none."""
+    if operation.circuit is None or operation.stream_id is not None:
+        return None
+    round_count = rounds_policy.rounds_for(operation, code)
+    return detector_formation.build_formation_table(
+        operation.circuit, round_count
+    )
+
+
+def _formation_reads(
+    settings: machine_settings.MachineSettings, tables: Mapping
+) -> window_records.FormationReads:
+    """Which reads also hold the raw rounds their first round reads.
+
+    A strong read does, when a seat past the weak syndrome buffer forms.
+    """
+    strong_side_seat = settings.detection_events.strong_side_seat()
+    return window_records.FormationReads(
+        strong_side_seat=strong_side_seat, tables=tables
+    )
 
 
 def _refuse_bulk_strong_without_a_merge(

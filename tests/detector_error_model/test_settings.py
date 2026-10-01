@@ -89,17 +89,15 @@ def test_a_charged_cost_with_no_clock_is_refused():
 
 
 @pytest.mark.parametrize(
-    "formed_at, forms_there",
+    "formed_at, seat",
     [
-        (("controller",), False),
-        (("weak_syndrome_buffer",), False),
-        (("weak_decoder", "strong_decoder"), True),
-        (("weak_decoder", "strong_syndrome_buffer"), True),
+        (("controller",), None),
+        (("weak_syndrome_buffer",), None),
+        (("weak_decoder", "strong_decoder"), "strong_decoder"),
+        (("weak_decoder", "strong_syndrome_buffer"), "strong_syndrome_buffer"),
     ],
 )
-def test_a_seat_past_the_weak_buffer_forms_on_the_strong_side(
-    formed_at, forms_there
-):
+def test_the_seat_past_the_weak_buffer_that_forms_is_named(formed_at, seat):
     settings = event_settings.DetectionEventSettings(formed_at=formed_at)
 
-    assert settings.forms_on_the_strong_side() is forms_there
+    assert settings.strong_side_seat() == seat

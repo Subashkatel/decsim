@@ -164,6 +164,38 @@ def no_recipes_at(seat):
     return formation.SeatedFormation(None, settings)
 
 
+def lookback_circuit(error_probability=0.0) -> tuple:
+    """One qubit measured ten rounds; round r's detector is rec[-1] ^ rec[-3].
+
+    Rounds 1 and 2 compare against the reset. Returns the circuit and its
+    packet schedule, one measurement a round.
+    """
+    noisy_measurement = (
+        f"X_ERROR({error_probability}) 0\nM({error_probability}) 0\n"
+    )
+    circuit = stim.Circuit(
+        "R 0\n"
+        f"{noisy_measurement}DETECTOR rec[-1]\n"
+        f"{noisy_measurement}DETECTOR rec[-1]\n"
+        "REPEAT 8 {\n"
+        f"{noisy_measurement}DETECTOR rec[-1] rec[-3]\n"
+        "}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    return circuit, measurement_rounds
+
+
+def lookback_seated(formed_at):
+    circuit, measurement_rounds = lookback_circuit()
+    table = detector_formation.build_formation_table(
+        circuit, 10, measurement_rounds=measurement_rounds
+    )
+    settings = event_settings.DetectionEventSettings(formed_at=formed_at)
+    source = CircuitSource(table)
+    return formation.SeatedFormation(source, settings)
+
+
 def test_a_circuit_less_round_leaves_a_store_seat_at_its_stated_width():
     placement = no_recipes_at("weak_syndrome_buffer")
     raw = (stated(),)
@@ -247,7 +279,10 @@ def test_asking_a_width_forms_nothing_and_holds_nothing():
     placement.width_at("weak_syndrome_buffer", second_round)
 
     assert detector.observed == []
-    assert placement.needs_the_round_before("weak_syndrome_buffer", 1, 2)
+    needed_rounds = placement.rounds_needed_before(
+        "weak_syndrome_buffer", 1, 2, 2
+    )
+    assert needed_rounds == (1,)
 
 
 def test_fake_bits_formed_are_the_first_of_the_random_bits():
@@ -308,10 +343,98 @@ def test_a_seat_given_the_round_before_forms_the_round_after_it():
     assert formed[0].bits == (0,) * 8
 
 
-def test_a_seat_that_has_not_formed_a_round_needs_the_one_before():
+def test_a_seat_that_has_not_formed_a_surface_code_round_needs_one_before():
+    """A bulk detector compares a round against the one before it."""
     placement = seated(("weak_decoder",))
 
-    assert placement.needs_the_round_before("weak_decoder", 1, 3)
+    assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == (2,)
+
+
+def test_a_seat_is_given_the_round_its_detector_reads_and_none_between():
+    """Round 5's detector is rec[-1] XOR rec[-3], rounds 5 and 3."""
+    placement = lookback_seated(("strong_decoder",))
+
+    assert placement.rounds_needed_before("strong_decoder", 1, 5, 5) == (3,)
+
+
+def reach_growing_circuit(error_probability=0.0) -> tuple:
+    """Ten rounds of rec[-1], then rec[-1] ^ rec[-4] from round 4 on.
+
+    A read from round 3 reads only round 3 for its first round, while
+    its round 4 reads round 1. Returns the circuit and its packet
+    schedule, one measurement a round.
+    """
+    noisy_measurement = (
+        f"X_ERROR({error_probability}) 0\nM({error_probability}) 0\n"
+    )
+    circuit = stim.Circuit(
+        "R 0\n"
+        "REPEAT 3 {\n"
+        f"{noisy_measurement}DETECTOR rec[-1]\n"
+        "}\n"
+        "REPEAT 7 {\n"
+        f"{noisy_measurement}DETECTOR rec[-1] rec[-4]\n"
+        "}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(10)}
+    return circuit, measurement_rounds
+
+
+def reach_growing_seated(formed_at):
+    circuit, measurement_rounds = reach_growing_circuit()
+    table = detector_formation.build_formation_table(
+        circuit, 10, measurement_rounds=measurement_rounds
+    )
+    settings = event_settings.DetectionEventSettings(formed_at=formed_at)
+    source = CircuitSource(table)
+    return formation.SeatedFormation(source, settings)
+
+
+def test_a_seat_is_given_the_round_a_later_round_of_its_read_reads():
+    """Round 3 reads only itself; round 4 of the same read reads round 1."""
+    placement = reach_growing_seated(("strong_decoder",))
+
+    assert placement.rounds_needed_before("strong_decoder", 1, 3, 4) == (1,)
+
+
+def test_a_seat_is_not_given_a_round_it_formed():
+    """It formed round 2, so round 3's detectors read the packet it kept."""
+    placement = seated(("weak_decoder",))
+    first_two = rounds(1, 2)
+    placement.form_at("weak_decoder", first_two)
+
+    assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == ()
+
+
+def test_a_seat_is_not_given_a_round_it_was_given_raw_before():
+    """Round 3 read round 1 and was given rounds 1 and 2; round 4 reads 2.
+
+    The seat keeps round 2's packet while round 4 is unformed there, so
+    a read from round 4 brings nothing before it.
+    """
+    placement = lookback_seated(("strong_decoder",))
+    third = (fragment(3, bits=(0,)),)
+    first_two = (fragment(1, bits=(0,)), fragment(2, bits=(0,)))
+    placement.form_at("strong_decoder", third, first_two)
+
+    assert placement.rounds_needed_before("strong_decoder", 1, 4, 4) == ()
+
+
+def test_a_round_whose_detectors_read_only_itself_needs_nothing_before():
+    """Round 2's detector compares against the reset: rec[-1] alone."""
+    placement = lookback_seated(("strong_decoder",))
+
+    assert placement.rounds_needed_before("strong_decoder", 1, 2, 2) == ()
+
+
+def test_a_seat_given_fewer_rounds_than_it_needs_refuses_the_round():
+    placement = lookback_seated(("strong_decoder",))
+    fifth = (fragment(5, bits=(0,)),)
+    fourth = (fragment(4, bits=(0,)),)
+
+    with pytest.raises(RuntimeError, match="round 5 reads round 3"):
+        placement.form_at("strong_decoder", fifth, fourth)
 
 
 def test_a_seat_needs_nothing_before_a_round_it_formed():
@@ -319,24 +442,30 @@ def test_a_seat_needs_nothing_before_a_round_it_formed():
     first_two = rounds(1, 2)
     placement.form_at("weak_decoder", first_two)
 
-    assert not placement.needs_the_round_before("weak_decoder", 1, 2)
+    assert placement.rounds_needed_before("weak_decoder", 1, 2, 2) == ()
 
 
 def test_an_operations_first_round_needs_nothing_before_it():
     """It compares against the reset (LILLIPUT 2108.06569 lines 499-510)."""
     placement = seated(("weak_decoder",))
 
-    assert not placement.needs_the_round_before("weak_decoder", 1, 1)
+    assert placement.rounds_needed_before("weak_decoder", 1, 1, 1) == ()
 
 
 def test_a_seat_that_does_not_form_needs_nothing():
     placement = seated(("controller",))
 
-    assert not placement.needs_the_round_before("weak_decoder", 1, 3)
+    assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == ()
+
+
+def test_a_source_with_no_recipes_needs_nothing_before_a_round():
+    placement = no_recipes_at("weak_decoder")
+
+    assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == ()
 
 
 def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
-    """max_record_span + 1 packets: two rounds of eight raw bits here.
+    """Two packets of eight raw bits: a round and the one it compares to.
 
     Maurer 2510.21600 Algorithm 2 (lines 760-770) keeps the running
     syndrome a detector compares against; the seat holds that and no
@@ -354,8 +483,63 @@ def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
 
     placement.form_at("weak_decoder", first_three)
 
-    assert TABLE.max_record_span == 1
     assert reported == [8, 16, 16]
+
+
+def test_a_round_that_left_the_store_lets_its_seat_go_of_what_it_read():
+    """Round 2 formed at another seat: no read forms it here after."""
+    placement = seated(("weak_decoder", "strong_decoder"))
+    first = rounds(1)
+    placement.form_at("strong_decoder", first)
+
+    placement.retire_round((1, 2))
+
+    history = placement.history_by_seat["strong_decoder"]
+    assert history.former_by_operation[1].packets == {}
+
+
+def test_a_seat_that_joins_late_knows_the_rounds_that_left_before_it():
+    """Round 1 is read by rounds 2 and 3; round 2 left before this seat formed.
+
+    The strong seat forms round 3 from round 1 given raw, and round 2's
+    read of round 1 was done already, so it holds nothing after.
+    """
+    placement = _twice_read_seated(("strong_decoder",))
+    placement.retire_round((1, 2))
+    third = (fragment(3, bits=(0,)),)
+    first = (fragment(1, bits=(0,)),)
+
+    placement.form_at("strong_decoder", third, first)
+
+    history = placement.history_by_seat["strong_decoder"]
+    assert history.former_by_operation[1].packets == {}
+
+
+def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
+    """Rounds retire out of order; the watermark closes over all three."""
+    placement = seated(("weak_decoder",))
+    three_rounds = rounds(1, 2, 3)
+    placement.form_at("weak_decoder", three_rounds)
+
+    placement.retire_round((1, 1))
+    placement.retire_round((1, 3))
+    placement.retire_round((1, 2))
+
+    history = placement.history_by_seat["weak_decoder"]
+    done_rounds = history.memory.done_by_operation[1]
+    assert history.memory.events_by_round == {}
+    assert done_rounds.through == 3
+    assert done_rounds.above == set()
+
+
+def test_a_seat_still_holding_a_raw_round_at_the_end_is_named():
+    """Round 1 waits for round 2, which never formed here nor left a store."""
+    placement = seated(("strong_decoder",))
+    first = rounds(1)
+    placement.form_at("strong_decoder", first)
+
+    with pytest.raises(RuntimeError, match="strong_decoder seat still holds"):
+        placement.check_settled()
 
 
 def test_each_operation_is_formed_from_its_own_first_round():
@@ -397,22 +581,68 @@ def test_forming_rounds_together_costs_the_latency_once_and_the_rate_after():
     assert placement.cycles_at("controller", 4) == 0
 
 
-@pytest.mark.parametrize("seat", event_settings.SEATS)
-def test_every_seat_forms_stims_events_on_sampled_shots(seat):
-    """Each round split into three shuffled fragments, at every seat.
-
-    The first round compares against the reset and the last folds in
-    the data readout, so a four-round memory covers all three layers.
-    The rounds come as two windows out of order, the later first, and
-    overlapping, so a seat forms a round from the round before it that
-    it is given and answers a round it formed from what it remembers.
-    """
+def _noisy_surface_code() -> tuple:
+    """Four rounds, the three layers: reset, bulk, folded data readout."""
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z",
         rounds=4,
         distance=3,
         before_measure_flip_probability=0.05,
         after_clifford_depolarization=0.05,
+    )
+    return circuit, 4, None
+
+
+def _noisy_lookback_memory() -> tuple:
+    """Ten rounds whose detector reads two rounds back: rec[-1] ^ rec[-3]."""
+    circuit, measurement_rounds = lookback_circuit(0.1)
+    return circuit, 10, measurement_rounds
+
+
+def _noisy_reach_growing_memory() -> tuple:
+    """Ten rounds whose later rounds reach further back than round 3."""
+    circuit, measurement_rounds = reach_growing_circuit(0.1)
+    return circuit, 10, measurement_rounds
+
+
+def _noisy_color_code(distance, round_count) -> tuple:
+    """Stim's XYZ color code memory, whose detectors read two rounds back."""
+    circuit = stim.Circuit.generated(
+        "color_code:memory_xyz",
+        rounds=round_count,
+        distance=distance,
+        before_measure_flip_probability=0.05,
+        after_clifford_depolarization=0.05,
+    )
+    return circuit, round_count, None
+
+
+FORMATION_CIRCUITS = {
+    "surface_code_d3": _noisy_surface_code(),
+    "lookback_two_rounds": _noisy_lookback_memory(),
+    "color_code_d3": _noisy_color_code(3, 6),
+    "color_code_d5": _noisy_color_code(5, 8),
+    "reach_growing": _noisy_reach_growing_memory(),
+}
+
+
+@pytest.mark.parametrize("circuit_name", sorted(FORMATION_CIRCUITS))
+@pytest.mark.parametrize("seat", event_settings.SEATS)
+def test_every_seat_forms_stims_events_on_sampled_shots(seat, circuit_name):
+    """Each round split into three shuffled fragments, at every seat.
+
+    The rounds come as two windows out of order, the later first, and
+    overlapping, so a seat forms a round from the raw rounds before it
+    that it is given, as many as rounds_needed_before says, and answers
+    a round it formed from what it remembers. The circuits reach one
+    round back (the surface code), two (the lookback memory and Stim's
+    color code) and, from round 4 of a read starting at round 3, three
+    (the reach-growing memory), so the rounds the whole read reaches,
+    not a fixed count, are what the seat needs.
+    """
+    circuit, round_count, measurement_rounds = FORMATION_CIRCUITS[circuit_name]
+    table = detector_formation.build_formation_table(
+        circuit, round_count, measurement_rounds=measurement_rounds
     )
     sampler = circuit.compile_sampler(seed=11)
     measurements = sampler.sample(32)
@@ -421,14 +651,13 @@ def test_every_seat_forms_stims_events_on_sampled_shots(seat):
         measurements=measurements, append_observables=False
     )
 
-    formed = _formed_at(seat, circuit, measurements)
+    formed = _formed_at(seat, table, measurements)
 
     assert formed == _as_rows(expected)
     assert any(any(row) for row in formed)
 
 
-def _formed_at(seat, circuit, measurements) -> list:
-    table = detector_formation.build_formation_table(circuit, 4)
+def _formed_at(seat, table, measurements) -> list:
     settings = event_settings.DetectionEventSettings(formed_at=(seat,))
     rows = []
     for shot in measurements:
@@ -444,25 +673,31 @@ def _formed_at(seat, circuit, measurements) -> list:
 
 def _one_shot_formed_at(placement, seat, packets) -> tuple:
     """One shot's events, its rounds given as two windows out of order."""
+    last_round = len(packets)
+    after_last_round = last_round + 1
+    later_window = range(3, after_last_round)
+    earlier_window = range(1, last_round)
     events_by_round = {}
-    for window in ((3, 4), (1, 2, 3)):
+    for window in (later_window, earlier_window):
         fragments = _window_fragments(window, packets)
-        before = _round_before(placement, seat, window[0], packets)
+        before = _rounds_before(placement, seat, window, packets)
         formed = placement.form_at(seat, fragments, before)
         for carried in formed:
             events_by_round[carried.round_index] = carried.bits
     row = []
-    for round_index in (1, 2, 3, 4):
+    for round_index in sorted(events_by_round):
         row.extend(events_by_round[round_index])
     return tuple(row)
 
 
-def _round_before(placement, seat, first_round, packets) -> tuple:
-    """The raw round before first_round, when the seat needs it."""
-    if not placement.needs_the_round_before(seat, 1, first_round):
-        return ()
-    round_before = first_round - 1
-    return _in_three_shuffled_fragments(round_before, packets[round_before])
+def _rounds_before(placement, seat, window, packets) -> tuple:
+    """The raw rounds before the window the seat says it needs."""
+    first_round = window[0]
+    last_round = window[-1]
+    rounds_before = placement.rounds_needed_before(
+        seat, 1, first_round, last_round
+    )
+    return _window_fragments(rounds_before, packets)
 
 
 def _window_fragments(window, packets) -> tuple:
@@ -495,3 +730,17 @@ def _as_rows(events) -> list:
         bits = tuple(int(bit) for bit in shot)
         rows.append(bits)
     return rows
+
+
+def _twice_read_seated(formed_at) -> formation.SeatedFormation:
+    """Three one-bit rounds; rounds 2 and 3 each read round 1."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1] rec[-2]\n"
+        "M 0\nDETECTOR rec[-1] rec[-3]"
+    )
+    table = detector_formation.build_formation_table(
+        circuit, 3, measurement_rounds={0: 1, 1: 2, 2: 3}
+    )
+    settings = event_settings.DetectionEventSettings(formed_at=formed_at)
+    source = CircuitSource(table)
+    return formation.SeatedFormation(source, settings)

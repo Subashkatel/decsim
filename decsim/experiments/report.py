@@ -135,6 +135,7 @@ SHOT_SUMS = (
     "referee_window_disagreements",
     "decoded_windows",
     "escalated_windows",
+    "executed_rounds",
     "strong_decoded_rounds",
     "strong_service_sum_us",
     *STATUS_SUMS,
@@ -1075,25 +1076,31 @@ def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
 
 
 def strong_service_bound_us(totals: fold.RowTotals) -> float:
-    """Toshio's Theorem 1 bound on one strong decode's time, per point.
+    """Toshio's Theorem 1 bound on one strong decode's time, in us.
 
-    Theorem 1 bounds the strong decoder's time per round (2510.25222
-    line 1794), tau_strong <= (1 / gamma_switch)(d / r_strong) tau_gen
-    (eq. (6), lines 1206-1214), with gamma_switch per d rounds (line
-    1788). A decode reads r_strong rounds, so one decode's time is
-    bounded by d tau_gen / gamma_switch. A window escalates with
-    probability gamma_switch r_com / d (lines 1254-1255), the point's
-    escalated windows over its windows, so the bound is tau_gen r_com
-    windows / escalated windows, the same unit as
-    strong_service_mean_us beside it; infinite when nothing escalated.
-    tau_gen r_com is the shots' window_period_us column.
+    Eq. (6) bounds the strong decoder's time per round, tau_strong <=
+    (1 / gamma_switch)(d / r_strong) tau_gen, for one weak and one
+    strong decoder on one patch (2510.25222 lines 1201-1214), with
+    gamma_switch the switching rate per d rounds (lines 174-175). A
+    decode reads r_strong rounds, so one decode's time is bounded by
+    d tau_gen / gamma_switch. The proof counts the escalations against
+    the rounds generated (lines 1253-1266), so gamma_switch is the
+    escalated windows over the generated rounds over d, and the bound is
+    tau_gen times the generated rounds over the escalated windows. The
+    rounds are the shots' executed rounds, not their committed windows
+    times r_com: a double window absorbs windows whose rounds were still
+    generated. tau_gen is the shots' window_period_us over their
+    commit_rounds; infinite when nothing escalated.
     """
     escalated_windows = totals.sums["escalated_windows"]
     if escalated_windows == 0:
         return math.inf
-    windows = totals.sums["decoded_windows"]
+    generated_rounds = totals.sums["executed_rounds"]
     window_period_us = totals.maxes["window_period_us"]
-    return window_period_us * windows / escalated_windows
+    commit_rounds = totals.maxes["commit_rounds"]
+    round_period_us = window_period_us / commit_rounds
+    generated_us = round_period_us * generated_rounds
+    return generated_us / escalated_windows
 
 
 def _shot_totals(row: dict) -> fold.RowTotals:

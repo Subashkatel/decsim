@@ -354,7 +354,7 @@ point the run held:
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the point |
 | `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
 | `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the point, and the point's summed `strong_service_sum_us` over those windows: every strong decode weighs the same, whichever shot ran it. Empty when nothing escalated |
-| `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen r_com windows / escalated windows over the point, with tau_gen r_com the shots' `window_period_us` (2510.25222 eq. (6)); infinite when nothing escalated |
+| `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen times the point's generated rounds (its shots' `executed_rounds`) over its escalated windows, which is d tau_gen over the switching rate per d rounds, with tau_gen the shots' `window_period_us` over their `commit_rounds` (2510.25222 eq. (6)); generated rounds and not committed windows, since a double window absorbs windows whose rounds were still generated; infinite when nothing escalated |
 | `parallel_processes_needed` | the largest over the point's shots |
 | `weak_syndrome_weight_mean`, `weak_service_mean_us`, `strong_wait_mean_us` | the means over the point's shots, when they kept the switching records |
 | `weak_syndrome_weight_max`, `strong_wait_max_us`, `strong_held_in_units_max`, `backlog_peak_rounds` | the largest over the point's shots, when they kept the records |

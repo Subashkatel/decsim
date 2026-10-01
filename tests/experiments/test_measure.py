@@ -774,6 +774,34 @@ def test_toshios_per_decode_bound_is_commit_time_over_escalated_share(
     assert rows[0]["escalated_windows"] == 10
 
 
+def test_the_per_decode_bound_counts_the_rounds_a_double_window_absorbed(
+    tmp_path,
+):
+    """Theorem 1 per decode reads the generated rounds, not the windows.
+
+    Every window escalates into a double window, which absorbs the
+    windows it covers: four windows commit over the thirty rounds and all
+    four escalated. The switching rate per d = 3 rounds is 4 / (30 / 3)
+    = 0.4, so eq. (6) bounds one decode by d tau_gen / gamma = 3 / 0.4 =
+    7.5 us (2510.25222 lines 1201-1214, 1253-1266). Four committed
+    windows times r_com tau_gen would say 3 us.
+    """
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": 1000000.0,
+        "strong_window": "double_window",
+    }
+    sections = {"escalation": escalation}
+    shot = switching_run(tmp_path, 1000000.0, sections=sections)
+    measurement = measure.measure_shot(shot)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [measurement])
+
+    assert measurement.executed_rounds == 30
+    assert measurement.decoded_windows == 4
+    assert measurement.escalated_windows == 4
+    assert rows[0]["strong_service_bound_us"] == 7.5
+
+
 def test_a_points_strong_service_is_its_strong_decodes_mean(tmp_path):
     """The point divides its summed service by its strong decodes.
 

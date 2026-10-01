@@ -127,7 +127,7 @@ ready to frame commit: median 15.772 us, p99 22.726 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/reference/combined/reference-824d2aa1/sweep.csv
+every column: results/reference/combined/reference-6dc5065e/sweep.csv
 ```
 
 Two new words:
@@ -241,7 +241,7 @@ decsim plot results/reference/combined/* --figure stage_breakdown
 ```
 
 ```
-results/reference/combined/reference-824d2aa1/stage_breakdown.png
+results/reference/combined/reference-6dc5065e/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:

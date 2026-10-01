@@ -122,7 +122,9 @@ class SeatedFormation:
         the earliest round its unformed rounds' recipes read
         (detector_formation.FormationTable rounds_read_before_first). A
         round the seat formed before is answered from what it remembers,
-        and its packet sits in the seat's ring, so it is not given again.
+        and its former keeps its packet while an unformed round reads it
+        (detector_formation.StreamingDetectorFormer), so it is not given
+        again.
         """
         history = self.history_by_seat.get(seat)
         if history is None:
@@ -161,10 +163,10 @@ class _SeatHistory:
 
     A detector compares this round's outcomes against the round before
     it (LILLIPUT 2108.06569 lines 499-510), so a round is formed from
-    the packets the seat holds, the last max_record_span + 1 it was
-    given (detector_formation.StreamingDetectorFormer). A round the
-    seat formed before is answered from what it remembers, and its
-    packet is held for the round after it.
+    the packets the seat holds, each kept while a round that reads it is
+    unformed here (detector_formation.StreamingDetectorFormer). A round
+    the seat formed before is answered from what it remembers, and its
+    packet is held for the rounds after it.
     """
 
     def __init__(

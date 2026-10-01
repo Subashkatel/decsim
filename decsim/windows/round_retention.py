@@ -23,7 +23,9 @@ rounds before its first that its rounds' recipes read
 hold, as an HEVC decoder keeps each picture the current reference set
 names (FFmpeg hevc/refs.c:486-517). A window's own weak read holds none:
 the earlier window's read holds those rounds until it lands in the same
-decoder, which forms them and keeps them in its ring, so the hold ends
+decoder, which forms them and keeps each packet while a round it has
+not formed reads it (detector_formation.StreamingDetectorFormer), even
+when it forms a later block first, so the hold ends
 when the reader no longer needs the round in the store, as on a read of
 no formation. The read ends when the window before it commits, or when
 the window is re-sliced or absorbed. The stores hold slots and
@@ -202,7 +204,8 @@ class RoundRetention:
 
         None of the rounds before its start: an earlier window's read
         holds them until it lands in the same decoder, which forms them
-        there and keeps them in its ring.
+        there and keeps each packet while a round it has not formed
+        reads it.
         """
         return self.read_keys_for_bounds(
             window.operation_id, window.start_round, window.buffer_hi, window

@@ -230,11 +230,9 @@ def test_the_record_span_reaches_back_as_far_as_an_observable_reads():
         "OBSERVABLE_INCLUDE(0) rec[-3] rec[-1]\n"
     )
     table = detector_formation.build_formation_table(circuit, 3)
-    former = detector_formation.StreamingDetectorFormer(table)
     assert table.detectors[2].records == ((3, 0),)
     assert table.observables[0].records == ((1, 0), (3, 0))
     assert table.max_record_span == 2
-    assert former.kept_packet_count == 3
 
 
 def test_a_round_reads_back_to_the_earliest_record_of_its_detectors():
@@ -292,17 +290,59 @@ def test_the_former_keeps_only_the_packets_a_recipe_can_reach():
     assert set(former.packets) == {2, 3}
 
 
-def test_the_ring_ends_at_the_round_last_given_whatever_its_order():
-    """A window read out of order leaves only its own packets held."""
-    table = formation_table(4)
+def lookback_circuit(rounds):
+    """One noisy qubit whose detector reads two rounds back from round 3."""
+    noisy_round = "M(0.15) 0\n"
+    later_rounds = rounds - 2
+    return stim.Circuit(
+        f"R 0\n{noisy_round}DETECTOR rec[-1]\n{noisy_round}DETECTOR rec[-1]\n"
+        f"REPEAT {later_rounds} {{\n{noisy_round}DETECTOR rec[-1] rec[-3]\n}}\n"
+    )
+
+
+def lookback_table(circuit, rounds):
+    measurement_rounds = {index: index + 1 for index in range(rounds)}
+    return detector_formation.build_formation_table(
+        circuit, rounds, measurement_rounds=measurement_rounds
+    )
+
+
+def test_a_round_is_read_by_the_later_rounds_whose_recipes_name_it():
+    """Round 2 is read by round 4 (rec[-3]); round 10 by no later round."""
+    circuit = lookback_circuit(10)
+    table = lookback_table(circuit, 10)
+
+    assert table.rounds_reading(2) == (4,)
+    assert table.rounds_reading(10) == ()
+
+
+def test_a_packet_stays_held_while_a_round_that_reads_it_is_unformed():
+    """Skoric's parallel order: rounds 1-3, then 5-7, then the seam 4.
+
+    Round 4 reads round 2, formed long before, so round 2's packet is
+    kept until round 4 forms; Stim's converter is the referent.
+    """
+    circuit = lookback_circuit(10)
+    table = lookback_table(circuit, 10)
+    sampler = circuit.compile_sampler(seed=3)
+    measurements = sampler.sample(1)
+    packets = detector_formation.split_measurements_into_packets(
+        table, measurements[0]
+    )
+    stim_events, _ = formed_by_stim(circuit, measurements)
     former = detector_formation.StreamingDetectorFormer(table)
-    empty_packet = [0] * 8
-    former.feed_packet(1, empty_packet)
-    former.feed_packet(2, empty_packet)
-    former.feed_packet(3, empty_packet)
-    former.hold_packet(1, empty_packet)
-    assert set(former.packets) == {1}
-    assert former.held_bits() == 8
+    for round_index in (1, 2, 3):
+        former.feed_packet(round_index, packets[round_index])
+    former.hold_packet(4, packets[4])
+    for round_index in (5, 6, 7):
+        former.feed_packet(round_index, packets[round_index])
+
+    events, _ = former.feed_packet(4, packets[4])
+
+    formed = [bit for _, bit in events]
+    stim_row = stim_events[0]
+    expected = [int(stim_row[index]) for index, _ in events]
+    assert formed == expected
 
 
 def test_a_held_packet_forms_nothing_and_serves_the_round_after_it():

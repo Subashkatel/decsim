@@ -774,13 +774,14 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     assert mismatched == []
 
 
-def _lookback_workload(settings):
+def _lookback_workload(
+    settings, noisy_round: str = "X_ERROR(0.05) 0\nM(0.05) 0\n"
+):
     """Ten rounds of one qubit whose detector reads two rounds back.
 
     Round r's detector is rec[-1] ^ rec[-3], so a seat that joins at a
     region reads two raw rounds before it.
     """
-    noisy_round = "X_ERROR(0.05) 0\nM(0.05) 0\n"
     circuit = stim.Circuit(
         f"R 0\n{noisy_round}DETECTOR rec[-1]\n"
         f"{noisy_round}DETECTOR rec[-1]\n"
@@ -843,6 +844,71 @@ def test_a_switching_run_on_a_two_round_lookback_consumes_stims_events(
 
     expected = _stims_events_by_round(machine, emitted)
     mismatched = _mismatched_rounds(landed, expected)
+    assert mismatched == []
+
+
+def _parallel_lookback_machine(unit_count: int):
+    """Skoric's blocks of one round plus one on the two-round lookback.
+
+    The weak decoder forms, on unit_count units: rounds 1 to 3, then 5
+    to 7, then the seam 3 to 5, whose round 4 reads round 2.
+    """
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        BOTH_DECODERS,
+    )
+    settings = machine.settings
+    # a flipped readout alone, so no fault straddles two blocks' commits
+    workload = _lookback_workload(settings, "M(0.15) 0\n")
+    windows = dataclasses.replace(
+        settings.windows, kind="parallel", commit_rounds=1, buffer_rounds=1
+    )
+    # a declared decoder decodes no syndrome, so no fault's ownership is
+    # asked of the blocks; the landed events are the check
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_no_window)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, decoder=weak, units=unit_count
+    )
+    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
+    collaborators = escalation_policies.EscalationCollaborators()
+    policy = escalation_policies.Baseline(collaborators)
+    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    settings = dataclasses.replace(
+        settings,
+        workload=workload,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _is_no_window(job) -> bool:
+    del job
+    return False
+
+
+@pytest.mark.parametrize("unit_count", [1, 3])
+def test_a_seam_formed_after_a_later_block_reads_the_rounds_it_kept(
+    unit_count: int,
+):
+    """Round 4 reads round 2, formed two blocks before; Stim agrees.
+
+    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
+    the referent for every unit's landed rounds.
+    """
+    machine = _parallel_lookback_machine(unit_count)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert landed
     assert mismatched == []
 
 

@@ -1252,18 +1252,24 @@ unformed rounds' recipes read, less the rounds its seat has formed:
 any detector of an unformed round of the read names (and, on the last
 round, any observable). A later round of a read can reach further back
 than its first (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the
-whole read is counted, not its first round. A round the seat formed sits
-in its former's one ring of `max_record_span + 1` packets and is not
-given again. The recipe table owns the law (`rounds_read_before` per
-round, `rounds_read_before_first` per read).
+whole read is counted, not its first round. A round the seat formed is
+not given again: its former keeps a packet while a round that reads it
+is unformed there, the packet's reference set, so a seam formed after a
+later block still finds the rounds it reads, and also the
+`max_record_span + 1` packets ending at the table's last round, which a
+live table's next round may read before its recipes come. Fed in order
+that is no more than the ring of `max_record_span + 1` packets it
+replaced. The recipe table owns the law (`rounds_read_before` per
+round, `rounds_read_before_first` per read, `rounds_reading` per
+packet).
 A read whose reader forms and never read the rounds before its first
 holds the rounds its whole read reaches under its own hold: a strong
 read in both stores, and a restart read past a strong region, whose
 absorbed windows no weak decode read, in the primary store
 (`replace_restart_reads`). A window's own weak read holds none of
 them: the window before it reads them and holds them until it lands in
-the same decoder, which forms them there and keeps them in its ring,
-so a round leaves the store when no reader needs it there, as it does
+the same decoder, which forms them there and keeps each packet while a
+round it has not formed reads it, so a round leaves the store when no reader needs it there, as it does
 when nothing forms. On a live stream a window is admitted only once its
 commit region begins, so with no buffer the window before it can commit
 first; when the strong side forms, that window's potential strong read
@@ -1315,7 +1321,8 @@ for the same two), and `form_at` takes `rounds_before` in place of
 gained `replace_restart_reads`.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
-(`FormationTable.rounds_read_before`, `rounds_read_before_first`),
+(`FormationTable.rounds_read_before`, `rounds_read_before_first`,
+`rounds_reading`, `StreamingDetectorFormer`),
 `decsim/detector_error_model/detection_event_formation.py`
 (`rounds_needed_before`, `rounds_read_before`),
 `decsim/records/windows.py` (`FormationReads`),

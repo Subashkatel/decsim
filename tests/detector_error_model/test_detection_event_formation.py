@@ -526,8 +526,8 @@ def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
     placement.retire_round((1, 2))
 
     history = placement.history_by_seat["weak_decoder"]
-    done_rounds = history.done_by_operation[1]
-    assert history.events_by_round == {}
+    done_rounds = history.memory.done_by_operation[1]
+    assert history.memory.events_by_round == {}
     assert done_rounds.through == 3
     assert done_rounds.above == set()
 

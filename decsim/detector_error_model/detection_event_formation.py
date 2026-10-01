@@ -205,12 +205,7 @@ class _SeatHistory:
         # placement, silent for a history on its own
         self.state_held = trace_source.SILENT
         self.former_by_operation: dict = {}
-        # per operation, the rounds formed here or retired, kept from
-        # the first retirement on, so a former made later knows them
-        self.done_by_operation: dict = {}
-        # the events of rounds formed here and not yet retired, which a
-        # second read of the round is answered from
-        self.events_by_round: dict = {}
+        self.memory = _SeatMemory()
 
     @property
     def keeps_landed_width(self) -> bool:
@@ -289,9 +284,7 @@ class _SeatHistory:
         so a live stream that has since run its final round no longer
         keeps rounds for a round still to run.
         """
-        done_rounds = self._done_rounds_of(operation_id)
-        done_rounds.add(round_index)
-        self.events_by_round.pop((operation_id, round_index), None)
+        self.memory.retire(operation_id, round_index)
         if operation_id not in self.former_by_operation:
             return
         former = self._former_for(operation_id)
@@ -347,7 +340,7 @@ class _SeatHistory:
         self, operation_id: Any, first_round: int, stop_round: int
     ) -> tuple:
         """The rounds from first_round to before stop_round never formed."""
-        done_rounds = self._done_rounds_of(operation_id)
+        done_rounds = self.memory.done_rounds_of(operation_id)
         unformed_rounds = []
         for round_index in range(first_round, stop_round):
             if round_index in done_rounds:
@@ -381,7 +374,7 @@ class _SeatHistory:
         """The round's events, formed here the first time the seat sees it."""
         former = self._former_for(operation_id)
         key = (operation_id, round_index)
-        remembered = self.events_by_round.get(key)
+        remembered = self.memory.events_by_round.get(key)
         if remembered is not None:
             former.hold_packet(round_index, raw_bits)
             self._report_state(operation_id, former)
@@ -390,17 +383,10 @@ class _SeatHistory:
         self._report_state(operation_id, former)
         events = former.form_round(round_index)
         values = tuple(value for _, value in events)
-        self.events_by_round[key] = values
+        self.memory.events_by_round[key] = values
         if self.observer is not None:
             self.observer.observe_round(operation_id, round_index, values)
         return values
-
-    def _done_rounds_of(
-        self, operation_id: Any
-    ) -> detector_formation.DoneRounds:
-        """The operation's rounds formed here or retired."""
-        new_record = detector_formation.DoneRounds()
-        return self.done_by_operation.setdefault(operation_id, new_record)
 
     def _report_state(
         self,
@@ -422,7 +408,7 @@ class _SeatHistory:
         table = self.recipes.formation_table(operation_id)
         former = self.former_by_operation.get(operation_id)
         if former is None:
-            done_rounds = self._done_rounds_of(operation_id)
+            done_rounds = self.memory.done_rounds_of(operation_id)
             former = detector_formation.StreamingDetectorFormer(
                 table, done_rounds
             )
@@ -431,6 +417,35 @@ class _SeatHistory:
         if former.table is not table:
             former.extend_table(table)
         return former
+
+
+class _SeatMemory:
+    """What a seat remembers of the rounds it is done with.
+
+    Read where a round is formed or retired, not where the seat is
+    wired, so it is kept apart from the seat's collaborators.
+    """
+
+    def __init__(self) -> None:
+        # per operation, the rounds formed here or retired, kept from
+        # the first retirement on, so a former made later knows them
+        self.done_by_operation: dict = {}
+        # the events of rounds formed here and not yet retired, which a
+        # second read of the round is answered from
+        self.events_by_round: dict = {}
+
+    def done_rounds_of(
+        self, operation_id: Any
+    ) -> detector_formation.DoneRounds:
+        """The operation's rounds formed here or retired."""
+        new_record = detector_formation.DoneRounds()
+        return self.done_by_operation.setdefault(operation_id, new_record)
+
+    def retire(self, operation_id: Any, round_index: int) -> None:
+        """The round is done here, and its events are no longer asked for."""
+        done_rounds = self.done_rounds_of(operation_id)
+        done_rounds.add(round_index)
+        self.events_by_round.pop((operation_id, round_index), None)
 
 
 def _as_stated_events(

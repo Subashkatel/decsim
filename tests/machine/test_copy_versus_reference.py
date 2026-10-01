@@ -1166,9 +1166,9 @@ def _note_packets(held_by_seat: dict, seat, operation_id, bits) -> None:
 def _bookkeeping_of(machine, seat: str) -> dict:
     placement = machine.readout.detection_events
     history = placement.history_by_seat[seat]
-    done_rounds = history.done_by_operation[1]
+    done_rounds = history.memory.done_by_operation[1]
     return {
-        "events": len(history.events_by_round),
+        "events": len(history.memory.events_by_round),
         "done_above": len(done_rounds.above),
     }
 

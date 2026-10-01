@@ -94,7 +94,7 @@ logical error rate.
 | Compiler terminal Hadamard | supported | Both logical bases, conjugate readout, clean and known-fault parity checks | Finite noisy supplied-circuit decoding |
 | High-level LogAsm Hadamard/rotation | not supported | Pinned observable backpropagation rejects these operations | Unsupported through that frontend |
 | Leakage sampling | supported, sampling only | Explicitly allocated Deltakit FlipSimulator preserves heralds and matches whole-circuit execution | Local leakage decoding not supported: the leakage model semantics are unverified |
-| Shared multi-patch streams | supported | Retained joint state and complete-record Stim oracle, including interleaved acquisitions | Whole-group lifetime, strong and weak primary routes |
+| Shared multi-patch streams | supported | Retained joint state and complete-record Stim oracle, live and recorded | Whole-group lifetime, strong and weak primary routes |
 | qLDPC/bivariate bicycle | supported, one bounded example | Public [[30,8,2]] CSS code, all eight outputs, undecomposed noisy model | BP-OSD agreement, live feedback and higher-index logical-failure detection |
 
 Compiler Hadamard is transversal H followed immediately by destructive readout

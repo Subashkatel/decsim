@@ -143,12 +143,15 @@ Two limits, in plain words:
   can favour one decoder, and the test cannot see the shots it lost.
 
 `--out <file>` writes the same comparison as a csv, one row per point
-both folders hold, for you to plot or test further:
+both folders hold, for you to plot or test further. A row starts as a
+`sweep.csv` row does, `point_id` and then one column per swept path,
+before the comparison:
 
 | Column | What it is |
 | --- | --- |
-| `point` | the point's metadata, as `diff` names it |
-| `first_point_id`, `second_point_id` | the point's id in each folder |
+| `point_id` | the point's id in the first folder, which joins that folder's `sweep.csv` |
+| one column per swept path | the value the first folder's point ran with |
+| `second_point_id` | the point's id in the second folder |
 | `shared_shot_count` | the seeds both runs hold, from 0 to the shorter run's stop |
 | `digest_mismatch_count` | shared seeds whose `sample_digest` differs; above 0, nothing is paired and the columns below are empty |
 | `unscored_shot_count` | shared seeds either run left unscored, left out of the pairs |

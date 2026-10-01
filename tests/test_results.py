@@ -36,6 +36,18 @@ TWO_POINT_SWEEP = [
     }
 ]
 
+# Two axes that both vary, so the paired csv needs a column for each.
+TWO_AXIS_SWEEP = [
+    {
+        "axes": {
+            "workload.arguments.physical_error_probability": [0.003, 0.01],
+            "qpu.distance": [3],
+            "qpu.round_period_microseconds": [1.0, 2.0],
+        },
+        "collection": {"max_shots": 2},
+    }
+]
+
 # The shots of a paired folder's first point: room for 25 shots that
 # only the first folder fails beside 5 that only the second fails.
 PAIRED_SHOTS = 200
@@ -48,8 +60,9 @@ SAME_SHOTS_TEXT = (
     "the second only; no difference shown by the mixture test;"
 )
 
-# The swept path that tells the two points apart, a column of sweep.csv.
+# Swept paths, each a column of sweep.csv.
 PROBABILITY_AXIS = "workload.arguments.physical_error_probability"
+PERIOD_AXIS = "qpu.round_period_microseconds"
 ROUNDS_COLUMN = "settings.workload.row_settings.arguments.rounds_per_shot"
 PROBABILITY_COLUMN = (
     "settings.workload.row_settings.arguments.physical_error_probability"
@@ -557,6 +570,41 @@ def test_equal_rates_still_print_the_paired_difference(runs, tmp_path, capsys):
     assert "; differ by the mixture test;" in paired_line
 
 
+def test_the_paired_csv_gives_each_swept_path_its_own_column(tmp_path, capsys):
+    """The csv starts as sweep.csv does: point_id, then each swept path."""
+    run_dir = _collected(tmp_path / "two_axes", {"sweep": TWO_AXIS_SWEEP})
+    out = tmp_path / "paired.csv"
+    command.main(["diff", str(run_dir), str(run_dir), "--out", str(out)])
+    capsys.readouterr()
+
+    sweep_rows = _csv_rows(run_dir / "sweep.csv")
+    paired_rows = _csv_rows(out)
+    paired_columns = list(paired_rows[0])
+    swept_by_point = {
+        row["point_id"]: (row[PERIOD_AXIS], row[PROBABILITY_AXIS])
+        for row in sweep_rows
+    }
+    paired_swept_by_point = {
+        row["point_id"]: (row[PERIOD_AXIS], row[PROBABILITY_AXIS])
+        for row in paired_rows
+    }
+    swept_values = set(paired_swept_by_point.values())
+    assert paired_columns[:5] == [
+        "point_id",
+        "qpu.distance",
+        PERIOD_AXIS,
+        PROBABILITY_AXIS,
+        "second_point_id",
+    ]
+    assert swept_values == {
+        ("1.0", "0.003"),
+        ("1.0", "0.01"),
+        ("2.0", "0.003"),
+        ("2.0", "0.01"),
+    }
+    assert paired_swept_by_point == swept_by_point
+
+
 def _failing_seeds(first_only: int, second_only: int) -> tuple:
     """Both fail the shared seeds, then the first its own, then the second."""
     first_start = len(SHARED_FAILING_SEEDS)
@@ -660,7 +708,7 @@ def _paired_diff(capsys, tmp_path, first, second) -> tuple:
     point = _point_text(probability)
     point_lines = [line for line in lines if point in line]
     rows = _csv_rows(out)
-    (row,) = [row for row in rows if row["first_point_id"] == point_id]
+    (row,) = [row for row in rows if row["point_id"] == point_id]
     return point_lines, row
 
 

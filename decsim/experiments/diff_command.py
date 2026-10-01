@@ -57,16 +57,18 @@ AGREEMENT_STANDARD_ERRORS = 1.96
 class PairedComparison:
     """One point's failures in two folders on the shots both decoded.
 
-    The field names are the columns of the csv `--out` writes. The
-    shared shots are seed 0 up to where the shorter prefix stopped, and
-    a pair is a shared shot both points scored. A shared shot whose
-    sample_digest differs was a different draw in each folder, so a
-    point with any such shot is not paired and its paired fields are
-    None. The difference of rates is the first's minus the second's.
+    The field names are the columns of the csv `--out` writes, with the
+    point's swept values after point_id, as sweep.csv has them. point_id
+    is the point's id in the first folder, so a row joins that folder's
+    sweep.csv. The shared shots are seed 0 up to where the shorter
+    prefix stopped, and a pair is a shared shot both points scored. A
+    shared shot whose sample_digest differs was a different draw in each
+    folder, so a point with any such shot is not paired and its paired
+    fields are None. The difference of rates is the first's minus the
+    second's.
     """
 
-    point: str
-    first_point_id: str
+    point_id: str
     second_point_id: str
     shared_shot_count: int
     digest_mismatch_count: int
@@ -128,8 +130,10 @@ def main(argv: list) -> None:
     if parsed.out is None:
         return
     rows = [dataclasses.asdict(comparison) for comparison in paired]
+    point_ids = [comparison.point_id for comparison in paired]
+    swept = run_folder.swept_values(first, point_ids)
     out = pathlib.Path(parsed.out)
-    report.write_csv(rows, out)
+    report.write_csv(rows, out, swept)
 
 
 def _refuse_a_folder_without_points(run_dir: pathlib.Path) -> None:
@@ -198,7 +202,7 @@ def _result_lines(first: pathlib.Path, second: pathlib.Path) -> tuple:
         first_shots = _shot_rows_of(first, first_row["point_id"])
         second_shots = _shot_rows_of(second, second_row["point_id"])
         point_paired = _paired_comparison(
-            point, first_row, second_row, first_shots, second_shots
+            first_row, second_row, first_shots, second_shots
         )
         paired.append(point_paired)
         comparison = _Comparison(point, first_shots, second_shots)
@@ -258,7 +262,6 @@ class _Comparison:
 
 
 def _paired_comparison(
-    point: str,
     first_row: dict,
     second_row: dict,
     first_shots: list,
@@ -286,8 +289,7 @@ def _paired_comparison(
         second_failures,
     ) = _shared_seeds(first_by_seed, second_by_seed, shared_shot_count)
     unpaired = PairedComparison(
-        point=point,
-        first_point_id=first_row["point_id"],
+        point_id=first_row["point_id"],
         second_point_id=second_row["point_id"],
         shared_shot_count=shared_shot_count,
         digest_mismatch_count=digest_mismatch_count,

@@ -126,7 +126,8 @@ class FormingInAPipeline(RecordingFormer):
         clock=clock, latency_cycles=3, cycles_per_round=2
     )
 
-    def cycles_at(self, seat, round_count):
+    def cycles_at(self, seat: str, round_count: int) -> int:
+        """The pipelined cost of forming round_count rounds together."""
         self.cycles_asked.append((seat, round_count))
         return self.settings.cycles_for(round_count)
 
@@ -366,26 +367,28 @@ def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
 def test_the_rounds_before_a_region_land_raw_and_cost_no_formation():
     """The seat holds rounds 1 and 2 for round 3 and forms neither.
 
-    It is charged for two rounds: their forming, and their entry into
-    the former (two rounds' rate, the cost of three less one's).
+    The pipelined seat forms two rounds, 3 cycles then 2 of a 10-tick
+    clock, so the region is stored at 50; four formed rounds would take
+    until 90.
     """
     engine = engine_module.Engine()
-    former = RecordingFormer()
+    former = FormingInAPipeline()
     receiver = room_side(engine, detection_events=former)
     reads = decoding_records.WindowReads((1, 0))
     receiver.store.register_hold(reads, [(1, 1), (1, 2), (1, 3), (1, 4)])
     carried = region(1, 2, 3, 4, first_round=3)
+    stored_at = []
+
+    def record_stored() -> None:
+        stored_at.append(engine.now)
 
     receiver.reserve_region(carried)
-    receiver.receive_region(carried, _nothing)
+    receiver.receive_region(carried, record_stored)
+    engine.run()
 
     seat = "strong_syndrome_buffer"
     assert carried.wire_bits == 4 * BITS_PER_ROUND
-    assert receiver.detection_events.cycles_asked == [
-        (seat, 2),
-        (seat, 3),
-        (seat, 1),
-    ]
+    assert stored_at == [50]
     assert receiver.detection_events.formed == [
         (seat, 3, (1, 2)),
         (seat, 4, ()),

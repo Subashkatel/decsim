@@ -37,8 +37,10 @@ class TierFormation:
     the first ask so the stage that prices the formation and the
     dispatcher that predicts the unit's compute read one number. A job
     that is cancelled before its decode starts gives that claim back,
-    since no stage of it ever ran. A source with no recipes leaves the
-    rounds as they landed, and the tier is charged for them all the same.
+    since no stage of it ever ran. The claims live at the seat
+    (claim_rounds), which forgets one once its round retires. A source
+    with no recipes leaves the rounds as they landed, and the tier is
+    charged for them all the same.
     """
 
     def __init__(
@@ -46,7 +48,6 @@ class TierFormation:
     ) -> None:
         self.placement = placement
         self.seat = seat
-        self.formed_round_keys: set = set()
 
     def form(self, payloads: list, rounds_before: tuple = ()) -> list:
         """One job's rounds, their detection events in place of outcomes.
@@ -69,13 +70,8 @@ class TierFormation:
         frozen = job.detection_event_rounds
         if frozen is not None:
             return frozen
-        fresh = []
-        for key in _round_keys_of(job):
-            if key in self.formed_round_keys:
-                continue
-            fresh.append(key)
-        self.formed_round_keys.update(fresh)
-        frozen = tuple(fresh)
+        round_keys = _round_keys_of(job)
+        frozen = self.placement.claim_rounds(self.seat, round_keys)
         job.detection_event_rounds = frozen
         return frozen
 
@@ -93,7 +89,7 @@ class TierFormation:
         claimed = job.detection_event_rounds
         if claimed is None:
             return
-        self.formed_round_keys.difference_update(claimed)
+        self.placement.return_claim(self.seat, claimed)
         job.detection_event_rounds = None
 
 

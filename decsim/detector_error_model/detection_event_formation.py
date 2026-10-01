@@ -164,6 +164,21 @@ class SeatedFormation:
         for history in self.history_by_seat.values():
             history.retire(operation_id, round_index)
 
+    def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
+        """The round keys no earlier job of the seat claimed, now claimed.
+
+        A decoder tier charges a job for the rounds it is first to form
+        (decoders/detection_events.py TierFormation). A claim goes when
+        its round retires, since no job reads the round after.
+        """
+        history = self.history_by_seat[seat]
+        return history.claim(round_keys)
+
+    def return_claim(self, seat: str, round_keys: tuple) -> None:
+        """A job that never started gives its claimed round keys back."""
+        history = self.history_by_seat[seat]
+        history.claimed_keys.difference_update(round_keys)
+
     def check_settled(self) -> None:
         """At the end of a run no seat may still hold a raw round.
 
@@ -211,6 +226,8 @@ class _SeatHistory:
         # the events of rounds formed here and not yet retired, which a
         # second read of the round is answered from
         self.events_by_round: dict = {}
+        # the round keys a decoder tier's jobs have claimed, until retired
+        self.claimed_keys: set = set()
 
     @property
     def keeps_landed_width(self) -> bool:
@@ -291,12 +308,24 @@ class _SeatHistory:
         """
         done_rounds = self._done_rounds_of(operation_id)
         done_rounds.add(round_index)
-        self.events_by_round.pop((operation_id, round_index), None)
+        round_key = (operation_id, round_index)
+        self.events_by_round.pop(round_key, None)
+        self.claimed_keys.discard(round_key)
         if operation_id not in self.former_by_operation:
             return
         former = self._former_for(operation_id)
         former.retire_round(round_index)
         self._report_state(operation_id, former)
+
+    def claim(self, round_keys: tuple) -> tuple:
+        """The keys not claimed before, now claimed."""
+        fresh = []
+        for round_key in round_keys:
+            if round_key in self.claimed_keys:
+                continue
+            fresh.append(round_key)
+        self.claimed_keys.update(fresh)
+        return tuple(fresh)
 
     def check_settled(self) -> None:
         """No former of this seat holds a raw round."""

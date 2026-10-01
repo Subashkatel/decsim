@@ -36,6 +36,7 @@ import pathlib
 import sys
 from typing import Optional
 
+import numpy
 import pytest
 import yaml
 
@@ -820,6 +821,54 @@ def _counts_by_name_tier_and_value(rows: list) -> dict:
         key = (row["name"], row["tier"], row["value_us"])
         counts[key] = row["count"]
     return counts
+
+
+def test_the_formed_to_commit_median_and_p99_are_split_by_tier(tmp_path):
+    """Kept and escalated windows each get their own median and p99.
+
+    Seed 1 at 5 dB keeps eight windows and escalates two. Each tier's
+    columns are numpy's nearest percentile of that tier's own samples,
+    the rule the merged columns follow (percentile_of_counts).
+    """
+    escalating = switching_shot(tmp_path, 5.0, seed=1)
+    record = report.record_of([escalating])
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [escalating])
+    kept = _samples_of(record.window_samples, "buffer0_ready_to_frame", "weak")
+    escalated = _samples_of(
+        record.window_samples, "buffer0_ready_to_frame", "strong"
+    )
+
+    assert len(kept) == 8
+    assert len(escalated) == 2
+    row = rows[0]
+    kept_median = numpy.percentile(kept, 50, method="nearest")
+    kept_p99 = numpy.percentile(kept, 99, method="nearest")
+    escalated_median = numpy.percentile(escalated, 50, method="nearest")
+    escalated_p99 = numpy.percentile(escalated, 99, method="nearest")
+    assert row["buffer0_ready_to_frame_weak_median_us"] == kept_median
+    assert row["buffer0_ready_to_frame_weak_p99_us"] == kept_p99
+    assert row["buffer0_ready_to_frame_strong_median_us"] == escalated_median
+    assert row["buffer0_ready_to_frame_strong_p99_us"] == escalated_p99
+
+
+def test_a_tier_that_committed_no_window_has_no_latency_columns(tmp_path):
+    """No escalated window, no strong percentile: the cell is empty."""
+    quiet = switching_shot(tmp_path, 5.0, seed=0)
+    rows, _run_dir = yaml_configs.folded_run(tmp_path, [quiet])
+
+    assert rows[0]["buffer0_ready_to_frame_weak_median_us"] is not None
+    assert "buffer0_ready_to_frame_strong_median_us" not in rows[0]
+
+
+def _samples_of(rows: list, name: str, tier: str) -> list:
+    """window_samples.csv's counts of one latency point and tier, expanded."""
+    samples = []
+    for row in rows:
+        if (row["name"], row["tier"]) != (name, tier):
+            continue
+        repeated = [row["value_us"]] * row["count"]
+        samples.extend(repeated)
+    return samples
 
 
 def test_a_point_with_no_strong_decode_has_no_strong_service(tmp_path):

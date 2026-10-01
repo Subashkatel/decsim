@@ -267,7 +267,7 @@ value.
 This is the multiset of a point's window samples, one per tier. A median
 and a p99 need nothing more, and one piece records nothing more for
 another process to reach the same numbers. The columns in `sweep.csv`
-add the tiers together.
+add the tiers together, except the formed-to-commit split below.
 
 ### `latency_samples.csv`
 
@@ -370,6 +370,12 @@ Then four columns per latency point, in the order of `POINTS`:
 `<point>_max_us`. The mean and the max fold over the shot rows; the
 median and the p99 come from the sample counts, through
 `percentile_of_counts`.
+
+Then `buffer0_ready_to_frame_<tier>_median_us` and
+`buffer0_ready_to_frame_<tier>_p99_us` for each tier that committed a
+window at the point: the formed-to-commit time of the kept windows
+(`weak`) and of the escalated ones (`strong`), each over that tier's own
+sample counts. A tier with no window has no column.
 
 ### `links.csv`
 

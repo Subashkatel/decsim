@@ -51,6 +51,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.data_movement as data_movement
 import decsim.observe.settings as observe_settings
+import decsim.records.windows as window_records
 
 # the measurement's fields that are not columns of shots.csv: the
 # per-window collections, the counter tables of their own files, and the
@@ -93,6 +94,12 @@ LOAD_MAXES = (
     "strong_held_in_units_max",
     "backlog_peak_rounds",
 )
+# the latency point whose median and p99 sweep.csv also gives per tier:
+# a window's formed-to-commit time, kept (weak) apart from escalated
+# (strong), which the switching studies weigh against each other
+# (Toshio et al. 2510.25222 Sec. III); every other point's tiers stay
+# apart in window_samples.csv
+TIER_SPLIT_POINT = "buffer0_ready_to_frame"
 # which role each field of shots.csv plays in a sweep point's row: a
 # mean over the point's shots, the largest over them, a sum, or how many
 # shots hold it true. The latency points' own mean and max columns are
@@ -290,6 +297,7 @@ def summarize_point(
     for name in _points_held(totals.means):
         multiset = _multiset_over_tiers(counts, point, name)
         _add_latency_point_columns(row, totals, name, multiset)
+    _add_tier_split_columns(row, counts, point)
     return row
 
 
@@ -1688,6 +1696,22 @@ def _add_latency_point_columns(
     row[f"{name}_median_us"] = percentile_of_counts(multiset, 0.50)
     row[f"{name}_p99_us"] = percentile_of_counts(multiset, 0.99)
     row[f"{name}_max_us"] = totals.maxes[f"{name}_max_us"]
+
+
+def _add_tier_split_columns(row: dict, counts: dict, point: tuple) -> None:
+    """TIER_SPLIT_POINT's median and p99 over each tier's own windows.
+
+    A tier that committed no window at the point gets no column, since
+    a percentile of no sample is no number.
+    """
+    for tier in window_records.DecoderTier:
+        key = (point, TIER_SPLIT_POINT, tier.value)
+        multiset = counts.get(key)
+        if not multiset:
+            continue
+        prefix = f"{TIER_SPLIT_POINT}_{tier.value}"
+        row[f"{prefix}_median_us"] = percentile_of_counts(multiset, 0.50)
+        row[f"{prefix}_p99_us"] = percentile_of_counts(multiset, 0.99)
 
 
 def _terminal_block(row: dict, values: dict) -> str:

@@ -524,6 +524,62 @@ def test_a_shot_either_run_left_unscored_is_counted_and_left_out(
     )
 
 
+def test_a_point_whose_shared_shots_are_all_unscored_has_no_pair(
+    runs, tmp_path, capsys
+):
+    """Every shared shot unscored in the first: no pair, no interval."""
+    first_failing, second_failing = _failing_seeds(25, 5)
+    every_seed = tuple(range(PAIRED_SHOTS))
+    first = _paired_folder(
+        runs["first"],
+        tmp_path,
+        "first",
+        first_failing,
+        unscored_seeds=every_seed,
+    )
+    second = _paired_folder(runs["first"], tmp_path, "second", second_failing)
+
+    lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    paired_line = _line_with(lines, " paired on ")
+    assert row["shared_shot_count"] == "200"
+    assert row["unscored_shot_count"] == "200"
+    assert row["scored_pair_count"] == "0"
+    assert row["is_mixture_difference"] == "False"
+    assert row["difference_low"] == ""
+    assert row["difference_high"] == ""
+    assert paired_line.endswith(
+        " paired on the 0 shots both runs scored of 200 shared shots (200 "
+        "unscored in either run, left out): 0 failed in the first only, 0 "
+        "in the second only; no difference shown by the mixture test; on "
+        "these pairs, not the whole runs, the failure rate of the first "
+        "minus the second has no interval, with no pair"
+    )
+
+
+def test_a_point_with_no_shared_seed_has_no_pair(runs, tmp_path, capsys):
+    """The second's shots.csv starts at seed 1, so no seed is shared."""
+    first_failing, second_failing = _failing_seeds(25, 5)
+    first = _paired_folder(runs["first"], tmp_path, "first", first_failing)
+    second = _paired_folder(runs["first"], tmp_path, "second", second_failing)
+    _kept_shots(second, _is_past_seed_zero)
+
+    lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    paired_line = _line_with(lines, " paired on ")
+    assert row["shared_shot_count"] == "0"
+    assert row["scored_pair_count"] == "0"
+    assert row["difference_low"] == ""
+    assert " paired on the 0 shots both runs scored of 0 shared shots " in (
+        paired_line
+    )
+    assert paired_line.endswith(" has no interval, with no pair")
+
+
+def _is_past_seed_zero(row: dict) -> bool:
+    return row["seed"] != "0"
+
+
 def test_the_pairs_end_where_the_shorter_prefix_stopped(runs, tmp_path, capsys):
     """The second stopped at its 150th shot; its later shots are no pairs.
 

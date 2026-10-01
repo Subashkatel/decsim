@@ -403,10 +403,10 @@ def _paired_line(point_text: str, paired: PairedComparison) -> str:
     verdict = "no difference shown"
     if paired.is_mixture_difference:
         verdict = "differ"
-    interval = "none, with no pair"
+    interval = "has no interval, with no pair"
     if paired.difference_low is not None:
         interval = (
-            f"[{paired.difference_low:.6g}, {paired.difference_high:.6g}]"
+            f"is in [{paired.difference_low:.6g}, {paired.difference_high:.6g}]"
         )
     return (
         f"  {point_text} paired on the {paired.scored_pair_count} shots both "
@@ -415,7 +415,7 @@ def _paired_line(point_text: str, paired: PairedComparison) -> str:
         f"{paired.first_only_failure_count} failed in the first only, "
         f"{paired.second_only_failure_count} in the second only; {verdict} by "
         "the mixture test; on these pairs, not the whole runs, the failure "
-        f"rate of the first minus the second is in {interval}"
+        f"rate of the first minus the second {interval}"
     )
 
 

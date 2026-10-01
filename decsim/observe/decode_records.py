@@ -56,11 +56,7 @@ class DecodeRecordLedger:
     ) -> None:
         """One request reached its terminal outcome."""
         del outcome
-        local_fragments = ()
-        if job.decoder_input is not None:
-            fragments = job.decoder_input.fragments()
-            local_fragments = tuple(fragments)
-        weight = _syndrome_weight(local_fragments)
+        weight = _decoded_syndrome_weight(job)
         soft_output = None
         if result is not None:
             soft_output = result.soft_output
@@ -137,8 +133,22 @@ def _window_order(key: tuple) -> tuple:
     return (operation_order, window_id)
 
 
+def _decoded_syndrome_weight(job: decoding_records.DecodeJob) -> Optional[int]:
+    """The set bits the job's decode read; None when it never started.
+
+    The decode reads its unit's memory into payloads as it starts
+    (decoders/decode_service.py), and the unit frees that memory at the
+    decode's end, before a confidence walk lets the verdict end the
+    request, so payloads is what still holds the input then.
+    """
+    if not job.service_started:
+        return None
+    fragments = tuple(job.payloads)
+    return _syndrome_weight(fragments)
+
+
 def _syndrome_weight(fragments: tuple) -> Optional[int]:
-    """The set bits of the landed input; None when its bits are unknown."""
+    """The set bits of the input; None when its bits are unknown."""
     if not fragments:
         return None
     weight = 0

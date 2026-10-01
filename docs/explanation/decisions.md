@@ -827,8 +827,7 @@ changing only a display-time value cannot change physical noise consistently.
 its compile_m2d_converter converts the resulting complete raw record into
 detection events and observable flips. These installed public APIs supply the
 execution and same-record oracle. StreamingDetectorFormer extends its existing
-record-lookback recipes without changing prior packets or resurrecting discarded
-measurements. That also serves incrementally described recorded traces.
+record-lookback recipes without changing prior packets.
 
 Growing models reuse WindowSlicer and the qLDPC sequential-window ownership law
 already cited in `decsim/windows/window_planner.py`. Complete detector effects,
@@ -1287,15 +1286,16 @@ and keeps each packet while a round it has not formed reads it, and a
 restart window's rounds before its start are in the strong region, whose
 request keeps them until the restart window commits; so a round leaves
 the store when no reader needs it there, as it does when nothing forms.
-On a live stream a window is admitted only once its commit region
-begins, so with no buffer the window before it can commit first; when
-the strong side forms, that window's potential strong read then shrinks
-to the rounds a round after its commit reads (`earlier_rounds_read`),
-and lasts until the next window registers
-its own (`release_committed_strong_read`), the order the stream path
-keeps for every hold: a read claims its rounds before a release could
-free them. A stream no round of which reads back keeps none, so a store
-with room for one round runs it.
+On a stream a window is admitted only once its commit region begins,
+so the window before it can commit, or escalate, before the next
+registers, and its potential strong read then ends or becomes a hold of
+the region it carries. When the strong side forms, the stream itself
+holds the rounds before the last admitted window's commit end that a
+later round reads (`LaterStreamReads`, from `earlier_rounds_read`),
+moved on as each window registers, after that window claims its own:
+a read claims its rounds before a release could free them. The hold
+ends when the stream seals. A stream no round of which reads back
+keeps none, so a store with room for one round runs it.
 The plan places a finite operation's holds before the operation
 begins, so it reads the operation's recipes off the same circuit the
 source will (`build/plan.py`, `_formation_tables`); the holds the run
@@ -1351,7 +1351,7 @@ seat lacks.
 (`rounds_needed_before`, `earlier_rounds_read`),
 `decsim/records/windows.py` (`FormationReads`),
 `decsim/windows/round_retention.py` (`strong_rounds_before`,
-`release_committed_strong_read`), `decsim/syndrome_buffer/round_output.py`
+`_hold_later_stream_reads`), `decsim/syndrome_buffer/round_output.py`
 (`_read_the_rounds_before`),
 `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
 (`_land_formed`);

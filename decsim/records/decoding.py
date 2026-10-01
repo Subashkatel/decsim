@@ -124,6 +124,22 @@ class PotentialRestart:
 
 
 @dataclass(frozen=True)
+class LaterStreamReads:
+    """A hold: the raw rounds a stream's windows still to come read early.
+
+    A strong read of a window carries the raw rounds before its first
+    that its recipes read, and a stream's window registers only as its
+    rounds arrive, so the stream keeps them for it until then.
+    """
+
+    stream_id: Any
+
+    def referenced_operation_ids(self) -> tuple:
+        """None: the rounds held are the stream's own."""
+        return ()
+
+
+@dataclass(frozen=True)
 class PendingStrong:
     """A hold: rounds for an admitted, not yet served strong request."""
 

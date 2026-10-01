@@ -940,6 +940,21 @@ def test_a_stream_keeps_the_round_its_observable_reads_until_the_last():
     _assert_drained(run)
 
 
+def test_an_escalation_leaves_the_rounds_a_later_window_reads_held():
+    """Window 6 escalates before window 7 registers; round 8 reads round 5.
+
+    Window 6's potential strong read becomes its region's hold, which
+    names only what the region reads, so the stream itself keeps round 5
+    for window 7.
+    """
+    program = _final_reaching_program()
+    settings = _switching_live_settings(program, (6, 7))
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
 def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")

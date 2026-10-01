@@ -195,23 +195,9 @@ class WindowManager:
         if models_changed:
             self.planner.refresh_stream_models(stream_id)
         self.tracker.seal(stream_id, stream_round_count)
-        self._release_the_last_kept_strong_read(stream_id)
+        self.retention.release_later_stream_reads(stream_id)
         self.check_windows_for_operation(stream_id)
         self.results.finish_workload_if_ready()
-
-    def _release_the_last_kept_strong_read(self, stream_id) -> None:
-        """A sealed stream has no next window to claim its last one's rounds.
-
-        A committed window may keep its potential strong read for the
-        window after it (round_retention.release_committed_strong_read).
-        """
-        windows = self.planner.windows_of(stream_id)
-        if not windows:
-            return
-        last_window = windows[-1]
-        if not last_window.committed:
-            return
-        self.retention.release_committed_strong_read(last_window)
 
     def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
         """Mark a live stream round as a measurement-closed boundary.

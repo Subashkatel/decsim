@@ -389,17 +389,15 @@ class StreamingDetectorFormer:
         return sum(len(packet) for packet in self.packets.values())
 
     def extend_table(self, table: FormationTable) -> None:
-        """Append recipes without changing earlier rounds or losing history.
+        """Append recipes without changing earlier rounds.
 
-        Live circuits and incrementally described recorded streams supply
-        the next recipes before their packets. Stim's record lookbacks
-        still require every referenced earlier measurement to be retained.
+        A live circuit supplies the next recipes before their packets.
+        The packets they read are the live table's last live_reach and
+        its observables', which the former kept, or rounds a seat that
+        forms only some rounds was never given, which a read gives it
+        then (rounds_needed_before).
         """
         _check_formation_prefix(self.table, table)
-        previous_detector_count = len(self.table.detectors)
-        new_detectors = table.detectors[previous_detector_count:]
-        new_recipes = new_detectors + table.observables
-        _check_retained_recipe_records(new_recipes, self.packets)
         self.table = table
 
     def _let_go_of_unread_packets(self, held_round: int) -> None:
@@ -501,24 +499,6 @@ def _check_formation_prefix(
     detector_prefix = table.detectors[:previous_detector_count]
     if detector_prefix != previous.detectors:
         raise RuntimeError("formation extension changes an existing detector")
-
-
-def _check_retained_recipe_records(recipes, packets: dict) -> None:
-    last_received_round = max(packets, default=0)
-    for recipe in recipes:
-        _check_recipe_history(recipe, packets, last_received_round)
-
-
-def _check_recipe_history(
-    recipe, packets: dict, last_received_round: int
-) -> None:
-    for record_round, _ in recipe.records:
-        if record_round > last_received_round:
-            continue
-        if record_round not in packets:
-            raise RuntimeError(
-                f"formation extension references discarded round {record_round}"
-            )
 
 
 def _circuit_tables(

@@ -41,21 +41,28 @@ def test_extending_a_live_table_keeps_the_previous_measurement() -> None:
     assert expected.tolist() == [[True, False]]
 
 
-def test_a_recorded_table_extension_refuses_a_discarded_measurement() -> None:
-    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
-    complete = first * 2
+def test_a_former_takes_a_table_whose_new_round_reads_a_round_never_given():
+    """A seat that formed round 2 alone is given round 1 when round 3 needs it.
+
+    The seat never held round 1, so the longer table discards nothing,
+    and the read that forms round 3 gives it round 1 raw.
+    """
+    circuit = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]")
     table = detector_formation.build_formation_table(
-        complete, 2, measurement_rounds={0: 1, 1: 2}
+        circuit, 2, measurement_rounds={0: 1, 1: 2}, live_reach=2
     )
     former = detector_formation.StreamingDetectorFormer(table)
-    former.feed_packet(1, (0,))
-    former.feed_packet(2, (0,))
-    complete.append_from_stim_program_text("M 0\nDETECTOR rec[-1] rec[-3]")
-    extended = detector_formation.build_formation_table(
-        complete, 3, measurement_rounds={0: 1, 1: 2, 2: 3}
+    former.feed_packet(2, (1,))
+    circuit.append_from_stim_program_text("M 0\nDETECTOR rec[-1] rec[-3]")
+    longer = detector_formation.build_formation_table(
+        circuit, 3, measurement_rounds={0: 1, 1: 2, 2: 3}
     )
-    with pytest.raises(RuntimeError, match="references discarded round 1"):
-        former.extend_table(extended)
+
+    former.extend_table(longer)
+    former.hold_packet(1, (1,))
+    events, _ = former.feed_packet(3, (0,))
+
+    assert events == [(2, 1)]
 
 
 def test_a_table_extension_cannot_change_an_existing_packet() -> None:

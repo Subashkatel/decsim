@@ -72,6 +72,78 @@ decoder is priced by a card. A decoder charged its measured wall clock
 moves the tick columns from run to run, and `diff` says for each mean
 whether the move is within its error bars.
 
+## If the two runs decoded the same shots, compare them shot by shot
+
+Two configurations that differ only in their decoder draw the same
+shot at the same seed, so most of their failures are the same shots.
+What tells them apart is the shots where one failed and the other did
+not. Two separate intervals cannot see that, and they overlap long
+after the shots show a difference: 25 shots that only the first run
+failed against 5 that only the second failed is a clear difference,
+while the two intervals still overlap.
+
+So `diff` also compares every point both folders hold shot by shot,
+and prints the result on the line after `logical_error_rate_estimate`
+whenever that rate differs. It never assumes the shots are the same:
+
+- It takes the seeds both runs hold from seed 0 up to where the shorter
+  run stopped (`prefix_shots` in `sweep.csv`).
+- Every one of those seeds must have the same `sample_digest` in both
+  `shots.csv` files. If any differs, the two runs did not decode the
+  same shots, and `diff` says `not paired`, with how many seeds
+  differ; the interval line above it is then the only comparison.
+- A shot either run left unscored has no failure to compare, so it is
+  left out of the pairs and counted.
+
+The line gives two numbers, and they answer different questions:
+
+- **The mixture test** (Robbins' beta-binomial mixture, Howard et al.,
+  arXiv 1810.08240, Proposition 7) asks whether the two runs differ at
+  all. It reads only the shots where exactly one failed and says
+  `differ` or `no difference shown`. It never says the two are the
+  same: a small difference needs many shots to show.
+- **The difference interval** (eq. 24 of the same paper) bounds how
+  much the first run's failure rate minus the second's is, with 95
+  percent confidence.
+
+They can disagree. With 25 shots against 5 in a million, the mixture
+test says `differ`, because 25 against 5 is unlikely from a fair coin,
+while the interval runs from about -3 to +7 in 100,000 and so still
+holds zero: the difference is 2 in 100,000, and the interval needs
+more shots to rule zero out. Both are right: one says the runs differ,
+the other that the difference is not yet measured well enough to put
+a size on it.
+
+Both hold at any stop: a point that ran to a failure target and a
+point that ran a fixed number of shots are read the same way, and so
+are pairs cut at the shorter run's stop.
+
+Two limits, in plain words:
+
+- The 95 percent guarantee is for one pair of points. Compare twenty
+  points of a sweep and about one of them may say `differ` by chance.
+- The mixture test assumes that, if the two decoders are equally good,
+  on a shot where only one failed either one is equally likely to be
+  the one that failed, whatever happened on earlier shots. A decoder
+  that adapts as it runs, such as an escalation threshold that learns
+  online, can break that, because its behaviour on a shot depends on
+  the shots before it.
+
+`--out <file>` writes the same comparison as a csv, one row per point
+both folders hold, for you to plot or test further:
+
+| Column | What it is |
+| --- | --- |
+| `point` | the point's metadata, as `diff` names it |
+| `first_point_id`, `second_point_id` | the point's id in each folder |
+| `shared_shots` | the seeds both runs hold, from 0 to the shorter run's stop |
+| `digest_mismatches` | shared seeds whose `sample_digest` differs; above 0, nothing is paired and the columns below are empty |
+| `unscored_shots` | shared seeds either run left unscored, left out of the pairs |
+| `scored_pairs` | the shared seeds both runs scored |
+| `first_only_failures`, `second_only_failures` | pairs that only the first run failed, and only the second |
+| `is_mixture_difference` | whether the mixture test says the two differ |
+| `difference_low`, `difference_high` | the 95 percent interval on the first run's failure rate minus the second's; empty with no pair |
+
 ## Read the folders from Python
 
 `decsim.results` reads run folders into one table, a row per point with
@@ -180,7 +252,8 @@ counts those windows in `referee_window_disagreements`.
 - **The shots.** Two shots say almost nothing about a logical error
   rate. Compare `logical_error_rate_low` and `logical_error_rate_high`,
   not just `logical_error_rate_estimate`; if the two intervals overlap,
-  the runs have not been shown to differ. A point with no interval, no
+  the runs have not been shown to differ that way. When the two runs
+  decoded the same shots, read the paired line too. A point with no interval, no
   scored shot or a cap with no failure, has no comparison to make, and
   `diff` says so.
 - **The manifest.** `manifest.json` in each folder carries the git

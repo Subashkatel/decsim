@@ -4,14 +4,21 @@ Two runs of one yaml whose decoder is priced by a card are the same
 run, number for number; a run at another shot length differs in one
 setting and in the circuit it ran. The folders come from `decsim
 collect` itself, so the reader is pinned against what the writer wrote.
+The paired comparison is checked on shots rewritten by hand against
+Robbins' beta-binomial mixture, computed with scipy.special.betaln, and
+Howard et al. (arXiv 1810.08240) eq. (24), computed here from the
+formula.
 """
 
 import csv
 import json
+import math
 import pathlib
 import shutil
 
+import numpy
 import pytest
+import scipy.special
 import scipy.stats
 
 import decsim.experiments.command as command
@@ -28,6 +35,12 @@ TWO_POINT_SWEEP = [
         "collection": {"max_shots": 20},
     }
 ]
+
+# The shots of a paired folder's first point: room for 25 shots that
+# only the first folder fails beside 5 that only the second fails.
+PAIRED_SHOTS = 200
+# The seeds both paired folders fail.
+SHARED_FAILING_SEEDS = (0, 1, 2, 3, 4)
 
 ROUNDS_COLUMN = "settings.workload.row_settings.arguments.rounds_per_shot"
 PROBABILITY_COLUMN = (
@@ -157,9 +170,12 @@ def test_diff_judges_a_logical_error_rate_by_its_exact_interval(
     inside_lines = _diff_printed(capsys, known, inside)
     apart_lines = _diff_printed(capsys, known, apart)
 
-    assert inside_lines[-1].endswith(", within error bars")
-    assert apart_lines[-1].endswith(", beyond error bars")
-    assert len(apart_lines) == 6
+    inside_rate = _line_with(inside_lines, " logical_error_rate_estimate: ")
+    apart_rate = _line_with(apart_lines, " logical_error_rate_estimate: ")
+    assert inside_rate.endswith(", within error bars")
+    assert apart_rate.endswith(", beyond error bars")
+    # the rate's line and the paired line that follows it
+    assert len(apart_lines) == 7
 
 
 def test_diff_makes_no_comparison_of_a_rate_with_no_interval(
@@ -183,7 +199,14 @@ def test_diff_makes_no_comparison_of_a_rate_with_no_interval(
 
     lines = _diff_printed(capsys, runs["first"], unscored)
 
-    assert lines[-1].endswith(", no statistical comparison possible")
+    rate_line = _line_with(lines, " logical_error_rate_estimate: ")
+    assert rate_line.endswith(", no statistical comparison possible")
+
+
+def _line_with(lines: list, text: str) -> str:
+    """The one printed line that holds this text."""
+    (line,) = [line for line in lines if text in line]
+    return line
 
 
 def _spread_shots(run_dir, column: str, half_width: float) -> None:
@@ -357,6 +380,258 @@ def test_diff_refuses_a_folder_without_its_resolved_settings(
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
     assert "holds no resolved/ folder" in printed.err
+
+
+@pytest.mark.parametrize(
+    ("first_only", "second_only", "word"),
+    [(25, 5, "differ"), (12, 2, "no difference shown")],
+)
+def test_the_paired_verdict_is_the_beta_binomial_mixture_against_twenty(
+    runs, tmp_path, capsys, first_only, second_only, word
+):
+    """The verdict is whether log B(a + 1, b + 1) + (a + b) log 2 >= log 20.
+
+    That sum is log M, Robbins' mixture with a uniform prior over the
+    chance that the first point is the one failing on a discordant shot
+    (Howard et al. Proposition 7): 25 against 5 crosses 20, 12 against 2
+    does not.
+    """
+    first_failing, second_failing = _failing_seeds(first_only, second_only)
+    first = _paired_folder(runs["first"], tmp_path, "first", first_failing)
+    second = _paired_folder(runs["first"], tmp_path, "second", second_failing)
+
+    lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    first_shape = first_only + 1
+    second_shape = second_only + 1
+    discordant_count = first_only + second_only
+    log_beta = scipy.special.betaln(first_shape, second_shape)
+    log_evidence = log_beta + discordant_count * math.log(2)
+    is_difference = log_evidence >= math.log(20)
+    paired_line = _line_with(lines, " paired on ")
+    assert row["first_only_failures"] == str(first_only)
+    assert row["second_only_failures"] == str(second_only)
+    assert row["is_mixture_difference"] == str(is_difference)
+    assert f"; {word} by the mixture test;" in paired_line
+
+
+def test_the_paired_interval_is_equation_24_on_the_shifted_differences(
+    runs, tmp_path, capsys
+):
+    first_failing, second_failing = _failing_seeds(25, 5)
+    first = _paired_folder(runs["first"], tmp_path, "first", first_failing)
+    second = _paired_folder(runs["first"], tmp_path, "second", second_failing)
+
+    _lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    expected_low, expected_high = _equation_24_difference(
+        first_failing, second_failing
+    )
+    low = float(row["difference_low"])
+    high = float(row["difference_high"])
+    assert low == pytest.approx(expected_low, rel=1e-12, abs=0)
+    assert high == pytest.approx(expected_high, rel=1e-12, abs=0)
+    assert row["scored_pairs"] == str(PAIRED_SHOTS)
+
+
+def test_a_shared_shot_drawn_differently_refuses_the_pairing(
+    runs, tmp_path, capsys
+):
+    """One seed's sample_digest differs: no pairs, the interval line kept."""
+    first_failing, second_failing = _failing_seeds(25, 5)
+    first = _paired_folder(runs["first"], tmp_path, "first", first_failing)
+    second = _paired_folder(
+        runs["first"],
+        tmp_path,
+        "second",
+        second_failing,
+        redrawn_seeds=(7,),
+    )
+    _set_limits(first, 0.1, 0.2)
+    _set_limits(second, 0.02, 0.09)
+
+    lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    paired_line = _line_with(lines, " not paired: ")
+    rate_line = _line_with(lines, " logical_error_rate_estimate: ")
+    assert row["digest_mismatches"] == "1"
+    assert row["scored_pairs"] == ""
+    assert row["is_mixture_difference"] == ""
+    assert paired_line.endswith(
+        " not paired: 1 of 200 shared shots hold a different "
+        "sample_digest, so the two points did not decode the same shots"
+    )
+    assert rate_line.endswith(", beyond error bars")
+
+
+def test_a_shot_either_run_left_unscored_is_counted_and_left_out(
+    runs, tmp_path, capsys
+):
+    """Seed 30 fails only in the second; unscored in the first, no pair."""
+    first_failing, second_failing = _failing_seeds(25, 5)
+    first = _paired_folder(
+        runs["first"],
+        tmp_path,
+        "first",
+        first_failing,
+        unscored_seeds=(30,),
+    )
+    second = _paired_folder(runs["first"], tmp_path, "second", second_failing)
+
+    lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    paired_line = _line_with(lines, " paired on ")
+    assert row["unscored_shots"] == "1"
+    assert row["scored_pairs"] == "199"
+    assert row["second_only_failures"] == "4"
+    assert "(1 unscored in either run, left out)" in paired_line
+
+
+def test_the_pairs_end_where_the_shorter_prefix_stopped(runs, tmp_path, capsys):
+    """The second stopped at its 150th shot; its later shots are no pairs.
+
+    A folder holds shots past its stop when a piece ran on beyond it, so
+    the first's failures at seeds 160 to 169 find shots in the second,
+    and still pair with nothing.
+    """
+    first_failing, second_failing = _failing_seeds(25, 5)
+    late_failures = tuple(range(160, 170))
+    first_and_late = first_failing + late_failures
+    first = _paired_folder(runs["first"], tmp_path, "first", first_and_late)
+    second = _paired_folder(runs["first"], tmp_path, "second", second_failing)
+    _set_prefix_shots(second, 150)
+
+    _lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    assert row["shared_shots"] == "150"
+    assert row["first_only_failures"] == "25"
+
+
+def _failing_seeds(first_only: int, second_only: int) -> tuple:
+    """Both fail the shared seeds, then the first its own, then the second."""
+    first_start = len(SHARED_FAILING_SEEDS)
+    second_start = first_start + first_only
+    second_end = second_start + second_only
+    first_own = range(first_start, second_start)
+    second_own = range(second_start, second_end)
+    first_failing = SHARED_FAILING_SEEDS + tuple(first_own)
+    second_failing = SHARED_FAILING_SEEDS + tuple(second_own)
+    return first_failing, second_failing
+
+
+def _paired_folder(
+    run_dir,
+    tmp_path,
+    name: str,
+    failing_seeds: tuple,
+    unscored_seeds: tuple = (),
+    redrawn_seeds: tuple = (),
+):
+    """A copy whose first point holds PAIRED_SHOTS shots written here.
+
+    Each is the point's first shot but for its seed, its failure, its
+    scoring and its sample_digest, which names the seed and whether it
+    was drawn again. The sweep row's prefix and rate follow the shots.
+    """
+    destination = tmp_path / name
+    shutil.copytree(run_dir, destination)
+    sweep_path = destination / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
+    point_id = sweep_rows[0]["point_id"]
+    shots_path = destination / "shots.csv"
+    shot_rows = _csv_rows(shots_path)
+    point_rows = [row for row in shot_rows if row["point_id"] == point_id]
+    other_rows = [row for row in shot_rows if row["point_id"] != point_id]
+    template = point_rows[0]
+    written = [
+        _shot_row(template, seed, failing_seeds, unscored_seeds, redrawn_seeds)
+        for seed in range(PAIRED_SHOTS)
+    ]
+    every_row = written + other_rows
+    _write_csv_rows(shots_path, every_row)
+    sweep_rows[0]["prefix_shots"] = PAIRED_SHOTS
+    sweep_rows[0]["logical_error_rate_estimate"] = (
+        len(failing_seeds) / PAIRED_SHOTS
+    )
+    _write_csv_rows(sweep_path, sweep_rows)
+    return destination
+
+
+def _set_limits(run_dir, low: float, high: float) -> None:
+    """The first sweep row's exact interval set by hand."""
+    sweep_path = run_dir / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
+    sweep_rows[0]["logical_error_rate_low"] = low
+    sweep_rows[0]["logical_error_rate_high"] = high
+    _write_csv_rows(sweep_path, sweep_rows)
+
+
+def _set_prefix_shots(run_dir, prefix_shots: int) -> None:
+    """The first sweep row's prefix stopped by hand at prefix_shots."""
+    sweep_path = run_dir / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
+    sweep_rows[0]["prefix_shots"] = prefix_shots
+    _write_csv_rows(sweep_path, sweep_rows)
+
+
+def _shot_row(
+    template: dict,
+    seed: int,
+    failing_seeds: tuple,
+    unscored_seeds: tuple,
+    redrawn_seeds: tuple,
+) -> dict:
+    row = dict(template)
+    row["seed"] = seed
+    row["logical_failure"] = seed in failing_seeds
+    row["is_scored"] = seed not in unscored_seeds
+    row["sample_digest"] = f"seed {seed} drawn again {seed in redrawn_seeds}"
+    return row
+
+
+def _paired_diff(capsys, tmp_path, first, second) -> tuple:
+    """The lines diff prints, and its csv row of the point written here."""
+    out = tmp_path / "paired.csv"
+    command.main(["diff", str(first), str(second), "--out", str(out)])
+    printed = capsys.readouterr()
+    lines = printed.out.splitlines()
+    sweep_path = first / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
+    point_id = sweep_rows[0]["point_id"]
+    rows = _csv_rows(out)
+    (row,) = [row for row in rows if row["first_point_id"] == point_id]
+    return lines, row
+
+
+def _equation_24_difference(first_failing: tuple, second_failing: tuple):
+    """Howard et al. eq. (24) at the last of PAIRED_SHOTS pairs.
+
+    On y = (fail_first - fail_second + 1) / 2 in [0, 1]: each value's
+    prediction is the mean of the values before it, zero for the first;
+    V is the squared misses summed, floored at one; the radius is
+    [1.7 sqrt(V (log log 2V + 3.8)) + 3.4 log log 2V + 13] / t; and an
+    end y maps back to the difference as 2y - 1.
+    """
+    seeds = numpy.arange(PAIRED_SHOTS)
+    first = numpy.isin(seeds, first_failing)
+    second = numpy.isin(seeds, second_failing)
+    differences = first.astype(float) - second
+    values = (differences + 1) / 2
+    positions = seeds + 1
+    means = numpy.cumsum(values) / positions
+    predictions = numpy.concatenate(([0.0], means[:-1]))
+    squared_misses = (values - predictions) ** 2
+    miss_sum = numpy.sum(squared_misses)
+    variance = max(miss_sum, 1.0)
+    doubled_variance = 2 * variance
+    log_doubled = math.log(doubled_variance)
+    iterated_log = math.log(log_doubled)
+    root_argument = variance * (iterated_log + 3.8)
+    root = math.sqrt(root_argument)
+    radius = (1.7 * root + 3.4 * iterated_log + 13) / PAIRED_SHOTS
+    low = 2 * (means[-1] - radius) - 1
+    high = 2 * (means[-1] + radius) - 1
+    return low, high
 
 
 def test_load_gives_a_row_per_point_with_its_results_and_settings(runs):

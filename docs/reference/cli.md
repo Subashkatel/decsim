@@ -24,6 +24,7 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | --- | --- | --- |
 | `first` | required | the first run folder |
 | `second` | required | the run folder to compare it with |
+| `--out` | None | write each shared point's paired comparison to this csv |
 
 ## `decsim plan`
 

@@ -50,6 +50,10 @@ class SyndromeBuffer:
     # a store built with no waiting line in front of it frees its slots
     # with nobody to tell
     held_rounds = ports.Port(ports.HeldRounds, optional=True)
+    # the run's former seats, told when a round leaves the store the
+    # plan's windows read, which no read forms after; None on the other
+    # store
+    detection_events = ports.Port(ports.DetectionEventPlacement, optional=True)
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -467,6 +471,8 @@ class SyndromeBuffer:
     def _free_round(self, round_key) -> None:
         self.round_by_key.pop(round_key)
         self.trace.round_released.fire(round_key)
+        if self.detection_events is not None:
+            self.detection_events.retire_round(round_key)
         if self.held_rounds is not None:
             self.held_rounds.retry()
 

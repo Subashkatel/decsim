@@ -1254,8 +1254,14 @@ round, any observable). A later round of a read can reach further back
 than its first (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the
 whole read is counted, not its first round. A round the seat formed is
 not given again: its former keeps a packet while a round that reads it
-is unformed there, the packet's reference set, so a seam formed after a
-later block still finds the rounds it reads. On a live stream the
+is neither formed there nor retired, the packet's reference set, so a
+seam formed after a later block still finds the rounds it reads. A
+round is retired at every seat once it leaves the store the plan's
+windows read (`retire_round`): every read, an escalation's included,
+holds its rounds there until they have landed and formed, so no read
+forms it after, and a seat that forms only some rounds, the strong one
+above all, lets go of what only the others read. At the end of a run no
+seat holds a raw round (`check_settled`). On a live stream the
 former also keeps the last k packets, k the program's reach: how far
 back any fragment the stream can run reads, read off its repeated and
 final fragments when the stream is declared (`rounds_read_back`,
@@ -1266,8 +1272,8 @@ fragment runs next, last or not, finds its rounds. A program whose
 and is refused, as is a repeated round that measures nothing, whose
 records lie a round further back each round. A live table's
 observables are read by the final round, so the packets they read stay
-until it forms. Fed in order a former holds no more than the last
-k + 1 packets beside the observables', the ring it replaced. The
+until it forms. Fed in order a former holds the last k packets beside
+the observables', the ring it replaced. The
 recipe table owns the law (`rounds_read_before` per round,
 `rounds_read_before_first` per read, `rounds_reading` per packet,
 `earlier_rounds_read` per stream window).
@@ -1335,12 +1341,13 @@ line 154).
 
 **What it cost the port file.** `DetectionEventPlacement` lost
 `needs_the_round_before` and gained `rounds_needed_before` (the rounds,
-for a read's first and last round) and `earlier_rounds_read` (the
-rounds before a stream window's first that it or a later round reads),
-and `form_at` takes `rounds_before` in place of `round_before`;
-`WindowRetention.strong_round_before` became `strong_rounds_before`,
-which takes the read's last round too and answers the rounds the strong
-seat lacks.
+for a read's first and last round), `earlier_rounds_read` (the rounds
+before a stream window's first that it or a later round reads),
+`retire_round` and `check_settled`, and `form_at` takes `rounds_before`
+in place of `round_before`; `WindowRetention.strong_round_before`
+became `strong_rounds_before`, which takes the read's last round too
+and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a
+`detection_events` port, bound on the store the plan's windows read.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`, `rounds_read_before_first`,
@@ -1348,10 +1355,11 @@ seat lacks.
 `rounds_read_back`, `StreamingDetectorFormer`),
 `decsim/qpu/streaming_stim_device.py` (`_program_reach`),
 `decsim/detector_error_model/detection_event_formation.py`
-(`rounds_needed_before`, `earlier_rounds_read`),
-`decsim/records/windows.py` (`FormationReads`),
+(`rounds_needed_before`, `earlier_rounds_read`, `retire_round`,
+`check_settled`), `decsim/records/windows.py` (`FormationReads`),
 `decsim/windows/round_retention.py` (`strong_rounds_before`,
-`_hold_later_stream_reads`), `decsim/syndrome_buffer/round_output.py`
+`_hold_later_stream_reads`), `decsim/syndrome_buffer/syndrome_buffer.py`
+(`_free_round`), `decsim/syndrome_buffer/round_output.py`
 (`_read_the_rounds_before`),
 `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
 (`_land_formed`);

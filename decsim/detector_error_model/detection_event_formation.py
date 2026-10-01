@@ -150,6 +150,28 @@ class SeatedFormation:
         table = self.recipes.formation_table(operation_id)
         return table.earlier_rounds_read(first_round)
 
+    def retire_round(self, round_key: tuple) -> None:
+        """No read forms this round again: every seat's reads of it are done.
+
+        The round left the store the plan's windows read, so no window
+        or escalation reads it after now, and every seat stops keeping
+        packets for it (detector_formation.StreamingDetectorFormer
+        retire_round): a round an escalation took to the strong side, a
+        sealed stream's last rounds and a clipped tail are among them.
+        """
+        operation_id, round_index = round_key
+        for history in self.history_by_seat.values():
+            history.retire(operation_id, round_index)
+
+    def check_settled(self) -> None:
+        """At the end of a run no seat may still hold a raw round.
+
+        Every round has formed or left the store by then, so a packet
+        still held is one no round would ever have let go of.
+        """
+        for history in self.history_by_seat.values():
+            history.check_settled()
+
     def cycles_at(self, seat: str, round_count: int) -> int:
         """What forming round_count rounds together costs the seat, on clock."""
         if seat not in self.history_by_seat:
@@ -252,6 +274,31 @@ class _SeatHistory:
             former.hold_packet(first.round_index, bits)
             self._report_state(first.operation_id, former)
 
+    def retire(self, operation_id: Any, round_index: int) -> None:
+        """No read forms this round here again; held packets may go.
+
+        The former takes the source's newest table first, so a live
+        stream that has since run its final round no longer keeps rounds
+        for a round still to run.
+        """
+        if operation_id not in self.former_by_operation:
+            return
+        former = self._former_for(operation_id)
+        former.retire_round(round_index)
+        self._report_state(operation_id, former)
+
+    def check_settled(self) -> None:
+        """No former of this seat holds a raw round."""
+        for operation_id, former in self.former_by_operation.items():
+            if not former.packets:
+                continue
+            held_rounds = sorted(former.packets)
+            raise RuntimeError(
+                f"the {self.seat} seat still holds raw rounds {held_rounds} "
+                f"of operation {operation_id!r} at the end of the run, "
+                "though every round has formed or left the store"
+            )
+
     def rounds_needed_before(
         self, operation_id: Any, first_round: int, last_round: int
     ) -> tuple:
@@ -328,8 +375,9 @@ class _SeatHistory:
             former.hold_packet(round_index, raw_bits)
             self._report_state(operation_id, former)
             return remembered
-        events, _ = former.feed_packet(round_index, raw_bits)
+        former.take_packet(round_index, raw_bits)
         self._report_state(operation_id, former)
+        events, _ = former.form_round(round_index)
         values = tuple(value for _, value in events)
         self.events_by_round[key] = values
         if self.observer is not None:

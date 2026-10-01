@@ -486,6 +486,28 @@ def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
     assert reported == [8, 16, 16]
 
 
+def test_a_round_that_left_the_store_lets_its_seat_go_of_what_it_read():
+    """Round 2 formed at another seat: no read forms it here after."""
+    placement = seated(("weak_decoder", "strong_decoder"))
+    first = rounds(1)
+    placement.form_at("strong_decoder", first)
+
+    placement.retire_round((1, 2))
+
+    history = placement.history_by_seat["strong_decoder"]
+    assert history.former_by_operation[1].packets == {}
+
+
+def test_a_seat_still_holding_a_raw_round_at_the_end_is_named():
+    """Round 1 waits for round 2, which never formed here nor left a store."""
+    placement = seated(("strong_decoder",))
+    first = rounds(1)
+    placement.form_at("strong_decoder", first)
+
+    with pytest.raises(RuntimeError, match="strong_decoder seat still holds"):
+        placement.check_settled()
+
+
 def test_each_operation_is_formed_from_its_own_first_round():
     placement = seated(("controller",))
     first = rounds(1)

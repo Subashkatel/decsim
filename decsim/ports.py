@@ -1612,6 +1612,15 @@ class DetectionEventPlacement(Protocol):
         stream as far back as its program reaches. None with no recipes.
         """
 
+    def retire_round(self, round_key: tuple) -> None:
+        """The round left the store the plan's windows read: none forms it.
+
+        Every seat stops keeping raw packets for it.
+        """
+
+    def check_settled(self) -> None:
+        """At the end of a run no seat holds a raw round; a leak raises."""
+
     def cycles_at(self, seat: str, round_count: int) -> int:
         """The cycles of forming round_count rounds together at the seat."""
 

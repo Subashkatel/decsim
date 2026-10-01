@@ -320,38 +320,62 @@ class StreamingDetectorFormer:
     """One seat's former for one operation: a raw packet in, events out.
 
     It keeps a packet while a round that reads it (FormationTable
-    rounds_reading) has not been formed here, as an HEVC decoder keeps
-    each picture the current reference set names (FFmpeg
-    hevc/refs.c:486-517), so a round formed out of order finds the
-    packets it reads. On a live table it also keeps the live_reach last
-    packets, which a round not yet run may read, and the packets the
-    observables read, which the final round forms. Fed in round order it
-    so holds no more than the last k + 1 packets, k the furthest a
-    recipe or a round still to run reaches back, beside those the
+    rounds_reading) is neither formed here nor retired (retire_round),
+    as an HEVC decoder keeps each picture the current reference set
+    names (FFmpeg hevc/refs.c:486-517), so a round formed out of order
+    finds the packets it reads. On a live table it also keeps the
+    live_reach last packets, which a round not yet run may read, and the
+    packets the observables read, which the final round forms. Fed in
+    round order it so holds, between rounds, the packets of the last k
+    rounds, k the furthest any recipe reaches back, beside those the
     observables read: the state IBM's windowed form keeps as its running
-    syndrome (Maurer 2510.21600 Algorithm 2, lines 760-770). Every
-    detector of the arriving round starts at its reference parity and
-    XORs in its listed bits. The observables come out with the last
-    round of a whole operation.
+    syndrome (Maurer 2510.21600 Algorithm 2, lines 760-770). A seat that
+    forms only some rounds keeps a packet until each round reading it
+    has formed here or left the store (retire_round), so it holds no
+    more than the rounds the store still keeps read. Every detector of the
+    arriving round starts at its reference parity and XORs in its listed
+    bits. The observables come out with the last round of a whole
+    operation.
     """
 
     def __init__(self, table: FormationTable):
         self.table = table
         self.packets: dict[int, tuple[int, ...]] = {}
-        # the rounds formed here, whose reads of a packet are done
-        self.formed_rounds: set[int] = set()
+        # the rounds whose reads of a packet are done here: formed here,
+        # or retired, which no read forms here again
+        self.done_rounds: set[int] = set()
 
     def feed_packet(
         self, round_index: int, bits: Iterable[int]
     ) -> tuple[list[tuple[int, int]], Optional[list[tuple[int, int]]]]:
         """Store one round's packet and form the detectors it completes.
 
+        take_packet then form_round.
+        """
+        self.take_packet(round_index, bits)
+        return self.form_round(round_index)
+
+    def take_packet(self, round_index: int, bits: Iterable[int]) -> None:
+        """Keep one round's packet beside those held, letting none go."""
+        packet = tuple(int(bit) for bit in bits)
+        expected_bit_count = self.table.packet_width_by_round[round_index]
+        if len(packet) != expected_bit_count:
+            raise ValueError(
+                f"round {round_index}: packet has {len(packet)} bits, "
+                f"the formation table expects {expected_bit_count}"
+            )
+        self.packets[round_index] = packet
+
+    def form_round(
+        self, round_index: int
+    ) -> tuple[list[tuple[int, int]], Optional[list[tuple[int, int]]]]:
+        """Form the round from the held packets, then let go of the unread.
+
         Returns (events, observables): events as (detector index, bit)
         pairs, observables as (observable index, bit) pairs on the last
         round of a whole operation and None otherwise.
         """
-        self.hold_packet(round_index, bits)
-        self.formed_rounds.add(round_index)
+        self.done_rounds.add(round_index)
         recipes = self.table.detectors_of_round(round_index)
         events = [
             (recipe.detector_index, self._form_parity(recipe))
@@ -363,22 +387,24 @@ class StreamingDetectorFormer:
                 (recipe.observable_index, self._form_parity(recipe))
                 for recipe in self.table.observables
             ]
+        self._let_go_of_unread_packets()
         return events, observables
 
     def hold_packet(self, round_index: int, bits: Iterable[int]) -> None:
         """Keep one round's packet, for the rounds after it, forming nothing.
 
-        Every other packet no unformed round reads is let go now.
+        Every packet no round left to form here reads is let go now.
         """
-        packet = tuple(int(bit) for bit in bits)
-        expected_bit_count = self.table.packet_width_by_round[round_index]
-        if len(packet) != expected_bit_count:
-            raise ValueError(
-                f"round {round_index}: packet has {len(packet)} bits, "
-                f"the formation table expects {expected_bit_count}"
-            )
-        self.packets[round_index] = packet
-        self._let_go_of_unread_packets(round_index)
+        self.take_packet(round_index, bits)
+        self._let_go_of_unread_packets()
+
+    def retire_round(self, round_index: int) -> None:
+        """No read forms this round here again: its reads are done.
+
+        The packets it alone still read are let go now.
+        """
+        self.done_rounds.add(round_index)
+        self._let_go_of_unread_packets()
 
     def holds_packet(self, round_index: int) -> bool:
         """Whether this round's raw packet is held here."""
@@ -400,11 +426,9 @@ class StreamingDetectorFormer:
         _check_formation_prefix(self.table, table)
         self.table = table
 
-    def _let_go_of_unread_packets(self, held_round: int) -> None:
+    def _let_go_of_unread_packets(self) -> None:
         unread_rounds = []
         for kept_round in self.packets:
-            if kept_round == held_round:
-                continue
             if self._is_still_read(kept_round):
                 continue
             unread_rounds.append(kept_round)
@@ -412,12 +436,12 @@ class StreamingDetectorFormer:
             del self.packets[unread_round]
 
     def _is_still_read(self, kept_round: int) -> bool:
-        """Whether a round not yet formed here, or not yet run, reads it."""
+        """Whether a round not done here, or not yet run, reads it."""
         if self._is_read_after_the_table(kept_round):
             return True
         reader_rounds = self.table.rounds_reading(kept_round)
         for reader_round in reader_rounds:
-            if reader_round not in self.formed_rounds:
+            if reader_round not in self.done_rounds:
                 return True
         return False
 

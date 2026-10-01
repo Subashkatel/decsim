@@ -476,6 +476,8 @@ Where the machine forms a round's detection events, and what it costs.
 | `width_at` | The width one round's fragments take as they leave the seat. |
 | `rounds_needed_before` | The raw rounds before a read's first round the seat must be given. |
 | `earlier_rounds_read` | The raw rounds before first_round it or any later round reads. |
+| `retire_round` | The round left the store the plan's windows read: none forms it. |
+| `check_settled` | At the end of a run no seat holds a raw round; a leak raises. |
 | `cycles_at` | The cycles of forming round_count rounds together at the seat. |
 
 ### `WindowModelSource`

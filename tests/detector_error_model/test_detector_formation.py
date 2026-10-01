@@ -20,7 +20,7 @@ from decsim.detector_error_model import detector_chronology, detector_formation
 def test_extending_a_live_table_keeps_the_previous_measurement() -> None:
     first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
     first_table = detector_formation.build_formation_table(
-        first, 1, measurement_rounds={0: 1}
+        first, 1, measurement_rounds={0: 1}, live_reach=1
     )
     former = detector_formation.StreamingDetectorFormer(first_table)
     first_events, _ = former.feed_packet(1, (1,))
@@ -285,14 +285,26 @@ def test_a_packet_of_the_wrong_width_is_refused():
         former.feed_packet(1, [0, 1, 0])
 
 
-def test_the_former_keeps_only_the_packets_a_recipe_can_reach():
+def test_a_former_fed_in_order_keeps_the_packet_the_next_round_reads():
+    """A surface-code round reads the one before it, and no earlier one."""
     table = formation_table(4)
     former = detector_formation.StreamingDetectorFormer(table)
     empty_packet = [0] * 8
     former.feed_packet(1, empty_packet)
     former.feed_packet(2, empty_packet)
     former.feed_packet(3, empty_packet)
-    assert set(former.packets) == {2, 3}
+    assert set(former.packets) == {3}
+
+
+def test_a_former_holds_nothing_once_the_last_round_has_formed():
+    """No round reads the last one, and it read the others already."""
+    table = formation_table(2)
+    former = detector_formation.StreamingDetectorFormer(table)
+    check_bits = [0] * 8
+    check_and_data_bits = [0] * 17
+    former.feed_packet(1, check_bits)
+    former.feed_packet(2, check_and_data_bits)
+    assert former.packets == {}
 
 
 def lookback_circuit(rounds):
@@ -458,6 +470,19 @@ def test_a_live_former_keeps_the_rounds_its_reach_covers():
 
     assert kept_rounds == {2, 3}
     assert events == [(3, 1)]
+
+
+def test_a_retired_round_lets_go_of_the_packets_it_alone_read():
+    """Round 3 reads round 1 and is formed at another seat."""
+    circuit = lookback_circuit(10)
+    table = lookback_table(circuit, 10)
+    former = detector_formation.StreamingDetectorFormer(table)
+    former.feed_packet(1, (0,))
+    former.feed_packet(2, (0,))
+
+    former.retire_round(3)
+
+    assert set(former.packets) == {2}
 
 
 def test_a_held_packet_forms_nothing_and_serves_the_round_after_it():

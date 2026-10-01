@@ -15,6 +15,7 @@ processing on the decoder's own chip (2510.21600 lines 235-237).
 """
 
 import dataclasses
+import functools
 import pathlib
 
 import numpy
@@ -984,6 +985,94 @@ def test_a_strong_region_is_given_every_round_its_later_rounds_read(
     expected = _stims_events_by_round(machine, emitted)
     mismatched = _mismatched_rounds(landed, expected)
     assert mismatched == []
+
+
+def _every_third_escalating_machine(round_count: int):
+    """Rounds reading two back; windows of one round; every third escalates.
+
+    The strong side forms the escalated windows' rounds, and the weak
+    side every round, on three units each.
+    """
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        BOTH_DECODERS,
+    )
+    settings = machine.settings
+    noisy_round = "M(0.15) 0\n"
+    later_rounds = round_count - 2
+    circuit = stim.Circuit(
+        f"R 0\nREPEAT 2 {{\n{noisy_round}DETECTOR rec[-1]\n}}\n"
+        f"REPEAT {later_rounds} {{\n{noisy_round}DETECTOR rec[-1] rec[-3]\n}}\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    measurement_rounds = {index: index + 1 for index in range(round_count)}
+    physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
+    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
+    workload = workload_records.Workload(
+        (operation,), {1: round_count}, physical
+    )
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_every_third)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, decoder=weak, units=3
+    )
+    strong_decoder = dataclasses.replace(
+        settings.strong_decoder, kind=0.2, units=3
+    )
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    running = settings.workload.running(workload)
+    settings = dataclasses.replace(
+        settings,
+        workload=running,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+    )
+    return machine_module.Machine.build(settings, 0)
+
+
+def _is_every_third(job) -> bool:
+    return job.window_id % 3 == 0
+
+
+def _note_packets(held_by_seat: dict, seat, operation_id, bits) -> None:
+    del operation_id
+    held = held_by_seat.setdefault(seat, [])
+    held.append(bits)
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_a_strong_seat_lets_go_of_rounds_only_the_weak_side_forms(
+    round_count: int,
+):
+    """The rounds that read a region's rounds form at the weak side alone.
+
+    They leave the store once formed there, so the strong seat lets go
+    of the packets they read: it holds at most five one-bit packets at
+    48 rounds as at 24, the regions in flight and the rounds they read,
+    and none at the end.
+    """
+    machine = _every_third_escalating_machine(round_count)
+    held_by_seat = {}
+    note = functools.partial(_note_packets, held_by_seat)
+    machine.readout.detection_events.trace.state_held.connect(note)
+
+    machine.run()
+
+    held = held_by_seat["strong_decoder"]
+    assert max(held) <= 5
+    assert held[-1] == 0
 
 
 def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():

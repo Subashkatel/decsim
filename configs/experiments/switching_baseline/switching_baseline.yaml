@@ -6,9 +6,9 @@
 # time. weak_alone.yaml runs the same machine and shots with no
 # escalation. Every key is documented in reference.yaml.
 #
-# Sources: "lines" are the paper text copies decsim cites
-# (sandbox tmp/papers/txt/<arXiv>.txt); Helios RTL is
-# github.com/yale-paragon/Helios_scalable_QEC; "estimate" has no source.
+# Sources: "lines" are line numbers in the paper's arXiv text; Helios
+# RTL is github.com/yale-paragon/Helios_scalable_QEC; "estimate" has no
+# source.
 
 qpu:
   kind: stim_device
@@ -83,8 +83,8 @@ windows:
 escalation:
   kind: switching
   confidence: cluster_gap
-  confidence_walk_microseconds: 1.0   # owner value; estimate (2602.03336 lines 17-19)
-  gap_threshold_db: 20.0              # owner's cluster-gap threshold, not a calibrated point:
+  confidence_walk_microseconds: 1.0   # chosen value; estimate (2602.03336 lines 17-19)
+  gap_threshold_db: 20.0              # chosen cluster-gap threshold, not a calibrated point:
                                       # the paper's 20 dB is on the complementary gap
   strong_window: double_window
   restart_reread_buffer_regions: 1    # the default, 2510.25222 Fig. 12
@@ -174,7 +174,7 @@ collection:
   max_shots: 5000000
   min_shots: 0
   # 50 shots a piece: the slowest point, d=13 at p=0.005, is estimated
-  # at up to 600 s a shot (the pilot's 32 s at d=9 p=0.003, about three
+  # at up to 600 s a shot (a measured 32 s at d=9 p=0.003, about three
   # times the region's detectors, twice the escalations), so a piece is
   # at most about 8 hours, a third of a 24-hour task.
   piece_rounds: 5000

@@ -12,6 +12,6 @@ collection:
   max_failures: 100
   max_shots: 5000000
   min_shots: 0
-  # 2,000 shots a piece: weak-only shots took 0.17 to 0.41 s in the
-  # pilot, so a piece is minutes, and a capped point is 2,500 pieces.
+  # 2,000 shots a piece: weak-only shots took 0.17 to 0.41 s each,
+  # so a piece is minutes, and a capped point is 2,500 pieces.
   piece_rounds: 200000

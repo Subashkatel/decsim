@@ -43,9 +43,9 @@ PAIRED_SHOTS = 200
 SHARED_FAILING_SEEDS = (0, 1, 2, 3, 4)
 # The paired line of a point whose 20 shots failed alike in both runs.
 SAME_SHOTS_TEXT = (
-    " paired on 20 of 20 shared shots (0 unscored in either run, left "
-    "out): 0 failed in the first only, 0 in the second only; no "
-    "difference shown by the mixture test;"
+    " paired on the 20 shots both runs scored of 20 shared shots (0 "
+    "unscored in either run, left out): 0 failed in the first only, 0 in "
+    "the second only; no difference shown by the mixture test;"
 )
 
 # The swept path that tells the two points apart, a column of sweep.csv.
@@ -502,7 +502,13 @@ def test_a_shot_either_run_left_unscored_is_counted_and_left_out(
     assert row["unscored_shots"] == "1"
     assert row["scored_pairs"] == "199"
     assert row["second_only_failures"] == "4"
-    assert "(1 unscored in either run, left out)" in paired_line
+    assert (
+        " paired on the 199 shots both runs scored of 200 shared shots "
+        "(1 unscored in either run, left out): "
+    ) in paired_line
+    assert "; on these pairs, not the whole runs, the failure rate" in (
+        paired_line
+    )
 
 
 def test_the_pairs_end_where_the_shorter_prefix_stopped(runs, tmp_path, capsys):

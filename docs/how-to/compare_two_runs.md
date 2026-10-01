@@ -98,6 +98,12 @@ same:
 - A shot either run left unscored has no failure to compare, so it is
   left out of the pairs and counted.
 
+The pairs are the shots both runs scored among those shared seeds,
+and every number on the line is about them alone. They are not each
+run's whole failure rate: `sweep.csv` also counts a run's shots past
+the shorter run's stop and the shots the other run left unscored, so
+two rates in `sweep.csv` can differ by more or less than the pairs do.
+
 The line gives two numbers, and they answer different questions:
 
 - **The mixture test** (Robbins' beta-binomial mixture, Howard et al.,
@@ -106,8 +112,8 @@ The line gives two numbers, and they answer different questions:
   `differ` or `no difference shown`. It never says the two are the
   same: a small difference needs many shots to show.
 - **The difference interval** (eq. 24 of the same paper) bounds how
-  much the first run's failure rate minus the second's is, with 95
-  percent confidence.
+  much the first run's failure rate on the pairs minus the second's is,
+  with 95 percent confidence.
 
 They can disagree. With 25 shots against 5 in a million, the mixture
 test says `differ`, because 25 against 5 is unlikely from a fair coin,
@@ -126,11 +132,15 @@ Two limits, in plain words:
 - The 95 percent guarantee is for one pair of points. Compare twenty
   points of a sweep and about one of them may say `differ` by chance.
 - The mixture test assumes that, if the two decoders are equally good,
-  on a shot where only one failed either one is equally likely to be
-  the one that failed, whatever happened on earlier shots. A decoder
-  that adapts as it runs, such as an escalation threshold that learns
-  online, can break that, because its behaviour on a shot depends on
-  the shots before it.
+  on a paired shot where only one failed either one is equally likely
+  to be the one that failed, whatever happened on earlier shots. A
+  decoder that adapts as it runs, such as an escalation threshold that
+  learns online, can break that, because its behaviour on a shot
+  depends on the shots before it.
+- That assumption is about the pairs as they were selected. A shot
+  either run left unscored is not among them, so when leaving a shot
+  unscored goes with how hard it was to decode, the pairs that remain
+  can favour one decoder, and the test cannot see the shots it lost.
 
 `--out <file>` writes the same comparison as a csv, one row per point
 both folders hold, for you to plot or test further:
@@ -145,7 +155,7 @@ both folders hold, for you to plot or test further:
 | `scored_pairs` | the shared seeds both runs scored |
 | `first_only_failures`, `second_only_failures` | pairs that only the first run failed, and only the second |
 | `is_mixture_difference` | whether the mixture test says the two differ |
-| `difference_low`, `difference_high` | the 95 percent interval on the first run's failure rate minus the second's; empty with no pair |
+| `difference_low`, `difference_high` | the 95 percent interval on the first run's failure rate on the pairs minus the second's; empty with no pair |
 
 ## Read the folders from Python
 

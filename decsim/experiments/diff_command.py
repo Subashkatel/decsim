@@ -373,7 +373,12 @@ def _with_paired_statistics(
 
 
 def _paired_line(point_text: str, paired: PairedComparison) -> str:
-    """The paired comparison in words: differ, or no difference shown."""
+    """The paired comparison in words: differ, or no difference shown.
+
+    The line names its population, the shots both runs scored among the
+    shared seeds, because a run's own rate in sweep.csv also counts the
+    shots past the shorter stop and the shots the other left unscored.
+    """
     if paired.digest_mismatches:
         return (
             f"  {point_text} not paired: {paired.digest_mismatches} of "
@@ -389,12 +394,13 @@ def _paired_line(point_text: str, paired: PairedComparison) -> str:
             f"[{paired.difference_low:.6g}, {paired.difference_high:.6g}]"
         )
     return (
-        f"  {point_text} paired on {paired.scored_pairs} of "
-        f"{paired.shared_shots} shared shots ({paired.unscored_shots} "
-        f"unscored in either run, left out): {paired.first_only_failures} "
-        f"failed in the first only, {paired.second_only_failures} in the "
-        f"second only; {verdict} by the mixture test; the difference of "
-        f"rates, first minus second, is in {interval}"
+        f"  {point_text} paired on the {paired.scored_pairs} shots both "
+        f"runs scored of {paired.shared_shots} shared shots "
+        f"({paired.unscored_shots} unscored in either run, left out): "
+        f"{paired.first_only_failures} failed in the first only, "
+        f"{paired.second_only_failures} in the second only; {verdict} by "
+        "the mixture test; on these pairs, not the whole runs, the failure "
+        f"rate of the first minus the second is in {interval}"
     )
 
 

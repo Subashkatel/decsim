@@ -271,9 +271,7 @@ def _paired_comparison(
     itself a stop of the pair. The mixture test and the difference
     sequence hold at any stop (failure_statistics), so pairs cut there
     keep their 95 percent guarantee, whether a point stopped at a
-    failure target or at a fixed shot count. A shots.csv cut by hand is
-    read to its first missing seed, as the fold reads a prefix
-    (collection.PrefixTracker).
+    failure target or at a fixed shot count.
     """
     stop = min(first_row["prefix_shots"], second_row["prefix_shots"])
     first_by_seed = _shots_by_seed(first_shots, stop)
@@ -301,7 +299,7 @@ def _paired_comparison(
 
 
 def _shots_by_seed(shot_rows: list, stop: int) -> dict:
-    """The shot rows of the seeds before the stop, keyed by seed."""
+    """A piece can run on past its point's stop; those shots never pair."""
     by_seed = {}
     for row in shot_rows:
         if row["seed"] < stop:
@@ -310,7 +308,10 @@ def _shots_by_seed(shot_rows: list, stop: int) -> dict:
 
 
 def _contiguous_seed_count(by_seed: dict) -> int:
-    """How many seeds from 0 the rows hold without a gap."""
+    """A shots.csv cut by hand ends at its first missing seed.
+
+    The fold reads a prefix the same way (collection.PrefixTracker).
+    """
     count = 0
     while count in by_seed:
         count += 1
@@ -350,7 +351,11 @@ def _shared_seeds(
 def _with_paired_statistics(
     unpaired: PairedComparison, first_failures: list, second_failures: list
 ) -> PairedComparison:
-    """The discordant counts, the mixture test and the difference interval."""
+    """The mixture test reads only the discordant pairs, the interval all.
+
+    A pair both runs failed or both survived moves no evidence, but it
+    is a difference of zero, and so narrows the difference interval.
+    """
     first = numpy.asarray(first_failures, dtype=bool)
     second = numpy.asarray(second_failures, dtype=bool)
     first_survived = ~first

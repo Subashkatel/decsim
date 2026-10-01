@@ -930,16 +930,6 @@ def test_a_stream_keeps_the_round_its_final_fragment_may_read():
     _assert_drained(run)
 
 
-def test_a_stream_keeps_the_round_its_observable_reads_until_the_last():
-    """Window 2's region forms round 3 alone; the final round reads round 1."""
-    program = _first_round_observed_program()
-    settings = _switching_live_settings(program, (2,))
-
-    run = _run(settings)
-
-    _assert_drained(run)
-
-
 def test_an_escalation_leaves_the_rounds_a_later_window_reads_held():
     """Window 6 escalates before window 7 registers; round 8 reads round 5.
 

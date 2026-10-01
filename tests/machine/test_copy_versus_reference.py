@@ -987,11 +987,12 @@ def test_a_strong_region_is_given_every_round_its_later_rounds_read(
     assert mismatched == []
 
 
-def _every_third_escalating_machine(round_count: int):
+def _every_third_escalating_machine(round_count: int, observed: str = ""):
     """Rounds reading two back; windows of one round; every third escalates.
 
     The strong side forms the escalated windows' rounds, and the weak
-    side every round, on three units each.
+    side every round, on three units each. observed follows each
+    round's detector: an observable's record of the round, or nothing.
     """
     machine = _seated_machine(
         "experiments/switching/redo_window_switching.yaml",
@@ -1003,8 +1004,9 @@ def _every_third_escalating_machine(round_count: int):
     noisy_round = "M(0.15) 0\n"
     later_rounds = round_count - 2
     circuit = stim.Circuit(
-        f"R 0\nREPEAT 2 {{\n{noisy_round}DETECTOR rec[-1]\n}}\n"
-        f"REPEAT {later_rounds} {{\n{noisy_round}DETECTOR rec[-1] rec[-3]\n}}\n"
+        f"R 0\nREPEAT 2 {{\n{noisy_round}DETECTOR rec[-1]\n{observed}}}\n"
+        f"REPEAT {later_rounds} {{\n{noisy_round}DETECTOR rec[-1] rec[-3]\n"
+        f"{observed}}}\n"
         "OBSERVABLE_INCLUDE(0) rec[-1]\n"
     )
     measurement_rounds = {index: index + 1 for index in range(round_count)}
@@ -1073,6 +1075,38 @@ def test_a_strong_seat_lets_go_of_rounds_only_the_weak_side_forms(
     held = held_by_seat["strong_decoder"]
     assert max(held) <= 5
     assert held[-1] == 0
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_no_seat_or_store_keeps_a_round_for_an_observable(round_count: int):
+    """Every round's bit is in the observable, which folds as it arrives.
+
+    Each seat holds the two rounds back its detectors read, and the weak
+    store the rounds in flight, at 48 rounds as at 24.
+    """
+    machine = _every_third_escalating_machine(round_count, EVERY_ROUND_OBSERVED)
+    held_by_seat = {}
+    note = functools.partial(_note_packets, held_by_seat)
+    machine.readout.detection_events.trace.state_held.connect(note)
+    store = machine.readout.weak_syndrome_buffer
+    stored_rounds = []
+    count = functools.partial(_note_stored_rounds, store, stored_rounds)
+    store.trace.round_stored.connect(count)
+
+    machine.run()
+
+    assert max(held_by_seat["weak_decoder"]) <= 3
+    assert max(held_by_seat["strong_decoder"]) <= 3
+    assert max(stored_rounds) <= 3
+
+
+# an observable record of the round just measured, after its detector
+EVERY_ROUND_OBSERVED = "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+
+
+def _note_stored_rounds(store, stored_rounds: list, *stored) -> None:
+    del stored
+    stored_rounds.append(len(store.round_by_key))
 
 
 def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():

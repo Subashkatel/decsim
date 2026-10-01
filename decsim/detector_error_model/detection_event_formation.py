@@ -377,7 +377,7 @@ class _SeatHistory:
             return remembered
         former.take_packet(round_index, raw_bits)
         self._report_state(operation_id, former)
-        events, _ = former.form_round(round_index)
+        events = former.form_round(round_index)
         values = tuple(value for _, value in events)
         self.events_by_round[key] = values
         if self.observer is not None:

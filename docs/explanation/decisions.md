@@ -1248,8 +1248,7 @@ and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
 **Decided.** A read is given exactly the raw rounds before its first
 that its unformed rounds' recipes read, less those its seat holds raw:
 `rounds_needed_before` answers the rounds any detector of an unformed
-round of the read names (and, on the last round, any observable), and
-no round between them, so a read never asks for a round its stream let
+round of the read names, and no round between them, so a read never asks for a round its stream let
 go of. A later round of a read can reach further back than its first
 (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the whole read is
 counted, not its first round. A round the seat formed is
@@ -1264,17 +1263,19 @@ forms it after, and a seat that forms only some rounds, the strong one
 above all, lets go of what only the others read. At the end of a run no
 seat holds a raw round (`check_settled`). On a live stream the
 former also keeps the last k packets, k the program's reach: how far
-back any fragment the stream can run reads, read off its repeated and
+back any detector of a fragment the stream can run reads, read off its
+repeated and
 final fragments when the stream is declared (`rounds_read_back`,
 `live_reach`), since the controller holds the program before it runs a
 round and a detector's lookbacks are fixed by the circuit, so whichever
 fragment runs next, last or not, finds its rounds. A program whose
 `round_circuit` varies its fragments by round declares no such bound
 and is refused, as is a repeated round that measures nothing, whose
-records lie a round further back each round. A live table's
-observables are read by the final round, so the packets they read stay
-until it forms. Fed in order a former holds the last k packets beside
-the observables', the ring it replaced. The
+records lie a round further back each round. No seat forms an
+observable, since no seat's reader uses one: the truth is a running
+parity per observable that each round's packet folds into as it
+arrives (`form_shot`), so no round is kept for an observable. Fed in
+order a former holds the last k packets, the ring it replaced. The
 recipe table owns the law (`rounds_read_before` per round,
 `rounds_read_by` per read, `rounds_read_before_first` per planned
 read, `rounds_reading` per packet,
@@ -1331,7 +1332,12 @@ measurements a decoder's detectors read (`libs/qec/lib/decoder.cpp`
 lines 115-127); a detector compares a round against earlier ones
 (LILLIPUT 2108.06569 lines 499-510). An HEVC decoder keeps each
 picture the current reference set names, whatever else it holds
-(FFmpeg `hevc/refs.c` lines 486-517). One gem5 DMA request covers its
+(FFmpeg `hevc/refs.c` lines 486-517). Stim's frame simulator XORs an
+`OBSERVABLE_INCLUDE`'s records into its running `obs_record` when the
+instruction runs (`src/stim/simulators/frame_simulator.inl` lines
+233-243, v1.16.0), and IBM's decoder reads the observables off the
+final codeword beside the frame it accumulates (Maurer 2510.21600
+Algorithm 2, line 25). One gem5 DMA request covers its
 whole byte range (`src/dev/dma_device.cc` lines 195-207), a Garnet
 message becomes `divCeil(size, bitWidth)` flits and an SST event is
 its header plus its payload (`NetworkInterface.cc` lines 386-387,
@@ -1354,7 +1360,7 @@ and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`, `rounds_read_by`,
 `rounds_read_before_first`, `rounds_reading`, `earlier_rounds_read`, `live_reach`,
-`rounds_read_back`, `StreamingDetectorFormer`),
+`rounds_read_back`, `StreamingDetectorFormer`, `form_shot`),
 `decsim/qpu/streaming_stim_device.py` (`_program_reach`),
 `decsim/detector_error_model/detection_event_formation.py`
 (`rounds_needed_before`, `earlier_rounds_read`, `retire_round`,

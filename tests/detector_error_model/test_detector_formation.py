@@ -23,7 +23,7 @@ def test_extending_a_live_table_keeps_the_previous_measurement() -> None:
         first, 1, measurement_rounds={0: 1}, live_reach=1
     )
     former = detector_formation.StreamingDetectorFormer(first_table)
-    first_events, _ = former.feed_packet(1, (1,))
+    first_events = former.feed_packet(1, (1,))
     assert first_events == [(0, 1)]
     complete = first.copy()
     complete.append_from_stim_program_text("M 0\nDETECTOR rec[-1] rec[-2]")
@@ -31,7 +31,7 @@ def test_extending_a_live_table_keeps_the_previous_measurement() -> None:
         complete, 2, measurement_rounds={0: 1, 1: 2}
     )
     former.extend_table(complete_table)
-    second_events, _ = former.feed_packet(2, (1,))
+    second_events = former.feed_packet(2, (1,))
     converter = complete.compile_m2d_converter()
     measurements = numpy.array([[1, 1]], dtype=numpy.bool_)
     expected = converter.convert(
@@ -60,7 +60,7 @@ def test_a_former_takes_a_table_whose_new_round_reads_a_round_never_given():
 
     former.extend_table(longer)
     former.hold_packet(1, (1,))
-    events, _ = former.feed_packet(3, (0,))
+    events = former.feed_packet(3, (0,))
 
     assert events == [(2, 1)]
 
@@ -213,18 +213,31 @@ def test_the_reference_parity_is_used_when_the_expected_reading_is_one():
     assert observables == ()
 
 
-def test_observables_come_out_with_the_last_round_and_are_none_before():
-    table = formation_table(4)
+def test_a_former_keeps_no_packet_for_an_observable():
+    """Round 1's observable record folds in form_shot, not in the former."""
+    circuit = _first_round_observed_circuit()
+    table = detector_formation.build_formation_table(
+        circuit, 3, measurement_rounds={0: 1, 1: 2, 2: 3}
+    )
     former = detector_formation.StreamingDetectorFormer(table)
-    packets = empty_packets(table)
-    _, after_first = former.feed_packet(1, packets[1])
-    _, after_second = former.feed_packet(2, packets[2])
-    _, after_third = former.feed_packet(3, packets[3])
-    _, after_last = former.feed_packet(4, packets[4])
-    assert after_first is None
-    assert after_second is None
-    assert after_third is None
-    assert after_last == [(0, 0)]
+
+    former.feed_packet(1, (0,))
+    former.feed_packet(2, (0,))
+
+    assert former.packets == {}
+
+
+def test_an_observable_is_the_parity_of_its_rounds_records():
+    """Rounds 1 and 3 hold its records; round 2's bit is in no observable."""
+    circuit = _first_round_observed_circuit()
+    table = detector_formation.build_formation_table(
+        circuit, 3, measurement_rounds={0: 1, 1: 2, 2: 3}
+    )
+    packets = {1: (1,), 2: (1,), 3: (0,)}
+
+    _, observables = detector_formation.form_shot(table, packets)
+
+    assert observables == (1,)
 
 
 def test_an_observable_reads_records_from_an_earlier_round():
@@ -263,8 +276,8 @@ def test_a_read_reaches_back_as_far_as_its_furthest_reaching_round():
     assert table.rounds_read_before_first(3, read_rounds) == 2
 
 
-def test_the_last_round_reads_back_as_far_as_an_observable_reads():
-    """Round 3's detector reads round 3; the observable reads round 1."""
+def test_the_last_round_reads_no_round_back_for_an_observable():
+    """Round 3's detector reads round 3; the observable's round 1 folded."""
     circuit = stim.Circuit(
         "R 0 1\n"
         "M 0\nDETECTOR(0,0) rec[-1]\n"
@@ -274,8 +287,7 @@ def test_the_last_round_reads_back_as_far_as_an_observable_reads():
     )
     table = detector_formation.build_formation_table(circuit, 3)
 
-    assert table.rounds_read_before(2) == 0
-    assert table.rounds_read_before(3) == 2
+    assert table.rounds_read_before(3) == 0
 
 
 def test_a_packet_of_the_wrong_width_is_refused():
@@ -356,7 +368,7 @@ def test_a_packet_stays_held_while_a_round_that_reads_it_is_unformed():
     former.feed_packet(6, packets[6])
     former.feed_packet(7, packets[7])
 
-    events, _ = former.feed_packet(4, packets[4])
+    events = former.feed_packet(4, packets[4])
 
     formed = [bit for _, bit in events]
     stim_row = stim_events[0]
@@ -387,7 +399,7 @@ def test_a_window_keeps_what_the_last_round_alone_reads_back():
     assert table.earlier_rounds_read(2) == (1,)
 
 
-def test_a_live_window_keeps_its_reach_and_the_observables_rounds():
+def test_a_live_window_keeps_its_reach_and_no_observed_round():
     """A live table of five rounds that may read two back; round 1 observed."""
     circuit = stim.Circuit(
         "R 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]\n"
@@ -398,26 +410,16 @@ def test_a_live_window_keeps_its_reach_and_the_observables_rounds():
         circuit, 5, measurement_rounds=measurement_rounds, live_reach=2
     )
 
-    assert table.earlier_rounds_read(5) == (1, 3, 4)
+    assert table.earlier_rounds_read(5) == (3, 4)
 
 
-def test_a_live_table_leaves_its_observables_to_the_final_round():
-    """Round 1's observable record is read when the final round runs."""
-    circuit = stim.Circuit(
-        "R 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]\n"
-        "M 0\nDETECTOR rec[-1]"
-    )
-    measurement_rounds = {0: 1, 1: 2}
-    live = detector_formation.build_formation_table(
-        circuit, 2, measurement_rounds=measurement_rounds, live_reach=0
-    )
-    whole = detector_formation.build_formation_table(
-        circuit, 2, measurement_rounds=measurement_rounds
+def test_an_observable_record_reaches_no_round_back():
+    """Its rec[-3] lies two rounds back, folded when that round arrived."""
+    fragment = stim.Circuit(
+        "M 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-3]"
     )
 
-    assert live.rounds_read_before(2) == 0
-    assert whole.rounds_read_before(2) == 1
-    assert not live.forms_observables_at(2)
+    assert detector_formation.rounds_read_back(fragment, 1) == 0
 
 
 def test_a_fragment_reads_back_as_many_rounds_as_its_furthest_record():
@@ -466,7 +468,7 @@ def test_a_live_former_keeps_the_rounds_its_reach_covers():
     kept_rounds = set(former.packets)
 
     former.extend_table(longer_table)
-    events, _ = former.feed_packet(4, (1,))
+    events = former.feed_packet(4, (1,))
 
     assert kept_rounds == {2, 3}
     assert events == [(3, 1)]
@@ -498,7 +500,7 @@ def test_a_held_packet_forms_nothing_and_serves_the_round_after_it():
     former = detector_formation.StreamingDetectorFormer(table)
 
     former.hold_packet(2, packets[2])
-    events, _ = former.feed_packet(3, packets[3])
+    events = former.feed_packet(3, packets[3])
 
     formed = [bit for _, bit in events]
     stim_row = stim_events[0]
@@ -881,3 +883,12 @@ def test_padded_and_heralded_records_shift_the_lookbacks_after_them():
         OBSERVABLE_INCLUDE(0) rec[-1]
     """)
     forms_like_stim(circuit, 2)
+
+
+def _first_round_observed_circuit() -> stim.Circuit:
+    """Three one-bit rounds; the observable reads rounds 1 and 3."""
+    return stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]\n"
+        "M 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\n"
+        "OBSERVABLE_INCLUDE(0) rec[-1]"
+    )

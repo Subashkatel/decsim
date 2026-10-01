@@ -1462,29 +1462,6 @@ def _payload_bits_on(result: result_records.RunResult, path: str) -> list:
     return bits
 
 
-@pytest.mark.parametrize("placement", ["controller", "decoder"])
-@pytest.mark.parametrize("basis", ["X", "Z"])
-def test_deltakit_bell_memory_uses_shared_live_execution(
-    placement: str,
-    basis: str,
-) -> None:
-    pytest.importorskip("deltakit_explorer")
-    program = deltakit.bell_memory_rounds(
-        3, basis, 0.001, round_period_microseconds=1.1
-    )
-    settings = _joint_settings(program, placement)
-
-    run = _run(settings)
-
-    _assert_actual_truth(run)
-    _assert_direct_strong_path(run)
-    _assert_drained(run)
-    _assert_joint_acquisitions(run)
-    owner = run.result.operation_results[-1]
-    assert len(owner.logical_observables) == 1
-    assert len(owner.observable_truth) == 1
-
-
 def test_joint_segments_can_name_the_same_footprint_in_another_order() -> None:
     program = memory_programs.joint_repetition_program(True)
     settings = _joint_settings(program, "controller")

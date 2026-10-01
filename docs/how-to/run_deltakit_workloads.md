@@ -188,7 +188,7 @@ footprint at both protected-region endpoints. All members use the same declared
 round cadence. `ProtectedRegion` refers to the owner stream; it has no separate
 patch declaration. The source executes each requested round once for the group.
 
-The optional provider can produce two distinct kinds of input:
+The optional provider can produce a CSS code block:
 
 ```python
 import deltakit_explorer.codes as codes
@@ -196,23 +196,12 @@ import deltakit_explorer.codes as codes
 import decsim.frontends.deltakit as deltakit
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 
-bell = deltakit.bell_memory_rounds(
-    3, "Z", 0.001, round_period_microseconds=1.1
-)
-bell_source = streaming_stim_device.StreamingStimDevice({100: bell})
-
 code = codes.BivariateBicycleCode(3, 5, [1, 1, 4], [0, 1, 2])
 block = deltakit.css_memory_rounds(
     code, "Z", 0.001, round_period_microseconds=1.1
 )
 block_source = streaming_stim_device.StreamingStimDevice({100: block})
 ```
-
-Use a two-patch owner for the Bell source. It prepares two rotated-surface
-blocks with a transversal CNOT and reports their joint parity in X or Z.
-This is a physical Bell-memory experiment, not high-level lattice surgery.
-Its explicit wait slots make every exported fragment occupy the declared
-period and receive the selected idle noise exactly once.
 
 The BB example is one [[30,8,2]] block with eight logical outputs. Use one
 physical resource patch and eight logical qubit identities: the owner's
@@ -230,7 +219,7 @@ The end-to-end examples are reproducible through the public Machine tests:
 
 ```bash
 PYTHONPATH=. .venv-deltakit/bin/python -m pytest tests/machine/test_machine.py \
-  -k 'deltakit_bell or bb_block or bb_live or bb_higher or interleaved_joint' -q
+  -k 'bb_block or bb_live or bb_higher or interleaved_joint' -q
 ```
 
 They exercise live feedback, controller-side and decoder-side formation, full

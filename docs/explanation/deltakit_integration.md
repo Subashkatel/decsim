@@ -25,8 +25,6 @@ and reusable fragments:
   preserves physical identity. The final fragment replaces a normal round.
 - `css_memory_rounds` exports a supplied public CSS code, retaining every
   logical observable, including the BB example in the run guide.
-- `bell_memory_rounds` exports two surface blocks with a transversal CNOT and
-  explicit padded cadence, through the same canonical fragment record.
 
 The compiler boundary, `decsim.frontends.deltakit_compiler.compile_experiment`,
 exports the same finite circuit and map pair. All optional SDK calls end at
@@ -97,7 +95,6 @@ logical error rate.
 | High-level LogAsm Hadamard/rotation | not supported | Pinned observable backpropagation rejects these operations | Unsupported through that frontend |
 | Leakage sampling | supported, sampling only | Explicitly allocated Deltakit FlipSimulator preserves heralds and matches whole-circuit execution | Local leakage decoding not supported: the leakage model semantics are unverified |
 | Shared multi-patch streams | supported | Retained joint state and complete-record Stim oracle, including interleaved acquisitions | Whole-group lifetime, strong and weak primary routes |
-| Transversal Bell memory | supported | Initial cross-patch check parities, both bases, d3/d5, explicit physical wait noise | Live two-patch functional decoding; no lattice-surgery claim |
 | qLDPC/bivariate bicycle | supported, one bounded example | Public [[30,8,2]] CSS code, all eight outputs, undecomposed noisy model | BP-OSD agreement, live feedback and higher-index logical-failure detection |
 
 Compiler Hadamard is transversal H followed immediately by destructive readout

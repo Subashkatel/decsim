@@ -130,9 +130,7 @@ analysis inputs completes.
 
 The upstream high-level memory test emits zero observables and a final logical
 check as a detector. Disabling generated flows removes that check without
-supplying a complete returned logical-output mapping. The integrated
-lower-level provider declares output through public measurement handles; it
-does not claim to repair the high-level pipeline.
+supplying a complete returned logical-output mapping.
 
 Ordinary Stim rejects the tested leakage instruction set. The pinned Deltakit
 TableauSimulator accepts leakage instructions but treats them as no-ops, so it

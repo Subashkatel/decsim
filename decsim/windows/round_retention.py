@@ -134,20 +134,25 @@ class RoundRetention:
     def release_committed_strong_read(
         self, window: window_records.Window
     ) -> None:
-        """A final window's potential strong read ends, or waits for the next.
+        """A final window's potential strong read ends, or keeps a tail.
 
         A strong side that forms reads the rounds before a strong
-        region's commit, which are the tail of the window before it. On
-        a live stream whose next window is not admitted yet, this hold
-        is what keeps them, so it ends when the next window registers
-        (register_window), the order the stream path keeps for every
-        hold: a read claims its rounds before the release that would
-        free them.
+        region's first that its recipes read, the tail of the window
+        before it. On a live stream whose next window is not admitted
+        yet, this hold is what keeps them, so it shrinks to the rounds a
+        round after this commit reads (earliest_round_read_after) and
+        ends when the next window registers (register_window), the order
+        the stream path keeps for every hold: a read claims its rounds
+        before the release that would free them. With no round reading
+        back it ends now, and a store with room for one round runs on.
         """
-        if self._keeps_for_the_next_window(window):
-            return
         potential = decoding_records.PotentialStrong(window.key)
-        self.release_strong_hold_if_live(potential)
+        kept = self._kept_for_the_next_window(window)
+        if not kept:
+            self.release_strong_hold_if_live(potential)
+            return
+        for store in self._strong_context_stores():
+            store.replace_hold(potential, kept)
 
     def replace_window_reads(
         self, key: tuple, window: window_records.Window
@@ -581,6 +586,26 @@ class RoundRetention:
 
     # ---- private
 
+    def _kept_for_the_next_window(self, window: window_records.Window) -> list:
+        """The rounds of the window's potential strong read a later round reads.
+
+        None when the next window has registered, or the stream sealed,
+        or the potential read moved to an escalation, whose region
+        carried its rounds to the strong seat that keeps them.
+        """
+        if not self._keeps_for_the_next_window(window):
+            return []
+        potential = decoding_records.PotentialStrong(window.key)
+        if not self.weak_store.has_hold(potential):
+            return []
+        earliest_round = self.detection_events.earliest_round_read_after(
+            window.operation_id, window.commit_hi
+        )
+        if earliest_round is None:
+            return []
+        held = self.weak_store.hold_round_identities(potential)
+        return _rounds_from(held, window.operation_id, earliest_round)
+
     def _keeps_for_the_next_window(self, window: window_records.Window) -> bool:
         """Whether a strong read of the next window may need this hold."""
         if self.strong_side_seat is None:
@@ -683,6 +708,20 @@ def round_identities_of(payloads) -> tuple:
     for fragment in payloads:
         identities[(fragment.operation_id, fragment.round_index)] = None
     return tuple(identities)
+
+
+def _rounds_from(
+    round_keys: tuple, operation_id: Any, earliest_round: int
+) -> list:
+    """The operation's round keys at or after earliest_round, in order."""
+    kept = []
+    for round_key in round_keys:
+        if round_key[0] != operation_id:
+            continue
+        if round_key[1] < earliest_round:
+            continue
+        kept.append(round_key)
+    return kept
 
 
 def _from_the_first_round_on(identities: tuple, first_of: tuple) -> set:

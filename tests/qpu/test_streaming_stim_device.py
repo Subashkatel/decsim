@@ -49,6 +49,23 @@ def test_property_live_records_match_stim_at_different_stop_lengths(
     source.validate_stream_length(owner, round_count)
 
 
+def test_the_live_table_names_the_round_its_next_round_reads() -> None:
+    """A surface-code round compares against the one before it.
+
+    After three rounds the fourth, last or not, reads round 3; after the
+    stream's readout no round follows.
+    """
+    source, owner = _source()
+    for round_index in (1, 2, 3):
+        _run_round(source, owner, round_index, is_final=False)
+    running = source.formation_table(owner.id)
+    _run_round(source, owner, 4, is_final=True)
+    read_out = source.formation_table(owner.id)
+
+    assert running.next_round_reach == 3
+    assert read_out.next_round_reach is None
+
+
 def test_a_later_stop_keeps_the_executed_nonterminal_prefix() -> None:
     shorter, owner = _source()
     longer, _ = _source()
@@ -285,6 +302,17 @@ def _source(round_period_microseconds=None):
         owner, 0, fault_model_requirement=requirement
     )
     return source, owner
+
+
+def _run_round(source, owner, round_index: int, is_final: bool) -> None:
+    """Run one round of the stream at the QPU's cadence."""
+    source.idle_round_payloads(
+        owner,
+        owner.id,
+        round_index,
+        is_final=is_final,
+        round_period_ticks=1_100_000,
+    )
 
 
 def _execute(source, owner, round_count):

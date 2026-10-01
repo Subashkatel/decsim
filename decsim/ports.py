@@ -1616,6 +1616,15 @@ class DetectionEventPlacement(Protocol):
         whatever that seat has formed by then; zero with no recipes.
         """
 
+    def earliest_round_read_after(
+        self, operation_id: Any, last_round: int
+    ) -> Optional[int]:
+        """The earliest round up to last_round a later round reads.
+
+        From the recipes of the rounds that ran and the instructions of
+        a live stream's next round; None when no later round reads one.
+        """
+
     def cycles_at(self, seat: str, round_count: int) -> int:
         """The cycles of forming round_count rounds together at the seat."""
 

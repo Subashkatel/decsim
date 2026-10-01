@@ -1256,10 +1256,11 @@ than its first (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the
 whole read is counted, not its first round. A round the seat formed is
 not given again: its former keeps a packet while a round that reads it
 is unformed there, the packet's reference set, so a seam formed after a
-later block still finds the rounds it reads, and also the
-`max_record_span + 1` packets ending at the table's last round, which a
-live table's next round may read before its recipes come. Fed in order
-that is no more than the ring of `max_record_span + 1` packets it
+later block still finds the rounds it reads, and on a live stream also
+the packets the next round's instructions read before its recipes come
+(`next_round_reach`: the controller holds the program before it runs a
+round, and a detector's lookbacks are fixed by the circuit). Fed in
+order that is no more than the ring of `max_record_span + 1` packets it
 replaced. The recipe table owns the law (`rounds_read_before` per
 round, `rounds_read_before_first` per read, `rounds_reading` per
 packet).
@@ -1279,9 +1280,13 @@ round it has not formed reads it, so a round leaves the store when no reader nee
 when nothing forms. On a live stream a window is admitted only once its
 commit region begins, so with no buffer the window before it can commit
 first; when the strong side forms, that window's potential strong read
-then lasts until the next window registers its own
-(`release_committed_strong_read`), the order the stream path keeps for
-every hold: a read claims its rounds before a release could free them. The plan places a finite operation's holds before the operation
+then shrinks to the rounds a round after its commit reads, from the
+recipes of the rounds that ran and the next round's instructions
+(`earliest_round_read_after`), and lasts until the next window
+registers its own (`release_committed_strong_read`), the order the
+stream path keeps for every hold: a read claims its rounds before a
+release could free them. A stream no round of which reads back keeps
+none, so a store with room for one round runs it. The plan places a finite operation's holds before the operation
 begins, so it reads the operation's recipes off the same circuit the
 source will (`build/plan.py`, `_formation_tables`); the holds the run
 places while it goes ask the placement, whose source's table a live
@@ -1325,11 +1330,14 @@ for the same two), and `form_at` takes `rounds_before` in place of
 `round_before`; `WindowRetention.strong_round_before` became
 `strong_rounds_before`, which takes the read's last round too and
 answers the rounds the strong seat lacks, and gained
-`replace_restart_reads`.
+`replace_restart_reads`; `DetectionEventPlacement` gained
+`earliest_round_read_after`.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`, `rounds_read_before_first`,
-`rounds_reading`, `StreamingDetectorFormer`),
+`rounds_reading`, `earliest_round_read_after`, `next_round_reach`,
+`StreamingDetectorFormer`), `decsim/qpu/streaming_stim_device.py`
+(`_next_round_fragments`),
 `decsim/detector_error_model/detection_event_formation.py`
 (`rounds_needed_before`, `rounds_read_before`),
 `decsim/records/windows.py` (`FormationReads`),

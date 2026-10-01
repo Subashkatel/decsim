@@ -303,8 +303,11 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         if global_round != next_round:
             raise RuntimeError("live Stim rounds must execute consecutively")
         fragment = stream.program.round_circuit(global_round, is_final)
+        next_fragments = _next_round_fragments(
+            stream.program, global_round, is_final
+        )
         self._mark_stochastic_use()
-        bits = history.append(fragment, is_final)
+        bits = history.append(fragment, is_final, next_fragments)
         if is_final:
             self._report_finished_shot(stream)
         payload = round_records.QPUReadout(
@@ -339,7 +342,10 @@ class _History:
 
     The formation table covers the circuit so far; every appended
     fragment extends it, and each seat that forms the stream's rounds
-    takes the longer table in turn.
+    takes the longer table in turn. The table also says how far back
+    the next round reaches, read off the fragments it may run: the
+    program is the controller's before it runs a round, and a detector's
+    lookbacks are fixed by the circuit, not by its outcomes.
     """
 
     def __init__(self, seed: Optional[int]) -> None:
@@ -350,7 +356,9 @@ class _History:
         self.is_final = False
         self.table: Optional[formation.FormationTable] = None
 
-    def append(self, fragment: stim.Circuit, is_final: bool) -> tuple[int, ...]:
+    def append(
+        self, fragment: stim.Circuit, is_final: bool, next_fragments: tuple
+    ) -> tuple[int, ...]:
         first_measurement = self.circuit.num_measurements
         self.simulator.do(fragment)
         self.circuit += fragment
@@ -363,6 +371,7 @@ class _History:
             self.circuit,
             self.round_count,
             measurement_rounds=self.measurement_rounds,
+            next_round_circuits=next_fragments,
         )
         self.table = table
         measurements = self.simulator.current_measurement_record()
@@ -376,6 +385,20 @@ class _History:
         measurements = self.simulator.current_measurement_record()
         packets = formation.split_measurements_into_packets(table, measurements)
         return formation.form_shot(table, packets)
+
+
+def _next_round_fragments(program, round_index: int, is_final: bool) -> tuple:
+    """The fragments the round after this one may run: none after the last.
+
+    The controller decides at run time whether that round reads the
+    stream out, so both are named.
+    """
+    if is_final:
+        return ()
+    next_round = round_index + 1
+    repeated = program.round_circuit(next_round, False)
+    final = program.round_circuit(next_round, True)
+    return (repeated, final)
 
 
 def _copied_programs(programs):

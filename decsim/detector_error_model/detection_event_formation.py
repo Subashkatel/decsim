@@ -152,6 +152,21 @@ class SeatedFormation:
         read_rounds = range(first_round, stop_round)
         return table.rounds_read_before_first(first_round, read_rounds)
 
+    def earliest_round_read_after(
+        self, operation_id: Any, last_round: int
+    ) -> Optional[int]:
+        """The earliest round up to last_round a later round's recipes read.
+
+        Known from the recipes of the rounds that ran and, on a live
+        stream, from the instructions of the round not yet run
+        (detector_formation.FormationTable earliest_round_read_after).
+        None when no later round reads one, or with no recipes.
+        """
+        if self.recipes is None:
+            return None
+        table = self.recipes.formation_table(operation_id)
+        return table.earliest_round_read_after(last_round)
+
     def cycles_at(self, seat: str, round_count: int) -> int:
         """What forming round_count rounds together costs the seat, on clock."""
         if seat not in self.history_by_seat:

@@ -788,6 +788,77 @@ def test_a_live_region_reads_a_round_an_earlier_region_landed(
     _assert_drained(run)
 
 
+def _readout_only_program() -> circuit_records.RepeatedStimCircuit:
+    """One qubit whose every detector reads its own round alone."""
+    first = stim.Circuit("R 0\nM(0.15) 0\nDETECTOR rec[-1]")
+    repeated = stim.Circuit("M(0.15) 0\nDETECTOR rec[-1]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = repeated + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+
+
+def _escalates_none(job) -> bool:
+    del job
+    return False
+
+
+def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
+    """No detector reads an earlier round, so a committed window keeps none.
+
+    Window 0 commits before round 2 runs; round 2's instructions read
+    round 2 alone, so the weak syndrome buffer, one bit, takes round 2.
+    """
+    program = _readout_only_program()
+    settings = _settings(program, "live", "controller")
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, _escalates_none)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(
+        settings.escalation, kind="switching", policy=policy
+    )
+    seats = dataclasses.replace(
+        settings.detection_events, formed_at=("weak_decoder", "strong_decoder")
+    )
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    one_round = syndrome_buffer_settings.SyndromeBufferSettings(bits=1)
+    settings = dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        escalation=escalation,
+        detection_events=seats,
+        windows=windows,
+        weak_syndrome_buffer=one_round,
+    )
+
+    machine = machine_module.Machine.build(settings, RUN_SEED)
+    store = machine.readout.weak_syndrome_buffer
+    stalled = functools.partial(_refuse_a_round_still_held, store)
+    machine.engine.schedule(STALL_GUARD_TICKS, stalled, label="stall guard")
+
+    machine.run()
+
+    assert store.occupied_bits == 0
+
+
+# a run that has not drained by thirty microseconds is stuck: a store
+# full of a round nothing releases holds the stream's next round out,
+# and the stream keeps the engine running
+STALL_GUARD_TICKS = 30_000_000
+
+
+def _refuse_a_round_still_held(store) -> None:
+    held_bits = store.occupied_bits
+    assert held_bits == 0, f"the store still holds {held_bits} bits"
+
+
 def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")

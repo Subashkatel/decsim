@@ -345,6 +345,72 @@ def test_a_packet_stays_held_while_a_round_that_reads_it_is_unformed():
     assert formed == expected
 
 
+def test_the_earliest_round_a_later_round_reads_comes_from_its_recipes():
+    """Round 5 reads round 3; nothing follows round 10."""
+    circuit = lookback_circuit(10)
+    table = lookback_table(circuit, 10)
+
+    assert table.earliest_round_read_after(4) == 3
+    assert table.earliest_round_read_after(10) is None
+
+
+def test_a_table_names_how_far_back_its_next_round_reads():
+    """Three rounds run; the fourth's rec[-3] reads round 2."""
+    circuit = lookback_circuit(3)
+    reaching_round = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-3]")
+    own_round = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    measurement_rounds = {0: 1, 1: 2, 2: 3}
+
+    reaching = detector_formation.build_formation_table(
+        circuit,
+        3,
+        measurement_rounds=measurement_rounds,
+        next_round_circuits=(reaching_round, own_round),
+    )
+    own = detector_formation.build_formation_table(
+        circuit,
+        3,
+        measurement_rounds=measurement_rounds,
+        next_round_circuits=(own_round,),
+    )
+
+    assert reaching.next_round_reach == 2
+    assert reaching.earliest_round_read_after(3) == 2
+    assert own.next_round_reach is None
+
+
+def test_a_live_former_keeps_the_packet_its_next_round_reads():
+    """Rounds 1 to 3 read themselves; round 4's instructions read round 2.
+
+    Round 2's packet stays for round 4 before its recipes come, and
+    round 1's, which no round reads, goes.
+    """
+    circuit = stim.Circuit("R 0\nREPEAT 3 {\nM 0\nDETECTOR rec[-1]\n}")
+    measurement_rounds = {0: 1, 1: 2, 2: 3}
+    reaching_round = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-3]")
+    table = detector_formation.build_formation_table(
+        circuit,
+        3,
+        measurement_rounds=measurement_rounds,
+        next_round_circuits=(reaching_round,),
+    )
+    former = detector_formation.StreamingDetectorFormer(table)
+    for round_index in (1, 2, 3):
+        former.feed_packet(round_index, (0,))
+    longer = circuit + reaching_round
+    measurement_rounds[3] = 4
+    longer_table = detector_formation.build_formation_table(
+        longer, 4, measurement_rounds=measurement_rounds
+    )
+    kept_rounds = set(former.packets)
+
+    former.extend_table(longer_table)
+    events, _ = former.feed_packet(4, (1,))
+
+    assert kept_rounds == {2, 3}
+    assert events == [(3, 1)]
+
+
 def test_a_held_packet_forms_nothing_and_serves_the_round_after_it():
     """The round before a window, fetched raw, lets its first round form."""
     circuit = surface_code_circuit(4)

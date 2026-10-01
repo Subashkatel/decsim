@@ -2153,8 +2153,8 @@ class RoundsPolicy(Protocol):
     refuses a decoded one with none (frontends/planner.py
     _check_decode_owner_rounds).
 
-    The policies are FixedRounds, PerOperationRounds, CodeRounds,
-    GateRounds and TemporalRounds (qpu/round_policies.py), with no table
+    The policies are FixedRounds, PerOperationRounds, CodeRounds and
+    GateRounds (qpu/round_policies.py), with no table
     and no yaml key: the memory_circuit row fixes its rounds, a Python
     workload may pass its own (a PerOperationRounds may give an operation
     none), and GateRounds is the default. The lattice-surgery unit of d

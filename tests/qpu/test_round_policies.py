@@ -110,17 +110,6 @@ def test_a_generic_one_qubit_operation_costs_memory():
     assert policy.rounds_for(one_qubit, code) == 5
 
 
-def test_a_temporal_distance_replaces_d_for_surgery_only():
-    policy = round_policies.TemporalRounds(4)
-    code = code_geometry.SurfaceCodeModel(distance=7)
-    merge = operation(1, kind=program_records.OpKind.MERGE)
-    two_qubit = operation(2, qubits=(0, 1))
-    memory = operation(3, kind=program_records.OpKind.MEMORY)
-    assert policy.rounds_for(merge, code) == 4
-    assert policy.rounds_for(two_qubit, code) == 4
-    assert policy.rounds_for(memory, code) == 7
-
-
 def test_per_operation_counts_win_over_the_fallback_and_may_be_zero():
     fallback = round_policies.FixedRounds(9)
     policy = round_policies.PerOperationRounds({1: 0, 2: 4}, fallback=fallback)

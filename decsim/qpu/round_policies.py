@@ -141,42 +141,6 @@ class GateRounds:
         return distance
 
 
-@dataclasses.dataclass
-class TemporalRounds:
-    """A temporal distance for surgery, decoupled from the spatial distance.
-
-    A merge, or a generic operation on two or more qubits, takes
-    temporal_distance rounds; everything else takes what the base policy
-    says (GateRounds by default).
-    """
-
-    temporal_distance: int
-    base: Optional[ports.RoundsPolicy] = None
-
-    def __post_init__(self) -> None:
-        temporal_distance = int(self.temporal_distance)
-        self.temporal_distance = _at_least_one_round(
-            temporal_distance, "TemporalRounds.temporal_distance"
-        )
-        if self.base is None:
-            self.base = GateRounds()
-
-    def rounds_for(
-        self,
-        operation: program_records.OperationPlanningView,
-        code: ports.CodeModel,
-    ) -> int:
-        """The temporal distance for surgery, else the base policy's count."""
-        kind = operation.kind
-        is_merge = kind is program_records.OpKind.MERGE
-        is_generic = kind is program_records.OpKind.GENERIC
-        is_multi_qubit = len(operation.qubits) >= 2
-        is_generic_surgery = is_generic and is_multi_qubit
-        if is_merge or is_generic_surgery:
-            return self.temporal_distance
-        return self.base.rounds_for(operation, code)
-
-
 def _at_least_one_round(value: int, source: str) -> int:
     if value < 1:
         raise ValueError(f"{source} must give >= 1 round (got {value})")

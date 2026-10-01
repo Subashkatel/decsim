@@ -623,24 +623,19 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     links = _price_path(
         settings.links, "strong_buffer_to_strong_decoder", 3_000_000
     )
-    observation = dataclasses.replace(
-        settings.observation, decoder_memory_occupancy=True
-    )
     settings = dataclasses.replace(
         settings,
         strong_syndrome_buffer=buffer,
         strong_decoder=decoder,
         links=links,
-        observation=observation,
     )
     run = _run(settings)
     assert max(run.strong_occupancies) <= window_bits
     units = run.machine.decoders.decoder_manager.pool.units
-    occupancy = run.machine.observation.decoder_memory_occupancy.result()
-    memory = occupancy["per_unit"][units[0].name]
-    assert memory["capacity_bits"] == window_bits
-    assert memory["peak_occupied_bits"] == window_bits
-    assert memory["admissions"] > 1
+    unit = units[0]
+    assert unit.memory.capacity_bits == window_bits
+    assert run.deposits.peak_held_bits(unit) == window_bits
+    assert run.deposits.deposit_count(unit) > 1
     _assert_direct_strong_path(run)
     _assert_actual_truth(run)
     _assert_drained(run)
@@ -1103,62 +1098,6 @@ def test_longer_joint_feedback_protects_both_blocks_without_resampling() -> (
     _assert_joint_acquisitions(second)
 
 
-@pytest.mark.parametrize("placement", ["controller", "decoder"])
-def test_channel_reordering_preserves_live_detector_formation(
-    placement: str,
-) -> None:
-    """Keep channel delays, arrival order and the quantum oracle together.
-
-    This complete scenario stays in one function so each observed timing
-    can be read beside the channel card that causes it.
-    """
-    program = _partitioned_joint_program()
-    settings = _joint_settings(program, placement)
-    base_path = settings.links.qpu_to_controller
-    joint = _readout_route(base_path, ("left", "right"), "joint", 4_500_000)
-    left = _readout_route(base_path, ("left",), "left", 100_000)
-    right = _readout_route(base_path, ("right",), "right", 200_000)
-    links = dataclasses.replace(
-        settings.links, readout_routes=(joint, left, right)
-    )
-    settings = dataclasses.replace(settings, links=links)
-
-    run = _run(settings)
-
-    _assert_actual_truth(run)
-    _assert_direct_strong_path(run)
-    _assert_drained(run)
-    events = run.machine.observation.round_events.events
-    binary_events = [
-        event for event in events if event.kind == "BINARY_AVAILABLE"
-    ]
-    first_round_arrival_ticks = [
-        event.tick for event in binary_events if event.round_index == 1
-    ]
-    second_round_arrival_ticks = [
-        event.tick for event in binary_events if event.round_index == 2
-    ]
-    last_second_arrival_ticks = max(second_round_arrival_ticks)
-    first_arrival_ticks = min(first_round_arrival_ticks)
-    assert last_second_arrival_ticks < first_arrival_ticks
-    packed = [event.round_index for event in events if event.kind == "PACKED"]
-    after_last_round = len(packed) + 1
-    expected_rounds = list(range(1, after_last_round))
-    assert packed == expected_rounds
-    transfers = run.result.link_traffic["transfers"]
-    readouts = [row for row in transfers if row["path"] == "qpu_to_controller"]
-    delay_ticks = {row["total_delay_ticks"] for row in readouts}
-    assert delay_ticks == {
-        100_000,
-        200_000,
-        4_500_000,
-    }
-    assert len(readouts) == len(run.packets)
-    raw_bits = _raw_bits(run.packets)
-    payload_bits = sum(row["payload_bits"] for row in readouts)
-    assert payload_bits == len(raw_bits)
-
-
 @pytest.mark.parametrize(
     "basis, has_logical_flips", [("X", False), ("Z", True)]
 )
@@ -1243,15 +1182,15 @@ def test_bb_higher_logical_fault_is_reported_as_a_failure(
 
 
 @pytest.mark.parametrize("placement", ["controller", "decoder"])
-def test_interleaved_joint_recording_matches_complete_stim_conversion(
+def test_a_recorded_joint_stream_matches_complete_stim_conversion(
     placement: str,
 ) -> None:
     """Keep the physical record, chronology and decoder oracle together.
 
-    The explicit setup shows that three acquisition fragments carry one
-    quantum history, with the same fault and measurement map at both ends.
-    It stays in one function so the complete recorded input and its decoder
-    oracle remain visible beside the declared partitions.
+    The explicit setup shows that one recorded joint history reaches the
+    decoder with the same fault and measurement map at both ends. It stays
+    in one function so the complete recorded input and its decoder oracle
+    remain visible together.
     """
     program = memory_programs.joint_repetition_program(True, 0.12)
     circuit, mapping = program.assemble(3)
@@ -1261,18 +1200,11 @@ def test_interleaved_joint_recording_matches_complete_stim_conversion(
         circuit, 3, measurement_rounds=mapping
     )
     detector_rounds = table.detector_rounds()
-    first = round_records.MeasurementPartition(("left",), 1)
-    middle = round_records.MeasurementPartition(("left", "right"), 2)
-    right = round_records.MeasurementPartition(("right",), 1)
-    last = round_records.MeasurementPartition(("left", "right"), 7)
-    partitions = {1: (first, middle, right), 2: (first, middle, right)}
-    partitions[3] = (first, middle, last)
     source = stim_device.RecordedStimDevice(
         measurements,
         0,
         measurement_rounds={100: mapping},
         detector_rounds={100: detector_rounds},
-        readout_partitions={100: partitions},
     )
     settings = _joint_settings(program, placement)
     code = finite_example.RepetitionMemory(3, 3)
@@ -1306,7 +1238,7 @@ def test_interleaved_joint_recording_matches_complete_stim_conversion(
 def test_separate_terminal_emitters_preserve_the_complete_record(
     placement: str,
 ) -> None:
-    settings, measurements, circuit = _terminal_partitioned_settings(placement)
+    settings, measurements, circuit = _separate_terminal_settings(placement)
 
     run = _run(settings)
 
@@ -1322,14 +1254,64 @@ def test_separate_terminal_emitters_preserve_the_complete_record(
     final_indices = [packet.fragment_index for packet in final_packets]
     final_fragment_counts = [packet.fragment_count for packet in final_packets]
     final_width_bits = [packet.size_bits for packet in final_packets]
-    assert final_indices == [0, 1, 2, 3]
-    assert final_fragment_counts == [4, 4, 4, 4]
-    assert final_width_bits == [4, 4, 3, 6]
+    assert final_indices == [0, 1]
+    assert final_fragment_counts == [2, 2]
+    assert final_width_bits == [8, 9]
     source = settings.qpu.device
     expected_prediction = _direct_matching_prediction(circuit, source)
     result = run.result.operation_results[-1]
     assert result.operation_id == 100
     assert result.logical_observables == expected_prediction
+
+
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_a_round_overtaken_on_a_faster_route_still_packs_first(
+    placement: str,
+) -> None:
+    """Keep route delays, arrival order and the quantum oracle together.
+
+    The stream reads its patch alone for rounds 1 and 2, on a slow
+    route, and jointly with a partner patch for round 3, on a fast one,
+    so round 3 reaches the controller first and still packs last. This
+    complete scenario stays in one function so each observed timing can
+    be read beside the route card that causes it.
+    """
+    joint_footprint = ("stream-patch", "partner")
+    settings, _measurements, _circuit = _separate_terminal_settings(placement)
+    settings = _last_round_read_with(settings, joint_footprint)
+    base_path = settings.links.qpu_to_controller
+    alone = _readout_route(base_path, ("stream-patch",), "alone", 4_500_000)
+    joint = _readout_route(base_path, joint_footprint, "joint", 100_000)
+    links = dataclasses.replace(settings.links, readout_routes=(alone, joint))
+    settings = dataclasses.replace(settings, links=links)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    events = run.machine.observation.round_events.events
+    binary_events = [
+        event for event in events if event.kind == "BINARY_AVAILABLE"
+    ]
+    first_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 1
+    ]
+    last_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 3
+    ]
+    last_round_arrived_ticks = max(last_round_arrival_ticks)
+    first_round_arrived_ticks = min(first_round_arrival_ticks)
+    assert last_round_arrived_ticks < first_round_arrived_ticks
+    packed = [event.round_index for event in events if event.kind == "PACKED"]
+    assert packed == [1, 2, 3]
+    readouts = _transfers(run.result, "qpu_to_controller")
+    delay_ticks = {row["total_delay_ticks"] for row in readouts}
+    assert delay_ticks == {100_000, 4_500_000}
+    assert len(readouts) == len(run.packets)
+    raw_bits = _raw_bits(run.packets)
+    payload_bit_count = sum(row["payload_bits"] for row in readouts)
+    assert payload_bit_count == len(raw_bits)
 
 
 def test_a_timing_only_terminal_fragment_reads_the_round_out_whole():
@@ -1460,29 +1442,6 @@ def _payload_bits_on(result: result_records.RunResult, path: str) -> list:
         if transfer["path"] == path:
             bits.append(transfer["payload_bits"])
     return bits
-
-
-@pytest.mark.parametrize("placement", ["controller", "decoder"])
-@pytest.mark.parametrize("basis", ["X", "Z"])
-def test_deltakit_bell_memory_uses_shared_live_execution(
-    placement: str,
-    basis: str,
-) -> None:
-    pytest.importorskip("deltakit_explorer")
-    program = deltakit.bell_memory_rounds(
-        3, basis, 0.001, round_period_microseconds=1.1
-    )
-    settings = _joint_settings(program, placement)
-
-    run = _run(settings)
-
-    _assert_actual_truth(run)
-    _assert_direct_strong_path(run)
-    _assert_drained(run)
-    _assert_joint_acquisitions(run)
-    owner = run.result.operation_results[-1]
-    assert len(owner.logical_observables) == 1
-    assert len(owner.observable_truth) == 1
 
 
 def test_joint_segments_can_name_the_same_footprint_in_another_order() -> None:
@@ -3342,6 +3301,7 @@ class _Run:
     weak_writes: list
     strong_occupancies: list[int]
     decodes: declared_run.FinishedDecodes
+    deposits: declared_run.UnitMemoryDeposits
 
 
 def _program(producer: str) -> circuit_records.RepeatedStimCircuit:
@@ -3439,6 +3399,8 @@ def _run(
         strong_store.trace.round_stored.connect(observe)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
+    deposits = declared_run.UnitMemoryDeposits()
+    deposits.attach(machine)
     result = machine.run()
     return _Run(
         machine,
@@ -3448,6 +3410,7 @@ def _run(
         weak_writes,
         strong_occupancies,
         decodes,
+        deposits,
     )
 
 
@@ -3691,8 +3654,10 @@ def _run_static(
     strong_store.trace.round_released.connect(released)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
+    deposits = declared_run.UnitMemoryDeposits()
+    deposits.attach(machine)
     result = machine.run()
-    run = _Run(machine, result, [], [], weak_writes, [], decodes)
+    run = _Run(machine, result, [], [], weak_writes, [], decodes, deposits)
     return run, release_ticks_by_round
 
 
@@ -3748,34 +3713,6 @@ def _assert_held_rounds_retried(run: _Run) -> None:
     assert "RELEASED" in kinds
 
 
-def _partitioned_joint_program() -> circuit_records.RepeatedStimCircuit:
-    """Keep the first acquisition joint, then separate the two blocks."""
-    program = memory_programs.joint_repetition_program(True, 0.04)
-    left_checks = round_records.MeasurementPartition(("left",), 2)
-    right_checks = round_records.MeasurementPartition(("right",), 2)
-    left_data = round_records.MeasurementPartition(("left",), 3)
-    right_data = round_records.MeasurementPartition(("right",), 3)
-    bulk = (left_checks, right_checks)
-    final = (left_checks, right_checks, left_data, right_data)
-    partitions = {"repeated_round": bulk, "final_round": final}
-    return dataclasses.replace(program, readout_partitions=partitions)
-
-
-def _readout_route(
-    base: link_settings.PathSettings,
-    patches: tuple,
-    channel_name: str,
-    propagation_ticks: int,
-) -> link_settings.ReadoutRoute:
-    channel = dataclasses.replace(
-        base.channel,
-        name=channel_name,
-        propagation_latency_ticks=propagation_ticks,
-    )
-    path = dataclasses.replace(base, channel=channel)
-    return link_settings.ReadoutRoute(patches, path)
-
-
 def _joint_settings(
     program: circuit_records.RepeatedStimCircuit, placement: str
 ) -> machine_settings.MachineSettings:
@@ -3789,7 +3726,7 @@ def _joint_settings(
     return dataclasses.replace(base, workload=workload)
 
 
-def _terminal_partitioned_settings(placement: str) -> tuple:
+def _separate_terminal_settings(placement: str) -> tuple:
     program = memory_programs.memory_program(physical_error_probability=0.12)
     circuit, _mapping = program.assemble(3)
     sampler = circuit.compile_sampler(seed=73)
@@ -3801,27 +3738,20 @@ def _terminal_partitioned_settings(placement: str) -> tuple:
         for recipe in table.detectors
         if recipe.kind is detector_formation.LayerKind.READOUT
     )
-    syndrome_group = round_records.MeasurementPartition(("stream-patch",), 4)
-    first_data_group = round_records.MeasurementPartition(("stream-patch",), 3)
-    last_data_group = round_records.MeasurementPartition(("stream-patch",), 6)
     source = stim_device.RecordedStimDevice(
         measurements,
         0,
         detector_rounds={100: detector_rounds},
         terminal_detector_ids={100: terminal_ids},
-        readout_partitions={
-            2: {3: (syndrome_group, syndrome_group)},
-            3: {3: (first_data_group, last_data_group)},
-        },
     )
     settings = _settings(program, "live", placement)
     qpu = dataclasses.replace(settings.qpu, device=source)
-    workload = _terminal_partitioned_workload(circuit)
+    workload = _separate_terminal_workload(circuit)
     settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
     return settings, measurements, circuit
 
 
-def _terminal_partitioned_workload(
+def _separate_terminal_workload(
     circuit: stim.Circuit,
 ) -> workload_settings.WorkloadSettings:
     owner = program_records.Operation(
@@ -3841,7 +3771,7 @@ def _terminal_partitioned_workload(
         stream_offset=2,
         predecessors=(1,),
         syndrome_fragment_index=0,
-        syndrome_fragment_count=4,
+        syndrome_fragment_count=2,
     )
     finalizer = dataclasses.replace(
         syndrome,
@@ -3849,7 +3779,7 @@ def _terminal_partitioned_workload(
         name="data readout",
         predecessors=(2,),
         finalizes_stream_round=True,
-        syndrome_fragment_index=2,
+        syndrome_fragment_index=1,
     )
     policy = round_policies.PerOperationRounds({100: 3, 1: 2, 2: 1, 3: 0})
     return workload_settings.WorkloadSettings(
@@ -3857,6 +3787,41 @@ def _terminal_partitioned_workload(
         decode_operations=(owner,),
         rounds_policy=policy,
     )
+
+
+def _last_round_read_with(
+    settings: machine_settings.MachineSettings, footprint: tuple
+) -> machine_settings.MachineSettings:
+    """The stream's last-round emitters read the footprint, as its owner.
+
+    A stream's owner holds every patch its segments read
+    (frontends/circuit_frontend.py), so it takes the footprint too.
+    """
+    prefix, *last_round = settings.workload.operations
+    joint_last_round = _operations_on_group(tuple(last_round), footprint)
+    operations = (prefix, *joint_last_round)
+    owners = _operations_on_group(
+        settings.workload.decode_operations, footprint
+    )
+    workload = dataclasses.replace(
+        settings.workload, operations=operations, decode_operations=owners
+    )
+    return dataclasses.replace(settings, workload=workload)
+
+
+def _readout_route(
+    base: link_settings.PathSettings,
+    patches: tuple,
+    channel_name: str,
+    propagation_ticks: int,
+) -> link_settings.ReadoutRoute:
+    channel = dataclasses.replace(
+        base.channel,
+        name=channel_name,
+        propagation_latency_ticks=propagation_ticks,
+    )
+    path = dataclasses.replace(base, channel=channel)
+    return link_settings.ReadoutRoute(patches, path)
 
 
 def _operations_on_group(operations: tuple, patches: tuple) -> tuple:

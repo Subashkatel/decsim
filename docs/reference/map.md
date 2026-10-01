@@ -205,7 +205,7 @@ docstring.
 - `decsim/decoders/decoder_memory_transfer.py`: Moves a job's rounds from the weak syndrome buffer into the unit's memory.
 - `decsim/decoders/decoder_output.py`: The decoder side's outgoing sends: the frame, the strong tier, a peer.
 - `decsim/decoders/decoder_pool.py`: A manager's pool: its units, the free ones, the unit a job is offered.
-- `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim, flights.
+- `decsim/decoders/decoder_unit.py`: One decoder unit's occupancy: slots, memory, compute claim.
 - `decsim/decoders/decoders.py`: The timing-only decoder.
 - `decsim/decoders/detection_events.py`: One tier's event-detection logic: it forms the rounds that tier reads.
 - `decsim/decoders/dispatch_steps/__init__.py`: The dispatch_steps row: Relay-BP behind a CUDA-Q dispatcher, step by step.
@@ -223,7 +223,7 @@ docstring.
 - `decsim/decoders/relay_belief_propagation/window_decoder.py`: Relay-BP over one placed physical window model.
 - `decsim/decoders/schedulers.py`: The ready-queue discipline of a decoder pool: which waiting job is next.
 - `decsim/decoders/settings.py`: The settings of the decoder tiers, their manager and the escalation.
-- `decsim/decoders/staged_decoder.py`: The decoder unit's timing around one algorithm: stages and a pipeline.
+- `decsim/decoders/staged_decoder.py`: The decoder unit's timing around one algorithm: its stages.
 - `decsim/decoders/strong_backend.py`: The strong decoder on a device: FIFO queues in front of its resources.
 - `decsim/decoders/strong_requests.py`: Which destination window waits for which strong result.
 - `decsim/decoders/tesseract/__init__.py`: Tesseract decoders backed by the optional tesseract-decoder package.
@@ -266,7 +266,6 @@ docstring.
 - `decsim/frontends/__init__.py`: Everything that happens to a program before and while it runs.
 - `decsim/frontends/circuit_frontend.py`: A maker's workload lowered into a program the machine runs.
 - `decsim/frontends/deltakit.py`: Deltakit memory circuits exported into the supplied-circuit frontend.
-- `decsim/frontends/deltakit_compiler.py`: Compile finite rotated-code experiments through Deltakit's CircuitBuilder.
 - `decsim/frontends/execution_runtime.py`: Which operation runs when: readiness, resource ownership, timestamps.
 - `decsim/frontends/planner.py`: The plan of one run: cadence, geometry, windows and buffer holds.
 - `decsim/frontends/settings.py`: The workload settings: what the machine runs, and for how many rounds.
@@ -294,7 +293,6 @@ docstring.
 - `decsim/observe/sampled_shots.py`: The shots the syndrome source sampled, by the operation that asked.
 - `decsim/observe/settings.py`: The observation settings: what a run records beyond its results.
 - `decsim/observe/stage_records.py`: One run's decoder stage records, kept per operation and window.
-- `decsim/observe/syndrome_buffer_occupancy.py`: One syndrome buffer's occupancy over time, and how long each round stayed.
 - `decsim/observe/trace_writer.py`: One shot's Chrome trace: where every round and window sat and moved.
 - `decsim/observe/window_ledger.py`: The window ledger: every window's record, heard as the plan grows.
 - `decsim/observe/wiring.py`: Every listener of one run, built from the observation section and wired.

@@ -1,4 +1,4 @@
-"""One decoder unit's occupancy: slots, memory, compute claim, flights.
+"""One decoder unit's occupancy: slots, memory, compute claim.
 
 The unit is Smith's decoupled access-execute machine with two input slots
 (Smith 1982; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin's
@@ -8,10 +8,12 @@ the next window's transfer lands in the second slot while the current
 decode computes. Compute is claimed apart from the slots (Tomasulo's
 rule: an instruction whose operands are not ready waits in its
 reservation station, never on the functional unit; gem5 O3 issues only
-ready work, inst_queue.hh scheduleReadyInsts). A pipelined unit keeps
-every in-flight decode resident and retires them in issue order
-(Hennessy and Patterson, Computer Architecture, App. C; Helios
-2301.08419). The unit records who holds what, gem5's functional unit
+ready work, inst_queue.hh scheduleReadyInsts). The compute takes one
+decode at a time, as Helios's controller refuses input while it decodes:
+input_ready is high only while it is idle or preparing the next
+measurement (Helios_scalable_QEC control_node_single_FPGA.v lines
+234-243).
+The unit records who holds what, gem5's functional unit
 (fu_pool.hh:64-75); the service starts and ends the decodes.
 
 A finished result nobody has asked for yet waits in the unit's output
@@ -31,6 +33,9 @@ from typing import Optional
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.records.decoding as decoding_records
 
+# the decode computing and the next window's input landing beside it
+INPUT_SLOT_COUNT = 2
+
 
 @dataclasses.dataclass
 class ComputeClaim:
@@ -45,23 +50,6 @@ class ComputeClaim:
 
     holder: Optional[decoding_records.DecodeJob] = None
     expected_free_ticks: float = math.inf
-
-
-@dataclasses.dataclass
-class PipelineFlights:
-    """A pipelined unit's decodes in flight and its intake.
-
-    flights holds (job, latency ticks) of every decode started and not
-    yet finished. The intake job holds the unit's compute until its
-    initiation interval ends; a full pipeline keeps that claim on the
-    stalled owner until the next completion. All three stay empty on a
-    unit whose occupancy is its latency.
-    """
-
-    flights: list = dataclasses.field(default_factory=list)
-    intake_job: Optional[decoding_records.DecodeJob] = None
-    stalled_owner: Optional[decoding_records.DecodeJob] = None
-    stalled_depth: int = 0
 
 
 @dataclasses.dataclass
@@ -92,7 +80,6 @@ class DecoderUnit:
         self.memory = memory
         self.slots = UnitSlots()
         self.compute = ComputeClaim()
-        self.pipeline = PipelineFlights()
 
     @property
     def residents(self) -> list:
@@ -220,8 +207,8 @@ class DecoderUnit:
         released, so its decode is counted whole: that is the most a
         newcomer can wait behind it, and the least such total over the
         units bounds the newcomer's worst start. A holder that outlived
-        its prediction, its result not yet read or its pipeline full,
-        is held for a time nobody declared, so the work is unbounded.
+        its prediction, its result not yet read, is held for a time
+        nobody declared, so the work is unbounded.
         """
         work_left = 0.0
         holder = self.holder
@@ -296,78 +283,6 @@ class DecoderUnit:
             self.compute.expected_free_ticks = math.inf
             return
         self.compute.expected_free_ticks = ticks
-
-    # ---------------------------------------------------- the pipeline
-
-    def add_flight(
-        self, job: decoding_records.DecodeJob, latency_ticks: int
-    ) -> None:
-        """A pipelined decode started; it retires in issue order.
-
-        A hardware pipeline retires in issue order, so every in-flight
-        decode on one unit must declare the same latency; mixed
-        latencies refuse loudly.
-        """
-        flights = self.pipeline.flights
-        for flight_job, flight_latency in flights:
-            if flight_latency != latency_ticks:
-                raise RuntimeError(
-                    f"decode job {job.label!r} declares latency "
-                    f"{latency_ticks} ticks while {flight_job.label!r} is "
-                    "in flight with a different latency: a pipelined unit "
-                    "completes in order and takes one latency per unit"
-                )
-        flights.append((job, latency_ticks))
-        if self.pipeline.intake_job is not None:
-            raise RuntimeError(
-                f"pipelined unit {self.name!r} started {job.label!r} before "
-                "its prior initiation interval completed"
-            )
-        self.pipeline.intake_job = job
-
-    def take_flight(self, job: decoding_records.DecodeJob) -> bool:
-        """Retire the job's flight; whether it was in flight here."""
-        flights = self.pipeline.flights
-        for flight in flights:
-            if flight[0] is job:
-                flights.remove(flight)
-                return True
-        return False
-
-    def flight_count(self) -> int:
-        """Decodes started on this unit and not yet finished."""
-        return len(self.pipeline.flights)
-
-    def flight_labels(self) -> list:
-        """The labels of the decodes in flight."""
-        labels = []
-        for flight_job, _latency_ticks in self.pipeline.flights:
-            labels.append(flight_job.label)
-        return labels
-
-    def stall(self, owner: decoding_records.DecodeJob, depth: int) -> None:
-        """The pipeline is full: the owner keeps the compute claim."""
-        self.pipeline.stalled_owner = owner
-        self.pipeline.stalled_depth = depth
-
-    def lift_stall(self) -> Optional[decoding_records.DecodeJob]:
-        """The stalled owner whose claim may go, once a flight retired.
-
-        None when nothing was stalled, the pipeline is still full, or
-        the owner no longer holds the compute or is past its end.
-        """
-        owner = self.pipeline.stalled_owner
-        if owner is None:
-            return None
-        if self.flight_count() >= self.pipeline.stalled_depth:
-            return None
-        self.pipeline.stalled_owner = None
-        self.pipeline.stalled_depth = 0
-        if self.compute.holder is not owner:
-            return None
-        if owner.cancelled or owner.completed:
-            return None
-        return owner
 
     def _arriving_bits(
         self,

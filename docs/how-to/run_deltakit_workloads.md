@@ -1,6 +1,6 @@
 [decsim docs](../README.md) › [How-to guides](README.md)
 
-# Run Deltakit memory, protection and compiler workloads
+# Run Deltakit memory and protection workloads
 
 Deltakit supplies a circuit and its measurement schedule. The existing
 decsim machine runs them through readout, stores, windows, decoding and
@@ -25,15 +25,7 @@ Keep this environment separate from another checkout's editable
 installation.
 The Deltakit extra pins component versions in `pyproject.toml`; it does
 not require the umbrella SDK or a cloud account. The pinned SDK supports
-Python >=3.10,<3.15, the same floor as decsim. For the compiler
-entrypoint below, install its separate extra in the same isolated
-environment:
-
-```bash
-.venv-deltakit/bin/python -m pip install -e '.[run,deltakit-compile]'
-```
-
-Explorer memory users do not need the compiler extra.
+Python >=3.10,<3.15, the same floor as decsim.
 
 ## Run a memory experiment
 
@@ -146,15 +138,11 @@ replay of the physical-noise example works without the SDK installed.
 ## Declare separate readout transport channels
 
 This is a Python configuration surface shared by all circuit providers.
-`RepeatedStimCircuit.readout_partitions` maps fragment names (`first_round`,
-`repeated_round`, `final_round`, `single_round`) to tuples of
-`records.rounds.MeasurementPartition(patch_ids, measurement_count)`. Counts
-consume the raw measurement record consecutively, cover it completely, and name
-subsets of the owner's footprint. Omitted fragments remain aggregate.
+Each emission leaves the QPU as one readout of its operation's whole patch
+footprint.
 
-For finite `StimDevice` or `RecordedStimDevice`, `readout_partitions` maps the
-emitting operation id to a mapping from one-based stream round to partitions.
-Use distinct emitting operation ids for a terminal syndrome prefix and its
+For finite `StimDevice` or `RecordedStimDevice`, use distinct emitting
+operation ids for a terminal syndrome prefix and its
 separate data finalizer. Their declared fragment slots cover the combined round.
 The finite source currently infers separate terminal data only for its supported
 generated-circuit layout. With an explicit `measurement_rounds` map, keep final
@@ -168,12 +156,12 @@ names for independent queues or one name for a shared serializer. Use the
 existing `ChannelSettings` and `PathSettings` for bandwidth, propagation and
 setup. The default readout path handles any unmatched footprint.
 
-The runnable public-interface tests cover live out-of-order arrival and recorded
-measurement partitions at both detector-formation sites:
+The runnable public-interface tests cover a recorded joint stream and separate
+terminal emitters at both detector-formation sites:
 
 ```bash
 PYTHONPATH=. .venv-deltakit/bin/python -m pytest tests/machine/test_machine.py \
-  -k 'channel_reordering or interleaved_joint' -q
+  -k 'recorded_joint_stream or separate_terminal_emitters' -q
 ```
 
 This models channel transport after round completion. It does not establish
@@ -188,7 +176,7 @@ footprint at both protected-region endpoints. All members use the same declared
 round cadence. `ProtectedRegion` refers to the owner stream; it has no separate
 patch declaration. The source executes each requested round once for the group.
 
-The optional provider can produce two distinct kinds of input:
+The optional provider can produce a CSS code block:
 
 ```python
 import deltakit_explorer.codes as codes
@@ -196,23 +184,12 @@ import deltakit_explorer.codes as codes
 import decsim.frontends.deltakit as deltakit
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 
-bell = deltakit.bell_memory_rounds(
-    3, "Z", 0.001, round_period_microseconds=1.1
-)
-bell_source = streaming_stim_device.StreamingStimDevice({100: bell})
-
 code = codes.BivariateBicycleCode(3, 5, [1, 1, 4], [0, 1, 2])
 block = deltakit.css_memory_rounds(
     code, "Z", 0.001, round_period_microseconds=1.1
 )
 block_source = streaming_stim_device.StreamingStimDevice({100: block})
 ```
-
-Use a two-patch owner for the Bell source. It prepares two rotated-surface
-blocks with a transversal CNOT and reports their joint parity in X or Z.
-This is a physical Bell-memory experiment, not high-level lattice surgery.
-Its explicit wait slots make every exported fragment occupy the declared
-period and receive the selected idle noise exactly once.
 
 The BB example is one [[30,8,2]] block with eight logical outputs. Use one
 physical resource patch and eight logical qubit identities: the owner's
@@ -230,12 +207,11 @@ The end-to-end examples are reproducible through the public Machine tests:
 
 ```bash
 PYTHONPATH=. .venv-deltakit/bin/python -m pytest tests/machine/test_machine.py \
-  -k 'deltakit_bell or bb_block or bb_live or bb_higher or interleaved_joint' -q
+  -k 'bb_block or bb_live or bb_higher or recorded_joint_stream' -q
 ```
 
 They exercise live feedback, controller-side and decoder-side formation, full
-logical vectors, deliberate higher-index failure, and a recorded source with
-interleaved patch acquisitions. Direct Stim uses the same source contract.
+logical vectors, deliberate higher-index failure, and a recorded joint source. Direct Stim uses the same source contract.
 The hardware cadence and link/service costs remain configured model inputs;
 these checks do not establish calibrated neutral-atom transport or loss physics.
 
@@ -289,42 +265,6 @@ and explicit map through the existing Python settings. No downstream
 component needs the producer's name. Remove the optional Deltakit
 packages when generation is no longer needed; ordinary Stim remains
 necessary for supplied-circuit execution.
-
-## Compile memory or a terminal Hadamard
-
-The separate optional compiler frontend accepts `memory` and `hadamard`.
-It uses public rotated-code schedules and CircuitBuilder measurement
-handles, returning ordinary Stim and the same explicit round-map contract:
-
-```python
-import decsim.frontends.deltakit_compiler as compiler
-
-circuit, measurement_rounds = compiler.compile_experiment(
-    experiment="hadamard",
-    distance=5,
-    round_count=4,
-    basis="Z",
-    physical_error_probability=0.003,
-)
-```
-
-Use `experiment="memory"` for compiled memory, or `basis="X"` for the
-other prepared logical basis. Feed these outputs to the existing finite
-supplied-circuit settings, with `FixedRounds(round_count)` and the caller's
-QPU period and decoder timing. The compiler path uses SD6 and makes no
-physical-duration calibration claim.
-
-Hadamard acts transversally on the data qubits and immediately measures
-the conjugate basis. It does not continue extraction in the original patch
-orientation or establish fault-tolerant distance preservation. The compiler
-returns terminal measurement handles; the exporter explicitly reduces the
-public logical support to an observable. It never relabels a detector as
-logical truth. This supported CircuitBuilder path does not repair the
-separate high-level LogAsm Hadamard/rotation limitations.
-
-The entrypoint is tested at distances 3 and 5, both bases, several round
-counts, noiseless logical action, SD6 noise and whole decsim runs
-(`tests/frontends/test_deltakit_compiler.py`).
 
 ## Interpret the result within its scope
 

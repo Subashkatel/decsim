@@ -1072,11 +1072,11 @@ class Decoder(Protocol):
     union_find, tesseract, relay_bp, bposd, or a number (a preset
     latency on the MWPM path). sinter's abstract class
     with defaults (decsim/decoders/decoder.py, DecoderBase) fills start,
-    cancel, occupancy and pipeline_depth from decode and latency, so a row
-    writes those two. The manager asks occupancy and pipeline_depth at
-    dispatch, calls start once the input has landed, and cancel when the
-    request is withdrawn; a decoder measured on the host clock answers
-    occupancy with None and start decides its own time.
+    cancel and occupancy from decode and latency, so a row writes those
+    two. The manager asks occupancy at dispatch, calls start once the
+    input has landed, and cancel when the request is withdrawn; a
+    decoder measured on the host clock answers occupancy with None and
+    start decides its own time.
 
     stage_recorded is the port's data-side stage callback
     (the data path's hop table): a trace source the row
@@ -1148,9 +1148,6 @@ class Decoder(Protocol):
 
     def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """Ticks the unit's compute is held from the start; None if measured."""
-
-    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
-        """Decodes that may be in flight on one unit; one is no pipeline."""
 
 
 @runtime_checkable
@@ -2156,8 +2153,8 @@ class RoundsPolicy(Protocol):
     refuses a decoded one with none (frontends/planner.py
     _check_decode_owner_rounds).
 
-    The policies are FixedRounds, PerOperationRounds, CodeRounds,
-    GateRounds and TemporalRounds (qpu/round_policies.py), with no table
+    The policies are FixedRounds, PerOperationRounds, CodeRounds and
+    GateRounds (qpu/round_policies.py), with no table
     and no yaml key: the memory_circuit row fixes its rounds, a Python
     workload may pass its own (a PerOperationRounds may give an operation
     none), and GateRounds is the default. The lattice-surgery unit of d

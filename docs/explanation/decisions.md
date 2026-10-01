@@ -946,10 +946,7 @@ measurement record even when a later round reaches the controller first.
 
 **Existing contracts.** `SyndromeSource.round_payloads` already returns ordered
 acquisitions, and `Link.send` already carries their complete patch footprint.
-They remain the handoffs. `MeasurementPartition` describes contiguous portions of
-the source's raw record. Live Stim fragments and finite/recorded Stim sources
-use that same record. Partitioning does not split or resample quantum state.
-An operation's explicit `syndrome_fragment_index` now denotes the first slot of
+They remain the handoffs. An operation's explicit `syndrome_fragment_index` now denotes the first slot of
 its contiguous group. Its fragment count covers the entire round, including a
 separate final-data emitter. This removes the former one-payload-only restriction.
 
@@ -978,13 +975,21 @@ refuses a routed readout path because it cannot select its physical channel;
 current decoder delay estimates continue through the same method.
 
 **Provider neutrality and limits.** Direct Stim, recorded workloads and optional
-Deltakit exports use the same partition and readout records. A future compiler
-can supply the same groups without changing transport, windows or decoders.
-Removing Deltakit leaves both routing and causal assembly useful. These cards
+Deltakit exports use the same readout records. Removing Deltakit leaves both routing and causal assembly useful. These cards
 model transport after a whole physical round's outcomes become available. They
 do not schedule separate analog acquisition resources or move measurements within
 a round. Unequal round durations, arbitrary decoded conditional gates and dynamic
 composition of retained histories remain separate work.
+
+**Narrowed since.** A Stim source no longer splits one round's record into
+patch-keyed groups: each emission is one readout of its operation's whole
+footprint, so a route selects a path per footprint. The circuit-less
+`SyndromeBitDevice(one_payload_per_patch=True)` still emits one payload per
+patch, which the assembler joins as fragments. Every referent read waits for
+the whole round before decoding (Riverlane 2410.05202, IBM 2510.21600, Liu
+2603.16203), and the measured split, one patch over several feedlines, is not
+a patch-keyed shape; per-feedline readout would be a new design keyed by qubit
+groups.
 
 ## D28. A strong decode runs on a backend behind one port of four methods
 
@@ -1441,6 +1446,22 @@ mistake a gap for a result.
   once fills, and the run then stops and says how many rounds were left
   held for store room. The size that is always enough is the union of
   every hold, and an open-ended dynamic stream has none.
+- **O15. A unit never starts a second decode while one computes.** Its
+  compute is busy for the decode's whole occupancy; only the next
+  window's input lands beside it (`decsim/decoders/decoder_unit.py`).
+  The hardware the switching baseline models works this way: the
+  Helios union-find controller refuses input while it decodes, raising
+  `input_ready` only while idle or preparing the next measurement and
+  dropping it through loading, growth, merging and peeling
+  (`Helios_scalable_QEC/design/stage_controller/control_node_single_FPGA.v`
+  lines 234-243), cudaqx keeps "a single in-flight inference slot" per
+  GPU worker because deeper queues bought no throughput
+  (`cudaqx/docs/hybrid_ai_predecoder_pipeline.md` line 137), and one
+  stream's sliding windows are "inherently sequential" (Skoric et al.
+  2209.08552 line 106). Throughput comes from the pool's units. A study
+  of one unit multiplexing independent decodes would model Micro
+  Blossom's context switching (2502.14787), whose per-task latency
+  varies.
 O3, O4, O5, O6, O9 and O10 are closed: the sends name what they carry
 (`QPUReadout.size_bits` on the readout hop; on the strong request's
 hops the request's name, alone for the selection and in front of the

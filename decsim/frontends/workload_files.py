@@ -241,11 +241,6 @@ def _write_finite_circuit(
 def _write_fragments(
     program: circuit_records.RepeatedStimCircuit, folder: pathlib.Path
 ) -> dict:
-    if program.readout_partitions:
-        raise ValueError(
-            "the live fragments name readout_partitions, which "
-            f"{PHYSICAL_FILE_NAME} does not carry"
-        )
     fragments_folder = folder / "fragments"
     fragments_folder.mkdir(exist_ok=True)
     for name in FRAGMENT_NAMES:

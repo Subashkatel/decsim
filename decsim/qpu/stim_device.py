@@ -57,9 +57,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     measurement_rounds declares the QPU's packet schedule for the same
     reason. A non-empty terminal_detector_ids entry says the stream's
     final data readout arrives as its own fragment, through
-    finalize_stream_round. Readout partitions are keyed by the emitting
-    operation id, then by the one-based stream round. Separate syndrome
-    and data emitters can therefore declare different acquisition groups.
+    finalize_stream_round.
 
     Trace source: shot_sampled(operation, detection_events) once per
     fresh shot, with the whole-circuit detection events a reference
@@ -77,14 +75,12 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         detector_rounds: Optional[dict] = None,
         terminal_detector_ids: Optional[dict] = None,
         measurement_rounds: Optional[dict] = None,
-        readout_partitions: Optional[dict] = None,
     ) -> None:
         self._seed = validated_seed(seed)
         self._initialize_run_seed_binding(self._seed)
         detector_rounds_override = _rounds_by_key(detector_rounds)
         terminal_ids = _detector_ids_by_key(terminal_detector_ids)
         measurement_rounds_override = _rounds_by_key(measurement_rounds)
-        self._readout_partitions = _partitions_by_key(readout_partitions)
         self._shots = _ShotTable(
             detector_rounds_override=detector_rounds_override,
             terminal_detector_ids=terminal_ids,
@@ -178,7 +174,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
-        """This operation round in its declared raw measurement partitions."""
+        """This operation round's raw measurements as one readout."""
         key = program_records.decode_identity(operation)
         global_round = program_records.global_round(operation, round_index)
         bits = self._round_packet_bits(key, global_round)
@@ -224,7 +220,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         is_final: bool,
         round_period_ticks: int,
     ) -> list[round_records.QPUReadout]:
-        """This idle stream round in the owner's measurement partitions."""
+        """This idle stream round's raw measurements as one readout."""
         del is_final
         del round_period_ticks
         binding = self._shots.source_binding_by_key[stream_id]
@@ -407,9 +403,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         readout = round_records.QPUReadout(
             key, patches, round_index, bits=bits, size_bits=len(bits)
         )
-        by_round = self._readout_partitions.get(operation.id, {})
-        partitions = by_round.get(round_index, ())
-        return round_records.partition_measurements(readout, partitions)
+        return [readout]
 
     def _sample_shot(
         self,
@@ -524,7 +518,6 @@ class RecordedStimDevice(StimDevice):
         detector_rounds: Optional[dict] = None,
         terminal_detector_ids: Optional[dict] = None,
         measurement_rounds: Optional[dict] = None,
-        readout_partitions: Optional[dict] = None,
     ) -> None:
         StimDevice.__init__(
             self,
@@ -532,7 +525,6 @@ class RecordedStimDevice(StimDevice):
             detector_rounds=detector_rounds,
             terminal_detector_ids=terminal_detector_ids,
             measurement_rounds=measurement_rounds,
-            readout_partitions=readout_partitions,
         )
         self.measurements = measurements
         self.shot = shot
@@ -642,7 +634,6 @@ class BurstStimDevice(StimDevice):
         detector_rounds: Optional[dict] = None,
         terminal_detector_ids: Optional[dict] = None,
         measurement_rounds: Optional[dict] = None,
-        readout_partitions: Optional[dict] = None,
     ) -> None:
         StimDevice.__init__(
             self,
@@ -650,7 +641,6 @@ class BurstStimDevice(StimDevice):
             detector_rounds=detector_rounds,
             terminal_detector_ids=terminal_detector_ids,
             measurement_rounds=measurement_rounds,
-            readout_partitions=readout_partitions,
         )
         if settings is None:
             settings = BurstStimDevice.Settings()
@@ -913,16 +903,6 @@ class _ShotTable:
     sample_key_by_operation_id: dict = dataclasses.field(default_factory=dict)
     stream_model_by_id: dict = dataclasses.field(default_factory=dict)
     source_binding_by_key: dict = dataclasses.field(default_factory=dict)
-
-
-def _partitions_by_key(declared: Optional[dict]) -> dict:
-    declared = declared or {}
-    copied = {}
-    for key, by_round in declared.items():
-        copied[key] = {
-            index: tuple(partitions) for index, partitions in by_round.items()
-        }
-    return copied
 
 
 def _rounds_by_key(declared: Optional[dict]) -> dict:

@@ -1,4 +1,4 @@
-"""The decoder unit's timing around one algorithm: stages and a pipeline.
+"""The decoder unit's timing around one algorithm: its stages.
 
 One decode job is one walk through the configured stages before the
 algorithm (for a weak ASIC, reading the window out of the decoder-side
@@ -13,15 +13,10 @@ when it has them. Precedent for modeling actual units and reporting
 their cycles per job: XQsim src/XQ-simulator
 (https://github.com/SNU-HPCS/XQsim, commit
 006c38474c4caf8d51e2065ad3f3a5144b251bfc, MIT); nothing is copied from
-it. A unit may pipeline: with an initiation interval a new job may start
-every interval while each result still returns after the whole latency,
-at most pipeline_depth in flight (Hennessy and Patterson, Computer
-Architecture, App. C; Helios 2301.08419 is the hardware shape). Without
-one, a job holds the unit from first stage to release.
+it. A job holds the unit from first stage to release.
 """
 
 import dataclasses
-import math
 from collections.abc import Callable
 from typing import Optional
 
@@ -106,19 +101,11 @@ class MemoryFetchStage(DecoderStage):
 
 @dataclasses.dataclass(frozen=True)
 class UnitTiming:
-    """The unit's stages, the clock that prices them, and its pipeline.
-
-    initiation_interval_us is the least time between two starts on the
-    unit; None means the unit holds its compute for the whole decode.
-    pipeline_depth bounds the decodes in flight; None means the full
-    pipeline, ceil(latency / interval), computed per job.
-    """
+    """The unit's stages and the clock that prices them."""
 
     before: tuple[DecoderStage, ...]
     after: tuple[DecoderStage, ...]
     clock: config.Clock
-    initiation_interval_us: Optional[float] = None
-    pipeline_depth: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.clock.period_ticks < 1:
@@ -129,7 +116,6 @@ class UnitTiming:
                     f"{ALGORITHM_STAGE!r} names the decoder itself, not a "
                     "hardware stage"
                 )
-        _check_pipeline(self.initiation_interval_us, self.pipeline_depth)
 
     def stage_ticks(self, job: decoding_records.DecodeJob) -> dict:
         """Ticks per stage, by name.
@@ -143,12 +129,6 @@ class UnitTiming:
             clock = stage.priced_on(self.clock)
             ticks[stage.name] = cycles * clock.period_ticks
         return ticks
-
-    def initiation_interval_ticks(self) -> Optional[int]:
-        """The interval in ticks; None when the unit does not pipeline."""
-        if self.initiation_interval_us is None:
-            return None
-        return config.microseconds_to_ticks(self.initiation_interval_us)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -256,14 +236,11 @@ class StagedDecoder(decoder_module.DecoderBase):
         return stages + algorithm
 
     def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
-        """The initiation interval when pipelined, else the whole latency.
+        """The whole latency, stages included.
 
         None when the wrapped decoder is measured on the host clock: the
         unit cannot say in advance when it frees.
         """
-        interval_ticks = self.timing.initiation_interval_ticks()
-        if interval_ticks is not None:
-            return interval_ticks
         algorithm = self.decoder.occupancy(job)
         if algorithm is None:
             return None
@@ -271,18 +248,6 @@ class StagedDecoder(decoder_module.DecoderBase):
         stage_values = stage_ticks.values()
         stages = sum(stage_values)
         return stages + algorithm
-
-    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
-        """The declared depth, or the full pipeline ceil(latency / interval)."""
-        interval_ticks = self.timing.initiation_interval_ticks()
-        if interval_ticks is None:
-            return 1
-        if self.timing.pipeline_depth is not None:
-            return self.timing.pipeline_depth
-        latency_ticks = self.latency(job)
-        decodes_per_latency = latency_ticks / interval_ticks
-        full_pipeline = math.ceil(decodes_per_latency)
-        return max(1, full_pipeline)
 
     def start(
         self,
@@ -436,28 +401,6 @@ class _RunningDecode:
     aborted: bool = False
     open_stage: Optional["_Step"] = None
     open_start_ticks: int = 0
-
-
-def _check_pipeline(
-    initiation_interval_us: Optional[float], pipeline_depth: Optional[int]
-) -> None:
-    if initiation_interval_us is None:
-        if pipeline_depth is not None:
-            raise ValueError(
-                "pipeline_depth needs an initiation_interval_us; without "
-                "one the unit holds its compute for the whole decode"
-            )
-        return
-    is_positive = initiation_interval_us > 0
-    if not math.isfinite(initiation_interval_us) or not is_positive:
-        raise ValueError("initiation_interval_us must be positive and finite")
-    interval_ticks = config.microseconds_to_ticks(initiation_interval_us)
-    if interval_ticks == 0:
-        raise ValueError(
-            "initiation_interval_us is positive but rounds to zero ticks"
-        )
-    if pipeline_depth is not None and pipeline_depth < 1:
-        raise ValueError("pipeline_depth must be at least 1")
 
 
 def _run_sequences(job: decoding_records.DecodeJob) -> tuple:

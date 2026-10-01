@@ -11,8 +11,7 @@ says the decode, and any confidence walk charged on it, has ended.
 A landed job whose window still owes a boundary parks in its slot and
 releases its compute claim (Tomasulo's rule at the boundary hazard), so
 a dependent that fills early never deadlocks the unit against its own
-predecessor. A pipelined unit issues one decode per initiation interval
-and keeps at most its depth in flight (Hennessy and Patterson App. C).
+predecessor.
 """
 
 import dataclasses
@@ -33,15 +32,6 @@ import decsim.trace_source as trace_source
 
 if TYPE_CHECKING:
     import decsim.decoders.decoder_manager as decoder_manager_module
-
-# the job kinds a pipelined unit serves; every other kind holds its unit
-# for the whole decode until it gets its own design pass
-PIPELINED_JOB_KINDS = frozenset(
-    {
-        decoding_records.DecodeJobKind.WINDOW,
-        decoding_records.DecodeJobKind.SELF_CONTAINED,
-    }
-)
 
 
 class DecodeService:
@@ -77,19 +67,6 @@ class DecodeService:
         self.trace = _TraceSources()
 
     # ------------------------------------------ what the dispatcher asks
-
-    def resident_capacity(self, job: decoding_records.DecodeJob) -> int:
-        """Residents a unit holds for this job.
-
-        Two (the depth-1 access-execute machine) unless the decoder
-        pipelines: then every in-flight decode stays resident (its input
-        lives in the unit's memory until its result emerges) plus one
-        landing next. Memory admission still gates every resident, so a
-        deep pipeline pays its SRAM price visibly or refuses loudly.
-        """
-        decoder = self.manager.decoder
-        depth = decoder.pipeline_depth(job)
-        return depth + 1
 
     def carries_input(self, job: decoding_records.DecodeJob) -> bool:
         """The job moves syndrome data into a unit's memory.
@@ -270,11 +247,9 @@ class DecodeService:
 
         The ping-pong swap at compute end.
         """
-        self._end_flight(job, offer_now=False)
         unit = job.unit
         unit.evict(job)
-        intake_owner = unit.pipeline.intake_job
-        if unit.holder is job and intake_owner is not job:
+        if unit.holder is job:
             unit.release_compute()
         self.engine.log_io(
             f"unit {unit.name} SRAM",
@@ -303,11 +278,6 @@ class DecodeService:
         decoder.cancel(job)
         self.staging.cancel(job)
         self.free(job)
-
-    def discard_cancelled(self, job: decoding_records.DecodeJob) -> None:
-        """A cancelled decode reported its end: retire its flight and input."""
-        self._end_flight(job, offer_now=True)
-        self.staging.release(job)
 
     def release_input(self, job: decoding_records.DecodeJob) -> None:
         """Free the job's rounds from its unit's memory; none held is fine."""
@@ -372,10 +342,9 @@ class DecodeService:
         return held
 
     def check_settled(self) -> None:
-        """Refuse a quiescent run with a decode parked, in flight or intaking.
+        """Refuse a quiescent run with a decode parked.
 
-        A parked decode, a flight, or an intake interval still active
-        means an event never came.
+        A parked decode means the event that releases it never came.
         """
         parked = []
         for job in self.parked_jobs():
@@ -384,27 +353,6 @@ class DecodeService:
             parked = sorted(parked)
             raise RuntimeError(
                 f"run ended with parked decodes never released: {parked}"
-            )
-        self._check_pipelines_settled()
-
-    def _check_pipelines_settled(self) -> None:
-        """No unit ends the run with a decode in flight or its intake open."""
-        in_flight = []
-        busy = []
-        for unit in self.pool.units:
-            flight_labels = unit.flight_labels()
-            in_flight.extend(flight_labels)
-            if unit.pipeline.intake_job is not None:
-                busy.append(unit.name)
-        if in_flight:
-            raise RuntimeError(
-                "run ended with pipelined decodes still in flight: "
-                f"{sorted(in_flight)}"
-            )
-        if busy:
-            raise RuntimeError(
-                "run ended with pipelined decoder intake intervals still "
-                f"active: {sorted(busy)}"
             )
 
     # ------------------------------------------------- dispatch, private
@@ -417,7 +365,6 @@ class DecodeService:
         )
         self.trace.job_started.fire(job, job.unit)
         self._predict_compute_free(job)
-        pipeline = self._pipeline_of(decoder, job)
         if job.decoder_input is not None:
             # the decoder reads this unit's memory now
             job.payloads = job.decoder_input.fragments()
@@ -426,10 +373,6 @@ class DecodeService:
             self.engine,
             lambda result: self.manager.decode_completed(job, result),
         )
-        if pipeline is None:
-            return
-        interval_ticks, latency_ticks, depth = pipeline
-        self._track_pipelined_start(job, latency_ticks, interval_ticks, depth)
 
     def _assign_service_key(self, job: decoding_records.DecodeJob) -> None:
         """One service key per decode, shared by every request it serves."""
@@ -601,19 +544,14 @@ class DecodeService:
             unit.claim_compute(landing)  # starts at its landing
             self._predict_compute_free(landing)
             return
-        if self.pool.is_free(unit):
-            # a pipelined unit's intake went back to the pool at the end of
-            # its initiation interval; the decode's completion offers again
-            return
         self.pool.release(unit)
 
     def _predict_compute_free(self, job: decoding_records.DecodeJob) -> None:
         """Record when the compute this job holds frees.
 
         The decode starts once its input has landed and runs for the
-        declared latency (the initiation interval on a pipelined unit). A
-        decoder measured on the host clock declares no latency, so its
-        unit stays unpredicted.
+        declared latency. A decoder measured on the host clock declares
+        no latency, so its unit stays unpredicted.
         """
         unit = job.unit
         decoder = self.manager.decoder
@@ -627,116 +565,6 @@ class DecodeService:
             start = max(start, landing)
         free_ticks = start + occupancy
         unit.expect_compute_free(free_ticks)
-
-    # ------------------------------------------------- the pipelined unit
-
-    def _pipeline_of(self, decoder, job: decoding_records.DecodeJob):
-        """(interval, latency, depth) of a pipelined start, else None.
-
-        The row declares both halves and this asks for both. The Decoder
-        port's pipeline_depth is the decodes that may be in flight on
-        one unit, and one is no pipeline; a unit also runs the pipelined
-        model when it accepts work on its own interval rather than at
-        the rate it answers, which is a row whose occupancy differs from
-        its latency (gem5's FuncUnit declares an issue latency beside
-        its op latency, fu_pool.hh; the intake rate is the initiation
-        interval's alone, Hennessy and Patterson App. C). The two agree
-        on every row: a depth above one needs an interval shorter than
-        the latency, which the assert below says. The pipelined model
-        serves the job kinds in PIPELINED_JOB_KINDS; the strong tier and
-        merged batches are not pipelined yet, and a pipelined decoder
-        there refuses loudly rather than silently serializing.
-        """
-        occupancy = decoder.occupancy(job)
-        if occupancy is None:
-            return None
-        latency_ticks = decoder.latency(job)
-        depth = decoder.pipeline_depth(job)
-        accepts_on_its_own_interval = occupancy != latency_ticks
-        if depth == 1 and not accepts_on_its_own_interval:
-            return None
-        assert accepts_on_its_own_interval, (
-            f"decoder for {job.label!r} declares a pipeline depth of "
-            f"{depth} and an occupancy equal to its latency; a depth "
-            "above one needs an intake interval shorter than the answer"
-        )
-        if _is_outside_pipelined_model(job):
-            raise RuntimeError(
-                f"decode job {job.label!r}: a pipelined decoder serves "
-                "window and self-contained decodes only; the strong tier "
-                "and merged batches are not pipelined yet"
-            )
-        return occupancy, latency_ticks, depth
-
-    def _track_pipelined_start(
-        self,
-        job: decoding_records.DecodeJob,
-        latency_ticks: int,
-        interval_ticks: int,
-        depth: int,
-    ) -> None:
-        unit = job.unit
-        unit.add_flight(job, latency_ticks)
-        self.engine.schedule(
-            interval_ticks,
-            lambda: self._initiation_complete(unit, job, depth),
-            label=f"initiation_complete({job.label})",
-        )
-
-    def _initiation_complete(
-        self,
-        unit: decoder_unit_module.DecoderUnit,
-        job: decoding_records.DecodeJob,
-        depth: int,
-    ) -> None:
-        """The pipelined unit's intake is free again.
-
-        Release the compute claim so the next start may begin, unless the
-        pipeline is full; a full pipeline keeps the claim until the next
-        completion.
-        """
-        if unit.pipeline.intake_job is not job:
-            return
-        unit.pipeline.intake_job = None
-        if unit.holder is not job:
-            return
-        if job.cancelled or job.completed:
-            unit.release_compute()
-            self._offer_compute(unit)
-            self.manager.dispatch()
-            return
-        if unit.flight_count() >= depth:
-            unit.stall(job, depth)
-            return
-        unit.release_compute()
-        self._offer_compute(unit)
-        self.manager.dispatch()
-
-    def _end_flight(
-        self, job: decoding_records.DecodeJob, offer_now: bool
-    ) -> None:
-        """A pipelined decode left the unit (done or cancelled).
-
-        Retire its flight and lift a full-pipeline stall. The caller's
-        normal flow performs the compute offer unless offer_now says
-        otherwise.
-        """
-        for unit in self.pool.units:
-            if not unit.take_flight(job):
-                continue
-            self._lift_pipeline_stall(unit, offer_now)
-            return
-
-    def _lift_pipeline_stall(
-        self, unit: decoder_unit_module.DecoderUnit, offer_now: bool
-    ) -> None:
-        owner = unit.lift_stall()
-        if owner is None:
-            return
-        unit.release_compute()
-        if offer_now:
-            self._offer_compute(unit)
-            self.manager.dispatch()
 
 
 def job_defects_text(job: decoding_records.DecodeJob) -> str:
@@ -770,12 +598,6 @@ def is_boundary_owed(job: decoding_records.DecodeJob) -> bool:
     if job.gate is None:
         return False
     return not job.gate.may_start(job)
-
-
-def _is_outside_pipelined_model(job: decoding_records.DecodeJob) -> bool:
-    if job.kind not in PIPELINED_JOB_KINDS:
-        return True
-    return len(job.service_original_request_keys) > 1
 
 
 def _emitted_description(

@@ -38,7 +38,6 @@ import decsim.observe.runtime_stamps as runtime_stamps_module
 import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
-import decsim.observe.syndrome_buffer_occupancy as occupancy_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 
@@ -73,9 +72,6 @@ def observe(
     log = _connect_log(observation, engine)
     links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
     round_events = _connect_round_events(engine, qpu, control, readout)
-    syndrome_buffer_occupancy = _syndrome_buffer_occupancy(
-        observation, engine, readout.weak_syndrome_buffer
-    )
     window_ledger = _connect_window_ledger(window_manager)
     result_ledger = _connect_result_ledger(window_manager)
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
@@ -107,9 +103,6 @@ def observe(
         observation, engine, window_manager, decoder_managers
     )
     decoder_utilization = _decoder_utilization(engine, decoder_managers)
-    decoder_memory_occupancy = _decoder_memory_occupancy(
-        observation, engine, decoder_managers
-    )
     frame_corrections = _frame_corrections(control.pauli_frame)
     burst_flags = _connect_burst_flags(windows.burst_detector)
     return observation_module.Observation(
@@ -130,9 +123,7 @@ def observe(
         sampled_shots=sampled_shots,
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
-        decoder_memory_occupancy=decoder_memory_occupancy,
         round_events=round_events,
-        syndrome_buffer_occupancy=syndrome_buffer_occupancy,
         burst_flags=burst_flags,
         confidence=confidence,
     )
@@ -198,20 +189,6 @@ def _connect_command_events(qpu) -> command_events_module.CommandEvents:
     events = command_events_module.CommandEvents()
     qpu.trace.command_event.connect(events.command_event)
     return events
-
-
-def _syndrome_buffer_occupancy(
-    observation: observe_settings.ObservationSettings,
-    engine: engine_module.Engine,
-    weak_syndrome_buffer,
-):
-    """The weak syndrome buffer's occupancy listener, only when asked."""
-    if not observation.syndrome_buffer_occupancy:
-        return None
-    occupancy = occupancy_module.SyndromeBufferOccupancy(engine)
-    weak_syndrome_buffer.trace.round_stored.connect(occupancy.round_stored)
-    weak_syndrome_buffer.trace.round_released.connect(occupancy.round_released)
-    return occupancy
 
 
 def _trace_writer(
@@ -589,29 +566,6 @@ def _decode_backlog(
     decode_backlog = metrics.DecodeBacklog(window_manager, decoder_managers)
     engine.action_done.connect(decode_backlog.observe)
     return decode_backlog
-
-
-def _decoder_memory_occupancy(
-    observation: observe_settings.ObservationSettings,
-    engine: engine_module.Engine,
-    decoder_managers: tuple,
-) -> Optional[metrics.DecoderMemoryOccupancy]:
-    """The held-bit integral of every unit memory, only when asked for."""
-    if not observation.decoder_memory_occupancy:
-        return None
-    units = []
-    for manager in decoder_managers:
-        units.extend(manager.pool.units)
-    capacity_by_unit = {}
-    for unit in units:
-        capacity_by_unit[unit.name] = unit.memory.capacity_bits
-    occupancy = metrics.DecoderMemoryOccupancy(engine, capacity_by_unit)
-    for unit in units:
-        deposited = functools.partial(occupancy.deposited, unit.name)
-        unit.memory.trace.deposited.connect(deposited)
-        taken = functools.partial(occupancy.taken, unit.name)
-        unit.memory.trace.taken.connect(taken)
-    return occupancy
 
 
 def _connect_log(

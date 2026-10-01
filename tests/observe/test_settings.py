@@ -15,9 +15,7 @@ import tests.observe.gate_point as gate_point
 
 STUDY_KNOBS = (
     "record_switching_windows",
-    "syndrome_buffer_occupancy",
     "backlog_trace",
-    "decoder_memory_occupancy",
     "data_movement",
 )
 
@@ -172,7 +170,7 @@ def test_a_list_of_referees_is_refused_with_the_rows_by_name():
 
 
 def test_every_study_knob_is_read_from_the_section():
-    """The five knobs the Machine builds listeners for are yaml keys."""
+    """The three knobs the Machine builds listeners for are yaml keys."""
     knob_lines = [f"  {knob}: true\n" for knob in STUDY_KNOBS]
     text = "observation:\n" + "".join(knob_lines)
     section = _section(text)
@@ -180,9 +178,7 @@ def test_every_study_knob_is_read_from_the_section():
     settings = observe_settings.ObservationSettings.from_yaml(section)
 
     assert settings.record_switching_windows is True
-    assert settings.syndrome_buffer_occupancy is True
     assert settings.backlog_trace is True
-    assert settings.decoder_memory_occupancy is True
     assert settings.data_movement is True
 
 

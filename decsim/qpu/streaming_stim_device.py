@@ -323,8 +323,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
             bits=bits,
             size_bits=len(bits),
         )
-        partitions = stream.program.partitions_for_round(global_round, is_final)
-        return round_records.partition_measurements(payload, partitions)
+        return [payload]
 
     def _report_finished_shot(self, stream):
         circuit = stream.history.circuit.copy()

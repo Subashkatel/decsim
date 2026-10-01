@@ -343,7 +343,6 @@ One decoder: correctness and timing from one object.
 | `start` | Run the job on the unit; on_result runs once at its output. |
 | `cancel` | Stop a started job; on_result never runs for it. |
 | `occupancy` | Ticks the unit's compute is held from the start; None if measured. |
-| `pipeline_depth` | Decodes that may be in flight on one unit; one is no pipeline. |
 
 ### `StrongBackend`
 

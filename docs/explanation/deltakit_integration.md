@@ -10,7 +10,7 @@ use the same contracts for direct Stim and other producers, so removing
 Deltakit leaves every contract below intact.
 
 The [run guide](../how-to/run_deltakit_workloads.md) covers finite memory,
-live protection, physical idle noise, compiler experiments and SDK-free replay.
+live protection, physical idle noise and SDK-free replay.
 
 ## Inputs and ownership
 
@@ -25,12 +25,8 @@ and reusable fragments:
   preserves physical identity. The final fragment replaces a normal round.
 - `css_memory_rounds` exports a supplied public CSS code, retaining every
   logical observable, including the BB example in the run guide.
-- `bell_memory_rounds` exports two surface blocks with a transversal CNOT and
-  explicit padded cadence, through the same canonical fragment record.
 
-The compiler boundary, `decsim.frontends.deltakit_compiler.compile_experiment`,
-exports the same finite circuit and map pair. All optional SDK calls end at
-these boundaries. Neither a TICK nor a detector coordinate is interpreted as a
+All optional SDK calls end at these boundaries. Neither a TICK nor a detector coordinate is interpreted as a
 round or a physical duration. Unsupported selected inputs fail explicitly.
 
 The finite `StimDevice` preserves its declared horizon. `StreamingStimDevice`
@@ -84,28 +80,16 @@ raw shot.
 ## Capability boundaries
 
 Supported means the tests pin it within the stated scope. It does not
-establish an unrestricted compiler, fault tolerance or a statistical
-logical error rate.
+establish fault tolerance or a statistical logical error rate.
 
 | Capability | Status | What the tests pin | decsim scope |
 | --- | --- | --- | --- |
 | Surface and repetition memory | supported | Noisy finite circuits, explicit maps, same-record Stim detector/observable oracle | Functional decoding and SDK-free supplied-input replay |
 | Live surface protection | supported | One retained state, actual final readout, exact shared-record conversion | Functional decoding with feedback-selected stopping time |
 | Duration-aware memory noise | supported | Native schedule and T1/T2 channels checked against independent formulas | Live physical cadence checked before execution |
-| Compiler memory | supported | Public CircuitBuilder, validated terminal records and logical support | Finite supplied-circuit decoding at distances 3 and 5 |
-| Compiler terminal Hadamard | supported | Both logical bases, conjugate readout, clean and known-fault parity checks | Finite noisy supplied-circuit decoding |
-| High-level LogAsm Hadamard/rotation | not supported | Pinned observable backpropagation rejects these operations | Unsupported through that frontend |
 | Leakage sampling | supported, sampling only | Explicitly allocated Deltakit FlipSimulator preserves heralds and matches whole-circuit execution | Local leakage decoding not supported: the leakage model semantics are unverified |
-| Shared multi-patch streams | supported | Retained joint state and complete-record Stim oracle, including interleaved acquisitions | Whole-group lifetime, strong and weak primary routes |
-| Transversal Bell memory | supported | Initial cross-patch check parities, both bases, d3/d5, explicit physical wait noise | Live two-patch functional decoding; no lattice-surgery claim |
+| Shared multi-patch streams | supported | Retained joint state and complete-record Stim oracle, live and recorded | Whole-group lifetime, strong and weak primary routes |
 | qLDPC/bivariate bicycle | supported, one bounded example | Public [[30,8,2]] CSS code, all eight outputs, undecomposed noisy model | BP-OSD agreement, live feedback and higher-index logical-failure detection |
-
-Compiler Hadamard is transversal H followed immediately by destructive readout
-in the conjugate basis. It does not establish continued extraction in the old
-patch orientation, arbitrary logical programs or preserved code distance.
-The exporter explicitly declares output from public support and validated
-terminal records. It never relabels a detector by position or exposes
-evaluation truth as syndrome.
 
 The live source supports a shared group of physical patches with
 trailing-buffer feedback. One retained state preserves their correlations; one
@@ -146,9 +130,7 @@ analysis inputs completes.
 
 The upstream high-level memory test emits zero observables and a final logical
 check as a detector. Disabling generated flows removes that check without
-supplying a complete returned logical-output mapping. The integrated
-lower-level provider declares output through public measurement handles; it
-does not claim to repair the high-level pipeline.
+supplying a complete returned logical-output mapping.
 
 Ordinary Stim rejects the tested leakage instruction set. The pinned Deltakit
 TableauSimulator accepts leakage instructions but treats them as no-ops, so it
@@ -165,15 +147,14 @@ ordinary decoder. No cloud service or upstream source modification is used.
 
 ## Versions
 
-The `deltakit` and `deltakit-compile` extras in `pyproject.toml` pin
-Explorer 0.9.2, circuit, core and decode 0.9.1, Deltakit-Stim 0.2.5 and
-compiler 0.1.0. The pinned SDK requires Python 3.10 through 3.14, and
+The `deltakit` extra in `pyproject.toml` pins Explorer 0.9.2, circuit,
+core and decode 0.9.1 and Deltakit-Stim 0.2.5. The pinned SDK requires Python 3.10 through 3.14, and
 decsim's own floor is Python 3.10.
 
 ## What changed in the tree
 
-- Frontend modules, optional extras and examples provide canonical export,
-  supported compilation, live execution and reproducible replay.
+- Frontend modules, the optional extra and examples provide canonical export,
+  live execution and reproducible replay.
 - The shared circuit record and live Stim source and model modules preserve
   actual state, explicit cadence, stable fault identities and actual terminal
   models.

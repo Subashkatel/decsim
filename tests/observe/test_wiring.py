@@ -39,9 +39,7 @@ import tests.observe.gate_point as gate_point
 
 EVERY_KNOB = {
     "record_switching_windows": True,
-    "syndrome_buffer_occupancy": True,
     "backlog_trace": True,
-    "decoder_memory_occupancy": True,
     "data_movement": True,
     "trace": "chrome",
 }
@@ -205,17 +203,13 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     assert asked.observation.trace_writer is not None
     assert asked.observation.data_movement is not None
     assert asked.observation.decode_records is not None
-    assert asked.observation.syndrome_buffer_occupancy is not None
     assert asked.observation.decode_backlog is not None
     assert asked.observation.decoder_utilization is not None
-    assert asked.observation.decoder_memory_occupancy is not None
     assert silent.observation.trace_writer is None
     assert silent.observation.data_movement is None
     assert silent.observation.decode_records is None
-    assert silent.observation.syndrome_buffer_occupancy is None
     assert silent.observation.decode_backlog is None
     assert silent.observation.decoder_utilization is not None
-    assert silent.observation.decoder_memory_occupancy is None
 
 
 class PortOnlyDecoder:
@@ -266,10 +260,6 @@ class PortOnlyDecoder:
     def occupancy(self, job) -> int:
         del job
         return self.latency_ticks
-
-    def pipeline_depth(self, job) -> int:
-        del job
-        return 1
 
 
 def _machine_on(decoder, **observation):
@@ -379,9 +369,7 @@ def _bare_observation(
         stages=stages,
         decode_backlog=None,
         decoder_utilization=utilization,
-        decoder_memory_occupancy=None,
         round_events=rounds,
-        syndrome_buffer_occupancy=None,
         referee_audit=audit,
         sampled_shots=shots,
         burst_flags=None,

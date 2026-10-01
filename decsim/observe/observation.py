@@ -31,7 +31,6 @@ import decsim.observe.round_events as round_events_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
 import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.observe.stage_records as stage_records_module
-import decsim.observe.syndrome_buffer_occupancy as occupancy_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 
@@ -55,11 +54,7 @@ class Observation:
     stages: stage_records_module.StageLedger
     decode_backlog: Optional[metrics.DecodeBacklog]
     decoder_utilization: metrics.DecoderUtilization
-    decoder_memory_occupancy: Optional[metrics.DecoderMemoryOccupancy]
     round_events: round_events_module.RoundEventRecorder
-    syndrome_buffer_occupancy: Optional[
-        occupancy_module.SyndromeBufferOccupancy
-    ]
     referee_audit: referee_audit_module.RefereeAudit
     sampled_shots: sampled_shots_module.SampledShots
     burst_flags: Optional[burst_flags_module.BurstFlags]

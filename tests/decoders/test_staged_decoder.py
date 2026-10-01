@@ -1,11 +1,9 @@
 """The decoder unit's laws: staged time around one algorithm.
 
 The stages are data priced in cycles of the unit's clock, the shape of
-XQsim's modeled units (src/XQ-simulator, github.com/SNU-HPCS/XQsim). The
-pipeline laws are Hennessy and Patterson, Computer Architecture,
-Appendix C: a unit with an initiation interval frees its intake one
-interval after a start and keeps ceil(latency / interval) decodes in
-flight, while a unit without one holds its compute for the whole decode.
+XQsim's modeled units (src/XQ-simulator, github.com/SNU-HPCS/XQsim). A
+unit holds its compute for the whole decode, as Hennessy and Patterson,
+Computer Architecture, Appendix C, describe an unpipelined unit.
 The stage cuts are checked against their closed form, the stages summing
 to the whole job's cycles at the clock whatever the partition, and the
 measured algorithm against the host clock of the call it wrapped on a
@@ -366,8 +364,8 @@ def test_a_negative_stage_cost_and_a_zero_period_are_refused():
         staged_decoder.UnitTiming((), (), no_period)
 
 
-def test_the_unpipelined_unit_holds_its_compute_for_the_whole_decode():
-    """Without an initiation interval the unit is busy for its latency.
+def test_the_unit_holds_its_compute_for_the_whole_decode():
+    """The unit is busy for its latency, stages included.
 
     Hennessy and Patterson, Computer Architecture, Appendix C: an
     unpipelined functional unit accepts a new operation only after the
@@ -383,30 +381,6 @@ def test_the_unpipelined_unit_holds_its_compute_for_the_whole_decode():
     whole_job_ticks = stage_ticks + algorithm_ticks
     assert decoder.latency(job) == whole_job_ticks
     assert decoder.occupancy(job) == whole_job_ticks
-    assert decoder.pipeline_depth(job) == 1
-
-
-def test_a_pipelined_unit_frees_its_intake_after_the_initiation_interval():
-    """The interval is the occupancy, and the depth fills the latency.
-
-    Hennessy and Patterson, Computer Architecture, Appendix C: a
-    pipelined unit accepts one operation per initiation interval and
-    holds ceil(latency / interval) of them in flight; a declared depth
-    is a shallower unit than the full pipeline and wins over it.
-    """
-    timing = staged_decoder.UnitTiming(
-        (), (), CLOCK, initiation_interval_us=0.5
-    )
-    inner = decoders.PresetLatencyDecoder(4.0)
-    decoder = staged_decoder.StagedDecoder(inner, timing)
-    job = decode_job(round_count=3)
-    assert decoder.occupancy(job) == config.microseconds_to_ticks(0.5)
-    assert decoder.pipeline_depth(job) == 8
-    declared_timing = staged_decoder.UnitTiming(
-        (), (), CLOCK, initiation_interval_us=0.5, pipeline_depth=3
-    )
-    declared_unit = staged_decoder.StagedDecoder(inner, declared_timing)
-    assert declared_unit.pipeline_depth(job) == 3
 
 
 @pytest.mark.parametrize("start_tick", [0, 1, 3333])
@@ -467,32 +441,6 @@ def test_every_measured_algorithm_holds_the_unit_for_its_own_wall_clock():
     assert len(algorithm) == MEMORY_WINDOW_COUNT
     assert held_ticks == measured_ticks
     assert unit.occupancy(probe_job) is None
-
-
-def test_the_pipeline_parameters_are_refused_where_the_card_is_built():
-    """A card that cannot describe a pipeline is refused at construction.
-
-    A unit's card reaches decsim from a yaml section, so the four shapes
-    that have no reading as a pipeline stop there: an interval that is
-    not positive, one positive interval that rounds to zero ticks at the
-    engine's resolution, a depth below one decode, and a depth on a unit
-    that declared no interval and therefore holds its compute for the
-    whole decode (staged_decoder.py, _check_pipeline).
-    """
-    with pytest.raises(ValueError, match="positive"):
-        staged_decoder.UnitTiming((), (), CLOCK, initiation_interval_us=0.0)
-    with pytest.raises(ValueError, match="rounds to zero"):
-        staged_decoder.UnitTiming((), (), CLOCK, initiation_interval_us=1e-9)
-    with pytest.raises(ValueError, match="at least 1"):
-        staged_decoder.UnitTiming(
-            (),
-            (),
-            CLOCK,
-            initiation_interval_us=1.0,
-            pipeline_depth=0,
-        )
-    with pytest.raises(ValueError, match="needs an initiation_interval_us"):
-        staged_decoder.UnitTiming((), (), CLOCK, pipeline_depth=2)
 
 
 def _job_of_rounds(round_bits) -> decoding_records.DecodeJob:

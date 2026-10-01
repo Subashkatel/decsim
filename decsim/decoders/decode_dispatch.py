@@ -100,13 +100,12 @@ class DecodeDispatcher:
         startable = decoder_unit_module.is_startable(job)
         if not startable and _is_staging_refused(job):
             return None
-        resident_capacity = self.service.resident_capacity(job)
         carries_input = self.service.carries_input(job)
         placement = self.pool.offer(
             job,
             now=self.service.engine.now,
             carries_input=carries_input,
-            resident_capacity=resident_capacity,
+            resident_capacity=decoder_unit_module.INPUT_SLOT_COUNT,
             memory_demand_of=self.service.memory_demand,
             input_is_on_the_unit=self.service.input_is_on_the_unit,
         )

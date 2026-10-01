@@ -11,9 +11,9 @@ job.
 A decoder fills the `Decoder` port (`decsim/ports.py`;
 [The ports](../reference/ports.md) lists its methods and members). The shortest
 way is to inherit `DecoderBase` from `decsim/decoders/decoder.py`, which
-gives you the port's defaults: `start`, `cancel`, `occupancy`,
-`pipeline_depth`, a default for every member a row answers, and the
-wall-clock measurement around your call. Then your class is two methods:
+gives you the port's defaults: `start`, `cancel`, `occupancy`, a
+default for every member a row answers, and the wall-clock measurement
+around your call. Then your class is two methods:
 
 ```python
 class MyDecoder(decoder.DecoderBase):

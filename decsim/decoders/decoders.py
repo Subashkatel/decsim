@@ -2,9 +2,7 @@
 
 A row on the Decoder port (ports.py, the defaults in decoder.py):
 latency(job) prices one window job's compute as a service time in
-ticks, and decode(job) produces an empty DecodeResult. A pipelined unit
-is the staged decoder's timing (staged_decoder.py, UnitTiming), not a
-decoder.
+ticks, and decode(job) produces an empty DecodeResult.
 """
 
 import decsim.config as config

@@ -49,11 +49,7 @@ def test_the_strong_region_is_commit_plus_two_buffers_from_the_commit_start():
 
 
 def test_width_zero_restart_reads_no_round_of_the_strong_region():
-    """Width 0: the restart begins at the round after the strong region.
-
-    It shares no round with the strong region, so it owns the faults of
-    the rounds it reads.
-    """
+    """Width 0: the restart begins at the round after the strong region."""
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(
         0, boundary_payload
@@ -64,18 +60,10 @@ def test_width_zero_restart_reads_no_round_of_the_strong_region():
 
     assert plan.commit_hi == 9
     assert plan.restart_buffer_lo == 10
-    assert (
-        plan.restart_seam_fault_owner
-        is window_records.SeamFaultOwner.RESTART_WINDOW
-    )
 
 
 def test_one_buffer_region_of_re_read_reaches_back_into_the_strong_region():
-    """Width 1: the restart's buffer start is one buffer region back.
-
-    The re-read rounds are read twice, and the strong region, which
-    decoded them with both boundaries determined, keeps their faults.
-    """
+    """Width 1: the restart's buffer start is one buffer region back."""
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(
         1, boundary_payload
@@ -86,10 +74,6 @@ def test_one_buffer_region_of_re_read_reaches_back_into_the_strong_region():
 
     assert plan.commit_hi == 9
     assert plan.restart_buffer_lo == 7
-    assert (
-        plan.restart_seam_fault_owner
-        is window_records.SeamFaultOwner.STRONG_REGION
-    )
 
 
 def test_a_re_read_never_reaches_before_the_strong_regions_commit_start():
@@ -118,7 +102,6 @@ def test_a_strong_region_at_the_operations_end_has_no_restart_window():
 
     assert plan.commit_hi == 12
     assert plan.restart_buffer_lo is None
-    assert plan.restart_seam_fault_owner is None
 
 
 def _delivery(defects: dict, destination) -> window_records.BoundaryDelivery:

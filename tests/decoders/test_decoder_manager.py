@@ -17,7 +17,6 @@ import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
-import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -29,10 +28,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
-
-# a 1 MHz unit clock; these units declare no stage, so the period only
-# has to be a real one
-UNIT_CLOCK = config.Clock(1_000_000)
 
 
 class FixedRow(decoder_module.DecoderBase):
@@ -295,44 +290,6 @@ def test_the_rounds_before_are_held_by_the_tier_and_not_deposited():
     assert [fragment.round_index for fragment in deposited] == [2]
     assert deposited[0].bits == (0,)
     assert job.rounds_before == ()
-
-
-def test_an_escalation_routed_to_a_pipelined_unit_is_refused():
-    """The strong escalation tier is not pipelined yet, so it refuses.
-
-    A pipelined route serves plain window and external decodes only; a
-    strong re-decode, a gap's second solve and a merged batch keep occupancy
-    equal to latency until they get their own design pass, and routing
-    one to a pipelined unit would silently serialize it instead of
-    honoring the declared card (decode_service.py, _pipeline_of). The
-    escalation request is the one a switching run submits: it names the
-    destination window it re-decodes and asks for the strong pool.
-    """
-    engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming(
-        (), (), UNIT_CLOCK, initiation_interval_us=1.0
-    )
-    algorithm = FixedRow()
-    strong = staged_decoder.StagedDecoder(algorithm, timing)
-    scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
-    pool_settings = decoder_pool.PoolSettings(name="strong", unit_count=1)
-    manager = decoder_manager.DecoderManager(
-        engine,
-        scheduler=scheduler,
-        pool_settings=pool_settings,
-    )
-    manager.strong_requests = strong_requests_module.StrongRequests()
-    manager.escalation_policy = policy
-    manager.decoder = strong
-    job = _window_job()
-    job.kind = decoding_records.DecodeJobKind.STRONG_REDECODE
-    job.strong_decode_for = (1, 0)
-    job.request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 0
-    )
-    with pytest.raises(RuntimeError, match="not pipelined yet"):
-        manager.enqueue(job, None, lambda _job, _result: None)
 
 
 class UnpinnableRow(FixedRow):

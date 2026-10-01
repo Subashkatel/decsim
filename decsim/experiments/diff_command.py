@@ -1,13 +1,17 @@
 """`decsim diff`: how two run folders differ."""
 
 import argparse
+import dataclasses
 import json
 import math
 import pathlib
 import statistics
 from typing import Optional
 
+import numpy
+
 import decsim.collect as collect
+import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
@@ -49,7 +53,35 @@ SHOT_COLUMN_OF_MEAN = {"windows_per_shot": "decoded_windows"}
 AGREEMENT_STANDARD_ERRORS = 1.96
 
 
-def diff(first: pathlib.Path, second: pathlib.Path) -> list:
+@dataclasses.dataclass(frozen=True)
+class PairedComparison:
+    """One point's failures in two folders on the shots both decoded.
+
+    The field names are the columns of the csv `--out` writes, with the
+    point's swept values after point_id, as sweep.csv has them. point_id
+    is the point's id in the first folder, so a row joins that folder's
+    sweep.csv. The shared shots are seed 0 up to where the shorter
+    prefix stopped, and a pair is a shared shot both points scored. A
+    shared shot whose sample_digest differs was a different draw in each
+    folder, so a point with any such shot is not paired and its paired
+    fields are None. The difference of rates is the first's minus the
+    second's.
+    """
+
+    point_id: str
+    second_point_id: str
+    shared_shot_count: int
+    digest_mismatch_count: int
+    unscored_shot_count: int
+    scored_pair_count: Optional[int] = None
+    first_only_failure_count: Optional[int] = None
+    second_only_failure_count: Optional[int] = None
+    is_mixture_difference: Optional[bool] = None
+    difference_low: Optional[float] = None
+    difference_high: Optional[float] = None
+
+
+def diff(first: pathlib.Path, second: pathlib.Path) -> tuple:
     """How two run folders differ: settings, inputs by hash, then results.
 
     A point is matched by its metadata, the values its sweep set, so two
@@ -61,15 +93,22 @@ def diff(first: pathlib.Path, second: pathlib.Path) -> list:
     shots (shots.csv), which is where a decoder's measured wall clock
     moves a tick column between two runs of one yaml. A column with no
     error bar is compared exactly.
+
+    Each shared point is also compared shot by shot (PairedComparison),
+    on a line after its results, because two runs whose rates agree can
+    still differ on the shots they share.
+
+    Returns:
+        The lines, and one PairedComparison per point both folders hold.
     """
     _refuse_a_folder_without_points(first)
     _refuse_a_folder_without_points(second)
     lines = _settings_lines(first, second)
     input_lines = _input_lines(first, second)
     lines.extend(input_lines)
-    result_lines = _result_lines(first, second)
+    result_lines, paired = _result_lines(first, second)
     lines.extend(result_lines)
-    return lines
+    return lines, paired
 
 
 def main(argv: list) -> None:
@@ -77,12 +116,27 @@ def main(argv: list) -> None:
     parser = argparse.ArgumentParser(prog="decsim diff")
     parser.add_argument("first", help="the first run folder")
     parser.add_argument("second", help="the run folder to compare it with")
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="write each shared point's paired comparison to this csv",
+    )
     parsed = parser.parse_args(argv)
     first = pathlib.Path(parsed.first)
     second = pathlib.Path(parsed.second)
-    lines = diff(first, second)
+    lines, paired = diff(first, second)
     text = "\n".join(lines)
     print(text)
+    if parsed.out is None:
+        return
+    rows = [dataclasses.asdict(comparison) for comparison in paired]
+    # every point of the first folder names the swept paths, so the csv
+    # keeps sweep.csv's columns when the second folder holds fewer points
+    first_rows = _rows_by_metadata(first)
+    first_point_ids = [row["point_id"] for row in first_rows.values()]
+    swept = run_folder.swept_values(first, first_point_ids)
+    out = pathlib.Path(parsed.out)
+    report.write_csv(rows, out, swept)
 
 
 def _refuse_a_folder_without_points(run_dir: pathlib.Path) -> None:
@@ -133,29 +187,47 @@ def _input_lines(first: pathlib.Path, second: pathlib.Path) -> list:
     return _or_same(lines)
 
 
-def _result_lines(first: pathlib.Path, second: pathlib.Path) -> list:
-    """Each point's sweep.csv columns that differ, with their verdict."""
+def _result_lines(first: pathlib.Path, second: pathlib.Path) -> tuple:
+    """Each point's sweep.csv columns that differ, with their verdict.
+
+    Returns:
+        The section's lines, and each shared point's PairedComparison.
+    """
     first_rows = _rows_by_metadata(first)
     second_rows = _rows_by_metadata(second)
     lines = ["results:"]
     unmatched = _unmatched_lines(first_rows, second_rows)
     lines.extend(unmatched)
+    paired = []
     for point in _shared(first_rows, second_rows):
         first_row = first_rows[point]
         second_row = second_rows[point]
         first_shots = _shot_rows_of(first, first_row["point_id"])
         second_shots = _shot_rows_of(second, second_row["point_id"])
+        point_paired = _paired_comparison(
+            first_row, second_row, first_shots, second_shots
+        )
+        paired.append(point_paired)
         comparison = _Comparison(point, first_shots, second_shots)
         point_lines = comparison.lines(first_row, second_row)
         lines.extend(point_lines)
-    return _or_same(lines)
+        if _fail_alike(point_paired):
+            continue
+        point_text = _point_text(point)
+        paired_line = _paired_line(point_text, point_paired)
+        lines.append(paired_line)
+    section = _or_same(lines)
+    return section, paired
 
 
 class _Comparison:
     """One point's results in two folders, and the error bars of each."""
 
     def __init__(
-        self, point: str, first_shots: list, second_shots: list
+        self,
+        point: str,
+        first_shots: list,
+        second_shots: list,
     ) -> None:
         self.point_text = _point_text(point)
         self.first_shots = first_shots
@@ -192,6 +264,180 @@ class _Comparison:
         if gap <= AGREEMENT_STANDARD_ERRORS * spread:
             return "within error bars"
         return "beyond error bars"
+
+
+def _paired_comparison(
+    first_row: dict,
+    second_row: dict,
+    first_shots: list,
+    second_shots: list,
+) -> PairedComparison:
+    """The point's failures in the two folders, shot by shot.
+
+    A prefix runs from seed 0 to its stop (sweep.csv's prefix_shots),
+    so the seeds both folders hold run to where the shorter stopped,
+    itself a stop of the pair. The mixture test and the difference
+    sequence hold at any stop (failure_statistics), so pairs cut there
+    keep their 95 percent guarantee, whether a point stopped at a
+    failure target or at a fixed shot count.
+    """
+    stop = min(first_row["prefix_shots"], second_row["prefix_shots"])
+    first_by_seed = _shots_by_seed(first_shots, stop)
+    second_by_seed = _shots_by_seed(second_shots, stop)
+    first_held = _contiguous_seed_count(first_by_seed)
+    second_held = _contiguous_seed_count(second_by_seed)
+    shared_shot_count = min(first_held, second_held)
+    (
+        digest_mismatch_count,
+        unscored_shot_count,
+        first_failures,
+        second_failures,
+    ) = _shared_seeds(first_by_seed, second_by_seed, shared_shot_count)
+    unpaired = PairedComparison(
+        point_id=first_row["point_id"],
+        second_point_id=second_row["point_id"],
+        shared_shot_count=shared_shot_count,
+        digest_mismatch_count=digest_mismatch_count,
+        unscored_shot_count=unscored_shot_count,
+    )
+    if digest_mismatch_count:
+        return unpaired
+    return _with_paired_statistics(unpaired, first_failures, second_failures)
+
+
+def _shots_by_seed(shot_rows: list, stop: int) -> dict:
+    """A piece can run on past its point's stop; those shots never pair."""
+    by_seed = {}
+    for row in shot_rows:
+        if row["seed"] < stop:
+            by_seed[row["seed"]] = row
+    return by_seed
+
+
+def _contiguous_seed_count(by_seed: dict) -> int:
+    """A shots.csv cut by hand ends at its first missing seed.
+
+    The fold reads a prefix the same way (collection.PrefixTracker).
+    """
+    count = 0
+    while count in by_seed:
+        count += 1
+    return count
+
+
+def _shared_seeds(
+    first_by_seed: dict, second_by_seed: dict, shared_shot_count: int
+) -> tuple:
+    """Digest mismatches, unscored shots, and each pair's two failures.
+
+    A shot either folder left unscored got no correction there, so it
+    has no failure bit to pair and is counted apart.
+    """
+    digest_mismatch_count = 0
+    unscored_shot_count = 0
+    first_failures = []
+    second_failures = []
+    for seed in range(shared_shot_count):
+        first_shot = first_by_seed[seed]
+        second_shot = second_by_seed[seed]
+        if first_shot["sample_digest"] != second_shot["sample_digest"]:
+            digest_mismatch_count += 1
+        if not first_shot["is_scored"] or not second_shot["is_scored"]:
+            unscored_shot_count += 1
+            continue
+        first_failures.append(first_shot["logical_failure"])
+        second_failures.append(second_shot["logical_failure"])
+    return (
+        digest_mismatch_count,
+        unscored_shot_count,
+        first_failures,
+        second_failures,
+    )
+
+
+def _with_paired_statistics(
+    unpaired: PairedComparison, first_failures: list, second_failures: list
+) -> PairedComparison:
+    """The mixture test reads only the discordant pairs, the interval all.
+
+    A pair both runs failed or both survived moves no evidence; it
+    enters the interval as a difference of zero.
+    """
+    first = numpy.asarray(first_failures, dtype=bool)
+    second = numpy.asarray(second_failures, dtype=bool)
+    first_survived = ~first
+    second_survived = ~second
+    first_only = first & second_survived
+    second_only = second & first_survived
+    first_only_count = numpy.count_nonzero(first_only)
+    second_only_count = numpy.count_nonzero(second_only)
+    first_only_failure_count = int(first_only_count)
+    second_only_failure_count = int(second_only_count)
+    is_difference = failure_statistics.is_mixture_difference(
+        first_only_failure_count, second_only_failure_count
+    )
+    interval = failure_statistics.difference_sequence(first, second)
+    low = None
+    high = None
+    if interval is not None:
+        low, high = interval
+    return dataclasses.replace(
+        unpaired,
+        scored_pair_count=len(first),
+        first_only_failure_count=first_only_failure_count,
+        second_only_failure_count=second_only_failure_count,
+        is_mixture_difference=is_difference,
+        difference_low=low,
+        difference_high=high,
+    )
+
+
+def _fail_alike(paired: PairedComparison) -> bool:
+    """Whether every pair failed in both runs or in neither.
+
+    Two runs of one yaml decode the same shots to the same answers, and
+    a line saying so on every point would bury the lines that differ.
+    """
+    if paired.digest_mismatch_count or paired.unscored_shot_count:
+        return False
+    if not paired.scored_pair_count:
+        return False
+    discordant_count = (
+        paired.first_only_failure_count + paired.second_only_failure_count
+    )
+    return discordant_count == 0
+
+
+def _paired_line(point_text: str, paired: PairedComparison) -> str:
+    """The paired comparison in words: differ, or no difference shown.
+
+    The line names its population, the shots both runs scored among the
+    shared seeds, because a run's own rate in sweep.csv also counts the
+    shots past the shorter stop and the shots the other left unscored.
+    """
+    if paired.digest_mismatch_count:
+        return (
+            f"  {point_text} not paired: {paired.digest_mismatch_count} of "
+            f"{paired.shared_shot_count} shared shots hold a different "
+            "sample_digest, so the two points did not decode the same shots"
+        )
+    verdict = "no difference shown"
+    if paired.is_mixture_difference:
+        verdict = "differ"
+    interval = "has no interval, with no pair"
+    if paired.difference_low is not None:
+        interval = (
+            f"is in [{paired.difference_low:.6g}, {paired.difference_high:.6g}]"
+        )
+    return (
+        f"  {point_text} paired on the {paired.scored_pair_count} shots both "
+        f"runs scored of {paired.shared_shot_count} shared shots "
+        f"({paired.unscored_shot_count} unscored in either run, left out): "
+        f"{paired.first_only_failure_count} failed in the first only, "
+        f"{paired.second_only_failure_count} in the second only; {verdict} by "
+        "the mixture test; on these pairs, not the whole runs, the failure "
+        f"rate of the first minus the second {interval}"
+    )
 
 
 def _shot_column_of(column: str) -> Optional[str]:

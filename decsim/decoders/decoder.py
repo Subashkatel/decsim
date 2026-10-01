@@ -39,14 +39,14 @@ class DecoderBase(abc.ABC):
     a decoder whose occupancy is None is measured instead: decode_timed
     runs now and the result is delivered after the ticks the decode
     says, the host clock's by default (ticks_after_decode), or a row's
-    own cycle count of it. cancel does nothing, occupancy is latency, and
-    the pipeline depth is one: the unit holds compute for the whole
-    decode. stage_recorded is the port's stage source (data_path.md
-    section 5's data-side callback): a row with internal stages replaces
-    it with one of its own and fires a record per stage, and a row
-    without leaves this silent one, so the machine connects the stage
-    listeners to every row by name. window_checked is the same shape for
-    a row that audits its own answer against a referee.
+    own cycle count of it. cancel does nothing, and occupancy is latency:
+    the unit holds compute for the whole decode. stage_recorded is the
+    port's stage source (data_path.md section 5's data-side callback): a
+    row with internal stages replaces it with one of its own and fires a
+    record per stage, and a row without leaves this silent one, so the
+    machine connects the stage listeners to every row by name.
+    window_checked is the same shape for a row that audits its own
+    answer against a referee.
     """
 
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
@@ -99,11 +99,6 @@ class DecoderBase(abc.ABC):
     def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """Ticks the unit's compute is held from the start; None if measured."""
         return self.latency(job)
-
-    def pipeline_depth(self, job: decoding_records.DecodeJob) -> int:
-        """Decodes that may be in flight on one unit; one is no pipeline."""
-        del job
-        return 1
 
     def decode_timed(self, job: decoding_records.DecodeJob) -> tuple:
         """(result, nanoseconds the decode took on the host clock)."""

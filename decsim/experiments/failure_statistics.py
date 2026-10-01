@@ -20,8 +20,9 @@ import scipy.stats
 # e-Handbook 7.2.4.1).
 LOWER_QUANTILE = 0.025
 UPPER_QUANTILE = 0.975
-# Ville's inequality: a nonnegative martingale of mean one reaches 1/alpha
-# with chance at most alpha, at any seed (Howard et al. Lemma 3).
+# Ville's inequality (Ville 1939): a nonnegative martingale of mean one
+# ever reaches 1/alpha with chance at most alpha; Howard et al. Lemma 3
+# makes that the same as reaching it at any stopping time.
 MIXTURE_EVIDENCE_LEVEL = 20.0
 LOG_MIXTURE_EVIDENCE_LEVEL = math.log(MIXTURE_EVIDENCE_LEVEL)
 LOG_HALF = math.log(0.5)
@@ -181,24 +182,6 @@ def per_output_round_rate(shot_rate: float, outputs: int, rounds: int) -> float:
     return per_round_rate(output_rate, rounds)
 
 
-def mcnemar_p_value(
-    first_only_failures: int, second_only_failures: int
-) -> float:
-    """The exact two-sided McNemar p-value on a paired count fixed in advance.
-
-    McNemar (Psychometrika 12, 1947): with no difference, each discordant
-    seed (one point failed, the other did not) is a fair coin, so the
-    smaller count is Binomial(discordant_count, 1/2); the two-sided value
-    doubles its tail, at most one. Valid only when the paired count was
-    fixed before the run; any other stop takes the mixture sequence.
-    """
-    discordant_count = first_only_failures + second_only_failures
-    smaller = min(first_only_failures, second_only_failures)
-    tail = scipy.stats.binom.cdf(smaller, discordant_count, 0.5)
-    doubled_tail = 2 * tail
-    return float(min(doubled_tail, 1.0))
-
-
 def is_mixture_difference(
     first_only_failures: int, second_only_failures: int
 ) -> bool:
@@ -209,8 +192,9 @@ def is_mixture_difference(
     first point is the one failing on a discordant seed:
     M(1/2) = B(a + 1, b + 1) / (B(1, 1) (1/2)^(a + b)), where B(1, 1) is
     one. Under the null, each discordant sign a fair coin given every
-    earlier seed, M is a nonnegative martingale of mean one, so it
-    reaches 20 at any seed with chance at most 0.05 (Lemma 3).
+    earlier seed, M is a nonnegative martingale of mean one, so it ever
+    reaches 20 with chance at most 0.05 (Ville 1939), and so at any stop
+    (Lemma 3).
 
     B(a + 1, b + 1) = 1 / ((n + 1) C(n, a)), so log M is -log(n + 1)
     minus the log of the fair-coin probability of the counts, taken in

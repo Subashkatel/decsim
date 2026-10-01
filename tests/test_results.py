@@ -653,6 +653,24 @@ def test_the_paired_csv_gives_each_swept_path_its_own_column(tmp_path, capsys):
     assert paired_swept_by_point == swept_by_point
 
 
+def test_shots_scored_differently_print_their_paired_line(
+    runs, tmp_path, capsys
+):
+    """No failure anywhere, but each run left a different shot unscored."""
+    first = _paired_folder(
+        runs["first"], tmp_path, "first", (), unscored_seeds=(2,)
+    )
+    second = _paired_folder(
+        runs["first"], tmp_path, "second", (), unscored_seeds=(1,)
+    )
+
+    lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    paired_line = _line_with(lines, " paired on ")
+    assert row["unscored_shot_count"] == "2"
+    assert " (2 unscored in either run, left out): " in paired_line
+
+
 def _failing_seeds(first_only: int, second_only: int) -> tuple:
     """Both fail the shared seeds, then the first its own, then the second."""
     first_start = len(SHARED_FAILING_SEEDS)

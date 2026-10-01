@@ -395,7 +395,9 @@ def _fail_alike(paired: PairedComparison) -> bool:
     Two runs of one yaml decode the same shots to the same answers, and
     a line saying so on every point would bury the lines that differ.
     """
-    if paired.digest_mismatch_count or not paired.scored_pair_count:
+    if paired.digest_mismatch_count or paired.unscored_shot_count:
+        return False
+    if not paired.scored_pair_count:
         return False
     discordant_count = (
         paired.first_only_failure_count + paired.second_only_failure_count

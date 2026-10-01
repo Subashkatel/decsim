@@ -282,9 +282,9 @@ def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
     earlier round it lands in the first round, no further back. The
     count is fixed by the program's text, not its outcomes, so a stream
     keeps that many rounds as gem5's TAGE keeps its last maxHist
-    outcomes (src/cpu/pred/tage_base.cc:310-313). round_width is
-    positive: after rounds that measure nothing a record lies a round
-    further back each round, and no count bounds it. An observable's
+    outcomes (src/cpu/pred/tage_base.cc:310-313). After rounds that
+    measure nothing a record lies a round further back each round and no
+    count bounds it, so such a read is refused by name. An observable's
     records are not counted: they fold into a running parity as their
     round arrives (form_shot), so no seat keeps a round for them.
     """
@@ -902,4 +902,11 @@ def _rounds_back(before_start: int, round_width: int) -> int:
     """How many rounds back a record before_start measurements back lies."""
     if before_start <= 0:
         return 0
+    if round_width == 0:
+        raise ValueError(
+            "a detector reads a record from before its round, but the "
+            "repeated round measures nothing, so the record lies a round "
+            "further back every round and no stream can keep it; give the "
+            "repeated round a measurement"
+        )
     return -(-before_start // round_width)

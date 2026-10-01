@@ -924,3 +924,18 @@ def _first_round_observed_circuit() -> stim.Circuit:
         "M 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\n"
         "OBSERVABLE_INCLUDE(0) rec[-1]"
     )
+
+
+def test_a_read_back_past_rounds_that_measure_nothing_is_refused():
+    """After empty rounds a record lies further back every round."""
+    reads_before = stim.Circuit("DETECTOR rec[-1]")
+
+    with pytest.raises(ValueError) as refusal:
+        detector_formation.rounds_read_back(reads_before, 0)
+
+    assert str(refusal.value) == (
+        "a detector reads a record from before its round, but the "
+        "repeated round measures nothing, so the record lies a round "
+        "further back every round and no stream can keep it; give the "
+        "repeated round a measurement"
+    )

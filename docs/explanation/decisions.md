@@ -1286,6 +1286,9 @@ final fragments when the stream is declared (`rounds_read_back`,
 `live_reach`), since the controller holds the program before it runs a
 round and a detector's lookbacks are fixed by the circuit, so whichever
 fragment runs next, last or not, finds its rounds. A program whose
+repeated round measures nothing and still reads back is refused when
+the stream is declared, since its record lies a round further back
+every round and no count bounds it. A program whose
 `round_circuit` reaches further on some round than its declared
 fragments loses the round it reads there, and the run stops where that
 round would be formed (its former does not hold it) or read from the

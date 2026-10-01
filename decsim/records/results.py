@@ -55,15 +55,19 @@ class UnitTask(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class UnitOutcome:
-    """What one unit ran: its measured rows, its task, its memory.
+    """What one unit ran: its rows, its task, its memory, its packages.
 
     task is the task as the unit left it, its online calibrator after
     the unit's shots. peak_memory_mb is the peak resident memory of the
     process that ran the unit, read when the unit ended. A worker runs
     units one after another, so it bounds the unit's own peak from
-    above, which is the side a memory request needs.
+    above, which is the side a memory request needs. module_versions
+    maps each third-party top-level module that process had imported
+    when the unit ended to its version, read there because a decoder's
+    package loads in the process that decodes.
     """
 
     rows: list
     task: UnitTask
     peak_memory_mb: float
+    module_versions: dict

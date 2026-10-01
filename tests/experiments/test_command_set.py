@@ -833,24 +833,50 @@ def test_a_piece_records_the_interpreter_packages_and_slurm_task(
     assert piece["slurm_array_task_id"] == "7"
 
 
-def test_a_module_with_no_version_of_its_own_is_named_by_its_distribution(
-    monkeypatch,
+def test_a_pooled_piece_names_the_decoder_package_its_worker_loaded(
+    tmp_path, monkeypatch
 ):
-    versionless = types.ModuleType("relay_bp")
-    monkeypatch.setitem(sys.modules, "relay_bp", versionless)
+    """relay_bp loads in the worker that decodes, not in the saving parent.
 
-    identity = run_folder.piece_identity()
-
-    distribution_version = importlib.metadata.version("relay-bp")
-    assert identity["packages"]["relay_bp"] == distribution_version
-
-
-def test_a_module_the_run_never_imported_has_no_version(monkeypatch):
+    The referent is the version relay-bp's installed distribution states,
+    since the module states none of its own.
+    """
     monkeypatch.delitem(sys.modules, "relay_bp", raising=False)
+    weak_decoder = dict(yaml_configs.MINIMAL_CONFIG["weak_decoder"])
+    weak_decoder["kind"] = "relay_bp"
+    config_path = yaml_configs.write_config(
+        tmp_path, {"weak_decoder": weak_decoder}
+    )
+    out_dir = tmp_path / "out"
+    pooled = ["collect", str(config_path), "--out", str(out_dir)]
 
-    identity = run_folder.piece_identity()
+    command.main([*pooled, "--processes", "2"])
 
-    assert identity["packages"]["relay_bp"] is None
+    pieces_dir = out_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    distribution_version = importlib.metadata.version("relay-bp")
+    assert "relay_bp" not in sys.modules
+    assert piece["packages"]["relay_bp"] == distribution_version
+
+
+def test_a_module_that_states_its_version_is_named_by_it(monkeypatch):
+    stated = types.ModuleType("example_package")
+    stated.__version__ = "3.1.4"
+    monkeypatch.setitem(sys.modules, "example_package", stated)
+
+    versions = collect.imported_module_versions()
+
+    assert versions["example_package"] == "3.1.4"
+
+
+def test_the_standard_library_and_submodules_are_left_out():
+    versions = collect.imported_module_versions()
+
+    assert "json" not in versions
+    assert "stim" in versions
+    assert "decsim.collect" not in versions
 
 
 def test_a_piece_names_the_processor_linux_lists(tmp_path, monkeypatch):

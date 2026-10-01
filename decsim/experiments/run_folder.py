@@ -48,19 +48,6 @@ CONFIGURATION_COLUMNS = ("configuration_id", "name", "config_chain")
 # whose interpreter has no git of its own (a job script exports it):
 # "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
-# the modules whose versions every piece names, each with the
-# distribution importlib.metadata knows it by. A module's own __version__
-# is read first, since a folder of packages can hold a dist-info stale
-# against the module beside it; the distribution is read only for one
-# that states none (relay_bp). decsim's own version is the commit.
-RUN_MODULES = {
-    "numpy": "numpy",
-    "pymatching": "PyMatching",
-    "relay_bp": "relay-bp",
-    "scipy": "scipy",
-    "sinter": "sinter",
-    "stim": "stim",
-}
 # where Linux names the processor; another system's piece records the
 # word platform.processor gives
 PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
@@ -237,20 +224,19 @@ def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
 def piece_identity() -> dict:
     """What a piece records of the process that ran it: code, host, job.
 
-    Beside the commit, a rerun needs the interpreter and the packages
-    that sampled and decoded, and the processor that set the seconds a
-    shot; the array job and task name the Slurm task that ran it, which
-    the round's plan.csv maps back to its pieces.
+    Beside the commit, a rerun needs the interpreter and the processor
+    that set the seconds a shot; the array job and task name the Slurm
+    task that ran it, which the round's plan.csv maps back to its
+    pieces. The package versions come from the process that ran the
+    shots, with its measurements (collect.imported_module_versions).
     """
     commit, is_dirty = _tree_reading()
     python_version = platform.python_version()
-    packages = _run_module_versions()
     processor_model = _processor_model()
     return {
         "commit": commit,
         "dirty": is_dirty,
         "python": python_version,
-        "packages": packages,
         "host": platform.node(),
         "processor_model": processor_model,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
@@ -968,25 +954,6 @@ def _packed_reference(packed: pathlib.Path, reference: str) -> Optional[str]:
             words = line.split()
             return words[0]
     return None
-
-
-def _run_module_versions() -> dict:
-    """Each of RUN_MODULES's version, by module name."""
-    versions = {}
-    for module_name, distribution_name in RUN_MODULES.items():
-        version = _module_version(module_name, distribution_name)
-        versions[module_name] = version
-    return versions
-
-
-def _module_version(module_name: str, distribution_name: str) -> Optional[str]:
-    """The imported module's version; None for one this run never imported."""
-    module = sys.modules.get(module_name)
-    if module is None:
-        return None
-    if hasattr(module, "__version__"):
-        return module.__version__
-    return importlib.metadata.version(distribution_name)
 
 
 def _processor_model() -> str:

@@ -25,6 +25,7 @@ import concurrent.futures
 import dataclasses
 import enum
 import hashlib
+import importlib.metadata
 import json
 import numbers
 import pathlib
@@ -161,7 +162,28 @@ def run_unit(
         row = measure(shot)
         rows.append(row)
     peak_memory_mb = _peak_memory_mb()
-    return result_records.UnitOutcome(rows, unit.task, peak_memory_mb)
+    module_versions = imported_module_versions()
+    return result_records.UnitOutcome(
+        rows, unit.task, peak_memory_mb, module_versions
+    )
+
+
+def imported_module_versions() -> dict:
+    """Each third-party top-level module this process imported, its version.
+
+    A module's own __version__ is read first, since a folder of packages
+    can hold a dist-info stale against the module beside it; a module
+    that states none is named by the distribution that installed it
+    (relay_bp states none). The standard library, submodules and a
+    module neither names are left out.
+    """
+    distributions_by_module = importlib.metadata.packages_distributions()
+    versions = {}
+    for name in sorted(sys.modules):
+        version = _module_version(name, distributions_by_module)
+        if version is not None:
+            versions[name] = version
+    return versions
 
 
 def unique_tasks(tasks: Iterable[Task]) -> list:
@@ -240,6 +262,22 @@ def _peak_memory_mb() -> float:
     if sys.platform == "darwin":
         kilobytes = usage.ru_maxrss / 1024
     return kilobytes / 1024
+
+
+def _module_version(
+    name: str, distributions_by_module: Mapping
+) -> Optional[str]:
+    """One module's version, or None for a module the record leaves out."""
+    if "." in name or name in sys.stdlib_module_names:
+        return None
+    module = sys.modules[name]
+    stated = getattr(module, "__version__", None)
+    if isinstance(stated, str):
+        return stated
+    distributions = distributions_by_module.get(name)
+    if not distributions:
+        return None
+    return importlib.metadata.version(distributions[0])
 
 
 def _unit_outcomes(units: list, measure: Callable[[Shot], Any], processes: int):

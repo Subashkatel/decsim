@@ -853,7 +853,8 @@ def _save_the_piece(
     facts are the lines every piece of the run takes in piece.json: its
     configuration id, and a planned piece's round and task. The piece
     counts the rounds its shots ran, since a shot's cost grows with its
-    rounds, and the peak memory of the process that ran it. An adaptive
+    rounds, and the peak memory and the package versions of the process
+    that ran it. An adaptive
     point's piece keeps its calibrator as the unit's shots left it.
     """
     point_id = unit.task.strong_id()
@@ -863,6 +864,7 @@ def _save_the_piece(
         **facts,
         "rounds": rounds,
         "peak_memory_mb": outcome.peak_memory_mb,
+        "packages": outcome.module_versions,
     }
     state = unit.task.online_threshold
     pieces.write(

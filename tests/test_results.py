@@ -572,12 +572,14 @@ def test_equal_rates_still_print_the_paired_difference(runs, tmp_path, capsys):
 
 def test_the_paired_csv_gives_each_swept_path_its_own_column(tmp_path, capsys):
     """The csv starts as sweep.csv does: point_id, then each swept path."""
-    run_dir = _collected(tmp_path / "two_axes", {"sweep": TWO_AXIS_SWEEP})
+    folder = tmp_path / "two_axes"
+    run_dir = _collected(folder, {"sweep": TWO_AXIS_SWEEP})
     out = tmp_path / "paired.csv"
     command.main(["diff", str(run_dir), str(run_dir), "--out", str(out)])
     capsys.readouterr()
 
-    sweep_rows = _csv_rows(run_dir / "sweep.csv")
+    sweep_path = run_dir / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
     paired_rows = _csv_rows(out)
     paired_columns = list(paired_rows[0])
     swept_by_point = {
@@ -588,7 +590,8 @@ def test_the_paired_csv_gives_each_swept_path_its_own_column(tmp_path, capsys):
         row["point_id"]: (row[PERIOD_AXIS], row[PROBABILITY_AXIS])
         for row in paired_rows
     }
-    swept_values = set(paired_swept_by_point.values())
+    paired_swept = paired_swept_by_point.values()
+    swept_values = set(paired_swept)
     assert paired_columns[:5] == [
         "point_id",
         "qpu.distance",

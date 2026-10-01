@@ -930,6 +930,19 @@ def test_a_stream_keeps_the_round_its_final_fragment_may_read():
     _assert_drained(run)
 
 
+def test_a_round_reaching_past_its_declared_fragments_stops_the_run():
+    """Round 5 alone reads round 1; the declared fragments reach none back.
+
+    The controller's former let round 1 go, so forming round 5 raises
+    rather than form an event from a round it was not given.
+    """
+    program = _first_round_read_by_the_fifth_program()
+    settings = _settings(program, "live", "controller")
+
+    with pytest.raises(RuntimeError, match="round 5 reads round 1"):
+        _run(settings)
+
+
 def test_an_escalation_leaves_the_rounds_a_later_window_reads_held():
     """Window 6 escalates before window 7 registers; round 8 reads round 5.
 
@@ -4000,3 +4013,29 @@ def _required_sections_but_the_qpu() -> dict:
         sections[name] = {}
     del sections["qpu"]
     return sections
+
+
+def _first_round_read_by_the_fifth_program() -> "_FifthRoundReadsTheFirst":
+    """One-bit rounds reading only themselves, but round 5 reads round 1."""
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    first = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]")
+    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    final = repeated + readout
+    single = first + readout
+    return _FifthRoundReadsTheFirst(first, repeated, final, single)
+
+
+@dataclasses.dataclass(frozen=True)
+class _FifthRoundReadsTheFirst(circuit_records.RepeatedStimCircuit):
+    """Round 5 alone adds a detector of rec[-1] and rec[-5], round 1."""
+
+    def round_circuit(self, round_index: int, is_final: bool) -> stim.Circuit:
+        """The declared fragment, and on round 5 one more detector."""
+        declared = circuit_records.RepeatedStimCircuit.round_circuit
+        circuit = declared(self, round_index, is_final)
+        added = _ADDED_ON_ROUND.get(round_index, _NOTHING_ADDED)
+        return circuit + added
+
+
+_ADDED_ON_ROUND = {5: stim.Circuit("DETECTOR rec[-1] rec[-5]")}
+_NOTHING_ADDED = stim.Circuit()

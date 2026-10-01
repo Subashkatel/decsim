@@ -1276,9 +1276,12 @@ final fragments when the stream is declared (`rounds_read_back`,
 `live_reach`), since the controller holds the program before it runs a
 round and a detector's lookbacks are fixed by the circuit, so whichever
 fragment runs next, last or not, finds its rounds. A program whose
-`round_circuit` varies its fragments by round declares no such bound
-and is refused, as is a repeated round that measures nothing, whose
-records lie a round further back each round. No seat forms an
+`round_circuit` reaches further on some round than its declared
+fragments loses the round it reads there, and the run stops where that
+round would be formed (its former does not hold it) or read from the
+store, so no event is formed without it. A repeated round that measures
+nothing is refused, since its records lie a round further back each
+round. No seat forms an
 observable, since no seat's reader uses one: the truth is a running
 parity per observable that each round's packet folds into as it
 arrives (`form_shot`), so no round is kept for an observable. Fed in

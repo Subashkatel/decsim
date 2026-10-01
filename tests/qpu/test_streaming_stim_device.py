@@ -80,40 +80,21 @@ def test_a_live_table_reaches_as_far_back_as_its_final_fragment_reads():
     assert read_out.live_reach is None
 
 
-@dataclasses.dataclass(frozen=True)
-class _FifthRoundReachesBack(circuit_records.RepeatedStimCircuit):
-    """Round 5 alone adds a detector reading four rounds back."""
-
-    def round_circuit(self, round_index: int, is_final: bool) -> stim.Circuit:
-        """The declared fragment, and on round 5 one more detector."""
-        declared = circuit_records.RepeatedStimCircuit.round_circuit
-        circuit = declared(self, round_index, is_final)
-        added = _ADDED_BY_ROUND.get(round_index, _NOTHING_ADDED)
-        return circuit + added
-
-
-_ADDED_BY_ROUND = {5: stim.Circuit("DETECTOR rec[-1] rec[-5]")}
-_NOTHING_ADDED = stim.Circuit()
-
-
-def test_a_program_whose_fragments_vary_by_round_is_refused() -> None:
-    """Its four fragments do not bound how far back round 5 reads."""
+def test_a_program_whose_round_circuit_keeps_the_fragments_is_declared():
+    """A surface-code round reads the one before it: a reach of one."""
     declared = memory_programs.memory_program()
-    program = _FifthRoundReachesBack(
+    program = _DeclaredFragments(
         declared.first_round,
         declared.repeated_round,
         declared.final_round,
         declared.single_round,
     )
-    source = streaming_stim_device.StreamingStimDevice(
-        programs={"memory": program}, seed=37
-    )
-    owner = program_records.Operation(
-        "memory", "memory", ("patch",), patches=("patch",)
-    )
 
-    with pytest.raises(ValueError, match="varies them by round"):
-        source.declare_stream(owner, 0)
+    source, owner = _source(program=program)
+    _run_round(source, owner, 1, is_final=False)
+
+    running = source.formation_table(owner.id)
+    assert running.live_reach == 1
 
 
 def test_a_later_stop_keeps_the_executed_nonterminal_prefix() -> None:
@@ -474,3 +455,13 @@ def _assert_complete_record_matches_stim(source, stream_id, events) -> None:
     numpy.testing.assert_array_equal(events, expected_events[0])
     truth = source.logical_observable_truth(stream_id)
     numpy.testing.assert_array_equal(truth, expected_truth[0])
+
+
+@dataclasses.dataclass(frozen=True)
+class _DeclaredFragments(circuit_records.RepeatedStimCircuit):
+    """Overrides round_circuit and returns the declared fragment unchanged."""
+
+    def round_circuit(self, round_index: int, is_final: bool) -> stim.Circuit:
+        """The fragment the base class declares."""
+        declared = circuit_records.RepeatedStimCircuit.round_circuit
+        return declared(self, round_index, is_final)

@@ -25,10 +25,8 @@ import decsim.trace_source as trace_source
 
 # Any denotes opaque operation, stream and patch identities in port signatures.
 
+
 # the fragments a RepeatedStimCircuit runs are its four declared ones
-_DECLARED_ROUND_CIRCUIT = circuit_records.RepeatedStimCircuit.round_circuit
-
-
 class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     """Keep one physical memory history until its actual final readout.
 
@@ -416,16 +414,12 @@ def _program_reach(program: circuit_records.RepeatedStimCircuit) -> int:
     """How many rounds back any round after the first reads.
 
     Read off the repeated and final fragments, the only ones that run
-    after another round; the first round has nothing before it.
+    after another round; the first round has nothing before it. A
+    program whose round_circuit reaches further on some round loses the
+    round it reads there, and the seat forming that round raises
+    (detector_formation.StreamingDetectorFormer), so no event is formed
+    from a round it was not given.
     """
-    program_type = type(program)
-    if program_type.round_circuit is not _DECLARED_ROUND_CIRCUIT:
-        raise ValueError(
-            "live Stim memory reads how far back its rounds reach off the "
-            "four fragments a RepeatedStimCircuit declares, and a program "
-            "whose round_circuit varies them by round declares no bound, "
-            "so it could lose a round its later fragment reads"
-        )
     round_width = program.repeated_round.num_measurements
     repeated_reach = formation.rounds_read_back(
         program.repeated_round, round_width

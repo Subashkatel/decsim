@@ -323,7 +323,7 @@ class StreamingDetectorFormer:
 
     def __init__(
         self, table: FormationTable, done_rounds: Optional["DoneRounds"] = None
-    ):
+    ) -> None:
         """done_rounds is the seat's record of the operation's done rounds.
 
         A seat that forms only some rounds may make its former after
@@ -480,7 +480,9 @@ class DoneRounds:
             return
         if round_index > self.through:
             return
-        still_done = range(round_index + 1, self.through + 1)
+        first_still_done = round_index + 1
+        after_the_mark = self.through + 1
+        still_done = range(first_still_done, after_the_mark)
         self.above.update(still_done)
         self.through = round_index - 1
 

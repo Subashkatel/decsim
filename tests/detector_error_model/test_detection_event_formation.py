@@ -518,7 +518,8 @@ def test_a_seat_that_joins_late_knows_the_rounds_that_left_before_it():
 def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
     """Rounds retire out of order; the watermark closes over all three."""
     placement = seated(("weak_decoder",))
-    placement.form_at("weak_decoder", rounds(1, 2, 3))
+    three_rounds = rounds(1, 2, 3)
+    placement.form_at("weak_decoder", three_rounds)
 
     placement.retire_round((1, 1))
     placement.retire_round((1, 3))

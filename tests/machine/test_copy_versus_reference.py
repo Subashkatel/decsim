@@ -775,6 +775,181 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     assert mismatched == []
 
 
+# a seed that escalates a window whose predecessor stayed weak
+LOOKBACK_SEED = 5
+
+
+@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
+def test_a_switching_run_on_a_two_round_lookback_consumes_stims_events(
+    formed_at,
+):
+    """A region after a weak window lands Stim's events at every unit.
+
+    The strong side joins that region mid-stream and is given the two
+    raw rounds its first round reads (stim.Circuit.compile_m2d_converter
+    on the rows the QPU emitted is the referent).
+    """
+    machine = _lookback_switching_machine(formed_at, LOOKBACK_SEED)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert mismatched == []
+
+
+@pytest.mark.parametrize("unit_count", [1, 3])
+def test_a_seam_formed_after_a_later_block_reads_the_rounds_it_kept(
+    unit_count: int,
+):
+    """Round 4 reads round 2, formed two blocks before; Stim agrees.
+
+    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
+    the referent for every unit's landed rounds.
+    """
+    machine = _parallel_lookback_machine(unit_count)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert landed
+    assert mismatched == []
+
+
+@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
+def test_a_strong_region_is_given_every_round_its_later_rounds_read(
+    formed_at,
+):
+    """Round 4 of the region from round 3 reads round 1; Stim agrees.
+
+    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
+    the referent for every unit's landed rounds.
+    """
+    machine = _reach_growing_machine(formed_at)
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert mismatched == []
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_a_strong_seat_lets_go_of_rounds_only_the_weak_side_forms(
+    round_count: int,
+):
+    """The rounds that read a region's rounds form at the weak side alone.
+
+    They leave the store once formed there, so the strong seat lets go
+    of the packets they read: it holds at most five one-bit packets at
+    48 rounds as at 24, the regions in flight and the rounds they read,
+    and none at the end.
+    """
+    machine = _every_third_escalating_machine(round_count)
+    held_by_seat = {}
+    note = functools.partial(_note_packets, held_by_seat)
+    machine.readout.detection_events.trace.state_held.connect(note)
+
+    machine.run()
+
+    held = held_by_seat["strong_decoder"]
+    assert max(held) <= 5
+    assert held[-1] == 0
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_no_seat_or_store_keeps_a_round_for_an_observable(round_count: int):
+    """Every round's bit is in the observable, which folds as it arrives.
+
+    Each seat holds the two rounds back its detectors read, and the weak
+    store the rounds in flight, at 48 rounds as at 24.
+    """
+    machine = _every_third_escalating_machine(round_count, EVERY_ROUND_OBSERVED)
+    held_by_seat = {}
+    note = functools.partial(_note_packets, held_by_seat)
+    machine.readout.detection_events.trace.state_held.connect(note)
+    store = machine.readout.weak_syndrome_buffer
+    stored_rounds = []
+    count = functools.partial(_note_stored_rounds, store, stored_rounds)
+    store.trace.round_stored.connect(count)
+
+    machine.run()
+
+    assert max(held_by_seat["weak_decoder"]) <= 3
+    assert max(held_by_seat["strong_decoder"]) <= 3
+    assert max(stored_rounds) <= 3
+
+
+@pytest.mark.parametrize("round_count", [24, 48])
+def test_no_seat_keeps_a_record_of_rounds_once_the_run_ends(round_count: int):
+    """Every round has retired: no remembered events or done rounds stay."""
+    machine = _every_third_escalating_machine(round_count)
+
+    machine.run()
+
+    weak = _bookkeeping_of(machine, "weak_decoder")
+    strong = _bookkeeping_of(machine, "strong_decoder")
+    assert weak == {"events": 0, "done_above": 0}
+    assert strong == {"events": 0, "done_above": 0}
+
+
+# an observable record of the round just measured, after its detector
+EVERY_ROUND_OBSERVED = "OBSERVABLE_INCLUDE(0) rec[-1]\n"
+
+
+def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
+    """Five cycles at the strong buffer: formed after it lands, sent once.
+
+    A window woken between the landing and the store sends nothing
+    again; each unit still consumes Stim's events, and the run ends.
+    """
+    machine = _seated_machine(
+        "experiments/switching/redo_window_switching.yaml",
+        "sliding",
+        "redo_window",
+        CHIP_THEN_HOST_DECODER,
+        latency_cycles=5,
+    )
+    emitted = _raw_rounds(machine)
+    landed = _landed_rounds(machine)
+
+    machine.run()
+
+    expected = _stims_events_by_round(machine, emitted)
+    mismatched = _mismatched_rounds(landed, expected)
+    assert landed
+    assert mismatched == []
+
+
+@pytest.mark.parametrize(
+    "where, seat",
+    [
+        ("controller", "controller"),
+        ("weak_syndrome_buffer", "weak_syndrome_buffer"),
+        ("decoder", "weak_decoder"),
+    ],
+)
+def test_the_forming_seat_reports_the_two_raw_rounds_it_holds(where, seat):
+    """d=3: a bulk detector reads the round before, so a seat holds two.
+
+    The most is the last round's 8 check bits and 9 data bits beside the
+    8 of the round before it.
+    """
+    machine = _machine_formed_at(where)
+
+    machine.run()
+
+    data_movement = machine.observation.data_movement
+    assert data_movement.formation_state_bits_by_seat == {seat: 25}
+
+
 def _lookback_workload(
     settings, noisy_round: str = "X_ERROR(0.05) 0\nM(0.05) 0\n"
 ):
@@ -823,31 +998,6 @@ def _lookback_switching_machine(formed_at, seed):
     return machine_module.Machine.build(settings, seed)
 
 
-# a seed that escalates a window whose predecessor stayed weak
-LOOKBACK_SEED = 5
-
-
-@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
-def test_a_switching_run_on_a_two_round_lookback_consumes_stims_events(
-    formed_at,
-):
-    """A region after a weak window lands Stim's events at every unit.
-
-    The strong side joins that region mid-stream and is given the two
-    raw rounds its first round reads (stim.Circuit.compile_m2d_converter
-    on the rows the QPU emitted is the referent).
-    """
-    machine = _lookback_switching_machine(formed_at, LOOKBACK_SEED)
-    emitted = _raw_rounds(machine)
-    landed = _landed_rounds(machine)
-
-    machine.run()
-
-    expected = _stims_events_by_round(machine, emitted)
-    mismatched = _mismatched_rounds(landed, expected)
-    assert mismatched == []
-
-
 def _parallel_lookback_machine(unit_count: int):
     """Skoric's blocks of one round plus one on the two-round lookback.
 
@@ -890,27 +1040,6 @@ def _parallel_lookback_machine(unit_count: int):
 def _is_no_window(job) -> bool:
     del job
     return False
-
-
-@pytest.mark.parametrize("unit_count", [1, 3])
-def test_a_seam_formed_after_a_later_block_reads_the_rounds_it_kept(
-    unit_count: int,
-):
-    """Round 4 reads round 2, formed two blocks before; Stim agrees.
-
-    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
-    the referent for every unit's landed rounds.
-    """
-    machine = _parallel_lookback_machine(unit_count)
-    emitted = _raw_rounds(machine)
-    landed = _landed_rounds(machine)
-
-    machine.run()
-
-    expected = _stims_events_by_round(machine, emitted)
-    mismatched = _mismatched_rounds(landed, expected)
-    assert landed
-    assert mismatched == []
 
 
 def _reach_growing_machine(formed_at):
@@ -965,26 +1094,6 @@ def _reach_growing_machine(formed_at):
 
 def _is_window_one(job) -> bool:
     return job.window_id == 1
-
-
-@pytest.mark.parametrize("formed_at", [BOTH_DECODERS, CHIP_THEN_HOST_DECODER])
-def test_a_strong_region_is_given_every_round_its_later_rounds_read(
-    formed_at,
-):
-    """Round 4 of the region from round 3 reads round 1; Stim agrees.
-
-    stim.Circuit.compile_m2d_converter on the rows the QPU emitted is
-    the referent for every unit's landed rounds.
-    """
-    machine = _reach_growing_machine(formed_at)
-    emitted = _raw_rounds(machine)
-    landed = _landed_rounds(machine)
-
-    machine.run()
-
-    expected = _stims_events_by_round(machine, emitted)
-    mismatched = _mismatched_rounds(landed, expected)
-    assert mismatched == []
 
 
 def _every_third_escalating_machine(round_count: int, observed: str = ""):
@@ -1054,65 +1163,6 @@ def _note_packets(held_by_seat: dict, seat, operation_id, bits) -> None:
     held.append(bits)
 
 
-@pytest.mark.parametrize("round_count", [24, 48])
-def test_a_strong_seat_lets_go_of_rounds_only_the_weak_side_forms(
-    round_count: int,
-):
-    """The rounds that read a region's rounds form at the weak side alone.
-
-    They leave the store once formed there, so the strong seat lets go
-    of the packets they read: it holds at most five one-bit packets at
-    48 rounds as at 24, the regions in flight and the rounds they read,
-    and none at the end.
-    """
-    machine = _every_third_escalating_machine(round_count)
-    held_by_seat = {}
-    note = functools.partial(_note_packets, held_by_seat)
-    machine.readout.detection_events.trace.state_held.connect(note)
-
-    machine.run()
-
-    held = held_by_seat["strong_decoder"]
-    assert max(held) <= 5
-    assert held[-1] == 0
-
-
-@pytest.mark.parametrize("round_count", [24, 48])
-def test_no_seat_or_store_keeps_a_round_for_an_observable(round_count: int):
-    """Every round's bit is in the observable, which folds as it arrives.
-
-    Each seat holds the two rounds back its detectors read, and the weak
-    store the rounds in flight, at 48 rounds as at 24.
-    """
-    machine = _every_third_escalating_machine(round_count, EVERY_ROUND_OBSERVED)
-    held_by_seat = {}
-    note = functools.partial(_note_packets, held_by_seat)
-    machine.readout.detection_events.trace.state_held.connect(note)
-    store = machine.readout.weak_syndrome_buffer
-    stored_rounds = []
-    count = functools.partial(_note_stored_rounds, store, stored_rounds)
-    store.trace.round_stored.connect(count)
-
-    machine.run()
-
-    assert max(held_by_seat["weak_decoder"]) <= 3
-    assert max(held_by_seat["strong_decoder"]) <= 3
-    assert max(stored_rounds) <= 3
-
-
-@pytest.mark.parametrize("round_count", [24, 48])
-def test_no_seat_keeps_a_record_of_rounds_once_the_run_ends(round_count: int):
-    """Every round has retired: no remembered events or done rounds stay."""
-    machine = _every_third_escalating_machine(round_count)
-
-    machine.run()
-
-    weak = _bookkeeping_of(machine, "weak_decoder")
-    strong = _bookkeeping_of(machine, "strong_decoder")
-    assert weak == {"events": 0, "done_above": 0}
-    assert strong == {"events": 0, "done_above": 0}
-
-
 def _bookkeeping_of(machine, seat: str) -> dict:
     placement = machine.readout.detection_events
     history = placement.history_by_seat[seat]
@@ -1123,56 +1173,6 @@ def _bookkeeping_of(machine, seat: str) -> dict:
     }
 
 
-# an observable record of the round just measured, after its detector
-EVERY_ROUND_OBSERVED = "OBSERVABLE_INCLUDE(0) rec[-1]\n"
-
-
 def _note_stored_rounds(store, stored_rounds: list, *stored) -> None:
     del stored
     stored_rounds.append(len(store.round_by_key))
-
-
-def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
-    """Five cycles at the strong buffer: formed after it lands, sent once.
-
-    A window woken between the landing and the store sends nothing
-    again; each unit still consumes Stim's events, and the run ends.
-    """
-    machine = _seated_machine(
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
-        CHIP_THEN_HOST_DECODER,
-        latency_cycles=5,
-    )
-    emitted = _raw_rounds(machine)
-    landed = _landed_rounds(machine)
-
-    machine.run()
-
-    expected = _stims_events_by_round(machine, emitted)
-    mismatched = _mismatched_rounds(landed, expected)
-    assert landed
-    assert mismatched == []
-
-
-@pytest.mark.parametrize(
-    "where, seat",
-    [
-        ("controller", "controller"),
-        ("weak_syndrome_buffer", "weak_syndrome_buffer"),
-        ("decoder", "weak_decoder"),
-    ],
-)
-def test_the_forming_seat_reports_the_two_raw_rounds_it_holds(where, seat):
-    """d=3: a bulk detector reads the round before, so a seat holds two.
-
-    The most is the last round's 8 check bits and 9 data bits beside the
-    8 of the round before it.
-    """
-    machine = _machine_formed_at(where)
-
-    machine.run()
-
-    data_movement = machine.observation.data_movement
-    assert data_movement.formation_state_bits_by_seat == {seat: 25}

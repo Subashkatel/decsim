@@ -313,7 +313,8 @@ class StrongSyndromeRoundReceiver:
 
     def _issue_cycles(self, round_count: int) -> int:
         """The cycles the landing's rounds take to enter, one per rate."""
-        one_more = self.detection_events.cycles_at(_SEAT, round_count + 1)
+        next_count = round_count + 1
+        one_more = self.detection_events.cycles_at(_SEAT, next_count)
         first = self.detection_events.cycles_at(_SEAT, 1)
         return one_more - first
 

@@ -85,6 +85,9 @@ class StrongSyndromeRoundReceiver:
         # the bits each crossing round will take, by its key, held
         # against the store until it lands
         self.reserved_bits_by_round: dict = {}
+        # the tick this seat's former can take the next landing's first
+        # round, so landings form in the order they land
+        self.former_free_tick = 0
         self.trace = _TraceSources()
 
     def has_room(self, packed: round_records.PackedRound) -> bool:
@@ -236,14 +239,9 @@ class StrongSyndromeRoundReceiver:
     ) -> None:
         """Land the rounds once this seat has formed them, if it forms them.
 
-        The rounds of one landing are formed together, a pipelined
-        stage's fixed latency once and its rate for every round after
-        the first (detection_events, detector_error_model/settings.py).
         The rounds before are not formed. packet_bits are the carried
         rounds' bits, the rounds before first.
         """
-        round_count = len(packets)
-        cycles = self.detection_events.cycles_at(_SEAT, round_count)
         land = functools.partial(
             self._land_formed,
             rounds_before,
@@ -252,12 +250,11 @@ class StrongSyndromeRoundReceiver:
             hop,
             on_stored,
         )
-        if cycles == 0:
+        formed_tick = self._formed_tick(len(packets))
+        delay = formed_tick - self.engine.now
+        if delay == 0:
             land()
             return
-        clock = self.detection_events.clock
-        edge = clock.edge(cycles, self.engine.now)
-        delay = edge - self.engine.now
         self.engine.schedule(delay, land, label="detection event formation")
 
     def _land_formed(
@@ -290,6 +287,35 @@ class StrongSyndromeRoundReceiver:
             stored = dataclasses.replace(packet, fragments=fragments)
             self._land(stored, bits, hop)
         on_stored()
+
+    def _formed_tick(self, round_count: int) -> int:
+        """When this seat has formed a landing of round_count rounds.
+
+        The former is one pipelined stage: a fixed latency, then a round
+        every cycles_per_round (detection_events,
+        detector_error_model/settings.py). A landing enters once the
+        landing before it has entered all its rounds, as gem5's in-order
+        functional unit takes the next instruction only issueLat cycles
+        after the last (src/cpu/minor/func_unit.cc:157-170) and gives
+        results back in the order they entered (SelfStallingPipeline,
+        src/cpu/minor/buffers.hh:293). A later region's first round reads
+        the earlier region's last, so it must not form first.
+        """
+        cycles = self.detection_events.cycles_at(_SEAT, round_count)
+        issue_cycles = self._issue_cycles(round_count)
+        clock = self.detection_events.clock
+        entry_tick = max(self.engine.now, self.former_free_tick)
+        if issue_cycles > 0:
+            self.former_free_tick = clock.edge(issue_cycles, entry_tick)
+        if cycles == 0:
+            return entry_tick
+        return clock.edge(cycles, entry_tick)
+
+    def _issue_cycles(self, round_count: int) -> int:
+        """The cycles the landing's rounds take to enter, one per rate."""
+        one_more = self.detection_events.cycles_at(_SEAT, round_count + 1)
+        first = self.detection_events.cycles_at(_SEAT, 1)
+        return one_more - first
 
     def _land(
         self,

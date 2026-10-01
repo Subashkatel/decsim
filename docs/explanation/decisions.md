@@ -1061,7 +1061,14 @@ path from the controller to a decoder crosses exactly one of them, and
 the build checks the run's paths against the list. One cost law is
 charged at the seat that forms: `latency_cycles` once and
 `cycles_per_round` for each round after the first, on `clock`, the
-controller's by default. Each seat keeps its own history. A decoder
+controller's by default. The strong syndrome buffer's former is one
+such stage: a landing enters once the landing before it has entered
+all its rounds, so landings form in the order they land and a region
+never forms before the earlier region whose rounds it reads, as gem5's
+in-order functional unit takes the next instruction `issueLat` cycles
+after the last and returns results in order
+(`src/cpu/minor/func_unit.cc` lines 157-170). Each seat keeps its own
+history. A decoder
 seat that has not formed a job's first round reads the raw round
 before it with the job, and a strong side that forms reads the raw
 round before each escalated region; that round is priced as the raw
@@ -1382,7 +1389,7 @@ and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a
 (`_free_round`), `decsim/syndrome_buffer/round_output.py`
 (`_read_the_rounds_before`),
 `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`
-(`_land_formed`);
+(`_formed_tick`, `_land_formed`);
 `tests/detector_error_model/test_detection_event_formation.py` forms
 the surface code, the two-round lookback, a memory whose reach grows
 from round 4 and the color code at every seat against Stim's

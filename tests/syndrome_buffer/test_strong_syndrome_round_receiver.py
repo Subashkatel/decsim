@@ -118,6 +118,19 @@ class FormingInCycles(RecordingFormer):
         return FORMING_CYCLES
 
 
+class FormingInAPipeline(RecordingFormer):
+    """A pipelined seat: 3 cycles for the first round, 2 for each after."""
+
+    clock = config.Clock(10)
+    settings = event_settings.DetectionEventSettings(
+        clock=clock, latency_cycles=3, cycles_per_round=2
+    )
+
+    def cycles_at(self, seat, round_count):
+        self.cycles_asked.append((seat, round_count))
+        return self.settings.cycles_for(round_count)
+
+
 def _nothing() -> None:
     """A landing whose stored rounds wake no one."""
 
@@ -350,8 +363,12 @@ def test_an_escalated_region_lands_whole_and_each_round_wakes_the_windows():
     ]
 
 
-def test_the_rounds_before_a_region_land_raw_and_form_its_first_round():
-    """The seat holds rounds 1 and 2 for round 3 and forms neither."""
+def test_the_rounds_before_a_region_land_raw_and_cost_no_formation():
+    """The seat holds rounds 1 and 2 for round 3 and forms neither.
+
+    It is charged for two rounds: their forming, and their entry into
+    the former (two rounds' rate, the cost of three less one's).
+    """
     engine = engine_module.Engine()
     former = RecordingFormer()
     receiver = room_side(engine, detection_events=former)
@@ -364,7 +381,11 @@ def test_the_rounds_before_a_region_land_raw_and_form_its_first_round():
 
     seat = "strong_syndrome_buffer"
     assert carried.wire_bits == 4 * BITS_PER_ROUND
-    assert receiver.detection_events.cycles_asked == [(seat, 2)]
+    assert receiver.detection_events.cycles_asked == [
+        (seat, 2),
+        (seat, 3),
+        (seat, 1),
+    ]
     assert receiver.detection_events.formed == [
         (seat, 3, (1, 2)),
         (seat, 4, ()),
@@ -394,6 +415,38 @@ def test_a_region_formed_here_is_reported_stored_once_every_round_is():
     engine.run()
 
     assert stored_at == [(50, 2)]
+
+
+def test_a_later_region_forms_after_an_earlier_one_landing_at_once():
+    """Rounds 1 to 6 and 7 to 10 land together; round 7 reads round 6.
+
+    The former takes a region's rounds one every 2 cycles, so the second
+    region's first round enters at cycle 12 and leaves 3 cycles after
+    its entry, 6 cycles after that for its last: the store holds it at
+    210, after the first region at 130, never before.
+    """
+    engine = engine_module.Engine()
+    former = FormingInAPipeline()
+    receiver = room_side(engine, detection_events=former)
+    first = region(1, 2, 3, 4, 5, 6)
+    second = region(7, 8, 9, 10)
+    stored_at = []
+
+    def first_stored() -> None:
+        stored_at.append((engine.now, "rounds 1 to 6"))
+
+    def second_stored() -> None:
+        stored_at.append((engine.now, "rounds 7 to 10"))
+
+    receiver.reserve_region(first)
+    receiver.reserve_region(second)
+    receiver.receive_region(first, first_stored)
+    receiver.receive_region(second, second_stored)
+    engine.run()
+
+    assert stored_at == [(130, "rounds 1 to 6"), (210, "rounds 7 to 10")]
+    formed_rounds = [round_index for _, round_index, _ in former.formed]
+    assert formed_rounds == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def stated_event_round(round_index: int) -> round_records.PackedRound:

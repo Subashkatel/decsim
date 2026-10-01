@@ -72,11 +72,11 @@ class FormationTable:
 
     `packet_width_by_round` is the raw bit count of each round's packet.
     `readout_slot_start` is the slot where the folded data readout begins
-    in the last packet, or None when nothing was folded.
-    `next_round_reach` is the earliest round the round after round_count
-    reads, when the source holds that round's instructions before it
-    runs them (a live stream's next fragment, last or not); None when no
-    round follows or none is declared.
+    in the last packet, or None when nothing was folded. `live_reach`
+    is, on a live stream's table, how many rounds back a round not yet
+    run may read, the program's reach (rounds_read_back); None when the
+    table is the whole operation. A live table's last round is not the
+    final one, so its observables are read later, by the final round.
     """
 
     round_count: int
@@ -84,7 +84,7 @@ class FormationTable:
     readout_slot_start: Optional[int]
     detectors: tuple[DetectorRecipe, ...]
     observables: tuple[ObservableRecipe, ...]
-    next_round_reach: Optional[int] = None
+    live_reach: Optional[int] = None
 
     def detectors_of_round(self, round_index: int) -> list[DetectorRecipe]:
         """The detectors formed when this round's packet arrives."""
@@ -95,15 +95,15 @@ class FormationTable:
         """How many rounds before this one its formation reads.
 
         Forming a round reads the records of its detectors and, on the
-        last round, of every observable (StreamingDetectorFormer
-        feed_packet), so a former that starts at this round needs the
-        raw rounds from the earliest record on. Stim's converter reads
-        every record a detector names, however far back
-        (stim.Circuit.compile_m2d_converter). Records start at round
-        one, so the count never reaches before it.
+        last round of a whole operation, of every observable
+        (StreamingDetectorFormer feed_packet), so a former that starts
+        at this round needs the raw rounds from the earliest record on.
+        Stim's converter reads every record a detector names, however
+        far back (stim.Circuit.compile_m2d_converter). Records start at
+        round one, so the count never reaches before it.
         """
         recipes_of_round = self.detectors_of_round(round_index)
-        if round_index == self.round_count:
+        if self.forms_observables_at(round_index):
             recipes_of_round.extend(self.observables)
         earliest_round = round_index
         for recipe in recipes_of_round:
@@ -128,32 +128,31 @@ class FormationTable:
             earliest_round = min(earliest_round, earliest_read)
         return first_round - earliest_round
 
-    def earliest_round_read_after(self, last_round: int) -> Optional[int]:
-        """The earliest round up to last_round a later round reads.
+    def earlier_rounds_read(self, first_round: int) -> tuple[int, ...]:
+        """The rounds before first_round it or any later round reads.
 
-        The table's rounds say it from their recipes and the round after
-        the table through next_round_reach. None when no later round
-        reads one.
+        What a stream's window keeps for the windows after it, which
+        register later: on a whole operation the detectors' records of
+        first_round on, back to the earliest; on a live table the
+        live_reach rounds before it, since a round not yet run may read
+        that far. Both add the observables' rounds, which the last round
+        reads.
         """
-        first_later = last_round + 1
-        stop_round = self.round_count + 1
-        later_rounds = range(first_later, stop_round)
-        reach_count = self.rounds_read_before_first(first_later, later_rounds)
-        earliest_round = first_later - reach_count
-        if self.next_round_reach is not None:
-            earliest_round = min(earliest_round, self.next_round_reach)
-        if earliest_round > last_round:
-            return None
-        return earliest_round
+        earliest_round = first_round - self._reach_from(first_round)
+        earliest_round = max(1, earliest_round)
+        read_rounds = set(range(earliest_round, first_round))
+        observed_rounds = self._observable_rounds_before(first_round)
+        read_rounds.update(observed_rounds)
+        return tuple(sorted(read_rounds))
 
     def rounds_reading(self, round_index: int) -> tuple[int, ...]:
         """The later rounds whose formation reads this round's packet.
 
         The reference set of the packet: forming any of these rounds
         reads it (rounds_read_before names the same records from the
-        reading side), and the observables are read with the last round.
-        A round's own formation always comes with its own packet, so it
-        is not listed.
+        reading side), and a whole operation's observables are read with
+        its last round. A round's own formation always comes with its
+        own packet, so it is not listed.
         """
         return self._later_readers_by_round.get(round_index, ())
 
@@ -163,6 +162,49 @@ class FormationTable:
             recipe.detector_index: recipe.round_index
             for recipe in self.detectors
         }
+
+    @functools.cached_property
+    def observable_rounds(self) -> frozenset:
+        """The rounds the observables read, all with the last round."""
+        record_rounds = set()
+        for recipe in self.observables:
+            for record_round, _ in recipe.records:
+                record_rounds.add(record_round)
+        return frozenset(record_rounds)
+
+    def forms_observables_at(self, round_index: int) -> bool:
+        """Whether the observables are read with this round.
+
+        The last round of a whole operation; never on a live table, whose
+        final round has not run.
+        """
+        if self.live_reach is not None:
+            return False
+        return round_index == self.round_count
+
+    def _observable_rounds_before(self, first_round: int) -> list[int]:
+        """The observables' rounds before first_round, if a round on reads them.
+
+        A live table's final round is still to run; a whole operation's
+        last round is first_round or after it, or nothing reads them.
+        """
+        is_past_the_end = first_round > self.round_count
+        if self.live_reach is None and is_past_the_end:
+            return []
+        return [
+            record_round
+            for record_round in self.observable_rounds
+            if record_round < first_round
+        ]
+
+    def _reach_from(self, first_round: int) -> int:
+        """How far before first_round its or a later detector reads."""
+        if self.live_reach is not None:
+            return self.live_reach
+        earliest_round = self._earliest_detector_read_from.get(
+            first_round, first_round
+        )
+        return first_round - earliest_round
 
     @functools.cached_property
     def _detectors_by_round(self) -> dict[int, list[DetectorRecipe]]:
@@ -179,26 +221,36 @@ class FormationTable:
         return by_round
 
     @functools.cached_property
+    def _earliest_detector_read_from(self) -> dict[int, int]:
+        """For each round, the earliest record its or a later detector reads.
+
+        One pass from the last round down, once per whole table, so a
+        stream's every window asks it in a lookup.
+        """
+        earliest_by_round = {}
+        earliest_round = self.round_count
+        for round_index in range(self.round_count, 0, -1):
+            detectors = self._detectors_by_round.get(round_index, ())
+            record_rounds = _record_rounds_of(detectors)
+            record_rounds.append(earliest_round)
+            record_rounds.append(round_index)
+            earliest_round = min(record_rounds)
+            earliest_by_round[round_index] = earliest_round
+        return earliest_by_round
+
+    @functools.cached_property
     def _later_readers_by_round(self) -> dict[int, tuple[int, ...]]:
         """Each round's later readers, read off every recipe once."""
         readers: dict[int, set] = {}
         for recipe in self.detectors:
             _note_later_reader(readers, recipe.records, recipe.round_index)
-        for recipe in self.observables:
-            _note_later_reader(readers, recipe.records, self.round_count)
+        if self.forms_observables_at(self.round_count):
+            for recipe in self.observables:
+                _note_later_reader(readers, recipe.records, self.round_count)
         by_round = {}
         for round_index, reader_rounds in readers.items():
             by_round[round_index] = tuple(sorted(reader_rounds))
         return by_round
-
-
-def _note_later_reader(readers: dict, records, reader_round: int) -> None:
-    """Add reader_round to the readers of every earlier round it reads."""
-    for record_round, _ in records:
-        if record_round >= reader_round:
-            continue
-        reader_rounds = readers.setdefault(record_round, set())
-        reader_rounds.add(reader_round)
 
 
 def build_formation_table(
@@ -207,7 +259,7 @@ def build_formation_table(
     *,
     measurement_rounds: Optional[dict[int, int]] = None,
     detector_rounds: Optional[dict[int, int]] = None,
-    next_round_circuits: Sequence[stim.Circuit] = (),
+    live_reach: Optional[int] = None,
 ) -> FormationTable:
     """Read the recipe of every detector and observable off the circuit.
 
@@ -216,9 +268,8 @@ def build_formation_table(
     `detector_rounds` is each detector's declared round, inside
     1..round_count as detector_chronology requires; a detector can only
     be formed once every bit it reads has arrived, so a declared round
-    may not precede them either. `next_round_circuits` are the
-    instructions the round after the circuit may run, read for the
-    earliest round they reach (next_round_reach).
+    may not precede them either. `live_reach` marks a live stream's
+    table, rounds still to run after it (FormationTable).
     """
     if round_count < 1:
         raise ValueError("round_count must be positive")
@@ -229,52 +280,40 @@ def build_formation_table(
         circuit, packet_of_measurement, round_count, detector_rounds
     )
     detectors, observables = _read_recipes(circuit, tables)
-    next_round_reach = _next_round_reach(
-        circuit, packet_of_measurement, next_round_circuits
-    )
     return FormationTable(
         round_count=round_count,
         packet_width_by_round=packet_width_by_round,
         readout_slot_start=readout_slot_start,
         detectors=tuple(detectors),
         observables=tuple(observables),
-        next_round_reach=next_round_reach,
+        live_reach=live_reach,
     )
 
 
-def _next_round_reach(
-    circuit: stim.Circuit,
-    packet_of_measurement: dict[int, tuple[int, int]],
-    next_round_circuits: Sequence[stim.Circuit],
-) -> Optional[int]:
-    """The earliest round of the circuit any next-round circuit reads."""
-    measurement_total = circuit.num_measurements
-    record_rounds = []
-    for next_circuit in next_round_circuits:
-        for absolute_index in _records_run_before(
-            next_circuit, measurement_total
-        ):
-            record_round, _ = packet_of_measurement[absolute_index]
-            record_rounds.append(record_round)
-    return min(record_rounds, default=None)
+def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
+    """How many rounds back a fragment reads, run after rounds this wide.
 
-
-def _records_run_before(
-    next_circuit: stim.Circuit, measurement_total: int
-) -> list[int]:
-    """The measurements before measurement_total a following circuit reads.
-
-    As absolute indices, its lookbacks counted from where it starts.
+    A record past the fragment's own measurements lies k measurements
+    before it starts, so in the ceil(k / round_width)th round back once
+    the rounds before it are repeated ones, the furthest it lands; on an
+    earlier round it lands in the first round, no further back. The
+    count is fixed by the program's text, not its outcomes, so a stream
+    keeps that many rounds as gem5's TAGE keeps its last maxHist
+    outcomes (src/cpu/pred/tage_base.cc:310-313). A round that measures
+    nothing leaves such a record a round further back each round, so no
+    count bounds it, and the fragment is refused.
     """
-    absolute_indices = []
-    measured_so_far = measurement_total
-    for instruction in _flat_instructions(next_circuit):
+    furthest_count = 0
+    measured_so_far = 0
+    for instruction in _flat_instructions(fragment):
         if instruction.name not in ("DETECTOR", "OBSERVABLE_INCLUDE"):
             measured_so_far += _measurement_count(instruction)
             continue
-        read_indices = _absolute_indices(instruction, measured_so_far)
-        absolute_indices.extend(read_indices)
-    return [index for index in absolute_indices if index < measurement_total]
+        for offset in _record_offsets(instruction):
+            before_start = -offset - measured_so_far
+            reach_count = _rounds_back(before_start, round_width)
+            furthest_count = max(furthest_count, reach_count)
+    return furthest_count
 
 
 class StreamingDetectorFormer:
@@ -284,15 +323,16 @@ class StreamingDetectorFormer:
     rounds_reading) has not been formed here, as an HEVC decoder keeps
     each picture the current reference set names (FFmpeg
     hevc/refs.c:486-517), so a round formed out of order finds the
-    packets it reads. On a live table it also keeps the packets the
-    round after the table's last reads (next_round_reach), whose recipes
-    come later. Fed in round order this holds no more than a ring of the
-    last k + 1 packets, k the furthest any recipe reaches back, the
-    state IBM's windowed form keeps as its running syndrome (Maurer
-    2510.21600 Algorithm 2, lines 760-770), and on a surface code the
-    same packets. Every detector of the arriving round starts at its
-    reference parity and XORs in its listed bits. The observables come
-    out with the last round.
+    packets it reads. On a live table it also keeps the live_reach last
+    packets, which a round not yet run may read, and the packets the
+    observables read, which the final round forms. Fed in round order it
+    so holds no more than the last k + 1 packets, k the furthest a
+    recipe or a round still to run reaches back, beside those the
+    observables read: the state IBM's windowed form keeps as its running
+    syndrome (Maurer 2510.21600 Algorithm 2, lines 760-770). Every
+    detector of the arriving round starts at its reference parity and
+    XORs in its listed bits. The observables come out with the last
+    round of a whole operation.
     """
 
     def __init__(self, table: FormationTable):
@@ -308,7 +348,7 @@ class StreamingDetectorFormer:
 
         Returns (events, observables): events as (detector index, bit)
         pairs, observables as (observable index, bit) pairs on the last
-        round and None before it.
+        round of a whole operation and None otherwise.
         """
         self.hold_packet(round_index, bits)
         self.formed_rounds.add(round_index)
@@ -318,7 +358,7 @@ class StreamingDetectorFormer:
             for recipe in recipes
         ]
         observables = None
-        if round_index == self.table.round_count:
+        if self.table.forms_observables_at(round_index):
             observables = [
                 (recipe.observable_index, self._form_parity(recipe))
                 for recipe in self.table.observables
@@ -375,14 +415,22 @@ class StreamingDetectorFormer:
 
     def _is_still_read(self, kept_round: int) -> bool:
         """Whether a round not yet formed here, or not yet run, reads it."""
-        next_round_reach = self.table.next_round_reach
-        if next_round_reach is not None and kept_round >= next_round_reach:
+        if self._is_read_after_the_table(kept_round):
             return True
         reader_rounds = self.table.rounds_reading(kept_round)
         for reader_round in reader_rounds:
             if reader_round not in self.formed_rounds:
                 return True
         return False
+
+    def _is_read_after_the_table(self, kept_round: int) -> bool:
+        """Whether a live stream's rounds still to run may read it."""
+        live_reach = self.table.live_reach
+        if live_reach is None:
+            return False
+        if kept_round > self.table.round_count - live_reach:
+            return True
+        return kept_round in self.table.observable_rounds
 
     def _form_parity(self, recipe) -> int:
         value = recipe.reference_parity
@@ -791,3 +839,31 @@ def _layer_kind_for(record_count: int) -> LayerKind:
 def _store_bits(bits: list[int], indexed_values) -> None:
     for index, value in indexed_values:
         bits[index] = value
+
+
+def _note_later_reader(readers: dict, records, reader_round: int) -> None:
+    """Add reader_round to the readers of every earlier round it reads."""
+    for record_round, _ in records:
+        if record_round >= reader_round:
+            continue
+        reader_rounds = readers.setdefault(record_round, set())
+        reader_rounds.add(reader_round)
+
+
+def _record_rounds_of(recipes) -> list[int]:
+    """Every round the recipes' records name."""
+    return [
+        record_round for recipe in recipes for record_round, _ in recipe.records
+    ]
+
+
+def _rounds_back(before_start: int, round_width: int) -> int:
+    """How many rounds back a record before_start measurements back lies."""
+    if before_start <= 0:
+        return 0
+    if round_width == 0:
+        raise ValueError(
+            "a live stream whose repeated round measures nothing reads a "
+            "round further back each round, so no reach bounds what it keeps"
+        )
+    return -(-before_start // round_width)

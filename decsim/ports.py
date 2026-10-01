@@ -1602,22 +1602,14 @@ class DetectionEventPlacement(Protocol):
         read, less the rounds the seat has formed or holds raw.
         """
 
-    def rounds_read_before(
-        self, operation_id: Any, first_round: int, last_round: int
-    ) -> int:
-        """How many raw rounds before first_round a read to last_round reads.
+    def earlier_rounds_read(
+        self, operation_id: Any, first_round: int
+    ) -> tuple[int, ...]:
+        """The raw rounds before first_round it or any later round reads.
 
-        What a read holds before its first round for a seat that forms,
-        whatever that seat has formed by then; zero with no recipes.
-        """
-
-    def earliest_round_read_after(
-        self, operation_id: Any, last_round: int
-    ) -> Optional[int]:
-        """The earliest round up to last_round a later round reads.
-
-        From the recipes of the rounds that ran and the instructions of
-        a live stream's next round; None when no later round reads one.
+        What a stream's window holds before its first round for a seat
+        that forms, whatever that seat has formed by then; on a live
+        stream as far back as its program reaches. None with no recipes.
         """
 
     def cycles_at(self, seat: str, round_count: int) -> int:

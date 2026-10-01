@@ -134,38 +134,21 @@ class SeatedFormation:
             operation_id, first_round, last_round
         )
 
-    def rounds_read_before(
-        self, operation_id: Any, first_round: int, last_round: int
-    ) -> int:
-        """How many raw rounds before first_round a read to last_round reads.
+    def earlier_rounds_read(
+        self, operation_id: Any, first_round: int
+    ) -> tuple[int, ...]:
+        """The raw rounds before first_round it or any later round reads.
 
-        The count a read holds before its first round for a seat that
-        forms, whatever that seat has formed by the time it reads
-        (detector_formation.FormationTable rounds_read_before_first); a
-        live stream's table holds every round that has executed. Zero
-        for a source with no recipes, which forms nothing.
+        What a stream's window holds before its first round for a seat
+        that forms, whatever that seat has formed by the time it reads
+        (detector_formation.FormationTable earlier_rounds_read): a later
+        window registers after it, so it keeps what that window reads
+        too. None for a source with no recipes, which forms nothing.
         """
         if self.recipes is None:
-            return 0
+            return ()
         table = self.recipes.formation_table(operation_id)
-        stop_round = last_round + 1
-        read_rounds = range(first_round, stop_round)
-        return table.rounds_read_before_first(first_round, read_rounds)
-
-    def earliest_round_read_after(
-        self, operation_id: Any, last_round: int
-    ) -> Optional[int]:
-        """The earliest round up to last_round a later round's recipes read.
-
-        Known from the recipes of the rounds that ran and, on a live
-        stream, from the instructions of the round not yet run
-        (detector_formation.FormationTable earliest_round_read_after).
-        None when no later round reads one, or with no recipes.
-        """
-        if self.recipes is None:
-            return None
-        table = self.recipes.formation_table(operation_id)
-        return table.earliest_round_read_after(last_round)
+        return table.earlier_rounds_read(first_round)
 
     def cycles_at(self, seat: str, round_count: int) -> int:
         """What forming round_count rounds together costs the seat, on clock."""

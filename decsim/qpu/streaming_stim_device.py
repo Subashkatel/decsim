@@ -25,6 +25,9 @@ import decsim.trace_source as trace_source
 
 # Any denotes opaque operation, stream and patch identities in port signatures.
 
+# the fragments a RepeatedStimCircuit runs are its four declared ones
+_DECLARED_ROUND_CIRCUIT = circuit_records.RepeatedStimCircuit.round_circuit
+
 
 class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     """Keep one physical memory history until its actual final readout.
@@ -59,9 +62,14 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         stream_operation: program_records.Operation,
         round_count: int,
     ) -> Optional[int]:
-        """Create a physical history independently of decoder models."""
+        """Create a physical history independently of decoder models.
+
+        How far back the stream's rounds read is fixed here, from the
+        fragments the program declares (_program_reach).
+        """
         del round_count
         program = self._program_for(stream_operation)
+        reach = _program_reach(program)
         stream_id = stream_operation.id
         seed = None
         if self._seed is not None:
@@ -69,7 +77,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         history = _History(seed)
         period_ticks = _declared_round_period(program)
         self._streams_by_id[stream_id] = _Stream(
-            stream_operation, program, history, period_ticks
+            stream_operation, program, history, period_ticks, reach
         )
         return None
 
@@ -303,11 +311,11 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         if global_round != next_round:
             raise RuntimeError("live Stim rounds must execute consecutively")
         fragment = stream.program.round_circuit(global_round, is_final)
-        next_fragments = _next_round_fragments(
-            stream.program, global_round, is_final
-        )
         self._mark_stochastic_use()
-        bits = history.append(fragment, is_final, next_fragments)
+        live_reach = stream.reach
+        if is_final:
+            live_reach = None
+        bits = history.append(fragment, is_final, live_reach)
         if is_final:
             self._report_finished_shot(stream)
         payload = round_records.QPUReadout(
@@ -329,12 +337,17 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
 
 @dataclasses.dataclass(frozen=True)
 class _Stream:
-    """One registered source stream: its owner, program and history."""
+    """One registered source stream: its owner, program and history.
+
+    reach is how many rounds back a round after the first reads
+    (_program_reach).
+    """
 
     owner: program_records.Operation
     program: circuit_records.RepeatedStimCircuit
     history: "_History"
     round_period_ticks: Optional[int]
+    reach: int
 
 
 class _History:
@@ -342,10 +355,9 @@ class _History:
 
     The formation table covers the circuit so far; every appended
     fragment extends it, and each seat that forms the stream's rounds
-    takes the longer table in turn. The table also says how far back
-    the next round reaches, read off the fragments it may run: the
-    program is the controller's before it runs a round, and a detector's
-    lookbacks are fixed by the circuit, not by its outcomes.
+    takes the longer table in turn. Until the final round the table
+    carries the program's reach, how far back a round still to run may
+    read (FormationTable live_reach).
     """
 
     def __init__(self, seed: Optional[int]) -> None:
@@ -357,7 +369,10 @@ class _History:
         self.table: Optional[formation.FormationTable] = None
 
     def append(
-        self, fragment: stim.Circuit, is_final: bool, next_fragments: tuple
+        self,
+        fragment: stim.Circuit,
+        is_final: bool,
+        live_reach: Optional[int],
     ) -> tuple[int, ...]:
         first_measurement = self.circuit.num_measurements
         self.simulator.do(fragment)
@@ -371,7 +386,7 @@ class _History:
             self.circuit,
             self.round_count,
             measurement_rounds=self.measurement_rounds,
-            next_round_circuits=next_fragments,
+            live_reach=live_reach,
         )
         self.table = table
         measurements = self.simulator.current_measurement_record()
@@ -387,20 +402,6 @@ class _History:
         return formation.form_shot(table, packets)
 
 
-def _next_round_fragments(program, round_index: int, is_final: bool) -> tuple:
-    """The fragments the round after this one may run: none after the last.
-
-    The controller decides at run time whether that round reads the
-    stream out, so both are named.
-    """
-    if is_final:
-        return ()
-    next_round = round_index + 1
-    repeated = program.round_circuit(next_round, False)
-    final = program.round_circuit(next_round, True)
-    return (repeated, final)
-
-
 def _copied_programs(programs):
     copied = {}
     for stream_id, program in programs.items():
@@ -409,6 +410,28 @@ def _copied_programs(programs):
             raise ValueError("live Stim stream identities must be int or str")
         copied[stream_id] = dataclasses.replace(program)
     return copied
+
+
+def _program_reach(program: circuit_records.RepeatedStimCircuit) -> int:
+    """How many rounds back any round after the first reads.
+
+    Read off the repeated and final fragments, the only ones that run
+    after another round; the first round has nothing before it.
+    """
+    program_type = type(program)
+    if program_type.round_circuit is not _DECLARED_ROUND_CIRCUIT:
+        raise ValueError(
+            "live Stim memory reads how far back its rounds reach off the "
+            "four fragments a RepeatedStimCircuit declares, and a program "
+            "whose round_circuit varies them by round declares no bound, "
+            "so it could lose a round its later fragment reads"
+        )
+    round_width = program.repeated_round.num_measurements
+    repeated_reach = formation.rounds_read_back(
+        program.repeated_round, round_width
+    )
+    final_reach = formation.rounds_read_back(program.final_round, round_width)
+    return max(repeated_reach, final_reach)
 
 
 def _declared_round_period(program):

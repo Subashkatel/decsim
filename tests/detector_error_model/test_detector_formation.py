@@ -329,11 +329,13 @@ def test_a_packet_stays_held_while_a_round_that_reads_it_is_unformed():
     )
     stim_events, _ = formed_by_stim(circuit, measurements)
     former = detector_formation.StreamingDetectorFormer(table)
-    for round_index in (1, 2, 3):
-        former.feed_packet(round_index, packets[round_index])
+    former.feed_packet(1, packets[1])
+    former.feed_packet(2, packets[2])
+    former.feed_packet(3, packets[3])
     former.hold_packet(4, packets[4])
-    for round_index in (5, 6, 7):
-        former.feed_packet(round_index, packets[round_index])
+    former.feed_packet(5, packets[5])
+    former.feed_packet(6, packets[6])
+    former.feed_packet(7, packets[7])
 
     events, _ = former.feed_packet(4, packets[4])
 
@@ -343,58 +345,100 @@ def test_a_packet_stays_held_while_a_round_that_reads_it_is_unformed():
     assert formed == expected
 
 
-def test_the_earliest_round_a_later_round_reads_comes_from_its_recipes():
-    """Round 5 reads round 3; nothing follows round 10."""
+def test_a_window_keeps_the_rounds_it_or_a_later_round_reads():
+    """Every round from 3 on reads two rounds back, so from 5 on, 3 and 4."""
     circuit = lookback_circuit(10)
     table = lookback_table(circuit, 10)
 
-    assert table.earliest_round_read_after(4) == 3
-    assert table.earliest_round_read_after(10) is None
+    assert table.earlier_rounds_read(5) == (3, 4)
+    assert table.earlier_rounds_read(1) == ()
 
 
-def test_a_table_names_how_far_back_its_next_round_reads():
-    """Three rounds run; the fourth's rec[-3] reads round 2."""
-    circuit = lookback_circuit(3)
-    reaching_round = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-3]")
-    own_round = stim.Circuit("M 0\nDETECTOR rec[-1]")
-    measurement_rounds = {0: 1, 1: 2, 2: 3}
-
-    reaching = detector_formation.build_formation_table(
-        circuit,
-        3,
-        measurement_rounds=measurement_rounds,
-        next_round_circuits=(reaching_round, own_round),
+def test_a_window_keeps_what_the_last_round_alone_reads_back():
+    """Round 4 reads round 1 (rec[-4]); rounds 2 and 3 read themselves."""
+    circuit = stim.Circuit(
+        "R 0\nREPEAT 3 {\nM 0\nDETECTOR rec[-1]\n}\n"
+        "M 0\nDETECTOR rec[-1] rec[-4]\n"
     )
-    own = detector_formation.build_formation_table(
-        circuit,
-        3,
-        measurement_rounds=measurement_rounds,
-        next_round_circuits=(own_round,),
+    measurement_rounds = {index: index + 1 for index in range(4)}
+    table = detector_formation.build_formation_table(
+        circuit, 4, measurement_rounds=measurement_rounds
     )
 
-    assert reaching.next_round_reach == 2
-    assert reaching.earliest_round_read_after(3) == 2
-    assert own.next_round_reach is None
+    assert table.earlier_rounds_read(2) == (1,)
 
 
-def test_a_live_former_keeps_the_packet_its_next_round_reads():
-    """Rounds 1 to 3 read themselves; round 4's instructions read round 2.
+def test_a_live_window_keeps_its_reach_and_the_observables_rounds():
+    """A live table of five rounds that may read two back; round 1 observed."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]\n"
+        "REPEAT 4 {\nM 0\nDETECTOR rec[-1]\n}"
+    )
+    measurement_rounds = {index: index + 1 for index in range(5)}
+    table = detector_formation.build_formation_table(
+        circuit, 5, measurement_rounds=measurement_rounds, live_reach=2
+    )
 
-    Round 2's packet stays for round 4 before its recipes come, and
-    round 1's, which no round reads, goes.
+    assert table.earlier_rounds_read(5) == (1, 3, 4)
+
+
+def test_a_live_table_leaves_its_observables_to_the_final_round():
+    """Round 1's observable record is read when the final round runs."""
+    circuit = stim.Circuit(
+        "R 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]\n"
+        "M 0\nDETECTOR rec[-1]"
+    )
+    measurement_rounds = {0: 1, 1: 2}
+    live = detector_formation.build_formation_table(
+        circuit, 2, measurement_rounds=measurement_rounds, live_reach=0
+    )
+    whole = detector_formation.build_formation_table(
+        circuit, 2, measurement_rounds=measurement_rounds
+    )
+
+    assert live.rounds_read_before(2) == 0
+    assert whole.rounds_read_before(2) == 1
+    assert not live.forms_observables_at(2)
+
+
+def test_a_fragment_reads_back_as_many_rounds_as_its_furthest_record():
+    """rec[-4] after its own readout lies three one-bit rounds back."""
+    fragment = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-4]")
+
+    assert detector_formation.rounds_read_back(fragment, 1) == 3
+    assert detector_formation.rounds_read_back(fragment, 2) == 2
+
+
+def test_a_fragment_that_reads_only_itself_reaches_no_round_back():
+    fragment = stim.Circuit("M 0 1\nDETECTOR rec[-2] rec[-1]")
+
+    assert detector_formation.rounds_read_back(fragment, 2) == 0
+
+
+def test_a_round_that_measures_nothing_has_no_reach_to_keep():
+    """Each such round leaves an earlier record one round further back."""
+    fragment = stim.Circuit("DETECTOR rec[-1]")
+
+    with pytest.raises(ValueError, match="measures nothing"):
+        detector_formation.rounds_read_back(fragment, 0)
+
+
+def test_a_live_former_keeps_the_rounds_its_reach_covers():
+    """Rounds 1 to 3 read themselves; a round still to run may read two back.
+
+    Rounds 2 and 3 stay for round 4, whose recipes come later, and
+    round 1 goes.
     """
     circuit = stim.Circuit("R 0\nREPEAT 3 {\nM 0\nDETECTOR rec[-1]\n}")
     measurement_rounds = {0: 1, 1: 2, 2: 3}
-    reaching_round = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-3]")
     table = detector_formation.build_formation_table(
-        circuit,
-        3,
-        measurement_rounds=measurement_rounds,
-        next_round_circuits=(reaching_round,),
+        circuit, 3, measurement_rounds=measurement_rounds, live_reach=2
     )
     former = detector_formation.StreamingDetectorFormer(table)
-    for round_index in (1, 2, 3):
-        former.feed_packet(round_index, (0,))
+    former.feed_packet(1, (0,))
+    former.feed_packet(2, (0,))
+    former.feed_packet(3, (0,))
+    reaching_round = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-3]")
     longer = circuit + reaching_round
     measurement_rounds[3] = 4
     longer_table = detector_formation.build_formation_table(

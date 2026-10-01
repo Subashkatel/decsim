@@ -17,7 +17,8 @@ escalation may re-slice it as the restart window, which re-reads
 escalation.restart_reread_buffer_regions buffer regions of the strong
 region (Toshio et al. 2510.25222 Sec. III C). When the strong side
 forms the detection events, a window's potential strong read also holds
-the raw rounds before its first that its rounds' recipes read, as an
+the raw rounds before its first that its or a later round's recipes
+read (a later window claims them only once it registers), as an
 HEVC decoder keeps each picture the current reference set names (FFmpeg
 hevc/refs.c:486-517); an escalation carries only those its strong seat
 lacks (strong_rounds_before), since that seat's former keeps a round an
@@ -135,13 +136,13 @@ class RoundRetention:
 
         A strong side that forms reads the rounds before a strong
         region's first that its recipes read, the tail of the window
-        before it. On a live stream whose next window is not admitted
-        yet, this hold is what keeps them, so it shrinks to the rounds a
-        round after this commit reads (earliest_round_read_after) and
-        ends when the next window registers (register_window), the order
-        the stream path keeps for every hold: a read claims its rounds
-        before the release that would free them. With no round reading
-        back it ends now, and a store with room for one round runs on.
+        before it. On a stream whose next window is not admitted yet,
+        this hold is what keeps them, so it shrinks to the rounds a
+        round after this commit reads (earlier_rounds_read) and ends
+        when the next window registers (register_window), which claims
+        them first: a read claims its rounds before the release that
+        would free them. With no round reading back it ends now, and a
+        store with room for one round runs on.
         """
         potential = decoding_records.PotentialStrong(window.key)
         kept = self._kept_for_the_next_window(window)
@@ -237,7 +238,7 @@ class RoundRetention:
         context_lo, _commit_lo, _commit_hi, context_hi = bounds
         weak = set(weak_reads)
         strong = self._strong_rounds_read_before(
-            window.operation_id, context_lo, context_hi
+            window.operation_id, context_lo
         )
         strong += self.read_keys_for_bounds(
             window.operation_id, context_lo, context_hi, window
@@ -564,13 +565,12 @@ class RoundRetention:
         potential = decoding_records.PotentialStrong(window.key)
         if not self.weak_store.has_hold(potential):
             return []
-        earliest_round = self.detection_events.earliest_round_read_after(
-            window.operation_id, window.commit_hi
+        after_commit = window.commit_hi + 1
+        read_rounds = self.detection_events.earlier_rounds_read(
+            window.operation_id, after_commit
         )
-        if earliest_round is None:
-            return []
         held = self.weak_store.hold_round_identities(potential)
-        return _rounds_from(held, window.operation_id, earliest_round)
+        return _rounds_still_read(held, window, read_rounds)
 
     def _keeps_for_the_next_window(self, window: window_records.Window) -> bool:
         """Whether a strong read of the next window may need this hold."""
@@ -616,24 +616,25 @@ class RoundRetention:
             self.weak_store.replace_hold(restart, primary_reads)
 
     def _strong_rounds_read_before(
-        self, operation_id: Any, first_round: int, last_round: int
+        self, operation_id: Any, first_round: int
     ) -> list:
-        """The raw rounds a strong read of these rounds may carry.
+        """The raw rounds a strong read from first_round on may carry.
 
         A window's potential strong read is placed before anyone knows
         whether it escalates, or what the strong seat will have formed
         by then, so it keeps every round before its first that its
-        rounds' recipes read; the read itself carries only what the seat
-        lacks (strong_rounds_before).
+        rounds' recipes read, and those a later round reads, since the
+        later window claims them only once it registers
+        (earlier_rounds_read); the read itself carries only what the
+        seat lacks (strong_rounds_before).
         """
         if self.strong_side_seat is None:
             return []
-        reach_count = self.detection_events.rounds_read_before(
-            operation_id, first_round, last_round
+        read_rounds = self.detection_events.earlier_rounds_read(
+            operation_id, first_round
         )
-        earliest_round = first_round - reach_count
         round_keys = []
-        for round_index in range(earliest_round, first_round):
+        for round_index in read_rounds:
             round_keys.append((operation_id, round_index))
         return round_keys
 
@@ -670,15 +671,19 @@ def round_identities_of(payloads) -> tuple:
     return tuple(identities)
 
 
-def _rounds_from(
-    round_keys: tuple, operation_id: Any, earliest_round: int
+def _rounds_still_read(
+    round_keys: tuple, window: window_records.Window, read_rounds: tuple
 ) -> list:
-    """The operation's round keys at or after earliest_round, in order."""
+    """The window's held rounds a round after its commit still reads.
+
+    Its own rounds past the commit, and those of read_rounds.
+    """
     kept = []
     for round_key in round_keys:
-        if round_key[0] != operation_id:
+        operation_id, round_index = round_key
+        if operation_id != window.operation_id:
             continue
-        if round_key[1] < earliest_round:
+        if round_index <= window.commit_hi and round_index not in read_rounds:
             continue
         kept.append(round_key)
     return kept

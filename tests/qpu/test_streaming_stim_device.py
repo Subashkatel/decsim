@@ -23,6 +23,7 @@ import decsim.observe.settings as observation_settings
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
+import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -49,21 +50,70 @@ def test_property_live_records_match_stim_at_different_stop_lengths(
     source.validate_stream_length(owner, round_count)
 
 
-def test_the_live_table_names_the_round_its_next_round_reads() -> None:
-    """A surface-code round compares against the one before it.
+def _final_reaching_program() -> circuit_records.RepeatedStimCircuit:
+    """Round 1 reads out four times; the final round's rec[-4] reads back.
 
-    After three rounds the fourth, last or not, reads round 3; after the
-    stream's readout no round follows.
+    Repeated rounds read only themselves.
     """
-    source, owner = _source()
-    for round_index in (1, 2, 3):
-        _run_round(source, owner, round_index, is_final=False)
+    first = stim.Circuit("R 0\nREPEAT 4 {\nM 0\nDETECTOR rec[-1]\n}")
+    repeated = stim.Circuit("M 0\nDETECTOR rec[-1]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = stim.Circuit("M 0\nDETECTOR rec[-1] rec[-4]") + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+
+
+def test_a_live_table_reaches_as_far_back_as_its_final_fragment_reads():
+    """Two rounds in, the next may be the final one, three rounds back.
+
+    After the readout no round follows.
+    """
+    program = _final_reaching_program()
+    source, owner = _source(program=program)
+    _run_round(source, owner, 1, is_final=False)
+    _run_round(source, owner, 2, is_final=False)
     running = source.formation_table(owner.id)
-    _run_round(source, owner, 4, is_final=True)
+    _run_round(source, owner, 3, is_final=True)
     read_out = source.formation_table(owner.id)
 
-    assert running.next_round_reach == 3
-    assert read_out.next_round_reach is None
+    assert running.live_reach == 3
+    assert read_out.live_reach is None
+
+
+@dataclasses.dataclass(frozen=True)
+class _FifthRoundReachesBack(circuit_records.RepeatedStimCircuit):
+    """Round 5 alone adds a detector reading four rounds back."""
+
+    def round_circuit(self, round_index: int, is_final: bool) -> stim.Circuit:
+        """The declared fragment, and on round 5 one more detector."""
+        declared = circuit_records.RepeatedStimCircuit.round_circuit
+        circuit = declared(self, round_index, is_final)
+        added = _ADDED_BY_ROUND.get(round_index, _NOTHING_ADDED)
+        return circuit + added
+
+
+_ADDED_BY_ROUND = {5: stim.Circuit("DETECTOR rec[-1] rec[-5]")}
+_NOTHING_ADDED = stim.Circuit()
+
+
+def test_a_program_whose_fragments_vary_by_round_is_refused() -> None:
+    """Its four fragments do not bound how far back round 5 reads."""
+    declared = memory_programs.memory_program()
+    program = _FifthRoundReachesBack(
+        declared.first_round,
+        declared.repeated_round,
+        declared.final_round,
+        declared.single_round,
+    )
+    source = streaming_stim_device.StreamingStimDevice(
+        programs={"memory": program}, seed=37
+    )
+    owner = program_records.Operation(
+        "memory", "memory", ("patch",), patches=("patch",)
+    )
+
+    with pytest.raises(ValueError, match="varies them by round"):
+        source.declare_stream(owner, 0)
 
 
 def test_a_later_stop_keeps_the_executed_nonterminal_prefix() -> None:
@@ -283,8 +333,9 @@ def test_property_entangled_blocks_preserve_bell_parity_across_random_shots(
     assert logical_values == {0, 1}
 
 
-def _source(round_period_microseconds=None):
-    program = memory_programs.memory_program()
+def _source(round_period_microseconds=None, program=None):
+    if program is None:
+        program = memory_programs.memory_program()
     program = dataclasses.replace(
         program, round_period_microseconds=round_period_microseconds
     )

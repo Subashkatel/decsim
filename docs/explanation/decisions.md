@@ -1256,17 +1256,26 @@ than its first (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the
 whole read is counted, not its first round. A round the seat formed is
 not given again: its former keeps a packet while a round that reads it
 is unformed there, the packet's reference set, so a seam formed after a
-later block still finds the rounds it reads, and on a live stream also
-the packets the next round's instructions read before its recipes come
-(`next_round_reach`: the controller holds the program before it runs a
-round, and a detector's lookbacks are fixed by the circuit). Fed in
-order that is no more than the ring of the last k + 1 packets it
-replaced, k the furthest any recipe reaches back. The recipe table owns the law (`rounds_read_before` per
-round, `rounds_read_before_first` per read, `rounds_reading` per
-packet).
+later block still finds the rounds it reads. On a live stream the
+former also keeps the last k packets, k the program's reach: how far
+back any fragment the stream can run reads, read off its repeated and
+final fragments when the stream is declared (`rounds_read_back`,
+`live_reach`), since the controller holds the program before it runs a
+round and a detector's lookbacks are fixed by the circuit, so whichever
+fragment runs next, last or not, finds its rounds. A program whose
+`round_circuit` varies its fragments by round declares no such bound
+and is refused, as is a repeated round that measures nothing, whose
+records lie a round further back each round. A live table's
+observables are read by the final round, so the packets they read stay
+until it forms. Fed in order a former holds no more than the last
+k + 1 packets beside the observables', the ring it replaced. The
+recipe table owns the law (`rounds_read_before` per round,
+`rounds_read_before_first` per read, `rounds_reading` per packet,
+`earlier_rounds_read` per stream window).
 A window's potential strong read holds, in both stores, the rounds
-before its first that its rounds' recipes read, placed before anyone
-knows whether it escalates or what the strong seat will hold by then. An
+before its first that its or a later round's recipes read
+(`earlier_rounds_read`), placed before anyone knows whether it
+escalates or what the strong seat will hold by then. An
 escalation carries only the rounds its strong seat lacks
 (`strong_rounds_before`, asked when the region is planned): a round an
 earlier region landed there, formed or given raw, stays in that seat's
@@ -1281,9 +1290,8 @@ the store when no reader needs it there, as it does when nothing forms.
 On a live stream a window is admitted only once its commit region
 begins, so with no buffer the window before it can commit first; when
 the strong side forms, that window's potential strong read then shrinks
-to the rounds a round after its commit reads, from the recipes of the
-rounds that ran and the next round's instructions
-(`earliest_round_read_after`), and lasts until the next window registers
+to the rounds a round after its commit reads (`earlier_rounds_read`),
+and lasts until the next window registers
 its own (`release_committed_strong_read`), the order the stream path
 keeps for every hold: a read claims its rounds before a release could
 free them. A stream no round of which reads back keeps none, so a store
@@ -1327,20 +1335,20 @@ line 154).
 
 **What it cost the port file.** `DetectionEventPlacement` lost
 `needs_the_round_before` and gained `rounds_needed_before` (the rounds,
-for a read's first and last round) and `rounds_read_before` (a count,
-for the same two), and `form_at` takes `rounds_before` in place of
-`round_before`; `WindowRetention.strong_round_before` became
-`strong_rounds_before`, which takes the read's last round too and
-answers the rounds the strong seat lacks; `DetectionEventPlacement`
-gained `earliest_round_read_after`.
+for a read's first and last round) and `earlier_rounds_read` (the
+rounds before a stream window's first that it or a later round reads),
+and `form_at` takes `rounds_before` in place of `round_before`;
+`WindowRetention.strong_round_before` became `strong_rounds_before`,
+which takes the read's last round too and answers the rounds the strong
+seat lacks.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`, `rounds_read_before_first`,
-`rounds_reading`, `earliest_round_read_after`, `next_round_reach`,
-`StreamingDetectorFormer`), `decsim/qpu/streaming_stim_device.py`
-(`_next_round_fragments`),
+`rounds_reading`, `earlier_rounds_read`, `live_reach`,
+`rounds_read_back`, `StreamingDetectorFormer`),
+`decsim/qpu/streaming_stim_device.py` (`_program_reach`),
 `decsim/detector_error_model/detection_event_formation.py`
-(`rounds_needed_before`, `rounds_read_before`),
+(`rounds_needed_before`, `earlier_rounds_read`),
 `decsim/records/windows.py` (`FormationReads`),
 `decsim/windows/round_retention.py` (`strong_rounds_before`,
 `release_committed_strong_read`), `decsim/syndrome_buffer/round_output.py`

@@ -6,6 +6,8 @@ region (decode_detailed's `iterations`), with the numbers of the cell
 measurements.py ships. The answer is the relay_bp row's under the same
 run seed. The regions are Stim's rotated memory circuits of 3d rounds,
 the measured regions' own shape: at d = 5 and 15 rounds, 360 detectors.
+At Relay-BP-5 the referent is the A100's own timed decode of one shot of
+the measured d = 5 region, rebuilt here as the measurement built it.
 """
 
 import pytest
@@ -48,14 +50,17 @@ def _cells_on(partition: str) -> list:
     return cells
 
 
-def test_the_time_is_the_measured_line_at_relay_bps_own_iterations():
+def test_a_tier_with_no_relay_bp_keys_is_priced_by_the_relay_bp_1_line():
     """a100, whole, 360 detectors: 78.957 us plus 9.762 us an iteration."""
     pytest.importorskip("relay_bp")
     circuit = windows.memory_circuit(5, 15, 0.003)
     model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
-    settings = measured_table.MeasuredTableSettings("a100", "whole")
+    section = {"device": "a100", "partition": "whole"}
+    settings = measured_table.MeasuredTableSettings.from_yaml(
+        section, None, "strong_decoder"
+    )
     table = measured_table.MeasuredTable(settings)
     physical = model.require_faults(PHYSICAL)
     compiled = table.decoder.window_decoder.compiled_model(physical)
@@ -64,6 +69,45 @@ def test_the_time_is_the_measured_line_at_relay_bps_own_iterations():
     ticket = table.submit(job, 0)
     microseconds = 78.957 + 9.762 * detailed.iterations
     assert physical.check.shape[0] == 360
+    assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(
+        microseconds
+    )
+
+
+def test_relay_bp_5_runs_the_gpus_iterations_and_is_priced_by_its_line():
+    """Shot 40 of the measured d = 5 region: 87 iterations, as on the A100.
+
+    The region is the measured one, rebuilt: p = 0.001 on all four
+    channels, Stim's detector sampler at seed 12 for 2,200 shots, and
+    the gamma table drawn at seed 20260923, as the measurement drew it.
+    The A100 ran this shot in 87 iterations, and so did the relay_bp row
+    at Relay-BP-5 on the CPU. The line through the cell's 2,000 timed
+    decodes is 110.852 us plus 9.827 us an iteration.
+    """
+    pytest.importorskip("relay_bp")
+    circuit = windows.memory_circuit(5, 15, 0.001)
+    model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
+    detection_events, _ = windows.sampled_shots(circuit, 2200, 12)
+    job = windows.job_for(model, detection_events[40])
+    section = {
+        "device": "a100",
+        "gamma0": 0.35,
+        "gamma_interval": [-0.254, 0.985],
+        "relay_set_count": 600,
+        "converged_solution_count": 5,
+    }
+    settings = measured_table.MeasuredTableSettings.from_yaml(
+        section, None, "strong_decoder"
+    )
+    table = measured_table.MeasuredTable(settings)
+    window_decoder = table.decoder.window_decoder
+    reservation = window_decoder.reserve_run_seed(20260923)
+    window_decoder.commit_run_seed(reservation)
+    ticket = table.submit(job, 0)
+    result = table.result(ticket)
+    iteration_microseconds = 9.827 * 87
+    microseconds = 110.852 + iteration_microseconds
+    assert result.iterations == 87
     assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(
         microseconds
     )
@@ -120,7 +164,9 @@ def test_a_region_is_priced_by_the_measured_region_nearest_in_size():
     model = windows.whole_circuit_window(circuit, 40, REQUIREMENT)
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
-    settings = measured_table.MeasuredTableSettings("gh200", "whole")
+    settings = measured_table.MeasuredTableSettings(
+        device="gh200", partition="whole"
+    )
     table = measured_table.MeasuredTable(settings)
     ticket = table.submit(job, 0)
     result = table.result(ticket)
@@ -139,7 +185,9 @@ def test_a_region_with_no_faults_costs_the_cells_fastest_decode():
     model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
-    settings = measured_table.MeasuredTableSettings("a100", "whole")
+    settings = measured_table.MeasuredTableSettings(
+        device="a100", partition="whole"
+    )
     table = measured_table.MeasuredTable(settings)
     ticket = table.submit(job, 0)
     assert _decode_ticks(table, ticket) == config.microseconds_to_ticks(85.872)
@@ -160,25 +208,41 @@ def test_a_decode_is_never_priced_under_its_cells_fastest_decode(iterations):
 
 
 def test_the_device_runs_one_decode_at_a_time():
-    settings = measured_table.MeasuredTableSettings("a100", "mps")
+    settings = measured_table.MeasuredTableSettings(
+        device="a100", partition="mps"
+    )
     table = measured_table.MeasuredTable(settings)
     assert table.capacities() == {strong_backend.DISPATCHER: 1}
 
 
-def test_a_device_and_partition_never_measured_are_refused():
-    section = {"device": "gh200", "partition": "mps"}
+def test_relay_bp_5_on_a_device_never_measured_at_it_is_refused():
+    section = {
+        "device": "gh200",
+        "gamma0": 0.35,
+        "gamma_interval": [-0.254, 0.985],
+        "relay_set_count": 600,
+        "converged_solution_count": 5,
+    }
     with pytest.raises(ValueError) as refusal:
         measured_table.MeasuredTableSettings.from_yaml(
             section, None, "strong_decoder"
         )
+    relay_bp_5 = (
+        "{'gamma0': 0.35, 'relay_set_count': 600, "
+        "'gamma_interval': (-0.254, 0.985), 'converged_solution_count': 5}"
+    )
     assert str(refusal.value) == (
-        "strong_decoder.device 'gh200' with partition 'mps' and bases "
-        "'together' has no measurement in measured_table; the measured "
-        "ones are [('a100', 'whole', 'together'), "
-        "('a100', 'whole', 'apart'), "
-        "('a100', 'mps', 'together'), ('a100', '3g.40gb', 'together'), "
-        "('a100', '1g.10gb', 'together'), ('gh200', 'whole', 'together'), "
-        "('gh200', 'whole', 'apart')]"
+        "strong_decoder.device 'gh200' with partition 'whole', bases "
+        f"'together' and the Relay-BP keys {relay_bp_5} has no measurement "
+        "in measured_table; the measured ones are "
+        "[('a100', 'whole', 'together', {}), "
+        f"('a100', 'whole', 'together', {relay_bp_5}), "
+        "('a100', 'whole', 'apart', {}), ('a100', 'mps', 'together', {}), "
+        "('a100', '3g.40gb', 'together', {}), "
+        "('a100', '1g.10gb', 'together', {}), "
+        "('gh200', 'whole', 'together', {}), "
+        "('gh200', 'whole', 'apart', {})], each with the keys it sets off "
+        "the relay_bp row's defaults"
     )
 
 
@@ -215,7 +279,9 @@ def test_a_region_decoded_apart_is_its_two_parts_on_their_own_lines(
     model = windows.whole_circuit_window(circuit, 15, requirement)
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
-    settings = measured_table.MeasuredTableSettings(device, "whole", "apart")
+    settings = measured_table.MeasuredTableSettings(
+        device=device, partition="whole", bases="apart"
+    )
     row = measured_table.MeasuredTableDecoder(settings)
     reference = relay.RelayBeliefPropagationDecoder()
     _bind_seed(row)

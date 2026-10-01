@@ -61,8 +61,9 @@ Three conventions are worth knowing before you read:
   `no_revisit_detectors`, `priority_queue_limit`,
   `detector_order_method`, `detector_order_count`,
   `detector_order_seed` and `merge_errors` there too, `measured_table`'s
-  `device`, `partition` and `bases` in a decoder tier, `dispatch_steps`'s
-  `device`, `path` and `workers` there too, and the
+  `device` and `partition` with `relay_bp`'s nine in a decoder tier, a
+  measured cell's own (its decode runs at them and its line prices them),
+  `dispatch_steps`'s `device`, `path` and `workers` there too, and the
   `bivariate_bicycle` code card's `qubit_count` and
   `logical_qubit_count` in the `qpu` section, which names its card
   with `code_card` (default `rotated_surface`, Stim's generated

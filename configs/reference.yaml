@@ -1353,6 +1353,15 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # weight_step and cycle_count here, a
                                    # relay_bp one its nine keys and a
                                    # tesseract one its eight, as above
+  # The measured_table row takes the relay_bp row's nine keys too. Its own
+  # Relay-BP decode runs at them, and with the device, partition and bases
+  # below they must name a measured cell: the relay_bp row's defaults, or,
+  # on the a100, whole, together only, the paper's surface Relay-BP-5
+  # (2506.01779 line 343), these four with the rest at their defaults:
+  # gamma0: 0.35
+  # gamma_interval: [-0.254, 0.985]
+  # relay_set_count: 600
+  # converged_solution_count: 5
   # device: a100                   # the measured_table row's GPU: a100 |
                                    # gh200 (dispatch_steps names one too,
                                    # gh200 by default). Its time is intercept plus slope
@@ -1368,7 +1377,8 @@ strong_decoder:                    # the accurate tier: slow, lower LER
                                    # last three a100 only; 3g.40gb and
                                    # 1g.10gb are one Multi-Instance GPU
                                    # slice of that NVIDIA profile
-  # bases: together                # the measured_table row's BASIS_DECODES
+  # bases: together                # the relay_bp row's key, read by the
+                                   # measured_table row as its BASIS_DECODES
                                    # row: together | apart. apart decodes a
                                    # region's X and Z detectors as two
                                    # smaller models (Relay-BP 2506.01779

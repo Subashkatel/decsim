@@ -2,9 +2,10 @@
 
 MeasuredTable is the first row of the StrongBackend port
 (decsim/ports.py). It answers with decsim's own Relay-BP decode (the
-relay_bp row) and prices it from a line measured on the device
-(measurements.py): intercept plus slope times the iterations decsim's
-decode ran, and never less than the fastest decode the cell measured.
+relay_bp row, at the relay_bp keys its tier section sets) and prices it
+from a line measured on the device at those keys (measurements.py):
+intercept plus slope times the iterations decsim's decode ran, and
+never less than the fastest decode the cell measured.
 The measured time is one decode call with the syndrome's copies to and
 from the device and the launch inside it, and no link, so it is the
 time beyond the echo the port asks for with the launch folded in.
@@ -34,7 +35,6 @@ import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
-import decsim.tables as tables
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )
@@ -43,19 +43,20 @@ PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 
 
 @dataclasses.dataclass(frozen=True)
-class MeasuredTableSettings:
+class MeasuredTableSettings(measurements.RelaySettings):
     """The measured_table row's keys in its tier section.
 
-    device names the GPU measured and partition how it was shared;
-    bases names a row of BASIS_DECODES (strong_backend.py), whether a
-    region is decoded whole or as its X and Z parts. The three must name
-    measured cells (measurements.py): a part is priced by parts measured
-    on the device, never by the whole region's line.
+    The relay_bp row's nine keys set the row's own Relay-BP decode, so
+    the answer, its iterations and the line that prices them come from
+    one setting; bases among them says whether a region is decoded whole
+    or as its X and Z parts. device names the GPU measured and partition
+    how it was shared. Together they must name measured cells
+    (measurements.py): a decode is priced only by a line measured at its
+    own keys, and a part only by parts measured on the device.
     """
 
     device: str = "a100"
     partition: str = "whole"
-    bases: str = "together"
 
     @classmethod
     def from_yaml(
@@ -64,24 +65,30 @@ class MeasuredTableSettings:
         clocks: config.ClockSettings,
         section_name: str,
     ) -> "MeasuredTableSettings":
-        """Both keys, checked where they enter against the measured pairs.
+        """Every key, checked where it enters against the measured cells.
 
         section_name is the tier section the row sits in, which the
         refusal names.
         """
-        del clocks
+        relay_settings = measurements.RelaySettings.from_yaml(
+            section, clocks, section_name
+        )
+        relay_keys = dataclasses.asdict(relay_settings)
         device = section.get("device", "a100")
         partition = section.get("partition", "whole")
-        bases = section.get("bases", "together")
-        tables.row(strong_backend.BASIS_DECODES, f"{section_name}.bases", bases)
-        rows = _measured_rows(device, partition, bases)
+        settings = cls(device=device, partition=partition, **relay_keys)
+        rows = _measured_rows(settings)
         if rows:
-            return cls(device=device, partition=partition, bases=bases)
+            return settings
+        decode_settings = _decode_settings(settings)
+        keys = _keys_off_default(decode_settings)
         measured = _measured_cells()
         raise ValueError(
             f"{section_name}.device {device!r} with partition "
-            f"{partition!r} and bases {bases!r} has no measurement in "
-            f"measured_table; the measured ones are {measured}"
+            f"{partition!r}, bases {settings.bases!r} and the Relay-BP keys "
+            f"{keys} has no measurement in measured_table; the measured ones "
+            f"are {measured}, each with the keys it sets off the relay_bp "
+            "row's defaults"
         )
 
 
@@ -97,10 +104,11 @@ class MeasuredTable:
     """
 
     def __init__(self, settings: MeasuredTableSettings) -> None:
-        self.cells = _measured_rows(
-            settings.device, settings.partition, settings.bases
+        self.cells = _measured_rows(settings)
+        decode_settings = _decode_settings(settings)
+        self.decoder = relay_belief_propagation.RelayBeliefPropagationDecoder(
+            settings=decode_settings
         )
-        self.decoder = relay_belief_propagation.RelayBeliefPropagationDecoder()
 
     def run_seed_children(self) -> tuple:
         """The Relay-BP decoder's own children, at the relay_bp row's paths."""
@@ -175,23 +183,62 @@ def nearest_in_size(rows: tuple, detectors: int):
     return nearest
 
 
-def _measured_rows(device: str, partition: str, bases: str) -> tuple:
-    """The measured cells of one device, partition and bases, in order."""
-    wanted = (device, partition, bases)
+def _measured_rows(settings: MeasuredTableSettings) -> tuple:
+    """The cells measured at the settings, in region order."""
+    decode_settings = _decode_settings(settings)
+    wanted = (
+        settings.device,
+        settings.partition,
+        settings.bases,
+        decode_settings,
+    )
     rows = []
     for cell in measurements.RELAY_BP_TIMES:
-        if (cell.device, cell.partition, cell.bases) == wanted:
+        measured = (
+            cell.device,
+            cell.partition,
+            cell.bases,
+            cell.relay_settings,
+        )
+        if measured == wanted:
             rows.append(cell)
     return tuple(rows)
 
 
+def _decode_settings(
+    settings: MeasuredTableSettings,
+) -> measurements.RelaySettings:
+    """The relay_bp row's keys each decode runs at, X and Z together.
+
+    The strong backend cuts a region into its parts itself
+    (strong_backend.part_jobs), so the decode takes each request whole.
+    """
+    relay_keys = {}
+    for field in dataclasses.fields(measurements.RelaySettings):
+        relay_keys[field.name] = getattr(settings, field.name)
+    relay_keys["bases"] = "together"
+    return measurements.RelaySettings(**relay_keys)
+
+
+def _keys_off_default(relay_settings: measurements.RelaySettings) -> dict:
+    """Only what a tier changed, so a refusal names the keys to look at."""
+    defaults = measurements.RelaySettings()
+    keys = {}
+    for field in dataclasses.fields(relay_settings):
+        value = getattr(relay_settings, field.name)
+        if value != getattr(defaults, field.name):
+            keys[field.name] = value
+    return keys
+
+
 def _measured_cells() -> list:
-    """Every measured (device, partition, bases), once each."""
+    """Every measured device, partition, bases and keys, once each."""
     measured = []
     for cell in measurements.RELAY_BP_TIMES:
-        triple = (cell.device, cell.partition, cell.bases)
-        if triple not in measured:
-            measured.append(triple)
+        keys = _keys_off_default(cell.relay_settings)
+        cell_settings = (cell.device, cell.partition, cell.bases, keys)
+        if cell_settings not in measured:
+            measured.append(cell_settings)
     return measured
 
 

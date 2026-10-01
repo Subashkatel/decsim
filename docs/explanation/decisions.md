@@ -1029,9 +1029,9 @@ blocks finish" (CUDA C++ Programming Guide, preemption).
 **The first row.** `measured_table` answers with decsim's own Relay-BP
 decode and prices it from a line measured on a GPU: intercept plus slope
 times the iterations decsim's decode ran, per device, partition,
-decodes running and region size, and never less than the fastest decode
-the cell measured, since below it a line extrapolates to times the
-device never showed (`decsim/decoders/measured_table/`).
+Relay-BP keys, decodes running and region size, and never less than the
+fastest decode the cell measured, since below it a line extrapolates to
+times the device never showed (`decsim/decoders/measured_table/`).
 The line is fitted on NVIDIA's nv-qldpc-decoder run on decsim's own
 regions, one decode at a time; the time follows decsim's iteration count
 rather than a draw from the samples because the two implementations
@@ -1039,6 +1039,11 @@ agree on iteration counts in distribution, and it keeps a hard region
 slow on the device. Its capacity is one: one chip's regions reach one
 dispatcher. Several decodes on one GPU are not priced, because their
 times follow the other decodes' work rather than their own iterations.
+The tier's relay_bp keys set the row's own decode and choose the line,
+so the answer, the iterations and the time come from one setting; keys
+no cell was measured at are refused rather than priced on another
+setting's line, since Relay-BP-5's intercept is 32 to 108 us above
+Relay-BP-1's on the same A100.
 
 **Where to see it.** `tests/decoders/test_strong_backend.py` holds the
 queue against the Kiefer and Wolfowitz first-come first-served

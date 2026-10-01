@@ -10,14 +10,18 @@ import csv
 import dataclasses
 import functools
 import hashlib
+import importlib.metadata
 import json
 import math
 import pathlib
+import platform
 import resource
 import shutil
 import subprocess
 import sys
+import types
 
+import numpy
 import pytest
 import scipy.stats
 import sinter
@@ -799,6 +803,77 @@ def test_a_piece_records_the_peak_memory_of_the_process_that_ran_it(
     usage = resource.getrusage(resource.RUSAGE_SELF)
     peak_after_mb = usage.ru_maxrss / 1024
     assert 0 < piece["peak_memory_mb"] <= peak_after_mb
+
+
+def test_a_piece_records_the_interpreter_packages_and_slurm_task(
+    tmp_path, monkeypatch
+):
+    """The referents are the interpreter's and the packages' own versions.
+
+    A rerun needs what sampled and decoded beside the commit, and the
+    array job and task name the Slurm task when one ran the piece.
+    """
+    monkeypatch.setenv("SLURM_JOB_ID", "14700001")
+    monkeypatch.setenv("SLURM_ARRAY_JOB_ID", "14700000")
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "7")
+    config_path = yaml_configs.write_config(tmp_path, {})
+    out_dir = tmp_path / "out"
+
+    command.main(["collect", str(config_path), "--out", str(out_dir)])
+
+    pieces_dir = out_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    assert piece["python"] == platform.python_version()
+    assert piece["packages"]["stim"] == stim.__version__
+    assert piece["packages"]["numpy"] == numpy.__version__
+    assert piece["slurm_job_id"] == "14700001"
+    assert piece["slurm_array_job_id"] == "14700000"
+    assert piece["slurm_array_task_id"] == "7"
+
+
+def test_a_module_with_no_version_of_its_own_is_named_by_its_distribution(
+    monkeypatch,
+):
+    versionless = types.ModuleType("relay_bp")
+    monkeypatch.setitem(sys.modules, "relay_bp", versionless)
+
+    identity = run_folder.piece_identity()
+
+    distribution_version = importlib.metadata.version("relay-bp")
+    assert identity["packages"]["relay_bp"] == distribution_version
+
+
+def test_a_module_the_run_never_imported_has_no_version(monkeypatch):
+    monkeypatch.delitem(sys.modules, "relay_bp", raising=False)
+
+    identity = run_folder.piece_identity()
+
+    assert identity["packages"]["relay_bp"] is None
+
+
+def test_a_piece_names_the_processor_linux_lists(tmp_path, monkeypatch):
+    cpu_info = tmp_path / "cpuinfo"
+    cpu_info.write_text(
+        "processor\t: 0\nmodel name\t: Example CPU 9000 @ 2.00GHz\n"
+    )
+    monkeypatch.setattr(run_folder, "CPU_INFO_FILE", cpu_info)
+
+    identity = run_folder.piece_identity()
+
+    assert identity["cpu_model"] == "Example CPU 9000 @ 2.00GHz"
+
+
+def test_a_piece_with_no_cpu_list_names_the_platforms_processor(
+    tmp_path, monkeypatch
+):
+    missing = tmp_path / "no_cpuinfo"
+    monkeypatch.setattr(run_folder, "CPU_INFO_FILE", missing)
+
+    identity = run_folder.piece_identity()
+
+    assert identity["cpu_model"] == platform.processor()
 
 
 def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):

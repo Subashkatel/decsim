@@ -48,6 +48,22 @@ CONFIGURATION_COLUMNS = ("configuration_id", "name", "config_chain")
 # whose interpreter has no git of its own (a job script exports it):
 # "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
+# the modules whose versions every piece names, each with the
+# distribution importlib.metadata knows it by. A module's own __version__
+# is read first, since a folder of packages can hold a dist-info stale
+# against the module beside it; the distribution is read only for one
+# that states none (relay_bp). decsim's own version is the commit.
+RUN_MODULES = {
+    "numpy": "numpy",
+    "pymatching": "PyMatching",
+    "relay_bp": "relay-bp",
+    "scipy": "scipy",
+    "sinter": "sinter",
+    "stim": "stim",
+}
+# where Linux names the processor; another system's piece records the
+# word platform.processor gives
+CPU_INFO_FILE = pathlib.Path("/proc/cpuinfo")
 
 
 def run_dir_for(config, out_dir=None) -> pathlib.Path:
@@ -219,13 +235,27 @@ def recorded_configurations(experiment_dir: pathlib.Path) -> dict:
 
 
 def piece_identity() -> dict:
-    """What a piece records of the process that ran it: code, host, job."""
+    """What a piece records of the process that ran it: code, host, job.
+
+    Beside the commit, a rerun needs the interpreter and the packages
+    that sampled and decoded, and the processor that set the seconds a
+    shot; the array job and task name the Slurm task that ran it, which
+    the round's plan.csv maps back to its pieces.
+    """
     commit, is_dirty = _tree_reading()
+    python_version = platform.python_version()
+    packages = _run_module_versions()
+    cpu_model = _cpu_model()
     return {
         "commit": commit,
         "dirty": is_dirty,
+        "python": python_version,
+        "packages": packages,
         "host": platform.node(),
+        "cpu_model": cpu_model,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+        "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
+        "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
     }
 
 
@@ -938,6 +968,37 @@ def _packed_reference(packed: pathlib.Path, reference: str) -> Optional[str]:
             words = line.split()
             return words[0]
     return None
+
+
+def _run_module_versions() -> dict:
+    """Each of RUN_MODULES's version, by module name."""
+    versions = {}
+    for module_name, distribution_name in RUN_MODULES.items():
+        version = _module_version(module_name, distribution_name)
+        versions[module_name] = version
+    return versions
+
+
+def _module_version(module_name: str, distribution_name: str) -> Optional[str]:
+    """The imported module's version; None for one this run never imported."""
+    module = sys.modules.get(module_name)
+    if module is None:
+        return None
+    if hasattr(module, "__version__"):
+        return module.__version__
+    return importlib.metadata.version(distribution_name)
+
+
+def _cpu_model() -> str:
+    """The model name /proc/cpuinfo lists, else the platform's word."""
+    cpu_info = ""
+    if CPU_INFO_FILE.is_file():
+        cpu_info = CPU_INFO_FILE.read_text()
+    for line in cpu_info.splitlines():
+        label, _separator, value = line.partition(":")
+        if label.strip() == "model name":
+            return value.strip()
+    return platform.processor()
 
 
 def _versions() -> dict:

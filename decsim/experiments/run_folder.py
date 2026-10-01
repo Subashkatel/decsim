@@ -63,7 +63,7 @@ RUN_MODULES = {
 }
 # where Linux names the processor; another system's piece records the
 # word platform.processor gives
-CPU_INFO_FILE = pathlib.Path("/proc/cpuinfo")
+PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
 
 
 def run_dir_for(config, out_dir=None) -> pathlib.Path:
@@ -245,14 +245,14 @@ def piece_identity() -> dict:
     commit, is_dirty = _tree_reading()
     python_version = platform.python_version()
     packages = _run_module_versions()
-    cpu_model = _cpu_model()
+    processor_model = _processor_model()
     return {
         "commit": commit,
         "dirty": is_dirty,
         "python": python_version,
         "packages": packages,
         "host": platform.node(),
-        "cpu_model": cpu_model,
+        "processor_model": processor_model,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
         "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
@@ -989,12 +989,12 @@ def _module_version(module_name: str, distribution_name: str) -> Optional[str]:
     return importlib.metadata.version(distribution_name)
 
 
-def _cpu_model() -> str:
+def _processor_model() -> str:
     """The model name /proc/cpuinfo lists, else the platform's word."""
-    cpu_info = ""
-    if CPU_INFO_FILE.is_file():
-        cpu_info = CPU_INFO_FILE.read_text()
-    for line in cpu_info.splitlines():
+    processor_info = ""
+    if PROCESSOR_INFO_FILE.is_file():
+        processor_info = PROCESSOR_INFO_FILE.read_text()
+    for line in processor_info.splitlines():
         label, _separator, value = line.partition(":")
         if label.strip() == "model name":
             return value.strip()

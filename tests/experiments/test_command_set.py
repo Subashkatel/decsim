@@ -854,26 +854,26 @@ def test_a_module_the_run_never_imported_has_no_version(monkeypatch):
 
 
 def test_a_piece_names_the_processor_linux_lists(tmp_path, monkeypatch):
-    cpu_info = tmp_path / "cpuinfo"
-    cpu_info.write_text(
+    processor_info = tmp_path / "cpuinfo"
+    processor_info.write_text(
         "processor\t: 0\nmodel name\t: Example CPU 9000 @ 2.00GHz\n"
     )
-    monkeypatch.setattr(run_folder, "CPU_INFO_FILE", cpu_info)
+    monkeypatch.setattr(run_folder, "PROCESSOR_INFO_FILE", processor_info)
 
     identity = run_folder.piece_identity()
 
-    assert identity["cpu_model"] == "Example CPU 9000 @ 2.00GHz"
+    assert identity["processor_model"] == "Example CPU 9000 @ 2.00GHz"
 
 
-def test_a_piece_with_no_cpu_list_names_the_platforms_processor(
+def test_a_piece_with_no_processor_list_names_the_platforms_processor(
     tmp_path, monkeypatch
 ):
     missing = tmp_path / "no_cpuinfo"
-    monkeypatch.setattr(run_folder, "CPU_INFO_FILE", missing)
+    monkeypatch.setattr(run_folder, "PROCESSOR_INFO_FILE", missing)
 
     identity = run_folder.piece_identity()
 
-    assert identity["cpu_model"] == platform.processor()
+    assert identity["processor_model"] == platform.processor()
 
 
 def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):

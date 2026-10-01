@@ -18,6 +18,9 @@ import pytest
 
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
+import decsim.decoders.detection_events as detection_events
+import decsim.detector_error_model.detection_event_formation as formation
+import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -69,6 +72,33 @@ def _landed_in(memory) -> decoding_records.DecodeJob:
 def _staging(engine) -> decoder_memory_transfer.DecoderInputStaging:
     """The staging alone: the fold sends nothing, so it needs no transport."""
     return decoder_memory_transfer.DecoderInputStaging(None, engine)
+
+
+def test_a_staged_job_claims_its_rounds_before_it_reads_them():
+    """A round retires once its last reader reads it, so the claim is first.
+
+    A job priced after its rounds left the store would find a claim
+    that went at retirement, and pay for a round another job paid for.
+    """
+    engine = engine_module.Engine()
+    settings = event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder",)
+    )
+    placement = formation.SeatedFormation(None, settings)
+    tier = detection_events.TierFormation(placement, "weak_decoder")
+    staging = decoder_memory_transfer.DecoderInputStaging(
+        None, engine, formation=tier
+    )
+    memory = decoder_memory.DecoderMemory("default", 0, None)
+    resident = _job_with_rounds()
+    resident.input_key = "window 7's request"
+    memory.deposit(resident)
+    reader = _job_with_rounds()
+    reader.input_key = "window 7's request"
+
+    staging.stage(reader, memory, lambda _: None)
+
+    assert reader.detection_event_rounds == ((41, 0),)
 
 
 def test_a_folded_copy_is_booked_by_the_side_that_makes_it():

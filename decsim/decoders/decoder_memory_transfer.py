@@ -80,6 +80,7 @@ class DecoderInputStaging:
         and moves nothing. A tier that reads its input in place deposits
         nothing and sends nothing.
         """
+        self._claim_formation(job)
         if not self.copies_input:
             self._read_in_place(job, on_landed)
             return
@@ -296,6 +297,17 @@ class DecoderInputStaging:
         if hold is not None:
             hold()
             job.input_hold = None
+
+    def _claim_formation(self, job: decoding_records.DecodeJob) -> None:
+        """The job's tier claims the rounds it will form, while they are held.
+
+        Its rounds are held in the store until it lands or reads them,
+        and a round retires only after, so every job that reads a round
+        claims it before the round can retire and the claim can go then.
+        """
+        if self.formation is None:
+            return
+        self.formation.rounds_to_form(job)
 
     def _release_formation_claim(self, job: decoding_records.DecodeJob) -> None:
         """The job's tier takes back the rounds it claimed, never formed."""

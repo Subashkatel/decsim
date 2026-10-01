@@ -1274,10 +1274,12 @@ joins late does not wait on rounds that left before it. That record is
 a low watermark below which every round is done plus the rounds done
 above it (`DoneRounds`, as TCP keeps a cumulative ACK and its SACK
 blocks, RFC 2018), and a round's remembered events go when it retires,
-so nothing a seat keeps grows with the run. A decoder tier keeps the
-rounds its jobs claimed the same way (`TierFormation`), and never
-forgets a claim during the run: a copied job is priced after its rounds
-left the store, so a forgotten claim would charge a round twice. At the end of a run no
+so nothing a seat keeps grows with the run. A decoder tier's
+claims on the rounds it charges a job for live at its seat
+(`claim_rounds`) and go when their round retires: a job claims its
+rounds when it is staged on a unit, while the store still holds them
+for it, so no job, a copied one priced after its rounds left the store
+included, asks for a round after it retires. At the end of a run no
 seat holds a raw round (`check_settled`). On a live stream the
 former also keeps the last k packets, k the program's reach: how far
 back any detector of a fragment the stream can run reads, read off its
@@ -1373,7 +1375,9 @@ line 154).
 `needs_the_round_before` and gained `rounds_needed_before` (the rounds,
 for a read's first and last round), `earlier_rounds_read` (the rounds
 before a stream window's first that it or a later round reads),
-`retire_round` and `check_settled`, and `form_at` takes `rounds_before`
+`retire_round`, `check_settled`, `claim_rounds` and `return_claim` (a
+decoder tier's claims, kept at the seat so a claim goes when its round
+retires), and `form_at` takes `rounds_before`
 in place of `round_before`; `WindowRetention.strong_round_before`
 became `strong_rounds_before`, which takes the read's last round too
 and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a

@@ -164,6 +164,24 @@ class SeatedFormation:
         for history in self.history_by_seat.values():
             history.retire(operation_id, round_index)
 
+    def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
+        """The round keys no earlier job of the seat claimed, now claimed.
+
+        A decoder tier charges a job for the rounds it is first to claim
+        (decoders/detection_events.py TierFormation). Every job claims
+        its rounds while the store still holds them for it
+        (decoder_memory_transfer.py stage), and a round retires only
+        once no read holds it, so no job claims a round after it
+        retires and its claim goes then.
+        """
+        history = self.history_by_seat[seat]
+        return history.memory.claim(round_keys)
+
+    def return_claim(self, seat: str, round_keys: tuple) -> None:
+        """A job that never started gives its claimed round keys back."""
+        history = self.history_by_seat[seat]
+        history.memory.unclaim(round_keys)
+
     def check_settled(self) -> None:
         """At the end of a run no seat may still hold a raw round.
 
@@ -433,6 +451,8 @@ class _SeatMemory:
         # the events of rounds formed here and not yet retired, which a
         # second read of the round is answered from
         self.events_by_round: dict = {}
+        # the round keys a decoder tier's jobs claimed, until retired
+        self.claimed_keys: set = set()
 
     def done_rounds_of(
         self, operation_id: Any
@@ -442,10 +462,26 @@ class _SeatMemory:
         return self.done_by_operation.setdefault(operation_id, new_record)
 
     def retire(self, operation_id: Any, round_index: int) -> None:
-        """The round is done here, and its events are no longer asked for."""
+        """The round is done here; its events and claim are asked no more."""
         done_rounds = self.done_rounds_of(operation_id)
         done_rounds.add(round_index)
-        self.events_by_round.pop((operation_id, round_index), None)
+        round_key = (operation_id, round_index)
+        self.events_by_round.pop(round_key, None)
+        self.claimed_keys.discard(round_key)
+
+    def claim(self, round_keys: tuple) -> tuple:
+        """The keys not claimed before, now claimed."""
+        fresh = []
+        for round_key in round_keys:
+            if round_key in self.claimed_keys:
+                continue
+            fresh.append(round_key)
+        self.claimed_keys.update(fresh)
+        return tuple(fresh)
+
+    def unclaim(self, round_keys: tuple) -> None:
+        """The keys are claimed no more."""
+        self.claimed_keys.difference_update(round_keys)
 
 
 def _as_stated_events(

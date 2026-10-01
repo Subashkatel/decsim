@@ -889,15 +889,15 @@ def test_no_seat_or_store_keeps_a_round_for_an_observable(round_count: int):
 
 @pytest.mark.parametrize("round_count", [24, 48])
 def test_no_seat_keeps_a_record_of_rounds_once_the_run_ends(round_count: int):
-    """Every round has retired: no remembered events or done rounds stay."""
+    """Every round has retired: no events, claims or done rounds stay."""
     machine = _every_third_escalating_machine(round_count)
 
     machine.run()
 
     weak = _bookkeeping_of(machine, "weak_decoder")
     strong = _bookkeeping_of(machine, "strong_decoder")
-    assert weak == {"events": 0, "done_above": 0}
-    assert strong == {"events": 0, "done_above": 0}
+    assert weak == {"events": 0, "claims": 0, "done_above": 0}
+    assert strong == {"events": 0, "claims": 0, "done_above": 0}
 
 
 # an observable record of the round just measured, after its detector
@@ -1169,6 +1169,7 @@ def _bookkeeping_of(machine, seat: str) -> dict:
     done_rounds = history.memory.done_by_operation[1]
     return {
         "events": len(history.memory.events_by_round),
+        "claims": len(history.memory.claimed_keys),
         "done_above": len(done_rounds.above),
     }
 

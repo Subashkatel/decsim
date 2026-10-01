@@ -905,18 +905,6 @@ def test_the_round_that_closes_a_gap_moves_the_mark_over_the_rounds_after():
     assert done_rounds.above == set()
 
 
-def test_a_round_marked_not_done_below_the_mark_reopens_only_itself():
-    done_rounds = detector_formation.DoneRounds()
-    done_rounds.add(1)
-    done_rounds.add(2)
-    done_rounds.add(3)
-
-    done_rounds.discard(2)
-
-    assert done_rounds.through == 1
-    assert done_rounds.above == {3}
-
-
 def _first_round_observed_circuit() -> stim.Circuit:
     """Three one-bit rounds; the observable reads rounds 1 and 3."""
     return stim.Circuit(

@@ -141,6 +141,15 @@ def _window_job():
     )
 
 
+def _second_operations_job():
+    """The window job, reading round 1 of operation 2."""
+    job = _window_job()
+    job.operation_id = 2
+    second = dataclasses.replace(job.payloads[0], operation_id=2)
+    job.payloads = [second]
+    return job
+
+
 def test_a_fake_row_through_the_pool_decodes_the_window_once():
     engine = engine_module.Engine()
     log = log_writers.LogWriter()
@@ -207,13 +216,14 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
     manager.check_decode_work_settled()
 
 
-def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
+def test_a_withdrawn_windows_claim_goes_back_to_its_tier():
     """A decode that never started was never charged for forming them.
 
-    The rounds a job forms are frozen on it at the first ask, which can
-    be the dispatcher's compute prediction, before its input has landed.
-    A strong region then absorbs the window and the job is withdrawn, so
-    the job that reads those rounds next has to pay for forming them.
+    Each job claims its rounds when it is staged. The waiting window
+    reads a second operation's round, which no earlier job claimed, so
+    its claim is the round. A strong region then absorbs the window and
+    the job is withdrawn before its decode starts, so the job that reads
+    that round next has to pay for forming it.
     """
     engine = engine_module.Engine()
     row = FixedRow()
@@ -235,18 +245,18 @@ def test_a_withdrawn_windows_rounds_go_back_to_its_tier():
     busy.label = "busy"
     on_decoded = _resolving(manager)
     manager.enqueue(busy, None, on_decoded)
-    waiting = _window_job()
+    waiting = _second_operations_job()
     waiting.window_id = 1
     waiting.label = "waiting"
     waiting.request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 1
+        2, 1, window_records.DecoderTier.WEAK, 1
     )
     manager.enqueue(waiting, None, on_decoded)
     at_the_prediction = formation_stage.cycles_for(waiting)
 
-    manager.withdraw_window((1, 1))
+    manager.withdraw_window((2, 1))
 
-    strong = _window_job()
+    strong = _second_operations_job()
     strong.label = "strong"
     after_the_withdrawal = formation_stage.cycles_for(strong)
     assert at_the_prediction == 5

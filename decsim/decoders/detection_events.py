@@ -24,7 +24,6 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.staged_decoder as staged_decoder
-import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 
@@ -38,12 +37,12 @@ class TierFormation:
     the first ask so the stage that prices the formation and the
     dispatcher that predicts the unit's compute read one number. A job
     that is cancelled before its decode starts gives that claim back,
-    since no stage of it ever ran. The claims of an operation are kept
-    as a low watermark plus the rounds claimed above it
-    (detector_formation.DoneRounds): a tier claims its rounds in about
-    round order, so the record does not grow with the run where the
-    tier reads every round. A source with no recipes leaves the rounds
-    as they landed, and the tier is charged for them all the same.
+    since no stage of it ever ran. The claims live at the seat
+    (claim_rounds), which forgets one once its round retires: every job
+    claims its rounds when it is staged, while they are still held for
+    it, so none asks for a round after it retires. A source with no
+    recipes leaves the rounds as they landed, and the tier is charged
+    for them all the same.
     """
 
     def __init__(
@@ -51,8 +50,6 @@ class TierFormation:
     ) -> None:
         self.placement = placement
         self.seat = seat
-        # per operation, the rounds an earlier job of this tier claimed
-        self.claimed_by_operation: dict = {}
 
     def form(self, payloads: list, rounds_before: tuple = ()) -> list:
         """One job's rounds, their detection events in place of outcomes.
@@ -75,14 +72,8 @@ class TierFormation:
         frozen = job.detection_event_rounds
         if frozen is not None:
             return frozen
-        fresh = []
-        for key in _round_keys_of(job):
-            if self._is_claimed(key):
-                continue
-            fresh.append(key)
-        for key in fresh:
-            self._claim(key)
-        frozen = tuple(fresh)
+        round_keys = _round_keys_of(job)
+        frozen = self.placement.claim_rounds(self.seat, round_keys)
         job.detection_event_rounds = frozen
         return frozen
 
@@ -100,30 +91,8 @@ class TierFormation:
         claimed = job.detection_event_rounds
         if claimed is None:
             return
-        for key in claimed:
-            self._unclaim(key)
+        self.placement.return_claim(self.seat, claimed)
         job.detection_event_rounds = None
-
-    def _is_claimed(self, round_key: tuple) -> bool:
-        operation_id, round_index = round_key
-        claimed = self.claimed_by_operation.get(operation_id)
-        if claimed is None:
-            return False
-        return round_index in claimed
-
-    def _claim(self, round_key: tuple) -> None:
-        operation_id, round_index = round_key
-        claimed = self._claims_of(operation_id)
-        claimed.add(round_index)
-
-    def _unclaim(self, round_key: tuple) -> None:
-        operation_id, round_index = round_key
-        claimed = self._claims_of(operation_id)
-        claimed.discard(round_index)
-
-    def _claims_of(self, operation_id) -> detector_formation.DoneRounds:
-        new_record = detector_formation.DoneRounds()
-        return self.claimed_by_operation.setdefault(operation_id, new_record)
 
 
 @dataclasses.dataclass(frozen=True)

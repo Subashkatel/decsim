@@ -360,8 +360,8 @@ def _with_paired_statistics(
 ) -> PairedComparison:
     """The mixture test reads only the discordant pairs, the interval all.
 
-    A pair both runs failed or both survived moves no evidence, but it
-    is a difference of zero, and so narrows the difference interval.
+    A pair both runs failed or both survived moves no evidence; it
+    enters the interval as a difference of zero.
     """
     first = numpy.asarray(first_failures, dtype=bool)
     second = numpy.asarray(second_failures, dtype=bool)

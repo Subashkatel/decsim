@@ -1310,8 +1310,8 @@ def test_a_round_overtaken_on_a_faster_route_still_packs_first(
     assert delay_ticks == {100_000, 4_500_000}
     assert len(readouts) == len(run.packets)
     raw_bits = _raw_bits(run.packets)
-    payload_bits = sum(row["payload_bits"] for row in readouts)
-    assert payload_bits == len(raw_bits)
+    payload_bit_count = sum(row["payload_bits"] for row in readouts)
+    assert payload_bit_count == len(raw_bits)
 
 
 def test_a_timing_only_terminal_fragment_reads_the_round_out_whole():

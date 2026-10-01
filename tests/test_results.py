@@ -783,7 +783,7 @@ def _set_prefix_shots(run_dir, prefix_shots: int) -> None:
 
 
 def _set_rate(run_dir, rate: float) -> None:
-    """The first sweep row's shot failure rate set by hand."""
+    """Equal rates, so only the paired line can tell the folders apart."""
     sweep_path = run_dir / "sweep.csv"
     sweep_rows = _csv_rows(sweep_path)
     sweep_rows[0]["logical_error_rate_estimate"] = rate

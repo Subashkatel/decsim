@@ -1255,7 +1255,8 @@ than its first (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the
 whole read is counted, not its first round. A round the seat formed is
 not given again: its former keeps a packet while a round that reads it
 is neither formed there nor retired, the packet's reference set, so a
-seam formed after a later block still finds the rounds it reads. A
+seam formed after a later block still finds the rounds it reads, and
+the parallel scheme's blocks form at a decoder seat in any order. A
 round is retired at every seat once it leaves the store the plan's
 windows read (`retire_round`): every read, an escalation's included,
 holds its rounds there until they have landed and formed, so no read
@@ -1385,13 +1386,6 @@ mistake a gap for a result.
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
   the per-point settings.
-- **O7. The parallel windowing scheme refuses the decoder-side formation
-  row.** Skoric's A and B blocks read disjoint round ranges, and the
-  formation component forms in round order, so it is asked for a later
-  round while standing at an earlier one and refuses. What it wants is a
-  former that forms in arrival order from the tier's own store, which is
-  also how LILLIPUT's block and Yang's stage run: on the stream, not on
-  the window.
 - **O8. `decsim collect` refuses a `timing_only` device.** The device
   builds and runs as a machine, but the experiments layer's per-shot
   measurement compares the loop's prediction against PyMatching on the

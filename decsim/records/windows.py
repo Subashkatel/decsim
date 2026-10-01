@@ -347,13 +347,6 @@ class BoundaryUpdate:
     release_dependency: bool
 
 
-class SeamFaultOwner(Enum):
-    """Which side commits faults crossing a strong-region restart seam."""
-
-    STRONG_REGION = auto()
-    RESTART_WINDOW = auto()
-
-
 # The double-window region folds one buffer region into the escalated
 # window's commit region on each side, so it commits rcom + 2 rbuf
 # rounds. Toshio et al. 2510.25222 line 1352 parameterises that two as
@@ -402,14 +395,13 @@ def restart_reread_round_count(
 
 @dataclass(frozen=True)
 class StrongRegionPlan:
-    """Geometry and seam ownership for one deferred strong decode."""
+    """Geometry for one deferred strong decode."""
 
     commit_lo: int
     commit_hi: int
     context_lo: int
     context_hi: int
     restart_buffer_lo: Optional[int]
-    restart_seam_fault_owner: Optional[SeamFaultOwner]
 
 
 @dataclass(frozen=True)

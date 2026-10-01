@@ -549,7 +549,6 @@ class DoubleWindow(StrongWindowPorts):
             plan.restart_buffer_lo,
             model,
             plan.commit_hi,
-            plan.restart_seam_fault_owner,
         )
         restart = self.planner.window_at(restart_key)
         # its absorbed dependency is gone; no speculative strong decode in the
@@ -563,18 +562,15 @@ class DoubleWindow(StrongWindowPorts):
         buffer_lo: int,
         model,
         strong_window_hi: int,
-        seam_owner: window_records.SeamFaultOwner,
     ) -> None:
         """Install the restart window's re-sliced reads and their model."""
         restart = self.planner.reslice_window(restart_key, buffer_lo, model)
         self.retention.replace_window_reads(restart_key, restart)
-        seam_owner_name = seam_owner.name.lower()
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"restart window {restart_key} re-sliced across strong window "
             f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
-            f"{restart.buffer_hi}; crossing faults owned by "
-            f"{seam_owner_name})",
+            f"{restart.buffer_hi}; crossing faults owned by restart_window)",
         )
 
     # ---- private: the held job

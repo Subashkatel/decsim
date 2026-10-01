@@ -220,7 +220,6 @@ class DefaultWindowInteraction:
         context_hi = min(context_end, operation_round_count)
         has_restart = commit_hi < operation_round_count
         restart_buffer_lo = None
-        restart_seam_fault_owner = None
         if has_restart:
             reread_regions = self.restart_reread_buffer_regions
             reread_round_count = window_records.restart_reread_round_count(
@@ -228,32 +227,13 @@ class DefaultWindowInteraction:
             )
             restart_start = commit_hi - reread_round_count + 1
             restart_buffer_lo = max(commit_lo, restart_start)
-            restart_seam_fault_owner = self._restart_seam_fault_owner()
         return window_records.StrongRegionPlan(
             commit_lo=commit_lo,
             commit_hi=commit_hi,
             context_lo=context_lo,
             context_hi=context_hi,
             restart_buffer_lo=restart_buffer_lo,
-            restart_seam_fault_owner=restart_seam_fault_owner,
         )
-
-    def _restart_seam_fault_owner(self):
-        """Which side commits the faults crossing the restart seam.
-
-        With no re-read the restart window shares no round with the
-        strong region, so it owns the faults of the rounds it reads and
-        the strong region owns nothing past its committed edge (Toshio
-        2510.25222 Sec. III C). With a re-read the crossing
-        rounds are read twice, and the strong region keeps them: it
-        decoded them with both boundaries determined. A strong region
-        that reads no round past its edge and pins its far face there
-        leaves them to the restart window whatever the width
-        (escalation/strong_regions.py, double_window_region).
-        """
-        if self.restart_reread_buffer_regions == 0:
-            return window_records.SeamFaultOwner.RESTART_WINDOW
-        return window_records.SeamFaultOwner.STRONG_REGION
 
 
 def _seam_of(payload, destination, source):

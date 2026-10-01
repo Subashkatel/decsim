@@ -205,12 +205,8 @@ class StrongRegions:
         context_lo = plan.context_lo
         if near_source_key is not None:
             context_lo = plan.commit_lo
-        seam_fault_owner = _far_pinned_seam_owner(plan)
         pinned_plan = dataclasses.replace(
-            plan,
-            context_lo=context_lo,
-            context_hi=plan.commit_hi,
-            restart_seam_fault_owner=seam_fault_owner,
+            plan, context_lo=context_lo, context_hi=plan.commit_hi
         )
         pinned = dataclasses.replace(proposal, plan=pinned_plan)
         return self._resolved_double_window_region(key, pinned, near_source_key)
@@ -446,15 +442,6 @@ class _DoubleWindowProposal:
     plan: window_records.StrongRegionPlan
 
 
-def _far_pinned_seam_owner(
-    plan: window_records.StrongRegionPlan,
-) -> Optional[window_records.SeamFaultOwner]:
-    """The restart window, when there is one to pin the far face on."""
-    if plan.restart_seam_fault_owner is None:
-        return None
-    return window_records.SeamFaultOwner.RESTART_WINDOW
-
-
 def _union_of_owned_faults(owned_sets: list):
     """One prior-fault map from several windows' owned sets, or None."""
     if not owned_sets:
@@ -606,9 +593,7 @@ def _restart_window_key(
 def _refuse_terminal_restart_data(
     key: tuple, plan: window_records.StrongRegionPlan
 ) -> None:
-    has_restart_data = plan.restart_buffer_lo is not None
-    has_seam_owner = plan.restart_seam_fault_owner is not None
-    if has_restart_data or has_seam_owner:
+    if plan.restart_buffer_lo is not None:
         raise RuntimeError(
             f"terminal strong-region plan for {key} cannot define "
             f"restart seam data"
@@ -650,9 +635,13 @@ def _fault_exclusions(
 ) -> tuple:
     """(strong window's, restart window's) fault exclusion ranges.
 
-    The restart window owns the crossing faults (double_window_region):
-    the strong window excludes the rounds past its edge and the restart
-    window excludes only the rounds before the strong window.
+    The restart window owns the crossing faults at every re-read width
+    (double_window_region): the strong window excludes the rounds past
+    its edge and the restart window excludes only the rounds before the
+    strong window. The window decoded first commits the edges leaving
+    its commit region, and the window filled in between its neighbours
+    has closed faces and owns nothing across them (Skoric et al.
+    2209.08552 lines 258-261 and 380-388).
     """
     left_exclusions = _left_fault_exclusions(plan.commit_lo)
     if restart_key is None:

@@ -41,7 +41,15 @@ TWO_POINT_SWEEP = [
 PAIRED_SHOTS = 200
 # The seeds both paired folders fail.
 SHARED_FAILING_SEEDS = (0, 1, 2, 3, 4)
+# The paired line of a point whose 20 shots failed alike in both runs.
+SAME_SHOTS_TEXT = (
+    " paired on 20 of 20 shared shots (0 unscored in either run, left "
+    "out): 0 failed in the first only, 0 in the second only; no "
+    "difference shown by the mixture test;"
+)
 
+# The swept path that tells the two points apart, a column of sweep.csv.
+PROBABILITY_AXIS = "workload.arguments.physical_error_probability"
 ROUNDS_COLUMN = "settings.workload.row_settings.arguments.rounds_per_shot"
 PROBABILITY_COLUMN = (
     "settings.workload.row_settings.arguments.physical_error_probability"
@@ -116,16 +124,23 @@ def _rewritten(run_dir, tmp_path, name: str, values: dict):
 
 
 def test_two_runs_of_one_yaml_are_the_same(runs, capsys):
+    """Nothing differs, and every shared point's shots fail alike."""
     lines = _diff_printed(capsys, runs["first"], runs["second"])
 
-    assert lines == [
+    low_point = _point_text(0.003)
+    high_point = _point_text(0.01)
+    low_line = _line_with(lines, low_point)
+    high_line = _line_with(lines, high_point)
+    assert lines[:5] == [
         "settings:",
         "  the same",
         "inputs:",
         "  the same",
         "results:",
-        "  the same",
     ]
+    assert len(lines) == 7
+    assert SAME_SHOTS_TEXT in low_line
+    assert SAME_SHOTS_TEXT in high_line
 
 
 def test_diff_names_the_setting_and_the_input_that_changed(runs, capsys):
@@ -174,8 +189,8 @@ def test_diff_judges_a_logical_error_rate_by_its_exact_interval(
     apart_rate = _line_with(apart_lines, " logical_error_rate_estimate: ")
     assert inside_rate.endswith(", within error bars")
     assert apart_rate.endswith(", beyond error bars")
-    # the rate's line and the paired line that follows it
-    assert len(apart_lines) == 7
+    # the rate's line and each of the two points' paired lines
+    assert len(apart_lines) == 8
 
 
 def test_diff_makes_no_comparison_of_a_rate_with_no_interval(
@@ -253,9 +268,10 @@ def test_diff_judges_a_mean_by_the_standard_error_of_its_shots(
     near_lines = _diff_printed(capsys, runs["first"], near)
     far_lines = _diff_printed(capsys, runs["first"], far)
 
-    assert near_lines[-1].endswith(", within error bars")
-    assert far_lines[-1].endswith(", beyond error bars")
-    assert f"{column}:" in far_lines[-1]
+    near_line = _line_with(near_lines, f" {column}: ")
+    far_line = _line_with(far_lines, f" {column}: ")
+    assert near_line.endswith(", within error bars")
+    assert far_line.endswith(", beyond error bars")
 
 
 def test_diff_compares_a_column_with_no_error_bar_exactly(
@@ -268,7 +284,8 @@ def test_diff_compares_a_column_with_no_error_bar_exactly(
 
     lines = _diff_printed(capsys, runs["first"], changed)
 
-    assert lines[-1].endswith(", no error bar: compared exactly")
+    changed_line = _line_with(lines, " max_queued_windows: ")
+    assert changed_line.endswith(", no error bar: compared exactly")
 
 
 def _kept_shots(run_dir, keep) -> None:
@@ -307,8 +324,8 @@ def test_diff_gives_a_mean_over_one_shot_no_error_bar(runs, tmp_path, capsys):
 
     lines = _diff_printed(capsys, runs["first"], changed)
 
-    assert lines[-1].endswith(", no error bar: compared exactly")
-    assert "load:" in lines[-1]
+    load_line = _line_with(lines, " load: ")
+    assert load_line.endswith(", no error bar: compared exactly")
 
 
 def _blank_shot_column(run_dir, column: str) -> None:
@@ -331,7 +348,8 @@ def test_diff_gives_a_mean_its_shots_do_not_hold_no_error_bar(
 
     lines = _diff_printed(capsys, runs["first"], changed)
 
-    assert lines[-1].endswith(", no error bar: compared exactly")
+    load_line = _line_with(lines, " load: ")
+    assert load_line.endswith(", no error bar: compared exactly")
 
 
 def test_diff_names_a_column_only_the_second_folder_holds(
@@ -507,6 +525,32 @@ def test_the_pairs_end_where_the_shorter_prefix_stopped(runs, tmp_path, capsys):
     assert row["first_only_failures"] == "25"
 
 
+def test_equal_rates_still_print_the_paired_difference(runs, tmp_path, capsys):
+    """25 of 100 against 50 of 200: one rate, yet 25 against 5 paired.
+
+    The second's 5 failures among the 100 shared seeds miss the first's
+    25, and its other 45 come after the first stopped, so the two rates
+    print alike and only the paired line shows the difference.
+    """
+    first_failing = tuple(range(5, 30))
+    second_shared = tuple(range(30, 35))
+    second_later = tuple(range(100, 145))
+    second_failing = second_shared + second_later
+    first = _paired_folder(runs["first"], tmp_path, "first", first_failing)
+    second = _paired_folder(runs["first"], tmp_path, "second", second_failing)
+    _set_prefix_shots(first, 100)
+    _set_rate(first, 0.25)
+
+    lines, row = _paired_diff(capsys, tmp_path, first, second)
+
+    paired_line = _line_with(lines, " paired on ")
+    rate_lines = [line for line in lines if "logical_error_rate_est" in line]
+    assert rate_lines == []
+    assert row["first_only_failures"] == "25"
+    assert row["second_only_failures"] == "5"
+    assert "; differ by the mixture test;" in paired_line
+
+
 def _failing_seeds(first_only: int, second_only: int) -> tuple:
     """Both fail the shared seeds, then the first its own, then the second."""
     first_start = len(SHARED_FAILING_SEEDS)
@@ -574,6 +618,14 @@ def _set_prefix_shots(run_dir, prefix_shots: int) -> None:
     _write_csv_rows(sweep_path, sweep_rows)
 
 
+def _set_rate(run_dir, rate: float) -> None:
+    """The first sweep row's shot failure rate set by hand."""
+    sweep_path = run_dir / "sweep.csv"
+    sweep_rows = _csv_rows(sweep_path)
+    sweep_rows[0]["logical_error_rate_estimate"] = rate
+    _write_csv_rows(sweep_path, sweep_rows)
+
+
 def _shot_row(
     template: dict,
     seed: int,
@@ -590,7 +642,7 @@ def _shot_row(
 
 
 def _paired_diff(capsys, tmp_path, first, second) -> tuple:
-    """The lines diff prints, and its csv row of the point written here."""
+    """The lines diff prints of the point written here, and its csv row."""
     out = tmp_path / "paired.csv"
     command.main(["diff", str(first), str(second), "--out", str(out)])
     printed = capsys.readouterr()
@@ -598,9 +650,12 @@ def _paired_diff(capsys, tmp_path, first, second) -> tuple:
     sweep_path = first / "sweep.csv"
     sweep_rows = _csv_rows(sweep_path)
     point_id = sweep_rows[0]["point_id"]
+    probability = float(sweep_rows[0][PROBABILITY_AXIS])
+    point = _point_text(probability)
+    point_lines = [line for line in lines if point in line]
     rows = _csv_rows(out)
     (row,) = [row for row in rows if row["first_point_id"] == point_id]
-    return lines, row
+    return point_lines, row
 
 
 def _equation_24_difference(first_failing: tuple, second_failing: tuple):

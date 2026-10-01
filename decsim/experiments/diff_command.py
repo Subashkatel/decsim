@@ -51,9 +51,6 @@ SHOT_COLUMN_OF_MEAN = {"windows_per_shot": "decoded_windows"}
 # Two means agree within their error bars when they differ by at most
 # this many standard errors of their difference (a 95% interval).
 AGREEMENT_STANDARD_ERRORS = 1.96
-# The column whose line the paired comparison follows: the shot failure
-# rate, which is the rate the paired shots' failures estimate.
-PAIRED_ESTIMATE = "logical_error_rate_estimate"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -96,7 +93,8 @@ def diff(first: pathlib.Path, second: pathlib.Path) -> tuple:
     error bar is compared exactly.
 
     Each shared point is also compared shot by shot (PairedComparison),
-    and its line follows the logical error rate's when that differs.
+    on a line after its results, because two runs whose rates agree can
+    still differ on the shots they share.
 
     Returns:
         The lines, and one PairedComparison per point both folders hold.
@@ -203,9 +201,12 @@ def _result_lines(first: pathlib.Path, second: pathlib.Path) -> tuple:
             point, first_row, second_row, first_shots, second_shots
         )
         paired.append(point_paired)
-        comparison = _Comparison(point, first_shots, second_shots, point_paired)
+        comparison = _Comparison(point, first_shots, second_shots)
         point_lines = comparison.lines(first_row, second_row)
         lines.extend(point_lines)
+        point_text = _point_text(point)
+        paired_line = _paired_line(point_text, point_paired)
+        lines.append(paired_line)
     section = _or_same(lines)
     return section, paired
 
@@ -218,18 +219,13 @@ class _Comparison:
         point: str,
         first_shots: list,
         second_shots: list,
-        paired: PairedComparison,
     ) -> None:
         self.point_text = _point_text(point)
         self.first_shots = first_shots
         self.second_shots = second_shots
-        self.paired = paired
 
     def lines(self, first_row: dict, second_row: dict) -> list:
-        """One line per compared column that differs, with its verdict.
-
-        The paired comparison's line follows the shot failure rate's.
-        """
+        """One line per compared column that differs, with its verdict."""
         lines = []
         for column in _changed(first_row, second_row):
             if column in NOT_COMPARED_COLUMNS:
@@ -241,9 +237,6 @@ class _Comparison:
                 f"  {self.point_text} {column}: {first_value} -> "
                 f"{second_value}, {verdict}"
             )
-            if column == PAIRED_ESTIMATE:
-                paired_line = _paired_line(self.point_text, self.paired)
-                lines.append(paired_line)
         return lines
 
     def verdict(self, column: str, first_row: dict, second_row: dict) -> str:

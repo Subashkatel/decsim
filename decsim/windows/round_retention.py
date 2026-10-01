@@ -628,12 +628,6 @@ class RoundRetention:
         """
         if self.strong_side_seat is None:
             return []
-        return self._rounds_read_before(operation_id, first_round, last_round)
-
-    def _rounds_read_before(
-        self, operation_id: Any, first_round: int, last_round: int
-    ) -> list:
-        """The round keys before first_round the read reaches, in order."""
         reach_count = self.detection_events.rounds_read_before(
             operation_id, first_round, last_round
         )

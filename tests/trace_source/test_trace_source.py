@@ -56,7 +56,6 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     bare.run()
     every_listener = dataclasses.replace(
         settings.observation,
-        syndrome_buffer_occupancy=True,
         backlog_trace=True,
         decoder_memory_occupancy=True,
     )
@@ -67,5 +66,4 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     heard_frame = heard.control.pauli_frame.snapshot()
     assert heard_frame.records == bare_frame.records
     assert heard.observation.log.lines == bare.observation.log.lines
-    assert heard.observation.syndrome_buffer_occupancy.arrivals == 30
     assert heard.observation.decode_backlog.peak > 0

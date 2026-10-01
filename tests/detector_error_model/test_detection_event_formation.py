@@ -399,12 +399,26 @@ def test_a_seat_is_given_every_round_a_later_round_of_its_read_reaches():
 
 
 def test_a_seat_is_not_given_a_round_it_formed():
-    """It formed round 2, so round 3's detectors read it from its ring."""
+    """It formed round 2, so round 3's detectors read the packet it kept."""
     placement = seated(("weak_decoder",))
     first_two = rounds(1, 2)
     placement.form_at("weak_decoder", first_two)
 
     assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == ()
+
+
+def test_a_seat_is_not_given_a_round_it_was_given_raw_before():
+    """Round 3 read round 1 and was given rounds 1 and 2; round 4 reads 2.
+
+    The seat keeps round 2's packet while round 4 is unformed there, so
+    a read from round 4 brings nothing before it.
+    """
+    placement = lookback_seated(("strong_decoder",))
+    third = (fragment(3, bits=(0,)),)
+    first_two = (fragment(1, bits=(0,)), fragment(2, bits=(0,)))
+    placement.form_at("strong_decoder", third, first_two)
+
+    assert placement.rounds_needed_before("strong_decoder", 1, 4, 4) == ()
 
 
 def test_a_round_whose_detectors_read_only_itself_needs_nothing_before():

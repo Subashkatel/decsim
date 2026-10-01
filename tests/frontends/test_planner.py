@@ -719,7 +719,7 @@ def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
     """Its former reads round 2 for round 3's surface-code detectors."""
     table = surface_code_table()
     reads = window_records.FormationReads(
-        strong_side_forms=True, tables={1: table}
+        strong_side_seat="strong_decoder", tables={1: table}
     )
 
     plan = seven_round_plan(reads)
@@ -732,7 +732,7 @@ def test_a_strong_side_that_forms_holds_every_round_the_commit_reads():
     """Round 3's detector is rec[-1] ^ rec[-3]: it reads round 1."""
     table = lookback_table()
     reads = window_records.FormationReads(
-        strong_side_forms=True, tables={1: table}
+        strong_side_seat="strong_decoder", tables={1: table}
     )
 
     plan = seven_round_plan(reads)
@@ -745,7 +745,7 @@ def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
     """Round 3 reads only itself; round 4 of the same read reads round 1."""
     table = reach_growing_table()
     reads = window_records.FormationReads(
-        strong_side_forms=True, tables={1: table}
+        strong_side_seat="strong_decoder", tables={1: table}
     )
 
     plan = seven_round_plan(reads)
@@ -755,7 +755,7 @@ def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
 
 
 def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
-    reads = window_records.FormationReads(strong_side_forms=True)
+    reads = window_records.FormationReads(strong_side_seat="strong_decoder")
 
     plan = seven_round_plan(reads)
 

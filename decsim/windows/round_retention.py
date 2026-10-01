@@ -18,10 +18,12 @@ escalation.restart_reread_buffer_regions buffer regions of the strong
 region (Toshio et al. 2510.25222 Sec. III C). A read whose reader forms
 the detection events and never read the rounds before its first (a
 strong read, a restart read past a strong region) also holds the raw
-rounds before its first that its rounds' recipes read
-(strong_rounds_before, primary_rounds_before), under the read's own
-hold, as an HEVC decoder keeps each picture the current reference set
-names (FFmpeg hevc/refs.c:486-517). A window's own weak read holds none:
+rounds before its first that its rounds' recipes read, under the
+read's own hold, as an HEVC decoder keeps each picture the current
+reference set names (FFmpeg hevc/refs.c:486-517). An escalation carries
+only those its strong seat has not formed (strong_rounds_before): that
+seat's former keeps a round an earlier strong read landed while a round
+it has not formed reads it. A window's own weak read holds none:
 the earlier window's read holds those rounds until it lands in the same
 decoder, which forms them and keeps each packet while a round it has
 not formed reads it (detector_formation.StreamingDetectorFormer), even
@@ -63,14 +65,15 @@ class RoundRetention:
         *,
         is_strong_context_retained: bool,
         primary_tier: window_records.DecoderTier,
-        strong_side_forms: bool = False,
+        strong_side_seat: Optional[str] = None,
         primary_reader_forms: bool = False,
     ) -> None:
         self.is_strong_context_retained = is_strong_context_retained
         self.primary_tier = primary_tier
-        # a seat past the weak syndrome buffer on the escalation path
-        # forms the detection events (detection_events.formed_at)
-        self.strong_side_forms = strong_side_forms
+        # the seat past the weak syndrome buffer on the escalation path
+        # that forms the detection events (detection_events.formed_at),
+        # None when none does
+        self.strong_side_seat = strong_side_seat
         # the decoder the primary store feeds forms the detection events
         self.primary_reader_forms = primary_reader_forms
 
@@ -248,7 +251,7 @@ class RoundRetention:
         bounds = window_records.strong_context_bounds(window)
         context_lo, _commit_lo, _commit_hi, context_hi = bounds
         weak = set(weak_reads)
-        strong = self.strong_rounds_before(
+        strong = self._strong_rounds_read_before(
             window.operation_id, context_lo, context_hi
         )
         strong += self.read_keys_for_bounds(
@@ -259,16 +262,24 @@ class RoundRetention:
     def strong_rounds_before(
         self, operation_id: Any, first_round: int, last_round: int
     ) -> list:
-        """The raw rounds a strong read of these rounds reads before them.
+        """The raw rounds before these that a strong read of them carries.
 
-        When the strong side forms the events, a strong read starts at
-        the earliest round any of its rounds' recipes read: the strong
-        side's former has not seen the rounds the weak side decoded.
-        None otherwise.
+        When the strong side forms the events, its seat is given the
+        rounds before the read's first that its unformed rounds' recipes
+        read and it has not formed (rounds_needed_before): a round an
+        earlier strong read landed there stays in its former while an
+        unformed round reads it, so the stores need not keep it for this
+        read. None otherwise.
         """
-        if not self.strong_side_forms:
+        if self.strong_side_seat is None:
             return []
-        return self._rounds_read_before(operation_id, first_round, last_round)
+        needed_rounds = self.detection_events.rounds_needed_before(
+            self.strong_side_seat, operation_id, first_round, last_round
+        )
+        round_keys = []
+        for round_index in needed_rounds:
+            round_keys.append((operation_id, round_index))
+        return round_keys
 
     def primary_rounds_before(
         self, operation_id: Any, first_round: int, last_round: int
@@ -572,7 +583,7 @@ class RoundRetention:
 
     def _keeps_for_the_next_window(self, window: window_records.Window) -> bool:
         """Whether a strong read of the next window may need this hold."""
-        if not self.strong_side_forms:
+        if self.strong_side_seat is None:
             return False
         operation_id = window.operation_id
         if self.tracker.is_sealed(operation_id):
@@ -587,7 +598,7 @@ class RoundRetention:
 
         Only a strong side that forms keeps one (_keeps_for_the_next_window).
         """
-        if not self.strong_side_forms:
+        if self.strong_side_seat is None:
             return
         previous_key = (window.operation_id, window.window_index - 1)
         previous = self.planner.windows_by_key.get(previous_key)
@@ -612,6 +623,21 @@ class RoundRetention:
         restart = decoding_records.PotentialRestart(key)
         if self.weak_store.has_hold(restart):
             self.weak_store.replace_hold(restart, primary_reads)
+
+    def _strong_rounds_read_before(
+        self, operation_id: Any, first_round: int, last_round: int
+    ) -> list:
+        """The raw rounds a strong read of these rounds may carry.
+
+        A window's potential strong read is placed before anyone knows
+        whether it escalates, or what the strong seat will have formed
+        by then, so it keeps every round before its first that its
+        rounds' recipes read; the read itself carries only what the seat
+        lacks (strong_rounds_before).
+        """
+        if self.strong_side_seat is None:
+            return []
+        return self._rounds_read_before(operation_id, first_round, last_round)
 
     def _rounds_read_before(
         self, operation_id: Any, first_round: int, last_round: int

@@ -168,7 +168,7 @@ def _forming_retention(table, **forms):
 def test_a_strong_side_that_forms_reads_the_raw_round_before_a_redo():
     """A surface-code bulk detector reads the round before its own."""
     table = _surface_code_table()
-    retention = _forming_retention(table, strong_side_forms=True)
+    retention = _forming_retention(table, strong_side_seat="strong_decoder")
 
     assert retention.strong_rounds_before(1, 3, 3) == [(1, 2)]
 
@@ -176,7 +176,7 @@ def test_a_strong_side_that_forms_reads_the_raw_round_before_a_redo():
 def test_a_strong_side_reads_every_round_its_first_rounds_recipes_read():
     """Round 5's detector reads rounds 5 and 3, so rounds 3 and 4 go up."""
     table = _lookback_table()
-    retention = _forming_retention(table, strong_side_forms=True)
+    retention = _forming_retention(table, strong_side_seat="strong_decoder")
 
     assert retention.strong_rounds_before(1, 5, 5) == [(1, 3), (1, 4)]
 
@@ -184,14 +184,43 @@ def test_a_strong_side_reads_every_round_its_first_rounds_recipes_read():
 def test_a_strong_read_holds_every_round_a_later_round_of_it_reads():
     """Its first round 3 reads only itself; its round 4 reads round 1."""
     table = _reach_growing_table()
-    retention = _forming_retention(table, strong_side_forms=True)
+    retention = _forming_retention(table, strong_side_seat="strong_decoder")
 
     assert retention.strong_rounds_before(1, 3, 4) == [(1, 1), (1, 2)]
 
 
+def _raw_fragment(round_index: int) -> round_records.RetainedSyndromeFragment:
+    """One raw bit of a one-qubit round, as the QPU emits it."""
+    return round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=round_index,
+        bits=(0,),
+        size_bits=1,
+        fragment_index=0,
+    )
+
+
+def test_a_strong_read_carries_no_round_its_seat_formed():
+    """An earlier region landed rounds 3 and 4 there; round 6 still reads 4.
+
+    Round 5 reads round 3 and round 6 reads round 4, so the seat keeps
+    both packets for them and the read from round 5 carries nothing.
+    """
+    table = _lookback_table()
+    retention = _forming_retention(table, strong_side_seat="strong_decoder")
+    earlier_region = (_raw_fragment(3), _raw_fragment(4))
+    rounds_before = (_raw_fragment(1), _raw_fragment(2))
+    retention.detection_events.form_at(
+        "strong_decoder", earlier_region, rounds_before
+    )
+
+    assert retention.strong_rounds_before(1, 5, 6) == []
+
+
 def test_an_operations_first_round_has_no_round_before_to_read():
     table = _surface_code_table()
-    retention = _forming_retention(table, strong_side_forms=True)
+    retention = _forming_retention(table, strong_side_seat="strong_decoder")
 
     assert retention.strong_rounds_before(1, 1, 1) == []
 
@@ -210,7 +239,7 @@ def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
         primary_tier=window_records.DecoderTier.WEAK,
-        strong_side_forms=True,
+        strong_side_seat="strong_decoder",
     )
     retention.detection_events = formation.SeatedFormation(None, settings)
 

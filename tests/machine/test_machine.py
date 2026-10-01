@@ -717,6 +717,77 @@ def test_an_unbuffered_live_region_finds_the_round_before_it_held(
     _assert_drained(run)
 
 
+def _two_round_lookback_program() -> circuit_records.RepeatedStimCircuit:
+    """One qubit, two readouts in round 1, then rec[-1] ^ rec[-3] a round.
+
+    Rounds 2 and 3 read round 1's two readouts, and every round from 4
+    on reads two rounds back, so round 4 reads round 2.
+    """
+    first = stim.Circuit(
+        "R 0\nM(0.15) 0\nDETECTOR rec[-1]\nM(0.15) 0\nDETECTOR rec[-1]"
+    )
+    repeated = stim.Circuit("M(0.15) 0\nDETECTOR rec[-1] rec[-3]")
+    readout = stim.Circuit("OBSERVABLE_INCLUDE(0) rec[-1]")
+    final = repeated + readout
+    single = first + readout
+    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+
+
+def _escalates_one_of(window_ids: tuple, job) -> bool:
+    return job.window_id in window_ids
+
+
+@pytest.mark.parametrize(
+    "formed_at",
+    [
+        ("weak_decoder", "strong_decoder"),
+        ("weak_decoder", "strong_syndrome_buffer"),
+    ],
+)
+@pytest.mark.parametrize("escalated", [(1, 3), (1, 2)])
+def test_a_live_region_reads_a_round_an_earlier_region_landed(
+    formed_at: tuple, escalated: tuple
+) -> None:
+    """A later region reads a round window 1's region left at its seat.
+
+    Window 1's region forms round 2 and is given round 1 raw. Round 4
+    (window 3) reads round 2 and round 3 (window 2) reads round 1; the
+    strong seat keeps both packets while those rounds are unformed
+    there, so the later escalation carries neither.
+    """
+    program = _two_round_lookback_program()
+    settings = _settings(program, "live", "controller")
+    is_escalated = functools.partial(_escalates_one_of, escalated)
+    weak = declared_run.DeclaredConfidenceDecoder(0.028, is_escalated)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=weak, units=3)
+    strong_decoder = dataclasses.replace(settings.strong_decoder, units=3)
+    threshold = threshold_sources.FixedThreshold(0.5)
+    collaborators = escalation_policies.EscalationCollaborators(
+        threshold=threshold,
+        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    )
+    policy = escalation_policies.Switching(collaborators)
+    escalation = dataclasses.replace(
+        settings.escalation, kind="switching", policy=policy
+    )
+    seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
+    windows = dataclasses.replace(
+        settings.windows, commit_rounds=1, buffer_rounds=0
+    )
+    settings = dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        escalation=escalation,
+        detection_events=seats,
+        windows=windows,
+    )
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
 def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")

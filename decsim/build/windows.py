@@ -337,7 +337,7 @@ def _retention(
     return round_retention_module.RoundRetention(
         is_strong_context_retained=escalation_policy.requires_strong_context,
         primary_tier=escalation_policy.primary_tier,
-        strong_side_forms=formation_reads.strong_side_forms,
+        strong_side_seat=formation_reads.strong_side_seat,
         primary_reader_forms=formation_reads.primary_reader_forms,
     )
 

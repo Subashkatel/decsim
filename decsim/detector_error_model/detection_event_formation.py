@@ -122,7 +122,8 @@ class SeatedFormation:
         the earliest round its unformed rounds' recipes read
         (detector_formation.FormationTable rounds_read_before_first). A
         round the seat formed before is answered from what it remembers,
-        and its former keeps its packet while an unformed round reads it
+        and its former keeps its packet, or the packet it was given raw,
+        while an unformed round reads it
         (detector_formation.StreamingDetectorFormer), so it is not given
         again.
         """
@@ -258,7 +259,10 @@ class _SeatHistory:
     ) -> tuple:
         """The raw rounds before first_round that forming the read reads.
 
-        A source with no recipes forms nothing, so nothing is missing.
+        Those the seat neither formed nor holds raw: a round given to it
+        before an earlier read stays in its former while an unformed
+        round reads it. A source with no recipes forms nothing, so
+        nothing is missing.
         """
         if self.recipes is None:
             return ()
@@ -269,7 +273,20 @@ class _SeatHistory:
             first_round, unformed_rounds
         )
         earliest_round = first_round - reach_count
-        return self._unformed(operation_id, earliest_round, first_round)
+        return self._missing(operation_id, earliest_round, first_round)
+
+    def _missing(
+        self, operation_id: Any, first_round: int, stop_round: int
+    ) -> tuple:
+        """The rounds from first_round to before stop_round the seat lacks."""
+        former = self.former_by_operation.get(operation_id)
+        unformed_rounds = self._unformed(operation_id, first_round, stop_round)
+        missing_rounds = []
+        for round_index in unformed_rounds:
+            if former is not None and former.holds_packet(round_index):
+                continue
+            missing_rounds.append(round_index)
+        return tuple(missing_rounds)
 
     def _unformed(
         self, operation_id: Any, first_round: int, stop_round: int

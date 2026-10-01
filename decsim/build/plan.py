@@ -551,13 +551,13 @@ def _formation_reads(
     forms when detection_events.formed_at names it.
     """
     detection_events = settings.detection_events
-    strong_side_forms = detection_events.forms_on_the_strong_side()
+    strong_side_seat = detection_events.strong_side_seat()
     primary_seat = "weak_decoder"
     if escalation_policy.primary_tier is window_records.DecoderTier.STRONG:
         primary_seat = "strong_decoder"
     primary_reader_forms = primary_seat in detection_events.formed_at
     return window_records.FormationReads(
-        strong_side_forms=strong_side_forms,
+        strong_side_seat=strong_side_seat,
         primary_reader_forms=primary_reader_forms,
         tables=tables,
     )

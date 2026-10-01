@@ -1247,7 +1247,8 @@ and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
 ## D34. A seat is told how many rounds before a round it must be given
 
 **Decided.** A read is given every raw round before its first that its
-unformed rounds' recipes read, less the rounds its seat has formed:
+unformed rounds' recipes read, less the rounds its seat has formed or
+holds raw:
 `rounds_needed_before` answers those rounds, from the earliest round
 any detector of an unformed round of the read names (and, on the last
 round, any observable). A later round of a read can reach further back
@@ -1263,10 +1264,15 @@ replaced. The recipe table owns the law (`rounds_read_before` per
 round, `rounds_read_before_first` per read, `rounds_reading` per
 packet).
 A read whose reader forms and never read the rounds before its first
-holds the rounds its whole read reaches under its own hold: a strong
-read in both stores, and a restart read past a strong region, whose
+holds the rounds its whole read reaches under its own hold: a window's
+potential strong read in both stores, placed before anyone knows what
+the strong seat will hold, and a restart read past a strong region, whose
 absorbed windows no weak decode read, in the primary store
-(`replace_restart_reads`). A window's own weak read holds none of
+(`replace_restart_reads`). An escalation carries only the rounds its
+strong seat lacks (`strong_rounds_before`, asked when the region is
+planned): a round an earlier region landed there, formed or given raw,
+stays in that seat's former while a round it has not formed reads it,
+so the stores need not keep it for the later region. A window's own weak read holds none of
 them: the window before it reads them and holds them until it lands in
 the same decoder, which forms them there and keeps each packet while a
 round it has not formed reads it, so a round leaves the store when no reader needs it there, as it does
@@ -1317,8 +1323,9 @@ line 154).
 for a read's first and last round) and `rounds_read_before` (a count,
 for the same two), and `form_at` takes `rounds_before` in place of
 `round_before`; `WindowRetention.strong_round_before` became
-`strong_rounds_before`, which takes the read's last round too, and
-gained `replace_restart_reads`.
+`strong_rounds_before`, which takes the read's last round too and
+answers the rounds the strong seat lacks, and gained
+`replace_restart_reads`.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
 (`FormationTable.rounds_read_before`, `rounds_read_before_first`,

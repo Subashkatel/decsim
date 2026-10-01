@@ -445,13 +445,14 @@ class FormationReads:
     (FormationTable rounds_read_before_first), so the read that carries
     those rounds holds them, as an HEVC decoder keeps each picture the
     current reference set names (FFmpeg hevc/refs.c:486-517).
-    strong_side_forms is a seat past the weak syndrome buffer that
-    forms; primary_reader_forms is the decoder the primary store feeds,
-    forming. tables maps an operation id to its formation table; an
-    operation with none reads nothing before its first round.
+    strong_side_seat is the seat past the weak syndrome buffer that
+    forms, None when none does; primary_reader_forms is the decoder the
+    primary store feeds, forming. tables maps an operation id to its
+    formation table; an operation with none reads nothing before its
+    first round.
     """
 
-    strong_side_forms: bool = False
+    strong_side_seat: Optional[str] = None
     primary_reader_forms: bool = False
     tables: Mapping = field(default_factory=dict)
 
@@ -459,7 +460,7 @@ class FormationReads:
         self, operation_id: Any, first_round: int, last_round: int
     ) -> int:
         """The first round a strong read of these rounds holds."""
-        if not self.strong_side_forms:
+        if self.strong_side_seat is None:
             return first_round
         return self._earliest_round_read(operation_id, first_round, last_round)
 

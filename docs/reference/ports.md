@@ -188,7 +188,7 @@ The rounds a window may still read, as the escalation side sees it.
 | `release_absorbed_strong_hold` | Drop the rounds an absorbed window kept; the strong request has them. |
 | `require_rounds_retained` | A strong window starts only once every round it reads is held. |
 | `read_keys_for_bounds` | The retained round keys of a possibly cross-operation range. |
-| `strong_rounds_before` | The raw rounds a strong read of these rounds reads before them. |
+| `strong_rounds_before` | The raw rounds before these that a strong read of them carries. |
 | `require_retained` | Refuse a new consumer if an already-arrived round was released. |
 | `require_strong_retained` | The same, on the strong syndrome buffer. |
 

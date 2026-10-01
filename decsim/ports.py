@@ -688,7 +688,10 @@ class WindowRetention(Protocol):
     def strong_rounds_before(
         self, operation_id: Any, first_round: int, last_round: int
     ) -> list:
-        """The raw rounds a strong read of these rounds reads before them."""
+        """The raw rounds before these that a strong read of them carries.
+
+        Those its forming seat has neither formed nor been given.
+        """
 
     def require_retained(
         self, round_keys: list, purpose: str, store=None
@@ -1601,7 +1604,7 @@ class DetectionEventPlacement(Protocol):
         """The raw rounds before a read's first round the seat must be given.
 
         Back to the earliest round the read's unformed rounds' recipes
-        read, less the rounds the seat has formed.
+        read, less the rounds the seat has formed or holds raw.
         """
 
     def rounds_read_before(

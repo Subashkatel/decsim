@@ -279,6 +279,10 @@ class StreamingDetectorFormer:
         self.packets[round_index] = packet
         self._let_go_of_unread_packets(round_index)
 
+    def holds_packet(self, round_index: int) -> bool:
+        """Whether this round's raw packet is held here."""
+        return round_index in self.packets
+
     def held_bits(self) -> int:
         """The raw bits the former holds."""
         return sum(len(packet) for packet in self.packets.values())

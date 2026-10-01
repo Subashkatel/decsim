@@ -1293,9 +1293,10 @@ every round and no count bounds it. A program whose
 fragments loses the round it reads there, and the run stops where that
 round would be formed (its former does not hold it) or read from the
 store, so no event is formed without it. No seat forms an
-observable, since no seat's reader uses one: the truth is a running
-parity per observable that each round's packet folds into as it
-arrives (`form_shot`), so no round is kept for an observable. Fed in
+observable, since no seat's reader uses one: the device forms the truth
+once per shot (`form_shot`), walking the shot's complete packets in
+round order and XORing each round's records of an observable into its
+parity, so no seat keeps a round for an observable. Fed in
 order a former holds the last k packets, the ring it replaced. The
 recipe table owns the law (`rounds_read_before` per round,
 `rounds_read_by` per read, `rounds_read_before_first` per planned
@@ -1353,9 +1354,9 @@ measurements a decoder's detectors read (`libs/qec/lib/decoder.cpp`
 lines 115-127); a detector compares a round against earlier ones
 (LILLIPUT 2108.06569 lines 499-510). An HEVC decoder keeps each
 picture the current reference set names, whatever else it holds
-(FFmpeg `hevc/refs.c` lines 486-517). Stim's frame simulator XORs an
-`OBSERVABLE_INCLUDE`'s records into its running `obs_record` when the
-instruction runs (`src/stim/simulators/frame_simulator.inl` lines
+(FFmpeg `hevc/refs.c` lines 486-517). Stim's frame simulator XORs the
+records an OBSERVABLE_INCLUDE instruction names into its running
+`obs_record` when the instruction runs (`src/stim/simulators/frame_simulator.inl` lines
 233-243, v1.16.0), and IBM's decoder reads the observables off the
 final codeword beside the frame it accumulates (Maurer 2510.21600
 Algorithm 2, line 25). One gem5 DMA request covers its

@@ -285,8 +285,8 @@ def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
     outcomes (src/cpu/pred/tage_base.cc:310-313). After rounds that
     measure nothing a record lies a round further back each round and no
     count bounds it, so such a read is refused by name. An observable's
-    records are not counted: they fold into a running parity as their
-    round arrives (form_shot), so no seat keeps a round for them.
+    records are not counted: no seat forms an observable, and form_shot
+    folds them once per shot from its complete packets.
     """
     furthest_count = 0
     measured_so_far = 0
@@ -318,7 +318,7 @@ class StreamingDetectorFormer:
     the store (retire_round), so it holds no more than the rounds the
     store still keeps read. Every detector of the arriving round starts
     at its reference parity and XORs in its listed bits. It forms no
-    observable, which no seat reads (form_shot keeps them).
+    observable, which no seat reads (form_shot folds them per shot).
     """
 
     def __init__(
@@ -511,14 +511,14 @@ def form_shot(
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Every detector and observable bit of one shot, in index order.
 
-    Each observable is a running parity, folded as each round's packet
-    arrives, as Stim's frame simulator XORs an OBSERVABLE_INCLUDE's
-    records into its obs_record when the instruction runs and keeps no
-    record for it (src/stim/simulators/frame_simulator.inl:233-243,
-    v1.16.0), and IBM's decoder reads the observables off the final
-    codeword beside its running frame (Maurer 2510.21600 Algorithm 2,
-    line 25). XOR commutes, so folding a record when its round arrives
-    gives the parity the instruction would.
+    The device calls it once per shot with the shot's complete packets;
+    no seat calls it. It walks the packets once in round order, and each
+    observable starts at its reference parity and XORs in that round's
+    records of it, as Stim's frame simulator XORs an OBSERVABLE_INCLUDE's
+    records into its obs_record when the instruction runs
+    (src/stim/simulators/frame_simulator.inl:233-243, v1.16.0). XOR
+    commutes, so folding a record with its round gives the parity the
+    instruction would.
     """
     streaming_former = StreamingDetectorFormer(table)
     detector_bits = [0] * len(table.detectors)

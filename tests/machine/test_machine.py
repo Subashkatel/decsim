@@ -1264,6 +1264,56 @@ def test_separate_terminal_emitters_preserve_the_complete_record(
     assert result.logical_observables == expected_prediction
 
 
+@pytest.mark.parametrize("placement", ["controller", "decoder"])
+def test_a_round_overtaken_on_a_faster_route_still_packs_first(
+    placement: str,
+) -> None:
+    """Keep route delays, arrival order and the quantum oracle together.
+
+    The stream reads its patch alone for rounds 1 and 2, on a slow
+    route, and jointly with a partner patch for round 3, on a fast one,
+    so round 3 reaches the controller first and still packs last. This
+    complete scenario stays in one function so each observed timing can
+    be read beside the route card that causes it.
+    """
+    joint_footprint = ("stream-patch", "partner")
+    settings, _measurements, _circuit = _separate_terminal_settings(placement)
+    settings = _last_round_read_with(settings, joint_footprint)
+    base_path = settings.links.qpu_to_controller
+    alone = _readout_route(base_path, ("stream-patch",), "alone", 4_500_000)
+    joint = _readout_route(base_path, joint_footprint, "joint", 100_000)
+    links = dataclasses.replace(settings.links, readout_routes=(alone, joint))
+    settings = dataclasses.replace(settings, links=links)
+
+    run = _run(settings)
+
+    _assert_actual_truth(run)
+    _assert_direct_strong_path(run)
+    _assert_drained(run)
+    events = run.machine.observation.round_events.events
+    binary_events = [
+        event for event in events if event.kind == "BINARY_AVAILABLE"
+    ]
+    first_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 1
+    ]
+    last_round_arrival_ticks = [
+        event.tick for event in binary_events if event.round_index == 3
+    ]
+    last_round_arrived_ticks = max(last_round_arrival_ticks)
+    first_round_arrived_ticks = min(first_round_arrival_ticks)
+    assert last_round_arrived_ticks < first_round_arrived_ticks
+    packed = [event.round_index for event in events if event.kind == "PACKED"]
+    assert packed == [1, 2, 3]
+    readouts = _transfers(run.result, "qpu_to_controller")
+    delay_ticks = {row["total_delay_ticks"] for row in readouts}
+    assert delay_ticks == {100_000, 4_500_000}
+    assert len(readouts) == len(run.packets)
+    raw_bits = _raw_bits(run.packets)
+    payload_bits = sum(row["payload_bits"] for row in readouts)
+    assert payload_bits == len(raw_bits)
+
+
 def test_a_timing_only_terminal_fragment_reads_the_round_out_whole():
     """The split last round crosses as the unsplit one: 17 raw, 12 events.
 
@@ -3737,6 +3787,41 @@ def _separate_terminal_workload(
         decode_operations=(owner,),
         rounds_policy=policy,
     )
+
+
+def _last_round_read_with(
+    settings: machine_settings.MachineSettings, footprint: tuple
+) -> machine_settings.MachineSettings:
+    """The stream's last-round emitters read the footprint, as its owner.
+
+    A stream's owner holds every patch its segments read
+    (frontends/circuit_frontend.py), so it takes the footprint too.
+    """
+    prefix, *last_round = settings.workload.operations
+    joint_last_round = _operations_on_group(tuple(last_round), footprint)
+    operations = (prefix, *joint_last_round)
+    owners = _operations_on_group(
+        settings.workload.decode_operations, footprint
+    )
+    workload = dataclasses.replace(
+        settings.workload, operations=operations, decode_operations=owners
+    )
+    return dataclasses.replace(settings, workload=workload)
+
+
+def _readout_route(
+    base: link_settings.PathSettings,
+    patches: tuple,
+    channel_name: str,
+    propagation_ticks: int,
+) -> link_settings.ReadoutRoute:
+    channel = dataclasses.replace(
+        base.channel,
+        name=channel_name,
+        propagation_latency_ticks=propagation_ticks,
+    )
+    path = dataclasses.replace(base, channel=channel)
+    return link_settings.ReadoutRoute(patches, path)
 
 
 def _operations_on_group(operations: tuple, patches: tuple) -> tuple:

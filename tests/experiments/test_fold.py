@@ -19,6 +19,7 @@ the files one uncut run writes.
 import csv
 import json
 import math
+import os
 import pathlib
 import random
 import shutil
@@ -319,8 +320,8 @@ def test_merged_rows_are_the_stable_sort_of_the_files_rows(tmp_path):
     """Two files whose rows interleave, and rows of equal place in both.
 
     The stable sort of the concatenation keeps a row of equal place
-    behind every row the earlier file gave, which is the order
-    heapq.merge yields because the stream's index breaks the tie.
+    behind every row the earlier file gave, which is the order the
+    merge yields because the file's index breaks the tie.
     """
     first_rows = [_row(1, "a"), _row(3, "b"), _row(3, "c"), _row(7, "d")]
     second_rows = [_row(2, "e"), _row(3, "f"), _row(8, "g")]
@@ -337,6 +338,73 @@ def test_merged_rows_are_the_stable_sort_of_the_files_rows(tmp_path):
     assert merged == sorted_rows
     values = [row["value"] for row in merged]
     assert values == list("aebcfdg")
+
+
+def test_a_merge_of_disjoint_pieces_holds_one_file_open_at_a_time(tmp_path):
+    """A capped point's pieces are too many to open at once.
+
+    Three hundred files of three rows each, seed ranges apart as a
+    point's pieces are, given in reverse. The order's referent is the
+    stable sort of their rows; the open files are the process's own
+    descriptors, /proc/self/fd.
+    """
+    file_count = 300
+    paths = _disjoint_piece_files(tmp_path, file_count)
+    descriptors_before = _open_descriptor_count()
+
+    merged, descriptors_peak = _merged_and_peak_descriptors(paths)
+
+    together = _rows_of_files(paths)
+    sorted_rows = sorted(together, key=_place_of)
+    assert merged == sorted_rows
+    assert len(merged) == 3 * file_count
+    assert descriptors_peak - descriptors_before == 1
+
+
+def _disjoint_piece_files(folder, count: int) -> list:
+    """Files of three rows each, places 3i to 3i + 2, the last one first."""
+    paths = []
+    for piece in range(count):
+        first_place = 3 * piece
+        rows = _three_rows_from(first_place, piece)
+        path = folder / f"piece_{piece}.csv"
+        _write_rows(path, rows)
+        paths.append(path)
+    paths.reverse()
+    return paths
+
+
+def _three_rows_from(first_place: int, value) -> list:
+    rows = []
+    for offset in range(3):
+        place = first_place + offset
+        row = _row(place, value)
+        rows.append(row)
+    return rows
+
+
+def _rows_of_files(paths: list) -> list:
+    rows = []
+    for path in paths:
+        stream = fold.row_stream(path)
+        rows.extend(stream)
+    return rows
+
+
+def _open_descriptor_count() -> int:
+    descriptors = os.listdir("/proc/self/fd")
+    return len(descriptors)
+
+
+def _merged_and_peak_descriptors(paths: list) -> tuple:
+    """The merged rows, and the most descriptors open while they came."""
+    merged = []
+    peak = _open_descriptor_count()
+    for row in fold.merged_rows(paths, _place_of):
+        merged.append(row)
+        open_now = _open_descriptor_count()
+        peak = max(peak, open_now)
+    return merged, peak
 
 
 def test_a_file_with_no_rows_of_this_kind_is_skipped(tmp_path):

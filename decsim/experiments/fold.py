@@ -9,7 +9,8 @@ lists costs a hundred gigabytes. This module holds what the fold needs
 instead, and nothing in it grows with the number of shots:
 
     row_stream   one folder's file as rows, one row alive at a time
-    merged_rows  several folders' streams in one order, one row each
+    merged_rows  several folders' streams in one order, a file open only
+                 while its rows are due
     RowFile      one file written as its rows arrive
     RowTotals    a set of rows' count, true counts, sums, maxes, means
     ExactSum     a running sum that equals math.fsum of its values
@@ -26,16 +27,19 @@ each task are included in the results)"
 The order comes from a merge, not a sort. Every run folder holds its
 rows in the run's own order, its task position and then its seed, and a
 shot lives in one folder, so walking the folders side by side puts the
-rows back in the sweep's order while holding one row per folder:
-heapq.merge "does not pull the data into memory all at once"
-(/opt/python/lib/python3.11/heapq.py:319-321), and rows of equal key
-come out in the order the streams were given, because the heap entry is
-`[key(value), order, value, next]` and the stream's own index breaks the
-tie (heapq.py:376, 383-388). That makes the merged order the order the
-stable sort of the concatenation gave, and it is the classical balanced
-merge of Knuth, TAOCP volume 3, section 5.4.1. The merge assumes each
-input is sorted, so a stream that goes backwards is refused where it is
-read rather than folded into a wrong order.
+rows back in the sweep's order. The heap holds one entry per open file,
+(place, the file's index, row, stream), so rows of equal place come out
+in the order the files were given, the tie heapq.merge breaks the same
+way (/opt/python/lib/python3.11/heapq.py:376, 383-388); the merged
+order is the order the stable sort of the concatenation gave, the
+classical balanced merge of Knuth, TAOCP volume 3, section 5.4.1. Unlike
+heapq.merge, which starts every stream at once, a file is opened only
+when its first row is due: before that, only its first place is known,
+read with the file open for one row. The pieces of an experiment hold
+disjoint seed ranges, so one piece's file is open at a time, and a
+capped point's hundred thousand pieces stay under the open-file limit.
+The merge assumes each input is sorted, so a stream that goes backwards
+is refused where it is read rather than folded into a wrong order.
 
 Nothing here knows a column of decsim's: which field is a mean and which
 a count is report.py's to say, and a row is either the text a csv file
@@ -46,14 +50,9 @@ way. One accumulator therefore serves the fold and the single run.
 import csv
 import heapq
 import math
-import operator
 import pathlib
 
 import decsim.experiments.refusal as refusal
-
-# a keyed row is (the row's place in the run's order, the row); the merge
-# compares the place alone, so two rows are never compared
-_keyed_order = operator.itemgetter(0)
 
 
 def typed_value(text: str):
@@ -116,21 +115,19 @@ def row_stream(path: pathlib.Path):
 
 
 def merged_rows(paths: list, key):
-    """Every file's rows in the run's order, one row of each file held.
+    """Every file's rows in the run's order, a file open while its rows are due.
 
     `key` gives a row its place in that order. A path with no file is a
     folder that wrote no row of this kind and is skipped, which is what
     a folder that ran no sweep leaves behind.
     """
-    streams = []
-    for path in paths:
-        if not path.is_file():
-            continue
-        stream = _keyed_rows(path, key)
-        streams.append(stream)
-    merged = heapq.merge(*streams, key=_keyed_order)
-    for _place, row in merged:
+    waiting = _files_by_first_place(paths, key)
+    heap = []
+    while waiting or heap:
+        _open_the_files_due(waiting, heap, key)
+        _place, index, row, stream = heapq.heappop(heap)
         yield row
+        _push_the_next_row(heap, index, stream)
 
 
 class ExactSum:
@@ -317,6 +314,57 @@ class RowFile:
         self.handle = open(self.path, "w", newline="")
         self.writer = csv.DictWriter(self.handle, fieldnames=self.field_names)
         self.writer.writeheader()
+
+
+def _files_by_first_place(paths: list, key) -> list:
+    """(first place, index, path) of every file with a row, last first.
+
+    Sorted backwards, so the file due first is the one pop takes.
+    """
+    waiting = []
+    for index, path in enumerate(paths):
+        if not path.is_file():
+            continue
+        first_place = _first_place(path, key)
+        if first_place is None:
+            continue
+        waiting.append((first_place, index, path))
+    waiting.sort(reverse=True)
+    return waiting
+
+
+def _first_place(path: pathlib.Path, key):
+    """The place of a file's first row, the file open for that row only."""
+    rows = row_stream(path)
+    first_row = next(rows, None)
+    rows.close()
+    if first_row is None:
+        return None
+    return key(first_row)
+
+
+def _open_the_files_due(waiting: list, heap: list, key) -> None:
+    """Open each waiting file whose first row comes before the heap's next.
+
+    A file and an open row of equal place go by their index, the order
+    the files were given.
+    """
+    while waiting:
+        first_place, index, path = waiting[-1]
+        if heap and (first_place, index) > heap[0][:2]:
+            return
+        waiting.pop()
+        stream = _keyed_rows(path, key)
+        _push_the_next_row(heap, index, stream)
+
+
+def _push_the_next_row(heap: list, index: int, stream) -> None:
+    """The stream's next row onto the heap; an ended stream has closed."""
+    keyed = next(stream, None)
+    if keyed is None:
+        return
+    place, row = keyed
+    heapq.heappush(heap, (place, index, row, stream))
 
 
 def _keyed_rows(path: pathlib.Path, key):

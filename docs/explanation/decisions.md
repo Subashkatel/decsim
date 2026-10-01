@@ -1260,8 +1260,8 @@ later block still finds the rounds it reads, and on a live stream also
 the packets the next round's instructions read before its recipes come
 (`next_round_reach`: the controller holds the program before it runs a
 round, and a detector's lookbacks are fixed by the circuit). Fed in
-order that is no more than the ring of `max_record_span + 1` packets it
-replaced. The recipe table owns the law (`rounds_read_before` per
+order that is no more than the ring of the last k + 1 packets it
+replaced, k the furthest any recipe reaches back. The recipe table owns the law (`rounds_read_before` per
 round, `rounds_read_before_first` per read, `rounds_reading` per
 packet).
 A window's potential strong read holds, in both stores, the rounds

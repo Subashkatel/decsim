@@ -465,7 +465,7 @@ def test_a_source_with_no_recipes_needs_nothing_before_a_round():
 
 
 def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
-    """max_record_span + 1 packets: two rounds of eight raw bits here.
+    """Two packets of eight raw bits: a round and the one it compares to.
 
     Maurer 2510.21600 Algorithm 2 (lines 760-770) keeps the running
     syndrome a detector compares against; the seat holds that and no
@@ -483,7 +483,6 @@ def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
 
     placement.form_at("weak_decoder", first_three)
 
-    assert TABLE.max_record_span == 1
     assert reported == [8, 16, 16]
 
 

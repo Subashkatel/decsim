@@ -68,7 +68,6 @@ class OneRoundSource:
             readout_slot_start=None,
             detectors=(recipe,),
             observables=(),
-            max_record_span=0,
         )
 
 
@@ -100,7 +99,6 @@ class TwoRoundSource:
             readout_slot_start=None,
             detectors=(first, second),
             observables=(),
-            max_record_span=1,
         )
 
 

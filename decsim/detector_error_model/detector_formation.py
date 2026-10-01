@@ -73,7 +73,6 @@ class FormationTable:
     `packet_width_by_round` is the raw bit count of each round's packet.
     `readout_slot_start` is the slot where the folded data readout begins
     in the last packet, or None when nothing was folded.
-    `max_record_span` is how many rounds back any recipe reaches.
     `next_round_reach` is the earliest round the round after round_count
     reads, when the source holds that round's instructions before it
     runs them (a live stream's next fragment, last or not); None when no
@@ -85,7 +84,6 @@ class FormationTable:
     readout_slot_start: Optional[int]
     detectors: tuple[DetectorRecipe, ...]
     observables: tuple[ObservableRecipe, ...]
-    max_record_span: int
     next_round_reach: Optional[int] = None
 
     def detectors_of_round(self, round_index: int) -> list[DetectorRecipe]:
@@ -231,7 +229,6 @@ def build_formation_table(
         circuit, packet_of_measurement, round_count, detector_rounds
     )
     detectors, observables = _read_recipes(circuit, tables)
-    max_span = _max_record_span(detectors, observables, round_count)
     next_round_reach = _next_round_reach(
         circuit, packet_of_measurement, next_round_circuits
     )
@@ -241,7 +238,6 @@ def build_formation_table(
         readout_slot_start=readout_slot_start,
         detectors=tuple(detectors),
         observables=tuple(observables),
-        max_record_span=max_span,
         next_round_reach=next_round_reach,
     )
 
@@ -291,12 +287,12 @@ class StreamingDetectorFormer:
     packets it reads. On a live table it also keeps the packets the
     round after the table's last reads (next_round_reach), whose recipes
     come later. Fed in round order this holds no more than a ring of the
-    last max_record_span + 1 packets, the state IBM's windowed form
-    keeps as its running syndrome (Maurer 2510.21600 Algorithm 2, lines
-    760-770), and on a surface code the same packets.
-    Every detector of the arriving round starts at its reference parity
-    and XORs in its listed bits. The observables come out with the last
-    round.
+    last k + 1 packets, k the furthest any recipe reaches back, the
+    state IBM's windowed form keeps as its running syndrome (Maurer
+    2510.21600 Algorithm 2, lines 760-770), and on a surface code the
+    same packets. Every detector of the arriving round starts at its
+    reference parity and XORs in its listed bits. The observables come
+    out with the last round.
     """
 
     def __init__(self, table: FormationTable):
@@ -790,27 +786,6 @@ def _layer_kind_for(record_count: int) -> LayerKind:
     if record_count == 2:
         return LayerKind.BULK
     return LayerKind.READOUT
-
-
-def _max_record_span(
-    detectors: list, observables: list, round_count: int
-) -> int:
-    """How many rounds back any recipe reaches.
-
-    Observables included: a logical readout can span a whole block.
-    """
-    spans = []
-    for recipe in detectors:
-        earliest_round = min(record_round for record_round, _ in recipe.records)
-        span = recipe.round_index - earliest_round
-        spans.append(span)
-    for recipe in observables:
-        if not recipe.records:
-            continue
-        earliest_round = min(record_round for record_round, _ in recipe.records)
-        span = round_count - earliest_round
-        spans.append(span)
-    return max(spans, default=0)
 
 
 def _store_bits(bits: list[int], indexed_values) -> None:

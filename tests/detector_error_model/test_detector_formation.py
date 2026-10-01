@@ -141,7 +141,6 @@ def test_the_table_reads_the_packet_layout_off_a_generated_circuit():
     table = formation_table(4)
     assert table.packet_width_by_round == {1: 8, 2: 8, 3: 8, 4: 17}
     assert table.readout_slot_start == 8
-    assert table.max_record_span == 1
     assert len(table.detectors) == 32
     assert len(table.observables) == 1
 
@@ -221,7 +220,7 @@ def test_observables_come_out_with_the_last_round_and_are_none_before():
     assert after_last == [(0, 0)]
 
 
-def test_the_record_span_reaches_back_as_far_as_an_observable_reads():
+def test_an_observable_reads_records_from_an_earlier_round():
     circuit = stim.Circuit(
         "R 0 1\n"
         "M 0\nDETECTOR(0,0) rec[-1]\n"
@@ -232,7 +231,6 @@ def test_the_record_span_reaches_back_as_far_as_an_observable_reads():
     table = detector_formation.build_formation_table(circuit, 3)
     assert table.detectors[2].records == ((3, 0),)
     assert table.observables[0].records == ((1, 0), (3, 0))
-    assert table.max_record_span == 2
 
 
 def test_a_round_reads_back_to_the_earliest_record_of_its_detectors():
@@ -599,7 +597,6 @@ def test_a_declared_detector_round_after_its_bits_is_what_the_recipe_uses():
     assert len(third_round) == 8
     assert third_round[0].detector_index == 4
     assert third_round[1].detector_index == 13
-    assert table.max_record_span == 2
 
 
 def test_a_round_count_past_the_rounds_the_circuit_announces_is_refused():

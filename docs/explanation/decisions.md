@@ -981,10 +981,13 @@ do not schedule separate analog acquisition resources or move measurements withi
 a round. Unequal round durations, arbitrary decoded conditional gates and dynamic
 composition of retained histories remain separate work.
 
-**Narrowed since.** A source no longer splits one round's record into
-patch-keyed groups: each emission is one readout of its whole footprint, so a
-route selects a path per footprint. Every referent read waits for the whole
-round before decoding (Riverlane 2410.05202, IBM 2510.21600, Liu 2603.16203),
+**Narrowed since.** A Stim source no longer splits one round's record into
+patch-keyed groups: each emission is one readout of its operation's whole
+footprint, so a route selects a path per footprint. The circuit-less
+`SyndromeBitDevice(one_payload_per_patch=True)` still emits one payload per
+patch, which the assembler joins as fragments. Every referent read waits for
+the whole round before decoding (Riverlane 2410.05202, IBM 2510.21600, Liu
+2603.16203),
 and the measured split, one patch over several feedlines, is not a patch-keyed
 shape; per-feedline readout would be a new design keyed by qubit groups.
 

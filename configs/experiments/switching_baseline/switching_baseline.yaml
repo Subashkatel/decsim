@@ -35,7 +35,7 @@ controller:
   decision_to_pulse_cycles: 8      # QubiC trace, reference.yaml; after commit
 
 detection_events:
-  formed_at: [controller]          # 2408.13687 lines 478-480
+  formed_at: [controller]          # our placement; 2408.13687 lines 471-477 form them in a workstation
   clock: fridge
   latency_cycles: 5                # 20 ns, 2605.04892 lines 1273-1275
   cycles_per_round: 1              # fully pipelined, same lines
@@ -84,21 +84,23 @@ escalation:
   kind: switching
   confidence: cluster_gap
   confidence_walk_microseconds: 1.0   # owner value; estimate (2602.03336 lines 17-19)
-  gap_threshold_db: 20.0              # owner value, Toshio's threshold
+  gap_threshold_db: 20.0              # owner's cluster-gap threshold, not a calibrated point:
+                                      # the paper's 20 dB is on the complementary gap
   strong_window: double_window
-  restart_reread_buffer_regions: 1    # the default, 2510.25222 Fig. 12 step 5
-  run_both_at_once: false             # 2510.25222 lines 592-601
+  restart_reread_buffer_regions: 1    # the default, 2510.25222 Fig. 12
+  run_both_at_once: false             # strong only after the verdict, 2510.25222 lines 632-640
   clock: fridge
   threshold_cycles: 1                 # estimate, one compare
   switch_cycles: 1                    # estimate, one state change
 
 weak_decoder:
   kind: union_find
-  units: 1                         # 2510.25222 lines 1203-1204
+  units: 1                         # one weak, one strong: 2510.25222 lines 1273-1275
   input: copy
   boundary_fold: in_place          # 2301.08419 lines 632-640
   result_blocks_unit: false
-  weight_step: 0.5                 # Helios weights 2 to wmax 16, 2406.08491 lines 1612-1619
+  weight_step: 0.5                 # estimate, our conversion: Helios weights are integers
+                                   # 2 to wmax (2406.08491 lines 1616-1620)
   cycle_count:                     # Helios RTL at 2dda998, reference.yaml
     clock: helios
     delay_cycles: 3                # Helios_single_FPGA_core.v:76
@@ -118,16 +120,16 @@ weak_decoder:
 
 strong_decoder:
   kind: measured_table             # Slurm job 14676845, measured_table/measurements.py
-  units: 1                         # 2510.25222 lines 1203-1204
+  units: 1                         # 2510.25222 lines 1273-1275
   device: a100
   partition: whole
   bases: together
-  gamma0: 0.35                     # Relay-BP-5, 2506.01779 line 343
-  gamma_interval: [-0.254, 0.985]
-  pre_iterations: 80
-  relay_set_count: 600
-  iterations_per_set: 60
-  converged_solution_count: 5
+  gamma0: 0.35                     # surface code, 2506.01779 lines 303-306
+  gamma_interval: [-0.254, 0.985]  # measured_table/measurements.py RELAY_BP_5
+  pre_iterations: 80               # T0, 2506.01779 lines 303-305
+  relay_set_count: 600             # R = 601 legs, 2506.01779 lines 343-344
+  iterations_per_set: 60           # Tr, 2506.01779 lines 303-304
+  converged_solution_count: 5      # Relay-BP-5, 2506.01779 line 343
   unit_memory:
     bits: null
   engine:                          # copies are inside the measured time
@@ -140,7 +142,7 @@ strong_decoder:
 decoder_manager:
   clock: fridge
   dispatch_cycles: 0               # no manager on Helios's path, 2603.16203 lines 669-670
-  bulk_strong: false               # 2510.25222 lines 1186-1189
+  bulk_strong: false               # one region a decode, 2510.25222 lines 1255-1258
 
 pauli_frame:
   clock: fridge

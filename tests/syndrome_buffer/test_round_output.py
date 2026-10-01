@@ -227,6 +227,26 @@ def test_a_job_whose_first_round_reads_only_itself_carries_nothing_before():
     assert transfers.sends == [(output.path, 2)]
 
 
+def test_a_round_before_the_store_let_go_of_stops_the_read_by_name():
+    """Round 5 reads round 3, which a program reaching further lost."""
+    engine = engine_module.Engine()
+    store = _store(engine)
+    _store_rounds(store, (2, 4))
+    output = _output(engine, _Transfers(), store)
+    output.detection_events = _lookback_placement()
+
+    with pytest.raises(RuntimeError) as refusal:
+        output.send_input(_job(5), lambda: None)
+
+    assert str(refusal.value) == (
+        "a job from round 5 of operation 1 reads round 3, which the weak "
+        "syndrome buffer does not hold: its holds keep the rounds the "
+        "program's declared fragments read, so a round_circuit that "
+        "reads further back than they do cannot be formed at the "
+        "weak_decoder"
+    )
+
+
 def test_the_round_before_is_read_in_the_jobs_one_port_booking():
     """Two words on one read port, a cycle each from tick 0, then the link.
 

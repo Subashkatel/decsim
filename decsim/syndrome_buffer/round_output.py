@@ -114,14 +114,34 @@ class SyndromeBufferOutput:
         needed_rounds = self.detection_events.rounds_needed_before(
             self.reader_seat, operation_id, first.round_index, last_round
         )
-        by_fragment_index = operator.attrgetter("fragment_index")
         rounds_before = []
         for round_index in needed_rounds:
             round_key = (operation_id, round_index)
-            fragments = self.store.retained_fragments(round_key)
-            in_order = sorted(fragments, key=by_fragment_index)
+            in_order = self._retained_round_before(round_key, first)
             rounds_before.extend(in_order)
         job.rounds_before = tuple(rounds_before)
+
+    def _retained_round_before(
+        self, round_key: tuple, first: round_records.RetainedSyndromeFragment
+    ) -> list:
+        """A round the job reads before its first, in fragment order.
+
+        The holds keep every round the declared fragments read, so a
+        round missing from the store is one a round_circuit reaching
+        further back lost; the read stops there by name.
+        """
+        fragments = self.store.retained_fragments(round_key)
+        if fragments is None:
+            raise RuntimeError(
+                f"a job from round {first.round_index} of operation "
+                f"{first.operation_id} reads round {round_key[1]}, which "
+                f"the {self.name} does not hold: its holds keep the "
+                f"rounds the program's declared fragments read, so a "
+                f"round_circuit that reads further back than they do "
+                f"cannot be formed at the {self.reader_seat}"
+            )
+        by_fragment_index = operator.attrgetter("fragment_index")
+        return sorted(fragments, key=by_fragment_index)
 
     def land_held_input(
         self,

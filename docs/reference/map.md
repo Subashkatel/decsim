@@ -266,7 +266,6 @@ docstring.
 - `decsim/frontends/__init__.py`: Everything that happens to a program before and while it runs.
 - `decsim/frontends/circuit_frontend.py`: A maker's workload lowered into a program the machine runs.
 - `decsim/frontends/deltakit.py`: Deltakit memory circuits exported into the supplied-circuit frontend.
-- `decsim/frontends/deltakit_compiler.py`: Compile finite rotated-code experiments through Deltakit's CircuitBuilder.
 - `decsim/frontends/execution_runtime.py`: Which operation runs when: readiness, resource ownership, timestamps.
 - `decsim/frontends/planner.py`: The plan of one run: cadence, geometry, windows and buffer holds.
 - `decsim/frontends/settings.py`: The workload settings: what the machine runs, and for how many rounds.

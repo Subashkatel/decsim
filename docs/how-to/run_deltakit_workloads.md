@@ -1,6 +1,6 @@
 [decsim docs](../README.md) › [How-to guides](README.md)
 
-# Run Deltakit memory, protection and compiler workloads
+# Run Deltakit memory and protection workloads
 
 Deltakit supplies a circuit and its measurement schedule. The existing
 decsim machine runs them through readout, stores, windows, decoding and
@@ -25,15 +25,7 @@ Keep this environment separate from another checkout's editable
 installation.
 The Deltakit extra pins component versions in `pyproject.toml`; it does
 not require the umbrella SDK or a cloud account. The pinned SDK supports
-Python >=3.10,<3.15, the same floor as decsim. For the compiler
-entrypoint below, install its separate extra in the same isolated
-environment:
-
-```bash
-.venv-deltakit/bin/python -m pip install -e '.[run,deltakit-compile]'
-```
-
-Explorer memory users do not need the compiler extra.
+Python >=3.10,<3.15, the same floor as decsim.
 
 ## Run a memory experiment
 
@@ -273,42 +265,6 @@ and explicit map through the existing Python settings. No downstream
 component needs the producer's name. Remove the optional Deltakit
 packages when generation is no longer needed; ordinary Stim remains
 necessary for supplied-circuit execution.
-
-## Compile memory or a terminal Hadamard
-
-The separate optional compiler frontend accepts `memory` and `hadamard`.
-It uses public rotated-code schedules and CircuitBuilder measurement
-handles, returning ordinary Stim and the same explicit round-map contract:
-
-```python
-import decsim.frontends.deltakit_compiler as compiler
-
-circuit, measurement_rounds = compiler.compile_experiment(
-    experiment="hadamard",
-    distance=5,
-    round_count=4,
-    basis="Z",
-    physical_error_probability=0.003,
-)
-```
-
-Use `experiment="memory"` for compiled memory, or `basis="X"` for the
-other prepared logical basis. Feed these outputs to the existing finite
-supplied-circuit settings, with `FixedRounds(round_count)` and the caller's
-QPU period and decoder timing. The compiler path uses SD6 and makes no
-physical-duration calibration claim.
-
-Hadamard acts transversally on the data qubits and immediately measures
-the conjugate basis. It does not continue extraction in the original patch
-orientation or establish fault-tolerant distance preservation. The compiler
-returns terminal measurement handles; the exporter explicitly reduces the
-public logical support to an observable. It never relabels a detector as
-logical truth. This supported CircuitBuilder path does not repair the
-separate high-level LogAsm Hadamard/rotation limitations.
-
-The entrypoint is tested at distances 3 and 5, both bases, several round
-counts, noiseless logical action, SD6 noise and whole decsim runs
-(`tests/frontends/test_deltakit_compiler.py`).
 
 ## Interpret the result within its scope
 

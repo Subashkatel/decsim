@@ -261,10 +261,6 @@ class PortOnlyDecoder:
         del job
         return self.latency_ticks
 
-    def pipeline_depth(self, job) -> int:
-        del job
-        return 1
-
 
 def _machine_on(decoder, **observation):
     """The declared weak-only run with this row as the weak tier."""

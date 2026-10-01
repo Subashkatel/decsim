@@ -219,6 +219,20 @@ def test_a_tier_keeps_no_claim_once_its_round_retires():
     assert history.claimed_keys == set()
 
 
+def test_a_job_asking_after_its_rounds_retired_pays_and_leaves_no_claim():
+    """A strong job priced once its copied rounds left the weak store."""
+    seated = placement()
+    tier = detection_events.TierFormation(seated, "weak_decoder")
+    seated.retire_round((1, 1))
+    seated.retire_round((1, 2))
+
+    charged = tier.rounds_to_form(job([1, 2]))
+
+    history = seated.history_by_seat["weak_decoder"]
+    assert charged == ((1, 1), (1, 2))
+    assert history.claimed_keys == set()
+
+
 def test_the_rounds_a_job_pays_for_are_frozen_at_the_first_ask():
     """The dispatcher's prediction and the stage's walk read one number."""
     formation_stage = weak_stage()

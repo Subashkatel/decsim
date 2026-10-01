@@ -66,6 +66,8 @@ class SeatedFormation:
         # the source's recipes, None when it answers none
         self.recipes = source
         self.trace = _TraceSources()
+        # per operation, the rounds that left the store the plan's windows read
+        self.retired_by_operation: dict = {}
         self.history_by_seat = {}
         for seat in settings.formed_at:
             observer = None
@@ -161,6 +163,9 @@ class SeatedFormation:
         sealed stream's last rounds and a clipped tail are among them.
         """
         operation_id, round_index = round_key
+        new_record = detector_formation.DoneRounds()
+        retired = self.retired_by_operation.setdefault(operation_id, new_record)
+        retired.add(round_index)
         for history in self.history_by_seat.values():
             history.retire(operation_id, round_index)
 
@@ -169,10 +174,16 @@ class SeatedFormation:
 
         A decoder tier charges a job for the rounds it is first to form
         (decoders/detection_events.py TierFormation). A claim goes when
-        its round retires, since no job reads the round after.
+        its round retires, since no job reads the round after; one made
+        after, by a job priced once its rounds have formed and left the
+        store (a double window copied to the strong side), is charged and
+        not kept.
         """
         history = self.history_by_seat[seat]
-        return history.claim(round_keys)
+        fresh = history.claim(round_keys)
+        retired_keys = [key for key in fresh if self._has_retired(key)]
+        history.claimed_keys.difference_update(retired_keys)
+        return fresh
 
     def return_claim(self, seat: str, round_keys: tuple) -> None:
         """A job that never started gives its claimed round keys back."""
@@ -193,6 +204,13 @@ class SeatedFormation:
         if seat not in self.history_by_seat:
             return 0
         return self.settings.cycles_for(round_count)
+
+    def _has_retired(self, round_key: tuple) -> bool:
+        operation_id, round_index = round_key
+        retired = self.retired_by_operation.get(operation_id)
+        if retired is None:
+            return False
+        return round_index in retired
 
 
 class _SeatHistory:

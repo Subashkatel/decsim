@@ -1,8 +1,17 @@
 # Experiment 1's paired reference: switching_baseline.yaml's machine and
 # shots with no escalation, every window kept by the weak tier. Each
 # shot's samples depend on the seed alone, so `decsim diff` pairs the two
-# runs shot by shot. Only the escalation block differs.
+# runs shot by shot. The machine differs only in the escalation block.
 extends: switching_baseline.yaml
 
 escalation:
   kind: weak_baseline
+
+# extends replaces a section whole, so the stop rule is restated here.
+collection:
+  max_failures: 100
+  max_shots: 5000000
+  min_shots: 0
+  # 2,000 shots a piece: weak-only shots took 0.17 to 0.41 s in the
+  # pilot, so a piece is minutes, and a capped point is 2,500 pieces.
+  piece_rounds: 200000

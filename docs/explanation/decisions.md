@@ -1359,12 +1359,7 @@ line 154).
 `needs_the_round_before` and gained `rounds_needed_before` (the rounds,
 for a read's first and last round), `earlier_rounds_read` (the rounds
 before a stream window's first that it or a later round reads),
-`retire_round`, `check_settled`, `claim_rounds` and `return_claim` (a
-decoder tier's claims on the rounds it charges a job for, kept at the
-seat so a claim goes when its round retires, and one made after its
-round retired, by a job priced once its copied rounds formed and left
-the weak store, is charged and not kept, in place of the set
-`TierFormation` kept for the whole run), and `form_at` takes `rounds_before`
+`retire_round` and `check_settled`, and `form_at` takes `rounds_before`
 in place of `round_before`; `WindowRetention.strong_round_before`
 became `strong_rounds_before`, which takes the read's last round too
 and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a

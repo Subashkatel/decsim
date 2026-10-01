@@ -1618,12 +1618,6 @@ class DetectionEventPlacement(Protocol):
         Every seat stops keeping raw packets for it.
         """
 
-    def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
-        """The round keys no earlier job of the seat claimed, now claimed."""
-
-    def return_claim(self, seat: str, round_keys: tuple) -> None:
-        """A job that never started gives its claimed round keys back."""
-
     def check_settled(self) -> None:
         """At the end of a run no seat holds a raw round; a leak raises."""
 

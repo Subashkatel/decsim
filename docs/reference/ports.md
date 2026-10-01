@@ -477,8 +477,6 @@ Where the machine forms a round's detection events, and what it costs.
 | `rounds_needed_before` | The raw rounds before a read's first round the seat must be given. |
 | `earlier_rounds_read` | The raw rounds before first_round it or any later round reads. |
 | `retire_round` | The round left the store the plan's windows read: none forms it. |
-| `claim_rounds` | The round keys no earlier job of the seat claimed, now claimed. |
-| `return_claim` | A job that never started gives its claimed round keys back. |
 | `check_settled` | At the end of a run no seat holds a raw round; a leak raises. |
 | `cycles_at` | The cycles of forming round_count rounds together at the seat. |
 

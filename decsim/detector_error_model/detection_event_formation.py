@@ -66,8 +66,6 @@ class SeatedFormation:
         # the source's recipes, None when it answers none
         self.recipes = source
         self.trace = _TraceSources()
-        # per operation, the rounds that left the store the plan's windows read
-        self.retired_by_operation: dict = {}
         self.history_by_seat = {}
         for seat in settings.formed_at:
             observer = None
@@ -163,32 +161,8 @@ class SeatedFormation:
         sealed stream's last rounds and a clipped tail are among them.
         """
         operation_id, round_index = round_key
-        new_record = detector_formation.DoneRounds()
-        retired = self.retired_by_operation.setdefault(operation_id, new_record)
-        retired.add(round_index)
         for history in self.history_by_seat.values():
             history.retire(operation_id, round_index)
-
-    def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
-        """The round keys no earlier job of the seat claimed, now claimed.
-
-        A decoder tier charges a job for the rounds it is first to form
-        (decoders/detection_events.py TierFormation). A claim goes when
-        its round retires, since no job reads the round after; one made
-        after, by a job priced once its rounds have formed and left the
-        store (a double window copied to the strong side), is charged and
-        not kept.
-        """
-        history = self.history_by_seat[seat]
-        fresh = history.claim(round_keys)
-        retired_keys = [key for key in fresh if self._has_retired(key)]
-        history.claimed_keys.difference_update(retired_keys)
-        return fresh
-
-    def return_claim(self, seat: str, round_keys: tuple) -> None:
-        """A job that never started gives its claimed round keys back."""
-        history = self.history_by_seat[seat]
-        history.claimed_keys.difference_update(round_keys)
 
     def check_settled(self) -> None:
         """At the end of a run no seat may still hold a raw round.
@@ -204,13 +178,6 @@ class SeatedFormation:
         if seat not in self.history_by_seat:
             return 0
         return self.settings.cycles_for(round_count)
-
-    def _has_retired(self, round_key: tuple) -> bool:
-        operation_id, round_index = round_key
-        retired = self.retired_by_operation.get(operation_id)
-        if retired is None:
-            return False
-        return round_index in retired
 
 
 class _SeatHistory:
@@ -244,8 +211,6 @@ class _SeatHistory:
         # the events of rounds formed here and not yet retired, which a
         # second read of the round is answered from
         self.events_by_round: dict = {}
-        # the round keys a decoder tier's jobs have claimed, until retired
-        self.claimed_keys: set = set()
 
     @property
     def keeps_landed_width(self) -> bool:
@@ -326,24 +291,12 @@ class _SeatHistory:
         """
         done_rounds = self._done_rounds_of(operation_id)
         done_rounds.add(round_index)
-        round_key = (operation_id, round_index)
-        self.events_by_round.pop(round_key, None)
-        self.claimed_keys.discard(round_key)
+        self.events_by_round.pop((operation_id, round_index), None)
         if operation_id not in self.former_by_operation:
             return
         former = self._former_for(operation_id)
         former.retire_round(round_index)
         self._report_state(operation_id, former)
-
-    def claim(self, round_keys: tuple) -> tuple:
-        """The keys not claimed before, now claimed."""
-        fresh = []
-        for round_key in round_keys:
-            if round_key in self.claimed_keys:
-                continue
-            fresh.append(round_key)
-        self.claimed_keys.update(fresh)
-        return tuple(fresh)
 
     def check_settled(self) -> None:
         """No former of this seat holds a raw round."""

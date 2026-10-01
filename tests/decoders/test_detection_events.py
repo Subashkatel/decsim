@@ -206,31 +206,20 @@ def test_the_second_tier_charges_its_own_rounds():
     assert strong_cycles == 7
 
 
-def test_a_tier_keeps_no_claim_once_its_round_retires():
-    """No job reads a retired round, so its claim goes."""
+def test_a_round_two_jobs_read_is_charged_once_though_it_retired_between():
+    """A copied job is priced after its rounds left the store.
+
+    Window 0 paid for round 2; window 1, priced after round 2 retired,
+    pays for round 3 alone.
+    """
     seated = placement()
-    tier = detection_events.TierFormation(seated, "weak_decoder")
+    tier = detection_events.TierFormation(seated, "strong_decoder")
     tier.rounds_to_form(job([1, 2]))
-
-    seated.retire_round((1, 1))
     seated.retire_round((1, 2))
 
-    history = seated.history_by_seat["weak_decoder"]
-    assert history.claimed_keys == set()
+    charged = tier.rounds_to_form(job([2, 3]))
 
-
-def test_a_job_asking_after_its_rounds_retired_pays_and_leaves_no_claim():
-    """A strong job priced once its copied rounds left the weak store."""
-    seated = placement()
-    tier = detection_events.TierFormation(seated, "weak_decoder")
-    seated.retire_round((1, 1))
-    seated.retire_round((1, 2))
-
-    charged = tier.rounds_to_form(job([1, 2]))
-
-    history = seated.history_by_seat["weak_decoder"]
-    assert charged == ((1, 1), (1, 2))
-    assert history.claimed_keys == set()
+    assert charged == ((1, 3),)
 
 
 def test_the_rounds_a_job_pays_for_are_frozen_at_the_first_ask():

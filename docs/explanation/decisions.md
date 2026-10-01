@@ -987,9 +987,9 @@ footprint, so a route selects a path per footprint. The circuit-less
 `SyndromeBitDevice(one_payload_per_patch=True)` still emits one payload per
 patch, which the assembler joins as fragments. Every referent read waits for
 the whole round before decoding (Riverlane 2410.05202, IBM 2510.21600, Liu
-2603.16203),
-and the measured split, one patch over several feedlines, is not a patch-keyed
-shape; per-feedline readout would be a new design keyed by qubit groups.
+2603.16203), and the measured split, one patch over several feedlines, is not
+a patch-keyed shape; per-feedline readout would be a new design keyed by qubit
+groups.
 
 ## D28. A strong decode runs on a backend behind one port of four methods
 

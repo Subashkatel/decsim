@@ -124,7 +124,7 @@ strong_decoder:
   device: a100
   partition: whole
   bases: together
-  gamma0: 0.35                     # surface code, 2506.01779 lines 303-306
+  gamma0: 0.35                     # surface code, 2506.01779 lines 306-307
   gamma_interval: [-0.254, 0.985]  # measured_table/measurements.py RELAY_BP_5
   pre_iterations: 80               # T0, 2506.01779 lines 303-305
   relay_set_count: 600             # R = 601 legs, 2506.01779 lines 343-344

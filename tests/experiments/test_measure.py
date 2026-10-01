@@ -783,7 +783,7 @@ def test_the_per_decode_bound_counts_the_rounds_a_double_window_absorbed(
     windows it covers: four windows commit over the thirty rounds and all
     four escalated. The switching rate per d = 3 rounds is 4 / (30 / 3)
     = 0.4, so eq. (6) bounds one decode by d tau_gen / gamma = 3 / 0.4 =
-    7.5 us (2510.25222 lines 1201-1214, 1253-1266). Four committed
+    7.5 us (2510.25222 lines 1272-1304, 1335-1350). Four committed
     windows times r_com tau_gen would say 3 us.
     """
     escalation = {

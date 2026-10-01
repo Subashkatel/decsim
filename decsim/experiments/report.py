@@ -1080,11 +1080,11 @@ def strong_service_bound_us(totals: fold.RowTotals) -> float:
 
     Eq. (6) bounds the strong decoder's time per round, tau_strong <=
     (1 / gamma_switch)(d / r_strong) tau_gen, for one weak and one
-    strong decoder on one patch (2510.25222 lines 1201-1214), with
-    gamma_switch the switching rate per d rounds (lines 174-175). A
+    strong decoder on one patch (2510.25222 lines 1272-1304), with
+    gamma_switch the switching rate per d rounds (lines 185-188). A
     decode reads r_strong rounds, so one decode's time is bounded by
     d tau_gen / gamma_switch. The proof counts the escalations against
-    the rounds generated (lines 1253-1266), so gamma_switch is the
+    the rounds generated (lines 1335-1350), so gamma_switch is the
     escalated windows over the generated rounds over d, and the bound is
     tau_gen times the generated rounds over the escalated windows. The
     rounds are the shots' executed rounds, not their committed windows

@@ -1267,7 +1267,10 @@ joins late does not wait on rounds that left before it. That record is
 a low watermark below which every round is done plus the rounds done
 above it (`DoneRounds`, as TCP keeps a cumulative ACK and its SACK
 blocks, RFC 2018), and a round's remembered events go when it retires,
-so nothing a seat keeps grows with the run. At the end of a run no
+so nothing a seat keeps grows with the run. A decoder tier keeps the
+rounds its jobs claimed the same way (`TierFormation`), and never
+forgets a claim during the run: a copied job is priced after its rounds
+left the store, so a forgotten claim would charge a round twice. At the end of a run no
 seat holds a raw round (`check_settled`). On a live stream the
 former also keeps the last k packets, k the program's reach: how far
 back any detector of a fragment the stream can run reads, read off its

@@ -473,6 +473,17 @@ class DoneRounds:
             self.through = next_round
             next_round += 1
 
+    def discard(self, round_index: int) -> None:
+        """Mark the round not done; the rounds after it below the mark stay."""
+        if round_index in self.above:
+            self.above.remove(round_index)
+            return
+        if round_index > self.through:
+            return
+        still_done = range(round_index + 1, self.through + 1)
+        self.above.update(still_done)
+        self.through = round_index - 1
+
     def __contains__(self, round_index: int) -> bool:
         if round_index <= self.through:
             return True

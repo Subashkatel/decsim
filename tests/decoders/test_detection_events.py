@@ -222,6 +222,18 @@ def test_a_round_two_jobs_read_is_charged_once_though_it_retired_between():
     assert charged == ((1, 3),)
 
 
+def test_a_tier_claiming_in_round_order_keeps_only_a_mark():
+    """Overlapping windows claim rounds 1 to 3; no list of them stays."""
+    tier = weak_tier()
+    tier.rounds_to_form(job([1, 2]))
+
+    tier.rounds_to_form(job([2, 3]))
+
+    claimed = tier.claimed_by_operation[1]
+    assert claimed.through == 3
+    assert claimed.above == set()
+
+
 def test_the_rounds_a_job_pays_for_are_frozen_at_the_first_ask():
     """The dispatcher's prediction and the stage's walk read one number."""
     formation_stage = weak_stage()

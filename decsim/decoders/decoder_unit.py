@@ -9,8 +9,10 @@ decode computes. Compute is claimed apart from the slots (Tomasulo's
 rule: an instruction whose operands are not ready waits in its
 reservation station, never on the functional unit; gem5 O3 issues only
 ready work, inst_queue.hh scheduleReadyInsts). The compute takes one
-decode at a time, as Helios's controller raises input_ready only while
-idle (Helios_scalable_QEC control_node_single_FPGA.v lines 234-243).
+decode at a time, as Helios's controller refuses input while it decodes:
+input_ready is high only while it is idle or preparing the next
+measurement (Helios_scalable_QEC control_node_single_FPGA.v lines
+234-243).
 The unit records who holds what, gem5's functional unit
 (fu_pool.hh:64-75); the service starts and ends the decodes.
 

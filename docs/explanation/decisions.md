@@ -1450,7 +1450,9 @@ mistake a gap for a result.
   compute is busy for the decode's whole occupancy; only the next
   window's input lands beside it (`decsim/decoders/decoder_unit.py`).
   The hardware the switching baseline models works this way: the
-  Helios union-find controller raises `input_ready` only while idle
+  Helios union-find controller refuses input while it decodes, raising
+  `input_ready` only while idle or preparing the next measurement and
+  dropping it through loading, growth, merging and peeling
   (`Helios_scalable_QEC/design/stage_controller/control_node_single_FPGA.v`
   lines 234-243), cudaqx keeps "a single in-flight inference slot" per
   GPU worker because deeper queues bought no throughput

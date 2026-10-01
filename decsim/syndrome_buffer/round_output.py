@@ -99,8 +99,8 @@ class SyndromeBufferOutput:
         """Add the raw rounds before the job's first that its reader needs.
 
         A decoder that forms the events needs every round before the
-        job's first that its unformed rounds' recipes read, less the
-        rounds it formed (rounds_needed_before). They leave the store in
+        job's first that its unformed rounds' recipes read, less those
+        it holds (rounds_needed_before). They leave the store in
         the job's own read and ride its one transfer, priced with its
         rounds, as a gem5 DMA request covers its whole range and one
         Garnet message is cut into flits by its size alone

@@ -102,14 +102,27 @@ class FormationTable:
         far back (stim.Circuit.compile_m2d_converter). Records start at
         round one, so the count never reaches before it.
         """
-        recipes_of_round = self.detectors_of_round(round_index)
-        if self.forms_observables_at(round_index):
-            recipes_of_round.extend(self.observables)
-        earliest_round = round_index
-        for recipe in recipes_of_round:
-            for record_round, _ in recipe.records:
-                earliest_round = min(earliest_round, record_round)
+        record_rounds = self.rounds_read_by((round_index,))
+        record_rounds.add(round_index)
+        earliest_round = min(record_rounds)
         return round_index - earliest_round
+
+    def rounds_read_by(self, round_indices: Iterable[int]) -> set[int]:
+        """The rounds whose packets forming these rounds reads.
+
+        Their detectors' records and, with the last round of a whole
+        operation, the observables' (StreamingDetectorFormer
+        form_round): no more, so a seat joining mid-stream is given
+        what its rounds read and nothing between.
+        """
+        record_rounds = set()
+        for round_index in round_indices:
+            recipes_of_round = self.detectors_of_round(round_index)
+            if self.forms_observables_at(round_index):
+                recipes_of_round.extend(self.observables)
+            rounds_of_round = _record_rounds_of(recipes_of_round)
+            record_rounds.update(rounds_of_round)
+        return record_rounds
 
     def rounds_read_before_first(
         self, first_round: int, round_indices: Iterable[int]
@@ -119,13 +132,11 @@ class FormationTable:
         A read forms each of its rounds in turn, and a later round can
         reach further back than the first (a detector of rec[-1] and
         rec[-4] after rounds of rec[-1] alone), so the read reaches back
-        to the earliest round any of them reads (rounds_read_before).
+        to the earliest round any of them reads (rounds_read_by).
         """
-        earliest_round = first_round
-        for round_index in round_indices:
-            reach_count = self.rounds_read_before(round_index)
-            earliest_read = round_index - reach_count
-            earliest_round = min(earliest_round, earliest_read)
+        record_rounds = self.rounds_read_by(round_indices)
+        record_rounds.add(first_round)
+        earliest_round = min(record_rounds)
         return first_round - earliest_round
 
     def earlier_rounds_read(self, first_round: int) -> tuple[int, ...]:

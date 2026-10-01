@@ -1598,8 +1598,8 @@ class DetectionEventPlacement(Protocol):
     ) -> tuple:
         """The raw rounds before a read's first round the seat must be given.
 
-        Back to the earliest round the read's unformed rounds' recipes
-        read, less the rounds the seat has formed or holds raw.
+        The rounds the read's unformed rounds' recipes read, less those
+        the seat holds raw.
         """
 
     def earlier_rounds_read(

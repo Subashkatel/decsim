@@ -1245,14 +1245,14 @@ and on `WorkloadSettings`), `decsim/experiments/run_folder.py`
 
 ## D34. A seat is told how many rounds before a round it must be given
 
-**Decided.** A read is given every raw round before its first that its
-unformed rounds' recipes read, less the rounds its seat has formed or
-holds raw:
-`rounds_needed_before` answers those rounds, from the earliest round
-any detector of an unformed round of the read names (and, on the last
-round, any observable). A later round of a read can reach further back
-than its first (`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the
-whole read is counted, not its first round. A round the seat formed is
+**Decided.** A read is given exactly the raw rounds before its first
+that its unformed rounds' recipes read, less those its seat holds raw:
+`rounds_needed_before` answers the rounds any detector of an unformed
+round of the read names (and, on the last round, any observable), and
+no round between them, so a read never asks for a round its stream let
+go of. A later round of a read can reach further back than its first
+(`rec[-1]` rounds, then `rec[-1] ^ rec[-4]`), so the whole read is
+counted, not its first round. A round the seat formed is
 not given again: its former keeps a packet while a round that reads it
 is neither formed there nor retired, the packet's reference set, so a
 seam formed after a later block still finds the rounds it reads, and
@@ -1276,7 +1276,8 @@ observables are read by the final round, so the packets they read stay
 until it forms. Fed in order a former holds the last k packets beside
 the observables', the ring it replaced. The
 recipe table owns the law (`rounds_read_before` per round,
-`rounds_read_before_first` per read, `rounds_reading` per packet,
+`rounds_read_by` per read, `rounds_read_before_first` per planned
+read, `rounds_reading` per packet,
 `earlier_rounds_read` per stream window).
 A window's potential strong read holds, in both stores, the rounds
 before its first that its or a later round's recipes read
@@ -1351,8 +1352,8 @@ and answers the rounds the strong seat lacks. `SyndromeBuffer` gained a
 `detection_events` port, bound on the store the plan's windows read.
 
 **Where to see it.** `decsim/detector_error_model/detector_formation.py`
-(`FormationTable.rounds_read_before`, `rounds_read_before_first`,
-`rounds_reading`, `earlier_rounds_read`, `live_reach`,
+(`FormationTable.rounds_read_before`, `rounds_read_by`,
+`rounds_read_before_first`, `rounds_reading`, `earlier_rounds_read`, `live_reach`,
 `rounds_read_back`, `StreamingDetectorFormer`),
 `decsim/qpu/streaming_stim_device.py` (`_program_reach`),
 `decsim/detector_error_model/detection_event_formation.py`

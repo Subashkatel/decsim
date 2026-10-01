@@ -350,11 +350,11 @@ def test_a_seat_that_has_not_formed_a_surface_code_round_needs_one_before():
     assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == (2,)
 
 
-def test_a_seat_that_has_not_formed_a_round_needs_every_round_it_reads():
+def test_a_seat_is_given_the_round_its_detector_reads_and_none_between():
     """Round 5's detector is rec[-1] XOR rec[-3], rounds 5 and 3."""
     placement = lookback_seated(("strong_decoder",))
 
-    assert placement.rounds_needed_before("strong_decoder", 1, 5, 5) == (3, 4)
+    assert placement.rounds_needed_before("strong_decoder", 1, 5, 5) == (3,)
 
 
 def reach_growing_circuit(error_probability=0.0) -> tuple:
@@ -391,11 +391,11 @@ def reach_growing_seated(formed_at):
     return formation.SeatedFormation(source, settings)
 
 
-def test_a_seat_is_given_every_round_a_later_round_of_its_read_reaches():
+def test_a_seat_is_given_the_round_a_later_round_of_its_read_reads():
     """Round 3 reads only itself; round 4 of the same read reads round 1."""
     placement = reach_growing_seated(("strong_decoder",))
 
-    assert placement.rounds_needed_before("strong_decoder", 1, 3, 4) == (1, 2)
+    assert placement.rounds_needed_before("strong_decoder", 1, 3, 4) == (1,)
 
 
 def test_a_seat_is_not_given_a_round_it_formed():

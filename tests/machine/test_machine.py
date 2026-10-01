@@ -955,6 +955,20 @@ def test_an_escalation_leaves_the_rounds_a_later_window_reads_held():
     _assert_drained(run)
 
 
+def test_an_escalation_carries_only_the_round_its_final_round_reads():
+    """Window 7 forms the final round, which reads round 1 and itself.
+
+    The stream keeps round 1 and lets rounds 2 to 6 go, so the strong
+    read is given round 1 alone.
+    """
+    program = _first_round_observed_program()
+    settings = _switching_live_settings(program, (7,))
+
+    run = _run(settings)
+
+    _assert_drained(run)
+
+
 def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")

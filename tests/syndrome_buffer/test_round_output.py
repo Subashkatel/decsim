@@ -195,8 +195,8 @@ def _job(round_index=1) -> decoding_records.DecodeJob:
     )
 
 
-def test_the_rounds_before_leave_with_a_job_whose_decoder_needs_them():
-    """Rounds 3 and 4 ride the job's one move: three rounds of two bits."""
+def test_the_round_before_leaves_with_a_job_whose_decoder_reads_it():
+    """Round 5 reads round 3, which rides the job's one move, and not 4."""
     engine = engine_module.Engine()
     transfers = _Transfers()
     store = _store(engine)
@@ -207,8 +207,8 @@ def test_the_rounds_before_leave_with_a_job_whose_decoder_needs_them():
 
     output.send_input(job, lambda: None)
 
-    assert job.rounds_before == (_fragment(3), _fragment(4))
-    assert transfers.sends == [(output.path, 6)]
+    assert job.rounds_before == (_fragment(3),)
+    assert transfers.sends == [(output.path, 4)]
 
 
 def test_a_job_whose_first_round_reads_only_itself_carries_nothing_before():
@@ -227,12 +227,12 @@ def test_a_job_whose_first_round_reads_only_itself_carries_nothing_before():
     assert transfers.sends == [(output.path, 2)]
 
 
-def test_the_rounds_before_are_read_in_the_jobs_one_port_booking():
-    """Three words on one read port, a cycle each from tick 0, then the link.
+def test_the_round_before_is_read_in_the_jobs_one_port_booking():
+    """Two words on one read port, a cycle each from tick 0, then the link.
 
     SimpleMemory is busy for the size it moves (gem5
-    src/mem/simple_mem.cc:154), so the two rounds before cost their
-    words in the same read as the job's own round, with no second
+    src/mem/simple_mem.cc:154), so round 3, which round 5 reads, costs
+    its word in the same read as the job's own round, with no second
     request.
     """
     engine = engine_module.Engine()
@@ -246,7 +246,7 @@ def test_the_rounds_before_are_read_in_the_jobs_one_port_booking():
     delay = output.send_input(job, lambda: None)
 
     period_ticks = store.settings.clock.period_ticks
-    assert delay == 3 * period_ticks + LINK_DELAY_TICKS
+    assert delay == 2 * period_ticks + LINK_DELAY_TICKS
 
 
 def test_the_recording_transfers_fill_the_port():

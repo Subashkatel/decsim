@@ -234,7 +234,7 @@ class RoundRetention:
 
         When the strong side forms the events, its seat is given the
         rounds before the read's first that its unformed rounds' recipes
-        read and it has not formed (rounds_needed_before): a round an
+        read and it does not hold (rounds_needed_before): a round an
         earlier strong read landed there stays in its former while an
         unformed round reads it, so the stores need not keep it for this
         read. None otherwise.

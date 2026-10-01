@@ -170,20 +170,20 @@ def test_a_strong_side_that_forms_reads_the_raw_round_before_a_redo():
     assert retention.strong_rounds_before(1, 3, 3) == [(1, 2)]
 
 
-def test_a_strong_side_reads_every_round_its_first_rounds_recipes_read():
-    """Round 5's detector reads rounds 5 and 3, so rounds 3 and 4 go up."""
+def test_a_strong_read_carries_the_round_its_first_rounds_recipes_read():
+    """Round 5's detector reads rounds 5 and 3, so round 3 alone goes up."""
     table = _lookback_table()
     retention = _forming_retention(table, strong_side_seat="strong_decoder")
 
-    assert retention.strong_rounds_before(1, 5, 5) == [(1, 3), (1, 4)]
+    assert retention.strong_rounds_before(1, 5, 5) == [(1, 3)]
 
 
-def test_a_strong_read_holds_every_round_a_later_round_of_it_reads():
+def test_a_strong_read_carries_the_round_a_later_round_of_it_reads():
     """Its first round 3 reads only itself; its round 4 reads round 1."""
     table = _reach_growing_table()
     retention = _forming_retention(table, strong_side_seat="strong_decoder")
 
-    assert retention.strong_rounds_before(1, 3, 4) == [(1, 1), (1, 2)]
+    assert retention.strong_rounds_before(1, 3, 4) == [(1, 1)]
 
 
 def _raw_fragment(round_index: int) -> round_records.RetainedSyndromeFragment:

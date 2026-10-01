@@ -1,20 +1,15 @@
-"""The service's laws: the start, the park, the overlap, the pipeline.
+"""The service's laws: the start, the park, the overlap.
 
 Smith 1982 decoupled access-execute:
 with two slots the next window's transfer overlaps the compute, one
 window per max(T, C). Tomasulo's rule at the boundary hazard: a landed
 job whose window owes a boundary keeps its slot and never the compute.
-Hennessy and Patterson App. C: a
-pipelined unit starts one decode per initiation interval, at most depth
-in flight, each result a fixed latency after its start. The laws are
-computed inside the tests. The strong-primary law needs the whole
-declared fabric (tests/declared_run.py), because only a run builds the
-request whose tier the pipelined model must accept. A withdrawn job's
+The laws are computed inside the tests. The strong-primary law needs
+the whole declared fabric (tests/declared_run.py), because only a run
+builds the request that rides the strong-buffer path. A withdrawn job's
 landing follows the transport that carries it: once the transfer is
 cancelled, no landing is awaited.
 """
-
-import pytest
 
 import decsim.config as config
 import decsim.decoders.decoder_manager as decoder_manager
@@ -205,16 +200,6 @@ def _recording(manager, engine):
     return starts
 
 
-class _WindowLatencyDecoder(decoders.PresetLatencyDecoder):
-    """A row whose response depends on the window it decodes."""
-
-    def latency(self, job):
-        microseconds = 50.0
-        if job.window_id == 0:
-            microseconds = 100.0
-        return config.microseconds_to_ticks(microseconds)
-
-
 def strong_primary_run(decoder):
     """One three-round patch decoded by this row alone, on declared ticks.
 
@@ -360,190 +345,19 @@ def test_a_withdrawn_sender_and_its_joined_reader_leave_no_landing():
     assert manager.service.input_is_on_the_unit(reader, unit) is False
 
 
-def test_a_pipelined_unit_issues_at_its_initiation_interval():
-    # II = 0.5 us, C = 4 us, full depth: three windows landing at once
-    # start 0.5 us apart and each returns 4 us after its start
-    engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming(
-        (), (), UNIT_CLOCK, initiation_interval_us=0.5
-    )
-    algorithm = decoders.PresetLatencyDecoder(4.0)
-    decoder = staged_decoder.StagedDecoder(algorithm, timing)
-    manager = _manager(engine, decoder)
-    starts = _recording(manager, engine)
-    ends = {}
-    on_decoded = _ending_in(ends, engine, manager)
-    _enqueue_windows(manager, 3, None, on_decoded)
-    engine.run()
-    interval = config.microseconds_to_ticks(0.5)
-    latency = config.microseconds_to_ticks(4.0)
-    assert starts == {"w0": 0, "w1": interval, "w2": 2 * interval}
-    assert ends == {
-        "w0": latency,
-        "w1": interval + latency,
-        "w2": 2 * interval + latency,
-    }
-    manager.check_decode_work_settled()
+def test_a_strong_primary_window_is_priced_on_the_strong_buffer_path():
+    """A strong-primary window is a plain decode on the strong tier.
 
-
-def test_an_initiation_interval_stays_a_lower_bound_below_the_response():
-    """A response shorter than the interval never opens the intake early.
-
-    The intake rate is the initiation interval's alone: a new decode may
-    start every interval while each result still returns after the whole
-    latency (staged_decoder.py's module docstring, after Hennessy and
-    Patterson App. C). A one-microsecond response inside a
-    ten-microsecond interval therefore frees the result state without
-    erasing the intake cooldown, so the second start is one interval
-    after the first and not one response.
-    """
-    engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming(
-        (), (), UNIT_CLOCK, initiation_interval_us=10.0
-    )
-    algorithm = decoders.PresetLatencyDecoder(1.0)
-    decoder = staged_decoder.StagedDecoder(algorithm, timing)
-    manager = _manager(engine, decoder)
-    starts = _recording(manager, engine)
-    ends = {}
-    on_decoded = _ending_in(ends, engine, manager)
-    first = _job(0)
-    second = _job(1)
-    manager.enqueue(first, None, on_decoded)
-    manager.enqueue(second, None, on_decoded)
-    engine.run()
-    assert starts == {
-        "w0": 0,
-        "w1": config.microseconds_to_ticks(10.0),
-    }
-    assert ends == {
-        "w0": config.microseconds_to_ticks(1.0),
-        "w1": config.microseconds_to_ticks(11.0),
-    }
-    manager.check_decode_work_settled()
-
-
-def test_a_declared_pipeline_depth_bounds_the_decodes_in_flight():
-    """Depth two lets the third start wait for the first completion.
-
-    A pipelined unit holds at most its declared depth in flight
-    (Hennessy and Patterson App. C; decode_service.py,
-    _initiation_complete keeps the compute claim on a full pipeline), and
-    every in-flight decode stays resident because its input lives in the
-    unit's memory until its result emerges (resident_capacity). So with
-    a 5 us transfer, a 1 us interval, a 100 us response and four windows
-    ready at once: w0 and w1 start 5 and 6, the intake is free at 7 but
-    w2 waits until w0 completes at 105, and w3 cannot even take a slot
-    before that completion frees the memory it needs.
-    """
-    engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming(
-        (), (), UNIT_CLOCK, initiation_interval_us=1.0, pipeline_depth=2
-    )
-    algorithm = decoders.PresetLatencyDecoder(100.0)
-    decoder = staged_decoder.StagedDecoder(algorithm, timing)
-    manager = _manager(engine, decoder)
-    starts = _recording(manager, engine)
-    ends = {}
-    dispatches = {}
-
-    def note_dispatch(job, _unit):
-        dispatches[job.label] = engine.now
-
-    manager.service.trace.job_dispatched.connect(note_dispatch)
-    on_decoded = _ending_in(ends, engine, manager)
-    transfer_ticks = config.microseconds_to_ticks(5.0)
-    send_input = _send_after(engine, transfer_ticks)
-    _enqueue_windows(manager, 4, send_input, on_decoded)
-    engine.run()
-    assert starts == {
-        "w0": config.microseconds_to_ticks(5.0),
-        "w1": config.microseconds_to_ticks(6.0),
-        "w2": config.microseconds_to_ticks(105.0),
-        "w3": config.microseconds_to_ticks(110.0),
-    }
-    assert ends == {
-        "w0": config.microseconds_to_ticks(105.0),
-        "w1": config.microseconds_to_ticks(106.0),
-        "w2": config.microseconds_to_ticks(205.0),
-        "w3": config.microseconds_to_ticks(210.0),
-    }
-    assert dispatches["w2"] == 0  # the third window's slot was free at once
-    assert starts["w2"] == ends["w0"]
-    assert dispatches["w3"] == ends["w0"]
-    manager.check_decode_work_settled()
-
-
-def test_a_pipelined_unit_refuses_two_in_flight_response_times():
-    """One pipelined unit takes one latency, so mixed responses refuse.
-
-    A hardware pipeline retires in issue order (Hennessy and Patterson
-    App. C), so a second decode declaring a different latency while the
-    first is in flight would complete out of order; decoder_unit.py's
-    add_flight refuses loudly instead of reordering the results.
-    """
-    engine = engine_module.Engine()
-    timing = staged_decoder.UnitTiming(
-        (), (), UNIT_CLOCK, initiation_interval_us=1.0
-    )
-    algorithm = _WindowLatencyDecoder()
-    decoder = staged_decoder.StagedDecoder(algorithm, timing)
-    manager = _manager(engine, decoder)
-    first = _job(0)
-    second = _job(1)
-    on_decoded = _resolving(manager)
-    manager.enqueue(first, None, on_decoded)
-    manager.enqueue(second, None, on_decoded)
-    with pytest.raises(RuntimeError, match="completes in order"):
-        engine.run()
-
-
-def test_a_pipelined_unit_serves_a_strong_primary_window():
-    """A strong-primary window is a plain decode, so the pipeline takes it.
-
-    Only an escalation carries strong_decode_for, and the pipelined
-    model serves plain window decodes (decode_service.py, _pipeline_of):
-    a strong-primary run decodes each window once, like the weak tier,
+    A strong-primary run decodes each window once, like the weak tier,
     so its window is priced by its own arithmetic on declared_run's
     fabric. Three rounds end at 3, readout classification and the wire
-    publish the strong syndrome buffer at 15, the 6 us strong-buffer transfer
-    lands the input at 21, and the 100 us row returns at 121.
+    publish the strong syndrome buffer at 15, the 6 us strong-buffer
+    transfer lands the input at 21, and the 100 us row returns at 121.
     """
-    timing = staged_decoder.UnitTiming(
-        (), (), UNIT_CLOCK, initiation_interval_us=1.0
-    )
+    timing = staged_decoder.UnitTiming((), (), UNIT_CLOCK)
     algorithm = decoders.PresetLatencyDecoder(100.0)
     decoder = staged_decoder.StagedDecoder(algorithm, timing)
     machine = strong_primary_run(decoder)
     window = machine.observation.windows.windows[(1, 0)]
     assert window.t_data_complete == config.microseconds_to_ticks(15.0)
     assert window.t_done == config.microseconds_to_ticks(121.0)
-
-
-class _MisdeclaredDepth(decoders.PresetLatencyDecoder):
-    """A row that claims a pipeline and answers at the rate it accepts."""
-
-    def pipeline_depth(self, job):
-        del job
-        return 4
-
-
-def test_a_declared_depth_that_its_timing_denies_is_refused():
-    """The two halves of one fact are held against each other.
-
-    The port declares pipeline_depth, and a unit runs the pipelined
-    model when it accepts work on its own interval. A row that declares
-    a depth above one and answers at exactly the rate it accepts has
-    declared a pipeline it cannot run, and the service says so where it
-    reads both.
-    """
-    engine = engine_module.Engine()
-    decoder = _MisdeclaredDepth(1.0)
-    manager = _manager(engine, decoder)
-    job = _job(0)
-    with pytest.raises(AssertionError, match="pipeline depth of 4"):
-        manager.enqueue(job, None, _nothing_decoded)
-
-
-def _nothing_decoded(job, result) -> None:
-    del job, result

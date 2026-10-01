@@ -1736,7 +1736,7 @@ def test_the_strong_decodes_held_in_units_are_the_units_own_residents(
     The column reads the most strong decodes held at once off the stage
     ledger; the units' own slots, sampled after every engine action, give
     the same peak. One unit holds two residents, the decode it computes
-    and the next one (decode_service.py, resident_capacity), so one is
+    and the next one (decoder_unit.py, INPUT_SLOT_COUNT), so one is
     the most it can hold waiting.
     """
     samplers = []

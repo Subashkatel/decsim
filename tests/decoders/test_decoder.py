@@ -140,12 +140,6 @@ def test_a_window_row_without_a_latency_model_has_no_latency():
         row.latency(job)
 
 
-def test_pipeline_depth_is_one():
-    job = _job()
-    row = FixedRow()
-    assert row.pipeline_depth(job) == 1
-
-
 def test_cancel_on_a_plain_row_changes_nothing():
     row = FixedRow()
     job = _job()

@@ -458,7 +458,7 @@ class DecoderManager:
         field by field.
         """
         if job.cancelled:
-            self.service.discard_cancelled(job)
+            self.service.release_input(job)
             self.dispatcher.run()
             return
         settle = SETTLE_BY_JOB_KIND[job.kind]

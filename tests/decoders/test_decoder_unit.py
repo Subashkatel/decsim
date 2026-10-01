@@ -1,9 +1,7 @@
-"""One unit's occupancy: two input slots, one compute, in-order flights.
+"""One unit's occupancy: two input slots, one compute.
 
 Smith 1982 decoupled access-execute: the second slot holds the
-next window's input while the first computes. Hennessy and Patterson
-App. C: a pipelined unit retires its flights in issue order and
-a full pipeline stalls the intake until a flight retires.
+next window's input while the first computes.
 """
 
 import pytest
@@ -128,21 +126,6 @@ def test_the_compute_goes_to_the_oldest_landed_resident_not_parked():
     unit.admit(parked)
     unit.admit(ready)
     assert unit.oldest_landed_resident_ready_to_start() is ready
-
-
-def test_a_full_pipeline_stalls_until_a_flight_retires():
-    unit = _unit()
-    first = _job("first")
-    second = _job("second")
-    unit.add_flight(first, 40)
-    unit.pipeline.intake_job = None
-    unit.add_flight(second, 40)
-    unit.claim_compute(second)
-    unit.stall(second, 2)
-    assert unit.lift_stall() is None
-    assert unit.take_flight(first) is True
-    assert unit.lift_stall() is second
-    assert unit.flight_labels() == ["second"]
 
 
 def test_the_residents_describe_their_phase():

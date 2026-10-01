@@ -1441,6 +1441,20 @@ mistake a gap for a result.
   once fills, and the run then stops and says how many rounds were left
   held for store room. The size that is always enough is the union of
   every hold, and an open-ended dynamic stream has none.
+- **O15. A unit never starts a second decode while one computes.** Its
+  compute is busy for the decode's whole occupancy; only the next
+  window's input lands beside it (`decsim/decoders/decoder_unit.py`).
+  The hardware the switching baseline models works this way: the
+  Helios union-find controller raises `input_ready` only while idle
+  (`Helios_scalable_QEC/design/stage_controller/control_node_single_FPGA.v`
+  lines 234-243), cudaqx keeps "a single in-flight inference slot" per
+  GPU worker because deeper queues bought no throughput
+  (`cudaqx/docs/hybrid_ai_predecoder_pipeline.md` line 137), and one
+  stream's sliding windows are "inherently sequential" (Skoric et al.
+  2209.08552 line 106). Throughput comes from the pool's units. A study
+  of one unit multiplexing independent decodes would model Micro
+  Blossom's context switching (2502.14787), whose per-task latency
+  varies.
 O3, O4, O5, O6, O9 and O10 are closed: the sends name what they carry
 (`QPUReadout.size_bits` on the readout hop; on the strong request's
 hops the request's name, alone for the selection and in front of the

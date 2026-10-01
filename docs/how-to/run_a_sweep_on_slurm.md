@@ -163,6 +163,25 @@ The run folder's `sweep.csv` holds one row per point, its values and
 its counts, and `decsim.results.load` reads it beside every setting
 ([How to compare two runs](compare_two_runs.md)).
 
+## Or run a yaml to its end in one job
+
+`slurm/collect.sbatch` runs one yaml on one node with no plan and no
+rounds: `decsim collect` runs every point until its collection rule
+stops it, one piece per core, and saves each piece as it ends.
+
+```bash
+sbatch --output results/my_run/collect_%j.log \
+  slurm/collect.sbatch configs/experiments/my_study/my_study.yaml results/my_run
+```
+
+It asks for 32 cores, 160 GB and 6 days; `--cpus-per-task`, `--mem` and
+`--time` on the `sbatch` line override them. A job stopped by its time
+limit loses only the pieces still running, and the same line again
+carries on from the saved ones. Each step of a collect waits for its
+slowest piece, so a yaml whose points differ widely in seconds a shot
+keeps more cores busy as rounds. It refuses a tree with uncommitted
+changes, as `slurm/round.sh` does.
+
 ## Read next
 
 - [Your first sweep](../tutorials/first_sweep.md): a small sweep end to end, with the

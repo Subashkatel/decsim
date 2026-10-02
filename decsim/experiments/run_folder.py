@@ -599,6 +599,13 @@ def _how_it_ran() -> dict:
     }
 
 
+def rounds_per_shot(task: collect.Task) -> int:
+    """A shot's QEC rounds as the point's plan gives them (_rounds_per_shot)."""
+    shot_settings = task.shot_settings()
+    plan = _plan(shot_settings)
+    return _rounds_per_shot(plan)
+
+
 def _plan(settings) -> plan_build.Plan:
     """The plan the build derives from the settings, before it wires."""
     escalation_policy = escalation_build.build_escalation_policy(
@@ -859,6 +866,22 @@ def _tree_reading() -> tuple:
         if porcelain is not None:
             is_dirty = bool(porcelain)
     return commit, is_dirty
+
+
+def fresh_tree_reading() -> tuple:
+    """(checkout, commit, dirty) of the tree, read now from git itself.
+
+    Not the cached reading and not the launcher's: a launcher and every
+    task it starts each look at the tree as they start. commit and dirty
+    are None where git could not answer.
+    """
+    checkout = _checkout()
+    commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
+    porcelain = _git_output("git", "-C", str(checkout), "status", "--porcelain")
+    is_dirty = None
+    if porcelain is not None:
+        is_dirty = bool(porcelain)
+    return checkout, commit, is_dirty
 
 
 def _dirty_from_the_launcher() -> Optional[bool]:

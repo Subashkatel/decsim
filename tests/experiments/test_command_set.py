@@ -117,14 +117,19 @@ def _rows_of_every_file(run_dir) -> dict:
 
 
 @pytest.fixture(autouse=True)
-def one_tree_reading_per_test():
+def one_tree_reading_per_test(monkeypatch):
     """Every test here takes its own reading of the tree.
 
     run_folder reads the tree once per process, which is what a cluster
     task is. The suite is one process running many runs, and one of
     these tests answers for git itself, so the reading is dropped
-    around each test rather than carried between them.
+    around each test rather than carried between them. A batch task
+    refuses a tree git does not vouch for, which tests/test_tools.py
+    holds; here a task runs on the tree as it stands, and the reading
+    it exports goes when the test ends.
     """
+    monkeypatch.setenv(plan_command.ALLOW_DIRTY_VARIABLE, "1")
+    monkeypatch.delenv(run_folder.TREE_DIRTY_VARIABLE, raising=False)
     run_folder._tree_reading.cache_clear()
     yield
     run_folder._tree_reading.cache_clear()
@@ -2346,44 +2351,56 @@ def _named_library(path: pathlib.Path, digest) -> dict:
 
 
 def _plan(config_paths: list, experiment_dir: pathlib.Path, tasks: int):
-    """The yaml planned by `decsim plan`; the new round's folder or None."""
+    """The yaml's next batch planned, as `decsim run --slurm` plans it.
+
+    The batch's folder, or None when every point has stopped.
+    """
     (config_path,) = config_paths
-    before = pieces.round_dirs(experiment_dir)
-    out = ["--out", str(experiment_dir), "--tasks", str(tasks)]
-    command.main(["plan", str(config_path), *out])
-    after = pieces.round_dirs(experiment_dir)
-    if len(after) == len(before):
-        return None
-    return after[-1]
+    job = plan_command.JobShape(cores=4, hours=24, memory_mb=4096)
+    return plan_command.plan_batch(config_path, experiment_dir, tasks, job)
 
 
-def _run_the_round(round_dir: pathlib.Path, task_order=None) -> None:
-    """Every task of a round's plan, each as its own collect --plan."""
-    tasks_path = round_dir / "tasks.csv"
+def _run_task(batch_folder: pathlib.Path, task_number) -> None:
+    """One task of a batch, as its array task runs it."""
+    results_dir = batch_folder.parent.parent
+    batch_number = pieces.batch_number_of(batch_folder)
+    command.main(
+        [
+            "run",
+            "--out",
+            str(results_dir),
+            "--batch",
+            str(batch_number),
+            "--task",
+            str(task_number),
+        ]
+    )
+
+
+def _run_the_batch(batch_folder: pathlib.Path, task_order=None) -> None:
+    """Every task of a batch's plan, each as its own array task."""
+    tasks_path = batch_folder / "tasks.csv"
     task_numbers = [row["task"] for row in _csv_rows(tasks_path)]
     if task_order is not None:
         task_numbers = task_order
-    plan_path = round_dir / "plan.csv"
     for task_number in task_numbers:
-        command.main(
-            ["run", "--plan", str(plan_path), "--task", str(task_number)]
-        )
+        _run_task(batch_folder, task_number)
 
 
 def _plan_and_run_until_stopped(config_paths: list, experiment_dir) -> int:
-    """Rounds planned and run until every point has stopped; how many."""
-    rounds = 0
+    """Batches planned and run until every point has stopped; how many."""
+    batch_count = 0
     while True:
-        round_dir = _plan(config_paths, experiment_dir, 3)
-        if round_dir is None:
-            return rounds
-        _run_the_round(round_dir)
-        rounds += 1
+        batch_folder = _plan(config_paths, experiment_dir, 3)
+        if batch_folder is None:
+            return batch_count
+        _run_the_batch(batch_folder)
+        batch_count += 1
 
 
-def _planned_ranges(round_dir: pathlib.Path) -> list:
-    """A round's pieces as (point id, first seed, count)."""
-    plan_path = round_dir / "plan.csv"
+def _planned_ranges(batch_folder: pathlib.Path) -> list:
+    """A batch's pieces as (point id, first seed, count)."""
+    plan_path = batch_folder / "plan.csv"
     ranges = []
     for _task, piece in pieces.read_plan(plan_path):
         ranges.append((piece.point_id, piece.first_seed, piece.count))
@@ -2401,12 +2418,12 @@ def _cut_four_point_sweep(tmp_path) -> pathlib.Path:
 def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
     tmp_path,
 ):
-    """The uncut collect is the oracle for rounds that lost a piece.
+    """The uncut collect is the oracle for batches that lost a piece.
 
-    Round one cuts every point into pieces of one shot over three tasks;
+    Batch one cuts every point into pieces of one shot over three tasks;
     one piece is then deleted, as a task killed before its rename leaves
-    it missing. Round two plans that piece alone, with its own seeds,
-    and the status fold of both rounds is the uncut run's, file by file;
+    it missing. Batch two plans that piece alone, with its own seeds,
+    and the status fold of both batches is the uncut run's, file by file;
     status writes points in its own order, so the rows are compared in
     one order.
     """
@@ -2415,14 +2432,14 @@ def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     command.main(["run", str(whole_path), "--out", str(whole_dir)])
-    first_round = _plan([cut_path], cut_dir, 3)
-    _run_the_round(first_round)
+    first_batch = _plan([cut_path], cut_dir, 3)
+    _run_the_batch(first_batch)
     second_pieces = cut_dir.glob("pieces/*/1-1")
     lost_piece, *_kept = sorted(second_pieces)
     shutil.rmtree(lost_piece)
 
-    second_round = _plan([cut_path], cut_dir, 3)
-    _run_the_round(second_round)
+    second_batch = _plan([cut_path], cut_dir, 3)
+    _run_the_batch(second_batch)
     command.main(["status", str(cut_dir)])
 
     whole_run_dir = whole_dir
@@ -2430,55 +2447,55 @@ def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
     cut_run_dir = cut_dir
     cut_rows = _sorted_rows_of_every_file(cut_run_dir)
     lost_point = lost_piece.parent.name
-    assert _planned_ranges(second_round) == [(lost_point, 1, 1)]
+    assert _planned_ranges(second_batch) == [(lost_point, 1, 1)]
     assert _plan([cut_path], cut_dir, 3) is None
     assert cut_rows == whole_rows
 
 
-def _rounds_planned_without_running(
-    config_path: pathlib.Path, experiment_dir: pathlib.Path, rounds: int
+def _batches_planned_without_running(
+    config_path: pathlib.Path, experiment_dir: pathlib.Path, batch_count: int
 ) -> list:
-    """Each round's sorted pieces, for rounds planned with none run."""
-    planned_rounds = []
-    for _round in range(rounds):
-        round_dir = _plan([config_path], experiment_dir, 2)
-        round_ranges = _planned_ranges(round_dir)
-        planned_rounds.append(sorted(round_ranges))
-    return planned_rounds
+    """Each batch's sorted pieces, for batches planned with none run."""
+    planned_batches = []
+    for _batch in range(batch_count):
+        batch_folder = _plan([config_path], experiment_dir, 2)
+        batch_ranges = _planned_ranges(batch_folder)
+        planned_batches.append(sorted(batch_ranges))
+    return planned_batches
 
 
-def _rounds_of_saved_pieces(experiment_dir: pathlib.Path) -> set:
-    """The rounds whose tasks saved the experiment's pieces."""
-    rounds = set()
+def _batches_of_saved_pieces(experiment_dir: pathlib.Path) -> set:
+    """The batches whose tasks saved the experiment's pieces."""
+    batches = set()
     for folder in experiment_dir.glob("pieces/*/*"):
         piece = pieces.read_piece(folder)
-        rounds.add(piece["round"])
-    return rounds
+        batches.add(piece["batch"])
+    return batches
 
 
-def test_a_piece_no_round_ran_is_planned_once_a_round(tmp_path):
-    """A piece every earlier round listed and none ran is planned once.
+def test_a_piece_no_batch_ran_is_planned_once_a_batch(tmp_path):
+    """A piece every earlier batch listed and none ran is planned once.
 
     Rounds whose arrays never started leave each of their pieces listed
     in several plans; the next plan still names each seed range once,
-    and the same pieces every round.
+    and the same pieces every batch.
     """
     config_path = _cut_four_point_sweep(tmp_path)
     experiment_dir = tmp_path / "experiment"
 
-    planned_rounds = _rounds_planned_without_running(
+    planned_batches = _batches_planned_without_running(
         config_path, experiment_dir, 4
     )
 
-    first_round = planned_rounds[0]
-    assert len(set(first_round)) == len(first_round)
-    assert planned_rounds == [first_round] * 4
+    first_batch = planned_batches[0]
+    assert len(set(first_batch)) == len(first_batch)
+    assert planned_batches == [first_batch] * 4
 
 
 def _targeted_sweep(tmp_path) -> pathlib.Path:
     """The four-point sweep with a failure target, in one-shot pieces.
 
-    The target is out of reach, so every round extends each point.
+    The target is out of reach, so every batch extends each point.
     """
     (block,) = FOUR_POINT_SWEEP["sweep"]
     targeted_block = {
@@ -2489,29 +2506,29 @@ def _targeted_sweep(tmp_path) -> pathlib.Path:
     return yaml_configs.write_config(tmp_path, card)
 
 
-def test_a_piece_saved_by_an_earlier_round_is_not_run_or_planned_again(
+def test_a_piece_saved_by_an_earlier_batch_is_not_run_or_planned_again(
     tmp_path,
 ):
-    """A piece planned again, then saved by its first round, is done.
+    """A piece planned again, then saved by its first batch, is done.
 
-    Round two plans round one's pieces again while none is saved; once
-    round one saves them, round two's tasks skip them and round three
+    Batch two plans batch one's pieces again while none is saved; once
+    batch one saves them, batch two's tasks skip them and batch three
     plans only new seeds.
     """
     config_path = _targeted_sweep(tmp_path)
     experiment_dir = tmp_path / "experiment"
-    first_round = _plan([config_path], experiment_dir, 2)
-    second_round = _plan([config_path], experiment_dir, 2)
+    first_batch = _plan([config_path], experiment_dir, 2)
+    second_batch = _plan([config_path], experiment_dir, 2)
 
-    _run_the_round(first_round)
-    _run_the_round(second_round)
-    third_round = _plan([config_path], experiment_dir, 2)
+    _run_the_batch(first_batch)
+    _run_the_batch(second_batch)
+    third_batch = _plan([config_path], experiment_dir, 2)
 
-    first_ranges = _planned_ranges(first_round)
-    second_ranges = _planned_ranges(second_round)
-    third_ranges = _planned_ranges(third_round)
+    first_ranges = _planned_ranges(first_batch)
+    second_ranges = _planned_ranges(second_batch)
+    third_ranges = _planned_ranges(third_batch)
     assert second_ranges == first_ranges
-    assert _rounds_of_saved_pieces(experiment_dir) == {1}
+    assert _batches_of_saved_pieces(experiment_dir) == {1}
     assert not set(first_ranges) & set(third_ranges)
 
 
@@ -2601,8 +2618,8 @@ def _estimate_of(row: dict) -> tuple:
 def test_a_status_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
     """The referent is failure_statistics on the row's own counts and stop.
 
-    One noisy point with a target of three failures runs round after
-    round until the plan has nothing left; status gives it the target
+    One noisy point with a target of three failures runs batch after
+    batch until the plan has nothing left; status gives it the target
     state, and its estimate and exact limits are the ones the
     statistics module gives the same failures, scored shots and stop.
     """
@@ -2611,11 +2628,11 @@ def test_a_status_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
 
-    rounds = _plan_and_run_until_stopped([config_path], out_dir)
+    batch_count = _plan_and_run_until_stopped([config_path], out_dir)
     command.main(["status", str(out_dir)])
 
     (row,) = _typed_status_rows(out_dir)
-    assert rounds > 1
+    assert batch_count > 1
     assert row["state"] == "target"
     assert row["prefix_failures"] == 3
     assert _estimate_of(row) == _estimate_by_the_statistics(row)
@@ -2637,11 +2654,11 @@ def test_an_online_points_planned_pieces_run_in_one_task_as_the_uncut_point(
     command.main(["run", str(whole_config), "--out", str(whole_dir)])
     cut_config = _online_config(tmp_path, 15)
 
-    round_dir = _plan([cut_config], cut_dir, 3)
-    _run_the_round(round_dir)
+    batch_folder = _plan([cut_config], cut_dir, 3)
+    _run_the_batch(batch_folder)
     command.main(["run", str(cut_config), "--out", str(cut_dir)])
 
-    plan_path = round_dir / "plan.csv"
+    plan_path = batch_folder / "plan.csv"
     plan_rows = _csv_rows(plan_path)
     whole_run_dir = whole_dir
     cut_run_dir = cut_dir
@@ -2665,29 +2682,29 @@ def _values_of_rows(rows: list, columns: tuple) -> list:
     return values
 
 
-def test_a_rounds_extension_is_openmcs_ratio_of_the_target(tmp_path):
-    """Round two plans shots x (target / failures) in all, less round one's.
+def test_a_batchs_extension_is_openmcs_ratio_of_the_target(tmp_path):
+    """Batch two plans shots x (target / failures) in all, less batch one's.
 
     OpenMC extends a run by the ratio of the uncertainty it has to the
     one it wants, squared (trigger.cpp); for a failure count the squared
-    ratio is the target over the failures seen. Round one plans one
+    ratio is the target over the failures seen. Batch one plans one
     piece, having nothing measured.
     """
     collection = {"max_shots": 1000, "max_failures": 50, "piece_rounds": 90}
     card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
-    first_round = _plan([config_path], out_dir, 3)
-    _run_the_round(first_round)
+    first_batch = _plan([config_path], out_dir, 3)
+    _run_the_batch(first_batch)
     (first_piece,) = out_dir.glob("pieces/*/*")
     counts = pieces.read_piece(first_piece)
     needed = counts["count"] * 50 / counts["failures"]
     wanted = math.ceil(needed)
 
-    second_round = _plan([config_path], out_dir, 3)
+    second_batch = _plan([config_path], out_dir, 3)
 
-    first_ranges = _planned_ranges(first_round)
-    second_ranges = _planned_ranges(second_round)
+    first_ranges = _planned_ranges(first_batch)
+    second_ranges = _planned_ranges(second_batch)
     second_shots = sum(piece[2] for piece in second_ranges)
     assert first_ranges[0][1:] == (0, 6)
     assert counts["failures"] > 0
@@ -2705,15 +2722,14 @@ def test_a_task_whose_point_its_yaml_no_longer_makes_is_refused(
     """
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 1)
+    batch_folder = _plan([config_path], out_dir, 1)
     changed_card = {
         "sweep": [{"axes": NOISY_AXES, "collection": {"max_shots": 1}}]
     }
     yaml_configs.write_config(tmp_path, changed_card)
-    plan_path = round_dir / "plan.csv"
 
     with pytest.raises(SystemExit):
-        command.main(["run", "--plan", str(plan_path), "--task", "0"])
+        _run_task(batch_folder, 0)
 
     printed = capsys.readouterr()
     assert "no point of" in printed.err
@@ -2804,31 +2820,31 @@ def _cells_missed(point_id: str, status_row: dict, sweep_row: dict) -> list:
     return missed
 
 
-def test_a_rounds_last_piece_is_cut_to_what_the_time_cap_allows(tmp_path):
-    """The time cap bounds a round's shots below one whole piece.
+def test_a_batchs_last_piece_is_cut_to_what_the_time_cap_allows(tmp_path):
+    """The time cap bounds a batch's shots below one whole piece.
 
     One piece of six shots is saved; the cap is then set to its core
     seconds and one hundredth more, which at its seconds a shot allows
-    seven shots in all. The next round plans one shot, not a whole
+    seven shots in all. The next batch plans one shot, not a whole
     piece past the cap.
     """
     collection = {"max_shots": 1000, "max_failures": 1000, "piece_rounds": 90}
     card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
-    first_round = _plan([config_path], out_dir, 1)
-    _run_the_round(first_round)
+    first_batch = _plan([config_path], out_dir, 1)
+    _run_the_batch(first_batch)
     (first_piece,) = out_dir.glob("pieces/*/*")
     saved = pieces.read_piece(first_piece)
     capped = {**collection, "max_core_seconds": saved["core_seconds"] * 1.01}
     capped_card = {"sweep": [{"axes": NOISY_AXES, "collection": capped}]}
     yaml_configs.write_config(tmp_path, capped_card)
 
-    second_round = _plan([config_path], out_dir, 1)
+    second_batch = _plan([config_path], out_dir, 1)
 
     point_id = first_piece.parent.name
     assert saved["count"] == 6
-    assert _planned_ranges(second_round) == [(point_id, 6, 1)]
+    assert _planned_ranges(second_batch) == [(point_id, 6, 1)]
 
 
 @pytest.mark.parametrize(
@@ -2843,13 +2859,13 @@ def test_a_rounds_last_piece_is_cut_to_what_the_time_cap_allows(tmp_path):
 def test_a_plan_asking_for_no_task_core_hour_or_memory_is_refused(
     tmp_path, capsys, flag, shape_arguments
 ):
-    """A round has a task, and a task a core, an hour and some memory."""
+    """A batch has a task, and a task a core, an hour and some memory."""
     config_path = yaml_configs.write_config(tmp_path, {})
     experiment_dir = tmp_path / "experiment"
     arguments = [str(config_path), "--out", str(experiment_dir)]
 
     with pytest.raises(SystemExit):
-        command.main(["plan", *arguments, *shape_arguments])
+        command.main(["run", *arguments, "--slurm", *shape_arguments])
 
     printed = capsys.readouterr()
     assert f"{flag} must be at least 1" in printed.err
@@ -2865,10 +2881,10 @@ def test_a_plan_asking_for_no_task_core_hour_or_memory_is_refused(
         ("--memory-mb", 1, (1, 1, -1)),
     ],
 )
-def test_plan_round_refuses_no_task_core_hour_or_memory_before_writing(
+def test_plan_batch_refuses_no_task_core_hour_or_memory_before_writing(
     tmp_path, flag, task_count, shape
 ):
-    """plan_round itself refuses a shape below one, whoever calls it.
+    """plan_batch itself refuses a shape below one, whoever calls it.
 
     shape is the task's cores, hours and memory in MB.
     """
@@ -2877,21 +2893,21 @@ def test_plan_round_refuses_no_task_core_hour_or_memory_before_writing(
     experiment_dir = tmp_path / "experiment"
 
     with pytest.raises(refusal.RefusalError) as refused:
-        plan_command.plan_round(config_path, experiment_dir, task_count, job)
+        plan_command.plan_batch(config_path, experiment_dir, task_count, job)
 
     assert f"{flag} must be at least 1" in str(refused.value)
     assert not experiment_dir.exists()
 
 
-def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(
+def test_an_online_point_is_one_tasks_in_every_batch_with_the_same_seeds(
     tmp_path,
 ):
-    """Two rounds that may run at once hold one online point's same pieces.
+    """Two batches that may run at once hold one online point's same pieces.
 
-    Round two is planned before round one runs, as when round one's
+    Batch two is planned before batch one runs, as when batch one's
     array is still queued: it deals the point's four pieces again to one
-    task, in seed order, cut where round one cut them. Run in either
-    order, the rounds save each piece once and the fold is the uncut
+    task, in seed order, cut where batch one cut them. Run in either
+    order, the batches save each piece once and the fold is the uncut
     run's.
     """
     whole_dir = tmp_path / "whole"
@@ -2899,15 +2915,15 @@ def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(
     whole_config = _online_config(tmp_path, 60)
     command.main(["run", str(whole_config), "--out", str(whole_dir)])
     cut_config = _online_config(tmp_path, 15)
-    first_round = _plan([cut_config], cut_dir, 3)
-    second_round = _plan([cut_config], cut_dir, 3)
+    first_batch = _plan([cut_config], cut_dir, 3)
+    second_batch = _plan([cut_config], cut_dir, 3)
 
-    _run_the_round(second_round)
-    _run_the_round(first_round)
+    _run_the_batch(second_batch)
+    _run_the_batch(first_batch)
     command.main(["status", str(cut_dir)])
 
-    first_plan_path = first_round / "plan.csv"
-    second_plan_path = second_round / "plan.csv"
+    first_plan_path = first_batch / "plan.csv"
+    second_plan_path = second_batch / "plan.csv"
     first_plan = _csv_rows(first_plan_path)
     second_plan = _csv_rows(second_plan_path)
     cut_run_dir = cut_dir
@@ -2926,26 +2942,25 @@ def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(
 def test_a_plain_collect_and_an_older_planned_task_run_each_seed_once(
     tmp_path,
 ):
-    """A plain collect cuts its pieces where a planned piece begins or ends.
+    """A local run cuts its pieces where a planned piece begins or ends.
 
-    Round one plans seeds 0 to 5 and seed 6; only the first task runs.
-    The cap is raised to ten and a plain collect runs on: it saves seed
+    Batch one plans seeds 0 to 5 and seed 6; only the first task runs.
+    The cap is raised to ten and a local run runs on: it saves seed
     6 as the plan cut it, then seeds 7 to 9. The planned task run later
     finds seed 6 saved and runs nothing, so every seed is saved once.
     """
     config_path = _capped_noisy_config(tmp_path, 7, 90)
     out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 2)
-    plan_path = round_dir / "plan.csv"
-    command.main(["run", "--plan", str(plan_path), "--task", "0"])
+    batch_folder = _plan([config_path], out_dir, 2)
+    _run_task(batch_folder, 0)
     _capped_noisy_config(tmp_path, 10, 90)
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    command.main(["run", "--plan", str(plan_path), "--task", "1"])
+    _run_task(batch_folder, 1)
     command.main(["status", str(out_dir)])
 
     (row,) = _typed_status_rows(out_dir)
-    (_first_piece, second_piece) = _planned_ranges(round_dir)
+    (_first_piece, second_piece) = _planned_ranges(batch_folder)
     assert second_piece[1:] == (6, 1)
     assert _piece_names(out_dir) == ["0-5", "6-6", "7-9"]
     assert row["shots"] == 10
@@ -2954,17 +2969,17 @@ def test_a_plain_collect_and_an_older_planned_task_run_each_seed_once(
 def test_a_planned_piece_saved_under_another_cut_is_not_run_again(tmp_path):
     """A planned task runs only the seeds no saved piece holds.
 
-    Round one plans seeds 0 to 5 and seed 6. Before it runs, a plain
+    Batch one plans seeds 0 to 5 and seed 6. Before it runs, a plain
     collect with pieces of two shots saves seeds 0 to 6 in four pieces.
-    The round's tasks then find their seeds saved and run nothing.
+    The batch's tasks then find their seeds saved and run nothing.
     """
     config_path = _capped_noisy_config(tmp_path, 7, 90)
     out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 2)
+    batch_folder = _plan([config_path], out_dir, 2)
     _capped_noisy_config(tmp_path, 7, 30)
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    _run_the_round(round_dir)
+    _run_the_batch(batch_folder)
     command.main(["status", str(out_dir)])
 
     (row,) = _typed_status_rows(out_dir)
@@ -2983,10 +2998,10 @@ def _capped_noisy_config(tmp_path, max_shots: int, piece_rounds: int):
 def test_a_status_row_counts_and_costs_one_reading_of_the_pieces(
     tmp_path, monkeypatch
 ):
-    """A round that ends while status runs is in all of a row or in none.
+    """A batch that ends while status runs is in all of a row or in none.
 
-    Round one's piece of six shots is saved and round two's is planned;
-    round two ends right after status folds. The row's rounds are its
+    Batch one's piece of six shots is saved and batch two's is planned;
+    batch two ends right after status folds. The row's rounds are its
     shots' rounds, fifteen a shot, not the rounds of pieces the fold
     never read.
     """
@@ -2994,11 +3009,11 @@ def test_a_status_row_counts_and_costs_one_reading_of_the_pieces(
     card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
-    first_round = _plan([config_path], out_dir, 1)
-    _run_the_round(first_round)
-    second_round = _plan([config_path], out_dir, 1)
+    first_batch = _plan([config_path], out_dir, 1)
+    _run_the_batch(first_batch)
+    second_batch = _plan([config_path], out_dir, 1)
     fold = collect_command.fold_the_folder
-    fold_then_run = functools.partial(_fold_then_run, fold, second_round)
+    fold_then_run = functools.partial(_fold_then_run, fold, second_batch)
     monkeypatch.setattr(collect_command, "fold_the_folder", fold_then_run)
 
     command.main(["status", str(out_dir)])
@@ -3008,10 +3023,10 @@ def test_a_status_row_counts_and_costs_one_reading_of_the_pieces(
     assert row["rounds"] == 6 * 15
 
 
-def _fold_then_run(fold, round_dir: pathlib.Path, *arguments) -> list:
-    """The fold, then a round's tasks, as a round that ends mid-status."""
+def _fold_then_run(fold, batch_folder: pathlib.Path, *arguments) -> list:
+    """The fold, then a batch's tasks, as a batch that ends mid-status."""
     rows = fold(*arguments)
-    _run_the_round(round_dir)
+    _run_the_batch(batch_folder)
     return rows
 
 
@@ -3026,15 +3041,15 @@ def test_an_online_piece_with_no_saved_piece_before_it_is_refused(
     """
     config_path = _online_config(tmp_path, 15)
     out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 1)
-    plan_path = round_dir / "plan.csv"
+    batch_folder = _plan([config_path], out_dir, 1)
+    plan_path = batch_folder / "plan.csv"
     plan_rows = _csv_rows(plan_path)
     third_rows = [row for row in plan_rows if row["first_seed"] == "2"]
     _write_csv_rows(plan_path, third_rows)
     point_id = third_rows[0]["point_id"]
 
     with pytest.raises(SystemExit):
-        command.main(["run", "--plan", str(plan_path), "--task", "0"])
+        _run_task(batch_folder, 0)
 
     printed = capsys.readouterr()
     point_folders = pieces.folders_of(out_dir, [point_id])
@@ -3086,14 +3101,14 @@ def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:
     return {str(path): path.read_bytes() for path in paths}
 
 
-def test_rounds_planned_again_before_the_last_ran_run_each_seed_once(
+def test_batches_planned_again_before_the_last_ran_run_each_seed_once(
     tmp_path, monkeypatch
 ):
-    """The seeds planned by every round are one set, less the saved ones.
+    """The seeds planned by every batch are one set, less the saved ones.
 
-    Round one plans seeds 0 to 9 in one piece; a plain collect capped at
-    five shots saves 0 to 4. Round two plans the rest, 5 to 9, and round
-    three is planned before round two runs. Round three lists seeds 5 to
+    Batch one plans seeds 0 to 9 in one piece; a local run capped at
+    five shots saves 0 to 4. Batch two plans the rest, 5 to 9, and batch
+    three is planned before batch two runs. Batch three lists seeds 5 to
     9 once, and its task runs each of them once.
     """
     out_dir = tmp_path / "out"
@@ -3103,16 +3118,16 @@ def test_rounds_planned_again_before_the_last_ran_run_each_seed_once(
     command.main(["run", str(config_path), "--out", str(out_dir)])
     _capped_noisy_config(tmp_path, 10, 150)
     _plan([config_path], out_dir, 1)
-    third_round = _plan([config_path], out_dir, 1)
+    third_batch = _plan([config_path], out_dir, 1)
     ran_seeds = []
     run_unit = functools.partial(
         _run_the_unit_and_note, ran_seeds, collect.run_unit
     )
     monkeypatch.setattr(collect, "run_unit", run_unit)
 
-    _run_the_round(third_round)
+    _run_the_batch(third_batch)
 
-    ((_point_id, first_seed, count),) = _planned_ranges(third_round)
+    ((_point_id, first_seed, count),) = _planned_ranges(third_batch)
     assert (first_seed, count) == (5, 5)
     assert ran_seeds == [5, 6, 7, 8, 9]
 

@@ -1,7 +1,7 @@
-"""A round plan's records: one piece a round deals to a task.
+"""A batch plan's records: one piece a batch deals to a task.
 
-decsim plan writes them to round<k>/plan.csv, and decsim run --plan
-reads its task's share back (decsim/experiments/pieces.py).
+decsim run --slurm writes them to batches/<k>/plan.csv, and each task
+of the batch reads its share back (decsim/experiments/pieces.py).
 """
 
 import dataclasses

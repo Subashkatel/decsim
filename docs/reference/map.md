@@ -42,7 +42,7 @@ docstring.
 - `decsim/records/log_sources.py`: The name each component narrates under, in one place.
 - `decsim/records/program.py`: The program the front end hands the machine, one operation at a time.
 - `decsim/records/results.py`: The records one run returns: the run and each logical operation.
-- `decsim/records/round_plans.py`: A round plan's records: one piece a round deals to a task.
+- `decsim/records/round_plans.py`: A batch plan's records: one piece a batch deals to a task.
 - `decsim/records/rounds.py`: One syndrome round on its way out of the QPU and through the controller.
 - `decsim/records/seeds.py`: The run-level seed graph's records: a path edge, a child, a reservation.
 - `decsim/records/transfers.py`: One transfer on one link: its hop, its bits, its timing, its ledger.
@@ -353,7 +353,7 @@ docstring.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
 - `decsim/experiments/pieces.py`: A piece: seeds [first, first + count) of one sweep point, kept as one folder.
-- `decsim/experiments/plan_command.py`: `decsim plan`: the next round of an experiment's pieces, dealt to tasks.
+- `decsim/experiments/plan_command.py`: `decsim run --slurm`: an experiment's batches, planned and submitted.
 - `decsim/experiments/plots.py`: The figures that read decsim's own records, not a sweep's numbers.
 - `decsim/experiments/refusal.py`: The one refusal decsim.experiments raises when it will not do what was asked.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.

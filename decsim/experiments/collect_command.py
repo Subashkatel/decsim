@@ -49,7 +49,7 @@ class PointCollection:
     collector stops on the shot the report's row stops on. saved maps
     the first seed of each piece saved before this collect to its
     count, whatever collection cut it, and planned lists the (first
-    seed, count) of the pieces round plans named. pending holds the (first seed,
+    seed, count) of the pieces batch plans named. pending holds the (first seed,
     count) of the pieces handed out past the counted prefix, in seed
     order; they are counted once they are all saved, so the prefix
     stays contiguous whatever order the pool ends them in. last_piece
@@ -146,7 +146,7 @@ class PointCollection:
         A saved piece that starts at the next seed is taken whole, and a
         new one ends where the next saved piece starts or a planned piece
         starts or ends, so a collect run again under a raised cap or
-        target, or beside a round's tasks, runs no seed twice.
+        target, or beside a batch's tasks, runs no seed twice.
         """
         first_seed = self.next_seed
         saved_count = self.saved.get(first_seed)
@@ -318,28 +318,31 @@ def fold_the_folder(
 
 
 def run_planned(
-    plan_path: pathlib.Path, task_number: int, *, processes: int = 1
+    run_dir: pathlib.Path,
+    batch_number: int,
+    task_number: int,
+    *,
+    processes: int = 1,
 ) -> None:
-    """One task of a round's plan, its pieces run and saved.
+    """One task of a batch's plan, its pieces run and saved.
 
-    The results folder is the one the round's folder sits in, and the
-    plan recorded its points, so the task loads the run file run.json
-    names and only reads the records. A piece already saved is skipped,
-    so a task run again runs only what it had not saved. Each piece
-    records its round and task, and the task's run.json goes in
-    round<k>/<task>/.
+    run_dir is the results folder. The plan recorded its points, so the
+    task loads the run file run.json names and only reads the records.
+    A piece already saved is skipped, so a task run again runs only what
+    it had not saved. Each piece records its batch and task, and the
+    task's run.json goes in batches/<k>/<task>/.
     """
     _check_processes(processes)
-    round_dir = plan_path.parent
-    run_dir = round_dir.parent
+    run_dir = pathlib.Path(run_dir)
+    batch_folder = pieces.batch_dir(run_dir, batch_number)
+    plan_path = batch_folder / pieces.PLAN_FILE
     task_pieces = _pieces_of_the_task(plan_path, task_number)
     run_file = run_folder.recorded_run_file(run_dir)
     study = experiment.load(run_file)
     point_ids = [piece.point_id for piece in task_pieces]
-    task_dir = round_dir / str(task_number)
+    task_dir = batch_folder / str(task_number)
     started_utc = run_folder.start_run(task_dir, None, point_ids)
-    round_number = pieces.round_number_of(round_dir)
-    facts = {"round": round_number, "task": task_number}
+    facts = {"batch": batch_number, "task": task_number}
     _run_the_planned_pieces(study, run_dir, task_pieces, facts, processes)
     run_folder.finish_run(task_dir, None, point_ids, started_utc)
 
@@ -540,7 +543,7 @@ def _resumed_from_the_piece_before(
     """An online point's unit, its calibrator as the piece before it left it.
 
     The plan deals an online point's pieces to one task in seed order,
-    so the piece before is saved, by an earlier round or just now.
+    so the piece before is saved, by an earlier batch or just now.
     """
     if unit.first_seed == 0:
         return unit
@@ -751,7 +754,7 @@ def _point_collection(
 ) -> PointCollection:
     """A recorded point's collection state, its pieces sized by its rounds.
 
-    planned maps a point id to its planned pieces, as round plans name
+    planned maps a point id to its planned pieces, as batch plans name
     them (pieces.planned_pieces). A point whose shots send no detector
     data has no rounds to size a piece by or to score, and is refused
     here, before any shot runs, as sinter's Task refuses a task it cannot
@@ -897,7 +900,7 @@ def _save_the_piece(
     """One unit's measurements saved as its piece.
 
     facts are the lines every piece of the run takes in piece.json: a
-    planned piece's round and task, none for a plain collect. The piece
+    planned piece's batch and task, none for a local run. The piece
     counts the rounds its shots ran, since a shot's cost grows with its
     rounds, and the peak memory and the package versions of the process
     that ran it. An adaptive

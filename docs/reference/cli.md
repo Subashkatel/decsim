@@ -16,17 +16,6 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | `second` | required | the run folder to compare it with |
 | `--out` | None | write each shared point's paired comparison to this csv |
 
-## `decsim plan`
-
-| Argument | Default | What it is |
-| --- | --- | --- |
-| `run_file` | required | the experiment's run file |
-| `--out` | required | the results folder |
-| `--tasks` | required | the most tasks a round has |
-| `--cores` | 4 | pieces a task runs at once, one per core |
-| `--hours` | 24 | a task's walltime |
-| `--memory-mb` | 4096 | one piece's memory before its point has a measured peak |
-
 ## `decsim plot`
 
 | Argument | Default | What it is |
@@ -42,8 +31,18 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | `run_file` | None | the experiment's run file, Python or yaml |
 | `--out` | None | the results folder to write |
 | `--processes` | 1 | worker processes, one piece each (shots stay serial) |
-| `--plan` | None | a round's plan.csv, from decsim plan |
-| `--task` | None | the plan's task to run |
+| `--list` | off unless the flag is given | print the point names and stop |
+| `--only` | None | the one point to run, by its name |
+| `--shots` | None | stop every point at this many shots, its first seeds |
+| `--seed` | None | run one narrated shot of this seed, of the first point or the --only one |
+| `--log` | None | the narrated shot's engine log, over the point's |
+| `--trace` | off unless the flag is given | write the narrated shot's Chrome trace of the data path |
+| `--slurm` | off unless the flag is given | run the experiment as batches of Slurm arrays |
+| `--tasks` | None | the most tasks a batch has |
+| `--cores` | 4 | pieces a task runs at once |
+| `--hours` | 24 | a task's walltime |
+| `--memory-mb` | 4096 | one piece's memory before its point has a measured peak |
+| `--dry-run` | off unless the flag is given | print the sbatch lines and submit nothing |
 
 ## `decsim show`
 

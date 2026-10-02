@@ -81,7 +81,7 @@ class WorkloadSettings:
     dynamic_streams: tuple = ()
     protected_regions: tuple = ()
     rounds_policy: Optional[ports.RoundsPolicy] = None
-    physical_circuits: Mapping = dataclasses.field(default_factory=dict)
+    physical_circuits: tuple = ()
     feedback_boundary_mode: str = "trailing_buffer"
     # the record the fields above were lowered from, which a run folder
     # writes to its inputs (experiments/run_folder.py record_point)

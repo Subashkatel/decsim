@@ -142,7 +142,7 @@ def test_a_live_stream_gets_its_owner_region_and_rounds_derived():
         (4, 0),
         (100, 0),
     )
-    assert list(program.physical_circuits) == [100]
+    assert program.physical_circuits == ((100, workload.physical),)
 
 
 def test_one_circuit_under_two_operations_without_ranges_is_refused():
@@ -168,4 +168,4 @@ def test_the_one_operation_running_a_circuit_takes_the_circuits_rounds():
 
     assert operation.circuit == circuit
     assert program.rounds_policy.rounds_by_operation == ((1, 2),)
-    assert program.physical_circuits == {1: physical}
+    assert program.physical_circuits == ((1, physical),)

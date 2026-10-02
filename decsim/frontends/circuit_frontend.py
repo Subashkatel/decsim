@@ -7,7 +7,6 @@ are derived, so a maker writes none of them.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.ports as ports
@@ -20,16 +19,17 @@ import decsim.records.workload as workload_records
 class WorkloadProgram:
     """A maker's workload in the machine's terms.
 
-    physical_circuits maps the stream key that runs the workload's
+    physical_circuits pairs the stream key that runs the workload's
     physical circuit (the stream's owner, or the one operation that runs
-    it) to that circuit, for the syndrome source.
+    it) with that circuit, for the syndrome source; a workload carries
+    one physical circuit at most.
     """
 
     operations: tuple
     dynamic_streams: tuple
     protected_regions: tuple
     rounds_policy: Optional[ports.RoundsPolicy]
-    physical_circuits: Mapping
+    physical_circuits: tuple
 
 
 def lowered(workload: workload_records.Workload) -> WorkloadProgram:
@@ -92,11 +92,11 @@ def _standalone_program(
     That operation runs the whole circuit, so its rounds are the
     circuit's unless it names them.
     """
-    physical_circuits = {}
+    physical_circuits = ()
     if physical is not None:
         runner = _the_one_runner(operations)
         runner.circuit = physical.circuit
-        physical_circuits[runner.id] = physical
+        physical_circuits = ((runner.id, physical),)
         circuit_round_count = _owner_round_count(physical)
         round_counts.setdefault(runner.id, circuit_round_count)
     rounds_policy = _rounds_policy(round_counts)
@@ -125,9 +125,9 @@ def _stream_program(
     owner = _owner(stream_id, segments, circuit)
     round_counts[stream_id] = _owner_round_count(physical)
     regions = _protected_regions(operations, segments, owner)
-    physical_circuits = {}
+    physical_circuits = ()
     if physical is not None:
-        physical_circuits[stream_id] = physical
+        physical_circuits = ((stream_id, physical),)
     rounds_policy = _rounds_policy(round_counts)
     return WorkloadProgram(
         operations=tuple(operations),

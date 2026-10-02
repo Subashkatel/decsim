@@ -373,7 +373,7 @@ def _error_model_provider(
 
 
 def _circuit_arguments(
-    physical_circuits: Mapping, physical_tables: Mapping
+    physical_circuits: tuple, physical_tables: Mapping
 ) -> dict:
     """The source's constructor arguments for the workload's circuits.
 
@@ -385,7 +385,7 @@ def _circuit_arguments(
     measurement_rounds = {}
     detector_rounds = {}
     programs = {}
-    for key, physical in physical_circuits.items():
+    for key, physical in physical_circuits:
         if isinstance(physical, workload_records.FiniteCircuit):
             measurement_rounds[key] = dict(physical.measurement_rounds)
             table = physical_tables[key]
@@ -401,7 +401,7 @@ def _circuit_arguments(
     return arguments
 
 
-def _physical_formation_tables(physical_circuits: Mapping) -> dict:
+def _physical_formation_tables(physical_circuits: tuple) -> dict:
     """Each finite circuit's recipes, by the stream key that runs it.
 
     The source is declared each detector's round from this table, and
@@ -409,7 +409,7 @@ def _physical_formation_tables(physical_circuits: Mapping) -> dict:
     round's recipes reach.
     """
     tables = {}
-    for key, physical in physical_circuits.items():
+    for key, physical in physical_circuits:
         if not isinstance(physical, workload_records.FiniteCircuit):
             continue
         tables[key] = _physical_formation_table(physical)

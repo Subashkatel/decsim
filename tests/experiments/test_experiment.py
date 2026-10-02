@@ -11,6 +11,7 @@ import dataclasses
 
 import pytest
 
+import decsim.collect as collect
 import decsim.experiments.collection as collection
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
@@ -230,3 +231,61 @@ def test_an_online_point_with_a_target_is_refused_when_built(tmp_path):
 
     with pytest.raises(refusal.RefusalError, match="max_shots alone"):
         experiment.Experiment("online", [targeted])
+
+
+def _record_options_of(tmp_path, overrides: dict):
+    """The record options and settings the yaml's first point reads to."""
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    return task.record_options, task.settings
+
+
+def test_the_record_options_are_read_beside_what_they_record(tmp_path):
+    """They are written under observation and burst_detector, run-owned.
+
+    The machine never reads them, so they are on the task beside the
+    settings and no part of the point's id.
+    """
+    overrides = {
+        "observation": {"confidence_shot_count": "all"},
+        "burst_detector": {
+            "kind": "masked_regional_cusum",
+            "catch_deadline_rounds": 0,
+        },
+    }
+    written, settings = _record_options_of(tmp_path, overrides)
+    unset, _settings = _record_options_of(tmp_path, {})
+
+    assert written == collect.RecordOptions(None, 0)
+    assert unset == collect.RecordOptions(100, 300)
+    a_billion = 10**9
+    assert written.samples_confidence_of(a_billion)
+    assert unset.samples_confidence_of(99)
+    assert not unset.samples_confidence_of(100)
+    assert not hasattr(settings.observation, "confidence_shot_count")
+    assert not hasattr(settings.burst_detector, "catch_deadline_rounds")
+
+
+@pytest.mark.parametrize("written", [-1, True, "some", 2.5])
+def test_a_confidence_shot_count_that_is_no_count_is_refused(tmp_path, written):
+    """A count of shots from seed 0, or the word all; nothing else."""
+    overrides = {"observation": {"confidence_shot_count": written}}
+
+    with pytest.raises(ValueError, match="confidence_shot_count must be"):
+        _record_options_of(tmp_path, overrides)
+
+
+def test_a_catch_deadline_is_a_whole_number_of_rounds(tmp_path):
+    detector = {"kind": "masked_regional_cusum", "catch_deadline_rounds": -1}
+
+    with pytest.raises(ValueError, match="catch_deadline_rounds must be"):
+        _record_options_of(tmp_path, {"burst_detector": detector})
+
+
+def test_no_detector_takes_no_catch_deadline(tmp_path):
+    """With no detector there is no flag to time, so the key is refused."""
+    detector = {"kind": "none", "catch_deadline_rounds": 300}
+
+    with pytest.raises(ValueError, match="burst_detector does not know"):
+        _record_options_of(tmp_path, {"burst_detector": detector})

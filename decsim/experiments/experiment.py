@@ -60,6 +60,8 @@ FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 # A yaml point has no name of its own, so it is named by the start of
 # its id: as many hex characters as git shows of a commit.
 YAML_POINT_NAME_LENGTH = 12
+# what a yaml that names no record option records
+DEFAULT_RECORD_OPTIONS = collect.RecordOptions()
 # The module-level name a run file binds its experiment to.
 EXPERIMENT_NAME_IN_A_RUN_FILE = "experiment"
 
@@ -78,7 +80,8 @@ class Point:
     built in Python, whose cells are its metadata. online_threshold is
     the point's online threshold source when its escalation learns one:
     run state every shot of the point shares and teaches, so it is the
-    point's and never a setting, and no part of the point's id.
+    point's and never a setting, and no part of the point's id; so are
+    record_options, what the run records of its shots.
     """
 
     name: str
@@ -91,6 +94,7 @@ class Point:
     online_threshold: Optional[Any] = dataclasses.field(
         default=None, compare=False, repr=False
     )
+    record_options: collect.RecordOptions = DEFAULT_RECORD_OPTIONS
 
     def __post_init__(self) -> None:
         _check_folder_name(self.name, "point")
@@ -294,7 +298,12 @@ def task_of(point: Point) -> collect.Task:
     The online threshold source rides on the task beside the settings,
     which a shot alone receives it on (collect.Task.shot_settings).
     """
-    return collect.Task(point.machine, point.metadata, point.online_threshold)
+    return collect.Task(
+        point.machine,
+        point.metadata,
+        point.online_threshold,
+        point.record_options,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -360,8 +369,9 @@ class ExperimentConfig:
         """
         path = self.config_files[0]
         with _refused_in(path):
-            resolved, settings = self._read_point(values)
-            return _point_task_of(settings, resolved, values)
+            resolved, settings, record_options = self._read_point(values)
+            task = _point_task_of(settings, resolved, values)
+            return dataclasses.replace(task, record_options=record_options)
 
     def experiment(self) -> Experiment:
         """The sweep as an Experiment, one point per distinct sweep point.
@@ -455,12 +465,15 @@ class ExperimentConfig:
         return Experiment(self.name, (point,))
 
     def _read_point(self, values: Mapping) -> tuple:
-        """A point's resolved sections, and the settings read from them."""
+        """A point's resolved sections, its settings and record options."""
         resolved = self.resolved_sections(values)
+        machine_sections, record_options = _split_record_options(resolved)
         settings = machine_settings.MachineSettings.from_mapping(
-            resolved, name=self.name, section_folders=self.section_folders
+            machine_sections,
+            name=self.name,
+            section_folders=self.section_folders,
         )
-        return resolved, settings
+        return resolved, settings, record_options
 
 
 def resolved_description(
@@ -617,6 +630,7 @@ def _point_of(
         collection,
         sections,
         task.online_threshold,
+        task.record_options,
     )
 
 
@@ -691,6 +705,70 @@ def _point_task_of(
     )
     metadata = copy.deepcopy(dict(values))
     return collect.Task(point_settings, metadata, online_threshold)
+
+
+def _split_record_options(resolved: dict) -> tuple:
+    """The sections the machine reads, and the run's record options.
+
+    confidence_shot_count is written under observation and
+    catch_deadline_rounds under a burst detector, beside what they
+    record, but the machine reads neither (collect.RecordOptions), so
+    they are taken out of a copy before it reads the sections.
+    """
+    machine_sections = copy.deepcopy(resolved)
+    observation = _section_of(machine_sections, "observation")
+    burst_detector = _section_of(machine_sections, "burst_detector")
+    shot_count = _confidence_shot_count(observation)
+    deadline = _catch_deadline_rounds(burst_detector)
+    record_options = collect.RecordOptions(shot_count, deadline)
+    return machine_sections, record_options
+
+
+def _section_of(sections: dict, name: str) -> dict:
+    """The named section to take keys out of; an empty one if none.
+
+    A section that is not a block is left for the machine's reader,
+    which says what is wrong with it.
+    """
+    section = sections.get(name)
+    if isinstance(section, Mapping):
+        return section
+    return {}
+
+
+def _confidence_shot_count(observation: dict) -> Optional[int]:
+    """How many shots of a point write their windows' gaps; None, all."""
+    default = DEFAULT_RECORD_OPTIONS.confidence_shot_count
+    shot_count = observation.pop("confidence_shot_count", default)
+    if shot_count == collect.EVERY_SHOT:
+        return None
+    if config_module.is_whole_count(shot_count, 0):
+        return shot_count
+    raise ValueError(
+        "observation.confidence_shot_count must be a non-negative whole "
+        f"number of shots or {collect.EVERY_SHOT}, got {shot_count!r}"
+    )
+
+
+def _catch_deadline_rounds(burst_detector: dict) -> int:
+    """The rounds a detector's flag may come after a burst's onset.
+
+    A section that builds no detector keeps the key, which its reader
+    refuses, since there is no flag to time.
+    """
+    default = DEFAULT_RECORD_OPTIONS.catch_deadline_rounds
+    if burst_detector.get("kind", "none") == "none":
+        return default
+    deadline = config_module.whole_count(
+        burst_detector,
+        "burst_detector",
+        "catch_deadline_rounds",
+        default,
+        "rounds",
+        0,
+    )
+    burst_detector.pop("catch_deadline_rounds", None)
+    return deadline
 
 
 def _place(sections: dict, path: str, value) -> None:

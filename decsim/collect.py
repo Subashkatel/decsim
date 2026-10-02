@@ -38,6 +38,7 @@ from typing import Any, Optional
 import numpy
 import stim
 
+import decsim.config as config
 import decsim.machine as machine_module
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
@@ -46,6 +47,49 @@ import decsim.windows.built_window_models as built_window_models
 # The key a record's class is written under beside its fields. No field
 # can take it, since class is a Python keyword.
 RECORD_CLASS_KEY = "class"
+# confidence_shot_count's word for every shot of a point, in the yaml
+# and in a piece's record
+EVERY_SHOT = "all"
+
+
+@dataclasses.dataclass(frozen=True)
+class RecordOptions:
+    """What the run records of a point's shots beside their results.
+
+    confidence_shot_count is how many shots of the point, from seed 0,
+    write their windows' confidence gaps to window_confidence.csv when a
+    confidence signal decides the escalation; None writes every scored
+    shot's. catch_deadline_rounds is how many rounds after a burst's
+    onset a detector's flag may come and still catch it in time, which
+    the shot columns read; 300 is half the 600-round decay of the
+    comparison folder's burst, so a caught burst still has most of its
+    raised rounds ahead. The machine reads neither, so they are no part
+    of a point's id, as sinter keeps its output options out of a task's
+    strong id (sinter/_data/_task.py:167-204).
+    """
+
+    confidence_shot_count: Optional[int] = 100
+    catch_deadline_rounds: int = 300
+
+    def __post_init__(self) -> None:
+        shot_count = self.confidence_shot_count
+        if shot_count is not None and not config.is_whole_count(shot_count, 0):
+            raise ValueError(
+                "confidence_shot_count must be a non-negative whole number "
+                f"of shots or None for every shot, got {shot_count!r}"
+            )
+        deadline = self.catch_deadline_rounds
+        if not config.is_whole_count(deadline, 0):
+            raise ValueError(
+                "catch_deadline_rounds must be a non-negative whole number "
+                f"of rounds, got {deadline!r}"
+            )
+
+    def samples_confidence_of(self, seed: int) -> bool:
+        """Whether this seed's windows go into window_confidence.csv."""
+        if self.confidence_shot_count is None:
+            return True
+        return seed < self.confidence_shot_count
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,12 +99,15 @@ class Task:
     metadata is the json the caller wants to see beside every row (the
     sweep point). online_threshold is the point's online threshold
     source when the escalation asks for one, built once here and
-    installed on every shot's settings.
+    installed on every shot's settings. record_options are what the run
+    records of the shots, which the strong id leaves out with the
+    online source.
     """
 
     settings: machine_settings.MachineSettings
     metadata: Mapping[str, Any]
     online_threshold: Optional[Any] = None
+    record_options: RecordOptions = RecordOptions()
 
     def __post_init__(self):
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")

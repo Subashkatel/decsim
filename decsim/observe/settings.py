@@ -28,10 +28,7 @@ OBSERVATION_KEYS = (
     "trace",
     "trace_shots",
     "data_movement",
-    "confidence_shot_count",
 )
-# observation.confidence_shot_count's word for every shot of a point
-EVERY_SHOT = "all"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -50,13 +47,10 @@ class ObservationSettings:
     study; backlog_trace builds the sampler of the rounds waiting to be
     decoded (the decoder utilization is always integrated, every run's pool
     columns read it); data_movement builds the copy, reference and move
-    counters the RunResult carries. confidence_shot_count is how many shots
-    of each point, from seed 0, write their windows' confidence gaps to
-    window_confidence.csv when a confidence signal decides the escalation;
-    None writes every scored shot's.
+    counters the RunResult carries.
 
-    The keys that only record the run, the log, the trace and
-    confidence_shot_count, are labels (compare=False) and no part of a
+    The keys that only record the run, the log and the trace, are
+    labels (compare=False) and no part of a
     point's id, as sinter keeps its output options out of a task's strong id
     (sinter/_data/_task.py:167-204): each writer schedules nothing and
     calls no component (observe/trace_writer.py), so the shots'
@@ -75,9 +69,6 @@ class ObservationSettings:
     trace: str = dataclasses.field(compare=False, default="off")
     trace_shots: tuple = dataclasses.field(compare=False, default=(0,))
     data_movement: bool = False
-    confidence_shot_count: Optional[int] = dataclasses.field(
-        compare=False, default=100
-    )
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":
@@ -96,7 +87,6 @@ class ObservationSettings:
         )
         backlog_trace = config.boolean(section, "observation", "backlog_trace")
         data_movement = config.boolean(section, "observation", "data_movement")
-        confidence_shot_count = _confidence_shot_count(section)
         return cls(
             log=log,
             trace=trace,
@@ -106,7 +96,6 @@ class ObservationSettings:
             record_switching_windows=record_switching_windows,
             backlog_trace=backlog_trace,
             data_movement=data_movement,
-            confidence_shot_count=confidence_shot_count,
         )
 
     @property
@@ -123,12 +112,6 @@ class ObservationSettings:
     def writes_trace(self) -> bool:
         """Whether the run builds the Chrome trace writer at all."""
         return self.trace != "off"
-
-    def samples_confidence_of(self, seed: int) -> bool:
-        """Whether this seed's windows go into window_confidence.csv."""
-        if self.confidence_shot_count is None:
-            return True
-        return seed < self.confidence_shot_count
 
     @property
     def trace_path(self) -> Optional[str]:
@@ -220,22 +203,6 @@ def _trace_shots(section: Mapping) -> tuple:
     for shot in shots:
         _refuse_a_shot_that_is_not_a_count(shot)
     return tuple(shots)
-
-
-def _confidence_shot_count(section: Mapping) -> Optional[int]:
-    """How many shots of a point write their windows' gaps; None, all."""
-    shot_count = section.get("confidence_shot_count", 100)
-    if shot_count == EVERY_SHOT:
-        return None
-    is_a_count = isinstance(shot_count, int) and not isinstance(
-        shot_count, bool
-    )
-    if is_a_count and shot_count >= 0:
-        return shot_count
-    raise ValueError(
-        "observation.confidence_shot_count must be a non-negative whole "
-        f"number of shots or {EVERY_SHOT}, got {shot_count!r}"
-    )
 
 
 def _refuse_a_shot_that_is_not_a_count(shot) -> None:

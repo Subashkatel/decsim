@@ -42,6 +42,7 @@ import math
 from pathlib import Path
 from typing import Optional
 
+import decsim.collect as collect
 import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collection as collection
 import decsim.experiments.failure_statistics as failure_statistics
@@ -50,7 +51,6 @@ import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.data_movement as data_movement
-import decsim.observe.settings as observe_settings
 import decsim.records.windows as window_records
 
 # the measurement's fields that are not columns of shots.csv: the
@@ -548,7 +548,7 @@ def confidence_shot_count_of(measurements: list):
         if confidence is None:
             continue
         if confidence.sampled_shot_count is None:
-            return observe_settings.EVERY_SHOT
+            return collect.EVERY_SHOT
         return confidence.sampled_shot_count
     return None
 

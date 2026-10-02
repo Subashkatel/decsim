@@ -6,26 +6,72 @@ the paper's constant g_th (Toshio et al. 2510.25222 Sec. III A, step
 shots with two loops: a rate tracker that pins the escalation fraction
 at a target, and an audit lane that strong-decodes a random sample of
 kept windows to learn whether the target is safe; it is one instance
-per sweep point, shared by every shot. The yaml's third source, table,
-is resolved by the experiments layer to a fixed threshold per sweep
-point (escalation/settings.py, threshold_nats_for), so at run time it is
-FixedThreshold. Both rows fill the ThresholdSource port
-(decsim/ports.py). Thresholds and gaps are natural-log weight (nats),
-the unit the decoder compares in; the yaml converts the paper's
+per sweep point, shared by every shot. The third source, TableThreshold,
+looks each sweep point up in an offline calibration csv
+(TableThreshold.Settings.at_sweep_point), so at run time it decides as
+FixedThreshold does. Every row fills the ThresholdSource port
+(decsim/ports.py) and is built from its own Settings record, which the
+switching settings hold. Thresholds and gaps are natural-log weight
+(nats), the unit the decoder compares in; the yaml converts the paper's
 decibels.
 """
 
+import csv
 import dataclasses
+import fractions
 import math
+import pathlib
 import random
 from collections.abc import Mapping
+from typing import Optional
 
 import decsim.config as config
 import decsim.records.decoding as decoding_records
+import decsim.tables as tables
 
 # The resolved paths the online source's seed reads its two numbers from.
 SEED_DISTANCE_PATH = "qpu.distance"
 SEED_PROBABILITY_PATH = "workload.arguments.physical_error_probability"
+# Decibels are 10 log10 of the likelihood ratio; matching weights are
+# its natural log: nats = decibels * ln(10) / 10.
+LN_TEN = math.log(10.0)
+ONLINE_KEYS = (
+    "target_escalation_rate",
+    "step_db",
+    "audit_rate",
+    "kept_bad_budget",
+    "adjust_factor",
+    "min_escalation_rate",
+    "max_escalation_rate",
+)
+
+
+def decibels_to_nats(decibels: float) -> float:
+    """A gap threshold in the paper's decibels as matching weight."""
+    scaled = decibels * LN_TEN
+    return scaled / 10.0
+
+
+def nats_to_decibels(nats: float) -> float:
+    """A matching weight in the paper's decibels: decibels_to_nats undone."""
+    decibels_per_nat = 10.0 / LN_TEN
+    return nats * decibels_per_nat
+
+
+def checked_decibels(decibels: float, name: str) -> float:
+    """A keep threshold is finite and not negative, wherever it is read.
+
+    Every signal's gap is a weight difference or a growth spent, never
+    below zero, so a negative threshold keeps every window, as 0 dB
+    already does, and an infinite or undefined one is no likelihood
+    ratio (Toshio et al. 2510.25222 Sec. III A, step 3: keep at g >=
+    g_th, with g_th in decibels).
+    """
+    if not math.isfinite(decibels) or decibels < 0.0:
+        raise ValueError(
+            f"{name} must be finite and not negative (got {decibels!r})"
+        )
+    return decibels
 
 
 class FixedThreshold:
@@ -47,6 +93,27 @@ class FixedThreshold:
     audits_by_escalating = False
     reads_a_calibration_table = False
     built_per_sweep_point = False
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The constant, in nats (escalation.gap_threshold_db, converted)."""
+
+        threshold_nats: float
+
+        def at_sweep_point(
+            self, resolved: Mapping
+        ) -> "FixedThreshold.Settings":
+            """A constant is the same at every sweep point."""
+            del resolved
+            return self
+
+        def for_sweep_point(self, resolved: Mapping) -> None:
+            """A constant builds nothing shared across a point's shots."""
+            del resolved
+
+        def build(self) -> "FixedThreshold":
+            """A fresh source at this threshold."""
+            return FixedThreshold(self.threshold_nats)
 
     def __init__(self, threshold_nats: float) -> None:
         self.threshold_nats = threshold_nats
@@ -75,14 +142,192 @@ class TableThreshold(FixedThreshold):
     threshold in decibels, set as Toshio et al. 2510.25222 Sec. III B
     sets it (by brute force, or as Eq. (4)'s smallest g_th, line 890);
     the experiments layer looks the point up and converts it before the
-    machine is built
-    (EscalationSettings.threshold_nats_for), so at run time this row
+    machine is built (Settings.at_sweep_point), so at run time this row
     decides on a constant exactly as FixedThreshold does. What it
     declares that the fixed row does not is where its number came from,
     which is what the settings need to know to demand the csv.
     """
 
     reads_a_calibration_table = True
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The csv and its column; the point's number once looked up.
+
+        table is escalation.threshold_table and column
+        escalation.threshold_column. threshold_nats is None until the
+        experiments layer looks the sweep point up (at_sweep_point).
+        base_directory resolves a relative table; it is a label, no
+        part of a point's id, since the number the table gives a point
+        names the point and the folder the table sits in does not.
+        """
+
+        table: str
+        column: str = "gth_eq4_wilson"
+        threshold_nats: Optional[float] = None
+        base_directory: Optional[pathlib.Path] = dataclasses.field(
+            compare=False, default=None
+        )
+
+        def at_sweep_point(
+            self, resolved: Mapping
+        ) -> "TableThreshold.Settings":
+            """The sweep point's threshold, looked up in the calibration csv.
+
+            The point is refused when the table does not certify it,
+            instead of guessed. The table's key columns are headed by
+            yaml paths (qpu.distance,
+            workload.arguments.physical_error_probability), each matched
+            against the value at that path in the point's resolved
+            sections, so a point that sweeps neither still finds its
+            row; every other column is one method's threshold in dB
+            (Toshio et al. 2510.25222 Sec. III B sets g_th by brute force
+            over P_L(g_th), lines 855-863, or as the smallest g_th with
+            P_L,th(g_th) <= epsilon P_L,strong, Eq. (4) at line 890). The
+            first row that holds the point wins.
+            """
+            table_path = self._table_path()
+            rows = _table_rows(table_path, self.column)
+            for row in rows:
+                point = _point_at(row, resolved, table_path)
+                if _is_point(row, point):
+                    cell = row[self.column]
+                    threshold_nats = _certified_nats(
+                        cell, table_path, self.column, point
+                    )
+                    return dataclasses.replace(
+                        self, threshold_nats=threshold_nats
+                    )
+            _refuse_a_point_off_the_table(rows, resolved, table_path)
+
+        def for_sweep_point(self, resolved: Mapping) -> None:
+            """A table builds nothing shared across a point's shots."""
+            del resolved
+
+        def build(self) -> "TableThreshold":
+            """A fresh source at the point's threshold, once looked up."""
+            if self.threshold_nats is None:
+                raise ValueError(
+                    "escalation.threshold_source table resolves the "
+                    "threshold per sweep point in the experiments layer "
+                    "(ExperimentConfig.point_task); build the machine "
+                    "through it, or give gap_threshold_db"
+                )
+            return TableThreshold(self.threshold_nats)
+
+        def _table_path(self) -> pathlib.Path:
+            table_path = pathlib.Path(self.table)
+            is_relative = not table_path.is_absolute()
+            if is_relative and self.base_directory is not None:
+                table_path = self.base_directory / table_path
+            if not table_path.exists():
+                raise ValueError(f"threshold_table {table_path} does not exist")
+            return table_path
+
+
+def _table_rows(table_path: pathlib.Path, column: str) -> list:
+    """The table's rows, which name the threshold column and a key column.
+
+    A table with no key column would match every point to its first row,
+    a wrong threshold with no sign of it, so it is refused.
+    """
+    with open(table_path, newline="") as table_file:
+        reader = csv.DictReader(table_file)
+        rows = list(reader)
+    if not rows:
+        return rows
+    columns = list(rows[0])
+    if column not in columns:
+        raise ValueError(
+            f"threshold_table {table_path} has no column {column!r}; its "
+            f"columns are {sorted(columns)}"
+        )
+    key_columns = _key_columns(columns)
+    if not key_columns:
+        raise ValueError(
+            f"threshold_table {table_path} has no key column; a key column "
+            "is headed by the yaml path of the setting it matches, as "
+            "qpu.distance"
+        )
+    return rows
+
+
+def _key_columns(columns: list) -> list:
+    """The columns headed by a yaml path, which name a table's points."""
+    keys = []
+    for column in columns:
+        if "." in column:
+            keys.append(column)
+    return keys
+
+
+def _point_at(row: dict, resolved: Mapping, table_path) -> dict:
+    """The point's value at each of the table's key columns."""
+    point = {}
+    reader = f"threshold_table {table_path}"
+    for column in _key_columns(list(row)):
+        point[column] = config.setting_at(resolved, column, reader)
+    return point
+
+
+def _is_point(row: dict, point: dict) -> bool:
+    """Whether every key cell of the row holds the point's value."""
+    for column, value in point.items():
+        if not _cell_holds(row[column], value):
+            return False
+    return True
+
+
+def _cell_holds(cell: str, value) -> bool:
+    """Whether a cell holds a value: a float within a relative 1e-9.
+
+    A float written out as text reads back within that. A whole number
+    is written exactly, so it is compared exactly, and any other value
+    is compared as its text.
+    """
+    if not config.is_number(value):
+        return cell == str(value)
+    if isinstance(value, int):
+        return fractions.Fraction(cell) == value
+    number = float(cell)
+    return math.isclose(number, value, rel_tol=1e-9)
+
+
+def _refuse_a_point_off_the_table(
+    rows: list, resolved: Mapping, table_path
+) -> None:
+    """The point, and the points the table does certify."""
+    point = {}
+    calibrated = []
+    for row in rows:
+        point = _point_at(row, resolved, table_path)
+        keys = {}
+        for column in point:
+            keys[column] = row[column]
+        calibrated.append(keys)
+    raise ValueError(
+        f"threshold_table {table_path} has no row for {point}; its rows "
+        f"are {calibrated}"
+    )
+
+
+def _certified_nats(
+    cell: str, table_path: pathlib.Path, column: str, point: dict
+) -> float:
+    if cell == "":
+        raise ValueError(
+            f"threshold_table {table_path} refuses {point}: the {column} "
+            "entry is empty (not enough evidence at calibration time)"
+        )
+    entry = f"threshold_table {table_path} entry {column} at {point}"
+    try:
+        gap_threshold_db = float(cell)
+    except ValueError:
+        raise ValueError(
+            f"{entry} must be a number of decibels (got {cell!r})"
+        ) from None
+    checked = checked_decibels(gap_threshold_db, entry)
+    return decibels_to_nats(checked)
 
 
 class EscalationRateTracker:
@@ -294,47 +539,111 @@ class OnlineThreshold:
     reads_a_calibration_table = False
     built_per_sweep_point = True
 
-    @classmethod
-    def for_sweep_point(
-        cls, online, threshold_nats: float, resolved: Mapping
-    ) -> "OnlineThreshold":
-        """The one instance a sweep point's shots share, seeded by the point.
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The starting threshold and the calibrator's knobs.
 
-        A row that declares built_per_sweep_point builds its own
-        instance, so what the experiments layer installs is the row the
-        table names and nothing else. Both loops are assembled here,
-        where they are read: the rate tracker starting at the point's
-        threshold in nats, the audit lane, and the target adjustment.
-        The random stream is seeded from the point's distance and error
-        rate alone, read by path from its resolved sections, so a rerun
-        of the point draws the same audits.
-
-        online is the escalation section's card, typed where it is
-        declared (escalation/settings.py OnlineThresholdSettings); that
-        module imports this one, so an annotation here cannot point back
-        at it.
+        threshold_nats is where the rate tracker starts
+        (escalation.gap_threshold_db, converted). Two loops move it: a
+        rate tracker steps it toward target_escalation_rate on every
+        window (step_db per event), and a randomized audit lane
+        strong-decodes audit_rate of the kept windows; one revised audit
+        multiplies the target by adjust_factor, and only ceil(3 /
+        kept_bad_budget) consecutive clean audits divide it back. The
+        target stays inside [min_escalation_rate, max_escalation_rate -
+        audit_rate], because the audits reach the strong tier beside the
+        target and max_escalation_rate bounds the strong duty they make
+        together (OnlineThresholdController). Defaults are the validated
+        drift-replay configuration.
         """
-        step_nats = online.step_nats()
-        tracker = EscalationRateTracker(
-            target_escalation_rate=online.target_escalation_rate,
-            threshold=threshold_nats,
-            step=step_nats,
-        )
-        audit = AuditLane(audit_rate=online.audit_rate)
-        adjustment = TargetAdjustment(
-            kept_bad_budget=online.kept_bad_budget,
-            adjust_factor=online.adjust_factor,
-            min_escalation_rate=online.min_escalation_rate,
-            max_escalation_rate=online.max_escalation_rate,
-        )
-        controller = OnlineThresholdController(tracker, audit, adjustment)
-        reader = "the online threshold's seed"
-        distance = config.setting_at(resolved, SEED_DISTANCE_PATH, reader)
-        probability = config.setting_at(resolved, SEED_PROBABILITY_PATH, reader)
-        generator = random.Random(
-            f"online-threshold d={distance} p={probability}"
-        )
-        return cls(controller, generator)
+
+        threshold_nats: float
+        target_escalation_rate: float = 1e-3
+        step_db: float = 0.25
+        audit_rate: float = 0.01
+        kept_bad_budget: float = 2e-4
+        adjust_factor: float = 2.0
+        min_escalation_rate: float = 1e-5
+        max_escalation_rate: float = 0.30
+
+        def __post_init__(self) -> None:
+            _check_online_steps(self)
+            _check_online_rates(self)
+
+        @classmethod
+        def from_yaml(
+            cls, section: Mapping, threshold_nats: float
+        ) -> "OnlineThreshold.Settings":
+            """The `online` card, every key optional, from its start."""
+            if not isinstance(section, Mapping):
+                raise ValueError(
+                    "escalation.online must be a mapping of the "
+                    f"calibrator's knobs (got {section!r})"
+                )
+            tables.refuse_unknown_keys(
+                "escalation.online", section, ONLINE_KEYS
+            )
+            knobs = {}
+            for key, default in _ONLINE_DEFAULTS.items():
+                knobs[key] = config.finite_number(
+                    section, "escalation.online", key, default
+                )
+            return cls(threshold_nats=threshold_nats, **knobs)
+
+        def step_nats(self) -> float:
+            """The step in natural-log weight units."""
+            return decibels_to_nats(self.step_db)
+
+        def at_sweep_point(
+            self, resolved: Mapping
+        ) -> "OnlineThreshold.Settings":
+            """The start and the knobs are the same at every sweep point."""
+            del resolved
+            return self
+
+        def for_sweep_point(self, resolved: Mapping) -> "OnlineThreshold":
+            """The one instance a sweep point's shots share, point-seeded.
+
+            Both loops are assembled here, where they are read: the rate
+            tracker starting at the threshold in nats, the audit lane,
+            and the target adjustment. The random stream is seeded from
+            the point's distance and error rate alone, read by path from
+            its resolved sections, so a rerun of the point draws the same
+            audits.
+            """
+            step_nats = self.step_nats()
+            tracker = EscalationRateTracker(
+                target_escalation_rate=self.target_escalation_rate,
+                threshold=self.threshold_nats,
+                step=step_nats,
+            )
+            audit = AuditLane(audit_rate=self.audit_rate)
+            adjustment = TargetAdjustment(
+                kept_bad_budget=self.kept_bad_budget,
+                adjust_factor=self.adjust_factor,
+                min_escalation_rate=self.min_escalation_rate,
+                max_escalation_rate=self.max_escalation_rate,
+            )
+            controller = OnlineThresholdController(tracker, audit, adjustment)
+            reader = "the online threshold's seed"
+            distance = config.setting_at(resolved, SEED_DISTANCE_PATH, reader)
+            probability = config.setting_at(
+                resolved, SEED_PROBABILITY_PATH, reader
+            )
+            generator = random.Random(
+                f"online-threshold d={distance} p={probability}"
+            )
+            return OnlineThreshold(controller, generator)
+
+        def build(self) -> "OnlineThreshold":
+            """Refused: the source learns across a point's shots."""
+            raise ValueError(
+                "escalation.threshold_source online is built once per sweep "
+                "point by the experiments layer "
+                "(ExperimentConfig.point_task), which seeds it and "
+                "shares it across the point's shots; build the machine "
+                "through it"
+            )
 
     def __init__(
         self, controller: OnlineThresholdController, random_generator
@@ -417,3 +726,57 @@ class OnlineThreshold:
     def _record(self, event: str) -> None:
         tracker = self.controller.tracker
         self.trajectory.append((tracker.window_count, tracker.threshold, event))
+
+
+# The online card's knobs and their defaults, in the order the card
+# lists them.
+_ONLINE_DEFAULTS = {
+    "target_escalation_rate": 1e-3,
+    "step_db": 0.25,
+    "audit_rate": 0.01,
+    "kept_bad_budget": 2e-4,
+    "adjust_factor": 2.0,
+    "min_escalation_rate": 1e-5,
+    "max_escalation_rate": 0.30,
+}
+
+
+def _check_online_steps(online) -> None:
+    """Refuse a step, an audit share or a factor outside its range."""
+    if online.step_db <= 0:
+        raise ValueError(
+            f"escalation.online.step_db must be positive (got {online.step_db})"
+        )
+    if not 0 < online.audit_rate < 1:
+        raise ValueError(
+            "escalation.online.audit_rate must be in (0, 1) "
+            f"(got {online.audit_rate})"
+        )
+    if not 0 < online.kept_bad_budget < 1:
+        raise ValueError(
+            "escalation.online.kept_bad_budget must be in (0, 1) "
+            f"(got {online.kept_bad_budget})"
+        )
+    if online.adjust_factor <= 1:
+        raise ValueError(
+            "escalation.online.adjust_factor must exceed 1 "
+            f"(got {online.adjust_factor})"
+        )
+
+
+def _check_online_rates(online) -> None:
+    low = online.min_escalation_rate
+    high = online.max_escalation_rate
+    if not 0 < low <= high <= 1:
+        raise ValueError(
+            "escalation.online needs 0 < min_escalation_rate <= "
+            f"max_escalation_rate <= 1 (got {low} and {high})"
+        )
+    target_cap = high - online.audit_rate
+    if not low <= online.target_escalation_rate <= target_cap:
+        raise ValueError(
+            "escalation.online.target_escalation_rate must lie inside "
+            "[min_escalation_rate, max_escalation_rate - audit_rate], "
+            "since the audits reach the strong tier beside it "
+            f"(got {online.target_escalation_rate}, cap {target_cap})"
+        )

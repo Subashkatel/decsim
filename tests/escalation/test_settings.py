@@ -7,6 +7,7 @@ import pytest
 import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 
 
 def test_switching_reads_both_cycle_costs_on_the_named_clock():
@@ -50,6 +51,6 @@ def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
     """Decibels are 10 log10 of the ratio, the weight its natural log."""
     weight_nats = math.log(100.0)
 
-    assert escalation_settings.nats_to_decibels(weight_nats) == pytest.approx(
+    assert threshold_sources.nats_to_decibels(weight_nats) == pytest.approx(
         20.0
     )

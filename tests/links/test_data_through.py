@@ -52,6 +52,7 @@ import decsim.config as config
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
@@ -259,13 +260,13 @@ def machine_settings(shape: str, distance: int):
             escalation=escalation,
             links=links,
         )
-    nats = escalation_settings.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
+    nats = threshold_sources.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=nats)
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         confidence=confidence,
-        gap_threshold_db=UNREACHABLE_GAP_DECIBELS,
-        gap_threshold_nats=nats,
+        threshold=threshold,
     )
     return machine_settings_module.MachineSettings(
         workload=workload,

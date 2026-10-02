@@ -990,9 +990,7 @@ def _lookback_switching_machine(formed_at, seed):
         settings.weak_decoder, algorithm=union_find_settings
     )
     confidence = cluster.ClusterGap.Settings()
-    escalation = dataclasses.replace(
-        settings.escalation, confidence=confidence, gap_threshold_db=15.0
-    )
+    escalation = dataclasses.replace(settings.escalation, confidence=confidence)
     settings = dataclasses.replace(
         settings,
         workload=workload,

@@ -42,7 +42,7 @@ import math
 from pathlib import Path
 from typing import Optional
 
-import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collection as collection
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
@@ -520,12 +520,12 @@ def gap_bin_low_decibels(gap_nats: float) -> float:
     """The lower edge, in decibels, of the 0.1 dB bin holding the gap.
 
     A gap in nats is ln of the likelihood ratio and a decibel is
-    10 log10 of it (escalation/settings.py nats_to_decibels); Toshio et
+    10 log10 of it (threshold_sources.py nats_to_decibels); Toshio et
     al. histogram their gaps in decibels (2510.25222 main.tex:564). An
     infinite gap, a window whose other class has no fault set, keeps
     its own bin.
     """
-    decibels = escalation_settings.nats_to_decibels(gap_nats)
+    decibels = threshold_sources.nats_to_decibels(gap_nats)
     if math.isinf(decibels):
         return decibels
     scaled = decibels * CONFIDENCE_BINS_PER_DECIBEL

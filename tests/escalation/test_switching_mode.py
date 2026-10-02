@@ -311,10 +311,8 @@ def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     log_of_ten = math.log(10.0)
     expected_nats = 2.0 * log_of_ten
     first_point = config.first_point_task()
-    assert first_point.settings.escalation.gap_threshold_db == 20.0
-    assert math.isclose(
-        first_point.settings.escalation.gap_threshold_nats, expected_nats
-    )
+    threshold = first_point.settings.escalation.threshold
+    assert math.isclose(threshold.threshold_nats, expected_nats)
 
 
 def test_every_window_commits_once_across_both_output_links(tmp_path):
@@ -416,7 +414,7 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)
     first_point = config.first_point_task()
-    threshold_nats = first_point.settings.escalation.gap_threshold_nats
+    threshold_nats = first_point.settings.escalation.threshold.threshold_nats
     weak_tier = window_records.DecoderTier.WEAK
     strong_tier = window_records.DecoderTier.STRONG
     for seed in range(4):

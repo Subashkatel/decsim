@@ -20,6 +20,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 
@@ -79,16 +80,15 @@ def test_a_row_that_decides_on_no_confidence_is_built_from_an_empty_record():
 
 def test_a_row_that_decides_on_a_confidence_gets_the_three_fields():
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     settings = escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
+        threshold=threshold,
         confidence=confidence,
     )
 
     matching = mwpm.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
-    signal = escalation_build.confidence_signal(settings, weak)
     signal = escalation_build.confidence_signal(settings, weak)
     policy = escalation_build.build_escalation_policy(settings, signal)
 
@@ -114,10 +114,10 @@ def test_every_machine_binds_its_own_copy_of_a_built_policy():
     gets a copy with its ports unbound and the prototype's threshold.
     """
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     switching = escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
+        threshold=threshold,
         confidence=confidence,
     )
     matching = mwpm.PyMatchingDecoder.Settings()
@@ -142,10 +142,12 @@ def test_every_machine_binds_its_own_copy_of_a_built_policy():
 def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
     """The table row is resolved per sweep point, before the root builds."""
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.TableThreshold.Settings(
+        table="calibration.csv"
+    )
     settings = escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="table",
-        gap_threshold_nats=None,
+        threshold=threshold,
         confidence=confidence,
     )
 
@@ -186,8 +188,9 @@ def test_a_strong_window_that_names_no_row_is_refused():
 
 def test_the_confidence_row_is_built_with_the_sections_walk_card():
     confidence = complementary.ComplementaryGap.Settings(walk_microseconds=0.25)
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     settings = escalation_settings.EscalationSettings(
-        kind="switching", gap_threshold_nats=2.0, confidence=confidence
+        kind="switching", threshold=threshold, confidence=confidence
     )
 
     matching = mwpm.PyMatchingDecoder.Settings()

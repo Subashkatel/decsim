@@ -23,7 +23,7 @@ import tempfile
 from typing import Optional
 
 import decsim.collect as collect
-import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collection as collection_module
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -894,7 +894,7 @@ def _say_the_threshold(calibrator) -> None:
 def _final_threshold_db(summary: dict) -> float:
     """The calibrator's final threshold, in the paper's decibels."""
     final_threshold_nats = summary["threshold"]
-    return escalation_settings.nats_to_decibels(final_threshold_nats)
+    return threshold_sources.nats_to_decibels(final_threshold_nats)
 
 
 def _write_online_threshold_record(
@@ -927,7 +927,7 @@ def _trajectory_rows(
     """The trajectory's rows, then the end row at the final threshold."""
     rows = []
     for window_count, threshold_nats, event in calibrator.trajectory:
-        row_db = escalation_settings.nats_to_decibels(threshold_nats)
+        row_db = threshold_sources.nats_to_decibels(threshold_nats)
         row = {**point, "window_count": window_count}
         row["threshold_db"] = row_db
         row["event"] = event

@@ -299,10 +299,7 @@ def _point_task_of(
     distance or error rate still finds them.
     """
     workload = settings.workload.made()
-    threshold_nats = settings.escalation.threshold_nats_for(resolved)
-    escalation = dataclasses.replace(
-        settings.escalation, gap_threshold_nats=threshold_nats
-    )
+    escalation = settings.escalation.at_sweep_point(resolved)
     online_threshold = escalation.online_threshold_for(resolved)
     point_settings = dataclasses.replace(
         settings, workload=workload, escalation=escalation

@@ -124,8 +124,17 @@ def confidence_signal(
             "escalation a confidence record, one of the rows of "
             "decsim/confidence/signals.py"
         )
-    threshold_nats = escalation.gap_threshold_nats
+    threshold_nats = _threshold_nats(escalation)
     return confidence.build(weak_decoder.algorithm, threshold_nats)
+
+
+def _threshold_nats(
+    escalation: escalation_settings.EscalationSettings,
+) -> Optional[float]:
+    """The point's threshold in nats, None while a table has not set it."""
+    if escalation.threshold is None:
+        return None
+    return escalation.threshold.threshold_nats
 
 
 def build_burst_detector(
@@ -177,43 +186,23 @@ def _collaborators(
 
 
 def _threshold_source(settings: escalation_settings.EscalationSettings):
-    """The row escalation.threshold_source names, for this sweep point.
+    """The point's threshold source, built from its row's record.
 
     A row the experiments layer builds once per point (it learns across
-    the point's shots) arrives already built; every other row is built
-    here from the point's threshold in nats, its one constructor
-    argument. The table source is resolved to a number per sweep point
-    by the experiments layer (ExperimentConfig.point_task), so a
-    table run reaches the root with its threshold in nats or not at all.
+    the point's shots) arrives already built as online_threshold; every
+    other row's record builds its source here. The table record holds
+    its number once the experiments layer has looked the point up
+    (ExperimentConfig.point_task), and refuses to build before.
     """
-    row = tables.row(
-        escalation_settings.THRESHOLD_SOURCES,
-        "escalation.threshold_source",
-        settings.threshold_source,
-    )
-    if row.built_per_sweep_point:
-        return _sweep_point_source(settings)
-    if settings.gap_threshold_nats is None:
+    if settings.online_threshold is not None:
+        return settings.online_threshold
+    if settings.threshold is None:
         raise ValueError(
-            "escalation.threshold_source table resolves the threshold "
-            "per sweep point in the experiments layer "
-            "(ExperimentConfig.point_task); build the machine "
-            "through it, or give gap_threshold_db"
+            "escalation.kind switching keeps a window by a threshold; "
+            "give the escalation a threshold record, one of the rows of "
+            "escalation/threshold_sources.py"
         )
-    return row(settings.gap_threshold_nats)
-
-
-def _sweep_point_source(settings: escalation_settings.EscalationSettings):
-    """The source the experiments layer built, shared by every shot."""
-    if settings.online_threshold is None:
-        raise ValueError(
-            "escalation.threshold_source online is built once per sweep "
-            "point by the experiments layer "
-            "(ExperimentConfig.point_task), which seeds it and "
-            "shares it across the point's shots; build the machine "
-            "through it"
-        )
-    return settings.online_threshold
+    return settings.threshold.build()
 
 
 def _refuse_a_policy_that_cannot_escalate(kind: str, escalation_policy):

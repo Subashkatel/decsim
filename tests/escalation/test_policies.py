@@ -184,10 +184,12 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         engine=ENGINE_CARD,
     )
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_nats=threshold_nats
+    )
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        gap_threshold_db=15.0,
-        gap_threshold_nats=threshold_nats,
+        threshold=threshold,
         confidence=confidence,
     )
     pauli_frame = pauli_frame_module.PauliFrameConfig(
@@ -373,9 +375,10 @@ def _double_window_settings(
         engine=ENGINE_CARD,
     )
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=1.0)
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        gap_threshold_nats=1.0,
+        threshold=threshold,
         strong_window="double_window",
         confidence=confidence,
     )
@@ -621,12 +624,17 @@ class _KeepEverything:
     """A threshold source written outside decsim: the port, and no more.
 
     Its one constructor argument is the sweep point's threshold in nats,
-    which is what the root gives every row of the table.
+    and its Settings record is the fixed row's, which builds this row.
     """
 
     audits_by_escalating = False
     reads_a_calibration_table = False
     built_per_sweep_point = False
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings(threshold_sources.FixedThreshold.Settings):
+        def build(self) -> "_KeepEverything":
+            return _KeepEverything(self.threshold_nats)
 
     def __init__(self, threshold_nats: float) -> None:
         self.threshold_nats = threshold_nats
@@ -700,8 +708,9 @@ def _serial_switching_settings(
         algorithm=belief_matching_settings
     )
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=1.0)
     escalation = escalation_settings.EscalationSettings(
-        kind="switching", gap_threshold_nats=1.0, confidence=confidence
+        kind="switching", threshold=threshold, confidence=confidence
     )
     return machine_settings.MachineSettings(
         windows=windows,
@@ -928,10 +937,12 @@ def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
 def _switching_policy(threshold_nats: float):
     """A switching row over a fixed threshold and the complementary gap."""
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_nats=threshold_nats
+    )
     settings = escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=threshold_nats,
+        threshold=threshold,
         confidence=confidence,
     )
     matching = mwpm.PyMatchingDecoder.Settings()
@@ -979,7 +990,7 @@ def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
     The key is in decibels because that is the paper's unit; the machine
     holds nats, so the conversion happens once, at the yaml boundary.
     """
-    twenty_decibels = escalation_settings.decibels_to_nats(20.0)
+    twenty_decibels = threshold_sources.decibels_to_nats(20.0)
     natural_log_of_ten = math.log(10.0)
     by_hand = 20.0 * natural_log_of_ten / 10.0
 
@@ -989,7 +1000,7 @@ def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
 
 def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
     """The equality case is a keep, which is Toshio's Fig. 12 caption."""
-    threshold = escalation_settings.decibels_to_nats(20.0)
+    threshold = threshold_sources.decibels_to_nats(20.0)
     policy = _switching_policy(threshold)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
 

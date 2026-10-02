@@ -27,6 +27,7 @@ import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
@@ -178,10 +179,10 @@ def test_a_weak_only_run_has_one_pool_and_no_strong_unit():
 
 def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
+        threshold=threshold,
         confidence=confidence,
     )
     weak = _preset(10.0)
@@ -197,10 +198,10 @@ def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
+        threshold=threshold,
         confidence=confidence,
     )
     weak_memory = decoder_settings.UnitMemorySettings(bits=12)
@@ -220,10 +221,10 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
 def test_only_the_pool_that_decodes_the_windows_blocks_on_its_result():
     """A strong decode frees its unit at its end and waits in its output."""
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
+        threshold=threshold,
         confidence=confidence,
     )
     weak_preset = _preset(10.0)

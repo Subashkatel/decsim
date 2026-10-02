@@ -181,8 +181,8 @@ def gap_half_ticks_to_natural_log_weight(
 
     Every signal reports its gap in the units the switching threshold is
     held in (escalation.gap_threshold_db is converted once, at the yaml
-    boundary, by escalation/settings.py decibels_to_nats), so a threshold
-    means the same thing whichever signal a run names.
+    boundary, by escalation/threshold_sources.py decibels_to_nats), so a
+    threshold means the same thing whichever signal a run names.
     """
     if gap_half_ticks == math.inf:
         return math.inf

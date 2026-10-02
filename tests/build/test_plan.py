@@ -89,10 +89,10 @@ def _plan(
 def _switching():
     """A switching section with a fixed threshold and a gap signal."""
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     return escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
+        threshold=threshold,
         confidence=confidence,
     )
 
@@ -489,10 +489,10 @@ class _OutsideShape:
 def _outside_shape_switching():
     """A switching section whose strong window is the outside shape."""
     confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
     return escalation_settings.EscalationSettings(
         kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
+        threshold=threshold,
         confidence=confidence,
         strong_window="outside_shape",
     )

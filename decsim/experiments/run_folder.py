@@ -52,6 +52,12 @@ TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
 # where Linux names the processor; another system's piece records the
 # word platform.processor gives
 PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
+# What git reads as the code: the whole checkout but its results folder.
+# A run writes run.json and the run file's copy there, which .gitignore
+# keeps tracked as evidence, so they would make every later reading
+# dirty; dirty says the code differs from its commit, and results are
+# not code.
+CODE_PATHSPEC = ("--", ".", f":(exclude){RESULTS_DIR}")
 
 
 def run_dir_for(name: str, out_dir=None) -> pathlib.Path:
@@ -181,7 +187,9 @@ def snapshot_code_state(
     if run_file is not None:
         _copy_the_run_file(run_file, run_dir)
     checkout = _checkout()
-    diff = _git_output("git", "-C", str(checkout), "diff", "HEAD")
+    diff = _git_output(
+        "git", "-C", str(checkout), "diff", "HEAD", *CODE_PATHSPEC
+    )
     patches = []
     if diff:
         patches.append(diff)
@@ -762,6 +770,7 @@ def _untracked_files(checkout: pathlib.Path) -> Optional[list]:
         "ls-files",
         "--others",
         "--exclude-standard",
+        *CODE_PATHSPEC,
     )
     if listed is None:
         return None
@@ -860,11 +869,7 @@ def _tree_reading() -> tuple:
         commit = _commit_from_git_files(checkout)
     is_dirty = _dirty_from_the_launcher()
     if is_dirty is None:
-        porcelain = _git_output(
-            "git", "-C", str(checkout), "status", "--porcelain"
-        )
-        if porcelain is not None:
-            is_dirty = bool(porcelain)
+        is_dirty = _code_is_dirty(checkout)
     return commit, is_dirty
 
 
@@ -877,11 +882,18 @@ def fresh_tree_reading() -> tuple:
     """
     checkout = _checkout()
     commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
-    porcelain = _git_output("git", "-C", str(checkout), "status", "--porcelain")
-    is_dirty = None
-    if porcelain is not None:
-        is_dirty = bool(porcelain)
+    is_dirty = _code_is_dirty(checkout)
     return checkout, commit, is_dirty
+
+
+def _code_is_dirty(checkout: pathlib.Path) -> Optional[bool]:
+    """Whether the code differs from its commit; None when git is silent."""
+    porcelain = _git_output(
+        "git", "-C", str(checkout), "status", "--porcelain", *CODE_PATHSPEC
+    )
+    if porcelain is None:
+        return None
+    return bool(porcelain)
 
 
 def _dirty_from_the_launcher() -> Optional[bool]:

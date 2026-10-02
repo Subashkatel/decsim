@@ -2032,6 +2032,34 @@ def test_an_untracked_file_is_in_the_code_patch(tmp_path, monkeypatch):
     assert (replay / "maker.py").read_text() == "VALUE = 1\n"
 
 
+@requires_git
+def test_a_results_folder_in_the_checkout_leaves_the_tree_clean(
+    tmp_path, monkeypatch
+):
+    """A run's own run.json and run file copy are results, not code.
+
+    A planned batch writes them inside the checkout before its tasks
+    start, and every task refuses a dirty tree, so they must not read
+    as uncommitted code; an edit to the code still does.
+    """
+    tree_folder = tmp_path / "tree"
+    tree = _git_tree_with_maker(tree_folder)
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit"]
+    subprocess.run(["git", "-C", str(tree), "add", "maker.py"], check=True)
+    subprocess.run([*commit, "-q", "-m", "one"], cwd=tree, check=True)
+    results_folder = tree / "results" / "2026-10-02_sweep"
+    results_folder.mkdir(parents=True)
+    (results_folder / "run.json").write_text("{}\n")
+    monkeypatch.setattr(run_folder, "_checkout", lambda: tree)
+
+    _checkout, _commit, with_results = run_folder.fresh_tree_reading()
+    (tree / "maker.py").write_text("VALUE = 2\n")
+    _checkout, _commit, with_an_edit = run_folder.fresh_tree_reading()
+
+    assert with_results is False
+    assert with_an_edit is True
+
+
 def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     serial_dir = tmp_path / "serial"

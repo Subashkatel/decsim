@@ -28,7 +28,7 @@ import pathlib
 import re
 import sys
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -75,7 +75,10 @@ class Point:
     as it is of a sinter task's strong id. collection overrides the
     experiment's. sections is the yaml a point the yaml translator made
     resolved to, which its swept cells are read from; None for a point
-    built in Python, whose cells are its metadata.
+    built in Python, whose cells are its metadata. online_threshold is
+    the point's online threshold source when its escalation learns one:
+    run state every shot of the point shares and teaches, so it is the
+    point's and never a setting, and no part of the point's id.
     """
 
     name: str
@@ -85,9 +88,18 @@ class Point:
     sections: Optional[Mapping] = dataclasses.field(
         default=None, compare=False, repr=False
     )
+    online_threshold: Optional[Any] = dataclasses.field(
+        default=None, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         _check_folder_name(self.name, "point")
+        if self.machine.escalation.online_threshold is not None:
+            raise ValueError(
+                f"the point {self.name} carries an online threshold source "
+                "in its machine's escalation; it is the point's run state, "
+                "so give it as the point's online_threshold"
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -252,16 +264,10 @@ def description(study: Experiment, run_file: pathlib.Path) -> list:
 def task_of(point: Point) -> collect.Task:
     """The task a point's shots run: its settings, metadata and state.
 
-    The online threshold source is the point's state, not a setting:
-    every shot of the point shares the one instance and it learns over
-    them, so it is taken off the settings and carried on the task, and
-    the point's id is that of the settings without it.
+    The online threshold source rides on the task beside the settings,
+    which a shot alone receives it on (collect.Task.shot_settings).
     """
-    escalation = point.machine.escalation
-    online_threshold = escalation.online_threshold
-    plain_escalation = dataclasses.replace(escalation, online_threshold=None)
-    settings = dataclasses.replace(point.machine, escalation=plain_escalation)
-    return collect.Task(settings, point.metadata, online_threshold)
+    return collect.Task(point.machine, point.metadata, point.online_threshold)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -574,15 +580,17 @@ def _point_of(
     collection: collection_module.CollectionSettings,
     sections: dict,
 ) -> Point:
-    """A yaml point: its task's settings with the online source put back."""
-    settings = task.settings
-    escalation = dataclasses.replace(
-        settings.escalation, online_threshold=task.online_threshold
-    )
-    machine = dataclasses.replace(settings, escalation=escalation)
+    """A yaml point: its task's settings, metadata and online source."""
     point_id = task.strong_id()
     name = point_id[:YAML_POINT_NAME_LENGTH]
-    return Point(name, machine, task.metadata, collection, sections)
+    return Point(
+        name,
+        task.settings,
+        task.metadata,
+        collection,
+        sections,
+        task.online_threshold,
+    )
 
 
 def _refuse_an_unknown_point(

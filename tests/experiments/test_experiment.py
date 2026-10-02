@@ -7,6 +7,8 @@ settings and json metadata whose hash is its id
 today, which names its pieces.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.experiments.collection as collection
@@ -113,6 +115,23 @@ def test_a_yaml_point_keeps_the_id_its_task_has(tmp_path):
     assert point.name == point_id[:12]
     assert point_task.online_threshold is not None
     assert point_task.settings.escalation.online_threshold is None
+    assert point.machine.escalation.online_threshold is None
+    assert point.online_threshold is point_task.online_threshold
+
+
+def test_an_online_source_inside_a_points_machine_is_refused(tmp_path):
+    """The source is the point's run state, so it is given on the point."""
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    (task,) = config.tasks()
+    escalation = dataclasses.replace(
+        task.settings.escalation, online_threshold=task.online_threshold
+    )
+    machine = dataclasses.replace(task.settings, escalation=escalation)
+
+    with pytest.raises(ValueError, match="give it as the point's"):
+        experiment.Point("online", machine)
 
 
 def test_a_yaml_point_two_blocks_name_is_one_point(tmp_path):

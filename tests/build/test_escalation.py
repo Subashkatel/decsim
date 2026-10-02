@@ -31,7 +31,9 @@ ROUND_PERIOD_MICROSECONDS = 1.1
 def _switching(**changes) -> escalation_settings.SwitchingSettings:
     """A switching slot on a fixed threshold and the complementary gap."""
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     return escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, **changes
     )
@@ -64,7 +66,8 @@ def test_the_policy_decides_on_the_signals_source_and_the_threshold():
     switching = escalation_build.Switching.build(settings, weak, engine)
 
     policy = switching.policy
-    assert policy.threshold.threshold_nats == 2.0
+    twenty_decibels = threshold_sources.decibels_to_nats(20.0)
+    assert policy.threshold.threshold_nats == twenty_decibels
     assert policy.expected_source is switching.confidence_signal.source
     assert policy.run_both_at_once is False
 
@@ -112,7 +115,9 @@ def test_the_switching_part_builds_the_strong_window_its_slot_names():
 
 def test_the_confidence_row_is_built_with_the_sections_walk_card():
     confidence = complementary.ComplementaryGap.Settings(walk_microseconds=0.25)
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     settings = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )

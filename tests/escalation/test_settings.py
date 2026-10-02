@@ -22,7 +22,9 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 def _switching(**changes) -> escalation_settings.SwitchingSettings:
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     return escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, **changes
     )

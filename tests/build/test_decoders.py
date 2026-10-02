@@ -193,7 +193,9 @@ def test_a_weak_only_run_has_one_pool_and_no_strong_unit():
 
 def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
@@ -210,7 +212,9 @@ def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
@@ -231,7 +235,9 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
 def test_only_the_pool_that_decodes_the_windows_blocks_on_its_result():
     """A strong decode frees its unit at its end and waits in its output."""
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )

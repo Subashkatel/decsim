@@ -189,7 +189,7 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     )
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_nats=threshold_nats
+        threshold_decibels=15.0
     )
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
@@ -372,7 +372,10 @@ def _double_window_settings(
         engine=ENGINE_CARD,
     )
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=1.0)
+    one_nat = threshold_sources.nats_to_decibels(1.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=one_nat
+    )
     double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence,
@@ -425,7 +428,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
     """
     online = _always_auditing_online_threshold(threshold=2.0)
     online_settings = threshold_sources.OnlineThreshold.Settings(
-        threshold_nats=2.0
+        threshold_decibels=20.0
     )
     double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = declared_run.declared_switching(
@@ -599,7 +602,10 @@ def _serial_switching_settings(
         algorithm=belief_matching_settings
     )
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=1.0)
+    one_nat = threshold_sources.nats_to_decibels(1.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=one_nat
+    )
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
@@ -845,11 +851,11 @@ def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
         fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)
 
 
-def _switching_policy(threshold_nats: float):
+def _switching_policy(threshold_decibels: float):
     """A switching row over a fixed threshold and the complementary gap."""
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_nats=threshold_nats
+        threshold_decibels=threshold_decibels
     )
     settings = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
@@ -868,7 +874,7 @@ def test_a_weak_result_with_no_soft_output_escalates_its_window():
     nothing leaves the result bare, so the window goes to the strong
     tier rather than being kept on a confidence nobody computed.
     """
-    policy = _switching_policy(2.0)
+    policy = _switching_policy(20.0)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
     bare = decoding_records.DecodeResult(1, 0)
 
@@ -880,7 +886,7 @@ def test_a_weak_result_with_no_soft_output_escalates_its_window():
 
 def test_a_soft_output_from_another_signal_is_refused():
     """The threshold means one thing, so it reads one signal's gap."""
-    policy = _switching_policy(2.0)
+    policy = _switching_policy(20.0)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
     cluster_source = cluster.union_find_cluster_gap_source()
     result = decoding_records.DecodeResult(1, 0)
@@ -897,8 +903,8 @@ def test_a_soft_output_from_another_signal_is_refused():
 def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
     """Toshio 2510.25222 line 1623: "fix the gap threshold to be gth = 20 dB".
 
-    The key is in decibels because that is the paper's unit; the machine
-    holds nats, so the conversion happens once, at the yaml boundary.
+    The key and the threshold record are in decibels because that is the
+    paper's unit; a gap is compared in nats, so the record converts once.
     """
     twenty_decibels = threshold_sources.decibels_to_nats(20.0)
     natural_log_of_ten = math.log(10.0)
@@ -911,7 +917,7 @@ def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
 def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
     """The equality case is a keep, which is Toshio's Fig. 12 caption."""
     threshold = threshold_sources.decibels_to_nats(20.0)
-    policy = _switching_policy(threshold)
+    policy = _switching_policy(20.0)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
 
     a_hair_under = threshold - 1e-9

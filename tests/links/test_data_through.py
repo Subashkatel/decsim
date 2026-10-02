@@ -253,9 +253,10 @@ def machine_settings(shape: str, distance: int):
         return machine_settings_module.MachineSettings(
             workload=workload, qpu=qpu, strong_decoder=strong, links=links
         )
-    nats = threshold_sources.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=nats)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=UNREACHABLE_GAP_DECIBELS
+    )
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )

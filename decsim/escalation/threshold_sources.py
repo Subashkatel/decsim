@@ -12,9 +12,9 @@ TableThreshold, looks a point's facts up in an offline calibration csv
 (TableThreshold.Settings.from_table), so at run time it decides as
 FixedThreshold does. Every row fills the ThresholdSource port
 (decsim/ports.py) and is built from its own Settings record, which the
-switching settings hold. Thresholds and gaps are natural-log weight
-(nats), the unit the decoder compares in; the yaml converts the paper's
-decibels.
+switching settings hold. A record takes its threshold in the paper's
+decibels and hands it out in natural-log weight (nats), the unit the
+decoder compares a gap in.
 """
 
 import csv
@@ -72,7 +72,8 @@ def checked_decibels(decibels: float, name: str) -> float:
     ratio (Toshio et al. 2510.25222 Sec. III A, step 3: keep at g >=
     g_th, with g_th in decibels).
     """
-    if not math.isfinite(decibels) or decibels < 0.0:
+    is_finite = config.is_number(decibels) and math.isfinite(decibels)
+    if not is_finite or decibels < 0.0:
         raise ValueError(
             f"{name} must be finite and not negative (got {decibels!r})"
         )
@@ -91,7 +92,7 @@ class FixedThreshold:
     gap_threshold_db; built_per_sweep_point says the row builds its own
     instance for a sweep point, through for_point, which is what the
     online card configures, while a row that declares it False is built
-    by the root from the point's threshold in nats, its one constructor
+    by the root from the record's threshold in nats, its one constructor
     argument.
     """
 
@@ -101,12 +102,17 @@ class FixedThreshold:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The constant, in nats (escalation.gap_threshold_db, converted)."""
+        """The constant, in decibels (escalation.gap_threshold_db)."""
 
-        threshold_nats: float
+        threshold_decibels: float
 
         def __post_init__(self) -> None:
-            _check_threshold_nats(self.threshold_nats)
+            checked_decibels(self.threshold_decibels, "threshold_decibels")
+
+        @property
+        def threshold_nats(self) -> float:
+            """The threshold as the weight a gap is compared in."""
+            return decibels_to_nats(self.threshold_decibels)
 
         def for_point(
             self,
@@ -201,9 +207,13 @@ class TableThreshold(FixedThreshold):
             point = _point_of(columns, facts, table_path)
             row = _first_row_holding(rows, point, table_path)
             cell = row[column]
-            threshold_nats = _certified_nats(cell, table_path, column, point)
+            threshold_decibels = _certified_decibels(
+                cell, table_path, column, point
+            )
             return cls(
-                threshold_nats=threshold_nats, table=table_path, column=column
+                threshold_decibels=threshold_decibels,
+                table=table_path,
+                column=column,
             )
 
         def build(self) -> "TableThreshold":
@@ -424,10 +434,10 @@ class OnlineThreshold:
     class Settings:
         """The starting threshold and the calibrator's knobs.
 
-        threshold_nats is where the rate tracker starts
-        (escalation.gap_threshold_db, converted). Two loops move it: a
-        rate tracker steps it toward target_escalation_rate on every
-        window (step_db per event), and a randomized audit lane
+        threshold_decibels is where the rate tracker starts
+        (escalation.gap_threshold_db). Two loops move it: a rate tracker
+        steps it toward target_escalation_rate on every window
+        (step_decibels per event), and a randomized audit lane
         strong-decodes audit_rate of the kept windows; one revised audit
         multiplies the target by adjust_factor, and only ceil(3 /
         kept_bad_budget) consecutive clean audits divide it back. The
@@ -438,9 +448,9 @@ class OnlineThreshold:
         drift-replay configuration.
         """
 
-        threshold_nats: float
+        threshold_decibels: float
         target_escalation_rate: float = 1e-3
-        step_db: float = 0.25
+        step_decibels: float = 0.25
         audit_rate: float = 0.01
         kept_bad_budget: float = 2e-4
         adjust_factor: float = 2.0
@@ -448,16 +458,19 @@ class OnlineThreshold:
         max_escalation_rate: float = 0.30
 
         def __post_init__(self) -> None:
-            _check_threshold_nats(self.threshold_nats)
+            checked_decibels(self.threshold_decibels, "threshold_decibels")
             _check_online_numbers(self)
             _check_online_steps(self)
             _check_online_rates(self)
 
         @classmethod
         def from_yaml(
-            cls, section: Mapping, threshold_nats: float
+            cls, section: Mapping, threshold_decibels: float
         ) -> "OnlineThreshold.Settings":
-            """The `online` card, every key optional, from its start."""
+            """The `online` card, every key optional, from its start.
+
+            The card's step_db is the record's step_decibels.
+            """
             if not isinstance(section, Mapping):
                 raise ValueError(
                     "escalation.online must be a mapping of the "
@@ -471,12 +484,18 @@ class OnlineThreshold:
                 knobs[key] = config.finite_number(
                     section, "escalation.online", key, default
                 )
-            values = {"threshold_nats": threshold_nats, **knobs}
+            knobs["step_decibels"] = knobs.pop("step_db")
+            values = {"threshold_decibels": threshold_decibels, **knobs}
             return tables.section_record("escalation.online", cls, values)
+
+        @property
+        def threshold_nats(self) -> float:
+            """Where the rate tracker starts, as the weight a gap is in."""
+            return decibels_to_nats(self.threshold_decibels)
 
         def step_nats(self) -> float:
             """The step in natural-log weight units."""
-            return decibels_to_nats(self.step_db)
+            return decibels_to_nats(self.step_decibels)
 
         def for_point(
             self,
@@ -618,32 +637,23 @@ _ONLINE_DEFAULTS = {
 }
 
 
-def _check_threshold_nats(threshold_nats: float) -> None:
-    """A keep threshold in nats is finite and not negative, as in decibels."""
-    is_finite = config.is_number(threshold_nats) and math.isfinite(
-        threshold_nats
-    )
-    if is_finite and threshold_nats >= 0:
-        return
-    raise ValueError(
-        "threshold_nats must be finite and not negative "
-        f"(got {threshold_nats!r})"
-    )
-
-
 def _check_online_numbers(online) -> None:
     """Every knob of the online card is a finite number."""
-    for key in ONLINE_KEYS:
-        value = getattr(online, key)
+    for field in dataclasses.fields(online):
+        value = getattr(online, field.name)
         is_finite = config.is_number(value) and math.isfinite(value)
         if not is_finite:
-            raise ValueError(f"{key} must be a finite number (got {value!r})")
+            raise ValueError(
+                f"{field.name} must be a finite number (got {value!r})"
+            )
 
 
 def _check_online_steps(online) -> None:
     """Refuse a step, an audit share or a factor outside its range."""
-    if online.step_db <= 0:
-        raise ValueError(f"step_db must be positive (got {online.step_db})")
+    if online.step_decibels <= 0:
+        raise ValueError(
+            f"step_decibels must be positive (got {online.step_decibels})"
+        )
     if not 0 < online.audit_rate < 1:
         raise ValueError(
             f"audit_rate must be in (0, 1) (got {online.audit_rate})"
@@ -778,7 +788,7 @@ def _cell_holds(cell: str, value) -> bool:
     return math.isclose(number, value, rel_tol=1e-9)
 
 
-def _certified_nats(
+def _certified_decibels(
     cell: str, table_path: pathlib.Path, column: str, point: dict
 ) -> float:
     if cell == "":
@@ -793,5 +803,4 @@ def _certified_nats(
         raise ValueError(
             f"{entry} must be a number of decibels (got {cell!r})"
         ) from None
-    checked = checked_decibels(gap_threshold_db, entry)
-    return decibels_to_nats(checked)
+    return checked_decibels(gap_threshold_db, entry)

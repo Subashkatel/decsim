@@ -128,7 +128,9 @@ def _with_switching(settings, switching):
 def _switching(**changes):
     """A switching slot with a fixed threshold and a gap signal."""
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     return escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, **changes
     )
@@ -526,7 +528,9 @@ class _OutsideShape:
 def _outside_shape_switching():
     """A switching section whose strong window is the outside shape."""
     confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     outside_shape = _OutsideShape.Settings()
     return escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, strong_window=outside_shape

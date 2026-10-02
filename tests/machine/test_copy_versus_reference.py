@@ -1115,7 +1115,7 @@ def _declared_confidence(switching):
     """The yaml's switching slot, deciding on the weak tier's declared gap."""
     confidence = declared_run.DeclaredConfidence.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_nats=declared_run.ESCALATION_THRESHOLD
+        threshold_decibels=declared_run.ESCALATION_THRESHOLD_DECIBELS
     )
     return dataclasses.replace(
         switching, confidence=confidence, threshold=threshold

@@ -304,33 +304,37 @@ def _observe_each(tracker, gaps: list) -> None:
         tracker.observe(gap)
 
 
-@pytest.mark.parametrize("threshold_nats", [float("nan"), math.inf, -1.0])
-def test_a_threshold_that_is_no_nonnegative_number_is_refused(threshold_nats):
+@pytest.mark.parametrize(
+    "threshold_decibels", [float("nan"), math.inf, -1.0, True, "20"]
+)
+def test_a_threshold_that_is_no_nonnegative_number_is_refused(
+    threshold_decibels,
+):
     """Every gap is a weight difference at least zero (Sec. III A)."""
-    sentence = "threshold_nats must be finite and not negative"
+    sentence = "threshold_decibels must be finite and not negative"
     fixed = threshold_sources.FixedThreshold.Settings
     table = threshold_sources.TableThreshold.Settings
     online = threshold_sources.OnlineThreshold.Settings
     table_path = pathlib.Path("calibration.csv")
 
     with pytest.raises(ValueError, match=sentence):
-        fixed(threshold_nats)
+        fixed(threshold_decibels)
     with pytest.raises(ValueError, match=sentence):
         table(
-            threshold_nats=threshold_nats,
+            threshold_decibels=threshold_decibels,
             table=table_path,
             column="gth_eq4_wilson",
         )
     with pytest.raises(ValueError, match=sentence):
-        online(threshold_nats)
+        online(threshold_decibels)
 
 
 def test_an_online_step_that_is_not_a_number_is_refused():
     online = threshold_sources.OnlineThreshold.Settings
-    sentence = "step_db must be a finite number"
+    sentence = "step_decibels must be a finite number"
 
     with pytest.raises(ValueError, match=sentence):
-        online(1.0, step_db=float("nan"))
+        online(20.0, step_decibels=float("nan"))
 
 
 def _write_table(tmp_path, text: str) -> pathlib.Path:
@@ -354,8 +358,7 @@ def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
         table_path, distance=5, physical_error_probability=0.003
     )
 
-    expected_nats = 19.5 * math.log(10.0) / 10.0
-    assert threshold.threshold_nats == expected_nats
+    assert threshold.threshold_decibels == 19.5
     assert threshold.table == table_path
     assert threshold.column == "gth_eq4_wilson"
 
@@ -397,17 +400,18 @@ def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
 
 def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
     """The seed text is the one the experiments layer's yaml points use."""
-    settings = threshold_sources.OnlineThreshold.Settings(2.0)
+    settings = threshold_sources.OnlineThreshold.Settings(20.0)
 
     source = settings.for_point(distance=5, physical_error_probability=0.003)
 
     expected = random.Random("online-threshold d=5 p=0.003")
+    twenty_decibels = threshold_sources.decibels_to_nats(20.0)
     assert source.random_generator.getstate() == expected.getstate()
-    assert source.controller.tracker.threshold == 2.0
+    assert source.controller.tracker.threshold == twenty_decibels
 
 
 def test_an_online_source_with_no_error_probability_is_refused():
-    settings = threshold_sources.OnlineThreshold.Settings(2.0)
+    settings = threshold_sources.OnlineThreshold.Settings(20.0)
     sentence = "physical_error_probability=None"
 
     with pytest.raises(ValueError, match=sentence):

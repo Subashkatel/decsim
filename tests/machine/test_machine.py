@@ -1592,11 +1592,11 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
 
 def _switching_memory(weak_kind: str, confidence: str):
     """A d=3 memory whose weak tier, the named row, reports the signal."""
-    decibels = 20.0
-    nats = threshold_sources.decibels_to_nats(decibels)
     signal_row = confidence_signals.CONFIDENCE_SIGNALS[confidence]
     signal_settings = signal_row.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=nats)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
     switching = escalation_settings.SwitchingSettings(
         confidence=signal_settings, threshold=threshold
     )

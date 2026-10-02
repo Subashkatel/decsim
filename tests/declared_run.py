@@ -109,7 +109,8 @@ DECLARED_EDGE_NAMES = (
     "frame_to_controller",
     "controller_to_qpu",
 )
-ESCALATION_THRESHOLD = 0.5
+# 0.5 nats, which decibels_to_nats gives back exactly
+ESCALATION_THRESHOLD_DECIBELS = threshold_sources.nats_to_decibels(0.5)
 DECLARED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
     method="declared_confidence",
     cluster_origin="declared",
@@ -156,7 +157,7 @@ def declared_switching(**changes):
     """The switching slot over the declared confidence and threshold."""
     confidence = DeclaredConfidence.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_nats=ESCALATION_THRESHOLD
+        threshold_decibels=ESCALATION_THRESHOLD_DECIBELS
     )
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold

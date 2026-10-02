@@ -30,6 +30,7 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.workload as workload_records
@@ -277,7 +278,8 @@ def _timing_only_machine_formed_at(where: str):
     """The weak baseline on a source that carries no outcomes to form."""
     formed_there = _machine_formed_at(where)
     settings = formed_there.settings
-    qpu = dataclasses.replace(settings.qpu, kind="timing_only")
+    timing_only = syndrome_devices.TimingOnlyDevice.Settings()
+    qpu = dataclasses.replace(settings.qpu, source=timing_only)
     settings = dataclasses.replace(settings, qpu=qpu)
     return machine_module.Machine.build(settings, 0)
 

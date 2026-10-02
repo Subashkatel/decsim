@@ -13,6 +13,7 @@ import stim
 import decsim.config as config
 import decsim.detector_error_model.detector_formation as formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.ports as ports
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.stim_stream_models as stream_models
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -36,8 +37,21 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     shot_sampled fires once at finalization with that complete circuit.
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The live source has no keys: the fragments state every width."""
+
+        # the word the yaml and the reports name this row by
+        name = "streaming_stim"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "StreamingStimDevice":
+            """A fresh source over the workload's live fragments."""
+            del code
+            return StreamingStimDevice(**circuit_arguments)
+
     operation_circuit_scope = "none"
-    takes_code_card = False
     emits_bit_values = True
 
     def __init__(

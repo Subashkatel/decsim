@@ -71,6 +71,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
+import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
 
 THIS_FILE = pathlib.Path(__file__)
@@ -900,7 +901,8 @@ def _slotted_rounds_task(round_count: int) -> collect.Task:
 def _device_task(round_count: int) -> collect.Task:
     """A task whose settings hold a Python-built finite source."""
     device = stim_device.StimDevice(measurement_rounds={1: {0: round_count}})
-    qpu = qpu_settings.QpuSettings(device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
     return collect.Task(settings, {"point": 1})
 
@@ -909,7 +911,8 @@ def _recorded_device_task(flip: int) -> collect.Task:
     """A task whose settings hold a recorded shot, its last bit flip."""
     measurements = numpy.array([[0, flip]], dtype=bool)
     device = stim_device.RecordedStimDevice(measurements, 0)
-    qpu = qpu_settings.QpuSettings(device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
     return collect.Task(settings, {"point": 1})
 

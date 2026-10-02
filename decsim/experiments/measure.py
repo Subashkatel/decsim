@@ -949,7 +949,7 @@ def _burst_catch(
     flags = observation.burst_flags
     if flags is None:
         return None, None
-    onset_round = _burst_onset_round(settings.qpu.row_settings)
+    onset_round = _burst_onset_round(settings.qpu.source)
     if onset_round is None:
         first_flag_round = flags.first_flag_from(1)
         return first_flag_round, None
@@ -1097,17 +1097,17 @@ def _one_length(owner_rounds) -> int:
     return length
 
 
-def _burst_onset_round(qpu_row_settings) -> Optional[int]:
+def _burst_onset_round(source_settings) -> Optional[int]:
     """The burst's first round; None when the shot draws no burst.
 
-    Read by the keys' names rather than the row's class, so any qpu row
-    whose settings carry a burst probability and onset, as burst_stim's
-    do, is measured alike; a probability of 0 is no burst.
+    Read by the fields' names rather than the record's class, so any
+    source record that carries a burst probability and onset, as
+    burst_stim's does, is measured alike; a probability of 0 is no burst.
     """
-    probability = getattr(qpu_row_settings, "burst_error_probability", 0)
+    probability = getattr(source_settings, "burst_error_probability", 0)
     if probability == 0:
         return None
-    return qpu_row_settings.burst_onset_round
+    return source_settings.burst_onset_round
 
 
 @dataclasses.dataclass(frozen=True)

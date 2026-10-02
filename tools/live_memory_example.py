@@ -23,6 +23,7 @@ import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
 import decsim.producers as producers
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.circuits as circuit_records
 import decsim.settings as machine_settings
 
@@ -111,13 +112,14 @@ def live_settings(
 
     The workload is decsim.producers live_memory on the fragments, the
     one a yaml names, and the source is built from them as a yaml's
-    streaming_stim is (decsim/build/plan.py _syndrome_source).
+    streaming_stim is, by its settings record.
     """
     workload = producers.live_memory(program, prefix_round_count, patch)
     section = workload_settings.WorkloadSettings()
     lowered = section.running(workload)
+    source = streaming_stim_device.StreamingStimDevice.Settings()
     qpu = qpu_settings.QpuSettings(
-        kind="streaming_stim",
+        source=source,
         distance=distance,
         round_period_microseconds=round_period_microseconds,
     )

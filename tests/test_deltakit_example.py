@@ -25,6 +25,7 @@ import decsim.machine as machines
 import decsim.producers as producers
 import decsim.qpu.stim_device as sources
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import tests.declared_run as declared_run
 import tools.deltakit_example as example
 
 pytestmark = pytest.mark.usefixtures("explorer")
@@ -184,7 +185,8 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
         0,
         measurement_rounds={producers.LIVE_STREAM_ID: mapping},
     )
-    qpu = dataclasses.replace(settings.qpu, device=source)
+    source_record = declared_run.GivenSource(source)
+    qpu = dataclasses.replace(settings.qpu, source=source_record)
     settings = dataclasses.replace(settings, qpu=qpu)
     machine = machines.Machine.build(settings, 0)
     readouts = []
@@ -362,8 +364,10 @@ def _repetition_replay(circuit, mapping, measurements, distance, round_count):
         detector_rounds={1: detector_rounds},
     )
     code = example.RepetitionMemory(distance, round_count)
+    card = declared_run.GivenCard(code)
+    source_record = declared_run.GivenSource(source)
     qpu = dataclasses.replace(
-        settings.qpu, distance=None, code=code, device=source
+        settings.qpu, distance=None, code_card=card, source=source_record
     )
     settings = dataclasses.replace(settings, qpu=qpu)
     return machines.Machine.build(settings, 0)

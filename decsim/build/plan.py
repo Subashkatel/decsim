@@ -26,7 +26,6 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
-import decsim.tables as tables
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 
@@ -138,9 +137,8 @@ def build_plan(
         planned_ids.append(operation.id)
     physical_circuits = settings.workload.physical_circuits
     physical_tables = _physical_formation_tables(physical_circuits)
-    device = _syndrome_source(
-        settings.qpu, code, physical_circuits, physical_tables
-    )
+    circuit_arguments = _circuit_arguments(physical_circuits, physical_tables)
+    device = settings.qpu.source.build(code, circuit_arguments)
     formation_tables = _formation_tables(
         device, planned_operations, physical_tables, rounds_policy, code
     )
@@ -160,9 +158,9 @@ def build_plan(
         formation_reads=formation_reads,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
-    error_model_provider = settings.qpu.error_model_provider
-    if error_model_provider is None:
-        error_model_provider = device.window_model_source()
+    error_model_provider = _error_model_provider(
+        settings.qpu, device, code, circuit_arguments
+    )
     _refuse_bulk_strong_without_a_merge(settings, device, error_model_provider)
     _install_operation_circuits(device, error_model_provider, all_operations)
     idle_policy = settings.idle_policy.build()
@@ -357,34 +355,21 @@ def _boundary_policy(windows: window_settings.WindowSettings):
     return boundary_policy
 
 
-def _syndrome_source(
+def _error_model_provider(
     settings: qpu_settings.QpuSettings,
-    code,
-    physical_circuits: Mapping,
-    physical_tables: Mapping,
-):
-    """The device of the qpu kind, or the Python-built one.
+    device: ports.SyndromeSource,
+    code: ports.CodeModel,
+    circuit_arguments: Mapping,
+) -> ports.WindowModelSource:
+    """The window models' source: the run's own, or the one the qpu names.
 
-    A row that shapes its payloads by the code card is built with the
-    run's card, so a yaml that names it needs no argument of its own; a
-    row that reads its widths off a circuit is built with the
-    workload's physical circuits instead; a row with keys of its own is
-    built with its Settings record too.
+    A named one is built over the same card and circuits as the run's
+    source, and the decoders read its window models, not its rounds.
     """
-    if settings.device is not None:
-        return settings.device
-    row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
-    arguments = {}
-    if row.takes_code_card:
-        arguments["code"] = code
-    else:
-        circuit_arguments = _circuit_arguments(
-            physical_circuits, physical_tables
-        )
-        arguments.update(circuit_arguments)
-    if settings.row_settings is not None:
-        arguments["settings"] = settings.row_settings
-    return row(**arguments)
+    model_record = settings.error_model_provider
+    if model_record is None:
+        return device.window_model_source()
+    return model_record.build(code, circuit_arguments)
 
 
 def _circuit_arguments(
@@ -514,9 +499,10 @@ def _refuse_bulk_strong_without_a_merge(
     builds_models = error_model_provider is not own_models
     if not device.emits_bit_values and not builds_models:
         return
+    source_name = settings.qpu.source.name
     raise ValueError(
         "decoder_manager.bulk_strong merges timing-only strong re-decodes, "
-        f"and qpu.kind {settings.qpu.kind} gives the decoders bits and "
+        f"and qpu.kind {source_name} gives the decoders bits and "
         "models the merged decode would drop; set bulk_strong false or "
         "qpu.kind timing_only"
     )

@@ -1151,7 +1151,8 @@ def test_bb_higher_logical_fault_is_reported_as_a_failure(
         measurements, 0, measurement_rounds={100: mapping}
     )
     settings = _bb_settings(program, placement, commit_round_count=10)
-    qpu = dataclasses.replace(settings.qpu, device=source)
+    source_record = declared_run.GivenSource(source)
+    qpu = dataclasses.replace(settings.qpu, source=source_record)
     owner = program_records.Operation(
         100, "memory", tuple(range(8)), patches=("block",), circuit=circuit
     )
@@ -1201,8 +1202,10 @@ def test_a_recorded_joint_stream_matches_complete_stim_conversion(
     )
     settings = _joint_settings(program, placement)
     code = finite_example.RepetitionMemory(3, 3)
+    source_record = declared_run.GivenSource(source)
+    card = declared_run.GivenCard(code)
     qpu = dataclasses.replace(
-        settings.qpu, device=source, code=code, distance=None
+        settings.qpu, source=source_record, code_card=card, distance=None
     )
     owner = program_records.Operation(
         100, "joint", (0, 1), patches=("left", "right"), circuit=circuit
@@ -1250,7 +1253,7 @@ def test_separate_terminal_emitters_preserve_the_complete_record(
     assert final_indices == [0, 1]
     assert final_fragment_counts == [2, 2]
     assert final_width_bits == [8, 9]
-    source = settings.qpu.device
+    source = run.machine.qpu.syndrome_source
     expected_prediction = _direct_matching_prediction(circuit, source)
     result = run.result.operation_results[-1]
     assert result.operation_id == 100
@@ -1374,7 +1377,8 @@ def _circuit_less_terminal_run(
         operations=operations, decode_operations=(owner,), rounds_policy=policy
     )
     distance = source.code.distance
-    qpu = qpu_settings.QpuSettings(distance=distance, device=source)
+    source_record = declared_run.GivenSource(source)
+    qpu = qpu_settings.QpuSettings(distance=distance, source=source_record)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
@@ -1489,7 +1493,8 @@ def _memory_on_stim_device(
         operations=operations, rounds_policy=rounds
     )
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=3, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=3, source=source)
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
@@ -2075,11 +2080,11 @@ def _resolved_geometry(machine):
     return first.code_geometry
 
 
-def _one_memory_operation_on(card) -> machine_settings.MachineSettings:
-    """One timing-only memory operation on the code card given."""
+def _one_memory_operation_on(card_record) -> machine_settings.MachineSettings:
+    """One timing-only memory operation on the code card record given."""
     operation = program_records.Operation(id=1, name="memory", qubits=(0,))
     workload = workload_settings.WorkloadSettings(operations=[operation])
-    qpu = qpu_settings.QpuSettings(code=card)
+    qpu = qpu_settings.QpuSettings(code_card=card_record)
     decoder = decoders.PresetLatencyDecoder.Settings(0.0)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
@@ -2092,7 +2097,8 @@ def _one_memory_operation_on(card) -> machine_settings.MachineSettings:
 def test_a_code_card_written_outside_decsim_runs_with_no_registration():
     """A card is a port, not a table row: nothing names it but the settings."""
     card = OutsideCodeCard()
-    settings = _one_memory_operation_on(card)
+    card_record = declared_run.GivenCard(card)
+    settings = _one_memory_operation_on(card_record)
     machine = machine_module.Machine.build(settings)
     result = machine.run()
     geometry = _resolved_geometry(machine)
@@ -2100,8 +2106,9 @@ def test_a_code_card_written_outside_decsim_runs_with_no_registration():
     assert geometry.code_name == "outside code card"
 
 
-def test_a_run_without_a_code_card_resolves_the_distance_three_surface():
-    settings = _one_memory_operation_on(None)
+def test_the_default_code_card_resolves_the_distance_three_surface():
+    card_record = code_geometry.SurfaceCodeModel.Settings()
+    settings = _one_memory_operation_on(card_record)
     machine = machine_module.Machine.build(settings)
     machine.run()
     geometry = _resolved_geometry(machine)
@@ -2163,7 +2170,8 @@ def replayed_run(circuit, measurements, shot):
         operations=[memory], rounds_policy=rounds_policy
     )
     device = stim_device.RecordedStimDevice(measurements, shot)
-    qpu = qpu_settings.QpuSettings(distance=RECORDED_DISTANCE, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=RECORDED_DISTANCE, source=source)
     decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.028)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
@@ -3218,7 +3226,8 @@ def _protected_memory_settings(circuit, source):
         protected_regions=(region,),
         rounds_policy=policy,
     )
-    qpu = qpu_settings.QpuSettings(distance=3, device=source)
+    source_record = declared_run.GivenSource(source)
+    qpu = qpu_settings.QpuSettings(distance=3, source=source_record)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
@@ -3559,7 +3568,8 @@ def _static_idle_settings(idle_policy) -> machine_settings.MachineSettings:
         operations=(first, later), rounds_policy=rounds
     )
     source = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=3, device=source)
+    source_record = declared_run.GivenSource(source)
+    qpu = qpu_settings.QpuSettings(distance=3, source=source_record)
     clock = config.Clock(4000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
@@ -3691,7 +3701,8 @@ def _separate_terminal_settings(placement: str) -> tuple:
         terminal_detector_ids={100: terminal_ids},
     )
     settings = _settings(program, "live", placement)
-    qpu = dataclasses.replace(settings.qpu, device=source)
+    source_record = declared_run.GivenSource(source)
+    qpu = dataclasses.replace(settings.qpu, source=source_record)
     workload = _separate_terminal_workload(circuit)
     settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
     return settings, measurements, circuit
@@ -3823,7 +3834,8 @@ def _bb_settings(
         commit_rounds_override=commit_round_count,
         buffer_rounds_override=2,
     )
-    qpu = dataclasses.replace(settings.qpu, distance=None, code=code)
+    card = declared_run.GivenCard(code)
+    qpu = dataclasses.replace(settings.qpu, distance=None, code_card=card)
     price = decoders.PresetLatencyDecoder(0.2)
     backend = belief_propagation_osd.BeliefPropagationOsdDecoder(price)
     algorithm = declared_run.OneDecoder(backend)

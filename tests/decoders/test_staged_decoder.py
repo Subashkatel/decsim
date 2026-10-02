@@ -159,7 +159,8 @@ def memory_machine(decoder, circuit):
         operations=[operation], rounds_policy=rounds_policy
     )
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=MEMORY_DISTANCE, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=MEMORY_DISTANCE, source=source)
     algorithm = declared_run.OneDecoder(decoder)
     engine = decoder_settings.EngineSettings(clock=CLOCK)
     weak_decoder = decoder_settings.DecoderPoolSettings(

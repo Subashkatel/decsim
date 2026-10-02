@@ -42,7 +42,10 @@ def _weak_run():
         operations=[memory], rounds_policy=six_rounds
     )
     code = code_geometry.SurfaceCodeModel(distance=3)
-    qpu = qpu_settings.QpuSettings(code=code, round_period_microseconds=1.0)
+    card = declared_run.GivenCard(code)
+    qpu = qpu_settings.QpuSettings(
+        code_card=card, round_period_microseconds=1.0
+    )
     decoder = decoders.PresetLatencyDecoder.Settings(2.0)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, unit_count=1, engine=declared_run.DECLARED_ENGINE
@@ -78,8 +81,9 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
         rounds_policy=nine_rounds,
     )
     device = stim_device.StimDevice()
+    source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(
-        distance=3, device=device, round_period_microseconds=1.0
+        distance=3, source=source, round_period_microseconds=1.0
     )
     decoder = decoders.PresetLatencyDecoder.Settings(2.0)
     weak_decoder = decoder_settings.DecoderPoolSettings(
@@ -253,8 +257,9 @@ def _tan_sandwich_run(unit_count):
         operations=[memory], rounds_policy=rounds_policy
     )
     device = stim_device.StimDevice()
+    source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(
-        distance=3, round_period_microseconds=1.0, device=device
+        distance=3, round_period_microseconds=1.0, source=source
     )
     decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=5.0)
     weak_decoder = decoder_settings.DecoderPoolSettings(

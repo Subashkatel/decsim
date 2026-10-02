@@ -48,6 +48,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import tests.experiments.yaml_configs as yaml_configs
@@ -687,7 +688,8 @@ def test_a_streams_rounds_are_its_segments_counted_once():
     workload = workload_settings.WorkloadSettings(
         operations=(segment,), decode_operations=(owner,), rounds_policy=rounds
     )
-    qpu = qpu_settings.QpuSettings(distance=3, kind="timing_only")
+    timing_only = syndrome_devices.TimingOnlyDevice.Settings()
+    qpu = qpu_settings.QpuSettings(distance=3, source=timing_only)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)

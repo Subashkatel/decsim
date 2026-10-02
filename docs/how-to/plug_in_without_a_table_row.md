@@ -9,6 +9,8 @@ class in your own file runs with no registration step.
 ## Pass the instance
 
 ```python
+import dataclasses
+
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
@@ -17,13 +19,21 @@ import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 
+@dataclasses.dataclass(frozen=True)
+class MyCardSettings:
+    """My card's record: the qpu hands its build the distance and sizes."""
+
+    def build(self, distance, commit_rounds_override, buffer_rounds_override):
+        return MyCard()
+
+
 memory = program_records.Operation(id=1, name="memory", qubits=(0,))
 workload = workload_settings.WorkloadSettings(operations=(memory,))
 settings = machine_settings.MachineSettings(
     workload=workload,
     weak_decoder=decoder_settings.DecoderSettings(decoder=MyDecoder()),
     windows=window_settings.WindowSettings(scheme=MyScheme()),
-    qpu=qpu_settings.QpuSettings(code=MyCard()),
+    qpu=qpu_settings.QpuSettings(code_card=MyCardSettings()),
 )
 machine = machine_module.Machine.build(settings, 0)
 result = machine.run()
@@ -33,22 +43,19 @@ The default workload is empty, so a run with no operations completes
 at tick zero without calling any of your classes; name one.
 
 Every field of `MachineSettings` has a default, so you name only what
-differs from the default machine. The build site prefers your object
-over the table: `decsim/build/plan.py` and `decsim/build/decoders.py`
-check the settings record's object field first and fall back to the
-`kind` only when it is `None`. That order is sinter's, which resolves a
-caller's own object before its table
-(`decsim/tables.py`'s own docstring says so).
+differs from the default machine. The qpu's slots take a record whose
+`build` makes the component, and the build calls whatever record the
+slot holds: `source.build(code, circuit_arguments)`,
+`code_card.build(distance, commit_rounds_override,
+buffer_rounds_override)` and `layout.build(code)`. A table row's record
+is built the same way, so yours needs no table.
 
 ## What you give up
 
-Only the yaml, and with it a sweep point's settings for a code card:
-a point sets `qpu.distance`, and a `QpuSettings` that names both a
-distance and a code is refused ("multiple code sources supplied").
-Replace the distance with None beside your card, as
-`tools/deltakit_example.py` does for its repetition card. A card passed
-this way also keeps its own window sizes; `windows.commit_rounds` and
-`windows.buffer_rounds` size only the card `qpu.code_card` names.
+Only the yaml, and with it what a sweep point sets for a code card:
+your card's record is handed the point's `qpu.distance` and the
+windows section's `commit_rounds` and `buffer_rounds`, and a card that
+ignores them keeps its own.
 
 Without a row your class cannot be named from a config file, which
 means it cannot appear in a sweep run by `decsim run`, and a run

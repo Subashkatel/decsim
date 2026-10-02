@@ -26,6 +26,22 @@ from typing import Optional
 class SurfaceCodeModel:
     """Timing and sizing card of one rotated surface-code patch."""
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The surface card has no keys beyond the qpu's distance."""
+
+        def build(
+            self,
+            distance: Optional[int],
+            commit_rounds_override: Optional[int],
+            buffer_rounds_override: Optional[int],
+        ) -> "SurfaceCodeModel":
+            """The card at the distance, three when None, and window sizes."""
+            arguments = _card_arguments(
+                distance, commit_rounds_override, buffer_rounds_override
+            )
+            return SurfaceCodeModel(**arguments)
+
     distance: int = 3
     # None: the run's cadence.
     round_microseconds: Optional[float] = None
@@ -135,6 +151,18 @@ class BivariateBicycleCodeModel:
             """The qpu section's qubit counts; absent is the gross code's."""
             return cls(**section)
 
+        def build(
+            self,
+            distance: Optional[int],
+            commit_rounds_override: Optional[int],
+            buffer_rounds_override: Optional[int],
+        ) -> "BivariateBicycleCodeModel":
+            """The card at the distance, twelve when None, and window sizes."""
+            arguments = _card_arguments(
+                distance, commit_rounds_override, buffer_rounds_override
+            )
+            return BivariateBicycleCodeModel(settings=self, **arguments)
+
     settings: Settings = dataclasses.field(default_factory=Settings)
     distance: int = 12
     # None: the run's cadence.
@@ -197,6 +225,21 @@ class BivariateBicycleCodeModel:
     def data_bits_per_readout(self, num_patches: int) -> int:
         """Bits the final readout adds: the n data qubits of every patch."""
         return num_patches * self.settings.qubit_count
+
+
+def _card_arguments(
+    distance: Optional[int],
+    commit_rounds_override: Optional[int],
+    buffer_rounds_override: Optional[int],
+) -> dict:
+    """A card's constructor keywords; a distance of None is the card's own."""
+    arguments = {
+        "commit_rounds_override": commit_rounds_override,
+        "buffer_rounds_override": buffer_rounds_override,
+    }
+    if distance is not None:
+        arguments["distance"] = distance
+    return arguments
 
 
 def _check_window_overrides(

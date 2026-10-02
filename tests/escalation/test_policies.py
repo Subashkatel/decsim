@@ -168,7 +168,8 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         operations=[operation], rounds_policy=rounds_policy
     )
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=3, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=3, source=source)
     held = boundary_policies.Held.Settings()
     windows = window_settings.WindowSettings(
         terminal_policy="lookahead", boundary_policy=held

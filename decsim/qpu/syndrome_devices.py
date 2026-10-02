@@ -26,7 +26,9 @@ as their window model source, which answers every model question with
 nothing.
 """
 
+import dataclasses
 import random
+from collections.abc import Mapping
 from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -65,7 +67,6 @@ class CircuitlessSource:
     """
 
     operation_circuit_scope = "none"
-    takes_code_card = True
     # nothing is sampled per shot, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
 
@@ -124,6 +125,20 @@ class TimingOnlyDevice(CircuitlessSource):
     (_round_widths), so every link and every memory the round crosses
     can price it.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The timing-only source has no keys: the card states every width."""
+
+        # the word the yaml and the reports name this row by
+        name = "timing_only"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "TimingOnlyDevice":
+            """A fresh source shaped by the run's card."""
+            del circuit_arguments
+            return TimingOnlyDevice(code)
 
     emits_bit_values = False
 
@@ -197,6 +212,20 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     rounds another operation drew before it, which another component's
     timing decides.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The random-bit source has no keys: the card states every width."""
+
+        # the word the yaml and the reports name this row by
+        name = "syndrome_bits"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "SyndromeBitDevice":
+            """A fresh source shaped by the run's card."""
+            del circuit_arguments
+            return SyndromeBitDevice(code)
 
     emits_bit_values = True
 

@@ -50,13 +50,10 @@ class PauliFrameConfig:
     550 ns loop, one cycle at 250 MHz. Writes to different windows are
     charged in parallel, never queued behind each other.
 
-    Table row (FRAMES, below): pauli_frame.kind names the frame this run
-    commits into; logical_register is the one shipped row, the frame that
-    XORs an observable bitmask per window. clock None is the machine's
-    clock.
+    It builds the frame that XORs an observable bitmask per window. clock
+    None is the machine's clock.
     """
 
-    kind: str = "logical_register"
     write_cycles: int = 0
     clock: Optional[config.Clock] = None
 
@@ -67,21 +64,22 @@ class PauliFrameConfig:
     def from_yaml(
         cls, section: Mapping, clocks: config.ClockSettings
     ) -> "PauliFrameConfig":
-        """The `pauli_frame` section: a kind, and write_cycles on its clock."""
+        """The `pauli_frame` section: its kind's record and write cost."""
         tables.refuse_unknown_keys("pauli_frame", section, _PAULI_FRAME_KEYS)
         tables.refuse_missing_keys(
             "pauli_frame", section, _REQUIRED_PAULI_FRAME_KEYS
         )
         kind = section.get("kind", "logical_register")
-        tables.row(FRAMES, "pauli_frame.kind", kind)
+        record = tables.row(FRAMES, "pauli_frame.kind", kind)
         clock = clocks.clock(section["clock"])
         write_cycles = section["write_cycles"]
-        return cls(kind=kind, write_cycles=write_cycles, clock=clock)
+        return record(write_cycles=write_cycles, clock=clock)
 
-    def resolve(self, engine):
-        """Build the row these settings name, on the run's engine."""
-        row = tables.row(FRAMES, "pauli_frame.kind", self.kind)
-        return row(engine, clock=self.clock, write_cycles=self.write_cycles)
+    def build(self, engine) -> "PauliFrame":
+        """A fresh frame on these settings, on the run's engine."""
+        return PauliFrame(
+            engine, clock=self.clock, write_cycles=self.write_cycles
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -319,8 +317,7 @@ class _FrameState:
     windows_by_stream: dict = dataclasses.field(default_factory=dict)
 
 
-# pauli_frame.kind names one of these rows: the frame a decoder's
-# correction is committed into. Every row takes the engine, the clock and
-# the write cost in cycles of it, and fills the Frame port
+# pauli_frame.kind names one of these records; each builds the frame a
+# decoder's correction is committed into, which fills the Frame port
 # (decsim/ports.py).
-FRAMES = {"logical_register": PauliFrame}
+FRAMES = {"logical_register": PauliFrameConfig}

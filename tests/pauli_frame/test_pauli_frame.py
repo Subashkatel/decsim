@@ -259,12 +259,7 @@ def test_a_free_write_is_accepted_and_needs_no_clock():
 
 
 class CountingFrame(pauli_frame_module.PauliFrame):
-    """A frame row written outside decsim: it counts what it committed.
-
-    Its constructor is the port's, the engine and the write cost in
-    cycles of its clock, which is what the root gives every row of
-    FRAMES.
-    """
+    """A frame written outside decsim: it counts what it committed."""
 
     def __init__(self, engine, *, clock, write_cycles: int) -> None:
         reference = super()
@@ -285,11 +280,20 @@ class CountingFrame(pauli_frame_module.PauliFrame):
         )
 
 
-def test_a_frame_row_written_outside_decsim_runs_from_a_yaml(
-    monkeypatch, tmp_path
-):
-    """One FRAMES row and one pauli_frame.kind is the whole edit."""
-    monkeypatch.setitem(pauli_frame_module.FRAMES, "counting", CountingFrame)
+class CountingFrameConfig(pauli_frame_module.PauliFrameConfig):
+    """The record that builds a CountingFrame."""
+
+    def build(self, engine) -> CountingFrame:
+        return CountingFrame(
+            engine, clock=self.clock, write_cycles=self.write_cycles
+        )
+
+
+def test_a_frame_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
+    """One FRAMES record and one pauli_frame.kind is the whole edit."""
+    monkeypatch.setitem(
+        pauli_frame_module.FRAMES, "counting", CountingFrameConfig
+    )
     section = dict(yaml_configs.MINIMAL_CONFIG["pauli_frame"])
     section["kind"] = "counting"
     config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})

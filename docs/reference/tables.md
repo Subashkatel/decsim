@@ -93,7 +93,7 @@ In `decsim/pauli_frame/pauli_frame.py`. A row of it is named under `pauli_frame.
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `logical_register` | `PauliFrame` in `decsim/pauli_frame/pauli_frame.py` | Keeps every committed correction and charges each write once. |
+| `logical_register` | `PauliFrameConfig` in `decsim/pauli_frame/pauli_frame.py` | The frame's settings: what one write costs. |
 
 ## `FRAMINGS`
 

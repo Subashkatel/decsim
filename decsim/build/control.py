@@ -85,7 +85,7 @@ class Control:
         pauli_frame = None
         if frame is not None:
             clocked_frame = config.with_machine_clock(frame, machine_clock)
-            pauli_frame = clocked_frame.resolve(engine)
+            pauli_frame = clocked_frame.build(engine)
         decision_dispatch = decision_dispatch_module.DecisionDispatch(engine)
         control = cls(
             execution_runtime=execution_runtime,

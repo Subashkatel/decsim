@@ -1217,9 +1217,8 @@ class StrongBackend(Protocol):
 class Frame(Protocol):
     """The Pauli frame, as the decoder output sees it.
 
-    Table row: logical_register (FRAMES,
-    pauli_frame/pauli_frame.py), named by pauli_frame.kind; every row
-    takes the engine, the clock and the write cost in cycles of it.
+    Built by PauliFrameConfig.build (pauli_frame/pauli_frame.py) from the
+    write cost in cycles and the clock it counts on.
     """
 
     def commit_correction(

@@ -39,9 +39,9 @@ def test_every_decoder_and_basis_gets_its_figure(tmp_path):
 
 
 def test_saved_results_are_drawn_by_the_recipe_that_made_them(tmp_path):
-    """The 2026-09-27 stats name relay-bp-1, which today's run.py does not.
+    """The saved run.py imports a module since removed; its figures still draw.
 
-    Their figures are the ones that commit drew, relay-bp-1's among them.
+    The recipe's constants are read from the saved file, never run.
     """
     plot = script_module()
     stats_path = SAVED_RESULTS / "stats.csv"
@@ -54,7 +54,6 @@ def test_saved_results_are_drawn_by_the_recipe_that_made_them(tmp_path):
     drawn = {path.name for path in (tmp_path / "plots").iterdir()}
     saved = {path.name for path in (SAVED_RESULTS / "plots").iterdir()}
     assert drawn == saved
-    assert "relay-bp-1.png" in drawn
 
 
 def write_stats(folder: pathlib.Path) -> None:

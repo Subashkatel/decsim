@@ -805,9 +805,17 @@ def from_yaml(
 
 
 def with_path_latency(
-    links: settings.FabricSettings, path_name: str, latency_ticks: int
+    links: settings.FabricSettings,
+    path_name: str,
+    latency_microseconds: float,
 ) -> settings.FabricSettings:
-    """The card with one path's wire at latency_ticks, the rest as it was."""
+    """The card with one path's wire at a latency, the rest as it was.
+
+    The latency is rounded to whole ticks once, as every card's is
+    (config.microseconds_to_ticks).
+    """
+    config.check_duration("latency_microseconds", latency_microseconds)
+    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     path = getattr(links, path_name)
     channel = dataclasses.replace(
         path.channel, propagation_latency_ticks=latency_ticks

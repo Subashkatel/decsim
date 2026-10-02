@@ -209,9 +209,8 @@ def supplied_settings(
         algorithm=matching, engine=engine
     )
     reference = link_profiles.logical_reference_profile()
-    feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
     links = link_profiles.with_path_latency(
-        reference, "frame_to_controller", feedback_ticks
+        reference, "frame_to_controller", feedback_microseconds
     )
     observation = observation_settings.ObservationSettings(
         trace="chrome",

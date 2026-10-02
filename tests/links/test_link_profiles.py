@@ -825,6 +825,26 @@ def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
     assert paths_outside_the_strong_side(measured) == unchanged
 
 
+def test_a_path_latency_in_microseconds_moves_that_path_alone():
+    reference = link_profiles.logical_reference_profile()
+
+    links = link_profiles.with_path_latency(
+        reference, "frame_to_controller", 0.5
+    )
+
+    changed = links.frame_to_controller.channel
+    assert changed.propagation_latency_ticks == 500_000
+    assert links.controller_to_qpu == reference.controller_to_qpu
+
+
+def test_a_path_latency_that_rounds_to_no_ticks_is_refused():
+    reference = link_profiles.logical_reference_profile()
+    sentence = "latency_microseconds is positive but rounds to zero ticks"
+
+    with pytest.raises(ValueError, match=sentence):
+        link_profiles.with_path_latency(reference, "frame_to_controller", 1e-7)
+
+
 def _cites_nvqlink(source: str) -> bool:
     """Whether one source carries NVQLink's arXiv identifier."""
     found = ARXIV.search(source)

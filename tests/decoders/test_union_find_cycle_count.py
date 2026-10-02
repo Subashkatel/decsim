@@ -32,9 +32,6 @@ PERIOD_MICROSECONDS = 1 / MEGAHERTZ
 CYCLE_TICKS = config.microseconds_to_ticks(PERIOD_MICROSECONDS)
 CLOCK = config.Clock(CYCLE_TICKS)
 WEIGHT_STEP = 0.1
-# Helios's row: three registers between an element's change and the
-# controller's check (Helios_single_FPGA_core.v line 76)
-HELIOS = cycle_count_module.CycleCount(CLOCK, delay_cycles=3)
 # every edge of the twelve-detector graph is this long in half ticks,
 # and both ends of the one between two defects grow
 HAND_GRAPH_TICKS = 22
@@ -124,7 +121,7 @@ def test_an_empty_syndrome_costs_the_quiet_machines_eleven_cycles():
 
     assert evidence.growth_steps == ()
     assert evidence.forest_depth == 0
-    assert HELIOS.cycles(evidence) == 11
+    assert cycle_count_module.HELIOS.cycles(evidence) == 11
 
 
 def test_two_adjacent_defects_cost_sixteen_cycles():
@@ -144,7 +141,7 @@ def test_two_adjacent_defects_cost_sixteen_cycles():
     )
     assert evidence.growth_steps == (step,)
     assert evidence.forest_depth == 1
-    assert HELIOS.cycles(evidence) == 16
+    assert cycle_count_module.HELIOS.cycles(evidence) == 16
 
 
 def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
@@ -163,7 +160,7 @@ def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
     lengths = {edge.length_half_ticks for edge in graph.edges}
     assert lengths == {2}
     assert evidence.forest_depth == 1
-    assert HELIOS.cycles(evidence) == 19
+    assert cycle_count_module.HELIOS.cycles(evidence) == 19
 
 
 def test_a_steps_changes_are_its_fusion_kind_over_its_deepest_flood():
@@ -188,9 +185,9 @@ def test_a_steps_changes_are_its_fusion_kind_over_its_deepest_flood():
     roots_evidence = evidence_with([roots])
     parity_evidence = evidence_with([parity])
 
-    assert HELIOS.cycles(quiet_evidence) == floor
-    assert HELIOS.cycles(roots_evidence) == floor + 4
-    assert HELIOS.cycles(parity_evidence) == floor + 9
+    assert cycle_count_module.HELIOS.cycles(quiet_evidence) == floor
+    assert cycle_count_module.HELIOS.cycles(roots_evidence) == floor + 4
+    assert cycle_count_module.HELIOS.cycles(parity_evidence) == floor + 9
 
 
 def test_a_unit_that_walks_its_edges_pays_its_port_instead_of_its_changes():
@@ -232,7 +229,7 @@ def test_a_decode_with_no_steps_pays_its_setup_and_one_quiet_iteration():
     )
     setup = 1 + 2 * 5 + 3 * 4
     assert laid_out.cycles(evidence) == 1 + 2 + 2 + setup
-    assert HELIOS.cycles(None) == 0
+    assert cycle_count_module.HELIOS.cycles(None) == 0
 
 
 def test_the_count_ends_on_the_edge_of_its_own_clock():
@@ -246,10 +243,10 @@ def test_the_count_ends_on_the_edge_of_its_own_clock():
     )
     evidence = evidence_with([one_step], forest_depth=1)
     no_step = evidence_with([])
-    assert HELIOS.ticks(evidence, 0) == 16 * CYCLE_TICKS
-    assert HELIOS.ticks(evidence, 1) == 17 * CYCLE_TICKS - 1
-    assert HELIOS.ticks(no_step, 1) == 12 * CYCLE_TICKS - 1
-    assert HELIOS.ticks(None, 7) == 0
+    assert cycle_count_module.HELIOS.ticks(evidence, 0) == 16 * CYCLE_TICKS
+    assert cycle_count_module.HELIOS.ticks(evidence, 1) == 17 * CYCLE_TICKS - 1
+    assert cycle_count_module.HELIOS.ticks(no_step, 1) == 12 * CYCLE_TICKS - 1
+    assert cycle_count_module.HELIOS.ticks(None, 7) == 0
 
 
 def test_a_counted_unit_is_held_for_the_counted_cycles():
@@ -261,7 +258,9 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
     cannot say so in advance, as a measured unit cannot.
     """
     engine = engine_module.Engine()
-    settings = union_find.UnionFindDecoder.Settings(cycle_count=HELIOS)
+    settings = union_find.UnionFindDecoder.Settings(
+        cycle_count=cycle_count_module.HELIOS
+    )
     decoder = union_find.UnionFindDecoder(settings=settings)
     timing = staged_decoder.UnitTiming((), (), CLOCK)
     unit = staged_decoder.StagedDecoder(decoder, timing)

@@ -8,7 +8,6 @@ import math
 
 import pytest
 
-import decsim.confidence.complementary as complementary
 import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.escalation.settings as escalation_settings
@@ -25,38 +24,22 @@ def test_switching_reads_both_cycle_costs_on_the_named_clock():
         "switch_cycles": 4,
     }
     settings = escalation_settings.SwitchingSettings.from_yaml(
-        section, clocks, None, None, confidence_signals.confidence_settings
+        section, clocks, None, confidence_signals.confidence_settings
     )
     assert settings.clock.period_ticks == 8000
     assert settings.threshold_cycles == 3
     assert settings.switch_cycles == 4
 
 
-def test_an_unnamed_escalation_clock_uses_the_controller_clock():
+def test_an_unnamed_escalation_clock_is_left_to_the_machine():
     clocks = config.ClockSettings({})
-    controller_clock = config.Clock(123)
     section = {"kind": "switching", "gap_threshold_db": 20.0}
     settings = escalation_settings.SwitchingSettings.from_yaml(
-        section,
-        clocks,
-        None,
-        controller_clock,
-        confidence_signals.confidence_settings,
+        section, clocks, None, confidence_signals.confidence_settings
     )
-    assert settings.clock is controller_clock
+    assert settings.clock is None
     assert settings.threshold_cycles == 0
     assert settings.switch_cycles == 0
-
-
-def test_a_charged_escalation_cost_needs_its_clock():
-    confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
-    with pytest.raises(
-        ValueError, match="charged escalation costs need a clock"
-    ):
-        escalation_settings.SwitchingSettings(
-            confidence=confidence, threshold=threshold, threshold_cycles=1
-        )
 
 
 @pytest.mark.parametrize(
@@ -89,7 +72,7 @@ def test_a_kind_that_keeps_one_decoder_fills_no_switching_slot():
     section = {"kind": "weak_baseline", "threshold_cycles": 0}
 
     switching = escalation_settings.SwitchingSettings.from_yaml(
-        section, clocks, None, None, confidence_signals.confidence_settings
+        section, clocks, None, confidence_signals.confidence_settings
     )
 
     assert switching is None
@@ -101,7 +84,7 @@ def test_a_kind_that_keeps_one_decoder_refuses_the_confidence_keys():
 
     with pytest.raises(ValueError, match="decides on no confidence"):
         escalation_settings.SwitchingSettings.from_yaml(
-            section, clocks, None, None, confidence_signals.confidence_settings
+            section, clocks, None, confidence_signals.confidence_settings
         )
 
 

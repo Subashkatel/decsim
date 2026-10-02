@@ -339,6 +339,15 @@ def test_a_frameless_run_commits_at_the_delivery():
     assert committed == [4]
 
 
+def test_a_charged_verdict_needs_its_clock():
+    engine = engine_module.Engine()
+
+    with pytest.raises(
+        ValueError, match="charged escalation costs need a clock"
+    ):
+        window_commits.WindowVerdict(engine, threshold_cycles=1)
+
+
 @pytest.mark.parametrize("escalates", [False, True])
 def test_threshold_cycles_delay_kept_and_escalated_frame_points(escalates):
     clocks = config.ClockSettings.from_yaml({"decisions": 1.0})

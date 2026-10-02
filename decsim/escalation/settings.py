@@ -100,7 +100,8 @@ class SwitchingSettings:
     The complementary gap's two forced-class solves are two ordinary
     jobs of the weak pool, so weak_decoder.units alone decides whether
     they overlap. clock, threshold_cycles and switch_cycles price the
-    verdict's threshold and switch logic. The experiments layer sets the
+    verdict's threshold and switch logic; clock None is the machine's
+    clock. The experiments layer sets the
     sweep point's threshold (at_sweep_point) and installs the point's
     online threshold source, the one instance every shot of the point
     shares (online_threshold_for, collect.Task.shot_settings).
@@ -124,9 +125,7 @@ class SwitchingSettings:
     online_threshold: Optional[ports.ThresholdSource] = None
 
     def __post_init__(self) -> None:
-        _check_verdict_price(
-            self.clock, self.threshold_cycles, self.switch_cycles
-        )
+        _check_verdict_cycles(self.threshold_cycles, self.switch_cycles)
 
     @classmethod
     def from_yaml(
@@ -134,7 +133,6 @@ class SwitchingSettings:
         section: Mapping,
         clocks: config.ClockSettings,
         base_directory: Optional[pathlib.Path],
-        default_clock: Optional[config.Clock],
         confidence_settings: Callable,
     ) -> Optional["SwitchingSettings"]:
         """The `escalation` section: the switching slot, None if it keeps one.
@@ -147,7 +145,7 @@ class SwitchingSettings:
         confidence package sits above this one.
         """
         kind = escalation_kind(section)
-        clock = default_clock
+        clock = None
         if "clock" in section:
             clock = clocks.clock(section["clock"])
         threshold_cycles = section.get("threshold_cycles", 0)
@@ -155,7 +153,7 @@ class SwitchingSettings:
         confidence_keys = set(section) - set(_TIMING_KEYS)
         if kind != "switching":
             _refuse_confidence_keys(kind, confidence_keys)
-            _check_verdict_price(clock, threshold_cycles, switch_cycles)
+            _check_verdict_cycles(threshold_cycles, switch_cycles)
             return None
         return _switching_settings(
             section,
@@ -202,15 +200,10 @@ def escalation_kind(section: Mapping) -> str:
     return kind
 
 
-def _check_verdict_price(
-    clock: Optional[config.Clock], threshold_cycles, switch_cycles
-) -> None:
-    """The verdict's two costs are cycle counts, on a clock when charged."""
+def _check_verdict_cycles(threshold_cycles, switch_cycles) -> None:
+    """The verdict's two costs are whole cycle counts."""
     config.check_cycles("escalation.threshold_cycles", threshold_cycles)
     config.check_cycles("escalation.switch_cycles", switch_cycles)
-    charged = threshold_cycles + switch_cycles
-    if charged > 0 and clock is None:
-        raise ValueError("charged escalation costs need a clock")
 
 
 def _refuse_confidence_keys(kind: str, confidence_keys: set) -> None:

@@ -15,6 +15,7 @@ from typing import Any, Optional
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
+import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -113,10 +114,13 @@ class Windows:
         results = operation_results.OperationResults()
         courier = window_boundaries.BoundaryCourier()
         committer = window_commits.WindowCommitter(engine)
-        verdict = _verdict(settings.switching, engine)
+        verdict = _verdict(settings.switching, settings.clock, engine)
+        clocked_windows = config.with_machine_clock(
+            settings.windows, settings.clock
+        )
         requester = decode_requests.DecodeRequester(
-            clock=settings.windows.clock,
-            decision_cycles=settings.windows.decision_cycles,
+            clock=clocked_windows.clock,
+            decision_cycles=clocked_windows.decision_cycles,
         )
         confidence_signal, regions, shape, pending, strong_redecode = (
             _switching_side(switching)
@@ -343,19 +347,22 @@ def _gap_join(
 
 def _verdict(
     switching: Optional[escalation_settings.SwitchingSettings],
+    machine_clock: Optional[config.Clock],
     engine: engine_module.Engine,
 ) -> window_commits.WindowVerdict:
     """Whether a decoded window is kept, priced on the switching clock.
 
-    A run with no switching keeps every result at once.
+    A run with no switching keeps every result at once; a switching slot
+    that names no clock prices its verdict on machine_clock.
     """
     if switching is None:
         return window_commits.WindowVerdict(engine)
+    clocked_switching = config.with_machine_clock(switching, machine_clock)
     return window_commits.WindowVerdict(
         engine,
-        clock=switching.clock,
-        threshold_cycles=switching.threshold_cycles,
-        switch_cycles=switching.switch_cycles,
+        clock=clocked_switching.clock,
+        threshold_cycles=clocked_switching.threshold_cycles,
+        switch_cycles=clocked_switching.switch_cycles,
     )
 
 

@@ -731,3 +731,10 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     # W3 commits 10-12 past the strong region 1-9 and, at the default
     # re-read width, reads 7-15: the region's last block and its own six
     assert restart.round_count == 9
+
+
+def test_a_charged_window_decision_needs_its_clock():
+    with pytest.raises(
+        ValueError, match="windows.decision_cycles needs a clock"
+    ):
+        decode_requests.DecodeRequester(decision_cycles=1)

@@ -77,7 +77,8 @@ class MachineSettings:
     Every field has a default, so a Python caller names only what
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
-    prices propagation only.
+    prices propagation only. clock is the machine's clock, the one every
+    part that names none of its own counts its cycles on.
 
     The decode side is three slots, each None when the run has no such
     part: weak_decoder alone decodes every window once on the weak
@@ -88,6 +89,7 @@ class MachineSettings:
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
+    clock: Optional[config.Clock] = None
     qpu: qpu_settings.QpuSettings = qpu_settings.QpuSettings()
     controller: controller_settings.ControllerSettings = (
         controller_settings.ControllerSettings()
@@ -219,7 +221,7 @@ class MachineSettings:
             strong_section, "strong_syndrome_buffer", clocks, buffer_rows
         )
         windows = window_settings.WindowSettings.from_yaml(
-            sections["windows"], clocks, controller.clock
+            sections["windows"], clocks
         )
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
         strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
@@ -231,7 +233,6 @@ class MachineSettings:
             escalation_section,
             clocks,
             escalation_folder,
-            controller.clock,
             confidence_signals.confidence_settings,
         )
         kind = escalation_settings.escalation_kind(escalation_section)
@@ -261,6 +262,7 @@ class MachineSettings:
         )
         return cls(
             clocks=clocks,
+            clock=controller.clock,
             qpu=qpu,
             controller=controller,
             idle_policy=idle_policy,

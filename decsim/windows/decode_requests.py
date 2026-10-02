@@ -417,6 +417,8 @@ class DecodeRequester:
         clock: Optional[config.Clock] = None,
         decision_cycles: int = 0,
     ) -> None:
+        if decision_cycles > 0 and clock is None:
+            raise ValueError("windows.decision_cycles needs a clock")
         self.clock = clock
         self.decision_cycles = decision_cycles
         # the windows whose decision has not ended, by window key

@@ -75,7 +75,8 @@ class WindowSettings:
     Python-built scheme or boundary policy is used as it is; the root's
     defaults are the sliding scheme and Eager shipping. row_settings is
     the scheme row's own Settings, read from the section's keys outside
-    WINDOWS_KEYS, or None for a row that declares none.
+    WINDOWS_KEYS, or None for a row that declares none. clock None is
+    the machine's clock.
     """
 
     clock: Optional[config.Clock] = None
@@ -93,8 +94,6 @@ class WindowSettings:
 
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
-        if self.decision_cycles > 0 and self.clock is None:
-            raise ValueError("windows.decision_cycles needs a clock")
         _check_window_rounds("windows.commit_rounds", self.commit_rounds, 1)
         _check_window_rounds("windows.buffer_rounds", self.buffer_rounds, 0)
 
@@ -103,7 +102,6 @@ class WindowSettings:
         cls,
         section: Mapping,
         clocks: config.ClockSettings,
-        default_clock: Optional[config.Clock] = None,
     ) -> "WindowSettings":
         """The `windows` section: a kind of the table, two sizes, the wire."""
         _check_required_keys(section)
@@ -121,7 +119,7 @@ class WindowSettings:
         boundaries = section.get("boundaries")
         if boundaries is not None:
             tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
-        clock = default_clock
+        clock = None
         if "clock" in section:
             clock = clocks.clock(section["clock"])
         decision_cycles = section.get("decision_cycles", 0)

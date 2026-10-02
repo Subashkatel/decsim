@@ -131,13 +131,6 @@ def test_the_smallest_whole_window_size_is_accepted():
     assert (settings.commit_rounds, settings.buffer_rounds) == (1, 0)
 
 
-def test_a_charged_window_decision_needs_its_clock():
-    with pytest.raises(
-        ValueError, match="windows.decision_cycles needs a clock"
-    ):
-        window_settings.WindowSettings(decision_cycles=1)
-
-
 class _SteppedScheme(sliding_scheme.SlidingWindowScheme):
     """A sliding scheme with one key of its own, for the section's split."""
 

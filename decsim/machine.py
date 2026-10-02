@@ -176,7 +176,7 @@ class Machine:
             settings, engine, plan, burst_detector, links, switching
         )
         decoders = decoders_part.Decoders.build(
-            settings.decoder_manager, engine, pool
+            settings.decoder_manager, settings.clock, engine, pool
         )
         return cls.assemble(
             settings,

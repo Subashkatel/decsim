@@ -13,6 +13,7 @@ import pytest
 import decsim.build.escalation as escalation_build
 import decsim.burst_detectors.event_count.detector as event_count
 import decsim.confidence.complementary as complementary
+import decsim.config as config
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
@@ -20,6 +21,9 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.settings as machine_settings
+from decsim.burst_detectors.masked_regional_cusum import (
+    detector as masked_regional_cusum,
+)
 
 
 def _switching(**changes) -> escalation_settings.SwitchingSettings:
@@ -34,6 +38,12 @@ def _switching(**changes) -> escalation_settings.SwitchingSettings:
 def _weak() -> decoder_settings.DecoderPoolSettings:
     matching = mwpm.PyMatchingDecoder.Settings()
     return decoder_settings.DecoderPoolSettings(algorithm=matching)
+
+
+def _plan_that_scores_nothing() -> types.SimpleNamespace:
+    """A plan that scores no operation calibrates a detector on nothing."""
+    run_plan = types.SimpleNamespace(resolved_operations=())
+    return types.SimpleNamespace(run_plan=run_plan, planned_operations=())
 
 
 def test_a_run_with_no_switching_builds_no_switching_part():
@@ -138,14 +148,51 @@ def test_the_switching_slots_detector_is_the_one_built():
     settings = machine_settings.MachineSettings(
         weak_decoder=weak, strong_decoder=weak, switching=switching
     )
-    # a plan that scores no operation calibrates the detector on nothing
-    run_plan = types.SimpleNamespace(resolved_operations=())
-    plan = types.SimpleNamespace(run_plan=run_plan, planned_operations=())
+    plan = _plan_that_scores_nothing()
     engine = engine_module.Engine()
 
     built = escalation_build.build_burst_detector(settings, engine, plan)
 
     assert isinstance(built, event_count.EventCountBurstDetector)
+
+
+def test_a_count_that_names_no_clock_counts_on_the_machines():
+    machine_clock = config.Clock(4000)
+    detector = event_count.EventCountBurstDetector.Settings(cycles_per_round=1)
+    switching = _switching(burst_detector=detector)
+    weak = _weak()
+    settings = machine_settings.MachineSettings(
+        clock=machine_clock,
+        weak_decoder=weak,
+        strong_decoder=weak,
+        switching=switching,
+    )
+    plan = _plan_that_scores_nothing()
+    engine = engine_module.Engine()
+
+    built = escalation_build.build_burst_detector(settings, engine, plan)
+
+    assert built.settings.clock == machine_clock
+
+
+def test_a_chart_bank_that_names_no_clock_stays_unpriced():
+    """With no clock the bank publishes a verdict as its round is formed."""
+    detector = masked_regional_cusum.MaskedRegionalCusumBurstDetector.Settings()
+    switching = _switching(burst_detector=detector)
+    weak = _weak()
+    machine_clock = config.Clock(4000)
+    settings = machine_settings.MachineSettings(
+        clock=machine_clock,
+        weak_decoder=weak,
+        strong_decoder=weak,
+        switching=switching,
+    )
+    plan = _plan_that_scores_nothing()
+    engine = engine_module.Engine()
+
+    built = escalation_build.build_burst_detector(settings, engine, plan)
+
+    assert built.settings.clock is None
 
 
 def test_a_run_with_no_switching_builds_no_detector():

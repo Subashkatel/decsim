@@ -11,6 +11,7 @@ import dataclasses
 from typing import Optional
 
 import decsim.build.plan as plan_build
+import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_pool as decoder_pool_module
@@ -66,21 +67,26 @@ class Decoders:
     def build(
         cls,
         manager_settings: decoder_settings.DecoderManagerSettings,
+        machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         pool: DecoderPool,
     ) -> "Decoders":
         """Each manager over its pool, bound to its tier's unit.
 
-        A switching run's policy is bound by the switching part.
+        A manager card that names no clock dispatches on machine_clock. A
+        switching run's policy is bound by the switching part.
         """
+        clocked_manager = config.with_machine_clock(
+            manager_settings, machine_clock
+        )
         strong_requests = strong_requests_module.StrongRequests()
-        decoder_manager = _decoder_manager(manager_settings, engine, pool.chip)
+        decoder_manager = _decoder_manager(clocked_manager, engine, pool.chip)
         decoder_manager.decoder = pool.active
         decoder_manager.strong_requests = strong_requests
         strong_decoder_manager = None
         if pool.host is not None:
             strong_decoder_manager = _decoder_manager(
-                manager_settings, engine, pool.host
+                clocked_manager, engine, pool.host
             )
             strong_decoder_manager.decoder = pool.strong
             strong_decoder_manager.strong_requests = strong_requests
@@ -143,7 +149,7 @@ def build_decoder_unit(
         _check_serves_the_confidence(
             algorithm, algorithm_settings.name, tier, signal, signal_name
         )
-    return _staged_unit(tier_settings, algorithm, formation)
+    return _staged_unit(tier_settings, algorithm, formation, settings.clock)
 
 
 def build_decoder_pool(
@@ -312,33 +318,38 @@ def _staged_unit(
     tier_settings: decoder_settings.DecoderPoolSettings,
     algorithm,
     formation: Optional[detection_events_module.TierFormation],
+    machine_clock: Optional[config.Clock],
 ) -> staged_decoder.StagedDecoder:
     """The algorithm between its stages, on the tier's engine clock.
 
     This tier's event-detection logic first when the rounds reach it raw,
     then the fetch stage, then the algorithm, then the release stage,
-    each stage priced once a job and once a round.
+    each stage priced once a job and once a round. An engine card that
+    names no clock counts on machine_clock.
     """
+    clocked_engine = config.with_machine_clock(
+        tier_settings.engine, machine_clock
+    )
     before = []
     formation_stage = _formation_stage(formation)
     if formation_stage is not None:
         before.append(formation_stage)
     fetch = staged_decoder.MemoryFetchStage(
         "fetch",
-        cycles_per_job=tier_settings.engine.fetch_cycles_per_job,
-        cycles_per_round=tier_settings.engine.fetch_cycles_per_round,
+        cycles_per_job=clocked_engine.fetch_cycles_per_job,
+        cycles_per_round=clocked_engine.fetch_cycles_per_round,
         word_bits=tier_settings.unit_memory.word_bits,
     )
     before.append(fetch)
     release = staged_decoder.DecoderStage(
         "release",
-        cycles_per_job=tier_settings.engine.release_cycles_per_job,
-        cycles_per_round=tier_settings.engine.release_cycles_per_round,
+        cycles_per_job=clocked_engine.release_cycles_per_job,
+        cycles_per_round=clocked_engine.release_cycles_per_round,
     )
     timing = staged_decoder.UnitTiming(
         before=tuple(before),
         after=(release,),
-        clock=tier_settings.engine.clock,
+        clock=clocked_engine.clock,
     )
     return staged_decoder.StagedDecoder(algorithm, timing)
 

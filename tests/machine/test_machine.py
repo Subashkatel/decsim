@@ -409,7 +409,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings, engine, plan, burst_detector, links, switching
     )
     decoders = decoders_part.Decoders.build(
-        settings.decoder_manager, engine, pool
+        settings.decoder_manager, settings.clock, engine, pool
     )
     sender = readout.syndrome_round_sender
     unbound = "SyndromeRoundSender.windows was read before it was bound"

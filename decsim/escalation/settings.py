@@ -121,8 +121,8 @@ class SwitchingSettings:
     # whose build(engine) returns the shape
     strong_window: Any = strong_window_shapes.RedoWindow.Settings()
     # the burst detector row's Settings record, opaque here: the record
-    # whose build(engine, circuits, round_period_microseconds) returns
-    # the detector; None watches for no burst
+    # whose build(engine, circuits, round_period_microseconds,
+    # machine_clock) returns the detector; None watches for no burst
     burst_detector: Any = None
     # the sweep point's live online source, shared by every shot of the
     # point and installed per shot by the experiments layer

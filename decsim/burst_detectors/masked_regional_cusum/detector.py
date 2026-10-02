@@ -125,8 +125,14 @@ class MaskedRegionalCusumBurstDetector:
             engine: engine_module.Engine,
             circuits: Mapping,
             round_period_microseconds: float,
+            machine_clock: Optional[config.Clock],
         ) -> "MaskedRegionalCusumBurstDetector":
-            """The chart banks, calibrated from each operation's circuit."""
+            """The chart banks, calibrated from each operation's circuit.
+
+            A bank with no clock is unpriced, its verdict published as
+            its round is formed, so the machine's clock is not read.
+            """
+            del machine_clock
             return MaskedRegionalCusumBurstDetector(
                 self, engine, circuits, round_period_microseconds
             )

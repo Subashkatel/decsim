@@ -137,7 +137,8 @@ def build_burst_detector(
 
     It scores detection events, so every operation it scores brings the
     circuit they are formed from, and it is calibrated from that
-    circuit, its round count and the round period.
+    circuit, its round count and the round period. The row reads the
+    machine's clock when its own record names none.
     """
     if settings.switching is None:
         return None
@@ -146,7 +147,7 @@ def build_burst_detector(
         return None
     circuits = _counted_circuits(plan)
     round_period = settings.qpu.round_period_microseconds
-    return record.build(engine, circuits, round_period)
+    return record.build(engine, circuits, round_period, settings.clock)
 
 
 def _threshold_source(settings: escalation_settings.SwitchingSettings):

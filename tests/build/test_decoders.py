@@ -140,6 +140,21 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     assert unit.decoder.weight_step == 0.25
 
 
+def test_an_engine_that_names_no_clock_counts_on_the_machines():
+    machine_clock = config.Clock(4000)
+    engine = decoder_settings.EngineSettings()
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
+    settings = _settings(weak=weak)
+    settings = dataclasses.replace(settings, clock=machine_clock)
+
+    unit = decoder_build.build_decoder_unit(settings, "weak", None, None)
+
+    assert unit.timing.clock == machine_clock
+
+
 def test_a_tier_whose_slot_is_empty_builds_none():
     settings = _settings()
 
@@ -316,3 +331,22 @@ def test_each_managers_scheduler_is_seeded_on_its_own_path():
     assert len(chip_scheduler.reserved_seeds) == 1
     assert len(host_scheduler.reserved_seeds) == 1
     assert chip_scheduler.reserved_seeds != host_scheduler.reserved_seeds
+
+
+def test_a_manager_that_names_no_clock_dispatches_on_the_machines():
+    """A dispatch cost on no clock of its own is charged on the machine's."""
+    machine_clock = config.Clock(4000)
+    declared = declared_run.weak_only_run()
+    manager_settings = decoder_settings.DecoderManagerSettings(
+        dispatch_cycles=1
+    )
+    settings = dataclasses.replace(
+        declared.settings,
+        clock=machine_clock,
+        decoder_manager=manager_settings,
+    )
+
+    machine = declared_run.run_machine(settings)
+
+    dispatch_cost = machine.decoders.decoder_manager.service.dispatch_cost
+    assert dispatch_cost.clock == machine_clock

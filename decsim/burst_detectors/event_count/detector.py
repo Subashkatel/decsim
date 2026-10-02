@@ -119,10 +119,15 @@ class EventCountBurstDetector:
             engine: engine_module.Engine,
             circuits: Mapping,
             round_period_microseconds: float,
+            machine_clock: Optional[config.Clock],
         ) -> "EventCountBurstDetector":
-            """The detector, calibrated from each scored operation's circuit."""
+            """The detector, calibrated from each scored operation's circuit.
+
+            A count that names no clock counts on machine_clock.
+            """
+            clocked = config.with_machine_clock(self, machine_clock)
             return EventCountBurstDetector(
-                self, engine, circuits, round_period_microseconds
+                clocked, engine, circuits, round_period_microseconds
             )
 
     def __init__(

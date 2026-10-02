@@ -242,3 +242,29 @@ def _check_at_least_one_cycle(cycles_per_access: int) -> None:
     raise ValueError(
         "ported_syndrome_buffer.cycles_per_access must be at least one cycle"
     )
+
+
+# The sky130 catalogue's pseudo dual port byte FIFO (VLSIDA
+# sky130_sram_macros at 965df150, sky130_sram_1kbyte_1r1w_8x1024_8.py),
+# taking a word a clock with no added latency as Helios's fall-through
+# FIFO does (design/generics/fifo_fwft.v lines 95, 105 and 115). These
+# are the record's defaults.
+SKY130_BYTE_FIFO = PortedSyndromeBufferSettings(
+    read_ports=1,  # num_r_ports, line 15
+    write_ports=1,  # num_w_ports, line 16
+    read_write_ports=0,  # num_rw_ports, line 14
+    word_bits=8,  # word_size, line 6
+    cycles_per_access=1,
+    access_latency_cycles=0,
+)
+# AFS's on-chip memory: four cycles to read 32 bits (2001.06598 lines
+# 530-531), an occupancy of the port. AFS states no port count, so the
+# ports are the byte FIFO's, an estimate.
+AFS_WORD_MEMORY = PortedSyndromeBufferSettings(
+    read_ports=1,  # estimate
+    write_ports=1,  # estimate
+    read_write_ports=0,  # estimate
+    word_bits=32,  # line 531
+    cycles_per_access=4,  # line 531
+    access_latency_cycles=0,
+)

@@ -212,3 +212,11 @@ def test_workers_on_the_device_path_are_refused():
         "strong_decoder.workers is the host path's; the device path "
         "decodes on its one dispatcher"
     )
+
+
+def test_a_record_with_no_measured_card_is_refused_when_it_is_made():
+    """Not as a KeyError when the decoder is built."""
+    sentence = "device 'a100' with path 'device' has no card in dispatch_steps"
+
+    with pytest.raises(ValueError, match=sentence):
+        dispatch_steps.DispatchStepsSettings(device="a100", path="device")

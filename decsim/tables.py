@@ -10,7 +10,8 @@ caller's own object first and its table second
 
 A row's own yaml keys are split off its section here too, so every
 table hands a row its keys the same way, and every section refuses a key
-it does not declare, or a required key it lacks, with the same sentence.
+it does not declare, or a required key it lacks, with the same sentence;
+a record a section's values build refuses a value by its key's path.
 
 This module holds nothing else, so a settings module can reach the
 lookup without importing the root that aggregates the sections.
@@ -62,6 +63,18 @@ def row_settings(
         if key in section:
             own_section[key] = section[key]
     return settings_class.from_yaml(own_section, *context)
+
+
+def section_record(section_name: str, record_class, values: Mapping):
+    """The record of a section's values, its refusal led by the section.
+
+    A record refuses a value by its field's name, which is the section's
+    key, so the section's name before it is the key's whole yaml path.
+    """
+    try:
+        return record_class(**values)
+    except ValueError as refusal:
+        raise ValueError(f"{section_name}.{refusal}") from None
 
 
 def row_keys(row_class) -> tuple:

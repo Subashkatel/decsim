@@ -290,9 +290,9 @@ def test_a_section_with_no_keys_keeps_the_short_beam_profile():
         ("no_revisit_detectors", None, "must be true or false"),
         ("merge_errors", 1, "must be true or false"),
         ("detector_order_method", "random", "is not a row of its table"),
-        ("detector_order_seed", -1, "must be null or a whole number from 0"),
-        ("detector_order_seed", 1.5, "must be null or a whole number from 0"),
-        ("detector_order_seed", True, "must be null or a whole number from 0"),
+        ("detector_order_seed", -1, "must be None or a whole number from 0"),
+        ("detector_order_seed", 1.5, "must be None or a whole number from 0"),
+        ("detector_order_seed", True, "must be None or a whole number from 0"),
         ("detector_order_seed", ONE_PAST_UINT64, "to 18446744073709551615"),
     ],
 )

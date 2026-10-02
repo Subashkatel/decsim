@@ -67,6 +67,19 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         # the word the yaml and the reports name this row by
         name = "relay_bp"
 
+        def __post_init__(self) -> None:
+            """Every value checked, each real number held as a float."""
+            for key, (unit, minimum) in _COUNT_KEYS.items():
+                value = getattr(self, key)
+                config.check_whole_count(key, value, unit, minimum)
+            for key in _REAL_KEYS:
+                _hold_as_float(self, key)
+            if self.alpha is not None:
+                _hold_as_float(self, "alpha")
+            interval = _ordered_interval(self.gamma_interval)
+            object.__setattr__(self, "gamma_interval", interval)
+            tables.row(strong_backend.BASIS_DECODES, "bases", self.bases)
+
         def build(self) -> "RelayBeliefPropagationDecoder":
             """A fresh decoder of these settings."""
             return RelayBeliefPropagationDecoder(settings=self)
@@ -78,31 +91,13 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
             clocks: config.ClockSettings,
             section_name: str,
         ) -> "RelayBeliefPropagationDecoder.Settings":
-            """Every key, checked where it enters; absent is the default.
+            """Every key the section writes; absent is the default.
 
             section_name is the tier section the row sits in, which a
             refusal names.
             """
             del clocks
-            alpha = _alpha(section, section_name)
-            scaling_key = "alpha_iteration_scaling_factor"
-            scaling = _real(section, section_name, scaling_key)
-            gamma0 = _real(section, section_name, "gamma0")
-            gamma_interval = _gamma_interval(section, section_name)
-            counts = config.whole_counts(
-                section, section_name, _COUNT_KEYS, _DEFAULTS
-            )
-            bases = section.get("bases", cls.bases)
-            bases_key = f"{section_name}.bases"
-            tables.row(strong_backend.BASIS_DECODES, bases_key, bases)
-            return cls(
-                alpha=alpha,
-                alpha_iteration_scaling_factor=scaling,
-                gamma0=gamma0,
-                gamma_interval=gamma_interval,
-                bases=bases,
-                **counts,
-            )
+            return tables.section_record(section_name, cls, section)
 
     def __init__(
         self,
@@ -172,9 +167,6 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         return backend_outcome.window_decode_of(outcome, fault_count)
 
 
-# the value a key the section leaves out takes
-_DEFAULTS = RelayBeliefPropagationDecoder.Settings()
-
 # each whole-number key, the unit its refusal names and its least value.
 # A first leg of zero iterations is refused: relay-bp runs its first leg
 # for pre_iter iterations and keeps the previous call's decoding when
@@ -187,39 +179,30 @@ _COUNT_KEYS = {
     "converged_solution_count": ("solutions", 1),
 }
 
-
-def _alpha(section: Mapping, section_name: str) -> Optional[float]:
-    """alpha, or None when the section leaves it null or out."""
-    alpha = section.get("alpha")
-    if alpha is None:
-        return None
-    return _real(section, section_name, "alpha")
+# the keys that are one finite real number each; alpha may also be None
+_REAL_KEYS = ("alpha_iteration_scaling_factor", "gamma0")
 
 
-def _real(section: Mapping, section_name: str, key: str) -> float:
-    """A finite real number; a boolean or a string is refused."""
-    default = getattr(_DEFAULTS, key)
-    value = section.get(key, default)
-    if _is_finite_number(value):
-        return float(value)
-    raise ValueError(
-        f"{section_name}.{key} must be a finite real number (got {value!r})"
-    )
+def _hold_as_float(settings, key: str) -> None:
+    """A finite real number, held as a float; a flag or a text is refused."""
+    value = getattr(settings, key)
+    if not _is_finite_number(value):
+        raise ValueError(f"{key} must be a finite real number (got {value!r})")
+    object.__setattr__(settings, key, float(value))
 
 
-def _gamma_interval(section: Mapping, section_name: str) -> tuple:
-    """[low, high], two finite real numbers, low below high.
+def _ordered_interval(interval) -> tuple:
+    """(low, high), two finite real numbers, low below high, as floats.
 
     relay-bp draws each later leg's memory strengths uniformly from the
     interval and panics on an empty one (rand's Uniform::new, low >= high).
     """
-    interval = section.get("gamma_interval", _DEFAULTS.gamma_interval)
     if _is_ordered_pair(interval):
         low, high = interval
         return (float(low), float(high))
     raise ValueError(
-        f"{section_name}.gamma_interval must be [low, high], two finite "
-        f"real numbers with low below high (got {interval!r})"
+        "gamma_interval must be [low, high], two finite real numbers with "
+        f"low below high (got {interval!r})"
     )
 
 

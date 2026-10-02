@@ -145,6 +145,13 @@ class ExtraClusterGap:
         # the word the yaml and the reports name this row by
         name = "extra_cluster_gap"
 
+        def __post_init__(self) -> None:
+            if self.walk_microseconds is None:
+                return
+            config.check_microseconds(
+                "walk_microseconds", self.walk_microseconds
+            )
+
         def build(self, weak_algorithm, threshold_nats) -> "ExtraClusterGap":
             """The row grown to the threshold, on the weak row's unit.
 

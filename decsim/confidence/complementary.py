@@ -66,6 +66,13 @@ class ComplementaryGap:
         # the word the yaml and the reports name this row by
         name = "complementary_gap"
 
+        def __post_init__(self) -> None:
+            if self.walk_microseconds is None:
+                return
+            config.check_microseconds(
+                "walk_microseconds", self.walk_microseconds
+            )
+
         def build(self, weak_algorithm, threshold_nats) -> "ComplementaryGap":
             """The row priced by the card; the weak row says nothing to it."""
             del weak_algorithm

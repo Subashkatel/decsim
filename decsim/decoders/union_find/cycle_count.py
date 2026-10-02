@@ -25,6 +25,7 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.records.decoder_evidence as evidence_records
+import decsim.tables as tables
 
 CYCLE_FIELDS = (
     "setup_cycles",
@@ -135,19 +136,12 @@ class CycleCount:
 
         section_name is the tier section the block sits in. Every
         refusal of the block leads with cycle_count, so the tier's name
-        before it is the key's whole yaml path, as the engine card's
-        refusals give it (decoders/settings.py _engine_stage_cycles).
+        before it is the key's whole yaml path.
         """
         _check_keys(section, section_name)
-        clock = clocks.clock(section["clock"])
-        fields = {}
-        for name in CYCLE_FIELDS:
-            fields[name] = section.get(name, 0)
-        cycles_per_edge = section.get("cycles_per_edge", 0.0)
-        try:
-            return cls(clock, cycles_per_edge=cycles_per_edge, **fields)
-        except ValueError as refusal:
-            raise ValueError(f"{section_name}.{refusal}") from None
+        values = dict(section)
+        values["clock"] = clocks.clock(section["clock"])
+        return tables.section_record(section_name, cls, values)
 
     def cycles(
         self, evidence: Optional[evidence_records.UnionFindHardEvidence]

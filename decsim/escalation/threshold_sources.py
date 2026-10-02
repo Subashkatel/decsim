@@ -100,6 +100,9 @@ class FixedThreshold:
 
         threshold_nats: float
 
+        def __post_init__(self) -> None:
+            _check_threshold_nats(self.threshold_nats)
+
         def at_sweep_point(
             self, resolved: Mapping
         ) -> "FixedThreshold.Settings":
@@ -168,6 +171,11 @@ class TableThreshold(FixedThreshold):
         base_directory: Optional[pathlib.Path] = dataclasses.field(
             compare=False, default=None
         )
+
+        def __post_init__(self) -> None:
+            if self.threshold_nats is None:
+                return
+            _check_threshold_nats(self.threshold_nats)
 
         def at_sweep_point(
             self, resolved: Mapping
@@ -567,6 +575,8 @@ class OnlineThreshold:
         max_escalation_rate: float = 0.30
 
         def __post_init__(self) -> None:
+            _check_threshold_nats(self.threshold_nats)
+            _check_online_numbers(self)
             _check_online_steps(self)
             _check_online_rates(self)
 
@@ -739,6 +749,28 @@ _ONLINE_DEFAULTS = {
     "min_escalation_rate": 1e-5,
     "max_escalation_rate": 0.30,
 }
+
+
+def _check_threshold_nats(threshold_nats: float) -> None:
+    """A keep threshold in nats is finite and not negative, as in decibels."""
+    is_finite = config.is_number(threshold_nats) and math.isfinite(
+        threshold_nats
+    )
+    if is_finite and threshold_nats >= 0:
+        return
+    raise ValueError(
+        "threshold_nats must be finite and not negative "
+        f"(got {threshold_nats!r})"
+    )
+
+
+def _check_online_numbers(online) -> None:
+    """Every knob of the online card is a finite number."""
+    for key in ONLINE_KEYS:
+        value = getattr(online, key)
+        is_finite = config.is_number(value) and math.isfinite(value)
+        if not is_finite:
+            raise ValueError(f"{key} must be a finite number (got {value!r})")
 
 
 def _check_online_steps(online) -> None:

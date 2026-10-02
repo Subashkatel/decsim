@@ -338,3 +338,12 @@ def test_rows_of_one_kind_and_settings_share_a_models_backend():
 
     assert later_shot_row.compiled_for(faults, model) is graphs
     assert keyless_row.compiled_for(faults, model) is not graphs
+
+
+@pytest.mark.parametrize("microseconds", [-1.0, math.inf, True])
+def test_a_preset_latency_that_is_no_duration_is_refused(microseconds):
+    settings = adapter.PyMatchingDecoder.Settings
+    sentence = "preset_latency_microseconds must be a finite nonnegative"
+
+    with pytest.raises(ValueError, match=sentence):
+        settings(preset_latency_microseconds=microseconds)

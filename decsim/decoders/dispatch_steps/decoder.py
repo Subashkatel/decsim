@@ -36,6 +36,7 @@ import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.tables as tables
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )
@@ -62,6 +63,11 @@ class DispatchStepsSettings:
     # the word the yaml and the reports name this row by
     name = "dispatch_steps"
 
+    def __post_init__(self) -> None:
+        _check_path(self.device, self.path)
+        config.check_whole_count("workers", self.workers, "graph workers")
+        _check_workers(self.path, self.workers)
+
     def build(self) -> "DispatchStepsDecoder":
         """A fresh decoder of these settings."""
         return DispatchStepsDecoder(settings=self)
@@ -73,16 +79,13 @@ class DispatchStepsSettings:
         clocks: config.ClockSettings,
         section_name: str,
     ) -> "DispatchStepsSettings":
-        """The three keys, checked where they enter against the cards."""
+        """The three keys the section writes; absent is the default.
+
+        section_name is the tier section the row sits in, which a refusal
+        names.
+        """
         del clocks
-        device = section.get("device", "gh200")
-        path = section.get("path", "device")
-        _check_path(section_name, device, path)
-        workers = config.whole_count(
-            section, section_name, "workers", 1, "graph workers"
-        )
-        _check_workers(section_name, path, workers)
-        return cls(device=device, path=path, workers=workers)
+        return tables.section_record(section_name, cls, section)
 
 
 class DispatchSteps:
@@ -195,23 +198,23 @@ def _kernel_rows(device: str) -> tuple:
     return tuple(rows)
 
 
-def _check_path(section_name: str, device: str, path: str) -> None:
+def _check_path(device: str, path: str) -> None:
     """A device and path with a measured card; the A100 has no device path."""
     if (device, path) in measurements.CARDS:
         return
     measured = sorted(measurements.CARDS)
     raise ValueError(
-        f"{section_name}.device {device!r} with path {path!r} has no card in "
+        f"device {device!r} with path {path!r} has no card in "
         f"dispatch_steps; the measured ones are {measured} (the device "
         "path's graph fire is compiled for compute capability 9.0 and up, "
         "dispatch_kernel.cu v0.15.2 line 491)"
     )
 
 
-def _check_workers(section_name: str, path: str, workers: int) -> None:
+def _check_workers(path: str, workers: int) -> None:
     """Workers other than the one are named only on the host path."""
     if path == "device" and workers != 1:
         raise ValueError(
-            f"{section_name}.workers is the host path's; the device path "
-            "decodes on its one dispatcher"
+            "workers is the host path's; the device path decodes on its one "
+            "dispatcher"
         )

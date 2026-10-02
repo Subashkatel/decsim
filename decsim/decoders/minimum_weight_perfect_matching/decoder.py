@@ -20,6 +20,7 @@ import numpy
 import pymatching
 import scipy.sparse
 
+import decsim.config as config
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
@@ -67,6 +68,9 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         """
 
         preset_latency_microseconds: Optional[float] = None
+
+        def __post_init__(self) -> None:
+            _check_preset_latency(self.preset_latency_microseconds)
 
         @property
         def name(self):
@@ -211,6 +215,19 @@ class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     def _weights_for(self, faults):
         fault_count = len(faults.priors)
         return numpy.ones(fault_count)
+
+
+def _check_preset_latency(microseconds) -> None:
+    """A preset core latency is a finite number at least zero, or none."""
+    if microseconds is None:
+        return
+    is_finite = config.is_number(microseconds) and math.isfinite(microseconds)
+    if is_finite and microseconds >= 0:
+        return
+    raise ValueError(
+        "preset_latency_microseconds must be a finite nonnegative number "
+        f"of microseconds, or None (got {microseconds!r})"
+    )
 
 
 def _no_matching_decode(faults) -> decoding_records.WindowDecode:

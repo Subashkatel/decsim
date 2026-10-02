@@ -522,3 +522,17 @@ def test_a_unit_memory_word_under_an_in_place_input_is_refused():
         decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+def test_an_engine_stage_of_negative_cycles_is_refused_by_its_record():
+    sentence = "engine.fetch_cycles_per_round must not be negative"
+
+    with pytest.raises(ValueError, match=sentence):
+        decoder_settings.EngineSettings(fetch_cycles_per_round=-1)
+
+
+def test_a_unit_memory_of_no_bits_is_refused_by_its_record():
+    sentence = "unit_memory.bits must be at least one bit"
+
+    with pytest.raises(ValueError, match=sentence):
+        decoder_settings.UnitMemorySettings(bits=0)

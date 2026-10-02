@@ -9,6 +9,7 @@ its outer loop raises the target on one bad audit and relaxes it on a
 rule-of-three clean quota.
 """
 
+import math
 import random
 import types
 
@@ -299,3 +300,27 @@ def _observe_each(tracker, gaps: list) -> None:
     """Feed the tracker one gap per window, so a test body holds no loop."""
     for gap in gaps:
         tracker.observe(gap)
+
+
+@pytest.mark.parametrize("threshold_nats", [float("nan"), math.inf, -1.0])
+def test_a_threshold_that_is_no_nonnegative_number_is_refused(threshold_nats):
+    """Every gap is a weight difference at least zero (Sec. III A)."""
+    sentence = "threshold_nats must be finite and not negative"
+    fixed = threshold_sources.FixedThreshold.Settings
+    table = threshold_sources.TableThreshold.Settings
+    online = threshold_sources.OnlineThreshold.Settings
+
+    with pytest.raises(ValueError, match=sentence):
+        fixed(threshold_nats)
+    with pytest.raises(ValueError, match=sentence):
+        table(table="calibration.csv", threshold_nats=threshold_nats)
+    with pytest.raises(ValueError, match=sentence):
+        online(threshold_nats)
+
+
+def test_an_online_step_that_is_not_a_number_is_refused():
+    online = threshold_sources.OnlineThreshold.Settings
+    sentence = "step_db must be a finite number"
+
+    with pytest.raises(ValueError, match=sentence):
+        online(1.0, step_db=float("nan"))

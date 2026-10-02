@@ -165,3 +165,11 @@ def _noiseless_detector(settings):
     circuits = {1: (circuit, burst_rounds.ROUNDS)}
     engine = engine_module.Engine()
     return event_count.EventCountBurstDetector(settings, engine, circuits, 1.0)
+
+
+def test_the_record_refuses_a_window_of_no_rounds():
+    settings = event_count.EventCountBurstDetector.Settings
+    sentence = "patch_window_rounds must be a whole number of rounds"
+
+    with pytest.raises(ValueError, match=sentence):
+        settings(patch_window_rounds=0)

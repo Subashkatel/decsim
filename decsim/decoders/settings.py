@@ -8,8 +8,6 @@ when a window is decoded again by the strong tier.
 """
 
 import dataclasses
-import math
-import numbers
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -145,20 +143,22 @@ class UnitMemorySettings:
     bits: Optional[int] = None
     word_bits: Optional[int] = None
 
+    def __post_init__(self) -> None:
+        config.check_capacity_bits("unit_memory.bits", self.bits)
+        _check_word_bits("unit_memory.word_bits", self.word_bits)
+
     @classmethod
     def from_yaml(
         cls, section: Mapping, section_name: str
     ) -> "UnitMemorySettings":
-        """The unit_memory block: one capacity, checked where it enters."""
+        """The unit_memory block's two keys."""
         block_name = f"{section_name}.unit_memory"
         tables.refuse_unknown_keys(block_name, section, UNIT_MEMORY_KEYS)
-        bits = section.get("bits")
-        key = f"{section_name}.unit_memory.bits"
-        config.check_capacity_bits(key, bits)
-        word_bits = section.get("word_bits")
-        word_key = f"{section_name}.unit_memory.word_bits"
-        _check_word_bits(word_key, word_bits)
-        return cls(bits=bits, word_bits=word_bits)
+        values = {
+            "bits": section.get("bits"),
+            "word_bits": section.get("word_bits"),
+        }
+        return tables.section_record(section_name, cls, values)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -175,6 +175,11 @@ class EngineSettings:
     fetch_cycles_per_job: int = 0
     release_cycles_per_job: int = 1
     release_cycles_per_round: int = 0
+
+    def __post_init__(self) -> None:
+        for key in ENGINE_CYCLE_KEYS:
+            cycles = getattr(self, key)
+            config.check_cycles(f"engine.{key}", cycles)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -235,7 +240,10 @@ class DecoderPoolSettings:
     algorithm: Any
     unit_count: int = 1
     engine: EngineSettings = EngineSettings()
-    unit_memory: UnitMemorySettings = UnitMemorySettings()
+    # built per pool, since its check is defined below this class
+    unit_memory: UnitMemorySettings = dataclasses.field(
+        default_factory=UnitMemorySettings
+    )
     copies_input: bool = True
     copies_boundary_fold: bool = True
     result_blocks_unit: bool = False
@@ -375,7 +383,8 @@ def _engine_card(
     tables.refuse_unknown_keys(card_name, engine, _ENGINE_KEYS)
     cycles = _engine_stage_cycles(engine, section_name)
     clock = _engine_clock(engine, clocks, section_name)
-    return EngineSettings(clock=clock, **cycles)
+    values = {"clock": clock, **cycles}
+    return tables.section_record(section_name, EngineSettings, values)
 
 
 def _engine_clock(
@@ -406,9 +415,7 @@ def _engine_cycles(engine: Mapping, section_name: str, key: str) -> int:
             f"{section_name}.engine needs {key}, {priced} in cycles of "
             "its clock"
         )
-    cycles = engine[key]
-    config.check_cycles(f"{section_name}.engine.{key}", cycles)
-    return cycles
+    return engine[key]
 
 
 def _check_boolean(section_name: str, key: str, value) -> None:
@@ -508,10 +515,9 @@ def _algorithm(
         tables.refuse_unknown_keys(section_name, section, DECODER_KEYS)
         return None
     if not isinstance(kind, str):
-        _check_latency_microseconds(kind, section_name)
+        latency = _latency_settings(kind, section_name)
         tables.refuse_unknown_keys(section_name, section, DECODER_KEYS)
-        matching = minimum_weight_perfect_matching.PyMatchingDecoder
-        return matching.Settings(preset_latency_microseconds=kind)
+        return latency
     row = tables.row(DECODERS, f"{section_name}.kind", kind)
     if not hasattr(row.Settings, "from_yaml"):
         tables.refuse_unknown_keys(section_name, section, DECODER_KEYS)
@@ -521,24 +527,15 @@ def _algorithm(
     )
 
 
-def _check_latency_microseconds(kind, section_name: str) -> None:
-    """A number in the kind's place is a latency, or it is refused."""
-    if _is_latency_microseconds(kind):
-        return
-    rows = sorted(DECODERS)
-    raise ValueError(
-        f"{section_name}.kind {kind!r} is neither a row nor a latency; name "
-        f"one of {rows}, or write a finite nonnegative number of "
-        "microseconds"
-    )
-
-
-def _is_latency_microseconds(kind) -> bool:
-    """A preset core latency: a finite number at least zero, never a flag."""
-    if isinstance(kind, bool):
-        return False
-    if not isinstance(kind, numbers.Real):
-        return False
-    if not math.isfinite(kind):
-        return False
-    return kind >= 0
+def _latency_settings(kind, section_name: str):
+    """A kind that is no row's name is a core latency on the MWPM path."""
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder
+    try:
+        return matching.Settings(preset_latency_microseconds=kind)
+    except ValueError:
+        rows = sorted(DECODERS)
+        raise ValueError(
+            f"{section_name}.kind {kind!r} is neither a row nor a latency; "
+            f"name one of {rows}, or write a finite nonnegative number of "
+            "microseconds"
+        ) from None

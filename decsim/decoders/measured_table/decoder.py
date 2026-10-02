@@ -35,6 +35,7 @@ import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.tables as tables
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )
@@ -60,6 +61,10 @@ class MeasuredTableSettings(measurements.RelaySettings):
     # the word the yaml and the reports name this row by
     name = "measured_table"
 
+    def __post_init__(self) -> None:
+        measurements.RelaySettings.__post_init__(self)
+        _check_measured(self)
+
     def build(self) -> "MeasuredTableDecoder":
         """A fresh decoder of these settings."""
         return MeasuredTableDecoder(settings=self)
@@ -71,31 +76,13 @@ class MeasuredTableSettings(measurements.RelaySettings):
         clocks: config.ClockSettings,
         section_name: str,
     ) -> "MeasuredTableSettings":
-        """Every key, checked where it enters against the measured cells.
+        """Every key the section writes; absent is the default.
 
-        section_name is the tier section the row sits in, which the
-        refusal names.
+        section_name is the tier section the row sits in, which a refusal
+        names.
         """
-        relay_settings = measurements.RelaySettings.from_yaml(
-            section, clocks, section_name
-        )
-        relay_keys = dataclasses.asdict(relay_settings)
-        device = section.get("device", "a100")
-        partition = section.get("partition", "whole")
-        settings = cls(device=device, partition=partition, **relay_keys)
-        rows = _measured_rows(settings)
-        if rows:
-            return settings
-        decode_settings = _decode_settings(settings)
-        keys = _keys_off_default(decode_settings)
-        measured = _measured_cells()
-        raise ValueError(
-            f"{section_name}.device {device!r} with partition "
-            f"{partition!r}, bases {settings.bases!r} and the Relay-BP keys "
-            f"{keys} has no measurement in measured_table; the measured ones "
-            f"are {measured}, each with the keys it sets off the relay_bp "
-            "row's defaults"
-        )
+        del clocks
+        return tables.section_record(section_name, cls, section)
 
 
 class MeasuredTable:
@@ -187,6 +174,22 @@ def nearest_in_size(rows: tuple, detectors: int):
         if abs(size_difference) < abs(nearest_difference):
             nearest = row
     return nearest
+
+
+def _check_measured(settings: MeasuredTableSettings) -> None:
+    """The settings name measured cells, or no line prices a decode."""
+    rows = _measured_rows(settings)
+    if rows:
+        return
+    decode_settings = _decode_settings(settings)
+    keys = _keys_off_default(decode_settings)
+    measured = _measured_cells()
+    raise ValueError(
+        f"device {settings.device!r} with partition {settings.partition!r}, "
+        f"bases {settings.bases!r} and the Relay-BP keys {keys} has no "
+        f"measurement in measured_table; the measured ones are {measured}, "
+        "each with the keys it sets off the relay_bp row's defaults"
+    )
 
 
 def _measured_rows(settings: MeasuredTableSettings) -> tuple:

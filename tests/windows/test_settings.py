@@ -19,6 +19,7 @@ import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 
 CLOCKS = config.ClockSettings({"decisions": 250.0})
+SCHEME_ROWS = window_settings.WINDOWING_SCHEMES.values()
 
 
 def _section(**overrides) -> dict:
@@ -133,6 +134,12 @@ def test_a_window_size_that_is_not_a_whole_count_is_refused(key, rounds):
     section = _section(**{key: rounds})
     with pytest.raises(ValueError, match=f"windows.{key} is a whole"):
         window_settings.WindowSettings.from_yaml(section, CLOCKS)
+
+
+@pytest.mark.parametrize("row", SCHEME_ROWS)
+def test_every_scheme_record_refuses_a_window_that_commits_nothing(row):
+    with pytest.raises(ValueError, match="commit_rounds is a whole number"):
+        row.Settings(commit_rounds=0)
 
 
 def test_the_smallest_whole_window_size_is_accepted():

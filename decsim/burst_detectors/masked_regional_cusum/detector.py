@@ -29,6 +29,7 @@ import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
+import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 # The quiet shots are a Monte Carlo integral over the circuit's own
@@ -95,30 +96,33 @@ class MaskedRegionalCusumBurstDetector:
         pipeline_cycles: int = 30
         raise_strong_priors: bool = False
 
+        def __post_init__(self) -> None:
+            """Every value checked, each number of the method a float."""
+            for key, unit in _COUNT_UNITS.items():
+                value = getattr(self, key)
+                config.check_whole_count(key, value, unit)
+            if self.mask_count is not None:
+                config.check_whole_count(
+                    "mask_count", self.mask_count, "firings"
+                )
+            config.check_cycles("pipeline_cycles", self.pipeline_cycles)
+            _hold_method_numbers(self)
+
         @classmethod
         def from_yaml(
             cls, section: Mapping, clocks: config.ClockSettings
         ) -> "MaskedRegionalCusumBurstDetector.Settings":
             """The timing card prices on a clock; a null mask_count is none."""
-            method = _method_keys(section)
             clock = _bank_clock(section, clocks)
-            datapath_count = config.whole_count(
-                section, "burst_detector", "datapath_count", 1, "datapaths"
-            )
-            pipeline_cycles = section.get("pipeline_cycles", 30)
-            config.check_cycles(
-                "burst_detector.pipeline_cycles", pipeline_cycles
-            )
             raise_priors = config.boolean(
                 section, "burst_detector", "raise_strong_priors"
             )
-            return cls(
-                clock=clock,
-                datapath_count=datapath_count,
-                pipeline_cycles=pipeline_cycles,
-                raise_strong_priors=raise_priors,
-                **method,
-            )
+            values = {
+                **section,
+                "clock": clock,
+                "raise_strong_priors": raise_priors,
+            }
+            return tables.section_record("burst_detector", cls, values)
 
         def build(
             self,
@@ -524,41 +528,31 @@ def _slot_columns(layout: layout_module.Layout) -> tuple:
     return detectors, rows_at, checks_at
 
 
-def _method_keys(section: Mapping) -> dict:
-    """The CUSUM's method numbers, each checked once at the yaml."""
-    return {
-        "mask_window_rounds": config.whole_count(
-            section, "burst_detector", "mask_window_rounds", 64, "rounds"
-        ),
-        "mask_count": _mask_count(section),
-        "mask_hold_rounds": config.whole_count(
-            section, "burst_detector", "mask_hold_rounds", 100, "rounds"
-        ),
-        "region_radii": _radii(section),
-        "fault_rate_multipliers": _multipliers(section),
-        "rate_tracking_rounds": config.whole_count(
-            section, "burst_detector", "rate_tracking_rounds", 5000, "rounds"
-        ),
-        "unmasked_share_floor": _share_floor(section),
-        "false_alarms_per_second": _false_alarms_per_second(section),
-        "calibration_shot_count": config.whole_count(
-            section, "burst_detector", "calibration_shot_count", 20_000, "shots"
-        ),
-    }
+# each whole-number field and the unit its refusal names
+_COUNT_UNITS = {
+    "mask_window_rounds": "rounds",
+    "mask_hold_rounds": "rounds",
+    "rate_tracking_rounds": "rounds",
+    "calibration_shot_count": "shots",
+    "datapath_count": "datapaths",
+}
 
 
-def _mask_count(section: Mapping) -> Optional[int]:
-    """The mask's count; null never masks, the plain regional CUSUM."""
-    if section.get("mask_count", 8) is None:
-        return None
-    return config.whole_count(
-        section, "burst_detector", "mask_count", 8, "firings"
-    )
+def _hold_method_numbers(settings) -> None:
+    """The method's radii, designs, floor and budget, checked, as floats."""
+    radii = _radii(settings.region_radii)
+    multipliers = _multipliers(settings.fault_rate_multipliers)
+    share_floor = _share_floor(settings.unmasked_share_floor)
+    false_alarms = _false_alarms_per_second(settings.false_alarms_per_second)
+    object.__setattr__(settings, "region_radii", radii)
+    object.__setattr__(settings, "fault_rate_multipliers", multipliers)
+    object.__setattr__(settings, "unmasked_share_floor", share_floor)
+    object.__setattr__(settings, "false_alarms_per_second", false_alarms)
 
 
 def _is_list_at_least(values, bound: float) -> bool:
-    """Whether values is a yaml list of numbers, each at least bound."""
-    if not isinstance(values, list):
+    """Whether values is a list of numbers, each at least bound."""
+    if not isinstance(values, (list, tuple)):
         return False
     for value in values:
         if not config.is_number(value):
@@ -568,47 +562,43 @@ def _is_list_at_least(values, bound: float) -> bool:
     return True
 
 
-def _radii(section: Mapping) -> tuple:
+def _radii(radii) -> tuple:
     """The disc radii; none leaves the whole patch the only region."""
-    radii = section.get("region_radii", [0.0, 1.5, 2.3, 3.2])
     if _is_list_at_least(radii, 0.0):
         return tuple(float(radius) for radius in radii)
     raise ValueError(
-        "burst_detector.region_radii must be a list of disc radii, each a "
-        f"number at least zero (got {radii!r})"
+        "region_radii must be a list of disc radii, each a number at least "
+        f"zero (got {radii!r})"
     )
 
 
-def _multipliers(section: Mapping) -> tuple:
-    multipliers = section.get("fault_rate_multipliers", [2.0, 4.0, 20.0])
+def _multipliers(multipliers) -> tuple:
     is_listed = _is_list_at_least(multipliers, 1.0)
     is_above_one = is_listed and 1.0 not in multipliers
     if is_above_one and multipliers:
         return tuple(float(multiplier) for multiplier in multipliers)
     raise ValueError(
-        "burst_detector.fault_rate_multipliers must be a list of at least "
-        "one design, each a number above one: a design at one is no burst "
+        "fault_rate_multipliers must be a list of at least one design, each "
+        "a number above one: a design at one is no burst "
         f"(got {multipliers!r})"
     )
 
 
-def _share_floor(section: Mapping) -> float:
-    value = section.get("unmasked_share_floor", 0.2)
+def _share_floor(value) -> float:
     if config.is_number(value) and 0 <= value < 1:
         return float(value)
     raise ValueError(
-        "burst_detector.unmasked_share_floor must be a share from 0 up to, "
-        f"not including, 1 (got {value!r})"
+        "unmasked_share_floor must be a share from 0 up to, not including, "
+        f"1 (got {value!r})"
     )
 
 
-def _false_alarms_per_second(section: Mapping) -> float:
-    value = section.get("false_alarms_per_second", 0.03)
+def _false_alarms_per_second(value) -> float:
     if config.is_number(value) and value > 0:
         return float(value)
     raise ValueError(
-        "burst_detector.false_alarms_per_second must be a rate above zero, "
-        f"written as a number (got {value!r})"
+        "false_alarms_per_second must be a rate above zero, written as a "
+        f"number (got {value!r})"
     )
 
 

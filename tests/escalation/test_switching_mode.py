@@ -282,8 +282,8 @@ def test_a_kind_written_as_a_list_is_refused_with_the_rows(tmp_path):
 @pytest.mark.parametrize(
     "threshold, sentence",
     [
-        (-1.0, "gap_threshold_db must be finite and not negative"),
-        (math.inf, "gap_threshold_db must be finite and not negative"),
+        (-1.0, "threshold_nats must be finite and not negative"),
+        (math.inf, "threshold_nats must be finite and not negative"),
         (True, "gap_threshold_db must be a number of decibels"),
         ("20", "gap_threshold_db must be a number of decibels"),
     ],
@@ -853,8 +853,7 @@ def test_a_negative_confidence_walk_is_refused_by_name(tmp_path):
     card = _walk_card(-1.0, "union_find", "cluster_gap")
     config_path = write_config(tmp_path, card)
     with pytest.raises(
-        ValueError,
-        match="escalation.confidence_walk_microseconds must be finite",
+        ValueError, match="walk_microseconds must be finite and not negative"
     ):
         load_experiment(config_path)
 

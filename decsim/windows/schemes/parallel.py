@@ -30,6 +30,10 @@ class ParallelWindowScheme:
 
         commit_rounds: Optional[int] = None
         buffer_rounds: Optional[int] = None
+
+        def __post_init__(self) -> None:
+            window_data.check_window_sizes(self)
+
         # the word the yaml and the reports name this row by
         name = "parallel"
 

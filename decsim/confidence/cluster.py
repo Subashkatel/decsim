@@ -103,6 +103,13 @@ class ClusterGap:
         # the word the yaml and the reports name this row by
         name = "cluster_gap"
 
+        def __post_init__(self) -> None:
+            if self.walk_microseconds is None:
+                return
+            config.check_microseconds(
+                "walk_microseconds", self.walk_microseconds
+            )
+
         def build(self, weak_algorithm, threshold_nats) -> "ClusterGap":
             """The row at the weak decoder's weight step, priced by the card.
 

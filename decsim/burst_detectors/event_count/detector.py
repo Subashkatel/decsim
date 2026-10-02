@@ -27,8 +27,15 @@ import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.windows as window_records
+import decsim.tables as tables
 import decsim.trace_source as trace_source
 
+# the fields that are a whole number of rounds, at least one
+_ROUND_COUNT_KEYS = (
+    "patch_window_rounds",
+    "detector_window_rounds",
+    "rate_tracking_rounds",
+)
 # Q3DE's counter confidence, 1 - alpha = 0.99 (2501.00331 lines
 # 1076-1078): a position is in the flagged region when its count reaches
 # the count its usual rate reaches this rarely.
@@ -75,44 +82,28 @@ class EventCountBurstDetector:
         cycles_per_round: int = 0
         raise_strong_priors: bool = False
 
+        def __post_init__(self) -> None:
+            for key in _ROUND_COUNT_KEYS:
+                value = getattr(self, key)
+                config.check_whole_count(key, value, "rounds")
+            _check_false_alarms_per_round(self.false_alarms_per_round)
+            config.check_cycles("cycles_per_round", self.cycles_per_round)
+
         @classmethod
         def from_yaml(
             cls, section: Mapping, clocks: config.ClockSettings
         ) -> "EventCountBurstDetector.Settings":
             """A priced count names its clock; an unpriced one needs none."""
-            patch_window = config.whole_count(
-                section, "burst_detector", "patch_window_rounds", 4, "rounds"
-            )
-            detector_window = config.whole_count(
-                section,
-                "burst_detector",
-                "detector_window_rounds",
-                20,
-                "rounds",
-            )
-            false_alarms = _false_alarms_per_round(section)
-            tracking = config.whole_count(
-                section,
-                "burst_detector",
-                "rate_tracking_rounds",
-                10_000,
-                "rounds",
-            )
-            cycles = section.get("cycles_per_round", 0)
-            config.check_cycles("burst_detector.cycles_per_round", cycles)
-            clock = _count_clock(section, clocks, cycles)
+            clock = _count_clock(section, clocks)
             raise_priors = config.boolean(
                 section, "burst_detector", "raise_strong_priors"
             )
-            return cls(
-                patch_window_rounds=patch_window,
-                detector_window_rounds=detector_window,
-                false_alarms_per_round=false_alarms,
-                rate_tracking_rounds=tracking,
-                clock=clock,
-                cycles_per_round=cycles,
-                raise_strong_priors=raise_priors,
-            )
+            values = {
+                **section,
+                "clock": clock,
+                "raise_strong_priors": raise_priors,
+            }
+            return tables.section_record("burst_detector", cls, values)
 
         def build(
             self,
@@ -468,22 +459,22 @@ def _rate_scales(tracked_rates, calibrated_rates):
     return scales
 
 
-def _false_alarms_per_round(section: Mapping) -> float:
-    value = section.get("false_alarms_per_round", 1e-6)
+def _check_false_alarms_per_round(value) -> None:
     if config.is_number(value) and 0 < value < 1:
-        return float(value)
+        return
     raise ValueError(
-        "burst_detector.false_alarms_per_round must be a probability "
-        f"between 0 and 1, written as a number (got {value!r})"
+        "false_alarms_per_round must be a probability between 0 and 1, "
+        f"written as a number (got {value!r})"
     )
 
 
-def _count_clock(section: Mapping, clocks: config.ClockSettings, cycles: int):
+def _count_clock(section: Mapping, clocks: config.ClockSettings):
     """event_count's clock; a priced count needs one."""
     name = section.get("clock")
     if name is not None:
         return clocks.clock(name)
-    if cycles > 0:
+    cycles = section.get("cycles_per_round", 0)
+    if config.is_whole_count(cycles):
         raise ValueError(
             "burst_detector.cycles_per_round needs a clock: name the "
             "clocks domain its cycles are counted in"

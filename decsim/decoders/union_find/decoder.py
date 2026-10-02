@@ -16,6 +16,7 @@ import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.tables as tables
 
 
 class UnionFindDecoder(decoder_module.WindowDecoderBase):
@@ -60,6 +61,12 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         # the word the yaml and the reports name this row by
         name = "union_find"
 
+        def __post_init__(self) -> None:
+            weight_step = evidence_records.normalized_weight_step(
+                self.weight_step, "weight_step"
+            )
+            object.__setattr__(self, "weight_step", weight_step)
+
         def build(self) -> "UnionFindDecoder":
             """A fresh decoder of these settings."""
             return UnionFindDecoder(settings=self)
@@ -71,25 +78,18 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             clocks: config.ClockSettings,
             section_name: str,
         ) -> "UnionFindDecoder.Settings":
-            """Both keys, checked where they enter; absent is the default.
+            """Both keys; absent is the default.
 
             section_name is the tier section the row sits in, which a
-            weight_step or cycle_count refusal names.
+            refusal names.
             """
-            weight_step = section.get(
-                "weight_step", evidence_records.DEFAULT_WEIGHT_STEP
-            )
-            key = f"{section_name}.weight_step"
-            normalized_step = evidence_records.normalized_weight_step(
-                weight_step, key
-            )
+            values = dict(section)
             block = section.get("cycle_count")
-            if block is None:
-                return cls(weight_step=normalized_step)
-            cycle_count = cycle_count_module.CycleCount.from_yaml(
-                block, clocks, section_name
-            )
-            return cls(weight_step=normalized_step, cycle_count=cycle_count)
+            if block is not None:
+                values["cycle_count"] = cycle_count_module.CycleCount.from_yaml(
+                    block, clocks, section_name
+                )
+            return tables.section_record(section_name, cls, values)
 
     def __init__(
         self,
@@ -101,9 +101,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             settings = UnionFindDecoder.Settings()
         self.compile_key = (UnionFindDecoder, settings)
         # absolute natural-log units represented by one weight tick
-        self.weight_step = evidence_records.normalized_weight_step(
-            settings.weight_step
-        )
+        self.weight_step = settings.weight_step
         self.cycle_count = settings.cycle_count
 
     def ticks_after_decode(

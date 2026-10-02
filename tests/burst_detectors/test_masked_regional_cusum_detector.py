@@ -349,3 +349,14 @@ def _quiet_rows(shot_count, seed, positions):
         shot_rows = burst_rounds.bulk_rows(circuit, sampled, positions)
         rows.append(shot_rows)
     return numpy.asarray(rows)
+
+
+def test_the_record_refuses_a_negative_radius_and_holds_floats():
+    settings = detector_module.MaskedRegionalCusumBurstDetector.Settings
+    sentence = "region_radii must be a list of disc radii"
+
+    with pytest.raises(ValueError, match=sentence):
+        settings(region_radii=(-1.0,))
+    whole = settings(region_radii=(0, 2), fault_rate_multipliers=(3,))
+    assert whole.region_radii == (0.0, 2.0)
+    assert isinstance(whole.fault_rate_multipliers[0], float)

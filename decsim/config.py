@@ -48,6 +48,14 @@ def check_duration(name: str, value: float) -> None:
         raise ValueError(f"{name} is positive but rounds to zero ticks")
 
 
+def check_microseconds(name: str, value: object) -> None:
+    """A card's time in microseconds: a finite number, not negative."""
+    is_finite = is_number(value) and math.isfinite(value)
+    if is_finite and value >= 0:
+        return
+    raise ValueError(f"{name} must be finite and not negative (got {value!r})")
+
+
 def check_capacity_bits(key: str, value) -> None:
     """A memory's capacity in bits, checked where the yaml enters.
 
@@ -84,11 +92,19 @@ def whole_count(
 ) -> int:
     """A count of at least minimum, read from a yaml section's key."""
     value = section.get(key, default)
+    check_whole_count(f"{section_name}.{key}", value, unit, minimum)
+    return value
+
+
+def check_whole_count(
+    name: str, value: object, unit: str, minimum: int = 1
+) -> None:
+    """A count is a whole number of its unit, at least minimum."""
     if is_whole_count(value, minimum):
-        return value
+        return
     raise ValueError(
-        f"{section_name}.{key} must be a whole number of {unit}, at least "
-        f"{minimum} (got {value!r})"
+        f"{name} must be a whole number of {unit}, at least {minimum} "
+        f"(got {value!r})"
     )
 
 
@@ -103,23 +119,6 @@ def is_whole_count(value: object, minimum: int = 1) -> bool:
     if not isinstance(value, int):
         return False
     return value >= minimum
-
-
-def whole_counts(
-    section: Mapping, section_name: str, count_keys: Mapping, defaults
-) -> dict:
-    """Each count key's value, read as whole_count reads one.
-
-    count_keys maps a key to its unit and least value; a key the section
-    leaves out takes its attribute on defaults.
-    """
-    counts = {}
-    for key, (unit, minimum) in count_keys.items():
-        default = getattr(defaults, key)
-        counts[key] = whole_count(
-            section, section_name, key, default, unit, minimum
-        )
-    return counts
 
 
 def boolean(

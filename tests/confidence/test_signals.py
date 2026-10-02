@@ -71,3 +71,13 @@ def test_every_row_names_its_own_source():
     methods = {built.source.method for built in built_rows}
 
     assert methods == {"complementary_gap", "cluster_gap", "extra_cluster_gap"}
+
+
+@pytest.mark.parametrize("name", sorted(confidence_signals.CONFIDENCE_SIGNALS))
+@pytest.mark.parametrize("walk", [-1.0, float("nan"), "fast"])
+def test_every_rows_record_refuses_a_walk_card_that_is_no_duration(name, walk):
+    row = confidence_signals.CONFIDENCE_SIGNALS[name]
+    sentence = "walk_microseconds must be finite and not negative"
+
+    with pytest.raises(ValueError, match=sentence):
+        row.Settings(walk_microseconds=walk)

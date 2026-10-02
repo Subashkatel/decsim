@@ -9,7 +9,6 @@ geometry the strong tier re-decodes (Toshio et al. arXiv 2510.25222).
 """
 
 import dataclasses
-import math
 import pathlib
 from collections.abc import Callable, Mapping
 from numbers import Real
@@ -344,9 +343,7 @@ def _gap_threshold_db(
             "escalation.gap_threshold_db must be a number of decibels "
             f"(got {value!r})"
         )
-    return threshold_sources.checked_decibels(
-        float(value), "escalation.gap_threshold_db"
-    )
+    return float(value)
 
 
 def _calibrated_threshold(
@@ -403,9 +400,7 @@ def _check_serial_only(
 
 def _confidence_walk_microseconds(section: Mapping) -> Optional[float]:
     """The card that prices a confidence signal's own computation."""
-    if "confidence_walk_microseconds" not in section:
-        return None
-    value = section["confidence_walk_microseconds"]
+    value = section.get("confidence_walk_microseconds")
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, Real):
@@ -414,10 +409,4 @@ def _confidence_walk_microseconds(section: Mapping) -> Optional[float]:
             f"microseconds, or null to leave the signal on its own cost "
             f"model (got {value!r})"
         )
-    microseconds = float(value)
-    if not math.isfinite(microseconds) or microseconds < 0.0:
-        raise ValueError(
-            "escalation.confidence_walk_microseconds must be finite and "
-            f"not negative (got {value!r})"
-        )
-    return microseconds
+    return float(value)

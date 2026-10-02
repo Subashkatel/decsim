@@ -87,12 +87,6 @@ class WindowSettings:
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
         _check_terminal_policy(self.terminal_policy)
-        _check_window_rounds(
-            "windows.commit_rounds", self.scheme.commit_rounds, 1
-        )
-        _check_window_rounds(
-            "windows.buffer_rounds", self.scheme.buffer_rounds, 0
-        )
 
     @property
     def kind(self) -> str:
@@ -154,7 +148,7 @@ def _scheme_settings(section: Mapping, row):
     for key in declared_keys:
         if key in section:
             values[key] = section[key]
-    return row.Settings(**values)
+    return tables.section_record("windows", row.Settings, values)
 
 
 def _terminal_policy(section: Mapping, switching) -> str:
@@ -192,26 +186,6 @@ def _check_required_keys(section: Mapping) -> None:
     raise ValueError(
         f"windows needs the keys {listed}; configs/reference.yaml holds "
         "every key with its meaning"
-    )
-
-
-def _check_window_rounds(key: str, rounds, least: int) -> None:
-    """A window size is a whole count of rounds, or null for the code's.
-
-    A window is a commit region of ncom rounds and a buffer region of
-    nbuf (Skoric et al. 2209.08552 lines 194-197, nW = ncom + nbuf). A
-    window that commits no round never moves the stream on, so ncom is
-    at least one; a buffer may be empty. YAML reads `true` as a
-    boolean, which Python counts as an int, so a flag is refused by name
-    as config.check_cycles refuses it.
-    """
-    if rounds is None:
-        return
-    if config.is_whole_count(rounds, least):
-        return
-    raise ValueError(
-        f"{key} is a whole number of rounds, at least {least}, or null "
-        f"for the code's own size (got {rounds!r})"
     )
 
 

@@ -182,9 +182,6 @@ class MachineSettings:
             sections["weak_syndrome_buffer"], "weak_syndrome_buffer", clocks
         )
         strong_section = sections["strong_syndrome_buffer"]
-        syndrome_buffer_settings.check_strong_section_charges_nothing(
-            strong_section
-        )
         strong_syndrome_buffer = syndrome_buffer_settings.from_yaml(
             strong_section, "strong_syndrome_buffer", clocks
         )

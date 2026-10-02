@@ -21,14 +21,6 @@ SYNDROME_BUFFERS = {
     ),
 }
 
-# the keys only the weak syndrome buffer reads: its costs and the clock
-# they are charged on
-_WEAK_BUFFER_ONLY_KEYS = (
-    "clock",
-    "write_cycles",
-    "read_cycles",
-)
-
 
 def from_yaml(
     section: Mapping,
@@ -45,20 +37,3 @@ def from_yaml(
     if "clock" in section:
         values["clock"] = clocks.clock(section["clock"])
     return record(**values)
-
-
-def check_strong_section_charges_nothing(section: Mapping) -> None:
-    """The strong syndrome buffer's section prices no access.
-
-    Its receiving end stores a round at the tick it lands
-    (strong_syndrome_round_receiver.py), so a cost or its clock written
-    there would be read and never paid, whatever its value.
-    """
-    for key in _WEAK_BUFFER_ONLY_KEYS:
-        if key in section:
-            raise ValueError(
-                f"strong_syndrome_buffer.{key} belongs to the weak "
-                "syndrome buffer's costs; the strong syndrome buffer "
-                "stores a round as it lands and charges nothing, so leave "
-                "it out"
-            )

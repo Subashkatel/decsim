@@ -28,6 +28,7 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
 THIS_FILE = pathlib.Path(__file__)
@@ -207,14 +208,73 @@ def test_a_ported_strong_store_is_refused_at_build(strong_syndrome_buffer):
     settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
     planned = _strong_only(settings)
 
-    with pytest.raises(ValueError, match="ported_syndrome_buffer prices"):
+    with pytest.raises(ValueError, match="not PortedSyndromeBufferSettings"):
         machine_module.Machine.build(planned)
+
+
+# One cost each, set on the plain store: the clock, a write, a read.
+CHARGED_STRONG_STORES = [
+    syndrome_buffer_module.SyndromeBufferSettings(clock=PORTED_CLOCK),
+    syndrome_buffer_module.SyndromeBufferSettings(write_cycles=100),
+    syndrome_buffer_module.SyndromeBufferSettings(read_cycles=100),
+]
+
+
+@pytest.mark.parametrize("strong_syndrome_buffer", CHARGED_STRONG_STORES)
+def test_a_cost_on_the_strong_store_is_refused_at_build(
+    strong_syndrome_buffer,
+):
+    """Its receiving end books no access, so the cost would go unpaid."""
+    settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
+    planned = _strong_only(settings)
+
+    with pytest.raises(ValueError, match="only the weak syndrome buffer"):
+        machine_module.Machine.build(planned)
+
+
+def test_a_strong_store_with_only_a_capacity_is_built():
+    capacity_only = syndrome_buffer_module.SyndromeBufferSettings(bits=4096)
+    settings = _machine_settings(strong_syndrome_buffer=capacity_only)
+    planned = _strong_only(settings)
+
+    machine = machine_module.Machine.build(planned)
+
+    assert machine.readout.strong_syndrome_buffer is not None
 
 
 def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
     tmp_path,
 ):
     """Both routes reach the one check, so they refuse in one sentence."""
+    ported_section = "strong_syndrome_buffer:\n  kind: ported_syndrome_buffer\n"
+    ported_strong = ported_syndrome_buffer.PortedSyndromeBufferSettings()
+
+    yaml_sentence, python_sentence = _yaml_and_python_refusals(
+        tmp_path, ported_section, ported_strong
+    )
+
+    assert yaml_sentence == python_sentence
+
+
+def test_a_strong_store_cost_is_refused_alike_from_yaml_and_python(tmp_path):
+    cost_section = "strong_syndrome_buffer:\n  write_cycles: 3\n"
+    costed_strong = syndrome_buffer_module.SyndromeBufferSettings(
+        write_cycles=3
+    )
+
+    yaml_sentence, python_sentence = _yaml_and_python_refusals(
+        tmp_path, cost_section, costed_strong
+    )
+
+    assert yaml_sentence == python_sentence
+
+
+def _yaml_and_python_refusals(tmp_path, strong_section: str, strong_store):
+    """The build refusals of a switching point given the strong store twice.
+
+    Once as a yaml section appended to the shipped config, once as the
+    settings record set in Python on the same point.
+    """
     configs = tmp_path / "configs"
     shutil.copytree(CONFIGS, configs)
     path = configs / "experiments" / "data_movement" / "data_movement.yaml"
@@ -225,17 +285,14 @@ def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
     values = dict(points[0])
     values["workload.arguments.physical_error_probability"] = 0.001
     point = config.point_task(values)
-    settings = point.settings
-    ported_strong = ported_syndrome_buffer.PortedSyndromeBufferSettings()
     python_built = dataclasses.replace(
-        settings, strong_syndrome_buffer=ported_strong
+        point.settings, strong_syndrome_buffer=strong_store
     )
-    ported_section = "strong_syndrome_buffer:\n  kind: ported_syndrome_buffer\n"
-    ported_text = text + ported_section
-    path.write_text(ported_text)
-    ported_config = experiment.load_experiment(path)
-    ported_point = ported_config.point_task(values)
-    yaml_built = ported_point.settings
+    changed_text = text + strong_section
+    path.write_text(changed_text)
+    changed_config = experiment.load_experiment(path)
+    changed_point = changed_config.point_task(values)
+    yaml_built = changed_point.settings
 
     with pytest.raises(ValueError) as yaml_refusal:
         machine_module.Machine.build(yaml_built)
@@ -244,7 +301,7 @@ def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
 
     yaml_sentence = str(yaml_refusal.value)
     python_sentence = str(python_refusal.value)
-    assert yaml_sentence == python_sentence
+    return yaml_sentence, python_sentence
 
 
 def test_a_weak_only_run_reads_nothing_from_the_room_side():

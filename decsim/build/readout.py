@@ -344,21 +344,40 @@ def _strong_store(
 
 
 def _check_strong_store_charges_nothing(slot: Optional[StoreSlot]) -> None:
-    """The strong syndrome buffer is not a store that prices its reads.
+    """The strong syndrome buffer is a plain store with no access cost.
 
-    Its receiving end stores a round as it lands and never books the
-    write, so a store that books its reads by words would price half its
-    accesses. The settings are refused whoever built them, as gem5
-    refuses a wrong neighbour when it binds the port whatever script
-    built it (src/mem/port.cc:152, fatal_if).
+    Its receiving end stores a round as it lands and books no access, so
+    a cost set on it would never be paid.
     """
-    if slot is None or not slot.settings.prices_read_bits:
+    if slot is None:
+        return
+    settings = slot.settings
+    if settings.prices_read_bits:
+        raise ValueError(
+            "the strong syndrome buffer takes SyndromeBufferSettings, not "
+            "PortedSyndromeBufferSettings: it stores a round as it lands "
+            "and books no port access"
+        )
+    charged = _charged_cost_fields(settings)
+    if not charged:
         return
     raise ValueError(
-        "strong_syndrome_buffer.kind ported_syndrome_buffer prices its "
-        "accesses on ports; the strong syndrome buffer stores a round "
-        "as it lands and charges nothing, so name syndrome_buffer"
+        f"the strong syndrome buffer's settings set {charged}, which only "
+        "the weak syndrome buffer charges; the strong syndrome buffer "
+        "stores a round as it lands and charges nothing, so leave them out"
     )
+
+
+def _charged_cost_fields(settings) -> list:
+    """The cost fields of a plain store's settings set away from free."""
+    charged = []
+    if settings.clock is not None:
+        charged.append("clock")
+    if settings.write_cycles != 0:
+        charged.append("write_cycles")
+    if settings.read_cycles != 0:
+        charged.append("read_cycles")
+    return charged
 
 
 def _check_one_price_for_a_read(

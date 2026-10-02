@@ -54,13 +54,11 @@ def test_a_tiny_grid_runs_combines_and_plots(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "QUIET_PARTS", 1)
     monkeypatch.setattr(run, "QUIET_BATCHES", 1)
     monkeypatch.setattr(run, "QUIET_STREAMS", 4)
-    monkeypatch.setattr(sys, "argv", [str(SCRIPT)])
     monkeypatch.setitem(sys.modules, "run", run)
     plot = script_module("plot")
     folder = tmp_path / "out"
-    experiment = run.burst_detection()
 
-    experiment.main(arguments=["--out", str(folder)])
+    run.main(["--out", str(folder)])
     plot.main(folder)
 
     trials_text = (folder / "trials.csv").read_text()

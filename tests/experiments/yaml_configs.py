@@ -93,7 +93,7 @@ def folded_run(tmp_path, measurements: list) -> tuple:
     """The shots folded into a run folder as a collect folds its pieces.
 
     Each point's shots are one piece, in the order they are given, and
-    the point's resolved record names no swept path, so the run folder's
+    the point's record names no swept path, so the run folder's
     files hold only what the shots measured. Returns the sweep rows the
     fold computed, before csv turns an empty cell into text, and the
     run folder, whose links.csv and data_movement.csv the fold wrote.
@@ -113,11 +113,8 @@ def folded_run(tmp_path, measurements: list) -> tuple:
         )
         folders.append(folder)
     point_ids = list(measurements_by_point)
-    seeds_by_point = pieces.seed_ranges_of(folders)
     run_dir = experiment_dir / "run"
-    rows = report.fold_pieces(
-        experiment_dir, folders, point_ids, seeds_by_point, run_dir
-    )
+    rows = report.fold_pieces(experiment_dir, folders, point_ids, run_dir)
     return rows, run_dir
 
 
@@ -235,13 +232,6 @@ def write_config(tmp_path, overrides: dict) -> pathlib.Path:
     return config_path
 
 
-def run_folder_of(experiment_dir) -> pathlib.Path:
-    """The run folder a collect of one yaml wrote: combined/<name>-<id8>/."""
-    combined = pathlib.Path(experiment_dir) / "combined"
-    (folder,) = combined.iterdir()
-    return folder
-
-
 def strong_unit(algorithm) -> dict:
     return {
         "strong_decoder": {
@@ -357,9 +347,10 @@ def example_tool_config(
 
 
 def _write_a_bare_point_record(experiment_dir, point_id: str) -> None:
-    """A resolved record holding only what the fold reads of a point."""
-    resolved_dir = experiment_dir / run_folder.RESOLVED_FOLDER
-    resolved_dir.mkdir(exist_ok=True)
-    record = {"id": point_id, "metadata": {}, "sections": None}
-    record_path = resolved_dir / f"{point_id}.json"
+    """A record holding only what the fold reads of a point."""
+    point_dir = experiment_dir / run_folder.POINTS_FOLDER / point_id
+    point_dir.mkdir(parents=True)
+    record = {"id": point_id, "name": point_id, "metadata": {}}
+    record["sections"] = None
+    record_path = point_dir / run_folder.RECORD_FILE
     run_folder.write_json(record_path, record)

@@ -328,6 +328,7 @@ def measure_shot(
         settings,
         observation,
         shot.result,
+        record_options=shot.task.record_options,
         code=device.code,
         round_period_microseconds=round_period_microseconds,
         point_id=point_id,
@@ -807,6 +808,7 @@ def _measurement(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
+    record_options: collect.RecordOptions,
     code: ports.CodeModel,
     round_period_microseconds: float,
     point_id: str,
@@ -851,13 +853,14 @@ def _measurement(
     totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
-    first_flag_round, is_caught = _burst_catch(settings, observation)
+    deadline = record_options.catch_deadline_rounds
+    first_flag_round, is_caught = _burst_catch(settings, observation, deadline)
     window_statuses = _window_statuses(observation)
     unscored_reason = _unscored_reason(observation)
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
-    confidence = _shot_confidence(settings, observation, seed)
+    confidence = _shot_confidence(settings, observation, seed, record_options)
     return ShotMeasurement(
         point_id=point_id,
         algorithm=algorithm,
@@ -914,21 +917,23 @@ def _shot_confidence(
     settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
     seed: int,
+    record_options: collect.RecordOptions,
 ) -> Optional[ShotConfidence]:
     """The confidence ledger's windows, None when no signal ran."""
     ledger = observation.confidence
     if ledger is None:
         return None
     windows = ledger.windows()
-    is_sampled = settings.observation.samples_confidence_of(seed)
+    is_sampled = record_options.samples_confidence_of(seed)
     signal = settings.switching.confidence.name
-    sampled_shot_count = settings.observation.confidence_shot_count
+    sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 
 
 def _burst_catch(
     settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
+    deadline: int,
 ) -> tuple:
     """The first flag at or after the burst's onset, and whether in time.
 
@@ -950,7 +955,6 @@ def _burst_catch(
         return first_flag_round, None
     first_flag_round = flags.first_flag_from(onset_round)
     delay = first_flag_round - onset_round
-    deadline = settings.observation.catch_deadline_rounds
     is_caught = first_flag_round > 0 and delay <= deadline
     return first_flag_round, is_caught
 
@@ -1047,7 +1051,7 @@ def _scored_owners(result: result_records.RunResult) -> tuple:
             owners.append(operation_result)
     if not owners:
         raise refusal.RefusalError(
-            "decsim collect scores every shot against the logical "
+            "decsim run scores every shot against the logical "
             "observables its syndrome source sampled, and the source "
             "sampled none; name a qpu.kind that samples the circuit, such "
             "as stim_device"

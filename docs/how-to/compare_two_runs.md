@@ -7,11 +7,11 @@ depends on what the two runs are.
 
 ## If they are pieces of one sweep, they are already added
 
-`decsim collect` folds every piece of a configuration into its run
-folder, `combined/<name>-<id8>/` under the experiment folder: it reads
-the pieces' additive files, adds them, and recomputes `sweep.csv` and
-`links.csv` from the sum. Two runs of different configurations are
-never added: the result would be a single row that is neither.
+`decsim run` folds every piece of an experiment into the csv
+files at the top of its results folder: it reads the pieces' additive
+files, adds them, and recomputes `sweep.csv` and `links.csv` from the
+sum. Two runs of different points are never added: the result would be
+a single row that is neither.
 
 ## If they are different configurations, read the rows
 
@@ -50,14 +50,14 @@ so when you report it. [Time](../explanation/time.md) says why.
 ## Let decsim say what differs
 
 ```bash
-decsim diff results/<first>/combined/<name>-<id8> results/<second>/combined/<name>-<id8>
+decsim diff results/<first> results/<second>
 ```
 
 `diff` matches the two folders' points by their metadata, the values
 their sweep set, and prints
 three sections. `settings` lists every value that differs at a point,
-the ones the build derived included (`resolved/`). `inputs` lists each
-workload file whose sha256 differs (`inputs/<id>/hashes.json`).
+the ones the build derived included (`machine.json`). `inputs` lists each
+workload file whose sha256 differs (`points/<name>/inputs/hashes.json`).
 `results` lists each `sweep.csv` column that differs, and says whether
 the two values agree within their error bars: a logical error rate by
 its exact interval (with no interval on either side, no statistical
@@ -170,16 +170,12 @@ a column per result, one per swept path, and one per setting
 question needs, and `decsim.plots` saves it:
 
 ```python
-import glob
-
 import matplotlib.pyplot as plt
 
 import decsim.plots as plots
 import decsim.results as results
 
-first_folders = glob.glob("results/first/combined/*")
-second_folders = glob.glob("results/second/combined/*")
-folders = first_folders + second_folders
+folders = ["results/first", "results/second"]
 rows = results.load(*folders)
 distance = "qpu.distance"
 figure, ax = plt.subplots()
@@ -274,11 +270,11 @@ counts those windows in `referee_window_disagreements`.
   decoded the same shots, read the paired line too. A point with no interval, no
   scored shot or a cap with no failure, has no comparison to make, and
   `diff` says so.
-- **The manifest.** `manifest.json` in each folder carries the git
+- **The run record.** `run.json` in each folder carries the git
   commit, whether the checkout was dirty, the library versions and the
   command line. Two runs on different commits are two experiments.
-- **The config.** `config/` in each folder is a verbatim copy of the
-  yaml chain. Diff those two folders before diffing the numbers.
+- **The run file.** Each folder holds a verbatim copy of its run file,
+  a yaml chain in `config/`. Diff those two folders before diffing the numbers.
 - **Whether either run measured a wall clock.** `latency_samples.csv`
   has rows only for a decoder named by a table row. If one run has that
   file populated and the other does not, their tick columns are not

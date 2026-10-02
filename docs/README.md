@@ -137,17 +137,16 @@ sources, and the ideas behind the tree.
 | `configs/` | the yaml experiments: `bases/`, `examples/` and `experiments/`. `configs/reference.yaml` documents every key. |
 | `results/` | what a run writes, one folder per run. Not tracked by git. |
 | `tests/` | the test suite, one folder per package |
-| `slurm/` | `round.sh`, which submits a round of an experiment's plan as job arrays |
 | `tools/` | the checks `tools/check.sh` runs, the tutorials' check `tools/check_tutorial_runs.py`, and the documentation generator |
 | `STYLE.md` | the rules every line of the package is written to |
 
 ## How to cite decsim
 
 There is no paper for decsim yet. Cite the repository and the commit you
-ran, which every run folder records for you: `manifest.json` holds the
-git commit, the resolved config and the library versions, and
-`code_state.patch` holds any uncommitted change. Quoting the commit from
-the manifest is enough for someone else to reproduce the run.
+ran, which every results folder records for you: `run.json` holds the
+git commit and the library versions, each point's `machine.json` every
+value it ran with, and `code_state.patch` any uncommitted change.
+Quoting the commit from `run.json` is enough for someone else to reproduce the run.
 
 The decoders, the circuits and the models decsim runs are other people's
 work and are cited where they are used: the papers behind each design

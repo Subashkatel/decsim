@@ -45,7 +45,7 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     7  machine (this file)
     8  collect
     9  experiments
-    10 __main__, experiment_runner, results
+    10 __main__, results
 
 Level 3 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.

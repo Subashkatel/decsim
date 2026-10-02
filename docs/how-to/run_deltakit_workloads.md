@@ -42,11 +42,10 @@ uses a whole-shot window in this example; the protection mode requires
 rotated surface memory. `--patch` names the patch the operations occupy;
 the default is `memory-patch`.
 
-The output folder is a run folder. Its `inputs/<id>/` holds the circuit
-and its measurement map, beside the argument values, the result, the
-command arrival/start events and the Chrome trace, which `decsim run`
-writes in the same places. Inspect `result.json`, `commands.json` and
-`trace/seed<seed>.trace.json` together. The separate
+The output folder is a run folder. Its `points/shot/inputs/` holds the circuit
+and its measurement map, beside the argument values, the result and
+the Chrome trace, which `decsim run` writes in the same places. Inspect
+`result.json` and `trace/seed<seed>.trace.json` together. The separate
 `setup_seconds.json` measures host export/build time, not simulated latency.
 Sampling and execution also consume host time during the run; that cost
 is not included in this setup measurement.
@@ -85,7 +84,7 @@ PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
 ```
 
 The rerun runs the point the first folder recorded: its distance,
-probability and period come from that point's `resolved/<id>.json`, and
+probability and period come from that point's `points/shot/machine.json`, and
 its basis, noise model and T1/T2 from the first run's `arguments.json`,
 unknown when neither names them. A distance or a period on the command
 line replaces the recorded one; a basis, probability, noise model or
@@ -116,7 +115,7 @@ intervals. The exporter calibrates the native schedule to the declared
 cadence. SD6 instead uses its probability at gates, resets, measurements
 and idle locations; it does not use relaxation or dephasing times.
 
-Live output is a run folder whose `inputs/<id>/fragments` holds the four
+Live output is a run folder whose `points/shot/inputs/fragments` holds the four
 reusable ordinary Stim fragments and `physical.json`, the form the
 `files` workload row reads. It also saves the actual `executed.stim`,
 `measurement_rounds.json`, `measurements.json`, result, commands, trace and

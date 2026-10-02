@@ -237,11 +237,6 @@ class MachineSettings:
         burst_detector = burst_detector_settings.detector_from_yaml(
             burst_detector_section, clocks
         )
-        catch_deadline_rounds = (
-            burst_detector_settings.catch_deadline_rounds_from_yaml(
-                burst_detector_section
-            )
-        )
         burst_detector_settings.refuse_a_detector_without_switching(
             burst_detector_section, switching
         )
@@ -259,9 +254,6 @@ class MachineSettings:
         magic_state_factory = qpu_settings.factory_from_yaml(factory_section)
         observation = observe_settings.ObservationSettings.from_yaml(
             observation_section
-        )
-        observation = dataclasses.replace(
-            observation, catch_deadline_rounds=catch_deadline_rounds
         )
         window_check = observe_settings.window_check_from_yaml(
             observation_section

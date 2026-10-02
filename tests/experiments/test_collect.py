@@ -452,6 +452,36 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     assert len(unique) == 2
 
 
+def test_two_records_with_the_same_fields_are_two_tasks():
+    """A record enters the id by its class beside its fields.
+
+    Two rows that take no settings have records with no fields, so only
+    their classes tell the points apart, as gem5's config.json writes
+    each object's type.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class EveryRound:
+        pass
+
+    @dataclasses.dataclass(frozen=True)
+    class NoRound:
+        pass
+
+    tasks = []
+    for rounds_policy in (EveryRound(), NoRound()):
+        workload = workload_settings.WorkloadSettings(
+            rounds_policy=rounds_policy
+        )
+        settings = machine_settings.MachineSettings(workload=workload)
+        task = collect.Task(settings, {"point": 1})
+        tasks.append(task)
+
+    unique = collect.unique_tasks(tasks)
+
+    assert len(unique) == 2
+
+
 def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
     """A component's __slots__ enter the strong id as its __dict__ does."""
     three_rounds = _slotted_rounds_task(3)
@@ -553,15 +583,15 @@ def test_one_yaml_saved_under_two_names_names_its_points_alike(tmp_path):
 
 
 def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
-    """resolved/<id>.json is where a label is read, so it keeps them all."""
+    """machine.json is where a label is read, so it keeps them all."""
     config_path = tmp_path / "t6.yaml"
     shutil.copyfile(REFERENCE_YAML, config_path)
     config = experiment.load_experiment(config_path)
     task = config.first_point_task()
 
-    point_id = run_folder.record_point(tmp_path, task)
+    run_folder.record_point(tmp_path, "point", task)
 
-    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_path = tmp_path / "points" / "point" / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     links = record["settings"]["links"]
@@ -617,9 +647,9 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
     plain_rows = _shot_rows_without_wall_clock(plain)
     recorded_rows = _shot_rows_without_wall_clock(recorded)
     printed = capsys.readouterr()
-    point_id = run_folder.record_point(tmp_path, recorded)
+    run_folder.record_point(tmp_path, "point", recorded)
 
-    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_path = tmp_path / "points" / "point" / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     recorded_observation = record["settings"]["observation"]

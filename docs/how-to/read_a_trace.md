@@ -152,7 +152,7 @@ Residences overlap by design, because a store holds many rounds at once,
 and a viewer stacks overlapping slices on extra rows. The counter track
 is the exact occupancy; the rows are the viewer's arrangement.
 
-`decsim collect` draws `timeline.png` from a trace file, not from the
+`decsim run` draws `timeline.png` from a trace file, not from the
 machine, so a point that traced no shot draws no timeline.
 
 `residence.csv` is read from the same files: one row per traced shot

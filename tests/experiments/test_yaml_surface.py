@@ -3,7 +3,7 @@
 These tests keep configs/reference.yaml and the loader from drifting
 apart: every shipped config loads, an unknown key or a stale one is
 refused with a sentence, the swept distance reaches the rounds policy,
-and a run writes its manifest and its per-shot records.
+and a run writes its run.json and its per-shot records.
 """
 
 import dataclasses
@@ -972,23 +972,24 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
     assert measurement.decoded_windows > 5
 
 
-def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
-    # One tiny run end to end: a timestamped experiment folder whose run
-    # folder holds manifest.json, the config copy, shots.csv, sweep.csv
-    # and links.csv.
+def test_a_run_writes_its_run_record_and_per_shot_records(
+    tmp_path, monkeypatch
+):
+    # One tiny run end to end: a dated results folder that holds
+    # run.json, the config copy, shots.csv, sweep.csv and links.csv.
     import csv
 
     config_path = yaml_configs.write_config(tmp_path, {})
     monkeypatch.chdir(tmp_path)
     run_dir, rows = collect_command.run_experiment(config_path)
 
-    manifest_path = run_dir / "manifest.json"
+    manifest_path = run_dir / "run.json"
     manifest_text = manifest_path.read_text()
     manifest = json.loads(manifest_text)
     assert manifest["versions"]["packages"]["stim"]
-    sections = manifest["experiment_config"]["sections"]
-    assert sections["escalation"]["kind"] == "weak_baseline"
-    assert sections["workload"]["arguments"]["distance"] == "${qpu.distance}"
+    assert manifest["run_files"] == [str(config_path)]
+    config_copy = run_dir / "config" / config_path.name
+    assert config_copy.read_text() == config_path.read_text()
     assert manifest["started_utc"] and manifest["finished_utc"]
 
     shots_csv_path = run_dir / "shots.csv"
@@ -997,10 +998,8 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
         shots = list(reader)
     assert len(shots) == 1 and shots[0]["seed"] == "0"
 
-    experiment_dir = run_dir.parent.parent
-    assert experiment_dir.name.endswith("-unit_test_config")
-    assert run_dir.name.startswith("unit_test_config-")
-    assert (run_dir / "config" / "unit_test_config.yaml").exists()
+    assert run_dir.parent.name == "results"
+    assert run_dir.name.endswith("_unit_test_config")
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
 
 
@@ -1016,7 +1015,7 @@ def test_a_points_record_holds_the_sections_it_resolved_to(tmp_path):
 
     collect_command.run_experiment(config_path, run_dir)
 
-    records = run_folder.resolved_by_point(run_dir)
+    records = run_folder.point_records(run_dir)
     (record,) = records.values()
     sections = record["sections"]
     assert sections["workload"]["arguments"]["distance"] == 3
@@ -1117,11 +1116,10 @@ def test_two_config_files_of_one_name_are_both_copied(tmp_path):
     child_folder.mkdir()
     child_path = child_folder / base_path.name
     child_path.write_text(f"extends: ../{base_path.name}\n")
-    config = experiment.load_experiment(child_path)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
-    run_folder.snapshot_code_state(config, run_dir)
+    run_folder.snapshot_code_state(child_path, run_dir)
 
     child_copy = run_dir / "config" / "child" / base_path.name
     base_copy = run_dir / "config" / base_path.name

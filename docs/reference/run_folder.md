@@ -2,33 +2,40 @@
 
 # The run folder
 
-Every `decsim collect` and every `decsim run` writes one folder under
-`results/`, named for the UTC time it started and the config it ran, and
-never reused (`decsim/experiments/run_folder.py`, `new_run_dir`), unless
-`--out` names one. `results/` is output, not code, and git does not
-track it, which is gem5's `m5out/`. `tools/deltakit_example.py` and
+Every `decsim run` writes one results folder,
+`results/<date>_<name>/`, named for the day it started and the
+experiment it ran, and a second one that day gets `_2`
+(`decsim/experiments/run_folder.py`, `new_run_dir`), unless `--out`
+names one. A launcher fixes the folder once and hands it to every task.
+`results/` is output, not code, and git does not track it, which is
+gem5's `m5out/`. `tools/deltakit_example.py` and
 `tools/live_memory_example.py` write the same records into their
 `--output` folder.
 
-A `decsim collect` folder is an experiment folder. It holds the
-experiment's pieces, and one run folder per configuration folded from
-them:
+A results folder holds one experiment: its pieces, one record per
+point, and the files folded from the pieces at its root. It holds one
+tree's results, so a run or a plan into a folder whose `run.json`
+names another commit, or the same commit clean against dirty, is
+refused:
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one sweep point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`) without the swept columns, the `residence.csv` rows of its traced shots when it traced any, an online point's calibrator as the piece left it in `state.pickle`, which the point's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a collect skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
-| `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `point_id`, `first_seed` and `count`, its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a point whose pieces differ in it, a piece without it included), its `scored_shots`, `failures`, `unscored_shots` and `core_seconds` (its shots' own wall time), its window status counts (the summary's `*_windows` status columns and `provisional_no_correction_windows`), its `configuration_id` and its `rounds` (the rounds its shots ran, their `executed_rounds` added up), the `state_sha256` of an online point's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended, which a later round's memory request is sized by), a planned piece's `round` and `task`, and the `commit`, `dirty`, `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a fold refuses a point whose pieces ran different commits, or one commit clean and dirty, since its estimate would pool two simulators under one manifest, and a collect refuses such a point, its own tree counted, before it writes its manifest or runs a shot) |
-| `resolved/<id>.json`, `inputs/<id>/` | `decsim/experiments/run_folder.py`, `write_point_record` | each point's record and workload, written before any shot and only once every yaml of the plan or collect has resolved and been accepted, so a refused one changes no record, as a run folder holds them below; the record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the point's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `configuration_id` (the configuration that recorded it last), its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which a status folds it by whatever its yaml says later |
-| `configurations.csv` | `decsim/experiments/run_folder.py`, `record_configuration` | one row per configuration: its `configuration_id` (the sha256 of its sections, the sweep and the collection left out), its `name` and its `config_chain`, the yamls nearest first as a json list; written by Python's csv module, so a name or path holding a comma, a quote or a semicolon reads back whole |
-| `combined/<name>-<id8>/` | `decsim/experiments/collect_command.py`, `write_the_run_folder` | the configuration's run folder, named by the first yaml `configurations.csv` records for its id and the first eight characters of the id, so a collect of any yaml of that id writes this one folder; a folder a second yaml name of the id got before keeps its manifest and traces but loses its fold at the next fold; a collect and a status write it, each fold built whole in a staging folder beside it and moved in in place of the earlier fold's files, so a refused fold leaves the last one as it was, and a status rebuilds every configuration's, one left with no point too, so a point that moved to another configuration is in one run folder. Two yamls of one configuration id, a sweep split one file a distance, fold into one |
-| `round<k>/plan.csv` | `decsim/experiments/plan_command.py`, `plan_round` | round `k`'s pieces, a row each: its `task`, `configuration_id`, `point_id`, `first_seed` and `count`. A planned piece whose seeds no saved piece holds is planned again, with its own seeds, in the next round, each seed once however many rounds planned it, and a task runs only the seeds of its pieces no saved piece holds. An online point's pieces go to one task in seed order, since each starts from the calibrator the one before it saved |
-| `round<k>/tasks.csv` | `decsim/experiments/plan_command.py`, `plan_round` | one row per task: its `cores`, its `memory_mb` (its cores' pieces at the largest measured peak of its points with a margin of one half, or `--memory-mb` a piece where nothing was measured), its `hours`, and its `estimated_core_hours` where every one of its points was measured; `slurm/round.sh` submits one array per shape of job |
-| `round<k>/<task>/` | `decsim/experiments/collect_command.py`, `run_planned` | the task's `manifest.json` and code state, and the `log.txt` Slurm writes |
-| `status.csv` | `decsim/experiments/status_command.py`, `fold_the_experiment` | one row per point the experiment recorded, from its record and pieces and not its yaml, each once under the configuration its record names: its `configuration_id`, then its `sweep.csv` row whole (its `point_id` and swept values, the `state` of its contiguous prefix, `no data` with no piece yet, its counts over every piece and the prefix's, and every estimate and exact limit, per shot, per round and `logical_error_rate_plan_unbiased`), then the `rounds` and `core_seconds` of all its pieces; the row reads the pieces once, so a round that ends while status runs is in all of it or none |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`) without the swept columns, the `residence.csv` rows of its traced shots when it traced any, an online point's calibrator as the piece left it in `state.pickle`, which the point's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
+| `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `point_id`, `first_seed` and `count`, its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a point whose pieces differ in it, a piece without it included), its `scored_shots`, `failures`, `unscored_shots` and `core_seconds` (its shots' own wall time), its window status counts (the summary's `*_windows` status columns and `provisional_no_correction_windows`), its `rounds` (the rounds its shots ran, their `executed_rounds` added up), the `state_sha256` of an online point's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended, which a later batch's memory request is sized by), a planned piece's `batch` and `task`, and the `commit`, `dirty`, `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a fold refuses a point whose pieces ran different commits, or one commit clean and dirty, since its estimate would pool two simulators under one `run.json`, and a run refuses such a point, its own tree counted, before it writes `run.json` or runs a shot) |
+| `points/<name>/machine.json`, `points/<name>/inputs/` | `decsim/experiments/run_folder.py`, `write_point_record` | each point's record and workload, below, written before any shot and only once every point of the experiment has built and been accepted, so a refused one changes no record. A name the folder holds for a point of another id is refused. The record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the point's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which a status folds it by whatever its run file says later |
+| `batches/<k>/plan.csv` | `decsim/experiments/plan_command.py`, `plan_batch` | batch `k`'s pieces, a row each: its `task`, `point_id`, `first_seed` and `count`. A planned piece whose seeds no saved piece holds is planned again, with its own seeds, in the next batch, each seed once however many batches planned it, and a task runs only the seeds of its pieces no saved piece holds. An online point's pieces go to one task in seed order, since each starts from the calibrator the one before it saved |
+| `batches/<k>/tasks.csv` | `decsim/experiments/plan_command.py`, `plan_batch` | one row per task: its `cores`, its `memory_mb` (its cores' pieces at the largest measured peak of its points with a margin of one half, or `--memory-mb` a piece where nothing was measured), its `hours`, and its `estimated_core_hours` where every one of its points was measured; `decsim run --slurm` submits one array per shape of job |
+| `batches/<k>/<task>/` | `decsim/experiments/collect_command.py`, `run_planned` | the task's `run.json` and code state, and the `log.txt` Slurm writes |
+| `batches/<k>/next_step.log` | `decsim/experiments/plan_command.py`, `launch` | what the next step of the batch loop printed: its check, its plan and its submissions |
+| `status.csv` | `decsim/experiments/status_command.py`, `fold_the_experiment` | one row per point the experiment recorded, from its record and pieces and not its run file: its `sweep.csv` row whole (its `point_id` and swept values, the `state` of its contiguous prefix, `no data` with no piece yet, its counts over every piece and the prefix's, and every estimate and exact limit, per shot, per round and `logical_error_rate_plan_unbiased`), then the `rounds` and `core_seconds` of all its pieces; the row reads the pieces once, so a batch that ends while status runs is in all of it or none. A status also folds the root files again |
+
+The root files are the fold: a run and a status build the whole
+fold in a staging folder beside it and move it in in place of the
+earlier fold's files, so a refused fold leaves the last one as it was.
 
 A run folder holds facts that add up and nothing else. No summary is
 stored: `sweep.csv` and `links.csv` are computed from the additive files
-when they are written, and a collect folds them over every piece, so a
+when they are written, and a run folds them over every piece, so a
 sweep cut into pieces, stopped and picked up again, gives the numbers
 one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 
@@ -47,25 +54,24 @@ one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
 | `data_movement.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point per path, then per memory class, averaged over the point's shots |
 | `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
-| `manifest.json` | `decsim/experiments/run_folder.py`, `write_manifest` | one object: what ran, where, and with which library versions |
-| `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of every yaml file in the config chain, each at its place relative to the others, so every `extends` still resolves |
+| `run.json` | `decsim/experiments/run_folder.py`, `write_run_record` | one object: what ran, where, and with which library versions |
+| `<run file>.py`, `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of the run file: a Python run file under its own name beside the results, or every yaml file in the config chain in `config/`, each at its place relative to the others, so every `extends` still resolves. The copy is written once: a later run into the folder must bring the same text, or a run file whose points have the ids `run.json` recorded, which differs only in how far they run (a pilot's caps raised) and replaces the copy; any other run file is refused |
 | `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, and a patch creating each untracked file git does not ignore, written only when there is either |
-| `resolved/<id>.json` | `decsim/experiments/run_folder.py`, `record_point` | one per sweep point, named by the point's content id: its metadata, the seeds this folder ran of it (ranges of first and how many, joined from its pieces), `sections`, the yaml the point resolved to with its axes placed and its references resolved (null for a point a Python caller built), `maker`, what the workload's row says made it for this point (the `producer` row answers its `function`, the point's own `arguments` and its package's `version`; the `files` row and a Python-built workload answer null), every setting, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
-| `inputs/<id>/` | `decsim/experiments/run_folder.py`, `record_point` | the workload the point ran, as the `files` workload row reads it (`operations.json`, and `circuit.stim` with `measurement_rounds.json` or `fragments/`), and `hashes.json`, each file's sha256 |
-| `result.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: every field of the shot's result |
-| `commands.json` | `decsim/experiments/run_command.py`, `write_shot` | `decsim run` and the two tools only: when each QPU command arrived and when it started |
+| `points/<name>/machine.json` | `decsim/experiments/run_folder.py`, `record_point` | one per point, in a folder named by the point's name: its content `id`, its `name`, its metadata, the seeds this folder ran of it (ranges of first and how many, joined from its pieces), `sections`, the yaml the point resolved to with its axes placed and its references resolved (null for a point a Python caller built), `maker`, what the workload's row says made it for this point (the `producer` row answers its `function`, the point's own `arguments` and its package's `version`; the `files` row and a Python-built workload answer null), every setting, each record under its `class` (module and qualified name) beside its fields, as gem5's `config.json` writes each object's type, so two records with the same fields are two points, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
+| `points/<name>/inputs/` | `decsim/experiments/run_folder.py`, `record_point` | the workload the point ran, as the `files` workload row reads it (`operations.json`, and `circuit.stim` with `measurement_rounds.json` or `fragments/`), and `hashes.json`, each file's sha256 |
+| `result.json` | `decsim/experiments/run_folder.py`, `write_shot` | `decsim run --seed` and the two tools only: every field of the shot's result |
 | `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file |
-| `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_command.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
+| `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_folder.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
 | `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |
-| `timeline.png` | `decsim/experiments/plots.py`, `plots` | the figure `decsim collect` draws itself, when a shot was traced: the lowest traced seed of the first point, in the sweep's order |
+| `timeline.png` | `decsim/experiments/plots.py`, `plots` | the figure `decsim run` draws itself, when a shot was traced: the lowest traced seed of the first point, in the sweep's order |
 | `timeline.png`, `stage_breakdown.png` | `decsim/experiments/plots.py`, `FIGURES` | one figure per `decsim plot --figure` name, the two that read decsim's own records: a trace, and the stage columns in pipeline order, one bar per point. A figure of the sweep's numbers is the reader's to draw from the files above; what a figure computes from them (a bar's length, a median, a log scale) is computed when it is drawn, not stored |
 
-The manifest, the config copy and the patch together are the whole
-experiment: the commit plus the patch is the code, and the config chain
-is the input. `resolved/` says what every value came to at each point,
+`run.json`, the run file's copy and the patch together are the whole
+experiment: the commit plus the patch is the code, and the run file is
+the input. `machine.json` says what every value came to at each point,
 and `inputs/` holds each point's workload, so a point reruns with the
-`files` row pointed at `inputs/<id>/operations.json` (and its circuit
-keys) without the maker installed.
+`files` row pointed at `points/<name>/inputs/operations.json` (and its
+circuit keys) without the maker installed.
 
 ## The columns of each file
 
@@ -79,7 +85,7 @@ its maximum.
 
 A point is named by `point_id`, its content id, as sinter's csv names
 a task by its `strong_id` (`sinter/_data/_csv_out.py:69-77`); it is
-also the name of its `resolved/` record. Right after it come the
+also the `id` in its `machine.json`. Right after it come the
 point's swept values, one column per yaml path the sweep sets, named
 by that path (`qpu.distance`,
 `workload.arguments.physical_error_probability`), in the order the
@@ -98,7 +104,7 @@ to there. A path its yaml does not hold is an empty cell. A string or a number i
 any other value (a flag, a null, a whole decoder row an axis set) as one
 cell of compact json with its keys sorted, as sinter writes
 `json_metadata` (`sinter/_data/_csv_out.py:35-37`). The typed value is
-in the point's `resolved/` record. A column's unit is in its name
+in the point's `machine.json`. A column's unit is in its name
 (`_us` microseconds, `_bits`, `_per_shot`), and a swept path's meaning
 and unit are its key's in `configs/reference.yaml`.
 
@@ -405,16 +411,15 @@ here.
 | `samples` | how many stays or moves the shot had there |
 | `mean_us`, `longest_us` | the mean and the longest: a stay's length, or a move's wait on the wire |
 
-### `manifest.json`
+### `run.json`
 
-One object. Its keys, from `write_manifest` in
+One object. Its keys, from `write_run_record` in
 `decsim/experiments/run_folder.py`:
 
 | Key | What it is |
 | --- | --- |
-| `config_files` | the yaml chain, in the order it was read |
-| `experiment_config` | the config as its files write it, as json: its sections after every `extends` was folded in, with each `${...}` reference as written, their folders, the sweep blocks and the files; what each point resolves to is in its `resolved/` record |
-| `points` | the sweep's point ids in task order, a point two blocks name listed once: the order a fold writes its rows in |
+| `run_files` | the run file, or the yaml chain in the order it was read; empty for a run no file describes |
+| `points` | the experiment's point ids in its order, a point two yaml blocks name listed once: the order a fold writes its rows in |
 | `git` | the commit and whether the checkout was dirty, read once when the process started |
 | `container` | the container image, when one was in use |
 | `versions` | the Python version, and `packages`: every installed package and its version |
@@ -423,7 +428,7 @@ One object. Its keys, from `write_manifest` in
 | `argv` | the command line as it was invoked |
 | `started_utc`, `finished_utc` | when |
 
-The manifest is written twice, once when the run starts and once when
+`run.json` is written twice, once when the run starts and once when
 it ends with `finished_utc` filled in, and both writes name the same
 tree: the reading is taken once, before the first shot, and reused. A
 tree that moves while a run is going, which is what an array running

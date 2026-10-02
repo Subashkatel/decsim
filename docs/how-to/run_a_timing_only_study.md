@@ -57,7 +57,7 @@ device you build in Python.
 ## 2. Run it
 
 ```bash
-decsim collect configs/examples/priced_cards_example.yaml
+decsim run configs/examples/priced_cards_example.yaml
 ```
 
 ```
@@ -87,7 +87,7 @@ load is whatever the host's wall clock gives.
 Run it a second time and compare:
 
 ```bash
-decsim collect configs/examples/priced_cards_example.yaml
+decsim run configs/examples/priced_cards_example.yaml
 diff <(cut -d, -f1-29 results/<first>/sweep.csv) \
      <(cut -d, -f1-29 results/<second>/sweep.csv)
 ```
@@ -108,7 +108,7 @@ If you want a run with no syndrome data at all, `qpu.kind: timing_only`
 emits payloads that state the code's size per round and carry no values,
 so links and memories are still charged in bits. It builds and runs as a
 machine, but
-`decsim collect` refuses it with a sentence, because every shot is
+`decsim run` refuses it with a sentence, because every shot is
 scored against the observables its source sampled, and a timing-only
 device samples none. Use a priced card on a real device instead.
 

@@ -27,13 +27,17 @@ __pycache__/
 # under results/<run>/logs/
 /slurm-*.out
 
-# Run output. A results folder's stats.csv, commit record, script copy
-# and plots are tracked, so every experiment's evidence has one place;
-# each point's working CSV and the Slurm logs stay with the run.
+# Run output. A results folder's summaries (sweep.csv, stats.csv and
+# the like), run.json, code state, script copy and plots are tracked, so
+# every experiment's evidence has one place; each point's records and
+# working CSV, the pieces, the batches, the traces and the logs stay
+# with the run.
 /results/*/points/
+/results/*/pieces/
+/results/*/batches/
+/results/*/trace/
+/results/*/log/
 /results/*/logs/
-# A decsim plan experiment's folder: its tasks write here while they
-# check the tree is clean; its summaries are copied up a level.
 /results/*/run/
 
 # Core dumps

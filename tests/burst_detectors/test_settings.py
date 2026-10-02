@@ -18,33 +18,6 @@ def test_the_row_none_takes_no_keys():
         burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
-def test_the_row_none_takes_no_catch_deadline():
-    section = {"kind": "none", "catch_deadline_rounds": 300}
-    with pytest.raises(ValueError, match="burst_detector does not know"):
-        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
-
-
-def test_the_catch_deadline_is_a_whole_number_of_rounds():
-    section = {"kind": "event_count", "catch_deadline_rounds": -1}
-    with pytest.raises(ValueError, match="catch_deadline_rounds must be"):
-        burst_detector_settings.catch_deadline_rounds_from_yaml(section)
-
-
-def test_the_catch_deadline_reaches_the_section():
-    default_section = {"kind": "event_count"}
-    written_section = {"kind": "event_count", "catch_deadline_rounds": 0}
-
-    default = burst_detector_settings.catch_deadline_rounds_from_yaml(
-        default_section
-    )
-    written = burst_detector_settings.catch_deadline_rounds_from_yaml(
-        written_section
-    )
-
-    assert default == 300
-    assert written == 0
-
-
 def test_the_row_none_reads_as_no_detector():
     detector = burst_detector_settings.detector_from_yaml(
         {}, burst_rounds.CLOCKS

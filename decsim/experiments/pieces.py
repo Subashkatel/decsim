@@ -12,9 +12,9 @@ the counts its save file already holds
 writer left is no piece and is passed over; no writer can tell from
 another host whether its owner is still writing, so none removes it.
 
-A round's plan, round<k>/plan.csv, is a list of pieces, each with the
-task it was dealt to; `decsim plan` writes it and `decsim collect
---plan` runs one task's share of it.
+A batch's plan, batches/<k>/plan.csv, is a list of pieces, each with
+the task it was dealt to; `decsim run --slurm` writes it and each task
+of the batch's arrays runs its share of it.
 """
 
 import csv
@@ -39,10 +39,11 @@ PIECE_FILE = "piece.json"
 # an adaptive point's calibrator as its piece left it (design 6.5)
 STATE_FILE = "state.pickle"
 
-# A round's folder, round<k>/, and its plan: a row per piece, its task first.
-ROUND_PREFIX = "round"
+# A batch's folder, batches/<k>/, and its plan: a row per piece, its
+# task first.
+BATCHES_FOLDER = "batches"
 PLAN_FILE = "plan.csv"
-PLAN_COLUMNS = ("task", "configuration_id", "point_id", "first_seed", "count")
+PLAN_COLUMNS = ("task", "point_id", "first_seed", "count")
 
 
 def piece_dir(
@@ -213,13 +214,13 @@ def read_state(folder: pathlib.Path) -> ports.ThresholdSource:
 
 
 def planned_pieces(experiment_dir: pathlib.Path) -> dict:
-    """Every round's planned pieces, by point id, as (first seed, count).
+    """Every batch's planned pieces, by point id, as (first seed, count).
 
-    Each seed range once, in seed order, however many rounds planned it.
+    Each seed range once, in seed order, however many batches planned it.
     """
     planned = {}
-    for round_dir in round_dirs(experiment_dir):
-        plan_path = round_dir / PLAN_FILE
+    for batch_folder in batch_dirs(experiment_dir):
+        plan_path = batch_folder / PLAN_FILE
         for _task, piece in read_plan(plan_path):
             point_pieces = planned.setdefault(piece.point_id, set())
             point_pieces.add((piece.first_seed, piece.count))
@@ -237,7 +238,6 @@ def read_plan(plan_path: pathlib.Path) -> list:
     planned = []
     for row in rows:
         piece = round_plans.PlannedPiece(
-            row["configuration_id"],
             row["point_id"],
             int(row["first_seed"]),
             int(row["count"]),
@@ -247,17 +247,21 @@ def read_plan(plan_path: pathlib.Path) -> list:
     return planned
 
 
-def round_dirs(experiment_dir: pathlib.Path) -> list:
-    """The experiment's round folders that hold a plan, in round order."""
-    found = experiment_dir.glob(f"{ROUND_PREFIX}*/{PLAN_FILE}")
+def batch_dir(experiment_dir: pathlib.Path, batch_number: int) -> pathlib.Path:
+    """Batch k's folder, batches/<k>/."""
+    return experiment_dir / BATCHES_FOLDER / str(batch_number)
+
+
+def batch_dirs(experiment_dir: pathlib.Path) -> list:
+    """The experiment's batch folders that hold a plan, in batch order."""
+    found = experiment_dir.glob(f"{BATCHES_FOLDER}/*/{PLAN_FILE}")
     folders = [path.parent for path in found]
-    return sorted(folders, key=round_number_of)
+    return sorted(folders, key=batch_number_of)
 
 
-def round_number_of(round_dir: pathlib.Path) -> int:
-    """The round number k of a round<k> folder."""
-    number_text = round_dir.name.removeprefix(ROUND_PREFIX)
-    return int(number_text)
+def batch_number_of(batch_folder: pathlib.Path) -> int:
+    """The batch number k of a batches/<k> folder."""
+    return int(batch_folder.name)
 
 
 def _staging_dir(folder: pathlib.Path) -> pathlib.Path:

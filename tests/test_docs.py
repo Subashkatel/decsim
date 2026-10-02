@@ -196,6 +196,24 @@ def _names_assigned(path: pathlib.Path) -> set:
     for node in tree.body:
         bound = _assigned_targets(node)
         named.update(bound)
+        variables = _environment_variables_named(node)
+        named.update(variables)
+    return named
+
+
+def _environment_variables_named(node: ast.AST) -> set:
+    """The environment variable a *_VARIABLE constant names.
+
+    A page that shows how to launch a job names the variables the job
+    reads, as it names a shell script's.
+    """
+    is_assignment = isinstance(node, ast.Assign)
+    if not is_assignment or not isinstance(node.value, ast.Constant):
+        return set()
+    named = set()
+    for target in node.targets:
+        if isinstance(target, ast.Name) and target.id.endswith("_VARIABLE"):
+            named.add(node.value.value)
     return named
 
 

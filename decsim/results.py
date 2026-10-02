@@ -1,4 +1,4 @@
-"""Run folders read back as one table.
+"""Results folders read back as one table.
 
 A row per sweep point beside its settings is sinter's shape: its
 read_stats_from_csv_files gives one TaskStats per task with the task's
@@ -19,15 +19,15 @@ def load(*run_dirs: Union[str, pathlib.Path]) -> list:
 
     A row holds its folder (run_dir), its sweep.csv columns read back as
     numbers, and every setting its point ran with, from the point's
-    resolved/ file, as settings.<path> columns.
+    machine.json, as settings.<path> columns.
     """
     rows = []
     for run_dir_name in run_dirs:
         run_dir = pathlib.Path(run_dir_name)
-        resolved = run_folder.resolved_by_point(run_dir)
+        records = run_folder.point_records(run_dir)
         results = report.rows_by_point(run_dir)
         for point, result in results.items():
-            record = resolved.get(point, {})
+            record = records.get(point, {})
             settings = run_folder.resolved_values(record, ("settings",))
             row = {"run_dir": str(run_dir)}
             row.update(result)

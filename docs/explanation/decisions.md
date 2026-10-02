@@ -1240,7 +1240,7 @@ row.
 
 **Decided.** A point's record names what made its workload by asking
 the workload's row (`maker`), and the run folder writes whatever the row
-answers under `maker` in `resolved/<id>.json`. The producer row answers
+answers under `maker` in the point's `machine.json`. The producer row answers
 its function, the point's own arguments and the package's version; the
 files row answers null, since its files are a workload another run made.
 
@@ -1430,10 +1430,10 @@ mistake a gap for a result.
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
   the per-point settings.
-- **O8. `decsim collect` refuses a `timing_only` device.** The device
+- **O8. `decsim run` refuses a `timing_only` device.** The device
   builds and runs as a machine, but the experiments layer's per-shot
   measurement compares the loop's prediction against PyMatching on the
-  sampled shot, and a timing-only device samples none, so `collect`
+  sampled shot, and a timing-only device samples none, so `decsim run`
   refuses the shot and names a qpu.kind that samples. A priced card on
   a real device is the way to a host-independent run today.
 - **O11. A staged job never moves to another unit.** A job that cannot

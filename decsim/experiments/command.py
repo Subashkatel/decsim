@@ -5,11 +5,14 @@ subcommand per word, and each verb's module imported only when that verb
 runs, so `decsim show` never loads matplotlib and `decsim plot` never
 loads Stim. The console script and `python -m decsim` both land here.
 
-    decsim run <yaml> [--seed N] [--out DIR] [--log ...] [--trace]
-    decsim collect <yaml> [--out DIR] [--processes N]
-    decsim collect --plan <round>/plan.csv --task K [--processes N]
-    decsim plan <yaml>... --out DIR --tasks N [--cores C] [--hours H]
-    decsim status <experiment dir>
+    decsim run <run file> [--out DIR] [--processes N] [--only NAME]
+        [--shots N]
+    decsim run <run file> --list
+    decsim run <run file> --seed S [--only NAME] [--out DIR] [--log ...]
+        [--trace]
+    decsim run <run file> --slurm --tasks N [--cores C] [--hours H]
+        [--memory-mb M] [--out DIR] [--dry-run]
+    decsim status <results folder>
     decsim show <yaml>
     decsim diff <run_dir> <run_dir>
     decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
@@ -61,30 +64,62 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 
 def _run(argv: list) -> None:
-    """One seeded shot of one yaml."""
-    import decsim.experiments.run_command as run_command
+    """An experiment's points, one point, one shot, Slurm, or a task."""
+    parser = _run_parser()
+    parsed = parser.parse_args(argv)
+    _check_the_run_arguments(parser, parsed)
+    if parsed.batch is not None:
+        _run_a_batch_task(parsed)
+        return
+    if parsed.list:
+        _list_the_points(parsed.run_file)
+        return
+    if parsed.slurm:
+        _launch_on_slurm(parsed)
+        return
+    if parsed.seed is not None:
+        _run_one_shot(parsed)
+        return
+    _collect(parsed)
 
-    run_command.main(argv)
+
+def _launch_on_slurm(parsed) -> None:
+    """One step of the batch loop: the next batch planned and submitted."""
+    import decsim.experiments.plan_command as plan_command
+
+    job = plan_command.JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
+    plan_command.launch(
+        parsed.run_file,
+        parsed.out,
+        parsed.tasks,
+        job,
+        dry_run=parsed.dry_run,
+    )
 
 
-def _collect(argv: list) -> None:
-    """The whole sweep of one yaml, or one task of a round's plan."""
+def _run_a_batch_task(parsed) -> None:
+    """One array task: its share of a batch's plan, on a tree git names."""
+    import decsim.experiments.collect_command as collect_command
+    import decsim.experiments.plan_command as plan_command
+
+    plan_command.refuse_an_unnamed_tree()
+    results_dir = pathlib.Path(parsed.out)
+    collect_command.run_planned(
+        results_dir, parsed.batch, parsed.task, processes=parsed.processes
+    )
+
+
+def _collect(parsed) -> None:
+    """Every chosen point collected until it stops, then the summary."""
     import decsim.experiments.collect_command as collect_command
     import decsim.experiments.report as report
 
-    parser = _collect_parser()
-    parsed = parser.parse_args(argv)
-    if parsed.plan is not None:
-        _check_the_plan_arguments(parser, parsed)
-        plan_path = pathlib.Path(parsed.plan)
-        collect_command.run_planned(
-            plan_path, parsed.task, processes=parsed.processes
-        )
-        return
-    if parsed.config is None:
-        parser.error("name the yaml to sweep, or --plan and --task")
     run_dir, rows = collect_command.run_experiment(
-        parsed.config, parsed.out, processes=parsed.processes
+        parsed.run_file,
+        parsed.out,
+        processes=parsed.processes,
+        only=parsed.only,
+        shot_count=parsed.shots,
     )
     if not rows:
         return
@@ -94,16 +129,52 @@ def _collect(argv: list) -> None:
     print(f"\nevery column: {run_dir}/sweep.csv")
 
 
-def _collect_parser():
-    """The collect command's arguments."""
+def _run_one_shot(parsed) -> None:
+    """One seeded shot of the chosen point, narrated."""
+    import decsim.experiments.collect_command as collect_command
+    import decsim.experiments.experiment as experiment
+
+    run_path = pathlib.Path(parsed.run_file)
+    study = experiment.load_one_point(run_path, parsed.only)
+    lines = collect_command.run_one_shot(
+        study,
+        run_path,
+        parsed.seed,
+        parsed.out,
+        log=parsed.log,
+        trace=parsed.trace,
+    )
+    text = "\n".join(lines)
+    print(text)
+
+
+def _list_the_points(run_file: str) -> None:
+    """The experiment's point names, one a line, MultiSim's --list."""
+    import decsim.experiments.experiment as experiment
+
+    study = experiment.load(run_file)
+    for point in study.points:
+        print(point.name)
+
+
+def _run_parser():
+    """The run command's arguments, all here, where the command page reads them.
+
+    The Slurm defaults are the ones the batches have been run with: four
+    cores, a day of walltime, 4096 MB a piece before one is measured.
+    --batch and --task are an array task's entry, which the loop writes.
+    """
     import argparse
 
-    parser = argparse.ArgumentParser(prog="decsim collect")
+    parser = argparse.ArgumentParser(prog="decsim run")
     parser.add_argument(
-        "config", nargs="?", default=None, help="the experiment yaml to sweep"
+        "run_file",
+        nargs="?",
+        default=None,
+        help="the experiment's run file, Python or yaml",
     )
     parser.add_argument(
-        "--out", default=None, help="the experiment folder to write"
+        "--out", default=None, help="the results folder to write"
     )
     parser.add_argument(
         "--processes",
@@ -112,29 +183,128 @@ def _collect_parser():
         help="worker processes, one piece each (shots stay serial)",
     )
     parser.add_argument(
-        "--plan", default=None, help="a round's plan.csv, from decsim plan"
+        "--list", action="store_true", help="print the point names and stop"
     )
     parser.add_argument(
-        "--task", type=int, default=None, help="the plan's task to run"
+        "--only", default=None, help="the one point to run, by its name"
+    )
+    parser.add_argument(
+        "--shots",
+        type=_shot_count,
+        default=None,
+        help="stop every point at this many shots, its first seeds",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="run one narrated shot of this seed, of the first point or "
+        "the --only one",
+    )
+    parser.add_argument(
+        "--log",
+        default=None,
+        choices=("off", "print", "file", "both"),
+        help="the narrated shot's engine log, over the point's",
+    )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="write the narrated shot's Chrome trace of the data path",
+    )
+    parser.add_argument(
+        "--slurm",
+        action="store_true",
+        help="run the experiment as batches of Slurm arrays",
+    )
+    parser.add_argument(
+        "--tasks", type=int, default=None, help="the most tasks a batch has"
+    )
+    parser.add_argument(
+        "--cores", type=int, default=4, help="pieces a task runs at once"
+    )
+    parser.add_argument(
+        "--hours", type=int, default=24, help="a task's walltime"
+    )
+    parser.add_argument(
+        "--memory-mb",
+        type=int,
+        default=4096,
+        help="one piece's memory before its point has a measured peak",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the sbatch lines and submit nothing",
+    )
+    parser.add_argument(
+        "--batch", type=int, default=None, help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--task", type=int, default=None, help=argparse.SUPPRESS
     )
     return parser
 
 
-def _check_the_plan_arguments(parser, parsed) -> None:
-    """A planned task takes its yaml and folder from the plan, and a task."""
-    if parsed.task is None:
-        parser.error("--plan runs one task of the plan; name it with --task")
-    if parsed.config is not None or parsed.out is not None:
+def _shot_count(text: str) -> int:
+    """A shot count: a whole number of at least one."""
+    import argparse
+
+    count = int(text)
+    if count < 1:
+        raise argparse.ArgumentTypeError(
+            f"a shot count is at least 1, got {count}"
+        )
+    return count
+
+
+def _check_the_run_arguments(parser, parsed) -> None:
+    """The run's arguments name one thing to do."""
+    if parsed.batch is not None:
+        _check_the_task_arguments(parser, parsed)
+        return
+    if parsed.run_file is None:
+        parser.error("name the run file")
+    if parsed.slurm:
+        _check_the_slurm_arguments(parser, parsed)
+        return
+    if parsed.tasks is not None or parsed.dry_run:
+        parser.error("--tasks and --dry-run go with --slurm")
+    _check_the_local_arguments(parser, parsed)
+
+
+def _check_the_local_arguments(parser, parsed) -> None:
+    """A local run collects, or narrates one shot, not both."""
+    if parsed.seed is not None and parsed.shots is not None:
         parser.error(
-            "--plan reads the yaml and the folder from the plan; name neither"
+            "--seed runs one narrated shot and --shots a collection; give one"
+        )
+    narrates = parsed.log is not None or parsed.trace
+    if narrates and parsed.seed is None:
+        parser.error(
+            "--log and --trace narrate the one shot --seed runs; a "
+            "collection traces the shots its observation names"
         )
 
 
-def _plan(argv: list) -> None:
-    """The next round of an experiment's pieces, dealt to tasks."""
-    import decsim.experiments.plan_command as plan_command
+def _check_the_slurm_arguments(parser, parsed) -> None:
+    """A Slurm run plans every point to its stop, in tasks of a shape."""
+    if parsed.tasks is None:
+        parser.error("--slurm deals each batch to at most --tasks tasks")
+    chosen = (parsed.only, parsed.shots, parsed.seed)
+    if any(option is not None for option in chosen):
+        parser.error(
+            "--slurm runs every point to its stop; --only, --shots and "
+            "--seed run locally"
+        )
 
-    plan_command.main(argv)
+
+def _check_the_task_arguments(parser, parsed) -> None:
+    """An array task reads its run file from the folder its batch is in."""
+    if parsed.task is None or parsed.out is None:
+        parser.error("--batch runs one task of a batch; name --task and --out")
+    if parsed.run_file is not None:
+        parser.error("--batch reads the run file from the folder; name none")
 
 
 def _status(argv: list) -> None:
@@ -230,8 +400,6 @@ def _report_no_verb(verb: Optional[str]) -> None:
 # Each verb and the function that runs it, in the order usage lists them.
 _RUN_BY_VERB = {
     "run": _run,
-    "collect": _collect,
-    "plan": _plan,
     "status": _status,
     "show": _show,
     "diff": _diff,

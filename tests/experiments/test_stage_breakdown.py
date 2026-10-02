@@ -25,8 +25,8 @@ def shots_csv_row(point_id, stage_us, stage_columns, algorithm):
     return row
 
 
-def write_point_record(resolved_dir, point_id):
-    """A resolved/ record whose metadata sets the distance its id ends in.
+def write_point_record(points_dir, point_id):
+    """A point's record whose metadata sets the distance its id ends in.
 
     The other two paths are the long ones a real sweep sets.
     """
@@ -40,8 +40,11 @@ def write_point_record(resolved_dir, point_id):
         "qpu": {"distance": distance, "round_period_microseconds": 1.0},
         "workload": {"arguments": {"physical_error_probability": 0.001}},
     }
-    record = {"id": point_id, "metadata": metadata, "sections": sections}
-    record_path = resolved_dir / f"{point_id}.json"
+    record = {"id": point_id, "name": point_id, "metadata": metadata}
+    record["sections"] = sections
+    point_dir = points_dir / point_id
+    point_dir.mkdir(exist_ok=True)
+    record_path = point_dir / "machine.json"
     record_text = json.dumps(record)
     record_path.write_text(record_text)
 
@@ -49,8 +52,8 @@ def write_point_record(resolved_dir, point_id):
 def write_run(run_dir, rows, algorithm="pymatching"):
     """rows: (point id, {stage column: us}) pairs, one per shot."""
     run_dir.mkdir()
-    resolved_dir = run_dir / "resolved"
-    resolved_dir.mkdir()
+    points_dir = run_dir / "points"
+    points_dir.mkdir()
     stage_columns = [column for column, _ in plots.STAGE_BREAKDOWN_STAGES]
     field_names = ["point_id", "algorithm"] + stage_columns
     shots_csv_path = run_dir / "shots.csv"
@@ -60,7 +63,7 @@ def write_run(run_dir, rows, algorithm="pymatching"):
         for point_id, stage_us in rows:
             row = shots_csv_row(point_id, stage_us, stage_columns, algorithm)
             writer.writerow(row)
-            write_point_record(resolved_dir, point_id)
+            write_point_record(points_dir, point_id)
 
 
 def flat_stages(algorithm_us):
@@ -137,10 +140,11 @@ def test_a_bar_is_labelled_by_the_value_its_point_ran_with(
     write_run(run_dir, [one_shot])
     record = {
         "id": "point3",
+        "name": "point3",
         "metadata": {"qpu.distance": "${windows.commit_rounds}"},
         "sections": {"qpu": {"distance": 3}},
     }
-    record_path = run_dir / "resolved" / "point3.json"
+    record_path = run_dir / "points" / "point3" / "machine.json"
     record_text = json.dumps(record)
     record_path.write_text(record_text)
     figure_path = tmp_path / "stage_breakdown.png"

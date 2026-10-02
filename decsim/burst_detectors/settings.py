@@ -39,22 +39,8 @@ def detector_from_yaml(section: Mapping, clocks: config.ClockSettings):
     """
     kind = section.get("kind", "none")
     row = tables.row(BURST_DETECTORS, "burst_detector.kind", kind)
-    section_keys = ("kind",)
-    if row is not None:
-        section_keys = ("kind", "catch_deadline_rounds")
     return tables.row_settings(
-        row, "burst_detector", section, section_keys, clocks
-    )
-
-
-def catch_deadline_rounds_from_yaml(section: Mapping) -> int:
-    """How many rounds after a burst's onset a flag may come and catch it.
-
-    300 is half the 600-round decay of the comparison folder's burst, so
-    a caught burst still has most of its raised rounds ahead.
-    """
-    return config.whole_count(
-        section, "burst_detector", "catch_deadline_rounds", 300, "rounds", 0
+        row, "burst_detector", section, ("kind",), clocks
     )
 
 

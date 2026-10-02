@@ -7,10 +7,10 @@ decoders compared, a panel per distance. The rate per round is the one
 the Tesseract paper reports (Beni et al. 2503.10988, eq. 8).
 
 The decoders, bases, distances, rates and rounds are the ones in the
-folder's own run.py, the script that made its stats: the runner copies
-it there and refuses another text beside it (decsim/experiment_runner.py
-_record_the_run), and this directory's run.py is today's recipe, which
-may name other decoders.
+folder's own run.py, the script that made its stats: the run copies it
+there once and refuses another text beside it
+(decsim/experiments/run_folder.py, start_run), and this directory's
+run.py is today's recipe, which may name other decoders.
 """
 
 import importlib.util

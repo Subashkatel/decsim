@@ -105,12 +105,12 @@ def _one_point_config(folder, shots, piece_shots):
 
 
 def _pieces_of_one_point(tmp_path, shots, piece_shots):
-    """One point's shots collected in pieces; the experiment folder."""
+    """One point's shots collected in pieces; the results folder."""
     folder = tmp_path / f"of_{shots}"
     folder.mkdir()
     config_path = _one_point_config(folder, shots, piece_shots)
     experiment_dir = folder / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 
@@ -124,10 +124,7 @@ def _piece_folders(experiment_dir) -> list:
 def _folded(experiment_dir, folders, out_dir) -> list:
     """The pieces folded into out_dir as the collect that saved them does."""
     point_ids = [folders[0].parent.name]
-    seeds_by_point = pieces.seed_ranges_of(folders)
-    return report.fold_pieces(
-        experiment_dir, folders, point_ids, seeds_by_point, out_dir
-    )
+    return report.fold_pieces(experiment_dir, folders, point_ids, out_dir)
 
 
 def _peak_rows_alive(monkeypatch, experiment_dir, out_dir):
@@ -610,17 +607,17 @@ def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
     the folder is on disk, and command.main catches only a refusal.
     Here two pieces lack service, as an older tree's pieces do, and the
     summary prints its other lines and says nothing about service. The
-    terminal names the points its folder's manifest lists, and the
-    collect's own run folder has that manifest.
+    terminal names its rows' points by their records in the folder it
+    is given, so the collect's records are copied beside the fold.
     """
     experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
     folders = _piece_folders(experiment_dir)
     _each_without_a_point(folders, "service")
     out_dir = tmp_path / "folded"
     rows = _folded(experiment_dir, folders, out_dir)
-    run_dir = yaml_configs.run_folder_of(experiment_dir)
-    manifest_path = run_dir / "manifest.json"
-    shutil.copy(manifest_path, out_dir)
+    points_dir = experiment_dir / "points"
+    copied_points_dir = out_dir / "points"
+    shutil.copytree(points_dir, copied_points_dir)
 
     assert "service_mean_us" not in rows[0]
     lines = report.terminal_lines(rows, out_dir)
@@ -695,7 +692,7 @@ def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
     """
     experiment_dir = _burst_and_quiet_pieces(tmp_path)
 
-    run_dir = yaml_configs.run_folder_of(experiment_dir)
+    run_dir = experiment_dir
     shots_path = run_dir / "shots.csv"
     sweep_path = run_dir / "sweep.csv"
     shots = _rows_of(shots_path)
@@ -729,37 +726,16 @@ def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
     assert forwards_bytes == backwards_bytes
 
 
-def test_a_fold_records_the_seeds_of_the_pieces_it_folded(tmp_path):
-    """A run folder's record names the seeds its rows hold, and no others.
-
-    The last two of four pieces folded alone hold and record seeds 2
-    and 3; all four record 0 to 3, and a second fold into that same
-    folder records them once.
-    """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 1)
-    folders = _piece_folders(experiment_dir)
-    second_half_dir = tmp_path / "second_half"
-    whole_dir = tmp_path / "whole"
-
-    _folded(experiment_dir, folders[2:], second_half_dir)
-    _folded(experiment_dir, folders, whole_dir)
-    _folded(experiment_dir, folders, whole_dir)
-
-    assert _seeds_of_every_shot(second_half_dir) == ["2", "3"]
-    assert _seeds_of_the_one_point(second_half_dir) == [[2, 2]]
-    assert _seeds_of_the_one_point(whole_dir) == [[0, 4]]
-
-
 def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
     """A resumed collect's record holds the saved seeds and the new ones."""
     config_path = _one_point_config(tmp_path, 2, 1)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
-    run_dir = yaml_configs.run_folder_of(experiment_dir)
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
+    run_dir = experiment_dir
     first_seeds = _seeds_of_the_one_point(run_dir)
     _one_point_config(tmp_path, 4, 1)
 
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
 
     assert first_seeds == [[0, 2]]
     assert _seeds_of_the_one_point(run_dir) == [[0, 4]]
@@ -791,12 +767,11 @@ def _seeds_of_every_shot(run_dir) -> list:
 
 
 def _seeds_of_the_one_point(run_dir) -> list:
-    """The seed ranges the run folder's one resolved record names."""
-    resolved_dir = run_dir / "resolved"
-    (resolved_path,) = resolved_dir.glob("*.json")
-    resolved_text = resolved_path.read_text()
-    resolved = json.loads(resolved_text)
-    return resolved["seeds"]
+    """The seed ranges the results folder's one point record names."""
+    (record_path,) = run_dir.glob("points/*/machine.json")
+    record_text = record_path.read_text()
+    record = json.loads(record_text)
+    return record["seeds"]
 
 
 # a burst at round 5 of a shot's thirty, so a burst shot measures its catch
@@ -833,7 +808,7 @@ def _burst_and_quiet_pieces(tmp_path):
     ]
     config_path = yaml_configs.write_config(tmp_path, overrides)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 
@@ -1063,8 +1038,8 @@ def _confidence_run(
     ]
     config_path = yaml_configs.write_config(tmp_path, overrides)
     experiment_dir = tmp_path / out
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
-    return yaml_configs.run_folder_of(experiment_dir)
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
+    return experiment_dir
 
 
 def _counts_of(rows, histogram) -> int:

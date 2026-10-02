@@ -8,18 +8,34 @@ the trial saves each line's first alarm in A and in B. Quiet points
 count false alarms over 104 s of quiet shots. Each (d, p)'s lines come
 from its calibration point, which its other points read, so on Slurm
 they run after it (--dependency=afterok).
+
+The command line is gem5 MultiSim's (gem5 v24.0 RELEASE-NOTES.md,
+"gem5 MultiSim"): `python run.py --list` prints the points, `python
+run.py <id> --out DIR` runs one, `python run.py` runs them all and
+combines, and `python run.py combine --out DIR` gathers the saved
+points' rows into each results file. A point's seed is a hash of its
+labels, so it draws the same shots in any grid, and its rows are saved
+whole once its function returns, so a point with a CSV is done and a
+resubmitted task runs only the rest.
 """
 
+import argparse
 import csv
+import dataclasses
+import hashlib
 import itertools
+import json
 import pathlib
+import sys
+import time
+from collections.abc import Callable
 from typing import Optional
 
 import numpy
 import stim
 
 import decsim.detector_error_model.detector_formation as detector_formation
-import decsim.experiment_runner as experiment_runner
+import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.qpu.stim_device as stim_device
 from decsim.burst_detectors.masked_regional_cusum import (
@@ -55,6 +71,26 @@ STIM_SEED_BOUND = 2**63
 DETECTOR_SETTINGS = (
     masked_regional_cusum.MaskedRegionalCusumBurstDetector.Settings()
 )
+NAME = "burst_detection"
+_SCRIPT_AS_GIVEN = pathlib.Path(__file__)
+SCRIPT = _SCRIPT_AS_GIVEN.resolve()
+# `run.py combine` gathers every saved point's rows into its results file
+COMBINE = "combine"
+POINTS_FOLDER = "points"
+
+
+@dataclasses.dataclass(frozen=True)
+class FunctionPoint:
+    """One point: function(labels, seed, folder) returns its rows.
+
+    Each row is a dict from column to value, saved after the labels'
+    columns into the point's CSV and gathered with every point naming
+    the same results_file into that file.
+    """
+
+    function: Callable
+    labels: dict
+    results_file: str
 
 
 def circuit(distance: int, error_rate: float) -> stim.Circuit:
@@ -97,7 +133,7 @@ def saved_lines(
 ) -> masked_regional_cusum.AlarmLines:
     """The lines the (d, p) calibration point saved, or a refusal."""
     calibration_id = RATE_POINTS.index((distance, error_rate))
-    path = experiment_runner.point_path(folder, calibration_id)
+    path = point_path(folder, calibration_id)
     if not path.exists():
         message = (
             f"no alarm levels at {path}: run calibration point "
@@ -184,22 +220,209 @@ def quiet_point(labels: dict, seed: int, folder: pathlib.Path) -> list:
     return rows
 
 
-def burst_detection() -> experiment_runner.Experiment:
+def burst_detection() -> list:
     """The calibrations in RATE_POINTS order, then each (d, p)'s points."""
-    experiment = experiment_runner.Experiment("burst_detection")
+    points = []
     for distance, error_rate in RATE_POINTS:
         rate_labels = {"d": distance, "p": error_rate}
-        experiment.add_point(calibration_point, rate_labels, "alarm_levels.csv")
+        point = FunctionPoint(
+            calibration_point, rate_labels, "alarm_levels.csv"
+        )
+        points.append(point)
     for distance, error_rate in RATE_POINTS:
         rate_labels = {"d": distance, "p": error_rate}
         classes = itertools.product(RADIUS_BY_SIZE, MULTIPLE_BY_STRENGTH)
         for size, strength in classes:
             labels = rate_labels | {"size": size, "strength": strength}
-            experiment.add_point(burst_point, labels, "trials.csv")
+            point = FunctionPoint(burst_point, labels, "trials.csv")
+            points.append(point)
         for part in range(QUIET_PARTS):
             labels = rate_labels | {"part": part}
-            experiment.add_point(quiet_point, labels, "quiet.csv")
-    return experiment
+            point = FunctionPoint(quiet_point, labels, "quiet.csv")
+            points.append(point)
+    return points
+
+
+def main(arguments: Optional[list] = None) -> None:
+    """Run what the command line asks: list, one point, all, or combine."""
+    parser = _parser()
+    parsed = parser.parse_args(arguments)
+    points = burst_detection()
+    if parsed.list:
+        _print_points(points)
+        return
+    point_ids = _point_ids(parser, parsed.target, len(points))
+    folder = _results_folder(parser, parsed)
+    run_folder.refuse_another_tree(folder)
+    every_id = list(range(len(points)))
+    started_utc = run_folder.start_run(folder, SCRIPT, every_id)
+    for point_id in point_ids:
+        _run_point(points[point_id], point_id, folder)
+    if parsed.target in (None, COMBINE):
+        combine(folder, points)
+    run_folder.finish_run(folder, SCRIPT, every_id, started_utc)
+
+
+def combine(folder: pathlib.Path, points: list) -> None:
+    """Each results file: its saved points' rows, in point order.
+
+    The rows are joined as text under the first point's header, so a
+    point whose header differs is refused rather than read under the
+    wrong columns.
+    """
+    lines_by_file = {}
+    first_path_by_file = {}
+    for point_id, point in enumerate(points):
+        path = point_path(folder, point_id)
+        if not path.exists():
+            continue
+        point_text = path.read_text()
+        header, *rows = point_text.splitlines(keepends=True)
+        file_lines = lines_by_file.setdefault(point.results_file, [header])
+        first_path = first_path_by_file.setdefault(point.results_file, path)
+        if header != file_lines[0]:
+            _refuse_a_different_header(first_path, path)
+        file_lines.extend(rows)
+    for results_file, file_lines in lines_by_file.items():
+        results_path = folder / results_file
+        text = "".join(file_lines)
+        results_path.write_text(text)
+
+
+def point_path(folder: pathlib.Path, point_id: int) -> pathlib.Path:
+    """Where a point's rows are saved; the file exists once it is done."""
+    return folder / POINTS_FOLDER / f"{point_id}.csv"
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run the burst detection experiment's points."
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="a point id from --list, or combine; all points when absent",
+    )
+    parser.add_argument(
+        "--list", action="store_true", help="print every point's id"
+    )
+    parser.add_argument(
+        "--out",
+        help="the results folder; a new dated one when every point runs",
+    )
+    return parser
+
+
+def _print_points(points: list) -> None:
+    for point_id, point in enumerate(points):
+        label_pairs = []
+        for key, value in point.labels.items():
+            label_pairs.append(f"{key}={value}")
+        labels_text = " ".join(label_pairs)
+        print(f"{point_id} {point.results_file} {labels_text}")
+
+
+def _point_ids(
+    parser: argparse.ArgumentParser, target: Optional[str], point_count: int
+) -> list:
+    """Every point for no target, none for combine, else the one named."""
+    if target is None:
+        return list(range(point_count))
+    if target == COMBINE:
+        return []
+    if not target.isdigit() or int(target) >= point_count:
+        last_point_id = point_count - 1
+        parser.error(
+            f"{target!r} is no point id; --list shows the {point_count} "
+            f"points, 0 to {last_point_id}, or give combine"
+        )
+    return [int(target)]
+
+
+def _results_folder(
+    parser: argparse.ArgumentParser, parsed: argparse.Namespace
+) -> pathlib.Path:
+    """--out, or a new dated folder for a run of every point.
+
+    One point and combine name their folder, since every task of an
+    array writes the one folder its points share.
+    """
+    if parsed.out is None and parsed.target is not None:
+        parser.error(
+            "one point or combine writes the folder its array shares; "
+            "name it with --out"
+        )
+    return run_folder.run_dir_for(NAME, parsed.out)
+
+
+def _run_point(
+    point: FunctionPoint, point_id: int, folder: pathlib.Path
+) -> None:
+    """The point's rows, labelled, written once its function returns.
+
+    A point whose CSV exists is done: it is written whole or not at
+    all, so a task the time limit stopped leaves no CSV to trust.
+    """
+    path = point_path(folder, point_id)
+    if path.exists():
+        print(f"point {point_id}: saved already")
+        return
+    seed = _point_seed(point.labels)
+    start = time.perf_counter()
+    rows = point.function(point.labels, seed, folder)
+    end = time.perf_counter()
+    if not rows:
+        raise ValueError(
+            f"point {point_id}'s function returned no rows; a point saves "
+            "at least one, so that its CSV says it ran"
+        )
+    labelled_rows = [point.labels | row for row in rows]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_rows_once(path, labelled_rows)
+    elapsed_seconds = end - start
+    row_count = len(labelled_rows)
+    print(f"point {point_id}: {row_count} rows, {elapsed_seconds:.0f} seconds")
+
+
+def _point_seed(labels: dict) -> int:
+    """A 64-bit seed read off the labels, the same on every machine."""
+    labels_json = json.dumps(labels, sort_keys=True)
+    labels_bytes = labels_json.encode()
+    hasher = hashlib.sha256(labels_bytes)
+    digest = hasher.digest()
+    seed_bytes = digest[:8]
+    return int.from_bytes(seed_bytes, "big")
+
+
+def _write_rows_once(path: pathlib.Path, rows: list) -> None:
+    """The rows as CSV, staged beside path and renamed over it."""
+    columns = list(rows[0])
+    with run_folder.staged_replacement(path) as staging:
+        with staging.open("w", newline="") as staging_file:
+            writer = csv.DictWriter(
+                staging_file, fieldnames=columns, lineterminator="\n"
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+
+
+def _refuse_a_different_header(
+    first_path: pathlib.Path, path: pathlib.Path
+) -> None:
+    first_header = _header(first_path)
+    header = _header(path)
+    raise ValueError(
+        f"{path} has the columns {header} but {first_path} has "
+        f"{first_header}; the rows of one results file are joined under one "
+        "header, so its points must save the same columns in the same order"
+    )
+
+
+def _header(path: pathlib.Path) -> str:
+    """A saved CSV's first line, without its line end."""
+    with path.open() as saved_file:
+        first_line = saved_file.readline()
+    return first_line.rstrip("\n")
 
 
 def _burst_flips(
@@ -250,5 +473,4 @@ def _alarm_round(first_round: int) -> Optional[int]:
 
 
 if __name__ == "__main__":
-    experiment = burst_detection()
-    experiment.main()
+    main(sys.argv[1:])

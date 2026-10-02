@@ -10,8 +10,9 @@ around it are.
 ## What a config file is
 
 A yaml file describes a **sweep**: a set of points, each of which is one
-machine, plus how many shots to run at each point. `decsim collect`
-runs the whole sweep. `decsim run` runs one shot of the first point.
+machine, plus how many shots to run at each point. `decsim run`
+runs the whole sweep, and `decsim run --seed S` one shot of the first
+point.
 
 The file has one section per component, and the section is read by the
 package that owns that component (`decsim/settings.py`, `SECTIONS`). The
@@ -88,8 +89,8 @@ extends: ../bases/weak_decoder_baseline.yaml
 folder, then applies this file's keys over it (`decsim/experiments/experiment.py`). A
 section this file names replaces the base's section whole, so a `sweep`
 written here replaces the base's sweep rather than adding to it.
-`manifest.json` records the whole chain, nearest first, and `config/`
-in the run folder holds a verbatim copy of every file in it. A chain
+`run.json` records the whole chain, nearest first, and `config/`
+in the results folder holds a verbatim copy of every file in it. A chain
 that reaches one of its own files again is refused, naming the files in
 the order it followed them.
 
@@ -140,7 +141,7 @@ collection:
 How a point's shots are cut and when they stop, sinter's
 `CollectionOptions` as yaml (`decsim/experiments/collection.py`). A
 point runs seeds 0, 1, 2 and on, in pieces of `piece_rounds` QEC rounds
-each saved whole the moment it ends, so a killed collect run again runs
+each saved whole the moment it ends, so a killed run started again runs
 only the pieces it lacks. It stops at the first shot where its scored
 failures reach `max_failures` with at least `min_shots` scored shots
 behind them, or where its shots reach `max_shots` or its shots' own
@@ -188,7 +189,7 @@ the run folder is named for the file. An experiment extends a base or
 writes every section itself, never extending an example or another
 experiment, and it holds its grid whole: no copy per distance and no
 preview copy. A run too long for one job is cut into pieces by
-`collect`, not by more files.
+`decsim run`, not by more files.
 
 | File | What it is for |
 | --- | --- |

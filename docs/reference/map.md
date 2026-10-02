@@ -42,7 +42,7 @@ docstring.
 - `decsim/records/log_sources.py`: The name each component narrates under, in one place.
 - `decsim/records/program.py`: The program the front end hands the machine, one operation at a time.
 - `decsim/records/results.py`: The records one run returns: the run and each logical operation.
-- `decsim/records/round_plans.py`: A round plan's records: one piece a round deals to a task.
+- `decsim/records/round_plans.py`: A batch plan's records: one piece a batch deals to a task.
 - `decsim/records/rounds.py`: One syndrome round on its way out of the QPU and through the controller.
 - `decsim/records/seeds.py`: The run-level seed graph's records: a path edge, a child, a reservation.
 - `decsim/records/transfers.py`: One transfer on one link: its hop, its bits, its timing, its ledger.
@@ -344,36 +344,31 @@ docstring.
 ### experiments
 
 - `decsim/experiments/__init__.py`: The experiments layer: the yaml experiment, the sweep, the rows and figures.
-- `decsim/experiments/collect_command.py`: `decsim collect`: every sweep point of one yaml, each until it stops.
-- `decsim/experiments/collection.py`: The collection section: how a sweep point's shots are cut and stopped.
+- `decsim/experiments/collect_command.py`: `decsim run`: every point of one experiment, each until it stops.
+- `decsim/experiments/collection.py`: The collection: how a point's shots are cut and stopped.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
 - `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
-- `decsim/experiments/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
+- `decsim/experiments/experiment.py`: An experiment: named points, each a machine to collect shots of.
 - `decsim/experiments/failure_statistics.py`: Estimates, exact intervals and paired tests of logical failure rates.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
 - `decsim/experiments/pieces.py`: A piece: seeds [first, first + count) of one sweep point, kept as one folder.
-- `decsim/experiments/plan_command.py`: `decsim plan`: the next round of an experiment's pieces, dealt to tasks.
+- `decsim/experiments/plan_command.py`: `decsim run --slurm`: an experiment's batches, planned and submitted.
 - `decsim/experiments/plots.py`: The figures that read decsim's own records, not a sweep's numbers.
 - `decsim/experiments/refusal.py`: The one refusal decsim.experiments raises when it will not do what was asked.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
 - `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
-- `decsim/experiments/run_command.py`: `decsim run`: one seeded shot of one yaml, narrated.
-- `decsim/experiments/run_folder.py`: The experiment folder and its run folders: results, config, identity.
-- `decsim/experiments/status_command.py`: `decsim status`: an experiment's pieces folded, and where each point stands.
+- `decsim/experiments/run_folder.py`: The results folder: one experiment's records, pieces and rows.
+- `decsim/experiments/status_command.py`: `decsim status`: a results folder's pieces folded, and where each point is.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
-## Level 10: __main__, experiment_runner, results
+## Level 10: __main__, results
 
 ### __main__
 
 - `decsim/__main__.py`: `python -m decsim <verb>`: the same command set as the console script.
 
-### experiment_runner
-
-- `decsim/experiment_runner.py`: One experiment script's points, its command line and its results folder.
-
 ### results
 
-- `decsim/results.py`: Run folders read back as one table.
+- `decsim/results.py`: Results folders read back as one table.

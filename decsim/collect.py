@@ -38,10 +38,58 @@ from typing import Any, Optional
 import numpy
 import stim
 
+import decsim.config as config
 import decsim.machine as machine_module
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
+
+# The key a record's class is written under beside its fields. No field
+# can take it, since class is a Python keyword.
+RECORD_CLASS_KEY = "class"
+# confidence_shot_count's word for every shot of a point, in the yaml
+# and in a piece's record
+EVERY_SHOT = "all"
+
+
+@dataclasses.dataclass(frozen=True)
+class RecordOptions:
+    """What the run records of a point's shots beside their results.
+
+    confidence_shot_count is how many shots of the point, from seed 0,
+    write their windows' confidence gaps to window_confidence.csv when a
+    confidence signal decides the escalation; None writes every scored
+    shot's. catch_deadline_rounds is how many rounds after a burst's
+    onset a detector's flag may come and still catch it in time, which
+    the shot columns read; 300 is half the 600-round decay of the
+    comparison folder's burst, so a caught burst still has most of its
+    raised rounds ahead. The machine reads neither, so they are no part
+    of a point's id, as sinter keeps its output options out of a task's
+    strong id (sinter/_data/_task.py:167-204).
+    """
+
+    confidence_shot_count: Optional[int] = 100
+    catch_deadline_rounds: int = 300
+
+    def __post_init__(self) -> None:
+        shot_count = self.confidence_shot_count
+        if shot_count is not None and not config.is_whole_count(shot_count, 0):
+            raise ValueError(
+                "confidence_shot_count must be a non-negative whole number "
+                f"of shots or None for every shot, got {shot_count!r}"
+            )
+        deadline = self.catch_deadline_rounds
+        if not config.is_whole_count(deadline, 0):
+            raise ValueError(
+                "catch_deadline_rounds must be a non-negative whole number "
+                f"of rounds, got {deadline!r}"
+            )
+
+    def samples_confidence_of(self, seed: int) -> bool:
+        """Whether this seed's windows go into window_confidence.csv."""
+        if self.confidence_shot_count is None:
+            return True
+        return seed < self.confidence_shot_count
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,12 +99,15 @@ class Task:
     metadata is the json the caller wants to see beside every row (the
     sweep point). online_threshold is the point's online threshold
     source when the escalation asks for one, built once here and
-    installed on every shot's settings.
+    installed on every shot's settings. record_options are what the run
+    records of the shots, which the strong id leaves out with the
+    online source.
     """
 
     settings: machine_settings.MachineSettings
     metadata: Mapping[str, Any]
     online_threshold: Optional[Any] = None
+    record_options: RecordOptions = RecordOptions()
 
     def __post_init__(self):
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
@@ -229,11 +280,13 @@ def metadata_text(metadata: Mapping[str, Any]) -> str:
     return json.dumps(value, sort_keys=True)
 
 
-def json_value(value: Any, *, keep_labels: bool = True) -> Any:
+def json_value(
+    value: Any, *, keep_labels: bool = True, record_classes: bool = True
+) -> Any:
     """A settings record as plain json: every value by its content.
 
-    A dataclass (a settings record, a round policy) appears as its
-    fields. Every number appears exactly (a json number, or a Fraction's
+    A dataclass (a settings record, a round policy) appears as its class
+    and its fields. Every number appears exactly (a json number, or a Fraction's
     exact text), every string and flag as written, and an enum member as
     its name. A Stim circuit appears as its text, as sinter's strong id
     carries the task's circuit (sinter/_data/_task.py:193), so two tasks
@@ -241,14 +294,30 @@ def json_value(value: Any, *, keep_labels: bool = True) -> Any:
     (a decoder, a device) has no record form and appears by its content
     too (_json_object). keep_labels False leaves out every dataclass
     field declared compare=False, the labels a strong id does not hash.
+    record_classes False leaves out each record's class, which names a
+    setting's identity and not a result's.
     """
+    form = _JsonForm(keep_labels, record_classes)
+    return _json_in(value, form)
+
+
+@dataclasses.dataclass(frozen=True)
+class _JsonForm:
+    """What json_value writes beside a record's compared fields."""
+
+    keep_labels: bool
+    record_classes: bool
+
+
+def _json_in(value: Any, form: _JsonForm) -> Any:
+    """One value walked in the form json_value was asked for."""
     if dataclasses.is_dataclass(value):
-        return _json_record(value, keep_labels)
+        return _json_record(value, form)
     if isinstance(value, Mapping):
-        return _json_mapping(value, keep_labels)
+        return _json_mapping(value, form)
     if isinstance(value, (list, tuple)):
-        return _json_list(value, keep_labels)
-    return _json_scalar(value, keep_labels)
+        return _json_list(value, form)
+    return _json_scalar(value, form)
 
 
 def _peak_memory_mb() -> float:
@@ -339,22 +408,35 @@ def _submit_up_to(
         running[future] = position
 
 
-def _json_record(record: Any, keep_labels: bool) -> dict:
-    """A dataclass as its fields, each one walked; labels when kept."""
+def _json_record(record: Any, form: _JsonForm) -> dict:
+    """A dataclass as its class and fields, each one walked; labels when kept.
+
+    The class sits beside the fields, as gem5's config.json writes each
+    object's type (src/python/m5/SimObject.py:1175-1178), so two records
+    with the same fields, two rows that take no settings, are two points.
+    """
     fields = {}
+    if form.record_classes:
+        record_class = type(record)
+        fields[RECORD_CLASS_KEY] = _qualified_name(record_class)
     for field in dataclasses.fields(record):
-        if not field.compare and not keep_labels:
+        if not field.compare and not form.keep_labels:
             continue
         field_value = getattr(record, field.name)
-        fields[field.name] = json_value(field_value, keep_labels=keep_labels)
+        fields[field.name] = _json_in(field_value, form)
     return fields
 
 
-def _json_mapping(mapping: Mapping, keep_labels: bool) -> dict:
+def _qualified_name(named_class: type) -> str:
+    """A class's module and qualified name, the identity pickle writes."""
+    return f"{named_class.__module__}.{named_class.__qualname__}"
+
+
+def _json_mapping(mapping: Mapping, form: _JsonForm) -> dict:
     """A mapping with its keys as text and its values walked."""
     items = {}
     for key, item in mapping.items():
-        items[str(key)] = json_value(item, keep_labels=keep_labels)
+        items[str(key)] = _json_in(item, form)
     return items
 
 
@@ -380,16 +462,16 @@ def _refuse_a_key_that_is_not_text(value: Any, where: str) -> None:
         _refuse_a_key_that_is_not_text(item, f"{where}.{key}")
 
 
-def _json_list(sequence, keep_labels: bool) -> list:
+def _json_list(sequence, form: _JsonForm) -> list:
     """A list or a tuple, each item walked."""
     items = []
     for item in sequence:
-        json_item = json_value(item, keep_labels=keep_labels)
+        json_item = _json_in(item, form)
         items.append(json_item)
     return items
 
 
-def _json_scalar(value: Any, keep_labels: bool) -> Any:
+def _json_scalar(value: Any, form: _JsonForm) -> Any:
     """A number exactly, a string, flag or path as written; others named."""
     if isinstance(value, (numbers.Number, numpy.generic)):
         return _json_number(value)
@@ -401,10 +483,10 @@ def _json_scalar(value: Any, keep_labels: bool) -> Any:
         return value.name
     if isinstance(value, stim.Circuit):
         return str(value)
-    return _json_object(value, keep_labels)
+    return _json_object(value, form)
 
 
-def _json_object(value: Any, keep_labels: bool) -> Any:
+def _json_object(value: Any, form: _JsonForm) -> Any:
     """A Python-built component: its class, and its attributes walked.
 
     Two instances that hold different values are two tasks. The id is
@@ -419,13 +501,13 @@ def _json_object(value: Any, keep_labels: bool) -> Any:
     if isinstance(value, numpy.ndarray):
         return value.tolist()
     if isinstance(value, type):
-        return f"{value.__module__}.{value.__qualname__}"
+        return _qualified_name(value)
     value_type = type(value)
-    class_name = f"{value_type.__module__}.{value_type.__qualname__}"
+    class_name = _qualified_name(value_type)
     attributes = _attributes_of(value)
     if not attributes:
         return class_name
-    content = _json_mapping(attributes, keep_labels)
+    content = _json_mapping(attributes, form)
     return {"class": class_name, "attributes": content}
 
 

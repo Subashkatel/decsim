@@ -163,7 +163,7 @@ the strong decoder, and nothing else in this run.
 ## Step 2. Run the sweep
 
 ```bash
-decsim collect configs/examples/two_tiers.yaml --out results/two_tiers
+decsim run configs/examples/two_tiers.yaml --out results/two_tiers
 ```
 
 The command prints the same resolved config, then one line per point as
@@ -198,7 +198,7 @@ ready to frame commit: median 28.368 us, p99 70.340 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/two_tiers/combined/two_tiers-1bd7c0f9/sweep.csv
+every column: results/two_tiers/sweep.csv
 ```
 
 Read `service time per window, mean` against the weak card of one

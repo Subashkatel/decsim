@@ -109,32 +109,6 @@ def test_a_negative_shot_number_is_refused():
     assert "non-negative whole numbers" in str(refusal.value)
 
 
-@pytest.mark.parametrize("written", ["-1", "true", "some", "2.5"])
-def test_a_confidence_shot_count_that_is_no_count_is_refused(written):
-    """A count of shots from seed 0, or the word all; nothing else."""
-    section = _section(f"observation:\n  confidence_shot_count: {written}\n")
-
-    with pytest.raises(ValueError) as refusal:
-        observe_settings.ObservationSettings.from_yaml(section)
-
-    assert "observation.confidence_shot_count must be a non-negative" in str(
-        refusal.value
-    )
-
-
-def test_every_shot_is_the_word_all_and_the_default_is_a_hundred():
-    every = _section("observation:\n  confidence_shot_count: all\n")
-    unset = _section("observation:\n  log: off\n")
-
-    every_settings = observe_settings.ObservationSettings.from_yaml(every)
-    unset_settings = observe_settings.ObservationSettings.from_yaml(unset)
-    a_billion = 10**9
-
-    assert every_settings.samples_confidence_of(a_billion)
-    assert unset_settings.samples_confidence_of(99)
-    assert not unset_settings.samples_confidence_of(100)
-
-
 def test_a_study_knob_that_is_not_true_or_false_is_refused():
     """The knobs are on or off; a word is a user's mistake."""
     section = _section("observation:\n  data_movement: yes please\n")

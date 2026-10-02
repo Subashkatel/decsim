@@ -115,9 +115,8 @@ def test_the_strong_window_record_declares_whether_it_absorbs():
 
     assert redo_window.strong_window.name == "redo_window"
     assert forward.strong_window.name == "double_window"
-    assert escalation_build.absorbs_weak_windows(redo_window) is False
-    assert escalation_build.absorbs_weak_windows(forward) is True
-    assert escalation_build.absorbs_weak_windows(None) is False
+    assert redo_window.strong_window.absorbs_weak_windows is False
+    assert forward.strong_window.absorbs_weak_windows is True
 
 
 def test_the_switching_part_builds_the_strong_window_its_slot_names():

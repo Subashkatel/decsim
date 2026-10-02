@@ -171,15 +171,6 @@ def build_switching(
     return Switching.build(settings, weak_decoder, engine)
 
 
-def absorbs_weak_windows(
-    settings: Optional[escalation_settings.SwitchingSettings],
-) -> bool:
-    """Whether the strong window replaces the weak windows it covers."""
-    if settings is None:
-        return False
-    return settings.strong_window.absorbs_weak_windows
-
-
 def build_burst_detector(
     settings: Optional[escalation_settings.SwitchingSettings],
     round_period_microseconds: float,

@@ -110,13 +110,11 @@ def build_plan(
     )
     scheme = _scheme(windows)
     boundary_policy = _boundary_policy(windows)
-    absorbs_weak_windows = escalation_build.absorbs_weak_windows(
-        switching_settings
-    )
     # the refusals print the strong window's row name, and only a window
     # that absorbs the weak windows restarts any, so a run with no
-    # switching carries the default record's width unread
+    # switching carries the default record, which absorbs none, unread
     strong_window = _strong_window_settings(switching_settings)
+    absorbs_weak_windows = strong_window.absorbs_weak_windows
     strong_window_name = strong_window.name
     reread_regions = strong_window.restart_reread_buffer_regions
     window_interaction = _window_interaction(windows, reread_regions)

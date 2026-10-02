@@ -114,13 +114,15 @@ class WorkloadSettings:
         return cls(kind=kind, row_settings=row_settings)
 
     def made(self) -> "WorkloadSettings":
-        """The section running the workload its row makes, once per point."""
+        """The section running the workload its row makes, once per point.
+
+        The lowered fields are the workload's; every other field keeps
+        the value the section was given.
+        """
         row = tables.row(WORKLOADS, "workload.kind", self.kind)
         workload = row.workload(self.row_settings)
-        running = WorkloadSettings.running(workload)
-        return dataclasses.replace(
-            running, kind=self.kind, row_settings=self.row_settings
-        )
+        lowered = _lowered_fields(workload)
+        return dataclasses.replace(self, **lowered)
 
     def maker(self) -> Optional[dict]:
         """What the row says made the workload; None for a Python-built one."""
@@ -136,15 +138,8 @@ class WorkloadSettings:
         A Python caller states its workload here:
         WorkloadSettings.running(producers.memory_circuit(...)).
         """
-        program = circuit_frontend.lowered(workload)
-        return cls(
-            operations=program.operations,
-            dynamic_streams=program.dynamic_streams,
-            protected_regions=program.protected_regions,
-            rounds_policy=program.rounds_policy,
-            physical_circuits=program.physical_circuits,
-            workload_record=workload,
-        )
+        lowered = _lowered_fields(workload)
+        return cls(**lowered)
 
 
 class ProducerWorkload:
@@ -282,6 +277,19 @@ def memory_circuit(
         before_measure_flip_probability=probability,
         after_reset_flip_probability=probability,
     )
+
+
+def _lowered_fields(workload: workload_records.Workload) -> dict:
+    """The fields a maker's workload fills, lowered for the machine."""
+    program = circuit_frontend.lowered(workload)
+    return {
+        "operations": program.operations,
+        "dynamic_streams": program.dynamic_streams,
+        "protected_regions": program.protected_regions,
+        "rounds_policy": program.rounds_policy,
+        "physical_circuits": program.physical_circuits,
+        "workload_record": workload,
+    }
 
 
 def _maker(function: str) -> Any:

@@ -69,6 +69,32 @@ MERGE_OPERATIONS = {
 }
 
 
+def test_making_a_workload_keeps_every_field_the_section_set():
+    """The maker's workload fills the lowered fields and no other."""
+    section = {
+        "kind": "producer",
+        "function": "decsim.producers:memory_circuit",
+        "arguments": {
+            "code_task": "surface_code:rotated_memory_z",
+            "rounds_per_shot": 6,
+            "distance": 3,
+            "physical_error_probability": 0.001,
+        },
+    }
+    read = workload_settings.WorkloadSettings.from_yaml(section, None)
+    hand_set = dataclasses.replace(
+        read, decode_operations=(), feedback_boundary_mode="measurement_closed"
+    )
+
+    made = hand_set.made()
+
+    assert made.decode_operations == ()
+    assert made.feedback_boundary_mode == "measurement_closed"
+    assert made.kind == "producer"
+    assert made.row_settings == hand_set.row_settings
+    assert len(made.operations) == 1
+
+
 def test_a_python_workload_is_the_point_the_yaml_maker_makes(tmp_path):
     """The maker's name and its "5d" are the yaml's labels, not the id.
 

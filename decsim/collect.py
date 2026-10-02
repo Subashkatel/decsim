@@ -43,6 +43,10 @@ import decsim.records.results as result_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
 
+# The key a record's class is written under beside its fields. No field
+# can take it, since class is a Python keyword.
+RECORD_CLASS_KEY = "class"
+
 
 @dataclasses.dataclass(frozen=True)
 class Task:
@@ -232,8 +236,8 @@ def metadata_text(metadata: Mapping[str, Any]) -> str:
 def json_value(value: Any, *, keep_labels: bool = True) -> Any:
     """A settings record as plain json: every value by its content.
 
-    A dataclass (a settings record, a round policy) appears as its
-    fields. Every number appears exactly (a json number, or a Fraction's
+    A dataclass (a settings record, a round policy) appears as its class
+    and its fields. Every number appears exactly (a json number, or a Fraction's
     exact text), every string and flag as written, and an enum member as
     its name. A Stim circuit appears as its text, as sinter's strong id
     carries the task's circuit (sinter/_data/_task.py:193), so two tasks
@@ -340,14 +344,25 @@ def _submit_up_to(
 
 
 def _json_record(record: Any, keep_labels: bool) -> dict:
-    """A dataclass as its fields, each one walked; labels when kept."""
-    fields = {}
+    """A dataclass as its class and fields, each one walked; labels when kept.
+
+    The class sits beside the fields, as gem5's config.json writes each
+    object's type (src/python/m5/SimObject.py:1175-1178), so two records
+    with the same fields, two rows that take no settings, are two points.
+    """
+    record_class = type(record)
+    fields = {RECORD_CLASS_KEY: _qualified_name(record_class)}
     for field in dataclasses.fields(record):
         if not field.compare and not keep_labels:
             continue
         field_value = getattr(record, field.name)
         fields[field.name] = json_value(field_value, keep_labels=keep_labels)
     return fields
+
+
+def _qualified_name(named_class: type) -> str:
+    """A class's module and qualified name, the identity pickle writes."""
+    return f"{named_class.__module__}.{named_class.__qualname__}"
 
 
 def _json_mapping(mapping: Mapping, keep_labels: bool) -> dict:
@@ -419,9 +434,9 @@ def _json_object(value: Any, keep_labels: bool) -> Any:
     if isinstance(value, numpy.ndarray):
         return value.tolist()
     if isinstance(value, type):
-        return f"{value.__module__}.{value.__qualname__}"
+        return _qualified_name(value)
     value_type = type(value)
-    class_name = f"{value_type.__module__}.{value_type.__qualname__}"
+    class_name = _qualified_name(value_type)
     attributes = _attributes_of(value)
     if not attributes:
         return class_name

@@ -505,6 +505,36 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     assert len(unique) == 2
 
 
+def test_two_records_with_the_same_fields_are_two_tasks():
+    """A record enters the id by its class beside its fields.
+
+    Two rows that take no settings have records with no fields, so only
+    their classes tell the points apart, as gem5's config.json writes
+    each object's type.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class EveryRound:
+        pass
+
+    @dataclasses.dataclass(frozen=True)
+    class NoRound:
+        pass
+
+    tasks = []
+    for rounds_policy in (EveryRound(), NoRound()):
+        workload = workload_settings.WorkloadSettings(
+            rounds_policy=rounds_policy
+        )
+        settings = machine_settings.MachineSettings(workload=workload)
+        task = collect.Task(settings, {"point": 1})
+        tasks.append(task)
+
+    unique = collect.unique_tasks(tasks)
+
+    assert len(unique) == 2
+
+
 def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
     """A component's __slots__ enter the strong id as its __dict__ does."""
     three_rounds = _slotted_rounds_task(3)

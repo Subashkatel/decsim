@@ -452,7 +452,9 @@ def value_lines(
     value (a value an axis sets lists the sweep's values), and in
     brackets its layer and source line when the value is one yaml key's
     (_origin_of). gem5's config.ini lists every parameter of every object
-    the same way (src/python/m5/simulate.py:122-127).
+    the same way (src/python/m5/simulate.py:122-127). A record's class is
+    left out: no yaml key sets it, and a yaml's settings are all records,
+    so every class leaf is one.
     """
     written = _written_keys(config)
     documented = _documented_keys()
@@ -461,6 +463,8 @@ def value_lines(
     leaves = value_leaves(settings_value, ())
     lines = []
     for path, value in leaves:
+        if path[-1] == collect.RECORD_CLASS_KEY:
+            continue
         key = _yaml_key(path)
         value = swept.get(key, value)
         value_text = json.dumps(value)

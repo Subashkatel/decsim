@@ -80,8 +80,9 @@ PYTHON_VARIABLE = "DECSIM_PYTHON"
 SUBMIT_LIMIT_VARIABLE = "SUBMIT_LIMIT"
 # Della's short QOS: 1,000 submitted jobs a user, each array task one.
 DEFAULT_SUBMIT_LIMIT = 1000
-# the key a settings row names its kind by, the one value a shape keeps
-KIND_KEY = "kind"
+# The values a shape keeps: each record's class, and the kind a row
+# names when one class serves several kinds.
+SHAPE_KEYS = (collect.RECORD_CLASS_KEY, "kind")
 # The next step only plans and submits, so it asks for one core, 16 GB
 # and twelve hours, what the loop's planning job has run with.
 NEXT_STEP_SHAPE = (
@@ -324,10 +325,10 @@ def _refuse_a_failed_check(point, python: str, completed) -> None:
 def _cheapest_point_of_each_shape(study: experiment.Experiment) -> list:
     """Per machine shape, the point with the fewest QEC rounds a shot.
 
-    A shape is the settings with every value but the rows' kinds left
-    out, so points that differ only in numbers (a distance, an error
-    rate) or in a workload made from them are one shape. Ties go to the
-    point the experiment lists first.
+    A shape is the settings with every value but the records' classes
+    and the rows' kinds left out, so points that differ only in numbers
+    (a distance, an error rate) or in a workload made from them are one
+    shape. Ties go to the point the experiment lists first.
     """
     cheapest_by_shape = {}
     for point in study.points:
@@ -343,7 +344,7 @@ def _cheapest_point_of_each_shape(study: experiment.Experiment) -> list:
 
 
 def _shape_of(value):
-    """The json value with every leaf but a row's kind replaced by None."""
+    """The json value with every leaf but a class or kind made None."""
     if isinstance(value, Mapping):
         return _shape_of_a_mapping(value)
     if isinstance(value, list):
@@ -352,10 +353,10 @@ def _shape_of(value):
 
 
 def _shape_of_a_mapping(value: Mapping) -> dict:
-    """A mapping's shape: its keys, its kind, its children's shapes."""
+    """A mapping's shape: its keys, class and kind, children's shapes."""
     shape = {}
     for key, child in value.items():
-        if key == KIND_KEY:
+        if key in SHAPE_KEYS:
             shape[key] = child
             continue
         shape[key] = _shape_of(child)

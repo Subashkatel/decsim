@@ -58,8 +58,6 @@ import yaml
 
 import decsim.collect as collect
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
-import decsim.escalation.policies as escalation_policies
-import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collect_command as run
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -71,7 +69,6 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
 import tests.experiments.yaml_configs as yaml_configs
@@ -284,8 +281,8 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
     )
     assert task.online_threshold is not None
     shot_settings = task.shot_settings()
-    escalation = shot_settings.escalation
-    assert escalation.online_threshold is task.online_threshold
+    switching = shot_settings.switching
+    assert switching.online_threshold is task.online_threshold
 
 
 def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
@@ -374,34 +371,6 @@ def test_two_points_under_one_cache_do_not_share_models():
 
     assert built.builds == 3
     assert built.reuses == 0
-
-
-# ---- an escalation row written outside decsim
-
-
-def test_an_outside_escalation_row_is_measured_over_its_tiers_links(
-    tmp_path, monkeypatch
-):
-    """The tier is read off the row, so a row off the table measures.
-
-    The experiments layer reads the tier the row declares, never the
-    escalation's name, so `decsim collect` measures any row the machine
-    runs.
-    """
-    shipped_directory = tmp_path / "shipped"
-    shipped_directory.mkdir()
-    shipped = _measured_shot(shipped_directory, "weak_baseline")
-    monkeypatch.setitem(
-        escalation_settings.ESCALATIONS, "outside_baseline", _OutsideEscalation
-    )
-    outside_directory = tmp_path / "outside"
-    outside_directory.mkdir()
-
-    outside = _measured_shot(outside_directory, "outside_baseline")
-
-    assert outside.samples == shipped.samples
-    assert outside.means == shipped.means
-    assert outside.logical_failure == shipped.logical_failure
 
 
 def test_a_unit_that_ended_is_handed_on_while_one_before_it_runs(tmp_path):
@@ -846,50 +815,6 @@ def _decoded_alone(task, seed: int) -> tuple:
 def _run_every_shot(task, shots: int, built_models) -> None:
     for seed in range(shots):
         collect.run_shot(task, seed, built_models=built_models)
-
-
-class _OutsideEscalation:
-    """An escalation row written outside decsim, delegating to Baseline.
-
-    It subclasses no shipped row: every fact the experiments layer and
-    the machine read off a row is declared here and every call is
-    forwarded, which is the shape the P8 plug-in probe used. What the
-    experiments layer reads to measure a shot is primary_tier.
-    """
-
-    decides_on_a_confidence = False
-    requires_strong_context = False
-    primary_tier = window_records.DecoderTier.WEAK
-    default_boundary_policy = "eager"
-
-    def __init__(self, collaborators) -> None:
-        self.delegate = escalation_policies.Baseline(collaborators)
-
-    def check_plan(self, plan) -> None:
-        self.delegate.check_plan(plan)
-
-    def tiers_for_ready_window(self, window) -> tuple:
-        return self.delegate.tiers_for_ready_window(window)
-
-    def verdict_for_weak_result(self, job, result):
-        return self.delegate.verdict_for_weak_result(job, result)
-
-    def learn_from_strong_result(self, window_key, result) -> None:
-        self.delegate.learn_from_strong_result(window_key, result)
-
-
-def _measured_shot(tmp_path, escalation_kind: str):
-    """One seeded shot of the minimal config under that escalation row."""
-    card = {"escalation": {"kind": escalation_kind}}
-    config_path = yaml_configs.write_config(tmp_path, card)
-    config = experiment.load_experiment(config_path)
-    return yaml_configs.measure_point_shot(
-        config,
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        seed=0,
-    )
 
 
 def _memory_task(rounds: int) -> collect.Task:

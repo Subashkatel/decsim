@@ -109,8 +109,8 @@ docstring.
 
 - `decsim/escalation/__init__.py`: The escalation: a window decoded again by the strong tier.
 - `decsim/escalation/pending_strong_windows.py`: The strong windows held until the conditions their row declared fire.
-- `decsim/escalation/policies.py`: The escalation policies: Baseline, StrongOnly and Switching.
-- `decsim/escalation/settings.py`: The escalation section: when a window is decoded again, and on what.
+- `decsim/escalation/policies.py`: The switching policy: weak first, escalate on low confidence.
+- `decsim/escalation/settings.py`: The switching settings: when a window is decoded again, and on what.
 - `decsim/escalation/strong_redecode.py`: The strong re-decode: the window side of the strong tier.
 - `decsim/escalation/strong_regions.py`: Where a strong window sits: its rounds, its faults, its neighbours.
 - `decsim/escalation/strong_window_shapes.py`: The strong window's shape: which rounds the strong tier re-decodes, and when.
@@ -320,7 +320,7 @@ docstring.
 - `decsim/build/__init__.py`: The build script of the machine: one module per pipeline stage.
 - `decsim/build/control.py`: The control part: the program's execution and the path back to the QPU.
 - `decsim/build/decoders.py`: The decoders part: each tier's units and the manager that schedules them.
-- `decsim/build/escalation.py`: Build the escalation policy the yaml names, and what it decides on.
+- `decsim/build/escalation.py`: The switching part: the confidence, the policy and the strong window side.
 - `decsim/build/plan.py`: Build the run's plan: the code, the workload's operations, the windows.
 - `decsim/build/program.py`: Register the workload with every component that reads it.
 - `decsim/build/qpu.py`: The qpu part: the device on its round clock, its readouts, the factory.

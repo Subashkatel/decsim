@@ -544,7 +544,7 @@ def test_a_regions_reservation_is_its_bits_and_the_refusal_names_them():
 def test_a_strong_primary_window_is_ready_on_the_room_side_landing():
     """With the strong tier alone, this landing drives readiness.
 
-    Under StrongOnly (decsim/escalation/policies.py) a round travels
+    With the strong decoder slot alone filled a round travels
     once, over controller_to_strong_buffer, so round r is ready at r
     plus qpu_to_controller 2 plus readout_to_bits 3 plus the room-side
     hop 7; the window then pays strong_buffer_to_strong_decoder 6 and

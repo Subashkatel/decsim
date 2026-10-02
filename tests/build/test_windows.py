@@ -45,15 +45,15 @@ def test_a_run_that_never_escalates_leaves_the_redecode_unbound():
 def test_a_switching_run_builds_only_the_window_side_it_names():
     """It may escalate, so it re-decodes on the strong side.
 
-    Its policy decides on no confidence and it names no burst detector,
-    so it has no confidence signal, no gap join and no detector.
+    Its signal is the switching part's, joined per window, and it names
+    no burst detector, so it has no detector.
     """
     machine = declared_run.switching_run(escalates=True)
     windows = machine.windows
 
-    assert windows.strong_redecode is not None
-    assert windows.confidence_signal is None
-    assert windows.gap_join is None
+    assert windows.strong_redecode is machine.switching.strong_redecode
+    assert windows.confidence_signal is machine.switching.confidence_signal
+    assert windows.gap_join is not None
     assert windows.burst_detector is None
 
 

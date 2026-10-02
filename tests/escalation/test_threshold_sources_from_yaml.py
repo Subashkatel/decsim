@@ -22,6 +22,7 @@ import pytest
 import yaml
 
 import decsim.build.escalation as escalation_build
+import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect_command as collect_command
@@ -50,7 +51,7 @@ def resolve_gap_threshold_nats(config, *, physical_error_probability, distance):
         physical_error_probability=physical_error_probability,
         distance=distance,
     )
-    return task.settings.escalation.threshold.threshold_nats
+    return task.settings.switching.threshold.threshold_nats
 
 
 def online_threshold_calibrator(
@@ -66,7 +67,7 @@ def online_threshold_calibrator(
 
 def first_escalation(config):
     task = config.first_point_task()
-    return task.settings.escalation
+    return task.settings.switching
 
 
 def source_config(tmp_path, switching_card: dict, shots: int = 1):
@@ -175,7 +176,7 @@ def test_a_table_read_from_two_folders_names_its_points_alike(tmp_path):
     first_task = first_config.first_point_task()
     second_task = second_config.first_point_task()
 
-    first_escalation = first_task.settings.escalation
+    first_escalation = first_task.settings.switching
     assert first_escalation.threshold.base_directory == first_folder
     assert first_task.strong_id() == second_task.strong_id()
 
@@ -247,8 +248,8 @@ def test_a_window_only_sweep_finds_its_table_row_by_path(tmp_path):
 
     two, three = config.tasks()
 
-    two_nats = two.settings.escalation.threshold.threshold_nats
-    three_nats = three.settings.escalation.threshold.threshold_nats
+    two_nats = two.settings.switching.threshold.threshold_nats
+    three_nats = three.settings.switching.threshold.threshold_nats
     two_decibels = two_nats * NATS_TO_DB
     three_decibels = three_nats * NATS_TO_DB
     assert math.isclose(two_decibels, 12.0)
@@ -675,13 +676,11 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     installed = task.online_threshold
 
     assert type(installed) is _OutsideLearningThreshold
-    expected_nats = task.settings.escalation.threshold.threshold_nats
+    expected_nats = task.settings.switching.threshold.threshold_nats
     assert installed.threshold_nats == expected_nats
     shot_settings = task.shot_settings()
-    signal = escalation_build.confidence_signal(
-        shot_settings.escalation, shot_settings.weak_decoder
+    engine = engine_module.Engine()
+    switching = escalation_build.Switching.build(
+        shot_settings.switching, shot_settings.weak_decoder, engine
     )
-    policy = escalation_build.build_escalation_policy(
-        shot_settings.escalation, signal
-    )
-    assert policy.threshold is installed
+    assert switching.policy.threshold is installed

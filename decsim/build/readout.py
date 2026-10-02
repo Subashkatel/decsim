@@ -69,7 +69,6 @@ class Readout:
         cls,
         settings: machine_settings.MachineSettings,
         engine: engine_module.Engine,
-        escalation_policy: ports.EscalationPolicy,
         detection_events: ports.DetectionEventPlacement,
         links: ports.Link,
     ) -> "Readout":
@@ -96,10 +95,10 @@ class Readout:
         weak_output = _weak_output(settings, engine)
         weak_receiver = weak_receiver_module.WeakSyndromeRoundReceiver(engine)
         strong_store, strong_output, strong_receiver = _strong_store(
-            settings, engine, escalation_policy
+            settings, engine
         )
         primary_output = weak_output
-        if _uses_the_room_side(escalation_policy):
+        if _uses_the_room_side(settings):
             primary_output = strong_output
         readout = cls(
             controller=controller,
@@ -226,7 +225,6 @@ class Readout:
 def build_detection_events(
     settings: machine_settings.MachineSettings,
     device,
-    escalation_policy: ports.EscalationPolicy,
     burst_detector: Optional[ports.BurstDetector] = None,
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
@@ -241,7 +239,7 @@ def build_detection_events(
     builds it before the parts.
     """
     formed_at = settings.detection_events.formed_at
-    paths = _paths_of_the_run(escalation_policy)
+    paths = _paths_of_the_run(settings)
     for path in paths:
         _check_one_seat_on(path, formed_at)
     source = None
@@ -256,29 +254,28 @@ def build_detection_events(
     )
 
 
-def _uses_strong_store(escalation_policy: ports.EscalationPolicy) -> bool:
+def _uses_strong_store(settings: machine_settings.MachineSettings) -> bool:
     """Whether a tier of this run reads its rounds from the room side."""
-    if escalation_policy.requires_strong_context:
+    if settings.switching is not None:
         return True
-    return _uses_the_room_side(escalation_policy)
+    return _uses_the_room_side(settings)
 
 
-def _uses_the_room_side(escalation_policy: ports.EscalationPolicy) -> bool:
+def _uses_the_room_side(settings: machine_settings.MachineSettings) -> bool:
     """Whether the plan's decoding tier reads the strong syndrome buffer."""
     strong = window_records.DecoderTier.STRONG
-    return escalation_policy.primary_tier is strong
+    return settings.window_tier is strong
 
 
 def _strong_store(
     settings: machine_settings.MachineSettings,
     engine: engine_module.Engine,
-    escalation_policy: ports.EscalationPolicy,
 ) -> tuple:
     """The strong syndrome buffer, its outgoing end and its receiving end.
 
     Three Nones on a run that never reads the room side.
     """
-    if not _uses_strong_store(escalation_policy):
+    if not _uses_strong_store(settings):
         return None, None, None
     store = _store(settings.strong_syndrome_buffer, "strong", engine)
     output = _strong_output(settings, engine)
@@ -419,11 +416,11 @@ def _check_forms_events(source) -> None:
     )
 
 
-def _paths_of_the_run(escalation_policy: ports.EscalationPolicy) -> tuple:
+def _paths_of_the_run(settings: machine_settings.MachineSettings) -> tuple:
     """The paths this run's rounds take to a decoder, the primary first."""
-    if _uses_the_room_side(escalation_policy):
+    if _uses_the_room_side(settings):
         return (event_settings.STRONG_PATH,)
-    if escalation_policy.requires_strong_context:
+    if settings.switching is not None:
         return (event_settings.WEAK_PATH, event_settings.ESCALATION_PATH)
     return (event_settings.WEAK_PATH,)
 

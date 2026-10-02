@@ -109,9 +109,9 @@ class DecodeOutcomes:
         in the output slot of the unit that produced it.
         """
         self.manager.strong_requests.finish_service(job)
-        self.manager.escalation_policy.learn_from_strong_result(
-            job.strong_decode_for, result
-        )
+        policy = self.manager.escalation_policy
+        if policy is not None:
+            policy.learn_from_strong_result(job.strong_decode_for, result)
         for held in deliveries:
             self.complete_strong(held)
 

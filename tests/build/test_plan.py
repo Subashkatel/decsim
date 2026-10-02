@@ -1,8 +1,8 @@
 """The run plan: the rows the yaml names and the defaults the plan derives.
 
 Two window keys carry a null default whose meaning the plan derives
-from the escalation row's declared facts, and the plan branches on a
-declared fact, never on a kind string.
+from whether the switching slot is filled and from its strong window
+row's declared facts, never from a kind string.
 Both are pinned here through build_plan, on settings shaped as a yaml
 would leave them.
 """
@@ -17,9 +17,10 @@ import decsim.build.plan as plan_build
 import decsim.confidence.complementary as complementary
 import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
-import decsim.escalation.policies as escalation_policies
+import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.qpu.settings as qpu_settings
@@ -28,7 +29,6 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
@@ -45,7 +45,7 @@ CONTROLLER_FORMS = event_settings.DetectionEventSettings()
 
 def _plan(
     *,
-    escalation=None,
+    switching=None,
     windows=None,
     qpu=None,
     idle_policy=None,
@@ -56,8 +56,6 @@ def _plan(
     """The plan of a six-round memory run with the given sections."""
     if idle_policy is None:
         idle_policy = controller_settings.IdlePolicySettings()
-    if escalation is None:
-        escalation = escalation_settings.EscalationSettings()
     if windows is None:
         windows = window_settings.WindowSettings()
     if qpu is None:
@@ -73,38 +71,49 @@ def _plan(
         links=links,
         controller=controller,
         pauli_frame=frame,
-        escalation=escalation,
         windows=windows,
         idle_policy=idle_policy,
         decoder_manager=decoder_manager,
         detection_events=detection_events,
     )
-    signal = escalation_build.confidence_signal(
-        escalation, settings.weak_decoder
+    if switching is not None:
+        settings = _with_switching(settings, switching)
+    engine = engine_module.Engine()
+    switching_part = escalation_build.build_switching(
+        settings.switching, settings.weak_decoder, engine
     )
-    policy = escalation_build.build_escalation_policy(escalation, signal)
-    return plan_build.build_plan(settings, policy)
+    return plan_build.build_plan(settings, switching_part)
 
 
-def _switching():
-    """A switching section with a fixed threshold and a gap signal."""
+def _with_switching(settings, switching):
+    """The settings with both decoders and the switching slot filled."""
+    matching = mwpm.PyMatchingDecoder.Settings()
+    decoder = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    return dataclasses.replace(
+        settings,
+        weak_decoder=decoder,
+        strong_decoder=decoder,
+        switching=switching,
+    )
+
+
+def _switching(**changes):
+    """A switching slot with a fixed threshold and a gap signal."""
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
-    return escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold=threshold,
-        confidence=confidence,
+    return escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold, **changes
     )
 
 
 def test_bulk_strong_is_refused_when_the_rounds_carry_bits():
     """A merged strong decode carries timing alone; bits would be dropped."""
     bits = qpu_settings.QpuSettings(kind="syndrome_bits", distance=3)
-    escalation = _switching()
+    switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
     with pytest.raises(ValueError, match="qpu.kind syndrome_bits"):
-        _plan(qpu=bits, escalation=escalation, decoder_manager=bulk)
+        _plan(qpu=bits, switching=switching, decoder_manager=bulk)
 
 
 def test_bulk_strong_is_refused_where_no_strong_pool_merges():
@@ -117,19 +126,19 @@ def test_bulk_strong_is_refused_where_no_strong_pool_merges():
 def test_bulk_strong_is_built_beside_an_explicitly_empty_model_source():
     empty_models = syndrome_devices.NO_WINDOW_MODELS
     timing = qpu_settings.QpuSettings(error_model_provider=empty_models)
-    escalation = _switching()
+    switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    plan = _plan(qpu=timing, escalation=escalation, decoder_manager=bulk)
+    plan = _plan(qpu=timing, switching=switching, decoder_manager=bulk)
 
     assert plan.error_model_provider is empty_models
 
 
 def test_bulk_strong_is_built_when_the_rounds_carry_timing_alone():
-    escalation = _switching()
+    switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    plan = _plan(escalation=escalation, decoder_manager=bulk)
+    plan = _plan(switching=switching, decoder_manager=bulk)
 
     assert not plan.device.emits_bit_values
 
@@ -224,13 +233,7 @@ def _second_window_strong_hold(plan) -> tuple:
     return holds[potential]
 
 
-FIXED_THRESHOLD = threshold_sources.FixedThreshold(0.5)
-DECLARED_COLLABORATORS = escalation_policies.EscalationCollaborators(
-    threshold=FIXED_THRESHOLD,
-    expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
-)
-SWITCHING_POLICY = escalation_policies.Switching(DECLARED_COLLABORATORS)
-SWITCHING = escalation_settings.EscalationSettings(policy=SWITCHING_POLICY)
+SWITCHING = declared_run.declared_switching()
 STRONG_SIDE_FORMS = event_settings.DetectionEventSettings(
     formed_at=("weak_decoder", "strong_decoder")
 )
@@ -244,7 +247,7 @@ def test_a_forming_strong_read_holds_what_its_circuit_reads_before_it():
     plan = _plan(
         qpu=source,
         workload=workload,
-        escalation=SWITCHING,
+        switching=SWITCHING,
         detection_events=STRONG_SIDE_FORMS,
     )
 
@@ -259,7 +262,7 @@ def test_a_source_with_no_recipes_holds_nothing_before_a_read():
     plan = _plan(
         qpu=source,
         workload=workload,
-        escalation=SWITCHING,
+        switching=SWITCHING,
         detection_events=STRONG_SIDE_FORMS,
     )
 
@@ -276,9 +279,7 @@ def test_a_restart_read_holds_no_round_before_its_restart_start():
     """
     source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
     workload = _lookback_workload()
-    escalation = escalation_settings.EscalationSettings(
-        policy=SWITCHING_POLICY, strong_window="double_window"
-    )
+    switching = declared_run.declared_switching(strong_window="double_window")
     weak_decoder_forms = event_settings.DetectionEventSettings(
         formed_at=("weak_decoder", "strong_decoder")
     )
@@ -286,7 +287,7 @@ def test_a_restart_read_holds_no_round_before_its_restart_start():
     plan = _plan(
         qpu=source,
         workload=workload,
-        escalation=escalation,
+        switching=switching,
         detection_events=weak_decoder_forms,
     )
 
@@ -306,7 +307,7 @@ def test_a_run_that_may_escalate_gets_the_lookahead_tail():
     """A strong recovery reads past the last window's commit."""
     switching = _switching()
 
-    plan = _plan(escalation=switching)
+    plan = _plan(switching=switching)
 
     assert plan.scheme.terminal_policy == "lookahead"
     assert plan.scheme.has_trailing_tail_context is True
@@ -330,7 +331,7 @@ def test_a_serial_escalation_holds_its_boundaries():
     """Descendants wait out an escalation, so nothing ships until final."""
     switching = _switching()
 
-    plan = _plan(escalation=switching)
+    plan = _plan(switching=switching)
 
     assert isinstance(plan.boundary_policy, boundary_policies.Held)
 
@@ -441,35 +442,6 @@ class _OutsideBoundaryPolicy:
         return final
 
 
-class _OutsideEscalation:
-    """An escalation row written outside decsim that never escalates."""
-
-    decides_on_a_confidence = False
-    requires_strong_context = False
-    primary_tier = window_records.DecoderTier.WEAK
-    default_boundary_policy = "outside_boundaries"
-
-    def check_plan(self, plan) -> None:
-        """Every run shape is served."""
-        del plan
-
-    def tiers_for_ready_window(self, window) -> tuple:
-        """The weak tier alone."""
-        del window
-        return (window_records.DecoderTier.WEAK,)
-
-    def verdict_for_weak_result(self, job, result):
-        """Every result is final."""
-        del job
-        del result
-        return decoding_records.Verdict.KEEP
-
-    def learn_from_strong_result(self, window_key, result) -> None:
-        """Nothing is learned."""
-        del window_key
-        del result
-
-
 class _OutsideShape:
     """A strong window shape written outside decsim that absorbs nothing."""
 
@@ -490,32 +462,11 @@ def _outside_shape_switching():
     """A switching section whose strong window is the outside shape."""
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
-    return escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold=threshold,
+    return escalation_settings.SwitchingSettings(
         confidence=confidence,
+        threshold=threshold,
         strong_window="outside_shape",
     )
-
-
-def test_an_outside_escalation_row_names_its_own_default_boundary_row(
-    monkeypatch,
-):
-    """A row that never escalates names the default; plan.py holds none.
-
-    So a row of BOUNDARY_POLICIES written outside decsim can be it.
-    """
-    monkeypatch.setitem(
-        window_settings.BOUNDARY_POLICIES,
-        "outside_boundaries",
-        _OutsideBoundaryPolicy,
-    )
-    policy = _OutsideEscalation()
-    escalation = escalation_settings.EscalationSettings(policy=policy)
-
-    plan = _plan(escalation=escalation)
-
-    assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)
 
 
 def test_an_outside_strong_window_row_names_the_escalations_default(
@@ -532,6 +483,6 @@ def test_an_outside_strong_window_row_names_the_escalations_default(
     )
     switching = _outside_shape_switching()
 
-    plan = _plan(escalation=switching)
+    plan = _plan(switching=switching)
 
     assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)

@@ -53,7 +53,7 @@ def test_the_input_block_changes_the_input_and_nothing_else():
     weak_fold = variant.weak_decoder.copies_boundary_fold
     assert weak_fold == base.weak_decoder.copies_boundary_fold
     assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
-    assert variant.escalation.kind == base.escalation.kind
+    assert variant.escalation_kind == base.escalation_kind
 
 
 def test_the_fold_block_changes_the_fold_and_nothing_else():
@@ -63,7 +63,7 @@ def test_the_fold_block_changes_the_fold_and_nothing_else():
     assert not variant.weak_decoder.copies_boundary_fold
     assert variant.weak_decoder.copies_input == base.weak_decoder.copies_input
     assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
-    assert variant.escalation.kind == base.escalation.kind
+    assert variant.escalation_kind == base.escalation_kind
 
 
 def test_the_switching_block_opens_the_last_two_hops():
@@ -71,7 +71,7 @@ def test_the_switching_block_opens_the_last_two_hops():
     variant = block_settings(SWITCHING)
     fabric = variant.links
 
-    assert variant.escalation.kind == "switching"
+    assert variant.escalation_kind == "switching"
     assert variant.strong_decoder.algorithm.name == 10.0
     assert variant.strong_decoder.copies_input
     assert fabric.weak_decoder_to_strong_decoder is not None

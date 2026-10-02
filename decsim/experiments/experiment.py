@@ -299,10 +299,13 @@ def _point_task_of(
     distance or error rate still finds them.
     """
     workload = settings.workload.made()
-    escalation = settings.escalation.at_sweep_point(resolved)
-    online_threshold = escalation.online_threshold_for(resolved)
+    switching = settings.switching
+    online_threshold = None
+    if switching is not None:
+        switching = switching.at_sweep_point(resolved)
+        online_threshold = switching.online_threshold_for(resolved)
     point_settings = dataclasses.replace(
-        settings, workload=workload, escalation=escalation
+        settings, workload=workload, switching=switching
     )
     metadata = copy.deepcopy(dict(values))
     return collect.Task(point_settings, metadata, online_threshold)
@@ -405,9 +408,15 @@ def _files_line(config: ExperimentConfig) -> str:
 
 
 def _section_lines(settings: machine_settings.MachineSettings) -> list:
-    """One line per section, its kind named where the section has one."""
+    """One line per section, its kind named where the section has one.
+
+    The escalation section's kind is the word for the filled decode slots.
+    """
     lines = []
     for field in dataclasses.fields(settings):
+        if field.name == "switching":
+            lines.append(f"escalation: kind {settings.escalation_kind}")
+            continue
         section = getattr(settings, field.name)
         kind = getattr(section, "kind", None)
         if kind is None:

@@ -10,9 +10,8 @@ operations, the second held until the first operation's decision reaches
 the QPU.
 
 To use only the strong decoder, select `escalation.kind: strong_only` and
-configure `strong_decoder`. In Python, pass
-`EscalationSettings(kind="strong_only")` from `decsim.escalation.settings`
-as the machine's escalation settings. The same selection works for finite
+configure `strong_decoder`. In Python, fill the machine's
+`strong_decoder` slot and leave `weak_decoder` and `switching` empty. The same selection works for finite
 streams and live protection: input and idle rounds use the strong buffer,
 window jobs use the strong decoder, and corrections return through the frame.
 There is no weak decode or escalation hop. Detection events may be formed at

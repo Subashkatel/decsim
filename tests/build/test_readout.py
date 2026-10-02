@@ -10,7 +10,6 @@ it is about.
 import dataclasses
 import pathlib
 import shutil
-import types
 
 import pytest
 
@@ -20,13 +19,10 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
-import decsim.escalation.policies as escalation_policies
-import decsim.escalation.settings as escalation_settings
 import decsim.experiments.experiment as experiment
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.records.rounds as round_records
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as store_settings
@@ -54,25 +50,31 @@ class _CountingDetector:
         self.observed.append(round_index)
 
 
-def _settings_forming_at(formed_at=("controller",)):
-    """A weak-only machine's settings, forming its events at the seats."""
+def _settings_forming_at(formed_at=("controller",), slots="weak_baseline"):
+    """A machine's settings, its decode slots filled, forming at the seats.
+
+    The paths of a run are read off which slots are filled.
+    """
     detection_events = event_settings.DetectionEventSettings(
         formed_at=formed_at
     )
-    return _machine_settings(detection_events=detection_events)
-
-
-def _policy(primary_tier="weak", requires_strong_context=False):
-    """The two facts the paths of a run are read off."""
-    tier = window_records.DecoderTier(primary_tier)
-    return types.SimpleNamespace(
-        primary_tier=tier, requires_strong_context=requires_strong_context
+    settings = _machine_settings(detection_events=detection_events)
+    if slots == "weak_baseline":
+        return settings
+    tier = settings.weak_decoder
+    if slots == "strong_only":
+        return dataclasses.replace(
+            settings, weak_decoder=None, strong_decoder=tier
+        )
+    switching = declared_run.declared_switching()
+    return dataclasses.replace(
+        settings, strong_decoder=tier, switching=switching
     )
 
 
-WEAK_BASELINE = _policy()
-SWITCHING = _policy(requires_strong_context=True)
-STRONG_ONLY = _policy("strong")
+WEAK_BASELINE = "weak_baseline"
+SWITCHING = "switching"
+STRONG_ONLY = "strong_only"
 
 
 def test_a_source_that_does_not_answer_the_port_forms_nothing():
@@ -88,15 +90,13 @@ def test_a_source_that_does_not_answer_the_port_forms_nothing():
     )
     carried = (fragment,)
 
-    placement = readout_part.build_detection_events(
-        settings, device, WEAK_BASELINE
-    )
+    placement = readout_part.build_detection_events(settings, device)
 
     assert placement.form_at("controller", carried) == carried
 
 
 @pytest.mark.parametrize(
-    "policy, formed_at",
+    "slots, formed_at",
     [
         (WEAK_BASELINE, ("controller",)),
         (WEAK_BASELINE, ("weak_syndrome_buffer",)),
@@ -108,17 +108,17 @@ def test_a_source_that_does_not_answer_the_port_forms_nothing():
         (STRONG_ONLY, ("weak_syndrome_buffer", "strong_decoder")),
     ],
 )
-def test_a_seat_list_every_path_crosses_once_is_built(policy, formed_at):
-    settings = _settings_forming_at(formed_at)
+def test_a_seat_list_every_path_crosses_once_is_built(slots, formed_at):
+    settings = _settings_forming_at(formed_at, slots)
     device = _DeviceWithNoFormationTable()
 
-    placement = readout_part.build_detection_events(settings, device, policy)
+    placement = readout_part.build_detection_events(settings, device)
 
     assert placement.forms_at(formed_at[0])
 
 
 @pytest.mark.parametrize(
-    "policy, formed_at, crossed",
+    "slots, formed_at, crossed",
     [
         (WEAK_BASELINE, ("strong_decoder",), "[]"),
         (WEAK_BASELINE, ("controller", "weak_decoder"), "['controller', "),
@@ -132,14 +132,14 @@ def test_a_seat_list_every_path_crosses_once_is_built(policy, formed_at):
     ],
 )
 def test_a_path_that_crosses_no_seat_or_two_is_refused(
-    policy, formed_at, crossed
+    slots, formed_at, crossed
 ):
     """None decodes raw outcomes; two form events of events."""
-    settings = _settings_forming_at(formed_at)
+    settings = _settings_forming_at(formed_at, slots)
     device = _DeviceWithNoFormationTable()
 
     with pytest.raises(ValueError) as refusal:
-        readout_part.build_detection_events(settings, device, policy)
+        readout_part.build_detection_events(settings, device)
 
     sentence = str(refusal.value)
     assert f"at {crossed}" in sentence
@@ -148,12 +148,11 @@ def test_a_path_that_crosses_no_seat_or_two_is_refused(
 
 def test_the_burst_detector_counts_at_the_primary_tiers_seat():
     """The escalated region's seat forms too, but is not counted twice."""
-    settings = _settings_forming_at(("weak_decoder", "strong_decoder"))
+    seats = ("weak_decoder", "strong_decoder")
+    settings = _settings_forming_at(seats, SWITCHING)
     source = _OneRoundSource()
     detector = _CountingDetector()
-    placement = readout_part.build_detection_events(
-        settings, source, SWITCHING, detector
-    )
+    placement = readout_part.build_detection_events(settings, source, detector)
     raw = (_OneRoundSource.fragment(),)
 
     placement.form_at("strong_decoder", raw)
@@ -168,9 +167,7 @@ def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
     detector = _CountingDetector()
 
     with pytest.raises(ValueError, match="burst_detector counts detection"):
-        readout_part.build_detection_events(
-            settings, device, WEAK_BASELINE, detector
-        )
+        readout_part.build_detection_events(settings, device, detector)
 
 
 def test_buffer_zero_is_built_from_the_kind_the_section_names():
@@ -447,11 +444,7 @@ def _with_one_tier(settings, plan: str):
     )
     if plan == "weak_only":
         return dataclasses.replace(settings, weak_decoder=tier)
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    escalation = escalation_settings.EscalationSettings(policy=policy)
-    return dataclasses.replace(
-        settings, strong_decoder=tier, escalation=escalation
-    )
+    return dataclasses.replace(settings, weak_decoder=None, strong_decoder=tier)
 
 
 class _OneRoundSource:

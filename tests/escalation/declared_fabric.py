@@ -14,9 +14,7 @@ import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
-import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -95,7 +93,7 @@ def switching_machine(
     round_microseconds: float = 1.0,
     escalation_microseconds: Optional[float] = None,
     record: bool = False,
-    escalation=None,
+    switching=None,
     trace_path=None,
     scheme=None,
     weak_syndrome_buffer=None,
@@ -103,8 +101,8 @@ def switching_machine(
 ) -> machine_module.Machine:
     """One d=3 memory operation, weak-primary switching on declared ticks.
 
-    escalation replaces the Python-built Switching settings when given
-    (a table row under its own kind); scheme replaces the lookahead
+    switching replaces the declared switching slot when given (a table
+    row of its own, say); scheme replaces the lookahead
     sliding windows with a caller's own windowing scheme; decision_cycles
     is the window side's decision, on the declared clock.
     """
@@ -121,13 +119,6 @@ def switching_machine(
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=strong, engine=declared_run.DECLARED_ENGINE
     )
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
-        run_both_at_once=run_both_at_once,
-    )
-    policy = escalation_policies.Switching(collaborators)
     boundary_policy = boundary_policies.Held()
     # a name off the table stays, so the settings refuse it by name
     row = escalation_settings.STRONG_WINDOW_SHAPES.get(strong_window)
@@ -154,9 +145,9 @@ def switching_machine(
         scheme=scheme,
         boundary_policy=boundary_policy,
     )
-    if escalation is None:
-        escalation = escalation_settings.EscalationSettings(
-            policy=policy, strong_window=strong_window
+    if switching is None:
+        switching = declared_run.declared_switching(
+            run_both_at_once=run_both_at_once, strong_window=strong_window
         )
     links = declared_profile(escalation_microseconds)
     readout_cycles = declared_cycles("readout_to_bits")
@@ -183,7 +174,7 @@ def switching_machine(
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
         links=links,
         controller=controller,
         pauli_frame=pauli_frame,

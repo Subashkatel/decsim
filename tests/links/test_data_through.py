@@ -241,39 +241,25 @@ def machine_settings(shape: str, distance: int):
         engine=ENGINE_CARD,
     )
     if shape == "weak":
-        escalation = escalation_settings.EscalationSettings(
-            kind="weak_baseline"
-        )
         return machine_settings_module.MachineSettings(
-            workload=workload,
-            qpu=qpu,
-            weak_decoder=weak,
-            escalation=escalation,
-            links=links,
+            workload=workload, qpu=qpu, weak_decoder=weak, links=links
         )
     if shape == "strong":
-        escalation = escalation_settings.EscalationSettings(kind="strong_only")
         return machine_settings_module.MachineSettings(
-            workload=workload,
-            qpu=qpu,
-            strong_decoder=strong,
-            escalation=escalation,
-            links=links,
+            workload=workload, qpu=qpu, strong_decoder=strong, links=links
         )
     nats = threshold_sources.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=nats)
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        confidence=confidence,
-        threshold=threshold,
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
     )
     return machine_settings_module.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak,
         strong_decoder=strong,
-        escalation=escalation,
+        switching=switching,
         links=links,
     )
 

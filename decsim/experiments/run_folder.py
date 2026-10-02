@@ -33,6 +33,7 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.collect as collect
 import decsim.compiled_libraries as compiled_libraries
+import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.frontends.workload_files as workload_files
 import decsim.records.program as program_records
@@ -610,13 +611,11 @@ def _how_it_ran() -> dict:
 
 def _plan(settings) -> plan_build.Plan:
     """The plan the build derives from the settings, before it wires."""
-    confidence_signal = escalation_build.confidence_signal(
-        settings.escalation, settings.weak_decoder
+    engine = engine_module.Engine()
+    switching = escalation_build.build_switching(
+        settings.switching, settings.weak_decoder, engine
     )
-    escalation_policy = escalation_build.build_escalation_policy(
-        settings.escalation, confidence_signal
-    )
-    return plan_build.build_plan(settings, escalation_policy)
+    return plan_build.build_plan(settings, switching)
 
 
 def _built_values(plan: plan_build.Plan) -> dict:

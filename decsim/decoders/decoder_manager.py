@@ -66,7 +66,9 @@ class DecoderManager:
     # one ledger for both sides: the chip's side opens a strong request
     # and the host's side serves it
     strong_requests = ports.Port(strong_requests_module.StrongRequests)
-    escalation_policy = ports.Port(ports.EscalationPolicy)
+    # the switching policy, which learns from a strong result; None on a
+    # run with no switching
+    escalation_policy = ports.Port(ports.EscalationPolicy, optional=True)
 
     def __init__(
         self,

@@ -26,6 +26,7 @@ import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.settings as qpu_settings
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.windows.settings as window_settings
@@ -77,6 +78,13 @@ class MachineSettings:
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
     prices propagation only.
+
+    The decode side is three slots, each None when the run has no such
+    part: weak_decoder alone decodes every window once on the weak
+    decoder, strong_decoder alone on the strong one, and both with
+    switching decode weak first and escalate a window to the strong
+    decoder; none of the three is a run that plans no decoding. Two
+    decoders without switching, or switching without both, is refused.
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
@@ -100,18 +108,12 @@ class MachineSettings:
         syndrome_buffer_settings.SyndromeBufferSettings()
     )
     windows: window_settings.WindowSettings = window_settings.WindowSettings()
-    weak_decoder: decoder_settings.DecoderPoolSettings = (
-        decoder_settings.DecoderPoolSettings()
-    )
-    strong_decoder: decoder_settings.DecoderPoolSettings = (
-        decoder_settings.DecoderPoolSettings()
-    )
+    weak_decoder: Optional[decoder_settings.DecoderPoolSettings] = None
+    strong_decoder: Optional[decoder_settings.DecoderPoolSettings] = None
     decoder_manager: decoder_settings.DecoderManagerSettings = (
         decoder_settings.DecoderManagerSettings()
     )
-    escalation: escalation_settings.EscalationSettings = (
-        escalation_settings.EscalationSettings()
-    )
+    switching: Optional[escalation_settings.SwitchingSettings] = None
     burst_detector: burst_detector_settings.BurstDetectorSettings = (
         burst_detector_settings.BurstDetectorSettings()
     )
@@ -126,14 +128,41 @@ class MachineSettings:
         observe_settings.ObservationSettings()
     )
 
+    def __post_init__(self) -> None:
+        _check_decode_slots(self)
+
     def decoder_settings_for(
         self, tier: str
-    ) -> decoder_settings.DecoderPoolSettings:
+    ) -> Optional[decoder_settings.DecoderPoolSettings]:
         """The card of one decoder tier, named the way the yaml names it."""
         if tier == "weak":
             return self.weak_decoder
         assert tier == "strong", f"no decoder tier named {tier!r}"
         return self.strong_decoder
+
+    @property
+    def window_tier(self) -> window_records.DecoderTier:
+        """The tier that decodes the plan's windows: weak if set, else strong.
+
+        A run with no decoder plans no decoding, and its windows, if any,
+        are the weak tier's.
+        """
+        if self.weak_decoder is None and self.strong_decoder is not None:
+            return window_records.DecoderTier.STRONG
+        return window_records.DecoderTier.WEAK
+
+    @property
+    def escalation_kind(self) -> str:
+        """The yaml's escalation.kind for these slots, which a trace prints.
+
+        The trace's process name and the plots that read it name a run
+        by this word (escalation/settings.py ESCALATION_KINDS).
+        """
+        if self.switching is not None:
+            return "switching"
+        if self.window_tier is window_records.DecoderTier.STRONG:
+            return "strong_only"
+        return "weak_baseline"
 
     @classmethod
     def from_mapping(
@@ -198,13 +227,19 @@ class MachineSettings:
             decoder_manager_section, clocks
         )
         escalation_folder = section_folders.get("escalation")
-        escalation = escalation_settings.EscalationSettings.from_yaml(
+        switching = escalation_settings.SwitchingSettings.from_yaml(
             escalation_section,
             clocks,
             escalation_folder,
             controller.clock,
             confidence_signals.confidence_settings,
         )
+        kind = escalation_settings.escalation_kind(escalation_section)
+        kept_sections = escalation_settings.ESCALATION_KINDS[kind]
+        if "weak_decoder" not in kept_sections:
+            weak_decoder = None
+        if "strong_decoder" not in kept_sections:
+            strong_decoder = None
         burst_detector_section = sections.get("burst_detector", {})
         burst_detector = (
             burst_detector_settings.BurstDetectorSettings.from_yaml(
@@ -237,7 +272,7 @@ class MachineSettings:
             weak_decoder=weak_decoder,
             strong_decoder=strong_decoder,
             decoder_manager=decoder_manager,
-            escalation=escalation,
+            switching=switching,
             burst_detector=burst_detector,
             pauli_frame=pauli_frame,
             workload=workload,
@@ -278,10 +313,34 @@ def _not_a_mapping_sentence(name: str, section) -> str:
 
 def _tier_settings(
     sections: Mapping, tier: str, clocks: config.ClockSettings
-) -> decoder_settings.DecoderPoolSettings:
+) -> Optional[decoder_settings.DecoderPoolSettings]:
     """A tier's section, or no decoder when the yaml leaves it out."""
     if tier not in sections:
-        return decoder_settings.DecoderPoolSettings()
+        return None
     return decoder_settings.DecoderPoolSettings.from_yaml(
         sections[tier], clocks, tier
     )
+
+
+def _check_decode_slots(settings: MachineSettings) -> None:
+    """Switching fills all three slots; without it one decoder at most."""
+    has_weak = settings.weak_decoder is not None
+    has_strong = settings.strong_decoder is not None
+    if settings.switching is None:
+        if has_weak and has_strong:
+            raise ValueError(
+                "weak_decoder and strong_decoder are both set and switching "
+                "is not; a run with no switching decodes its windows on one "
+                "decoder, so set switching or drop one decoder"
+            )
+        return
+    if not has_strong:
+        raise ValueError(
+            "escalation switching escalates to the strong_decoder, which "
+            "this configuration does not define"
+        )
+    if not has_weak:
+        raise ValueError(
+            "escalation switching decodes every window on the "
+            "weak_decoder first, which this configuration does not define"
+        )

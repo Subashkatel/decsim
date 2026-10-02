@@ -22,8 +22,6 @@ import pytest
 import decsim.controller.controller as controller_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.escalation.policies as escalation_policies
-import decsim.escalation.settings as escalation_settings
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
@@ -101,8 +99,6 @@ def strong_settings():
     strong = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    escalation = escalation_settings.EscalationSettings(policy=policy)
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -111,7 +107,6 @@ def strong_settings():
         workload=workload,
         qpu=qpu,
         strong_decoder=strong,
-        escalation=escalation,
         links=links,
         controller=controller,
         pauli_frame=frame,

@@ -17,7 +17,6 @@ import decsim.config as config
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
 import decsim.links.window_transfers as window_transfers
@@ -178,7 +177,6 @@ class _Fixture:
         self.builder.interaction = interaction
         self.builder.gate = gate
         self.queue = _RecordingQueue()
-        policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
         verdict = types.SimpleNamespace(
             accept_result=_ignore_result, accept_strong_result=_ignore_result
         )
@@ -190,7 +188,6 @@ class _Fixture:
         self.requester.retention = self.retention
         self.requester.builder = self.builder
         self.requester.decode_queue = self.queue
-        self.requester.escalation_policy = policy
         self.requester.verdict = verdict
         self.requester.store_output = store_output
         self.retention.register_window((1, 0), self.window)

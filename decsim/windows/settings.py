@@ -64,15 +64,14 @@ class WindowSettings:
     terminal_policy is flush or lookahead (TERMINAL_POLICIES,
     records/windows.py), how a finite stream drains its last buffered
     window; null, the default, leaves the row on flush, and on lookahead
-    when the escalation may escalate, since a strong recovery needs a
-    last window that reads past its own commit. boundaries names a row of
+    when the run switches, since a strong recovery needs a last window
+    that reads past its own commit. boundaries names a row of
     BOUNDARY_POLICIES (above): when a committed window ships its boundary
-    to the windows after it; null, the default, is the row the
-    escalation policy declares, or, when that policy may escalate, the
-    row its strong window shape declares (default_boundary_policy on
-    escalation/policies.py and escalation/strong_window_shapes.py):
-    held when the escalation may escalate and the strong window does not
-    absorb the weak windows it covers, and eager otherwise. A
+    to the windows after it; null, the default, is eager on a run with no
+    switching, and on a switching run the row its strong window shape
+    declares (default_boundary_policy on
+    escalation/strong_window_shapes.py): held when the strong window does
+    not absorb the weak windows it covers, and eager otherwise. A
     Python-built scheme or boundary policy is used as it is; the root's
     defaults are the sliding scheme and Eager shipping. row_settings is
     the scheme row's own Settings, read from the section's keys outside

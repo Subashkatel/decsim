@@ -226,13 +226,13 @@ class DecoderPoolSettings:
     algorithm is the row's own Settings record, whose build makes the
     unit's decoder (UnionFindDecoder.Settings and the rest); the section
     fills it from its keys outside DECODER_KEYS (union_find's weight_step
-    and cycle_count). None is no decoder at all, right for a run that
-    plans no windows. Every decoder runs between the engine's stages.
+    and cycle_count). A run with no decoder on a tier leaves the
+    machine's slot None. Every decoder runs between the engine's stages.
     """
 
     # a decoder row's Settings record, opaque to the tier: the record
     # whose build() returns the decoder
-    algorithm: Optional[Any] = None
+    algorithm: Any
     unit_count: int = 1
     engine: EngineSettings = EngineSettings()
     unit_memory: UnitMemorySettings = UnitMemorySettings()
@@ -254,8 +254,11 @@ class DecoderPoolSettings:
         section: Mapping,
         clocks: config.ClockSettings,
         section_name: str,
-    ) -> "DecoderPoolSettings":
-        """A tier section: kind, units, unit memory and the engine card."""
+    ) -> Optional["DecoderPoolSettings"]:
+        """A tier section: kind, units, unit memory and the engine card.
+
+        kind null is no decoder, so the section fills no slot.
+        """
         tables.refuse_missing_keys(
             section_name, section, _REQUIRED_DECODER_KEYS
         )
@@ -269,6 +272,8 @@ class DecoderPoolSettings:
             section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
         )
         result_blocks_unit = section.get("result_blocks_unit", False)
+        if algorithm is None:
+            return None
         return cls(
             algorithm=algorithm,
             unit_count=section["units"],

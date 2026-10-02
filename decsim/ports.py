@@ -1907,7 +1907,9 @@ class BoundaryPolicy(Protocol):
 class EscalationPolicy(Protocol):
     """Whether and when a window is decoded again by the strong tier.
 
-    Table rows: weak_baseline, strong_only, switching. The policy decides
+    The switching policy (escalation/policies.py Switching), on a run
+    whose switching slot is filled; a run with none leaves this port
+    unbound and keeps every window's one decode. The policy decides
     and is told, the shape of gem5's conditional predictor
     (src/cpu/pred/conditional.hh: lookup answers, update teaches, and
     the unit acts on the answer): it builds no job and sends nothing.
@@ -1918,22 +1920,6 @@ class EscalationPolicy(Protocol):
     The strong re-decode itself is the window side's
     (decsim/escalation/strong_redecode.py).
     """
-
-    # The tier that decodes the plan's windows; every tier-dependent site
-    # (arrival authority, input store and link, request-key tier, output
-    # link) follows from this one declaration.
-    primary_tier: window_records.DecoderTier
-    # Whether the policy may escalate a window, so the run keeps the
-    # strong syndrome buffer, every window's rounds a strong redo would
-    # read, and the strong tier's window side.
-    requires_strong_context: bool
-    # Whether the policy reads a confidence to decide keep, so the
-    # escalation section carries the confidence keys, the weak decoder
-    # must serve the run's signal, and the window side joins the solves
-    # a signal needs. A row is built from one EscalationCollaborators
-    # record (escalation/policies.py) and this says which of its fields
-    # the row reads.
-    decides_on_a_confidence: bool
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""

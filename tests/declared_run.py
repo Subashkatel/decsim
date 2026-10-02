@@ -19,7 +19,6 @@ import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
@@ -121,6 +120,49 @@ DECLARED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
     weight_step_natural_log=None,
     references=("declared by the test",),
 )
+
+
+class DeclaredConfidence:
+    """The confidence of a weak decoder that declares its own gap.
+
+    The window's one decode carries its soft output already, so the
+    signal hands it on at no cost and needs no evidence of the decode.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The declared signal, as the switching slot names it."""
+
+        name = "declared_confidence"
+
+        def build(self, weak_algorithm, threshold_nats):
+            """The signal; it reads neither the decoder nor the threshold."""
+            del weak_algorithm
+            del threshold_nats
+            return DeclaredConfidence()
+
+    source = DECLARED_CONFIDENCE_SOURCE
+    fault_model_requirement = None
+    decoder_evidence_requirement = frozenset()
+    evidence_refusal = "the declared confidence needs no evidence"
+    forced_logical_classes = ()
+
+    def compute(self, solves):
+        """The one solve's declared soft output, computed in no time."""
+        soft_output = solves[0].soft_output
+        return decoding_records.SoftOutputComputation(soft_output)
+
+
+def declared_switching(**changes):
+    """The switching slot over the declared confidence and threshold."""
+    confidence = DeclaredConfidence.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_nats=ESCALATION_THRESHOLD
+    )
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
+    )
+    return dataclasses.replace(switching, **changes)
 
 
 def lookahead_sliding_scheme():
@@ -418,8 +460,6 @@ def strong_only_run(
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=DECLARED_ENGINE
     )
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    escalation = escalation_settings.EscalationSettings(policy=policy)
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace, record_switching_windows=record
     )
@@ -431,7 +471,6 @@ def strong_only_run(
         workload=workload,
         qpu=qpu,
         strong_decoder=strong_decoder,
-        escalation=escalation,
         links=links,
         controller=controller,
         pauli_frame=frame,
@@ -535,13 +574,6 @@ def switching_run(
         copies_input=strong_copies_input,
         engine=DECLARED_ENGINE,
     )
-    threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=DECLARED_CONFIDENCE_SOURCE,
-        run_both_at_once=run_both_at_once,
-    )
-    policy = escalation_policies.Switching(collaborators)
     workload = declared_workload(operations, rounds)
     # serial switching needs Held boundaries; the double window refuses
     # them (escalation.policies.Switching.check_plan)
@@ -555,8 +587,8 @@ def switching_run(
     decoder_manager = decoder_settings.DecoderManagerSettings(
         bulk_strong=bulk_strong
     )
-    escalation = escalation_settings.EscalationSettings(
-        policy=policy,
+    switching = declared_switching(
+        run_both_at_once=run_both_at_once,
         strong_window=strong_window,
         clock=clock,
         threshold_cycles=threshold_cycles,
@@ -577,7 +609,7 @@ def switching_run(
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
         decoder_manager=decoder_manager,
-        escalation=escalation,
+        switching=switching,
         links=links,
         controller=controller,
         pauli_frame=frame,

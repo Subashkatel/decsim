@@ -129,8 +129,7 @@ class _Fixture:
         self.verdicts = {}
         self.verdict_ticks = []
         self.policy = types.SimpleNamespace(
-            verdict_for_weak_result=self._verdict_for,
-            decides_on_a_confidence=True,
+            verdict_for_weak_result=self._verdict_for
         )
         self.reads = []
         self.decode_queue = types.SimpleNamespace(

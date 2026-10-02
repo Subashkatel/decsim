@@ -513,10 +513,8 @@ def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
     }
     clocks = config.ClockSettings({})
     try:
-        settings = escalation_settings.EscalationSettings.from_yaml(
-            section,
-            clocks,
-            confidence_settings=confidence_signals.confidence_settings,
+        settings = escalation_settings.SwitchingSettings.from_yaml(
+            section, clocks, None, None, confidence_signals.confidence_settings
         )
     finally:
         del table["port_only"]

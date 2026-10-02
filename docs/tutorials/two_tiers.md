@@ -94,7 +94,7 @@ sweep:
 
 The `escalation` section is the new part.
 
-- `kind: switching` is the row of `ESCALATIONS` that runs the weak tier
+- `kind: switching` is the word of `ESCALATION_KINDS` that runs the weak tier
   first and escalates. The other two rows are `weak_baseline`, one tier
   only, and `strong_only`, the accurate decoder on everything.
 - `gap_threshold_db: 20.0` is the confidence below which a window is

@@ -26,7 +26,6 @@ import decsim.build.decoders as decoder_build
 import decsim.confidence.cluster as cluster
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.union_find.decoder as union_find
-import decsim.escalation.policies as escalation_policies
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
@@ -176,14 +175,14 @@ def _seated_machine(
         latency_cycles=latency_cycles,
     )
     windows = dataclasses.replace(settings.windows, kind=windows_kind)
-    escalation = dataclasses.replace(
-        settings.escalation, strong_window=strong_window
-    )
+    switching = settings.switching
+    if switching is not None:
+        switching = dataclasses.replace(switching, strong_window=strong_window)
     settings = dataclasses.replace(
         settings,
         detection_events=detection_events,
         windows=windows,
-        escalation=escalation,
+        switching=switching,
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -325,11 +324,11 @@ def _double_window_switching_at_the_decoder():
     )
     settings = point.settings
     detection_events = _formed_at(settings, "decoder")
-    escalation = dataclasses.replace(
-        settings.escalation, strong_window="double_window"
+    switching = dataclasses.replace(
+        settings.switching, strong_window="double_window"
     )
     settings = dataclasses.replace(
-        settings, detection_events=detection_events, escalation=escalation
+        settings, detection_events=detection_events, switching=switching
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -990,13 +989,13 @@ def _lookback_switching_machine(formed_at, seed):
         settings.weak_decoder, algorithm=union_find_settings
     )
     confidence = cluster.ClusterGap.Settings()
-    escalation = dataclasses.replace(settings.escalation, confidence=confidence)
+    escalation = dataclasses.replace(settings.switching, confidence=confidence)
     settings = dataclasses.replace(
         settings,
         workload=workload,
         windows=windows,
         weak_decoder=weak_decoder,
-        escalation=escalation,
+        switching=escalation,
     )
     return machine_module.Machine.build(settings, seed)
 
@@ -1028,18 +1027,13 @@ def _parallel_lookback_machine(unit_count: int):
         engine=declared_run.DECLARED_ENGINE,
         unit_count=unit_count,
     )
-    preset = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
-    strong = dataclasses.replace(settings.strong_decoder, algorithm=preset)
-    collaborators = escalation_policies.EscalationCollaborators()
-    policy = escalation_policies.Baseline(collaborators)
-    escalation = dataclasses.replace(settings.escalation, policy=policy)
     settings = dataclasses.replace(
         settings,
         workload=workload,
         windows=windows,
         weak_decoder=weak_decoder,
-        strong_decoder=strong,
-        escalation=escalation,
+        strong_decoder=None,
+        switching=None,
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -1090,13 +1084,7 @@ def _reach_growing_machine(formed_at):
         settings.strong_decoder,
         algorithm=matching,
     )
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
-    )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    switching = _declared_confidence(settings.switching)
     running = settings.workload.running(workload)
     settings = dataclasses.replace(
         settings,
@@ -1104,9 +1092,20 @@ def _reach_growing_machine(formed_at):
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
     )
     return machine_module.Machine.build(settings, 0)
+
+
+def _declared_confidence(switching):
+    """The yaml's switching slot, deciding on the weak tier's declared gap."""
+    confidence = declared_run.DeclaredConfidence.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_nats=declared_run.ESCALATION_THRESHOLD
+    )
+    return dataclasses.replace(
+        switching, confidence=confidence, threshold=threshold
+    )
 
 
 def _is_window_one(job) -> bool:
@@ -1159,13 +1158,7 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
         algorithm=matching,
         unit_count=3,
     )
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
-    )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    switching = _declared_confidence(settings.switching)
     running = settings.workload.running(workload)
     settings = dataclasses.replace(
         settings,
@@ -1173,7 +1166,7 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
     )
     return machine_module.Machine.build(settings, 0)
 

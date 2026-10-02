@@ -238,7 +238,7 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
     """One shot of the redo window switching experiment's switching point.
 
     The yaml names redo_window; the row under test replaces it in
-    the escalation card, which is where the build reads it from.
+    the switching slot, which is where the build reads it from.
     """
     config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
     config = experiment.load_experiment(config_path)
@@ -250,10 +250,10 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
         },
     )
     settings = point.settings
-    escalation = dataclasses.replace(
-        settings.escalation, strong_window=strong_window
+    switching = dataclasses.replace(
+        settings.switching, strong_window=strong_window
     )
-    settings = dataclasses.replace(settings, escalation=escalation)
+    settings = dataclasses.replace(settings, switching=switching)
     machine = machine_module.Machine.build(settings, seed)
     return machine.run()
 

@@ -149,8 +149,8 @@ The ones a study is most likely to change:
 - the **syndrome source**, which is what the QPU reads out
   (`SYNDROME_SOURCES`);
 - the **decoder** on each tier (`DECODERS`);
-- the **escalation policy**, which decides whether there are two tiers at
-  all (`ESCALATIONS`);
+- the **escalation kind**, which says which decode slots a run fills
+  (`ESCALATION_KINDS`);
 - the **windowing scheme**, which lays out the windows
   (`WINDOWING_SCHEMES`);
 - the **link fabric**, which prices the hops (`LINK_FABRICS`);

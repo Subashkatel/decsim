@@ -29,7 +29,7 @@ Sec. III A; every paper line on these pages is into the plain-text
 extraction of the paper, the one the code's own docstrings cite). The weak decoder is fast and reports a **soft output**; the
 strong decoder is accurate and has a relatively high latency.
 
-Three rows of `ESCALATIONS` say which of the two arrangements a run is:
+Three words of `ESCALATION_KINDS` say which of the two arrangements a run is:
 
 | Row | What runs |
 | --- | --- |

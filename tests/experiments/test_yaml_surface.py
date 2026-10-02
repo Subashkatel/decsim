@@ -13,7 +13,6 @@ import re
 import pytest
 import yaml
 
-import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
@@ -29,16 +28,17 @@ import tests.experiments.yaml_configs as yaml_configs
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
+    """weak_baseline keeps the weak tier; the strong section is read, unused."""
     reference_path = yaml_configs.CONFIGS_DIR / "reference.yaml"
     config = experiment.load_experiment(reference_path)
     point = config.first_point_task()
     settings = point.settings
     assert settings.weak_decoder.algorithm.name == "pymatching"
-    assert settings.strong_decoder.algorithm.name == "belief_matching"
-    assert escalation_build.primary_tier(settings.escalation) == "weak"
+    assert settings.strong_decoder is None
+    assert settings.switching is None
+    assert settings.window_tier.value == "weak"
     # engine cycles price on a named domain, resolved once like the links
     assert settings.weak_decoder.engine.clock == settings.clocks.clock("fridge")
-    assert settings.strong_decoder.engine.clock == settings.clocks.clock("room")
 
 
 def test_the_reference_controller_charges_the_traced_issue_pipeline():
@@ -773,7 +773,7 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
         },
     )
     settings = point.settings
-    with pytest.raises(ValueError, match="strong tier, which names no decoder"):
+    with pytest.raises(ValueError, match="the run names no decoder"):
         machine_module.Machine.build(settings)
 
 

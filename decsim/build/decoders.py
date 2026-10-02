@@ -34,10 +34,10 @@ class DecoderPool:
     """The tiers' units and the managers' pool knobs.
 
     active is the unit of the tier that decodes the plan's windows, None
-    when that tier names no decoder; strong is the strong tier's unit on
-    a run that may escalate, else None. chip is the chip's manager's
-    pool, of the tier that decodes the plan's windows; host is the host's
-    manager's, of the strong tier, on a switching run only.
+    on a run with no decoder; strong is the strong tier's unit on a
+    switching run, else None. chip is the chip's manager's pool, of the
+    tier that decodes the plan's windows; host is the host's manager's,
+    of the strong tier, on a switching run only.
     """
 
     active: Optional[ports.Decoder]
@@ -51,7 +51,7 @@ class Decoders:
     """The decode side: the units of both tiers and the managers over them.
 
     The chip's manager schedules the tier that decodes the plan's windows.
-    A run that may escalate has the host's manager too, over the strong
+    A switching run has the host's manager too, over the strong
     tier's units (LATTE 2509.03954 lines 705-720), and the two share one
     ledger of strong requests, since the chip side opens a strong request
     and the host side serves it. Nothing here reaches outward: the other
@@ -70,14 +70,15 @@ class Decoders:
         manager_settings: decoder_settings.DecoderManagerSettings,
         engine: engine_module.Engine,
         pool: DecoderPool,
-        escalation_policy: ports.EscalationPolicy,
     ) -> "Decoders":
-        """Each manager over its pool, bound to its tier's unit."""
+        """Each manager over its pool, bound to its tier's unit.
+
+        A switching run's policy is bound by the switching part.
+        """
         strong_requests = strong_requests_module.StrongRequests()
         decoder_manager = _decoder_manager(manager_settings, engine, pool.chip)
         decoder_manager.decoder = pool.active
         decoder_manager.strong_requests = strong_requests
-        decoder_manager.escalation_policy = escalation_policy
         strong_decoder_manager = None
         if pool.host is not None:
             strong_decoder_manager = _decoder_manager(
@@ -85,7 +86,6 @@ class Decoders:
             )
             strong_decoder_manager.decoder = pool.strong
             strong_decoder_manager.strong_requests = strong_requests
-            strong_decoder_manager.escalation_policy = escalation_policy
         return cls(
             primary_decoder=pool.active,
             strong_decoder=pool.strong,
@@ -121,7 +121,6 @@ class Decoders:
 def build_decoder_unit(
     settings: machine_settings.MachineSettings,
     tier: str,
-    policy,
     formation: Optional[detection_events_module.TierFormation],
     signal: Optional[ports.ConfidenceSignal],
 ):
@@ -133,17 +132,17 @@ def build_decoder_unit(
     seat of the run's detection event placement (formation). The tier
     that decodes the plan's windows carries the Tesseract referee when
     the observation asks for it, and must produce the evidence the run's
-    confidence signal reads when the run has one. None when the tier
-    names no decoder.
+    confidence signal reads when the run has one. None when the tier's
+    slot is empty.
     """
     tier_settings = settings.decoder_settings_for(tier)
-    algorithm_settings = tier_settings.algorithm
-    if algorithm_settings is None:
+    if tier_settings is None:
         return None
+    algorithm_settings = tier_settings.algorithm
     algorithm = algorithm_settings.build()
-    is_active = tier == policy.primary_tier.value
+    is_active = tier == settings.window_tier.value
     if is_active and signal is not None:
-        signal_name = settings.escalation.confidence.name
+        signal_name = settings.switching.confidence.name
         _check_serves_the_confidence(
             algorithm, algorithm_settings.name, tier, signal, signal_name
         )
@@ -160,25 +159,22 @@ def build_decoder_unit(
 def build_decoder_pool(
     settings: machine_settings.MachineSettings,
     plan: plan_build.Plan,
-    policy,
     detection_events: ports.DetectionEventPlacement,
     signal: Optional[ports.ConfidenceSignal],
 ) -> DecoderPool:
     """The tiers' units and the managers' pools.
 
     Switching gives the strong tier a pool of its own, which serves
-    escalated jobs. Any other escalation has one pool, of the tier that
-    decodes the plan's windows. Each tier whose decoder is a seat of the
-    run's detection event placement gets its own event-detection logic,
-    so a round both tiers read is formed and charged by each.
+    escalated jobs. A run with no switching has one pool, of the tier
+    that decodes the plan's windows. Each tier whose decoder is a seat of
+    the run's detection event placement gets its own event-detection
+    logic, so a round both tiers read is formed and charged by each.
     """
     weak_formation = _tier_formation(detection_events, "weak_decoder")
     strong_formation = _tier_formation(detection_events, "strong_decoder")
-    weak = build_decoder_unit(settings, "weak", policy, weak_formation, signal)
-    strong = build_decoder_unit(
-        settings, "strong", policy, strong_formation, signal
-    )
-    active_tier = policy.primary_tier.value
+    weak = build_decoder_unit(settings, "weak", weak_formation, signal)
+    strong = build_decoder_unit(settings, "strong", strong_formation, signal)
+    active_tier = settings.window_tier.value
     active = weak
     active_formation = weak_formation
     if active_tier == "strong":
@@ -193,9 +189,8 @@ def build_decoder_pool(
         active_formation,
         blocks_unit,
     )
-    if not policy.requires_strong_context:
+    if settings.switching is None:
         return DecoderPool(active=active, strong=None, chip=chip, host=None)
-    _check_switching_has_a_strong(strong)
     host = _pool(
         settings, decode_queue.STRONG_POOL, "strong", strong_formation, False
     )
@@ -205,12 +200,16 @@ def build_decoder_pool(
 def _check_the_active_tier_decodes(
     active, active_tier: str, plan: plan_build.Plan
 ) -> None:
-    """A plan with windows needs a decoder on the tier that decodes them."""
+    """A plan with windows needs a decoder on the tier that decodes them.
+
+    The tier's slot is filled whenever either is, so an empty one means
+    the run names no decoder at all.
+    """
     if active is not None or not plan.planned_operations:
         return
     raise ValueError(
-        f"the plan decodes windows on the {active_tier} tier, which "
-        "names no decoder: give it an algorithm"
+        f"the plan decodes windows on the {active_tier} tier, and the run "
+        "names no decoder: fill weak_decoder or strong_decoder"
     )
 
 
@@ -221,8 +220,19 @@ def _pool(
     formation: Optional[detection_events_module.TierFormation],
     blocks_unit: bool,
 ) -> decoder_pool_module.PoolSettings:
-    """One manager's pool, from the settings of the tier it holds units of."""
+    """One manager's pool, from the settings of the tier it holds units of.
+
+    A run with no decoder holds one unit of a tier's defaults, which
+    nothing is sent to.
+    """
     tier_settings = settings.decoder_settings_for(tier)
+    if tier_settings is None:
+        return decoder_pool_module.PoolSettings(
+            name=name,
+            unit_count=1,
+            blocks_unit=blocks_unit,
+            formation=formation,
+        )
     return decoder_pool_module.PoolSettings(
         name=name,
         unit_count=tier_settings.unit_count,
@@ -245,17 +255,9 @@ def _blocks_unit(
     tier alone.
     """
     tier_settings = settings.decoder_settings_for(active_tier)
+    if tier_settings is None:
+        return False
     return tier_settings.result_blocks_unit
-
-
-def _check_switching_has_a_strong(strong) -> None:
-    """Switching escalates to the strong tier, so the run must name one."""
-    if strong is not None:
-        return
-    raise ValueError(
-        "escalation switching escalates to the strong_decoder, which "
-        "this configuration does not define"
-    )
 
 
 def _tier_formation(

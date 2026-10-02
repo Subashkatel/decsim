@@ -1,15 +1,11 @@
-"""The escalation section: when a window is decoded again, and on what.
+"""The switching settings: when a window is decoded again, and on what.
 
-One record per yaml `escalation` section, the table of escalation kinds
-and the table of strong window shapes. A row of ESCALATIONS is the only
-place a kind's facts are written: which tier decodes the plan's windows
-(primary_tier) and whether the strong context is retained
-(requires_strong_context) and whether it decides on a confidence
-(decides_on_a_confidence, which is also what gates this section's
-confidence keys) are read off the class, so a new kind is one class and
-one row (sinter's BUILT_IN_DECODERS shape). A row of
-STRONG_WINDOW_SHAPES is the geometry the strong tier re-decodes
-(Toshio et al. arXiv 2510.25222).
+SwitchingSettings is the machine's switching slot, filled on a run that
+decodes weak first and escalates a window to the strong decoder. The
+yaml's `escalation` section is read here: its kind says which of the
+machine's decode slots a run fills (ESCALATION_KINDS), and a switching
+kind's keys become the record. A row of STRONG_WINDOW_SHAPES is the
+geometry the strong tier re-decodes (Toshio et al. arXiv 2510.25222).
 """
 
 import dataclasses
@@ -20,18 +16,22 @@ from numbers import Real
 from typing import Any, Optional
 
 import decsim.config as config
-import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.ports as ports
 import decsim.tables as tables
 
-# escalation.kind names one of these rows.
-ESCALATIONS = {
-    "weak_baseline": escalation_policies.Baseline,
-    "strong_only": escalation_policies.StrongOnly,
-    "switching": escalation_policies.Switching,
+# escalation.kind names one of these words: the decoder sections of the
+# yaml a run of that kind keeps, the machine's slots it fills. A kind
+# that keeps both decoders switches between them.
+ESCALATION_KINDS = {
+    "weak_baseline": ("weak_decoder",),
+    "strong_only": ("strong_decoder",),
+    "switching": ("weak_decoder", "strong_decoder"),
 }
+# The section keys every kind reads: the price of the verdict, which only
+# a switching run charges.
+_TIMING_KEYS = ("kind", "clock", "threshold_cycles", "switch_cycles")
 # escalation.strong_window names one of these rows: the shape of the
 # window the strong tier re-decodes. The root resolves the name once and
 # builds the row with the window components it needs.
@@ -74,14 +74,12 @@ ESCALATION_KEYS = (
 
 
 @dataclasses.dataclass(frozen=True)
-class EscalationSettings:
-    """The yaml's `escalation` section.
+class SwitchingSettings:
+    """The machine's switching slot: weak first, escalate on low confidence.
 
-    Table rows (ESCALATIONS, above): weak_baseline (every window on the
-    weak tier, final), strong_only (every window decoded once on the
-    strong tier, woken from the strong syndrome buffer), switching (weak first,
-    escalate serially on a small complementary gap, Toshio 2510.25222
-    Sec. III A without the parallel head start). The switching knobs:
+    Read from the yaml's `escalation` section when its kind is switching
+    (weak first, escalate serially on a small complementary gap, Toshio
+    2510.25222 Sec. III A without the parallel head start).
     threshold is the Settings record of the row of THRESHOLD_SOURCES
     the yaml's threshold_source names, which keeps the weak result when
     its gap is at or above the threshold (the paper uses 20 dB): fixed
@@ -111,99 +109,79 @@ class EscalationSettings:
     leaving each row on its own cost model.
     The complementary gap's two forced-class solves are two ordinary
     jobs of the weak pool, so weak_decoder.units alone decides whether
-    they overlap. A Python-built policy is used as it is, each machine
-    binding its own shallow copy of it. The experiments layer sets the
+    they overlap. clock, threshold_cycles and switch_cycles price the
+    verdict's threshold and switch logic. The experiments layer sets the
     sweep point's threshold (at_sweep_point) and installs the point's
     online threshold source, the one instance every shot of the point
     shares (online_threshold_for, collect.Task.shot_settings).
     """
 
+    # the confidence row's Settings record, opaque here: the record whose
+    # build(weak_algorithm, threshold_nats) returns the signal
+    confidence: Any
+    # the threshold row's Settings record (threshold_sources.py), opaque
+    # here: at_sweep_point, for_sweep_point and build answer for it
+    threshold: Any
     clock: Optional[config.Clock] = None
     threshold_cycles: int = 0
     switch_cycles: int = 0
-    kind: str = "weak_baseline"
-    # the confidence row's Settings record, opaque here: the record whose
-    # build(weak_algorithm, threshold_nats) returns the signal
-    confidence: Optional[Any] = None
-    # the threshold row's Settings record (threshold_sources.py), opaque
-    # here: at_sweep_point, for_sweep_point and build answer for it
-    threshold: Optional[Any] = None
     run_both_at_once: bool = False
     strong_window: str = "redo_window"
     restart_reread_buffer_regions: int = 1
-    policy: Optional[ports.EscalationPolicy] = None
     # the sweep point's live online source, shared by every shot of the
     # point and installed per shot by the experiments layer
     online_threshold: Optional[ports.ThresholdSource] = None
 
     def __post_init__(self) -> None:
-        config.check_cycles(
-            "escalation.threshold_cycles", self.threshold_cycles
+        _check_verdict_price(
+            self.clock, self.threshold_cycles, self.switch_cycles
         )
-        config.check_cycles("escalation.switch_cycles", self.switch_cycles)
-        charged = self.threshold_cycles + self.switch_cycles
-        if charged > 0 and self.clock is None:
-            raise ValueError("charged escalation costs need a clock")
 
     @classmethod
     def from_yaml(
         cls,
         section: Mapping,
         clocks: config.ClockSettings,
-        base_directory: Optional[pathlib.Path] = None,
-        default_clock: Optional[config.Clock] = None,
-        confidence_settings: Optional[Callable] = None,
-    ) -> "EscalationSettings":
-        """The common timing card and the policy's confidence knobs.
+        base_directory: Optional[pathlib.Path],
+        default_clock: Optional[config.Clock],
+        confidence_settings: Callable,
+    ) -> Optional["SwitchingSettings"]:
+        """The `escalation` section: the switching slot, None if it keeps one.
 
-        Both are checked at this boundary so a row without confidence
-        can accept timing keys while still refusing confidence knobs.
-        confidence_settings turns escalation.confidence and its walk card
-        into the row's record (confidence/signals.py
+        Every key is checked at this boundary, so a kind that keeps one
+        decoder still accepts the verdict's timing keys and refuses the
+        confidence keys. confidence_settings turns escalation.confidence
+        and its walk card into the row's record (confidence/signals.py
         confidence_settings), handed in by the caller, since the
-        confidence package sits above this one; a section that decides
-        on a confidence needs it.
+        confidence package sits above this one.
         """
-        kind = section.get("kind", "weak_baseline")
-        tables.refuse_unknown_keys("escalation", section, ESCALATION_KEYS)
-        row = tables.row(ESCALATIONS, "escalation.kind", kind)
+        kind = escalation_kind(section)
         clock = default_clock
         if "clock" in section:
             clock = clocks.clock(section["clock"])
-        confidence_keys = set(section) - {
-            "kind",
-            "clock",
-            "threshold_cycles",
-            "switch_cycles",
-        }
-        if not row.decides_on_a_confidence:
-            if confidence_keys:
-                listed = sorted(confidence_keys)
-                raise ValueError(
-                    f"escalation.kind {kind} decides on no confidence; "
-                    f"drop {listed}"
-                )
-            threshold_cycles = section.get("threshold_cycles", 0)
-            switch_cycles = section.get("switch_cycles", 0)
-            return cls(
-                kind=kind,
-                clock=clock,
-                threshold_cycles=threshold_cycles,
-                switch_cycles=switch_cycles,
-            )
+        threshold_cycles = section.get("threshold_cycles", 0)
+        switch_cycles = section.get("switch_cycles", 0)
+        confidence_keys = set(section) - set(_TIMING_KEYS)
+        if kind != "switching":
+            _refuse_confidence_keys(kind, confidence_keys)
+            _check_verdict_price(clock, threshold_cycles, switch_cycles)
+            return None
         return _switching_settings(
-            kind, section, base_directory, clock, confidence_settings
+            section,
+            base_directory,
+            clock,
+            threshold_cycles,
+            switch_cycles,
+            confidence_settings,
         )
 
-    def at_sweep_point(self, resolved: Mapping) -> "EscalationSettings":
-        """The section at one sweep point: a table's threshold looked up.
+    def at_sweep_point(self, resolved: Mapping) -> "SwitchingSettings":
+        """The slot at one sweep point: a table's threshold looked up.
 
         The threshold record answers for itself (threshold_sources.py):
         a table finds the point's row in its csv, the other rows are
         the same at every point.
         """
-        if self.threshold is None:
-            return self
         threshold = self.threshold.at_sweep_point(resolved)
         return dataclasses.replace(self, threshold=threshold)
 
@@ -217,18 +195,51 @@ class EscalationSettings:
         window stream; every other row answers None, and the root
         builds those from the record per shot.
         """
-        if self.threshold is None:
-            return None
         return self.threshold.for_sweep_point(resolved)
 
 
+def escalation_kind(section: Mapping) -> str:
+    """The section's kind, its keys checked: which decode slots a run fills."""
+    tables.refuse_unknown_keys("escalation", section, ESCALATION_KEYS)
+    kind = section.get("kind", "weak_baseline")
+    kinds = sorted(ESCALATION_KINDS)
+    if isinstance(kind, (list, Mapping)) or kind not in ESCALATION_KINDS:
+        raise ValueError(
+            f"escalation.kind {kind!r} is not a row of its table; the rows "
+            f"are {kinds}"
+        )
+    return kind
+
+
+def _check_verdict_price(
+    clock: Optional[config.Clock], threshold_cycles, switch_cycles
+) -> None:
+    """The verdict's two costs are cycle counts, on a clock when charged."""
+    config.check_cycles("escalation.threshold_cycles", threshold_cycles)
+    config.check_cycles("escalation.switch_cycles", switch_cycles)
+    charged = threshold_cycles + switch_cycles
+    if charged > 0 and clock is None:
+        raise ValueError("charged escalation costs need a clock")
+
+
+def _refuse_confidence_keys(kind: str, confidence_keys: set) -> None:
+    """A kind that keeps one decoder decides on no confidence."""
+    if not confidence_keys:
+        return
+    listed = sorted(confidence_keys)
+    raise ValueError(
+        f"escalation.kind {kind} decides on no confidence; drop {listed}"
+    )
+
+
 def _switching_settings(
-    kind: str,
     section: Mapping,
     base_directory: Optional[pathlib.Path],
     clock: Optional[config.Clock],
+    threshold_cycles: int,
+    switch_cycles: int,
     confidence_settings: Callable,
-) -> EscalationSettings:
+) -> SwitchingSettings:
     """The confidence knobs of an escalating kind, every rule checked once.
 
     Which keys the section may carry is the threshold row's to say, not
@@ -251,15 +262,12 @@ def _switching_settings(
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, threshold_row, strong_window)
     reread_regions = _restart_reread_buffer_regions(section, strong_window)
-    threshold_cycles = section.get("threshold_cycles", 0)
-    switch_cycles = section.get("switch_cycles", 0)
-    return EscalationSettings(
+    return SwitchingSettings(
+        confidence=confidence,
+        threshold=threshold,
         clock=clock,
         threshold_cycles=threshold_cycles,
         switch_cycles=switch_cycles,
-        kind=kind,
-        confidence=confidence,
-        threshold=threshold,
         run_both_at_once=run_both_at_once,
         strong_window=strong_window,
         restart_reread_buffer_regions=reread_regions,

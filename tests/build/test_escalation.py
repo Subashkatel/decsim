@@ -44,9 +44,11 @@ def test_a_run_with_no_switching_builds_no_switching_part():
 
 
 def test_the_policy_decides_on_the_signals_source_and_the_threshold():
+    settings = _switching()
+    weak = _weak()
     engine = engine_module.Engine()
 
-    switching = escalation_build.Switching.build(_switching(), _weak(), engine)
+    switching = escalation_build.Switching.build(settings, weak, engine)
 
     policy = switching.policy
     assert policy.threshold.threshold_nats == 2.0
@@ -63,12 +65,11 @@ def test_every_machine_builds_its_own_policy_from_one_settings_record():
     settings = _switching()
     weak = _weak()
 
-    first = escalation_build.Switching.build(
-        settings, weak, engine_module.Engine()
-    )
-    second = escalation_build.Switching.build(
-        settings, weak, engine_module.Engine()
-    )
+    first_engine = engine_module.Engine()
+    second_engine = engine_module.Engine()
+
+    first = escalation_build.Switching.build(settings, weak, first_engine)
+    second = escalation_build.Switching.build(settings, weak, second_engine)
 
     assert first.policy is not second.policy
     assert first.strong_redecode is not second.strong_redecode
@@ -83,44 +84,36 @@ def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
     settings = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
+    weak = _weak()
     engine = engine_module.Engine()
 
     with pytest.raises(ValueError) as refusal:
-        escalation_build.Switching.build(settings, _weak(), engine)
+        escalation_build.Switching.build(settings, weak, engine)
 
     assert "resolves the threshold per sweep point" in str(refusal.value)
 
 
-def test_the_strong_window_row_is_named_and_declares_whether_it_absorbs():
-    redo_window = _switching(strong_window="redo_window")
-    forward = _switching(strong_window="double_window")
+def test_the_strong_window_record_declares_whether_it_absorbs():
+    redo_window = _switching()
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    forward = _switching(strong_window=double_window)
 
-    redo_window_row = escalation_build.strong_window_row(redo_window)
-    double_window_row = escalation_build.strong_window_row(forward)
-
-    assert redo_window_row.absorbs_weak_windows is False
-    assert double_window_row.absorbs_weak_windows is True
+    assert redo_window.strong_window.name == "redo_window"
+    assert forward.strong_window.name == "double_window"
     assert escalation_build.absorbs_weak_windows(redo_window) is False
     assert escalation_build.absorbs_weak_windows(forward) is True
     assert escalation_build.absorbs_weak_windows(None) is False
 
 
 def test_the_switching_part_builds_the_strong_window_its_slot_names():
-    settings = _switching(strong_window="double_window")
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    settings = _switching(strong_window=double_window)
+    weak = _weak()
     engine = engine_module.Engine()
 
-    switching = escalation_build.Switching.build(settings, _weak(), engine)
+    switching = escalation_build.Switching.build(settings, weak, engine)
 
     assert isinstance(switching.shape, strong_window_shapes.DoubleWindow)
-
-
-def test_a_strong_window_that_names_no_row_is_refused():
-    settings = _switching(strong_window="sideways")
-
-    with pytest.raises(ValueError) as refusal:
-        escalation_build.strong_window_row(settings)
-
-    assert "escalation.strong_window" in str(refusal.value)
 
 
 def test_the_confidence_row_is_built_with_the_sections_walk_card():
@@ -129,9 +122,10 @@ def test_the_confidence_row_is_built_with_the_sections_walk_card():
     settings = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
+    weak = _weak()
     engine = engine_module.Engine()
 
-    switching = escalation_build.Switching.build(settings, _weak(), engine)
+    switching = escalation_build.Switching.build(settings, weak, engine)
 
     assert switching.confidence_signal.walk_microseconds == 0.25
 

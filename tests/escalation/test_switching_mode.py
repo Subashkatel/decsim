@@ -144,8 +144,10 @@ def test_both_restart_re_read_widths_load_from_the_escalation_section(
 
     no_reread_escalation = no_reread_point.settings.switching
     one_region_escalation = one_region_point.settings.switching
-    assert no_reread_escalation.restart_reread_buffer_regions == 0
-    assert one_region_escalation.restart_reread_buffer_regions == 1
+    no_reread_window = no_reread_escalation.strong_window
+    one_region_window = one_region_escalation.strong_window
+    assert no_reread_window.restart_reread_buffer_regions == 0
+    assert one_region_window.restart_reread_buffer_regions == 1
 
 
 def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):

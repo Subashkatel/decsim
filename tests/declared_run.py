@@ -33,6 +33,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.tables as tables
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -163,6 +164,19 @@ def declared_switching(**changes):
         confidence=confidence, threshold=threshold
     )
     return dataclasses.replace(switching, **changes)
+
+
+def strong_window_settings(name):
+    """The record of the strong window row the name picks, as yaml reads it.
+
+    A name off the table is refused with the yaml's own sentence.
+    """
+    row = tables.row(
+        escalation_settings.STRONG_WINDOW_SHAPES,
+        "escalation.strong_window",
+        name,
+    )
+    return row.Settings()
 
 
 def lookahead_sliding_scheme():
@@ -587,9 +601,10 @@ def switching_run(
     decoder_manager = decoder_settings.DecoderManagerSettings(
         bulk_strong=bulk_strong
     )
+    strong_window_record = strong_window_settings(strong_window)
     switching = declared_switching(
         run_both_at_once=run_both_at_once,
-        strong_window=strong_window,
+        strong_window=strong_window_record,
         clock=clock,
         threshold_cycles=threshold_cycles,
         switch_cycles=switch_cycles,

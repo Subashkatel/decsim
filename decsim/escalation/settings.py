@@ -33,8 +33,8 @@ ESCALATION_KINDS = {
 # a switching run charges.
 _TIMING_KEYS = ("kind", "clock", "threshold_cycles", "switch_cycles")
 # escalation.strong_window names one of these rows: the shape of the
-# window the strong tier re-decodes. The root resolves the name once and
-# builds the row with the window components it needs.
+# window the strong tier re-decodes. The yaml's name becomes the row's
+# Settings record, which the switching part builds on the run's engine.
 STRONG_WINDOW_SHAPES = {
     "redo_window": strong_window_shapes.RedoWindow,
     "double_window": strong_window_shapes.DoubleWindow,
@@ -46,15 +46,6 @@ THRESHOLD_SOURCES = {
     "table": threshold_sources.TableThreshold,
     "online": threshold_sources.OnlineThreshold,
 }
-# How many of the strong region's buffer regions the restarted weak
-# window re-reads under the double window (Toshio 2510.25222
-# Sec. III C). The text has the weak decoder resume once r_com + r_buf
-# rounds are stored after the strong region (lines 1229-1235), which
-# both values meet. 1, the default, reads its last buffer region as the
-# restart window's past context, which is how Fig. 12 step 5 draws the
-# restart window: that block is half assigned to the strong decoder and
-# half the weak decoder's buffer. 0 reads nothing inside the region.
-RESTART_REREAD_BUFFER_REGIONS = (0, 1)
 ESCALATION_KEYS = (
     "kind",
     "clock",
@@ -89,17 +80,16 @@ class SwitchingSettings:
     serial switching only; run_both_at_once is Sec. III A's Step 1, the strong
     decoder started with the weak one and cancelled on confidence
     (false, the default, is the same section's on-demand variant, lines
-    631-640); strong_window names the shape of the window the strong
-    tier re-decodes (STRONG_WINDOW_SHAPES in
-    decsim/escalation/strong_window_shapes.py): redo_window, the
+    631-640); strong_window is the Settings record of the shape of the
+    window the strong tier re-decodes, a row of STRONG_WINDOW_SHAPES
+    (decsim/escalation/strong_window_shapes.py): redo_window, the
     default, re-decodes the escalated window's commit region with its
     past face pinned on the earlier neighbour's committed correction and
     one buffer ahead (Bombin et al. 2303.04846 lines 775-788 and
     1456-1458); double_window is the paper's Sec. III C scheme as
     it is stated, an r_com + 2 r_buf extent read with no context, both
-    faces pinned (lines 1248-1259), and restart_reread_buffer_regions
-    is how many of the strong region's buffer regions the restarted
-    weak window re-reads under it.
+    faces pinned (lines 1248-1259), whose record holds how many of the
+    strong region's buffer regions the restarted weak window re-reads.
     confidence is the Settings record of the signal the weak tier
     reports and the threshold decides on (confidence/signals.py names
     the rows), and the build refuses a weak decoder whose decode cannot
@@ -126,8 +116,9 @@ class SwitchingSettings:
     threshold_cycles: int = 0
     switch_cycles: int = 0
     run_both_at_once: bool = False
-    strong_window: str = "redo_window"
-    restart_reread_buffer_regions: int = 1
+    # the strong window row's Settings record, opaque here: the record
+    # whose build(engine) returns the shape
+    strong_window: Any = strong_window_shapes.RedoWindow.Settings()
     # the sweep point's live online source, shared by every shot of the
     # point and installed per shot by the experiments layer
     online_threshold: Optional[ports.ThresholdSource] = None
@@ -259,9 +250,12 @@ def _switching_settings(
     walk_microseconds = _confidence_walk_microseconds(section)
     confidence = confidence_settings(named_confidence, walk_microseconds)
     run_both_at_once = config.boolean(section, "escalation", "run_both_at_once")
-    strong_window = _strong_window(section)
-    _check_serial_only(threshold_source, threshold_row, strong_window)
-    reread_regions = _restart_reread_buffer_regions(section, strong_window)
+    named_window = section.get("strong_window", "redo_window")
+    window_row = tables.row(
+        STRONG_WINDOW_SHAPES, "escalation.strong_window", named_window
+    )
+    _check_serial_only(threshold_source, threshold_row, window_row)
+    strong_window = _strong_window(section, named_window, window_row)
     return SwitchingSettings(
         confidence=confidence,
         threshold=threshold,
@@ -270,7 +264,6 @@ def _switching_settings(
         switch_cycles=switch_cycles,
         run_both_at_once=run_both_at_once,
         strong_window=strong_window,
-        restart_reread_buffer_regions=reread_regions,
     )
 
 
@@ -303,26 +296,19 @@ def _threshold(
     return threshold_row.Settings(threshold_nats=threshold_nats)
 
 
-def _restart_reread_buffer_regions(section: Mapping, strong_window: str) -> int:
-    """How far into the strong region the restart window re-reads.
+def _strong_window(section: Mapping, named_window: str, window_row):
+    """The strong window row's record, with the double window's width.
 
     Only a strong window that absorbs the weak windows it covers
     restarts the weak chain, so the key written beside any other row
     would be read by nothing and is refused.
     """
-    row = STRONG_WINDOW_SHAPES[strong_window]
     if "restart_reread_buffer_regions" in section:
-        _refuse_restart_without_absorption(row, strong_window)
+        _refuse_restart_without_absorption(window_row, named_window)
+    if not window_row.absorbs_weak_windows:
+        return window_row.Settings()
     regions = section.get("restart_reread_buffer_regions", 1)
-    is_a_count = type(regions) is int
-    if not is_a_count or regions not in RESTART_REREAD_BUFFER_REGIONS:
-        raise ValueError(
-            "escalation.restart_reread_buffer_regions must be 0, a "
-            "restart on the rounds stored after the strong region, or 1, "
-            "a re-read of the region's last buffer region as Toshio "
-            f"2510.25222 Fig. 12 step 5 draws it; got {regions!r}"
-        )
-    return int(regions)
+    return window_row.Settings(restart_reread_buffer_regions=regions)
 
 
 def _refuse_restart_without_absorption(row, strong_window: str) -> None:
@@ -402,24 +388,11 @@ def _online_card(
     return raw_online
 
 
-def _strong_window(section: Mapping) -> str:
-    """The strong window shape the section names, refused if not a row."""
-    named = section.get("strong_window", "redo_window")
-    rows = sorted(STRONG_WINDOW_SHAPES)
-    if named not in rows:
-        raise ValueError(
-            f"escalation.strong_window {named!r} is not a row of its "
-            f"table; the rows are {rows}"
-        )
-    return str(named)
-
-
 def _check_serial_only(
-    threshold_source: str, threshold_row, strong_window: str
+    threshold_source: str, threshold_row, window_row
 ) -> None:
     """A row that audits by escalating is validated for serial switching."""
-    row = STRONG_WINDOW_SHAPES[strong_window]
-    if not row.absorbs_weak_windows:
+    if not window_row.absorbs_weak_windows:
         return
     if threshold_row.audits_by_escalating:
         raise ValueError(

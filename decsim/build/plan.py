@@ -291,19 +291,25 @@ def _restart_reread_buffer_regions(
     Only a strong window that absorbs the weak windows restarts any, so
     a run with no switching carries the section's default unread.
     """
+    strong_window = _strong_window_settings(switching)
+    return strong_window.restart_reread_buffer_regions
+
+
+def _strong_window_settings(
+    switching: Optional[escalation_settings.SwitchingSettings],
+):
+    """The strong window's record; the default on a run with no switching."""
     if switching is None:
-        defaults = escalation_settings.SwitchingSettings
-        return defaults.restart_reread_buffer_regions
-    return switching.restart_reread_buffer_regions
+        return escalation_settings.SwitchingSettings.strong_window
+    return switching.strong_window
 
 
 def _strong_window(
     switching: Optional[escalation_settings.SwitchingSettings],
 ) -> str:
-    """The strong window's row name; the default on a run with no switching."""
-    if switching is None:
-        return escalation_settings.SwitchingSettings.strong_window
-    return switching.strong_window
+    """The strong window's row name, which a refusal prints."""
+    strong_window = _strong_window_settings(switching)
+    return strong_window.name
 
 
 def _scheme(windows: window_settings.WindowSettings, is_switching: bool):
@@ -420,8 +426,7 @@ def _boundaries_name(
         return windows.boundaries
     if switching is None:
         return "eager"
-    shape = escalation_build.strong_window_row(switching)
-    return shape.default_boundary_policy
+    return switching.strong_window.default_boundary_policy
 
 
 def _idle_policy(settings: controller_settings.IdlePolicySettings):

@@ -485,6 +485,13 @@ class RecordingRedoWindow(strong_window_shapes.RedoWindow):
     entry, one yaml name, and nothing else changes.
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings(strong_window_shapes.RedoWindow.Settings):
+        """The redo window's record, building this row."""
+
+        def build(self, engine) -> "RecordingRedoWindow":
+            return RecordingRedoWindow(engine)
+
     def __init__(self, engine) -> None:
         self.engine = engine
         self.planned_windows = []
@@ -503,6 +510,8 @@ def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
     """The escalation section reads a row's facts off the port alone."""
     port_facts = strong_window_shapes.StrongWindowShape.__annotations__
     facts = dict.fromkeys(port_facts, False)
+    record = type("PortOnlySettings", (), facts)
+    facts["Settings"] = record
     row = type("PortOnlyShape", (), facts)
     table = escalation_settings.STRONG_WINDOW_SHAPES
     table["port_only"] = row
@@ -518,7 +527,7 @@ def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
         )
     finally:
         del table["port_only"]
-    assert settings.strong_window == "port_only"
+    assert isinstance(settings.strong_window, record)
 
 
 def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
@@ -559,6 +568,13 @@ class RecordingDoubleWindow(strong_window_shapes.DoubleWindow):
     rows take, although its layout reads the planner, the requester and
     the ledger that the redo window never touches.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings(strong_window_shapes.DoubleWindow.Settings):
+        """The double window's record, building this row."""
+
+        def build(self, engine) -> "RecordingDoubleWindow":
+            return RecordingDoubleWindow(engine)
 
     def __init__(self, engine) -> None:
         self.engine = engine

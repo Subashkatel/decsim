@@ -250,8 +250,9 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
         },
     )
     settings = point.settings
+    strong_window_settings = declared_run.strong_window_settings(strong_window)
     switching = dataclasses.replace(
-        settings.switching, strong_window=strong_window
+        settings.switching, strong_window=strong_window_settings
     )
     settings = dataclasses.replace(settings, switching=switching)
     machine = machine_module.Machine.build(settings, seed)

@@ -22,6 +22,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
@@ -279,7 +280,8 @@ def test_a_restart_read_holds_no_round_before_its_restart_start():
     """
     source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
     workload = _lookback_workload()
-    switching = declared_run.declared_switching(strong_window="double_window")
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    switching = declared_run.declared_switching(strong_window=double_window)
     weak_decoder_forms = event_settings.DetectionEventSettings(
         formed_at=("weak_decoder", "strong_decoder")
     )
@@ -449,8 +451,20 @@ class _OutsideShape:
     default_boundary_policy = "outside_boundaries"
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, collaborators) -> None:
-        del collaborators
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The outside row's record: its two facts and its build."""
+
+        name = "outside_shape"
+        absorbs_weak_windows = False
+        default_boundary_policy = "outside_boundaries"
+        restart_reread_buffer_regions = 1
+
+        def build(self, engine) -> "_OutsideShape":
+            return _OutsideShape(engine)
+
+    def __init__(self, engine) -> None:
+        del engine
 
     def plan(self, weak_job):
         """Never reached: the test builds the plan and runs nothing."""
@@ -462,10 +476,9 @@ def _outside_shape_switching():
     """A switching section whose strong window is the outside shape."""
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    outside_shape = _OutsideShape.Settings()
     return escalation_settings.SwitchingSettings(
-        confidence=confidence,
-        threshold=threshold,
-        strong_window="outside_shape",
+        confidence=confidence, threshold=threshold, strong_window=outside_shape
     )
 
 
@@ -477,9 +490,6 @@ def test_an_outside_strong_window_row_names_the_escalations_default(
         window_settings.BOUNDARY_POLICIES,
         "outside_boundaries",
         _OutsideBoundaryPolicy,
-    )
-    monkeypatch.setitem(
-        escalation_settings.STRONG_WINDOW_SHAPES, "outside_shape", _OutsideShape
     )
     switching = _outside_shape_switching()
 

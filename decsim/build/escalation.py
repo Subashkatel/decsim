@@ -65,8 +65,8 @@ class Switching:
         settings and the point's threshold: the decode's weight step,
         the threshold it grows to, the unit's cycle count; a row reads
         what it needs and ignores the rest. The policy expects the
-        signal's source. The shape is the row escalation.strong_window
-        names: the redo window, or the double window of Toshio Sec. III C.
+        signal's source. The shape is the strong window record's row: the
+        redo window, or the double window of Toshio Sec. III C.
         """
         threshold_nats = settings.threshold.threshold_nats
         signal = settings.confidence.build(
@@ -79,8 +79,7 @@ class Switching:
             run_both_at_once=settings.run_both_at_once,
         )
         regions = strong_regions.StrongRegions()
-        shape_row = strong_window_row(settings)
-        shape = shape_row(engine)
+        shape = settings.strong_window.build(engine)
         pending = pending_strong_windows.PendingStrongWindows()
         strong_redecode = strong_redecode_module.StrongRedecode(engine)
         return cls(
@@ -122,23 +121,13 @@ def build_switching(
     return Switching.build(settings, weak_decoder, engine)
 
 
-def strong_window_row(settings: escalation_settings.SwitchingSettings):
-    """The strong window shape class the switching slot names."""
-    return tables.row(
-        escalation_settings.STRONG_WINDOW_SHAPES,
-        "escalation.strong_window",
-        settings.strong_window,
-    )
-
-
 def absorbs_weak_windows(
     settings: Optional[escalation_settings.SwitchingSettings],
 ) -> bool:
     """Whether the strong window replaces the weak windows it covers."""
     if settings is None:
         return False
-    row = strong_window_row(settings)
-    return row.absorbs_weak_windows
+    return settings.strong_window.absorbs_weak_windows
 
 
 def build_burst_detector(

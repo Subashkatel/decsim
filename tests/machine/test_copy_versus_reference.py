@@ -26,6 +26,7 @@ import decsim.build.decoders as decoder_build
 import decsim.confidence.cluster as cluster
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.union_find.decoder as union_find
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
@@ -177,7 +178,8 @@ def _seated_machine(
     windows = dataclasses.replace(settings.windows, kind=windows_kind)
     switching = settings.switching
     if switching is not None:
-        switching = dataclasses.replace(switching, strong_window=strong_window)
+        named = declared_run.strong_window_settings(strong_window)
+        switching = dataclasses.replace(switching, strong_window=named)
     settings = dataclasses.replace(
         settings,
         detection_events=detection_events,
@@ -324,8 +326,9 @@ def _double_window_switching_at_the_decoder():
     )
     settings = point.settings
     detection_events = _formed_at(settings, "decoder")
+    double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = dataclasses.replace(
-        settings.switching, strong_window="double_window"
+        settings.switching, strong_window=double_window
     )
     settings = dataclasses.replace(
         settings, detection_events=detection_events, switching=switching

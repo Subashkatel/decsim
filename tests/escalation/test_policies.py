@@ -25,6 +25,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
@@ -367,10 +368,11 @@ def _double_window_settings(
     )
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=1.0)
+    double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence,
         threshold=threshold,
-        strong_window="double_window",
+        strong_window=double_window,
     )
     return machine_settings.MachineSettings(
         windows=windows,
@@ -420,10 +422,11 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
     online_settings = threshold_sources.OnlineThreshold.Settings(
         threshold_nats=2.0
     )
+    double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = declared_run.declared_switching(
         threshold=online_settings,
         online_threshold=online,
-        strong_window="double_window",
+        strong_window=double_window,
     )
     with pytest.raises(
         ValueError, match="online threshold calibration is serial-only"

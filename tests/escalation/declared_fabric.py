@@ -14,7 +14,6 @@ import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -120,9 +119,8 @@ def switching_machine(
         algorithm=strong, engine=declared_run.DECLARED_ENGINE
     )
     boundary_policy = boundary_policies.Held()
-    # a name off the table stays, so the settings refuse it by name
-    row = escalation_settings.STRONG_WINDOW_SHAPES.get(strong_window)
-    if row is not None and row.absorbs_weak_windows:
+    strong_window_settings = declared_run.strong_window_settings(strong_window)
+    if strong_window_settings.absorbs_weak_windows:
         boundary_policy = None
     operation = program_records.Operation(
         id=1, name="mem1", qubits=(1,), patches=(1,)
@@ -147,7 +145,8 @@ def switching_machine(
     )
     if switching is None:
         switching = declared_run.declared_switching(
-            run_both_at_once=run_both_at_once, strong_window=strong_window
+            run_both_at_once=run_both_at_once,
+            strong_window=strong_window_settings,
         )
     links = declared_profile(escalation_microseconds)
     readout_cycles = declared_cycles("readout_to_bits")

@@ -63,7 +63,9 @@ workload = workload_settings.WorkloadSettings(
 engine = decoder_settings.EngineSettings(clock=config.Clock(1000))
 settings = machine_settings.MachineSettings(
     workload=workload,
-    qpu=qpu_settings.QpuSettings(distance=3, device=stim_device.StimDevice()),
+    qpu=qpu_settings.QpuSettings(
+        distance=3, source=stim_device.StimDevice.Settings()
+    ),
     weak_decoder=decoder_settings.DecoderSettings(kind=1.0, engine=engine),
     links=link_profiles.logical_reference_profile(),
 )

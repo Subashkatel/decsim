@@ -19,6 +19,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 
 
 @pytest.mark.parametrize("source_round_limit", [None, 11])
@@ -85,9 +86,19 @@ def _plan(device: "_PhysicalDevice", round_count: int) -> plan_build.Plan:
         dynamic_streams=(stream,),
         rounds_policy=rounds_policy,
     )
-    qpu = qpu_settings.QpuSettings(distance=3, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=3, source=source)
     settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)
-    return plan_build.build_plan(settings, None)
+    return plan_build.build_plan(
+        settings.qpu,
+        settings.workload,
+        settings.windows,
+        settings.idle_policy,
+        settings.detection_events,
+        settings.switching,
+        settings.decoder_manager.bulk_strong,
+        None,
+    )
 
 
 class _PhysicalDevice:

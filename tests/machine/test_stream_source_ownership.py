@@ -31,6 +31,7 @@ import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -257,10 +258,12 @@ def _machine(
     workload: workload_settings.WorkloadSettings,
     feedback_microseconds: float,
 ) -> machine_module.Machine:
+    source_record = declared_run.GivenSource(source)
+    models_record = declared_run.GivenSource(models)
     qpu = qpu_settings.QpuSettings(
         distance=3,
-        device=source,
-        error_model_provider=models,
+        source=source_record,
+        error_model_provider=models_record,
         round_period_microseconds=1.1,
     )
     clock = config.Clock(1000)

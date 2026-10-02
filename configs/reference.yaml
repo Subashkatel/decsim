@@ -40,7 +40,8 @@ qpu:
                                    # recorded_stim replays a released
                                    # experiment's measurements, which no
                                    # yaml key carries: build it in Python
-                                   # (QpuSettings(device=...)); a yaml
+                                   # from a source record of your own
+                                   # (QpuSettings(source=...)); a yaml
                                    # naming it stops at its build.
                                    # burst_stim is stim_device drawing each
                                    # shot from the circuit plus one error

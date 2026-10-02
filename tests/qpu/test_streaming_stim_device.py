@@ -27,6 +27,7 @@ import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -365,9 +366,10 @@ def _protected_machine(
         program = memory_programs.memory_program()
     source = streaming_stim_device.StreamingStimDevice(programs={100: program})
     workload = _protected_workload()
+    source_record = declared_run.GivenSource(source)
     qpu = qpu_settings.QpuSettings(
         distance=3,
-        device=source,
+        source=source_record,
         round_period_microseconds=period_microseconds,
     )
     clock = config.Clock(1000)

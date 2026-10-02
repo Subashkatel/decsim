@@ -76,11 +76,12 @@ def planning_view(qubits=(3, 5)):
     return program_records.OperationPlanningView.from_operation(operation)
 
 
-def settings_with(layout=None, code=None):
-    """One timing-only operation on the layout or the card given."""
+def settings_with(layout):
+    """One timing-only operation on the layout given."""
     operation = one_operation()
     workload = workload_settings.WorkloadSettings(operations=[operation])
-    qpu = qpu_settings.QpuSettings(code=code, layout=layout)
+    layout_record = declared_run.GivenLayout(layout)
+    qpu = qpu_settings.QpuSettings(layout=layout_record)
     decoder = decoders.PresetLatencyDecoder.Settings(1.0)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
@@ -150,14 +151,6 @@ def test_a_layout_written_outside_decsim_hears_every_hook_of_a_run():
     assert calls_by_name["resources_for"] == [view]
     assert calls_by_name["code_for_patch"] == [11]
     assert calls_by_name["patch_spatial_nodes_for"] == [11]
-
-
-def test_a_card_and_a_layout_together_are_refused_as_two_code_sources():
-    card = code_geometry.SurfaceCodeModel(distance=3)
-    layout = layouts.UniformLayout(card)
-    settings = settings_with(layout=layout, code=card)
-    with pytest.raises(ValueError, match="multiple code sources"):
-        machine_module.Machine.build(settings)
 
 
 def test_a_layout_that_declares_no_code_is_refused():

@@ -1,20 +1,24 @@
-"""The baseline's plot script against a small stats.csv of sinter rows."""
+"""The baseline's plot script against stats.csv files of sinter rows."""
 
 import importlib.util
 import itertools
 import pathlib
 import shutil
 
-import pytest
 import sinter
-
-pytest.importorskip("relay_bp")
-pytest.importorskip("tesseract_decoder")
 
 _THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
 REPOSITORY_ROOT = _TEST_FILE.parents[3]
 SCRIPT_FOLDER = REPOSITORY_ROOT / "experiments" / "decoder_baseline"
+# its run.py imports a runner since removed, so only its data can draw it
+COMMITTED_FOLDER = REPOSITORY_ROOT / "results" / "2026-09-27_decoder_baseline"
+DECODERS = (
+    "union-find",
+    "pymatching",
+    "xyz-relay-bp-5",
+    "tesseract-short-beam",
+)
 EXPECTED_PLOTS = {
     "union-find.png",
     "pymatching.png",
@@ -27,8 +31,6 @@ EXPECTED_PLOTS = {
 
 def test_every_decoder_and_basis_gets_its_figure(tmp_path):
     plot = script_module()
-    recipe_path = SCRIPT_FOLDER / "run.py"
-    shutil.copy(recipe_path, tmp_path)
     write_stats(tmp_path)
 
     plot.main(tmp_path)
@@ -37,30 +39,46 @@ def test_every_decoder_and_basis_gets_its_figure(tmp_path):
     assert written == EXPECTED_PLOTS
 
 
-def test_a_recipe_is_evaluated_as_the_script_it_is(tmp_path):
-    """Its grid may be any expression, and a name may take two at once."""
+def test_the_committed_baseline_is_drawn_from_its_stats_alone(tmp_path):
     plot = script_module()
-    recipe_path = SCRIPT_FOLDER / "run.py"
-    recipe_text = recipe_path.read_text()
-    written_grid = "DISTANCES = [5, 7, 9, 11, 13, 15]\n"
-    computed_grid = "DISTANCES = SAME_DISTANCES = list(range(5, 16, 2))\n"
-    assert written_grid in recipe_text
-    computed_text = recipe_text.replace(written_grid, computed_grid)
-    computed_path = tmp_path / "run.py"
-    computed_path.write_text(computed_text)
+    committed_stats = COMMITTED_FOLDER / "stats.csv"
+    shutil.copy(committed_stats, tmp_path)
 
-    recipe = plot.recipe_of(tmp_path)
+    plot.main(tmp_path)
 
-    assert recipe.DISTANCES == [5, 7, 9, 11, 13, 15]
-    assert recipe.SAME_DISTANCES is recipe.DISTANCES
+    written = {path.name for path in (tmp_path / "plots").iterdir()}
+    assert written == EXPECTED_PLOTS
+
+
+def test_the_committed_baselines_grid_is_read_back_sorted():
+    """stats.csv lists the distances out of order; the figures do not."""
+    plot = script_module()
+    committed_stats = COMMITTED_FOLDER / "stats.csv"
+    stats = sinter.read_stats_from_csv_files(committed_stats)
+
+    distances = plot.labels(stats, "d")
+    rates = plot.labels(stats, "p")
+
+    assert distances == [5, 7, 9, 11, 13, 15]
+    assert rates == [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
+
+
+def test_the_decoders_keep_run_pys_order():
+    """stats.csv lists Relay-BP last, as it was rerun after the others."""
+    plot = script_module()
+    committed_stats = COMMITTED_FOLDER / "stats.csv"
+    stats = sinter.read_stats_from_csv_files(committed_stats)
+
+    decoders = plot.decoders_in_order(stats)
+
+    assert decoders == list(DECODERS)
 
 
 def write_stats(folder: pathlib.Path) -> None:
     """Two rates of one distance for each decoder and basis."""
     lines = [sinter.CSV_HEADER]
-    decoders = ("union-find", "pymatching", "xyz-relay-bp-5")
     rates = ((0.003, 20), (0.005, 60))
-    points = itertools.product(decoders, ("x", "z"), rates)
+    points = itertools.product(DECODERS, ("x", "z"), rates)
     for decoder, basis, (rate, errors) in points:
         metadata = {"basis": basis, "d": 5, "p": rate}
         point = sinter.TaskStats(

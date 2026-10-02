@@ -25,6 +25,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
 import decsim.qpu.settings as qpu_settings
+import decsim.tables as tables
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -34,8 +35,8 @@ PORTS_PATH = DECSIM_ROOT / "ports.py"
 # STYLE.md rule 7: a shared module beside ports in the package order, so
 # its two Protocols cannot move into ports without a cycle of levels
 SHARED_PROTOCOL_MODULE = "seeding"
-# The tables whose section reads a row's own keys (decsim/tables.py
-# row_settings), so whose rows may declare a Settings.
+# The tables whose section reads a row's own keys, so whose rows with
+# keys declare a Settings that reads them (decsim/ports.py RowSettings).
 TABLES_WITH_ROW_KEYS = (
     workload_settings.WORKLOADS,
     qpu_settings.SYNDROME_SOURCES,
@@ -245,10 +246,25 @@ def test_the_code_card_port_declares_what_the_tree_calls_on_a_card():
 
 
 @pytest.mark.parametrize("kind", sorted(qpu_settings.CODE_CARDS))
-def test_every_code_card_row_is_a_code_model(kind):
+def test_every_code_card_rows_settings_builds_a_code_model(kind):
+    """A distance of None and no window sizes are the card's own."""
     row = qpu_settings.CODE_CARDS[kind]
-    card = row()
+    settings = row.Settings()
+    parameters = settings.__dataclass_params__
+    assert parameters.frozen
+    card = settings.build(None, None, None)
+    assert isinstance(card, row)
     assert isinstance(card, ports.CodeModel)
+
+
+@pytest.mark.parametrize("kind", sorted(qpu_settings.SYNDROME_SOURCES))
+def test_every_source_rows_settings_is_a_frozen_record_of_its_name(kind):
+    """The record the yaml's qpu.kind picks names its row by that word."""
+    row = qpu_settings.SYNDROME_SOURCES[kind]
+    settings = row.Settings()
+    parameters = settings.__dataclass_params__
+    assert parameters.frozen
+    assert settings.name == kind
 
 
 @pytest.mark.parametrize("kind", sorted(workload_settings.WORKLOADS))
@@ -269,16 +285,16 @@ def test_every_decoder_rows_settings_builds_the_row(kind):
 
 
 def _declared_row_settings() -> list:
-    """Every shipped row's nested Settings, across the tables that read one."""
+    """Every shipped row's nested Settings with keys, across those tables."""
     rows = []
     for table in TABLES_WITH_ROW_KEYS:
         table_rows = table.values()
         rows.extend(table_rows)
     declared = []
     for row in rows:
-        settings_class = getattr(row, "Settings", None)
-        if settings_class is not None:
-            declared.append(settings_class)
+        keys = tables.row_keys(row)
+        if keys:
+            declared.append(row.Settings)
     return declared
 
 

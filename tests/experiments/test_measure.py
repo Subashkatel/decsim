@@ -702,7 +702,8 @@ def test_the_window_sizes_and_period_are_the_card_the_qpu_ran(tmp_path):
         commit_rounds_override=2,
         buffer_rounds_override=1,
     )
-    qpu = dataclasses.replace(task.settings.qpu, distance=None, code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = dataclasses.replace(task.settings.qpu, code_card=card_record)
     settings = dataclasses.replace(task.settings, qpu=qpu)
     carded = collect.Task(settings, {})
     shot = collect.run_shot(carded, 0)
@@ -1438,8 +1439,9 @@ def seam_streams_settings(
         rounds_policy=rounds_policy,
     )
     device = stim_device.StimDevice()
+    source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(
-        distance=3, device=device, round_period_microseconds=1.0
+        distance=3, source=source, round_period_microseconds=1.0
     )
     engine_clock = config_module.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=engine_clock)

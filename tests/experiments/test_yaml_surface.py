@@ -646,6 +646,10 @@ class _SplitBits(syndrome_devices.SyndromeBitDevice):
         def from_yaml(cls, section):
             return cls(**section)
 
+        def build(self, code, circuit_arguments):
+            del circuit_arguments
+            return _SplitBits(code, self)
+
     def __init__(self, code, settings) -> None:
         syndrome_devices.SyndromeBitDevice.__init__(
             self, code, one_payload_per_patch=settings.one_payload_per_patch

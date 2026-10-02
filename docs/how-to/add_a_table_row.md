@@ -94,8 +94,8 @@ study most often extends:
 | --- | --- | --- |
 | `DECODERS` | `settings.build()`, where `settings` is the tier's `algorithm`, the row's `Settings` record | `decsim/build/decoders.py`, `build_decoder_unit` |
 | `WINDOWING_SCHEMES` | `row.Settings(...).build(terminal_policy)`; the row's `Settings` holds `commit_rounds` and `buffer_rounds` and any key of its own | `decsim/build/plan.py`, `_scheme` |
-| `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
-| `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
+| `SYNDROME_SOURCES` | `qpu.source.build(code, circuit_arguments)`, where `qpu.source` is the row's `Settings` record and `circuit_arguments` are the workload's circuits as the constructor's keywords | `decsim/build/plan.py`, `build_plan` |
+| `CODE_CARDS` (the `CodeModel` port) | `qpu.code_card.build(distance, commit_rounds_override, buffer_rounds_override)`, where `qpu.code_card` is the row's `Settings` record, `distance` is the qpu's (None for the card's own) and the overrides are the windows section's sizes | `decsim/qpu/settings.py`, `QpuSettings.build_code` |
 | `WORKLOADS` | not built (the `WorkloadRow` port): the workload section calls `row.workload(settings.row_settings)` once per sweep point for the records.workload `Workload` it lowers | `decsim/frontends/settings.py`, `WorkloadSettings.made` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/readout.py`, `_store` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |

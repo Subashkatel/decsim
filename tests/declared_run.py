@@ -264,6 +264,39 @@ def declared_qpu(round_microseconds=ROUND_MICROSECONDS):
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class GivenSource:
+    """A source record whose build returns the source the test made."""
+
+    source: object
+
+    def build(self, code, circuit_arguments):
+        del code, circuit_arguments
+        return self.source
+
+
+@dataclasses.dataclass(frozen=True)
+class GivenCard:
+    """A code card record whose build returns the card the test made."""
+
+    card: object
+
+    def build(self, distance, commit_rounds_override, buffer_rounds_override):
+        del distance, commit_rounds_override, buffer_rounds_override
+        return self.card
+
+
+@dataclasses.dataclass(frozen=True)
+class GivenLayout:
+    """A layout record whose build returns the layout the test made."""
+
+    layout: object
+
+    def build(self, code):
+        del code
+        return self.layout
+
+
 def declared_frame():
     """The frame's declared write cost."""
     write_cycles = declared_cycles("frame")

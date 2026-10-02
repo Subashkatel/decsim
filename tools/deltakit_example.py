@@ -26,6 +26,7 @@ import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
 import decsim.producers as producers
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
@@ -73,8 +74,12 @@ def main() -> None:
         decoder_microseconds=arguments.decoder_microseconds,
     )
     if arguments.family == "repetition":
-        code = RepetitionMemory(arguments.distance, arguments.rounds)
-        qpu = dataclasses.replace(settings.qpu, distance=None, code=code)
+        code_card = RepetitionMemory.Settings(
+            arguments.distance, arguments.rounds
+        )
+        qpu = dataclasses.replace(
+            settings.qpu, distance=None, code_card=code_card
+        )
         settings = dataclasses.replace(settings, qpu=qpu)
     machine = machine_module.Machine.build(settings, arguments.seed)
     prepared = time.perf_counter()
@@ -177,8 +182,8 @@ def supplied_settings(
 ) -> machine_settings.MachineSettings:
     """The machine a yaml names stim_device and a finite circuit with.
 
-    The source is built from the workload's circuit and round map
-    (decsim/build/plan.py _syndrome_source), whatever made them.
+    The Stim source is built from the workload's circuit and round map,
+    whatever made them.
     """
     physical = workload.physical
     if physical.circuit.num_observables != 1:
@@ -191,7 +196,7 @@ def supplied_settings(
     section = workload_settings.WorkloadSettings()
     lowered = section.running(workload)
     qpu = qpu_settings.QpuSettings(
-        kind="stim_device",
+        source=stim_device.StimDevice.Settings(),
         distance=distance,
         round_period_microseconds=period_microseconds,
     )
@@ -227,6 +232,23 @@ class RepetitionMemory:
 
     This example chooses a single finite decode window.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The card's own distance and round count."""
+
+        distance: int
+        round_count: int
+
+        def build(
+            self,
+            distance: Optional[int],
+            commit_rounds_override: Optional[int],
+            buffer_rounds_override: Optional[int],
+        ) -> "RepetitionMemory":
+            """The whole-shot card; the qpu sets no distance or window size."""
+            del distance, commit_rounds_override, buffer_rounds_override
+            return RepetitionMemory(self.distance, self.round_count)
 
     distance: int
     round_count: int

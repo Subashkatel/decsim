@@ -696,7 +696,16 @@ def _plan(settings) -> plan_build.Plan:
     switching = escalation_build.build_switching(
         settings.switching, settings.weak_decoder, engine
     )
-    return plan_build.build_plan(settings, switching)
+    return plan_build.build_plan(
+        settings.qpu,
+        settings.workload,
+        settings.windows,
+        settings.idle_policy,
+        settings.detection_events,
+        settings.switching,
+        settings.decoder_manager.bulk_strong,
+        switching,
+    )
 
 
 def _built_values(plan: plan_build.Plan) -> dict:

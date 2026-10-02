@@ -24,6 +24,7 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
@@ -100,7 +101,16 @@ def _plan(
     switching_part = escalation_build.build_switching(
         settings.switching, settings.weak_decoder, engine
     )
-    return plan_build.build_plan(settings, switching_part)
+    return plan_build.build_plan(
+        settings.qpu,
+        settings.workload,
+        settings.windows,
+        settings.idle_policy,
+        settings.detection_events,
+        settings.switching,
+        settings.decoder_manager.bulk_strong,
+        switching_part,
+    )
 
 
 def _with_switching(settings, switching):
@@ -126,7 +136,8 @@ def _switching(**changes):
 
 def test_bulk_strong_is_refused_when_the_rounds_carry_bits():
     """A merged strong decode carries timing alone; bits would be dropped."""
-    bits = qpu_settings.QpuSettings(kind="syndrome_bits", distance=3)
+    bits_source = syndrome_devices.SyndromeBitDevice.Settings()
+    bits = qpu_settings.QpuSettings(source=bits_source, distance=3)
     switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
@@ -143,7 +154,8 @@ def test_bulk_strong_is_refused_where_no_strong_pool_merges():
 
 def test_bulk_strong_is_built_beside_an_explicitly_empty_model_source():
     empty_models = syndrome_devices.NO_WINDOW_MODELS
-    timing = qpu_settings.QpuSettings(error_model_provider=empty_models)
+    models_record = declared_run.GivenSource(empty_models)
+    timing = qpu_settings.QpuSettings(error_model_provider=models_record)
     switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
@@ -162,16 +174,18 @@ def test_bulk_strong_is_built_when_the_rounds_carry_timing_alone():
 
 
 def test_a_row_shaped_by_the_code_card_is_built_with_the_runs_card():
-    """A yaml names the kind alone, so the build supplies the card."""
-    named_by_kind = qpu_settings.QpuSettings(kind="syndrome_bits", distance=5)
+    """The source record names no card, so the build supplies the run's."""
+    bits_source = syndrome_devices.SyndromeBitDevice.Settings()
+    bits = qpu_settings.QpuSettings(source=bits_source, distance=5)
 
-    plan = _plan(qpu=named_by_kind)
+    plan = _plan(qpu=bits)
 
     assert plan.device.code is plan.code
 
 
 def test_a_stim_source_is_its_own_window_model_source():
-    stim_source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    stim_record = stim_device.StimDevice.Settings()
+    stim_source = qpu_settings.QpuSettings(source=stim_record, distance=3)
 
     plan = _plan(qpu=stim_source)
 
@@ -198,31 +212,37 @@ def _live_fragments_workload():
     return section.running(workload)
 
 
+RECORDED_SOURCE = stim_device.RecordedStimDevice.Settings()
+STREAMING_SOURCE = streaming_stim_device.StreamingStimDevice.Settings()
+
+
 @pytest.mark.parametrize(
-    "kind, sentence",
+    "record, sentence",
     [
-        ("recorded_stim", "required positional arguments: 'measurements'"),
-        ("streaming_stim", "required positional argument: 'programs'"),
+        (RECORDED_SOURCE, "required positional arguments: 'measurements'"),
+        (STREAMING_SOURCE, "required positional argument: 'programs'"),
     ],
 )
-def test_a_source_the_workload_cannot_fill_stops_its_call(kind, sentence):
+def test_a_source_the_workload_cannot_fill_stops_its_call(record, sentence):
     """Python's own call names the argument the source is not given."""
-    source = qpu_settings.QpuSettings(kind=kind, distance=3)
+    source = qpu_settings.QpuSettings(source=record, distance=3)
 
     with pytest.raises(TypeError, match=sentence):
         _plan(qpu=source)
 
 
 def test_live_fragments_under_a_finite_circuit_source_stop_its_call():
-    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    stim_record = stim_device.StimDevice.Settings()
+    source = qpu_settings.QpuSettings(source=stim_record, distance=3)
     workload = _live_fragments_workload()
 
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         _plan(qpu=source, workload=workload)
 
 
-def test_live_fragments_build_the_streaming_source_from_a_yaml_kind():
-    source = qpu_settings.QpuSettings(kind="streaming_stim", distance=3)
+def test_live_fragments_build_the_streaming_source_from_its_record():
+    streaming_record = streaming_stim_device.StreamingStimDevice.Settings()
+    source = qpu_settings.QpuSettings(source=streaming_record, distance=3)
     workload = _live_fragments_workload()
 
     plan = _plan(qpu=source, workload=workload)
@@ -259,7 +279,8 @@ STRONG_SIDE_FORMS = event_settings.DetectionEventSettings(
 
 def test_a_forming_strong_read_holds_what_its_circuit_reads_before_it():
     """The second window commits from round 4, whose detector reads 2."""
-    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    stim_record = stim_device.StimDevice.Settings()
+    source = qpu_settings.QpuSettings(source=stim_record, distance=3)
     workload = _lookback_workload()
 
     plan = _plan(
@@ -274,7 +295,8 @@ def test_a_forming_strong_read_holds_what_its_circuit_reads_before_it():
 
 
 def test_a_source_with_no_recipes_holds_nothing_before_a_read():
-    source = qpu_settings.QpuSettings(kind="syndrome_bits", distance=3)
+    bits_record = syndrome_devices.SyndromeBitDevice.Settings()
+    source = qpu_settings.QpuSettings(source=bits_record, distance=3)
     workload = _lookback_workload()
 
     plan = _plan(
@@ -295,7 +317,8 @@ def test_a_restart_read_holds_no_round_before_its_restart_start():
     request keeps its rounds until the restart window commits, so the
     restart read holds none before round 7.
     """
-    source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
+    stim_record = stim_device.StimDevice.Settings()
+    source = qpu_settings.QpuSettings(source=stim_record, distance=3)
     workload = _lookback_workload()
     double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = declared_run.declared_switching(strong_window=double_window)

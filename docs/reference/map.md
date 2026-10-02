@@ -303,17 +303,7 @@ docstring.
 - `decsim/sinter_adapters/relay_bp.py`: decsim's Relay-BP as a sinter decoder, built from the point's circuit.
 - `decsim/sinter_adapters/union_find.py`: decsim's Union-Find as a sinter decoder.
 
-## Level 5: producers, settings
-
-### producers
-
-- `decsim/producers.py`: The workload makers decsim ships: Stim's and Deltakit's memories.
-
-### settings
-
-- `decsim/settings.py`: The whole machine's settings: one record per yaml section.
-
-## Level 6: build
+## Level 5: build, producers, settings
 
 ### build
 
@@ -327,19 +317,27 @@ docstring.
 - `decsim/build/readout.py`: The readout part: the path a round takes from the controller to the stores.
 - `decsim/build/windows.py`: The windows part: which windows exist, when each is decoded, where it goes.
 
-## Level 7: machine
+### producers
+
+- `decsim/producers.py`: The workload makers decsim ships: Stim's and Deltakit's memories.
+
+### settings
+
+- `decsim/settings.py`: The whole machine's settings: one record per yaml section.
+
+## Level 6: machine
 
 ### machine
 
 - `decsim/machine.py`: The machine: the parts of one run, built from its settings and connected.
 
-## Level 8: collect
+## Level 7: collect
 
 ### collect
 
 - `decsim/collect.py`: The experiments layer: tasks, and the shots collected from them.
 
-## Level 9: experiments
+## Level 8: experiments
 
 ### experiments
 
@@ -363,7 +361,7 @@ docstring.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
-## Level 10: __main__, results
+## Level 9: __main__, results
 
 ### __main__
 

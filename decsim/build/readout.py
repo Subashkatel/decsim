@@ -5,8 +5,8 @@ into one packed round, the sender writes the round into every store that
 must hold it, and each store's outgoing end hands the rounds on to the
 decoder that reads them. A store exists only when a decoder reads it: a
 run whose plan's windows the strong tier decodes has no weak syndrome
-buffer, and a run that never reads the room side no strong one, and
-neither has ends for its missing store.
+buffer, a run that never reads the room side no strong one, and a run
+with no decoder neither; no run has ends for a missing store.
 """
 
 import dataclasses
@@ -60,9 +60,10 @@ class Readout:
 
     The three weak fields are None on a run whose plan's windows the
     strong tier decodes, and the three strong fields on a run that never
-    reads the room side. primary_output is one of the two outgoing ends:
-    the weak one when the weak store exists, since the tier that decodes
-    the plan's windows reads it, and the strong one otherwise.
+    reads the room side; all six on a run with no decoder. primary_output
+    is one of the two outgoing ends: the weak one when the weak store
+    exists, since the tier that decodes the plan's windows reads it, and
+    the strong one otherwise, None when neither exists.
     """
 
     controller: controller_module.Controller
@@ -85,7 +86,7 @@ class Readout:
     strong_syndrome_round_receiver: Optional[
         strong_receiver_module.StrongSyndromeRoundReceiver
     ]
-    primary_output: round_output.SyndromeBufferOutput
+    primary_output: Optional[round_output.SyndromeBufferOutput]
 
     @classmethod
     def build(
@@ -249,11 +250,13 @@ class Readout:
 
         Every read, the escalation's included, holds its rounds there
         until they have landed and formed, so a round that leaves it is
-        formed nowhere after.
+        formed nowhere after. A run with no decoder has no such store.
         """
         primary_store = self.weak_syndrome_buffer
         if self.primary_output is self.strong_output:
             primary_store = self.strong_syndrome_buffer
+        if primary_store is None:
+            return
         primary_store.detection_events = self.detection_events
 
 

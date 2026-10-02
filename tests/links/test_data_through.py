@@ -232,7 +232,8 @@ def machine_settings(shape: str, distance: int):
         operations=(operation,), rounds_policy=rounds_policy
     )
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=distance, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=distance, source=source)
     links = link_profiles.logical_reference_profile()
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
@@ -604,7 +605,8 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
         operations=(first, second), rounds_policy=rounds_policy
     )
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=distance, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=distance, source=source)
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching,

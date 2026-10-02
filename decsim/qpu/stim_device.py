@@ -26,6 +26,7 @@ import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
+import decsim.ports as ports
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -64,9 +65,25 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     decode reads.
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The Stim source has no keys: the circuit states every width."""
+
+        # the word the yaml and the reports name this row by
+        name = "stim_device"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "StimDevice":
+            """A fresh source over the workload's circuits.
+
+            circuit_arguments are the workload's circuits as this
+            constructor's keywords (build/plan.py _circuit_arguments).
+            """
+            del code
+            return StimDevice(**circuit_arguments)
+
     operation_circuit_scope = "per_operation"
-    # the circuit states every round's width
-    takes_code_card = False
     emits_bit_values = True
 
     def __init__(
@@ -510,6 +527,25 @@ class RecordedStimDevice(StimDevice):
     exactly as for sampled data.
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The replay row: the measurements are an array no record holds.
+
+        Its build stops on the constructor's missing measurements, so a
+        replay runs from a record of the caller's own whose build hands
+        the source its array.
+        """
+
+        # the word the yaml and the reports name this row by
+        name = "recorded_stim"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "RecordedStimDevice":
+            """The constructor, called with the workload's circuits alone."""
+            del code
+            return RecordedStimDevice(**circuit_arguments)
+
     def __init__(
         self,
         measurements: numpy.ndarray,
@@ -604,6 +640,8 @@ class BurstStimDevice(StimDevice):
         burst_center: Optional[tuple] = None
         burst_error_probability: float = 0.0
         burst_channels: tuple = BURST_CHANNELS
+        # the word the yaml and the reports name this row by
+        name = "burst_stim"
 
         def __post_init__(self) -> None:
             _check_onset_round(self.burst_onset_round)
@@ -626,6 +664,13 @@ class BurstStimDevice(StimDevice):
                 if isinstance(value, list):
                     values[key] = tuple(value)
             return cls(**values)
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "BurstStimDevice":
+            """A fresh source drawing this burst over the workload circuits."""
+            del code
+            return BurstStimDevice(self, **circuit_arguments)
 
     def __init__(
         self,

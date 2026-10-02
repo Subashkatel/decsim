@@ -1424,17 +1424,13 @@ class SyndromeSource(Protocol):
     A live source waits for final readout; a source that draws nothing
     carries the silent source, so a listener connects to every row by name.
 
-    takes_code_card says whether the row shapes its payloads by the
-    run's code card: such a row is built with the card, so its rounds
-    state the code's syndrome width, and a row that reads its widths
-    off a circuit is built without it. emits_bit_values says whether a
-    round's payloads carry measured values, or their sizes alone.
+    emits_bit_values says whether a round's payloads carry measured
+    values, or their sizes alone.
     """
 
     # none means this consumer does not need Operation.circuit; it does not
     # require removal when an independent model provider needs the circuit.
     operation_circuit_scope: str
-    takes_code_card: bool
     emits_bit_values: bool
     shot_sampled: Any
 
@@ -1538,7 +1534,7 @@ class SyndromeSource(Protocol):
 
         A source with a circuit answers itself, since its circuit is the
         model; a source without one answers a component that builds no
-        model. The plan wires this unless Python names another provider
+        model. The plan wires this unless the qpu names another provider
         (qpu.error_model_provider), as sinter derives a task's model from
         its circuit only when none is given (sinter/_data/_task.py lines
         71 and 87-89): the sampler is never asked to be the model.

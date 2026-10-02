@@ -9,12 +9,14 @@ system before it wires a single port.
 import copy
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import stim
 
 import decsim.build.escalation as escalation_build
+import decsim.controller.policies as idle_policies
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
@@ -25,8 +27,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
-import decsim.settings as machine_settings
-import decsim.tables as tables
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 
@@ -69,7 +69,15 @@ class Plan:
 
 
 def build_plan(
-    settings: machine_settings.MachineSettings,
+    qpu: qpu_settings.QpuSettings,
+    workload: workload_settings.WorkloadSettings,
+    windows: window_settings.WindowSettings,
+    idle_policy_settings: Union[
+        idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings
+    ],
+    detection_events: detection_event_settings.DetectionEventSettings,
+    switching_settings: Optional[escalation_settings.SwitchingSettings],
+    is_bulk_strong: bool,
     switching: Optional[escalation_build.Switching],
 ) -> Plan:
     """The code, the workload's operations and the window plan.
@@ -77,15 +85,16 @@ def build_plan(
     Keep the root's run-shape and plan records together so their shared
     inputs remain visible; named helpers resolve individual collaborators.
     A switching run's policy refuses a run shape it cannot serve.
+    is_bulk_strong is the decoder manager's bulk_strong.
     """
-    is_switching = settings.switching is not None
-    window_sizes = settings.windows.scheme
-    code, layout = settings.qpu.build_code(
+    is_switching = switching_settings is not None
+    window_sizes = windows.scheme
+    code, layout = qpu.build_code(
         commit_rounds_override=window_sizes.commit_rounds,
         buffer_rounds_override=window_sizes.buffer_rounds,
     )
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
-        settings.workload
+        workload
     )
     external_decode_operations = decode_operations + dynamic_streams
     every_operation = operations + external_decode_operations
@@ -99,18 +108,23 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
-    scheme = _scheme(settings.windows)
-    boundary_policy = _boundary_policy(settings.windows)
+    scheme = _scheme(windows)
+    boundary_policy = _boundary_policy(windows)
     absorbs_weak_windows = escalation_build.absorbs_weak_windows(
-        settings.switching
+        switching_settings
     )
-    reread_regions = _restart_reread_buffer_regions(settings.switching)
-    window_interaction = _window_interaction(settings.windows, reread_regions)
+    # the refusals print the strong window's row name, and only a window
+    # that absorbs the weak windows restarts any, so a run with no
+    # switching carries the default record's width unread
+    strong_window = _strong_window_settings(switching_settings)
+    strong_window_name = strong_window.name
+    reread_regions = strong_window.restart_reread_buffer_regions
+    window_interaction = _window_interaction(windows, reread_regions)
     if dynamic_streams and not scheme.supports_dynamic_streams:
         raise ValueError(
             "dynamic streams require a windowing scheme that supports them"
         )
-    has_static_decode_plan = settings.workload.decode_operations is not None
+    has_static_decode_plan = workload.decode_operations is not None
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     run_shape = decoding_records.RunShape(
@@ -119,9 +133,9 @@ def build_plan(
         operations=views,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        strong_window=_strong_window(settings.switching),
+        strong_window=strong_window_name,
         is_absorbing_strong_window=absorbs_weak_windows,
-        is_bulk_strong=settings.decoder_manager.bulk_strong,
+        is_bulk_strong=is_bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
     )
@@ -136,15 +150,19 @@ def build_plan(
     planned_ids = []
     for operation in planned_operations:
         planned_ids.append(operation.id)
-    physical_circuits = settings.workload.physical_circuits
+    physical_circuits = workload.physical_circuits
     physical_tables = _physical_formation_tables(physical_circuits)
-    device = _syndrome_source(
-        settings.qpu, code, physical_circuits, physical_tables
-    )
+    circuit_arguments = _circuit_arguments(physical_circuits, physical_tables)
+    device = qpu.source.build(code, circuit_arguments)
     formation_tables = _formation_tables(
         device, planned_operations, physical_tables, rounds_policy, code
     )
-    formation_reads = _formation_reads(settings, formation_tables)
+    # a strong read also holds the raw rounds its first round reads when
+    # a seat past the weak syndrome buffer forms the events
+    strong_side_seat = detection_events.strong_side_seat()
+    formation_reads = window_records.FormationReads(
+        strong_side_seat=strong_side_seat, tables=formation_tables
+    )
     run_plan = planner.plan_execution(
         operations=views,
         planned_operation_ids=tuple(planned_ids),
@@ -152,7 +170,7 @@ def build_plan(
         layout=layout,
         scheme=scheme,
         rounds_policy=rounds_policy,
-        fallback_round_microseconds=settings.qpu.round_period_microseconds,
+        fallback_round_microseconds=qpu.round_period_microseconds,
         retain_strong_context=is_switching,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
@@ -160,12 +178,14 @@ def build_plan(
         formation_reads=formation_reads,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
-    error_model_provider = settings.qpu.error_model_provider
-    if error_model_provider is None:
-        error_model_provider = device.window_model_source()
-    _refuse_bulk_strong_without_a_merge(settings, device, error_model_provider)
+    error_model_provider = _error_model_provider(
+        qpu, device, code, circuit_arguments
+    )
+    _refuse_bulk_strong_without_a_merge(
+        is_bulk_strong, is_switching, qpu.source, device, error_model_provider
+    )
     _install_operation_circuits(device, error_model_provider, all_operations)
-    idle_policy = settings.idle_policy.build()
+    idle_policy = idle_policy_settings.build()
     return Plan(
         code=code,
         layout=layout,
@@ -176,7 +196,7 @@ def build_plan(
         operations=operations,
         decode_operations=decode_operations,
         dynamic_streams=dynamic_streams,
-        protected_regions=tuple(settings.workload.protected_regions),
+        protected_regions=tuple(workload.protected_regions),
         all_operations=all_operations,
         planned_operations=tuple(planned_operations),
         run_plan=run_plan,
@@ -278,18 +298,6 @@ def _decode_plan_operations(
     return tuple(planned)
 
 
-def _restart_reread_buffer_regions(
-    switching: Optional[escalation_settings.SwitchingSettings],
-) -> int:
-    """How far a restarted weak window re-reads; the default without one.
-
-    Only a strong window that absorbs the weak windows restarts any, so
-    a run with no switching carries the section's default unread.
-    """
-    strong_window = _strong_window_settings(switching)
-    return strong_window.restart_reread_buffer_regions
-
-
 def _strong_window_settings(
     switching: Optional[escalation_settings.SwitchingSettings],
 ):
@@ -297,14 +305,6 @@ def _strong_window_settings(
     if switching is None:
         return escalation_settings.SwitchingSettings.strong_window
     return switching.strong_window
-
-
-def _strong_window(
-    switching: Optional[escalation_settings.SwitchingSettings],
-) -> str:
-    """The strong window's row name, which a refusal prints."""
-    strong_window = _strong_window_settings(switching)
-    return strong_window.name
 
 
 def _scheme(windows: window_settings.WindowSettings):
@@ -357,34 +357,21 @@ def _boundary_policy(windows: window_settings.WindowSettings):
     return boundary_policy
 
 
-def _syndrome_source(
+def _error_model_provider(
     settings: qpu_settings.QpuSettings,
-    code,
-    physical_circuits: Mapping,
-    physical_tables: Mapping,
-):
-    """The device of the qpu kind, or the Python-built one.
+    device: ports.SyndromeSource,
+    code: ports.CodeModel,
+    circuit_arguments: Mapping,
+) -> ports.WindowModelSource:
+    """The window models' source: the run's own, or the one the qpu names.
 
-    A row that shapes its payloads by the code card is built with the
-    run's card, so a yaml that names it needs no argument of its own; a
-    row that reads its widths off a circuit is built with the
-    workload's physical circuits instead; a row with keys of its own is
-    built with its Settings record too.
+    A named one is built over the same card and circuits as the run's
+    source, and the decoders read its window models, not its rounds.
     """
-    if settings.device is not None:
-        return settings.device
-    row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
-    arguments = {}
-    if row.takes_code_card:
-        arguments["code"] = code
-    else:
-        circuit_arguments = _circuit_arguments(
-            physical_circuits, physical_tables
-        )
-        arguments.update(circuit_arguments)
-    if settings.row_settings is not None:
-        arguments["settings"] = settings.row_settings
-    return row(**arguments)
+    model_record = settings.error_model_provider
+    if model_record is None:
+        return device.window_model_source()
+    return model_record.build(code, circuit_arguments)
 
 
 def _circuit_arguments(
@@ -477,21 +464,12 @@ def _operation_formation_table(operation, rounds_policy, code):
     )
 
 
-def _formation_reads(
-    settings: machine_settings.MachineSettings, tables: Mapping
-) -> window_records.FormationReads:
-    """Which reads also hold the raw rounds their first round reads.
-
-    A strong read does, when a seat past the weak syndrome buffer forms.
-    """
-    strong_side_seat = settings.detection_events.strong_side_seat()
-    return window_records.FormationReads(
-        strong_side_seat=strong_side_seat, tables=tables
-    )
-
-
 def _refuse_bulk_strong_without_a_merge(
-    settings: machine_settings.MachineSettings, device, error_model_provider
+    is_bulk_strong: bool,
+    is_switching: bool,
+    source_settings: qpu_settings.SourceSettings,
+    device: ports.SyndromeSource,
+    error_model_provider: ports.WindowModelSource,
 ) -> None:
     """bulk_strong merges strong re-decodes that carry timing alone.
 
@@ -502,21 +480,22 @@ def _refuse_bulk_strong_without_a_merge(
     whose models come from a provider other than the source's own,
     would be lost.
     """
-    if not settings.decoder_manager.bulk_strong:
+    if not is_bulk_strong:
         return
-    if settings.switching is None:
+    if not is_switching:
         raise ValueError(
             "decoder_manager.bulk_strong merges the strong pool's queued "
-            f"re-decodes, and escalation.kind {settings.escalation_kind} "
-            "has no strong pool; remove the key or run switching"
+            "re-decodes, and a run with no switching has no strong pool; "
+            "remove the key or run switching"
         )
     own_models = device.window_model_source()
     builds_models = error_model_provider is not own_models
     if not device.emits_bit_values and not builds_models:
         return
+    source_name = source_settings.name
     raise ValueError(
         "decoder_manager.bulk_strong merges timing-only strong re-decodes, "
-        f"and qpu.kind {settings.qpu.kind} gives the decoders bits and "
+        f"and qpu.kind {source_name} gives the decoders bits and "
         "models the merged decode would drop; set bulk_strong false or "
         "qpu.kind timing_only"
     )

@@ -26,6 +26,7 @@ import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -592,7 +593,8 @@ def _committed_windows(
 ) -> list:
     """The spans of the windows a Stim run of the workload commits."""
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=distance, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=distance, source=source)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
@@ -752,8 +754,9 @@ def _stim_machine(
     workload: workload_settings.WorkloadSettings, device
 ) -> machine_module.Machine:
     """A d=3 run of the workload on a Stim source, one-microsecond rounds."""
+    source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(
-        distance=3, device=device, round_period_microseconds=1.0
+        distance=3, source=source, round_period_microseconds=1.0
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
@@ -1032,8 +1035,9 @@ def _machine(
 ) -> tuple[machine_module.Machine, streaming_stim_device.StreamingStimDevice]:
     program = memory_programs.memory_program()
     source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    source_record = declared_run.GivenSource(source)
     qpu = qpu_settings.QpuSettings(
-        distance=3, device=source, round_period_microseconds=1.0
+        distance=3, source=source_record, round_period_microseconds=1.0
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)

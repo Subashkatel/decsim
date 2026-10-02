@@ -5,6 +5,7 @@ qubit-exclusivity resource per operation. That is the only layout today;
 the seam it fills is LayoutModel below.
 """
 
+import dataclasses
 from typing import Any, Protocol, runtime_checkable
 
 import decsim.ports as ports
@@ -51,6 +52,14 @@ class LayoutModel(Protocol):
 
 class UniformLayout:
     """Every patch uses the same code card."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The uniform layout has no keys: every patch takes the run's card."""
+
+        def build(self, code: ports.CodeModel) -> "UniformLayout":
+            """A fresh layout over the run's card."""
+            return UniformLayout(code)
 
     def __init__(self, code: ports.CodeModel):
         self.code = code

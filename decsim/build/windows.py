@@ -150,7 +150,7 @@ class Windows:
         self,
         weak_store: Optional[ports.SyndromeBuffer],
         strong_store: Optional[ports.SyndromeBuffer],
-        store_output: ports.SyndromeBufferOutput,
+        store_output: Optional[ports.SyndromeBufferOutput],
         primary_decoder: Optional[ports.Decoder],
         strong_decoder: Optional[ports.Decoder],
         decode_queue: ports.DecodeQueue,

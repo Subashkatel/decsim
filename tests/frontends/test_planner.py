@@ -26,6 +26,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 
 
 def test_the_run_period_is_used_when_the_card_declares_none():
@@ -37,7 +38,10 @@ def test_the_run_period_is_used_when_the_card_declares_none():
 
 def test_the_card_period_wins_over_the_run_period():
     card = code_geometry.SurfaceCodeModel(round_microseconds=2.0)
-    qpu = qpu_settings.QpuSettings(round_period_microseconds=1.25, code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(
+        round_period_microseconds=1.25, code_card=card_record
+    )
     settings = machine_settings.MachineSettings(qpu=qpu)
     machine = machine_module.Machine.build(settings)
     assert machine.qpu.device.clock.period_ticks == 2_000_000
@@ -54,7 +58,10 @@ def test_a_period_shorter_than_one_tick_is_refused():
 
 def test_a_card_period_saves_a_run_period_shorter_than_one_tick():
     card = code_geometry.SurfaceCodeModel(round_microseconds=2.0)
-    qpu = qpu_settings.QpuSettings(round_period_microseconds=0.0, code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(
+        round_period_microseconds=0.0, code_card=card_record
+    )
     settings = machine_settings.MachineSettings(qpu=qpu)
     machine = machine_module.Machine.build(settings)
     assert machine.qpu.device.clock.period_ticks == 2_000_000
@@ -62,7 +69,8 @@ def test_a_card_period_saves_a_run_period_shorter_than_one_tick():
 
 def test_a_cadence_that_is_not_a_finite_number_is_refused():
     card = code_geometry.SurfaceCodeModel(round_microseconds=float("inf"))
-    qpu = qpu_settings.QpuSettings(code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
     with pytest.raises(
         ValueError, match="the code card's round_microseconds must be a finite"
@@ -77,7 +85,8 @@ def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
     count, the window sizes and the node counts all derive from it.
     """
     card = code_geometry.SurfaceCodeModel(distance=3.5)
-    qpu = qpu_settings.QpuSettings(code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
     with pytest.raises(ValueError, match="distance must be an int >= 1"):
         machine_module.Machine.build(settings)
@@ -85,7 +94,8 @@ def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
 
 def test_a_distance_of_zero_is_refused_by_name():
     card = code_geometry.SurfaceCodeModel(distance=0)
-    qpu = qpu_settings.QpuSettings(code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
     with pytest.raises(ValueError, match="distance must be an int >= 1"):
         machine_module.Machine.build(settings)
@@ -93,7 +103,8 @@ def test_a_distance_of_zero_is_refused_by_name():
 
 def test_a_commit_width_of_zero_is_refused_by_name():
     card = code_geometry.SurfaceCodeModel(commit_rounds_override=0)
-    qpu = qpu_settings.QpuSettings(code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
     with pytest.raises(ValueError, match="commit_rounds must be an int >= 1"):
         machine_module.Machine.build(settings)

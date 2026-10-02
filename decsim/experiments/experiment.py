@@ -64,6 +64,14 @@ YAML_POINT_NAME_LENGTH = 12
 DEFAULT_RECORD_OPTIONS = collect.RecordOptions()
 # The module-level name a run file binds its experiment to.
 EXPERIMENT_NAME_IN_A_RUN_FILE = "experiment"
+# The records whose fields the yaml writes beside their section's own
+# keys, by section and field: a workload row's, and the qpu's source and
+# code card.
+_RECORDS_WRITTEN_FLAT = (
+    ("workload", "row_settings"),
+    ("qpu", "source"),
+    ("qpu", "code_card"),
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -874,12 +882,16 @@ def _files_line(config: ExperimentConfig) -> str:
 def _section_lines(settings: machine_settings.MachineSettings) -> list:
     """One line per section, its kind named where the section has one.
 
-    The windows section's kind is its scheme's name, the escalation
-    section's the word for the filled decode slots, and the burst
-    detector's the name of the switching slot's detector.
+    The qpu section's kind is its source record's name, the windows
+    section's its scheme's name, the escalation section's the word for
+    the filled decode slots, and the burst detector's the name of the
+    switching slot's detector.
     """
     lines = []
     for field in dataclasses.fields(settings):
+        if field.name == "qpu":
+            lines.append(f"qpu: kind {settings.qpu.source.name}")
+            continue
         if field.name == "windows":
             scheme_name = settings.windows.scheme.name
             lines.append(f"windows: kind {scheme_name}")
@@ -1220,8 +1232,9 @@ def _add_new_values(known: list, values: tuple) -> None:
 
 def _yaml_key(path: tuple) -> tuple:
     """A settings path as the yaml writes it: a row's keys sit beside kind."""
-    key = []
-    for name in path:
-        if name != "row_settings":
-            key.append(name)
-    return tuple(key)
+    section_and_record = path[:2]
+    if section_and_record not in _RECORDS_WRITTEN_FLAT:
+        return path
+    section = path[:1]
+    record_keys = path[2:]
+    return section + record_keys

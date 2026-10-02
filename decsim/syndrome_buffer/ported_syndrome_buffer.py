@@ -57,7 +57,7 @@ class PortedSyndromeBufferSettings:
     single-port memory. word_bits is what one access moves.
     cycles_per_access is how long one access holds its port, and
     access_latency_cycles how long after its last access a request's
-    data is usable, both on clock.
+    data is usable, both on clock; clock None is the machine's clock.
     AFS's one number for a memory read, "a readout time of four cycles
     to read 32-bit data" multiplied by the count of reads (2001.06598
     lines 529-531, 1107-1110), is an occupancy: word_bits 32,

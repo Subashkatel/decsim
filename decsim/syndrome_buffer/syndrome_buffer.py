@@ -59,7 +59,8 @@ class SyndromeBufferSettings:
     clock, whatever their width, and no access waits for another:
     SimpleMemory's latency with no bandwidth term (gem5
     src/mem/SimpleMemory.py:49, simple_mem.cc:174). A zero cost runs
-    synchronously without clock-edge alignment.
+    synchronously without clock-edge alignment. clock None is the
+    machine's clock.
     """
 
     bits: Optional[int] = None

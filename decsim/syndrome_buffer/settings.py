@@ -6,7 +6,7 @@ are that record's fields; the records check their own values.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional, Union
+from typing import Union
 
 import decsim.config as config
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
@@ -35,7 +35,6 @@ def from_yaml(
     section: Mapping,
     section_name: str,
     clocks: config.ClockSettings,
-    default_clock: Optional[config.Clock] = None,
 ) -> Union[
     syndrome_buffer_module.SyndromeBufferSettings,
     ported_syndrome_buffer.PortedSyndromeBufferSettings,
@@ -51,7 +50,6 @@ def from_yaml(
     for key in field_names:
         if key in section:
             values[key] = section[key]
-    values["clock"] = default_clock
     if "clock" in section:
         values["clock"] = clocks.clock(section["clock"])
     return record(**values)

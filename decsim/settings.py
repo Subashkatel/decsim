@@ -76,10 +76,12 @@ class MachineSettings:
     Every field has a default, so a Python caller names only what
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
-    prices propagation only.
+    prices propagation only. clock is the machine's clock, the one every
+    part that names none of its own counts its cycles on.
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
+    clock: Optional[config.Clock] = None
     qpu: qpu_settings.QpuSettings = qpu_settings.QpuSettings()
     controller: controller_settings.ControllerSettings = (
         controller_settings.ControllerSettings()
@@ -171,14 +173,11 @@ class MachineSettings:
         )
         event_settings = detection_event_settings.DetectionEventSettings
         detection_events = event_settings.from_yaml(
-            detection_events_section, clocks, controller.clock
+            detection_events_section, clocks
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
         weak_syndrome_buffer = syndrome_buffer_settings.from_yaml(
-            sections["weak_syndrome_buffer"],
-            "weak_syndrome_buffer",
-            clocks,
-            controller.clock,
+            sections["weak_syndrome_buffer"], "weak_syndrome_buffer", clocks
         )
         strong_section = sections["strong_syndrome_buffer"]
         syndrome_buffer_settings.check_strong_section_charges_nothing(
@@ -220,6 +219,7 @@ class MachineSettings:
         )
         return cls(
             clocks=clocks,
+            clock=controller.clock,
             qpu=qpu,
             controller=controller,
             idle_policy=idle_policy,

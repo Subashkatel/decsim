@@ -146,6 +146,13 @@ def test_a_source_with_no_recipes_and_no_stated_width_forms_nothing():
     assert leaving == raw
 
 
+def test_a_charged_cost_with_no_clock_is_refused():
+    settings = event_settings.DetectionEventSettings(latency_cycles=5)
+
+    with pytest.raises(ValueError, match="give the machine a clock"):
+        formation.SeatedFormation(None, settings)
+
+
 def stated(bits=None, size_bits=17, event_bits=12):
     """A circuit-less source's last round: its raw and its events' width."""
     return round_records.RetainedSyndromeFragment(

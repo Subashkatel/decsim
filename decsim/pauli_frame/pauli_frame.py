@@ -52,7 +52,8 @@ class PauliFrameConfig:
 
     Table row (FRAMES, below): pauli_frame.kind names the frame this run
     commits into; logical_register is the one shipped row, the frame that
-    XORs an observable bitmask per window.
+    XORs an observable bitmask per window. clock None is the machine's
+    clock.
     """
 
     kind: str = "logical_register"
@@ -60,11 +61,7 @@ class PauliFrameConfig:
     clock: Optional[config.Clock] = None
 
     def __post_init__(self) -> None:
-        cycles = self.write_cycles
-        config.check_cycles("pauli_frame.write_cycles", cycles)
-        is_free = cycles == 0
-        if not is_free and self.clock is None:
-            raise ValueError("a charged write needs the clock it is priced on")
+        config.check_cycles("pauli_frame.write_cycles", self.write_cycles)
 
     @classmethod
     def from_yaml(
@@ -121,6 +118,8 @@ class PauliFrame:
     def __init__(
         self, engine, *, clock: Optional[config.Clock], write_cycles: int
     ) -> None:
+        if write_cycles > 0 and clock is None:
+            raise ValueError("a charged write needs the clock it is priced on")
         self.engine = engine
         self.clock = clock
         self.write_cycles = write_cycles

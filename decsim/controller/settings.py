@@ -67,6 +67,7 @@ class ControllerSettings:
     unbounded.
     clock is the domain all three cycle counts are charged on; a cost of
     zero cycles is uncharged rather than rounded up to the next edge.
+    clock None is the machine's clock.
     """
 
     clock: Optional[config.Clock] = None

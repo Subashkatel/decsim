@@ -12,6 +12,7 @@ neither has ends for its missing store.
 import dataclasses
 from typing import Optional, Union
 
+import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
@@ -93,6 +94,7 @@ class Readout:
         link_card: link_settings.FabricSettings,
         weak_store_slot: Optional[StoreSlot],
         strong_store_slot: Optional[StoreSlot],
+        machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         detection_events: ports.DetectionEventPlacement,
         links: ports.Link,
@@ -100,14 +102,18 @@ class Readout:
         """Every component of the readout path, wired to one another.
 
         A store slot left None is a store no decoder reads, which the
-        part does not build. One line per component, in the order a
-        round meets them, then the wires inside the part.
+        part does not build; the controller and a store that name no
+        clock run on machine_clock. One line per component, in the
+        order a round meets them, then the wires inside the part.
         """
         _check_readout_cost_is_priced(controller_settings, link_card)
         _check_one_price_for_a_read(weak_store_slot, link_card)
         _check_strong_store_charges_nothing(strong_store_slot)
-        controller = controller_module.Controller(engine, controller_settings)
-        assembler = round_assembly.RoundAssembler(engine, controller_settings)
+        clocked_controller = config.with_machine_clock(
+            controller_settings, machine_clock
+        )
+        controller = controller_module.Controller(engine, clocked_controller)
+        assembler = round_assembly.RoundAssembler(engine, clocked_controller)
         packing_line = syndrome_round_sender.HeldRounds(engine)
         in_flight_bound = controller_settings.packing_rounds_in_flight
         rounds_in_flight = round_assembly.RoundsInFlight(in_flight_bound)
@@ -117,7 +123,7 @@ class Readout:
         store_transfers = window_transfers.WindowTransfers(engine)
         memory_arrivals = memory_rounds.MemoryRoundArrivals(engine)
         weak_store, weak_output, weak_receiver = _weak_store(
-            weak_store_slot, engine
+            weak_store_slot, machine_clock, engine
         )
         strong_store, strong_output, strong_receiver = _strong_store(
             strong_store_slot, engine
@@ -253,6 +259,7 @@ class Readout:
 
 def build_detection_events(
     detection_event_settings: event_settings.DetectionEventSettings,
+    machine_clock: Optional[config.Clock],
     device,
     window_tier: window_records.DecoderTier,
     escalates: bool,
@@ -268,8 +275,9 @@ def build_detection_events(
     counts the rounds the first seat on the primary tier's path forms.
     window_tier is the tier that decodes the plan's windows, and
     escalates says a switching run sends regions on to the strong tier.
-    The decoder units are compiled from this placement, so the machine
-    builds it before the parts.
+    A placement that names no clock forms on machine_clock. The decoder
+    units are compiled from this placement, so the machine builds it
+    before the parts.
     """
     formed_at = detection_event_settings.formed_at
     paths = _paths_of_the_run(window_tier, escalates)
@@ -282,13 +290,18 @@ def build_detection_events(
     if burst_detector is not None:
         _check_forms_events(source)
         observed_seat = _first_seat_on(paths[0], formed_at)
+    clocked_settings = config.with_machine_clock(
+        detection_event_settings, machine_clock
+    )
     return formation.SeatedFormation(
-        source, detection_event_settings, observed_seat, burst_detector
+        source, clocked_settings, observed_seat, burst_detector
     )
 
 
 def _weak_store(
-    slot: Optional[StoreSlot], engine: engine_module.Engine
+    slot: Optional[StoreSlot],
+    machine_clock: Optional[config.Clock],
+    engine: engine_module.Engine,
 ) -> tuple:
     """The weak syndrome buffer, its outgoing end and its receiving end.
 
@@ -296,7 +309,8 @@ def _weak_store(
     """
     if slot is None:
         return None, None, None
-    store = slot.settings.build(engine)
+    store_settings = config.with_machine_clock(slot.settings, machine_clock)
+    store = store_settings.build(engine)
     output = round_output.SyndromeBufferOutput(
         engine,
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,

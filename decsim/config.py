@@ -5,15 +5,19 @@ machine is an integer count of them. A yaml states its costs in cycles
 of a named clock domain (XQsim's shape: domain labels with frequencies
 over one tick core); ClockSettings hands each component the Clock of the
 domain it names, and the component charges its cycles on that clock's
-edges.
+edges. A part that names no clock runs on the machine's
+(with_machine_clock).
 """
 
 import dataclasses
 import math
 import types
 from collections.abc import Iterator, Mapping
+from typing import Optional, TypeVar
 
 TICKS_PER_MICROSECOND = 1_000_000
+# A settings record with a clock field, which a part may leave None.
+ClockedSettings = TypeVar("ClockedSettings")
 # A clocks section that names no domain.
 _NO_DOMAINS = types.MappingProxyType({})
 
@@ -212,6 +216,20 @@ class Clock:
         if remainder == 0:
             return whole_cycles
         return whole_cycles + 1
+
+
+def with_machine_clock(
+    settings: ClockedSettings, machine_clock: Optional[Clock]
+) -> ClockedSettings:
+    """The settings on their own clock, or on the machine's when they name none.
+
+    A part's clock defaults to the machine's as a gem5 ClockedObject's
+    clock domain defaults to its parent's (src/sim/ClockedObject.py:50,
+    `Param.ClockDomain(Parent.clk_domain)`).
+    """
+    if settings.clock is not None:
+        return settings
+    return dataclasses.replace(settings, clock=machine_clock)
 
 
 class ClockSettings(Mapping):

@@ -81,7 +81,7 @@ def test_a_source_that_does_not_answer_the_port_forms_nothing():
     carried = (fragment,)
 
     placement = readout_part.build_detection_events(
-        settings.detection_events, device, *WEAK_BASELINE
+        settings.detection_events, None, device, *WEAK_BASELINE
     )
 
     assert placement.form_at("controller", carried) == carried
@@ -105,7 +105,7 @@ def test_a_seat_list_every_path_crosses_once_is_built(run_facts, formed_at):
     device = _DeviceWithNoFormationTable()
 
     placement = readout_part.build_detection_events(
-        settings.detection_events, device, *run_facts
+        settings.detection_events, None, device, *run_facts
     )
 
     assert placement.forms_at(formed_at[0])
@@ -134,12 +134,24 @@ def test_a_path_that_crosses_no_seat_or_two_is_refused(
 
     with pytest.raises(ValueError) as refusal:
         readout_part.build_detection_events(
-            settings.detection_events, device, *run_facts
+            settings.detection_events, None, device, *run_facts
         )
 
     sentence = str(refusal.value)
     assert f"at {crossed}" in sentence
     assert "crosses exactly one seat" in sentence
+
+
+def test_a_placement_that_names_no_clock_forms_on_the_machines():
+    detection_events = event_settings.DetectionEventSettings(latency_cycles=5)
+    machine_clock = config.Clock(4000)
+    device = _DeviceWithNoFormationTable()
+
+    placement = readout_part.build_detection_events(
+        detection_events, machine_clock, device, *WEAK_BASELINE
+    )
+
+    assert placement.clock == machine_clock
 
 
 def test_the_burst_detector_counts_at_the_primary_tiers_seat():
@@ -148,7 +160,7 @@ def test_the_burst_detector_counts_at_the_primary_tiers_seat():
     source = _OneRoundSource()
     detector = _CountingDetector()
     placement = readout_part.build_detection_events(
-        settings.detection_events, source, *SWITCHING, detector
+        settings.detection_events, None, source, *SWITCHING, detector
     )
     raw = (_OneRoundSource.fragment(),)
 
@@ -165,7 +177,7 @@ def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
 
     with pytest.raises(ValueError, match="burst_detector counts detection"):
         readout_part.build_detection_events(
-            settings.detection_events, device, *WEAK_BASELINE, detector
+            settings.detection_events, None, device, *WEAK_BASELINE, detector
         )
 
 

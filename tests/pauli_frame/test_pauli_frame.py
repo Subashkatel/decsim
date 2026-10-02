@@ -217,8 +217,10 @@ def test_a_write_cost_refusal_names_its_yaml_path():
 
 
 def test_a_charged_write_without_a_clock_is_refused():
+    engine = engine_module.Engine()
+
     with pytest.raises(ValueError, match="needs the clock"):
-        pauli_frame_module.PauliFrameConfig(write_cycles=1)
+        pauli_frame_module.PauliFrame(engine, clock=None, write_cycles=1)
 
 
 @pytest.mark.parametrize("key", ["clock", "write_cycles"])

@@ -136,6 +136,7 @@ class Machine:
         escalates = escalation_policy.requires_strong_context
         detection_events = readout_part.build_detection_events(
             settings.detection_events,
+            settings.clock,
             plan.device,
             window_tier,
             escalates,
@@ -150,13 +151,19 @@ class Machine:
         links = build_links(settings, engine)
         qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
         control = control_part.Control.build(
-            settings.controller, settings.pauli_frame, engine, plan, links
+            settings.controller,
+            settings.pauli_frame,
+            settings.clock,
+            engine,
+            plan,
+            links,
         )
         readout = readout_part.Readout.build(
             settings.controller,
             settings.links,
             weak_store_slot,
             strong_store_slot,
+            settings.clock,
             engine,
             detection_events,
             links,

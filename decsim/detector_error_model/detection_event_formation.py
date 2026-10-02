@@ -61,6 +61,7 @@ class SeatedFormation:
         observed_seat: Optional[str] = None,
         burst_detector: Optional[ports.BurstDetector] = None,
     ) -> None:
+        _check_charged_cost_has_a_clock(settings)
         self.settings = settings
         self.clock = settings.clock
         # the source's recipes, None when it answers none
@@ -547,3 +548,16 @@ class _TraceSources:
     """
 
     state_held: trace_source.TraceSource = trace_source.new_source()
+
+
+def _check_charged_cost_has_a_clock(
+    settings: detection_event_settings.DetectionEventSettings,
+) -> None:
+    """A charged cost counts its cycles on a clock, its own or the machine's."""
+    charged = settings.latency_cycles + settings.cycles_per_round
+    if charged == 0 or settings.clock is not None:
+        return
+    raise ValueError(
+        "a charged detection_events cost needs the clock its cycles are "
+        "counted on; name one, or give the machine a clock"
+    )

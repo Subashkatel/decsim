@@ -88,8 +88,11 @@ def _plan(device: "_PhysicalDevice", round_count: int) -> plan_build.Plan:
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=device)
     settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
+    )
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, signal
     )
     return plan_build.build_plan(settings, policy)
 

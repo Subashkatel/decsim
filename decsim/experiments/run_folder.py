@@ -610,8 +610,11 @@ def _how_it_ran() -> dict:
 
 def _plan(settings) -> plan_build.Plan:
     """The plan the build derives from the settings, before it wires."""
-    escalation_policy = escalation_build.build_escalation_policy(
+    confidence_signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
+    )
+    escalation_policy = escalation_build.build_escalation_policy(
+        settings.escalation, confidence_signal
     )
     return plan_build.build_plan(settings, escalation_policy)
 

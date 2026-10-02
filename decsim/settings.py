@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.burst_detectors.settings as burst_detector_settings
+import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
@@ -198,7 +199,11 @@ class MachineSettings:
         )
         escalation_folder = section_folders.get("escalation")
         escalation = escalation_settings.EscalationSettings.from_yaml(
-            escalation_section, clocks, escalation_folder, controller.clock
+            escalation_section,
+            clocks,
+            escalation_folder,
+            controller.clock,
+            confidence_signals.confidence_settings,
         )
         burst_detector_section = sections.get("burst_detector", {})
         burst_detector = (

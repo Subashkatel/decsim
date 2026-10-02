@@ -17,6 +17,7 @@ import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
+import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
@@ -182,10 +183,12 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         algorithm=matching,
         engine=ENGINE_CARD,
     )
+    confidence = complementary.ComplementaryGap.Settings()
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         gap_threshold_db=15.0,
         gap_threshold_nats=threshold_nats,
+        confidence=confidence,
     )
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=FRAME_CLOCK
@@ -369,10 +372,12 @@ def _double_window_settings(
         algorithm=belief_matching_settings,
         engine=ENGINE_CARD,
     )
+    confidence = complementary.ComplementaryGap.Settings()
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         gap_threshold_nats=1.0,
         strong_window="double_window",
+        confidence=confidence,
     )
     return machine_settings.MachineSettings(
         windows=windows,
@@ -659,8 +664,11 @@ def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
         },
     )
     settings = point.settings
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
+    )
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, signal
     )
     assert isinstance(policy.threshold, _KeepEverything)
     machine = machine_module.Machine.build(settings, 0)
@@ -691,8 +699,9 @@ def _serial_switching_settings(
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=belief_matching_settings
     )
+    confidence = complementary.ComplementaryGap.Settings()
     escalation = escalation_settings.EscalationSettings(
-        kind="switching", gap_threshold_nats=1.0
+        kind="switching", gap_threshold_nats=1.0, confidence=confidence
     )
     return machine_settings.MachineSettings(
         windows=windows,
@@ -918,15 +927,17 @@ def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
 
 def _switching_policy(threshold_nats: float):
     """A switching row over a fixed threshold and the complementary gap."""
+    confidence = complementary.ComplementaryGap.Settings()
     settings = escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
         gap_threshold_nats=threshold_nats,
-        confidence="complementary_gap",
+        confidence=confidence,
     )
     matching = mwpm.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
-    return escalation_build.build_escalation_policy(settings, weak)
+    signal = escalation_build.confidence_signal(settings, weak)
+    return escalation_build.build_escalation_policy(settings, signal)
 
 
 def test_a_weak_result_with_no_soft_output_escalates_its_window():
@@ -1018,7 +1029,8 @@ def test_the_policy_instance_is_the_authority_over_its_settings_row():
     row = escalation_build.escalation_row(settings)
     matching = mwpm.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
-    policy = escalation_build.build_escalation_policy(settings, weak)
+    signal = escalation_build.confidence_signal(settings, weak)
+    policy = escalation_build.build_escalation_policy(settings, signal)
     tier = escalation_build.primary_tier(settings)
 
     assert row is built

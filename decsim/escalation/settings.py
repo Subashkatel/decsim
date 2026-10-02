@@ -17,9 +17,9 @@ import dataclasses
 import fractions
 import math
 import pathlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from numbers import Real
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.escalation.policies as escalation_policies
@@ -228,12 +228,13 @@ class EscalationSettings:
     faces pinned (lines 1248-1259), and restart_reread_buffer_regions
     is how many of the strong region's buffer regions the restarted
     weak window re-reads under it.
-    confidence names the signal the weak tier reports and the threshold
-    decides on (confidence/signals.py), and the yaml refuses a
-    weak decoder whose decode cannot produce that signal's evidence;
-    confidence_walk_microseconds is the card that prices the signal's own
-    computation on the weak unit, null leaving each row on its own cost
-    model.
+    confidence is the Settings record of the signal the weak tier
+    reports and the threshold decides on (confidence/signals.py names
+    the rows), and the build refuses a weak decoder whose decode cannot
+    produce that signal's evidence; the yaml's
+    confidence_walk_microseconds, the card that prices the signal's own
+    computation on the weak unit, is a field of that record, null
+    leaving each row on its own cost model.
     The complementary gap's two forced-class solves are two ordinary
     jobs of the weak pool, so weak_decoder.units alone decides whether
     they overlap. A Python-built policy is used as it is, each machine
@@ -250,8 +251,9 @@ class EscalationSettings:
     threshold_cycles: int = 0
     switch_cycles: int = 0
     kind: str = "weak_baseline"
-    confidence: str = "complementary_gap"
-    confidence_walk_microseconds: Optional[float] = None
+    # the confidence row's Settings record, opaque here: the record whose
+    # build(weak_algorithm, threshold_nats) returns the signal
+    confidence: Optional[Any] = None
     gap_threshold_db: Optional[float] = None
     threshold_source: str = "fixed"
     threshold_table: Optional[str] = None
@@ -283,11 +285,17 @@ class EscalationSettings:
         clocks: config.ClockSettings,
         base_directory: Optional[pathlib.Path] = None,
         default_clock: Optional[config.Clock] = None,
+        confidence_settings: Optional[Callable] = None,
     ) -> "EscalationSettings":
         """The common timing card and the policy's confidence knobs.
 
         Both are checked at this boundary so a row without confidence
         can accept timing keys while still refusing confidence knobs.
+        confidence_settings turns escalation.confidence and its walk card
+        into the row's record (confidence/signals.py
+        confidence_settings), handed in by the caller, since the
+        confidence package sits above this one; a section that decides
+        on a confidence needs it.
         """
         kind = section.get("kind", "weak_baseline")
         tables.refuse_unknown_keys("escalation", section, ESCALATION_KEYS)
@@ -316,7 +324,9 @@ class EscalationSettings:
                 threshold_cycles=threshold_cycles,
                 switch_cycles=switch_cycles,
             )
-        return _switching_settings(kind, section, base_directory, clock)
+        return _switching_settings(
+            kind, section, base_directory, clock, confidence_settings
+        )
 
     def threshold_nats_for(self, resolved: Mapping) -> Optional[float]:
         """The sweep point's threshold in nats, per threshold_source.
@@ -417,6 +427,7 @@ def _switching_settings(
     section: Mapping,
     base_directory: Optional[pathlib.Path],
     clock: Optional[config.Clock],
+    confidence_settings: Callable,
 ) -> EscalationSettings:
     """The confidence knobs of an escalating kind, every rule checked once.
 
@@ -442,8 +453,8 @@ def _switching_settings(
         threshold_column = str(raw_column)
     online = _online_settings(section, threshold_source, threshold_row)
     named_confidence = section.get("confidence", "complementary_gap")
-    confidence = str(named_confidence)
     walk_microseconds = _confidence_walk_microseconds(section)
+    confidence = confidence_settings(named_confidence, walk_microseconds)
     run_both_at_once = config.boolean(section, "escalation", "run_both_at_once")
     strong_window = _strong_window(section)
     _check_serial_only(threshold_source, threshold_row, strong_window)
@@ -457,7 +468,6 @@ def _switching_settings(
         switch_cycles=switch_cycles,
         kind=kind,
         confidence=confidence,
-        confidence_walk_microseconds=walk_microseconds,
         gap_threshold_db=gap_threshold_db,
         gap_threshold_nats=gap_threshold_nats,
         threshold_source=threshold_source,

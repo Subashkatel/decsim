@@ -27,6 +27,7 @@ import pathlib
 
 import pytest
 
+import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -513,7 +514,9 @@ def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
     clocks = config.ClockSettings({})
     try:
         settings = escalation_settings.EscalationSettings.from_yaml(
-            section, clocks
+            section,
+            clocks,
+            confidence_settings=confidence_signals.confidence_settings,
         )
     finally:
         del table["port_only"]

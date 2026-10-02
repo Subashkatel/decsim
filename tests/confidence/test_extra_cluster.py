@@ -27,13 +27,11 @@ import pytest
 import decsim.confidence.cluster as cluster
 import decsim.confidence.extra_cluster as extra_cluster
 import decsim.config as config
-import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.escalation.settings as escalation_settings
 import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
@@ -288,17 +286,12 @@ def test_a_decode_without_growth_reports_no_gap():
 
 def test_the_row_builds_from_the_threshold_and_the_weak_row():
     count = cycle_count_module.CycleCount(CLOCK, delay_cycles=3)
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        confidence="extra_cluster_gap",
-        gap_threshold_nats=TWENTY_DECIBELS_NATS,
-    )
+    record = extra_cluster.ExtraClusterGap.Settings()
     union_find_settings = union_find.UnionFindDecoder.Settings(
         weight_step=0.2, cycle_count=count
     )
-    weak = decoder_settings.DecoderPoolSettings(algorithm=union_find_settings)
 
-    signal = extra_cluster.ExtraClusterGap.from_settings(escalation, weak)
+    signal = record.build(union_find_settings, TWENTY_DECIBELS_NATS)
 
     assert signal.growth_limit_ticks == 24
     assert signal.weight_step == 0.2
@@ -307,16 +300,11 @@ def test_the_row_builds_from_the_threshold_and_the_weak_row():
 
 def test_a_threshold_with_no_number_at_build_is_refused():
     """An online source has no epsilon_max to grow to."""
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        confidence="extra_cluster_gap",
-        threshold_source="online",
-    )
+    record = extra_cluster.ExtraClusterGap.Settings()
     union_find_settings = union_find.UnionFindDecoder.Settings()
-    weak = decoder_settings.DecoderPoolSettings(algorithm=union_find_settings)
 
     with pytest.raises(ValueError) as refusal:
-        extra_cluster.ExtraClusterGap.from_settings(escalation, weak)
+        record.build(union_find_settings, None)
 
     assert "threshold_source online has no fixed number" in str(refusal.value)
 

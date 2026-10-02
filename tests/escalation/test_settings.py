@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.escalation.settings as escalation_settings
 
@@ -17,7 +18,11 @@ def test_switching_reads_both_cycle_costs_on_the_named_clock():
         "threshold_cycles": 3,
         "switch_cycles": 4,
     }
-    settings = escalation_settings.EscalationSettings.from_yaml(section, clocks)
+    settings = escalation_settings.EscalationSettings.from_yaml(
+        section,
+        clocks,
+        confidence_settings=confidence_signals.confidence_settings,
+    )
     assert settings.clock.period_ticks == 8000
     assert settings.threshold_cycles == 3
     assert settings.switch_cycles == 4

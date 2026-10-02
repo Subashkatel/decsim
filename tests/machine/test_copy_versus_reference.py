@@ -23,6 +23,7 @@ import pytest
 import stim
 
 import decsim.build.decoders as decoder_build
+import decsim.confidence.cluster as cluster
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.policies as escalation_policies
@@ -988,8 +989,9 @@ def _lookback_switching_machine(formed_at, seed):
     weak_decoder = dataclasses.replace(
         settings.weak_decoder, algorithm=union_find_settings
     )
+    confidence = cluster.ClusterGap.Settings()
     escalation = dataclasses.replace(
-        settings.escalation, confidence="cluster_gap", gap_threshold_db=15.0
+        settings.escalation, confidence=confidence, gap_threshold_db=15.0
     )
     settings = dataclasses.replace(
         settings,

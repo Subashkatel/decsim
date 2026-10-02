@@ -47,6 +47,7 @@ import dataclasses
 
 import pytest
 
+import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
@@ -259,9 +260,10 @@ def machine_settings(shape: str, distance: int):
             links=links,
         )
     nats = escalation_settings.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
+    confidence = complementary.ComplementaryGap.Settings()
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        confidence="complementary_gap",
+        confidence=confidence,
         gap_threshold_db=UNREACHABLE_GAP_DECIBELS,
         gap_threshold_nats=nats,
     )

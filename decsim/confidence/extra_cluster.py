@@ -28,17 +28,16 @@ weight steps and can exceed the continuous value by up to half a step;
 a cluster gap exactly at the threshold may therefore read as kept.
 """
 
+import dataclasses
 import math
 import time
 from typing import Optional
 
 import decsim.confidence.cluster as cluster
 import decsim.config as config
-import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.escalation.settings as escalation_settings
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -61,6 +60,20 @@ def union_find_extra_cluster_gap_source(
         correction="none",
         weight_step_natural_log=normalized_step,
         references=("extra-cluster gap without cluster graph",),
+    )
+
+
+def _refuse_a_threshold_with_no_number(threshold_nats) -> None:
+    """The growth limit is the threshold, so it is one number at build."""
+    if threshold_nats is not None:
+        return
+    raise ValueError(
+        "escalation.confidence extra_cluster_gap grows to the "
+        "threshold, so it needs the threshold as one number when "
+        "the machine is built (Kishi 2602.03336 Sec. III, the "
+        "early-stopping threshold is the switching threshold): "
+        "give gap_threshold_db, or threshold_source table; "
+        "threshold_source online has no fixed number"
     )
 
 
@@ -121,39 +134,37 @@ class ExtraClusterGap:
         self.walk_microseconds = walk_microseconds
         self.cycle_count = cycle_count
 
-    @classmethod
-    def from_settings(
-        cls,
-        escalation: escalation_settings.EscalationSettings,
-        weak_decoder: decoder_settings.DecoderPoolSettings,
-    ) -> "ExtraClusterGap":
-        """The row grown to the threshold, on the weak row's unit.
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row as a run names it: the card that prices its growth.
 
-        A weak row that keeps no weight step grows no clusters: the row
-        takes the shipped step and the host clock, and the build refuses
-        the pairing by name (build/decoders.py).
+        walk_microseconds is escalation.confidence_walk_microseconds.
         """
-        threshold_nats = escalation.gap_threshold_nats
-        if threshold_nats is None:
-            raise ValueError(
-                "escalation.confidence extra_cluster_gap grows to the "
-                "threshold, so it needs the threshold as one number when "
-                "the machine is built (Kishi 2602.03336 Sec. III, the "
-                "early-stopping threshold is the switching threshold): "
-                "give gap_threshold_db, or threshold_source table; "
-                "threshold_source online has no fixed number"
+
+        walk_microseconds: Optional[float] = None
+        # the word the yaml and the reports name this row by
+        name = "extra_cluster_gap"
+
+        def build(self, weak_algorithm, threshold_nats) -> "ExtraClusterGap":
+            """The row grown to the threshold, on the weak row's unit.
+
+            A weak row that keeps no weight step grows no clusters: the
+            row takes the shipped step and the host clock, and the build
+            refuses the pairing by name (build/decoders.py).
+            """
+            _refuse_a_threshold_with_no_number(threshold_nats)
+            walk_microseconds = self.walk_microseconds
+            weight_step = getattr(weak_algorithm, "weight_step", None)
+            if weight_step is None:
+                return ExtraClusterGap(
+                    threshold_nats, walk_microseconds=walk_microseconds
+                )
+            return ExtraClusterGap(
+                threshold_nats,
+                weight_step=weight_step,
+                walk_microseconds=walk_microseconds,
+                cycle_count=weak_algorithm.cycle_count,
             )
-        walk_microseconds = escalation.confidence_walk_microseconds
-        algorithm = weak_decoder.algorithm
-        weight_step = getattr(algorithm, "weight_step", None)
-        if weight_step is None:
-            return cls(threshold_nats, walk_microseconds=walk_microseconds)
-        return cls(
-            threshold_nats,
-            weight_step=weight_step,
-            walk_microseconds=walk_microseconds,
-            cycle_count=algorithm.cycle_count,
-        )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
         """The window's gap by growing on, and what the growth cost.

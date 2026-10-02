@@ -924,7 +924,7 @@ def _shot_confidence(
         return None
     windows = ledger.windows()
     is_sampled = settings.observation.samples_confidence_of(seed)
-    signal = settings.escalation.confidence
+    signal = settings.escalation.confidence.name
     sampled_shot_count = settings.observation.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 

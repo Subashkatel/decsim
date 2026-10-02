@@ -9,7 +9,6 @@ import copy
 from typing import TYPE_CHECKING, Optional
 
 import decsim.burst_detectors.settings as burst_detector_settings
-import decsim.confidence.signals as confidence_signals
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
@@ -87,7 +86,7 @@ def builds_a_confidence_signal(
 
 def build_escalation_policy(
     settings: escalation_settings.EscalationSettings,
-    weak_decoder: decoder_settings.DecoderPoolSettings,
+    confidence_signal: Optional[ports.ConfidenceSignal],
 ):
     """The policy of the escalation kind, or a copy of the Python-built one.
 
@@ -95,42 +94,38 @@ def build_escalation_policy(
     settings record builds a machine per shot, so the built policy is a
     prototype: each machine gets a shallow copy, whose ports start
     unbound and whose collaborators (its threshold source) are the
-    prototype's own, shared by every shot as a row's are.
+    prototype's own, shared by every shot as a row's are. A row that
+    decides on a confidence expects the source of the run's signal.
     """
     if settings.policy is not None:
         return copy.copy(settings.policy)
     row = escalation_row(settings)
-    collaborators = _collaborators(row, settings, weak_decoder)
+    collaborators = _collaborators(row, settings, confidence_signal)
     return row(collaborators)
-
-
-def confidence_row(escalation: escalation_settings.EscalationSettings):
-    """The signal row escalation.confidence names, as a class.
-
-    What a row needs from a decode and what it says when refused are
-    the class's, so a build site that only checks the pairing reads
-    them here without building the row.
-    """
-    return tables.row(
-        confidence_signals.CONFIDENCE_SIGNALS,
-        "escalation.confidence",
-        escalation.confidence,
-    )
 
 
 def confidence_signal(
     escalation: escalation_settings.EscalationSettings,
     weak_decoder: decoder_settings.DecoderPoolSettings,
-):
-    """The signal row a switching run's weak decoder reports and decides on.
+) -> Optional[ports.ConfidenceSignal]:
+    """The signal a switching run's weak decoder reports and decides on.
 
-    Every row builds itself from the escalation section and the weak
-    decoder's settings: the card that prices its own computation, the
-    decode's weight step, the threshold it grows to, the unit's cycle
-    count; a row reads what it needs and ignores the rest.
+    The confidence record builds its row from the weak decoder's own
+    settings and the point's threshold: the decode's weight step, the
+    threshold it grows to, the unit's cycle count; a row reads what it
+    needs and ignores the rest. None when the run builds no signal.
     """
-    row = confidence_row(escalation)
-    return row.from_settings(escalation, weak_decoder)
+    if not builds_a_confidence_signal(escalation):
+        return None
+    confidence = escalation.confidence
+    if confidence is None:
+        raise ValueError(
+            "escalation.kind switching decides on a confidence; give the "
+            "escalation a confidence record, one of the rows of "
+            "decsim/confidence/signals.py"
+        )
+    threshold_nats = escalation.gap_threshold_nats
+    return confidence.build(weak_decoder.algorithm, threshold_nats)
 
 
 def build_burst_detector(
@@ -163,7 +158,7 @@ def build_burst_detector(
 def _collaborators(
     row,
     settings: escalation_settings.EscalationSettings,
-    weak_decoder: decoder_settings.DecoderPoolSettings,
+    signal: Optional[ports.ConfidenceSignal],
 ) -> escalation_policies.EscalationCollaborators:
     """The one record every escalation row is built from.
 
@@ -174,7 +169,6 @@ def _collaborators(
     if not row.decides_on_a_confidence:
         return escalation_policies.NO_CONFIDENCE
     threshold = _threshold_source(settings)
-    signal = confidence_signal(settings, weak_decoder)
     return escalation_policies.EscalationCollaborators(
         threshold=threshold,
         expected_source=signal.source,

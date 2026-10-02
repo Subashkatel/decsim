@@ -124,8 +124,11 @@ class Machine:
         and its path.
         """
         engine = engine_module.Engine()
-        escalation_policy = escalation_build.build_escalation_policy(
+        confidence_signal = escalation_build.confidence_signal(
             settings.escalation, settings.weak_decoder
+        )
+        escalation_policy = escalation_build.build_escalation_policy(
+            settings.escalation, confidence_signal
         )
         plan = plan_build.build_plan(settings, escalation_policy)
         burst_detector = escalation_build.build_burst_detector(
@@ -135,7 +138,11 @@ class Machine:
             settings, plan.device, escalation_policy, burst_detector
         )
         pool = decoders_part.build_decoder_pool(
-            settings, plan, escalation_policy, detection_events
+            settings,
+            plan,
+            escalation_policy,
+            detection_events,
+            confidence_signal,
         )
         links = build_links(settings, engine)
         qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -146,7 +153,13 @@ class Machine:
             settings, engine, escalation_policy, detection_events, links
         )
         windows = windows_part.Windows.build(
-            settings, engine, plan, escalation_policy, burst_detector, links
+            settings,
+            engine,
+            plan,
+            escalation_policy,
+            burst_detector,
+            links,
+            confidence_signal,
         )
         decoders = decoders_part.Decoders.build(
             settings.decoder_manager, engine, pool, escalation_policy

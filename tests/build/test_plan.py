@@ -14,6 +14,7 @@ import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.confidence.complementary as complementary
 import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
@@ -78,19 +79,21 @@ def _plan(
         decoder_manager=decoder_manager,
         detection_events=detection_events,
     )
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         escalation, settings.weak_decoder
     )
+    policy = escalation_build.build_escalation_policy(escalation, signal)
     return plan_build.build_plan(settings, policy)
 
 
 def _switching():
     """A switching section with a fixed threshold and a gap signal."""
+    confidence = complementary.ComplementaryGap.Settings()
     return escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
         gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+        confidence=confidence,
     )
 
 
@@ -485,11 +488,12 @@ class _OutsideShape:
 
 def _outside_shape_switching():
     """A switching section whose strong window is the outside shape."""
+    confidence = complementary.ComplementaryGap.Settings()
     return escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
         gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+        confidence=confidence,
         strong_window="outside_shape",
     )
 

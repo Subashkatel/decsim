@@ -17,6 +17,7 @@ import pytest
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
@@ -58,8 +59,11 @@ def _settings(*, escalation=None, weak=None, strong=None):
 
 
 def _pool(settings, detection_events=None):
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
+    )
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, signal
     )
     plan = plan_build.build_plan(settings, policy)
     if detection_events is None:
@@ -68,7 +72,7 @@ def _pool(settings, detection_events=None):
             None, at_the_controller
         )
     return decoder_build.build_decoder_pool(
-        settings, plan, policy, detection_events
+        settings, plan, policy, detection_events, signal
     )
 
 
@@ -102,10 +106,15 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
         algorithm=matching, engine=engine
     )
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
     )
-    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, signal
+    )
+    unit = decoder_build.build_decoder_unit(
+        settings, "weak", policy, None, signal
+    )
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=4)
 
     ticks = unit.timing.stage_ticks(job)
@@ -126,22 +135,32 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
         algorithm=union_find_settings, engine=engine
     )
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
     )
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, signal
+    )
 
-    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+    unit = decoder_build.build_decoder_unit(
+        settings, "weak", policy, None, signal
+    )
 
     assert unit.decoder.weight_step == 0.25
 
 
 def test_a_tier_that_names_no_decoder_builds_none():
     settings = _settings()
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
     )
+    policy = escalation_build.build_escalation_policy(
+        settings.escalation, signal
+    )
 
-    unit = decoder_build.build_decoder_unit(settings, "strong", policy)
+    unit = decoder_build.build_decoder_unit(
+        settings, "strong", policy, None, signal
+    )
 
     assert unit is None
 
@@ -158,11 +177,12 @@ def test_a_weak_only_run_has_one_pool_and_no_strong_unit():
 
 
 def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
+    confidence = complementary.ComplementaryGap.Settings()
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
         gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+        confidence=confidence,
     )
     weak = _preset(10.0)
     strong = _preset(30.0)
@@ -176,11 +196,12 @@ def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
 
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
+    confidence = complementary.ComplementaryGap.Settings()
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
         gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+        confidence=confidence,
     )
     weak_memory = decoder_settings.UnitMemorySettings(bits=12)
     strong_memory = decoder_settings.UnitMemorySettings(bits=30)
@@ -198,11 +219,12 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
 
 def test_only_the_pool_that_decodes_the_windows_blocks_on_its_result():
     """A strong decode frees its unit at its end and waits in its output."""
+    confidence = complementary.ComplementaryGap.Settings()
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
         threshold_source="fixed",
         gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+        confidence=confidence,
     )
     weak_preset = _preset(10.0)
     weak = dataclasses.replace(weak_preset, result_blocks_unit=True)

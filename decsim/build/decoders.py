@@ -10,7 +10,6 @@ before the parts because the window models are compiled for the units.
 import dataclasses
 from typing import Optional
 
-import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
@@ -20,7 +19,6 @@ import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
-import decsim.escalation.settings as escalation_settings
 import decsim.observe.settings as observe_settings
 import decsim.ports as ports
 import decsim.settings as machine_settings
@@ -124,7 +122,8 @@ def build_decoder_unit(
     settings: machine_settings.MachineSettings,
     tier: str,
     policy,
-    formation: Optional[detection_events_module.TierFormation] = None,
+    formation: Optional[detection_events_module.TierFormation],
+    signal: Optional[ports.ConfidenceSignal],
 ):
     """The decoder unit of one tier, weak or strong, as the root builds it.
 
@@ -134,7 +133,7 @@ def build_decoder_unit(
     seat of the run's detection event placement (formation). The tier
     that decodes the plan's windows carries the Tesseract referee when
     the observation asks for it, and must produce the evidence the run's
-    confidence signal reads when the run builds one. None when the tier
+    confidence signal reads when the run has one. None when the tier
     names no decoder.
     """
     tier_settings = settings.decoder_settings_for(tier)
@@ -143,11 +142,10 @@ def build_decoder_unit(
         return None
     algorithm = algorithm_settings.build()
     is_active = tier == policy.primary_tier.value
-    escalation = settings.escalation
-    builds_a_signal = escalation_build.builds_a_confidence_signal(escalation)
-    if is_active and builds_a_signal:
+    if is_active and signal is not None:
+        signal_name = settings.escalation.confidence.name
         _check_serves_the_confidence(
-            algorithm, algorithm_settings.name, tier, settings.escalation
+            algorithm, algorithm_settings.name, tier, signal, signal_name
         )
     check = tables.row(
         observe_settings.WINDOW_CHECKS,
@@ -164,6 +162,7 @@ def build_decoder_pool(
     plan: plan_build.Plan,
     policy,
     detection_events: ports.DetectionEventPlacement,
+    signal: Optional[ports.ConfidenceSignal],
 ) -> DecoderPool:
     """The tiers' units and the managers' pools.
 
@@ -175,8 +174,10 @@ def build_decoder_pool(
     """
     weak_formation = _tier_formation(detection_events, "weak_decoder")
     strong_formation = _tier_formation(detection_events, "strong_decoder")
-    weak = build_decoder_unit(settings, "weak", policy, weak_formation)
-    strong = build_decoder_unit(settings, "strong", policy, strong_formation)
+    weak = build_decoder_unit(settings, "weak", policy, weak_formation, signal)
+    strong = build_decoder_unit(
+        settings, "strong", policy, strong_formation, signal
+    )
     active_tier = policy.primary_tier.value
     active = weak
     active_formation = weak_formation
@@ -275,7 +276,8 @@ def _check_serves_the_confidence(
     algorithm,
     kind,
     tier: str,
-    escalation: escalation_settings.EscalationSettings,
+    signal: ports.ConfidenceSignal,
+    signal_name: str,
 ) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
@@ -284,13 +286,11 @@ def _check_serves_the_confidence(
     is not refused: it prices one decode of one window, and a forced pair
     is two decodes, so the card is charged once per forced solve.
     """
-    signal = escalation_build.confidence_row(escalation)
     required = signal.decoder_evidence_requirement
     missing = required - algorithm.decoder_evidence
     if not missing:
         return
     reason = _missing_evidence_reason(algorithm, missing, signal)
-    signal_name = escalation.confidence
     raise ValueError(
         f"{tier}_decoder.kind {kind!r} cannot serve the confidence "
         f"{signal_name}: {reason}"

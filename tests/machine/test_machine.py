@@ -38,6 +38,7 @@ import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
 import decsim.collect as collect
+import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
@@ -379,8 +380,11 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     point = config.first_point_task()
     settings = point.shot_settings()
     engine = engine_module.Engine()
-    escalation_policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder
+    )
+    escalation_policy = escalation_build.build_escalation_policy(
+        settings.escalation, signal
     )
     plan = plan_build.build_plan(settings, escalation_policy)
     burst_detector = escalation_build.build_burst_detector(
@@ -390,7 +394,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings, plan.device, escalation_policy, burst_detector
     )
     pool = decoders_part.build_decoder_pool(
-        settings, plan, escalation_policy, detection_events
+        settings, plan, escalation_policy, detection_events, signal
     )
     links = machine_module.build_links(settings, engine)
     qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -401,7 +405,13 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings, engine, escalation_policy, detection_events, links
     )
     windows = windows_part.Windows.build(
-        settings, engine, plan, escalation_policy, burst_detector, links
+        settings,
+        engine,
+        plan,
+        escalation_policy,
+        burst_detector,
+        links,
+        signal,
     )
     decoders = decoders_part.Decoders.build(
         settings.decoder_manager, engine, pool, escalation_policy
@@ -1567,9 +1577,11 @@ def _switching_memory(weak_kind: str, confidence: str):
     """A d=3 memory whose weak tier, the named row, reports the signal."""
     decibels = 20.0
     nats = escalation_settings.decibels_to_nats(decibels)
+    signal_row = confidence_signals.CONFIDENCE_SIGNALS[confidence]
+    signal_settings = signal_row.Settings()
     escalation = escalation_settings.EscalationSettings(
         kind="switching",
-        confidence=confidence,
+        confidence=signal_settings,
         gap_threshold_db=decibels,
         gap_threshold_nats=nats,
     )

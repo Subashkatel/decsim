@@ -667,7 +667,10 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     expected_nats = task.settings.escalation.gap_threshold_nats
     assert installed.threshold_nats == expected_nats
     shot_settings = task.shot_settings()
-    policy = escalation_build.build_escalation_policy(
+    signal = escalation_build.confidence_signal(
         shot_settings.escalation, shot_settings.weak_decoder
+    )
+    policy = escalation_build.build_escalation_policy(
+        shot_settings.escalation, signal
     )
     assert policy.threshold is installed

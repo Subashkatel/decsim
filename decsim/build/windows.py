@@ -85,6 +85,7 @@ class Windows:
         escalation_policy: ports.EscalationPolicy,
         burst_detector: Optional[ports.BurstDetector],
         links: ports.Link,
+        confidence_signal: Optional[ports.ConfidenceSignal],
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
@@ -117,7 +118,7 @@ class Windows:
             clock=settings.windows.clock,
             decision_cycles=settings.windows.decision_cycles,
         )
-        confidence_signal, gap_join = _confidence(settings, engine)
+        gap_join = _gap_join(confidence_signal, engine)
         regions, shape, pending, strong_redecode = _strong_redecode(
             settings, engine, escalation_policy
         )
@@ -324,20 +325,14 @@ def _retention(
     )
 
 
-def _confidence(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
-) -> tuple:
-    """The signal a window's confidence is read from, and the join of solves.
-
-    Two Nones on a run that decides on no confidence.
-    """
-    if not escalation_build.builds_a_confidence_signal(settings.escalation):
-        return None, None
-    signal = escalation_build.confidence_signal(
-        settings.escalation, settings.weak_decoder
-    )
-    gap_join = gap_join_module.WindowGapJoin(engine)
-    return signal, gap_join
+def _gap_join(
+    confidence_signal: Optional[ports.ConfidenceSignal],
+    engine: engine_module.Engine,
+) -> Optional[gap_join_module.WindowGapJoin]:
+    """The join of a window's solves; None on a run with no signal."""
+    if confidence_signal is None:
+        return None
+    return gap_join_module.WindowGapJoin(engine)
 
 
 def _verdict(

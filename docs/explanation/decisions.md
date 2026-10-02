@@ -1240,7 +1240,7 @@ row.
 
 **Decided.** A point's record names what made its workload by asking
 the workload's row (`maker`), and the run folder writes whatever the row
-answers under `maker` in `resolved/<id>.json`. The producer row answers
+answers under `maker` in the point's `machine.json`. The producer row answers
 its function, the point's own arguments and the package's version; the
 files row answers null, since its files are a workload another run made.
 

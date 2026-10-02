@@ -446,12 +446,12 @@ def test_a_run_folder_without_a_trace_has_no_file_to_draw_from(tmp_path):
 
 
 def test_the_figures_shot_is_the_first_points_lowest_traced_seed(tmp_path):
-    """The sweep's order, from the manifest, not the ids' name order.
+    """The run's order, from run.json, not the ids' name order.
 
     Point ids are hashes, so the first point's file can sort last.
     """
     manifest = {"points": ["ffff", "0000"]}
-    manifest_path = tmp_path / "manifest.json"
+    manifest_path = tmp_path / "run.json"
     manifest_text = json.dumps(manifest)
     manifest_path.write_text(manifest_text)
     trace_dir = tmp_path / "trace"

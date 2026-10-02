@@ -44,15 +44,17 @@ def run_one_shot(
     task = dataclasses.replace(task, settings=settings)
     shot_settings = task.shot_settings()
     machine = config.built_machine(shot_settings, seed)
-    run_dir = run_folder.run_dir_for(config, out_dir)
+    run_dir = run_folder.run_dir_for(config.name, out_dir)
     point_id = task.strong_id()
-    started_utc = run_folder.start_run(config, run_dir, [point_id])
+    run_file = pathlib.Path(config_path)
+    started_utc = run_folder.start_run(run_dir, run_file, [point_id])
     sections = config.resolved_sections(task.metadata)
-    run_folder.record_point(run_dir, task, [(seed, 1)], sections)
+    name = point_id[: experiment.YAML_POINT_NAME_LENGTH]
+    run_folder.record_point(run_dir, name, task, [(seed, 1)], sections)
     result = machine.run()
     label = measure.shot_label(point_id, seed)
     write_shot(machine, settings, run_dir, label, result)
-    run_folder.finish_run(config, run_dir, [point_id], started_utc)
+    run_folder.finish_run(run_dir, run_file, [point_id], started_utc)
     return _result_lines(config, task, seed, result, run_dir)
 
 

@@ -3,8 +3,8 @@
 Four canonical Stim fragments reproduce the same live history without the
 optional producer. Runtime feedback changes how long the data stays live.
 The fragments are read and written in the files row's form: a fragments
-folder with the four .stim files and physical.json, which a run folder
-keeps in inputs/<id>/fragments.
+folder with the four .stim files and physical.json, which a results
+folder keeps in points/<name>/inputs/fragments.
 """
 
 import argparse
@@ -26,6 +26,8 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.circuits as circuit_records
 import decsim.settings as machine_settings
 
+# The one point this example runs, which names its folder in points/.
+POINT_NAME = "shot"
 # The yaml path each physical value of a point sits at: the run's
 # metadata names its values by it, as a yaml sweep's does.
 METADATA_PATHS = {
@@ -51,10 +53,11 @@ CIRCUIT_VALUES = (
 def main() -> None:
     """Save canonical inputs and the physical history selected by feedback.
 
-    The output folder is a run folder (decsim/experiments/run_folder.py):
-    its manifest, every value of the run in resolved/, its workload in
-    inputs/, the shot's files as decsim run writes them and the finished
-    flag, beside the executed history and the arguments.
+    The output folder is a results folder
+    (decsim/experiments/run_folder.py): its run.json, every value of the
+    run and its workload under points/shot/, the shot's files as decsim
+    run writes them and the finished time, beside the executed history
+    and the arguments.
     """
     arguments = _arguments()
     recorded = _recorded_values(arguments.input)
@@ -77,9 +80,9 @@ def main() -> None:
         metadata[path] = parameters[name]
     task = collect.Task(settings, metadata)
     point_ids = [task.strong_id()]
-    started_utc = run_folder.start_run(None, arguments.output, point_ids)
+    started_utc = run_folder.start_run(arguments.output, None, point_ids)
     seeds = [(arguments.seed, 1)]
-    run_folder.record_point(arguments.output, task, seeds)
+    run_folder.record_point(arguments.output, POINT_NAME, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
     run_command.write_shot(machine, settings, arguments.output, label, result)
@@ -90,7 +93,7 @@ def main() -> None:
     argument_path = arguments.output / "arguments.json"
     argument_json = collect.json_value(argument_values)
     run_folder.write_json(argument_path, argument_json)
-    run_folder.finish_run(None, arguments.output, point_ids, started_utc)
+    run_folder.finish_run(arguments.output, None, point_ids, started_utc)
     print(f"complete: {arguments.output}")
 
 
@@ -152,7 +155,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--patch", default="memory-patch")
     # a fragments folder of the files row, such as a run's
-    # inputs/<id>/fragments
+    # points/<name>/inputs/fragments
     parser.add_argument("--input", type=pathlib.Path)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     return parser.parse_args()
@@ -172,25 +175,25 @@ def _recorded_values(fragments) -> dict:
     """The physical values recorded beside a fragments folder.
 
     physical.json's period when it binds one, and, for a run folder's
-    inputs/<id>/fragments, the arguments the run that made them recorded
-    and the point's values in resolved/<id>.json, so a rerun from them
+    points/<name>/inputs/fragments, the arguments the run that made them
+    recorded and the point's values in its machine.json, so a rerun from them
     runs, and names, the recorded point.
     """
     if fragments is None:
         return {}
     physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
     physical = _read_json(physical_path)
-    point_folder = fragments.parent
-    run_dir = point_folder.parent.parent
+    inputs_dir = fragments.parent
+    point_folder = inputs_dir.parent
+    points_dir = point_folder.parent
+    run_dir = points_dir.parent
     recorded = _recorded_arguments(run_dir)
     for name, value in physical.items():
         if value is not None:
             recorded[name] = value
-    resolved_path = (
-        run_dir / run_folder.RESOLVED_FOLDER / f"{point_folder.name}.json"
-    )
-    if resolved_path.exists():
-        record = _read_json(resolved_path)
+    record_path = point_folder / run_folder.RECORD_FILE
+    if record_path.exists():
+        record = _read_json(record_path)
         metadata_values = _metadata_values(record["metadata"])
         recorded.update(metadata_values)
     return recorded

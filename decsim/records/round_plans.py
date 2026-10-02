@@ -11,7 +11,6 @@ import dataclasses
 class PlannedPiece:
     """One piece of the plan: seeds [first_seed, first_seed + count)."""
 
-    configuration_id: str
     point_id: str
     first_seed: int
     count: int

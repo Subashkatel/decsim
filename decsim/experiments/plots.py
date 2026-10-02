@@ -25,7 +25,6 @@ microseconds and the stage breakdown in milliseconds.
 
 import csv
 import dataclasses
-import json
 import pathlib
 import statistics
 from typing import Optional
@@ -127,8 +126,8 @@ def first_trace_file(run_dir) -> Optional[pathlib.Path]:
 
     A sweep writes one file per traced shot under trace/, named by the
     shot's point id and seed (experiments/measure.py shot_label). The
-    ids are hashes, so their name order is no order of the sweep's; the
-    manifest lists the points in task order, and the figure draws the
+    ids are hashes, so their name order is no order of the sweep's;
+    run.json lists the points in the run's order, and the figure draws the
     lowest traced seed of the first point that traced one.
     """
     trace_dir = pathlib.Path(run_dir) / TRACE_DIR
@@ -821,11 +820,10 @@ def _legend_label(shot: _TimelineShot, window_key: tuple) -> str:
 
 
 def _recorded_points(run_dir) -> list:
-    """The point ids a run folder's manifest lists, in task order."""
-    manifest_path = pathlib.Path(run_dir) / "manifest.json"
-    manifest_text = manifest_path.read_text()
-    manifest = json.loads(manifest_text)
-    return manifest["points"]
+    """The point ids a results folder's run.json lists, in the run's order."""
+    run_path = pathlib.Path(run_dir) / run_folder.RUN_FILE
+    run_record = run_folder.read_json(run_path)
+    return run_record["points"]
 
 
 def _traced_shots_of(trace_dir: pathlib.Path, point_id: str) -> list:

@@ -31,14 +31,17 @@ import decsim.records.program as program_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 
+# The one point this example runs, which names its folder in points/.
+POINT_NAME = "shot"
+
 
 def main() -> None:
     """Write the input circuit, settings, result and trace into one folder.
 
-    The folder is a run folder (decsim/experiments/run_folder.py): its
-    manifest, every value of the run in resolved/, its workload in
-    inputs/, the shot's files as decsim run writes them and the finished
-    flag, beside the arguments and the setup time.
+    The folder is a results folder (decsim/experiments/run_folder.py):
+    its run.json, every value of the run and its workload under
+    points/shot/, the shot's files as decsim run writes them and the
+    finished time, beside the arguments and the setup time.
     """
     arguments = _arguments()
     _resolve_memory_parameters(arguments)
@@ -76,9 +79,9 @@ def main() -> None:
     setup_seconds = prepared - started
     task = _point_task(arguments, settings)
     point_ids = [task.strong_id()]
-    started_utc = run_folder.start_run(None, arguments.output, point_ids)
+    started_utc = run_folder.start_run(arguments.output, None, point_ids)
     seeds = [(arguments.seed, 1)]
-    run_folder.record_point(arguments.output, task, seeds)
+    run_folder.record_point(arguments.output, POINT_NAME, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
     run_command.write_shot(machine, settings, arguments.output, label, result)
@@ -88,7 +91,7 @@ def main() -> None:
     run_folder.write_json(argument_path, argument_values)
     setup_path = arguments.output / "setup_seconds.json"
     run_folder.write_json(setup_path, setup_seconds)
-    run_folder.finish_run(None, arguments.output, point_ids, started_utc)
+    run_folder.finish_run(arguments.output, None, point_ids, started_utc)
     print(f"complete: {arguments.output}; setup {setup_seconds:.6f} seconds")
 
 
@@ -260,11 +263,12 @@ def _circuit(arguments) -> tuple[stim.Circuit, dict[int, int]]:
             arguments.basis,
             arguments.probability,
         )
-    inputs_dir = arguments.input / run_folder.INPUTS_FOLDER
-    (point_folder,) = inputs_dir.iterdir()
-    operations_path = point_folder / "operations.json"
-    circuit_path = point_folder / "circuit.stim"
-    rounds_path = point_folder / "measurement_rounds.json"
+    points_dir = arguments.input / run_folder.POINTS_FOLDER
+    (point_folder,) = points_dir.iterdir()
+    inputs_dir = point_folder / run_folder.INPUTS_FOLDER
+    operations_path = inputs_dir / "operations.json"
+    circuit_path = inputs_dir / "circuit.stim"
+    rounds_path = inputs_dir / "measurement_rounds.json"
     workload = workload_files.read_workload(
         operations_path, circuit_path, rounds_path
     )

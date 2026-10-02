@@ -101,7 +101,7 @@ def _collected(folder, overrides: dict):
     config_path = yaml_configs.write_config(folder, sweep)
     run_dir = folder / "run"
     command.main(["collect", str(config_path), "--out", str(run_dir)])
-    return yaml_configs.run_folder_of(run_dir)
+    return run_dir
 
 
 @pytest.fixture(scope="module")
@@ -403,14 +403,14 @@ def test_diff_names_a_point_only_one_folder_holds(runs, tmp_path, capsys):
     assert f"  {point} only in the second folder" in second_lines
 
 
-def test_diff_refuses_a_folder_without_its_resolved_settings(
+def test_diff_refuses_a_folder_without_its_point_records(
     runs, tmp_path, capsys
 ):
-    """Without resolved/ the settings would read as never differing."""
+    """Without points/ the settings would read as never differing."""
     bare = tmp_path / "bare"
     shutil.copytree(runs["first"], bare)
-    resolved_dir = bare / "resolved"
-    shutil.rmtree(resolved_dir)
+    points_dir = bare / "points"
+    shutil.rmtree(points_dir)
 
     with pytest.raises(SystemExit) as stopped:
         command.main(["diff", str(runs["shorter"]), str(bare)])
@@ -418,7 +418,7 @@ def test_diff_refuses_a_folder_without_its_resolved_settings(
 
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
-    assert "holds no resolved/ folder" in printed.err
+    assert "holds no points/ folder" in printed.err
 
 
 @pytest.mark.parametrize(

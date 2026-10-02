@@ -6,10 +6,10 @@ runs, so `decsim show` never loads matplotlib and `decsim plot` never
 loads Stim. The console script and `python -m decsim` both land here.
 
     decsim run <yaml> [--seed N] [--out DIR] [--log ...] [--trace]
-    decsim collect <yaml> [--out DIR] [--processes N]
+    decsim collect <run file> [--out DIR] [--processes N]
     decsim collect --plan <round>/plan.csv --task K [--processes N]
-    decsim plan <yaml>... --out DIR --tasks N [--cores C] [--hours H]
-    decsim status <experiment dir>
+    decsim plan <run file> --out DIR --tasks N [--cores C] [--hours H]
+    decsim status <results folder>
     decsim show <yaml>
     decsim diff <run_dir> <run_dir>
     decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
@@ -68,7 +68,7 @@ def _run(argv: list) -> None:
 
 
 def _collect(argv: list) -> None:
-    """The whole sweep of one yaml, or one task of a round's plan."""
+    """Every point of one run file, or one task of a round's plan."""
     import decsim.experiments.collect_command as collect_command
     import decsim.experiments.report as report
 
@@ -81,10 +81,10 @@ def _collect(argv: list) -> None:
             plan_path, parsed.task, processes=parsed.processes
         )
         return
-    if parsed.config is None:
-        parser.error("name the yaml to sweep, or --plan and --task")
+    if parsed.run_file is None:
+        parser.error("name the run file, or --plan and --task")
     run_dir, rows = collect_command.run_experiment(
-        parsed.config, parsed.out, processes=parsed.processes
+        parsed.run_file, parsed.out, processes=parsed.processes
     )
     if not rows:
         return
@@ -100,10 +100,13 @@ def _collect_parser():
 
     parser = argparse.ArgumentParser(prog="decsim collect")
     parser.add_argument(
-        "config", nargs="?", default=None, help="the experiment yaml to sweep"
+        "run_file",
+        nargs="?",
+        default=None,
+        help="the experiment's run file, Python or yaml",
     )
     parser.add_argument(
-        "--out", default=None, help="the experiment folder to write"
+        "--out", default=None, help="the results folder to write"
     )
     parser.add_argument(
         "--processes",
@@ -124,9 +127,10 @@ def _check_the_plan_arguments(parser, parsed) -> None:
     """A planned task takes its yaml and folder from the plan, and a task."""
     if parsed.task is None:
         parser.error("--plan runs one task of the plan; name it with --task")
-    if parsed.config is not None or parsed.out is not None:
+    if parsed.run_file is not None or parsed.out is not None:
         parser.error(
-            "--plan reads the yaml and the folder from the plan; name neither"
+            "--plan reads the run file and the folder from the plan; name "
+            "neither"
         )
 
 

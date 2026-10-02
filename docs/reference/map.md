@@ -344,11 +344,11 @@ docstring.
 ### experiments
 
 - `decsim/experiments/__init__.py`: The experiments layer: the yaml experiment, the sweep, the rows and figures.
-- `decsim/experiments/collect_command.py`: `decsim collect`: every sweep point of one yaml, each until it stops.
-- `decsim/experiments/collection.py`: The collection section: how a sweep point's shots are cut and stopped.
+- `decsim/experiments/collect_command.py`: `decsim collect`: every point of one experiment, each until it stops.
+- `decsim/experiments/collection.py`: The collection: how a point's shots are cut and stopped.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
 - `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
-- `decsim/experiments/experiment.py`: One yaml file is one experiment; this module is the only yaml reader.
+- `decsim/experiments/experiment.py`: An experiment: named points, each a machine to collect shots of.
 - `decsim/experiments/failure_statistics.py`: Estimates, exact intervals and paired tests of logical failure rates.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
@@ -359,8 +359,8 @@ docstring.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
 - `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
 - `decsim/experiments/run_command.py`: `decsim run`: one seeded shot of one yaml, narrated.
-- `decsim/experiments/run_folder.py`: The experiment folder and its run folders: results, config, identity.
-- `decsim/experiments/status_command.py`: `decsim status`: an experiment's pieces folded, and where each point stands.
+- `decsim/experiments/run_folder.py`: The results folder: one experiment's records, pieces and rows.
+- `decsim/experiments/status_command.py`: `decsim status`: a results folder's pieces folded, and where each point is.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
@@ -376,4 +376,4 @@ docstring.
 
 ### results
 
-- `decsim/results.py`: Run folders read back as one table.
+- `decsim/results.py`: Results folders read back as one table.

@@ -352,7 +352,8 @@ def terminal_lines(rows: list, report_dir: Path) -> list:
     nothing has no counts and a row of zeros would claim otherwise.
     """
     movement = _data_movement_of(report_dir)
-    swept = swept_values_of(report_dir)
+    point_ids = [row["point_id"] for row in rows]
+    swept = run_folder.swept_values(report_dir, point_ids)
     blocks = []
     for row in rows:
         values = swept[row["point_id"]]
@@ -603,19 +604,17 @@ def rows_by_point(run_dir: Path) -> dict:
 
 
 def fold_pieces(
-    experiment_dir: Path,
+    run_dir: Path,
     folders: list,
     point_ids: list,
-    seeds_by_point: dict,
     out_dir: Path,
     rules: Optional[dict] = None,
 ) -> list:
-    """Pieces' additive files folded into a run folder; its sweep rows.
+    """Pieces' additive files folded into out_dir; the sweep rows.
 
-    A piece holds a run folder's additive files for a range of one
-    point's seeds. The points' records go into the run folder with the
-    seeds their pieces hold (seeds_by_point), and every folded row takes
-    its point's swept values from them. The rows come back in the order
+    A piece holds the additive files for a range of one point's seeds.
+    Every folded row takes its point's swept values from the point's
+    record in run_dir. The rows come back in the order
     one run over every piece would write them: its points in task order,
     then its seeds. Two pieces may not share a shot, which would be
     counted twice. rules maps a point id to the collection.PointRule
@@ -628,20 +627,19 @@ def fold_pieces(
     experiments/fold.py and not a list of the rows.
     """
     order = _refused_or_ordered(folders, point_ids)
-    run_folder.copy_points_of(
-        experiment_dir, point_ids, seeds_by_point, out_dir
-    )
-    return _fold_into(folders, point_ids, order, out_dir, rules)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    swept = run_folder.swept_values(run_dir, point_ids)
+    return _fold_the_folders(folders, order, out_dir, swept, rules)
 
 
 def refuse_pieces_of_another_tree(folders: list) -> None:
     """Refuse a collect onto a point whose saved pieces ran another tree.
 
-    A collect names this tree in its run folder's manifest before its
-    first shot and folds the pieces it adds with the saved ones, so it
-    asks the fold's own refusal first, this tree standing for the pieces
-    it would add, and a refused collect spends no shot and leaves the
-    run folder as the earlier tree wrote it.
+    A collect names this tree in its results folder's run.json before
+    its first shot and folds the pieces it adds with the saved ones, so
+    it asks the fold's own refusal first, this tree standing for the
+    pieces it would add, and a refused collect spends no shot and leaves
+    the results folder as the earlier tree wrote it.
     """
     identity = run_folder.piece_identity()
     this_code = _code_of(identity)
@@ -649,12 +647,6 @@ def refuse_pieces_of_another_tree(folders: list) -> None:
     for by_code in code_by_point.values():
         by_code.setdefault(this_code, "this collect")
     _refuse_a_point_of_two_trees(code_by_point)
-
-
-def swept_values_of(report_dir: Path) -> dict:
-    """The swept values of every point a run folder's manifest lists."""
-    manifest = _manifest_of(report_dir)
-    return run_folder.swept_values(report_dir, manifest["points"])
 
 
 class _PointMovement:
@@ -738,14 +730,6 @@ def _refused_or_ordered(folders: list, point_ids: list):
     _refuse_pieces_that_ran_different_code(folders)
     _refuse_a_repeated_shot(folders, order)
     return order
-
-
-def _fold_into(
-    folders: list, point_ids: list, order, out_dir: Path, rules
-) -> list:
-    """The folders' rows into out_dir, each with its point's swept values."""
-    swept = run_folder.swept_values(out_dir, point_ids)
-    return _fold_the_folders(folders, order, out_dir, swept, rules)
 
 
 def _fold_the_folders(
@@ -1382,13 +1366,6 @@ def _task_positions(points: list) -> dict:
     return positions
 
 
-def _manifest_of(run_dir) -> dict:
-    """One run folder's manifest.json."""
-    manifest_path = Path(run_dir) / "manifest.json"
-    manifest_text = manifest_path.read_text()
-    return json.loads(manifest_text)
-
-
 def _refuse_folders_of_different_columns(run_dirs: list) -> None:
     """The pieces of one point record the same columns in a folded file."""
     for name in FOLDED_FILES:
@@ -1561,8 +1538,8 @@ def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
 def _refuse_pieces_that_ran_different_code(run_dirs: list) -> None:
     """A point's pieces must have run one tree: one commit, clean or dirty.
 
-    A point's estimate pools its pieces' shots, and the run folder's
-    manifest names one tree, the folding process's, so pieces of two
+    A point's estimate pools its pieces' shots, and the results folder's
+    run.json names one tree, so pieces of two
     trees would pool two simulators under one name. A dirty tree's
     changes are not recorded per piece, so two dirty pieces of one
     commit pass, and a clean and a dirty one do not.
@@ -1605,8 +1582,8 @@ def _refuse_the_code(point_id: str, by_code: dict):
     listed = ", ".join(pieces_named)
     raise refusal.RefusalError(
         f"the pieces of point {point_id} ran different code: {listed}; "
-        "one estimate would pool two simulators under one manifest, so "
-        "collect the point into a new experiment folder, or move one "
+        "one estimate would pool two simulators under one run.json, so "
+        "collect the point into a new results folder, or move one "
         "tree's pieces out of this one"
     )
 
@@ -1628,7 +1605,7 @@ def _refuse_the_confidence_coverage(point_id: str, by_coverage: dict):
         f"the pieces of point {point_id} recorded confidence for different "
         f"shots (confidence_shot_count): {listed}; folding them would "
         "leave the confidence files short of the shots shots.csv counts, "
-        "so collect the point again into a new experiment folder"
+        "so collect the point again into a new results folder"
     )
 
 

@@ -87,7 +87,8 @@ def main(argv: list) -> None:
     parsed = parser.parse_args(argv)
     job = JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
     experiment_dir = pathlib.Path(parsed.out)
-    round_dir = plan_round(parsed.configs, experiment_dir, parsed.tasks, job)
+    run_file = pathlib.Path(parsed.run_file)
+    round_dir = plan_round(run_file, experiment_dir, parsed.tasks, job)
     if round_dir is None:
         print(
             f"every point has stopped; decsim status {experiment_dir}",
@@ -101,36 +102,33 @@ def main(argv: list) -> None:
 
 
 def plan_round(
-    config_paths: list,
+    run_file,
     experiment_dir: pathlib.Path,
     task_count: int,
     job: JobShape,
 ) -> Optional[pathlib.Path]:
     """The next round's plan written in its folder; None when nothing is left.
 
-    Every configuration's points are recorded first, so the tasks that
-    run the round only read them. Yamls of one configuration id, which
-    split its sweep, are planned as one configuration, and a point two
-    configurations reach is planned once (collect_command.recorded_points).
-    A shape below one is refused before anything is written.
+    Every point is recorded first, and run.json names the run file, so
+    the tasks that run the round load it again and only read the
+    records. A shape below one is refused before anything is written.
     """
     _refuse_a_shape_below_one(task_count, job)
+    run_folder.refuse_another_tree(experiment_dir)
     experiment_dir.mkdir(parents=True, exist_ok=True)
+    given_run_file = pathlib.Path(run_file)
+    absolute_run_file = given_run_file.resolve()
+    study = experiment.load(absolute_run_file)
     planned = pieces.planned_pieces(experiment_dir)
-    bundles = []
-    costs = {}
-    configs_by_id = _configs_by_id(config_paths)
-    owned_points = collect_command.recorded_points(
-        experiment_dir, configs_by_id
+    points = collect_command.recorded_points(experiment_dir, study)
+    point_ids = [point.task.strong_id() for point in points]
+    started_utc = run_folder.start_run(
+        experiment_dir, absolute_run_file, point_ids
     )
-    for configuration_id, point in owned_points:
-        point_id = point.task.strong_id()
-        point_pieces = _next_pieces(
-            experiment_dir, configuration_id, point, planned
-        )
-        point_bundles = _bundles_of(point, point_pieces)
-        bundles.extend(point_bundles)
-        costs[point_id] = _cost_of(experiment_dir, point)
+    bundles, costs = _bundles_and_costs(experiment_dir, points, planned)
+    run_folder.finish_run(
+        experiment_dir, absolute_run_file, point_ids, started_utc
+    )
     if not bundles:
         return None
     round_dir = _new_round_dir(experiment_dir)
@@ -143,8 +141,8 @@ def plan_round(
 def _parser() -> argparse.ArgumentParser:
     """The plan command's arguments."""
     parser = argparse.ArgumentParser(prog="decsim plan")
-    parser.add_argument("configs", nargs="+", help="the experiment's yamls")
-    parser.add_argument("--out", required=True, help="the experiment folder")
+    parser.add_argument("run_file", help="the experiment's run file")
+    parser.add_argument("--out", required=True, help="the results folder")
     parser.add_argument(
         "--tasks", type=int, required=True, help="the most tasks a round has"
     )
@@ -181,26 +179,23 @@ def _refuse_a_shape_below_one(task_count: int, job: JobShape) -> None:
             )
 
 
-def _configs_by_id(config_paths: list) -> dict:
-    """The yamls, each loaded by its absolute path, grouped by configuration id.
-
-    The absolute path is what configurations.csv records, so a task
-    started in another folder loads the same file.
-    """
-    configs_by_id = {}
-    for config_path in config_paths:
-        given_path = pathlib.Path(config_path)
-        absolute_path = given_path.resolve()
-        config = experiment.load_experiment(absolute_path)
-        configuration_id = run_folder.configuration_id(config)
-        configs = configs_by_id.setdefault(configuration_id, [])
-        configs.append(config)
-    return configs_by_id
+def _bundles_and_costs(
+    experiment_dir: pathlib.Path, points: list, planned: dict
+) -> tuple:
+    """Every point's next pieces as the dealer's bundles, and its cost."""
+    bundles = []
+    costs = {}
+    for point in points:
+        point_id = point.task.strong_id()
+        point_pieces = _next_pieces(experiment_dir, point, planned)
+        point_bundles = _bundles_of(point, point_pieces)
+        bundles.extend(point_bundles)
+        costs[point_id] = _cost_of(experiment_dir, point)
+    return bundles, costs
 
 
 def _next_pieces(
     experiment_dir: pathlib.Path,
-    configuration_id: str,
     point: collect_command.PointCollection,
     planned: dict,
 ) -> list:
@@ -214,11 +209,11 @@ def _next_pieces(
     planned_ranges = planned.get(point_id, [])
     missing = _unsaved_seeds(point.saved, planned_ranges)
     if missing:
-        return _pieces_of(configuration_id, point_id, missing)
+        return _pieces_of(point_id, missing)
     highest_seed = _highest_seed(planned_ranges, saved)
     shot_count = _extension(point, point.tracker.counts, highest_seed)
     ranges = _cut(highest_seed, shot_count, point.piece_shots)
-    return _pieces_of(configuration_id, point_id, ranges)
+    return _pieces_of(point_id, ranges)
 
 
 def _unsaved_seeds(saved: dict, planned_ranges: list) -> list:
@@ -326,13 +321,11 @@ def _cut(first_seed: int, shot_count: int, piece_shots: int) -> list:
     return ranges
 
 
-def _pieces_of(configuration_id: str, point_id: str, ranges: list) -> list:
+def _pieces_of(point_id: str, ranges: list) -> list:
     """Planned pieces of one point, one per (first seed, count)."""
     planned = []
     for first_seed, count in ranges:
-        piece = round_plans.PlannedPiece(
-            configuration_id, point_id, first_seed, count
-        )
+        piece = round_plans.PlannedPiece(point_id, first_seed, count)
         planned.append(piece)
     return planned
 

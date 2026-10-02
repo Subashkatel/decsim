@@ -423,7 +423,7 @@ def _write_fragments(
 
 def _saved_fragments(run_folder: pathlib.Path) -> pathlib.Path:
     """The fragments a tool run saved with its one point's inputs."""
-    saved = run_folder.glob("inputs/*/fragments")
+    saved = run_folder.glob("points/*/inputs/fragments")
     (fragments,) = saved
     return fragments
 
@@ -449,9 +449,13 @@ def _run_example(
 
 
 def _resolved_names(folder: pathlib.Path) -> list:
-    """The point ids a run folder recorded, which name its every value."""
-    paths = folder.glob("resolved/*.json")
-    return sorted(path.name for path in paths)
+    """The point ids a results folder recorded, which name its every value."""
+    paths = folder.glob("points/*/machine.json")
+    point_ids = []
+    for path in paths:
+        record = _read_json(path.parent, path.name)
+        point_ids.append(record["id"])
+    return sorted(point_ids)
 
 
 def _read_json(folder: pathlib.Path, filename: str) -> object:

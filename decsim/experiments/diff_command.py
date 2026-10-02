@@ -140,12 +140,13 @@ def main(argv: list) -> None:
 
 
 def _refuse_a_folder_without_points(run_dir: pathlib.Path) -> None:
-    """A folder without resolved/ would read as settings that never differ."""
-    if (run_dir / run_folder.RESOLVED_FOLDER).is_dir():
+    """A folder without points/ would read as settings that never differ."""
+    points_dir = run_dir / run_folder.POINTS_FOLDER
+    if points_dir.is_dir():
         return
     raise refusal.RefusalError(
-        f"{run_dir} holds no resolved/ folder; name a run folder decsim "
-        "collect wrote, combined/<name>-<id8>/ in its experiment folder"
+        f"{run_dir} holds no points/ folder; name a results folder decsim "
+        "collect wrote"
     )
 
 
@@ -179,8 +180,8 @@ def _input_lines(first: pathlib.Path, second: pathlib.Path) -> list:
     second_points = _records_by_metadata(second)
     lines = ["inputs:"]
     for point in _shared(first_points, second_points):
-        first_hashes = _hashes(first, first_points[point]["id"])
-        second_hashes = _hashes(second, second_points[point]["id"])
+        first_hashes = _hashes(first, first_points[point])
+        second_hashes = _hashes(second, second_points[point])
         point_text = _point_text(point)
         for name in _changed(first_hashes, second_hashes):
             lines.append(f"  {point_text} {name}: sha256 differs")
@@ -516,8 +517,8 @@ def _shot_rows_of(run_dir: pathlib.Path, point_id: str) -> list:
 
 
 def _records_by_metadata(run_dir: pathlib.Path) -> dict:
-    """Each point's resolved/ record, keyed by its metadata's text."""
-    by_id = run_folder.resolved_by_point(run_dir)
+    """Each point's machine.json, keyed by its metadata's text."""
+    by_id = run_folder.point_records(run_dir)
     records = {}
     for record in by_id.values():
         point = collect.metadata_text(record["metadata"])
@@ -540,11 +541,10 @@ def _rows_by_metadata(run_dir: pathlib.Path) -> dict:
     return rows
 
 
-def _hashes(run_dir: pathlib.Path, point_id: str) -> dict:
-    """A point's inputs/<id>/hashes.json."""
-    path = (
-        run_dir / run_folder.INPUTS_FOLDER / point_id / run_folder.HASHES_FILE
-    )
+def _hashes(run_dir: pathlib.Path, record: dict) -> dict:
+    """A point's inputs/hashes.json."""
+    inputs_dir = run_folder.inputs_dir_of(run_dir, record)
+    path = inputs_dir / run_folder.HASHES_FILE
     text = path.read_text()
     return json.loads(text)
 

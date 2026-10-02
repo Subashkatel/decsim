@@ -4,9 +4,8 @@ sinter's CollectionOptions (sinter/_data/_collection_options.py:34-38):
 an experiment's default and a point's own, or, read from a yaml, the
 collection section at the top of a file or in one sweep block, whose
 keys override the top's one by one. None of its keys enters a point's
-id or a
-configuration's id, as sinter's strong id leaves the collection options
-out (sinter/_data/_task.py:167-204): collecting longer is the same point
+id, as sinter's strong id leaves the collection options out
+(sinter/_data/_task.py:167-204): collecting longer is the same point
 run longer.
 
 A point stops on its contiguous prefix of seeds, sinter's rule

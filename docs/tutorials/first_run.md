@@ -127,7 +127,7 @@ ready to frame commit: median 15.772 us, p99 22.726 us
 
 data movement: observation.data_movement was off, so this run counted no copies, references or moves
 
-every column: results/reference/combined/reference-6dc5065e/sweep.csv
+every column: results/reference/sweep.csv
 ```
 
 Two new words:
@@ -160,33 +160,13 @@ ls results/reference
 ```
 
 ```
-combined
-configurations.csv
-inputs
-pieces
-resolved
-```
-
-`--out` names the experiment folder. `pieces/` holds each point's shots
-in pieces, each saved whole the moment it ends, and running the command
-again into the same folder runs only the pieces it has not saved.
-`combined/` holds one run folder per configuration, named by the yaml
-and the first eight characters of a hash of its settings, folded from
-the pieces. Without `--out`, `collect` writes a new folder named with
-the UTC time the run started, so no two collects share one.
-
-```bash
-ls results/reference/combined/*
-```
-
-```
 config
-inputs
 latency_samples.csv
 links.csv
-manifest.json
+pieces
+points
 residence.csv
-resolved
+run.json
 shot_links.csv
 shots.csv
 sweep.csv
@@ -195,12 +175,29 @@ trace
 window_samples.csv
 ```
 
-The folder is written under `results/`, which is output and is not
-tracked by git. `config/` holds a verbatim copy of the yaml files that
-produced it, `manifest.json` the git commit and the command line,
-`resolved/` every value each point ran with and the function that made
-its workload, `inputs/` the workload each point ran, and the csv files
-the facts.
+`--out` names the results folder. `pieces/` holds each point's shots
+in pieces, each saved whole the moment it ends, and running the command
+again into the same folder runs only the pieces it has not saved. The
+csv files at the top are folded from the pieces. Without `--out`,
+`collect` writes a new folder, `results/<date>_<name>/`, and a second
+one the same day gets `_2`, so no two collects share one.
+
+```bash
+ls results/reference/points/*
+```
+
+```
+inputs
+machine.json
+```
+
+`points/` holds one folder per point. A point of a yaml is named by the
+first twelve characters of its id. The folder is written under
+`results/`, which is output and is not tracked by git. `config/` holds
+a verbatim copy of the yaml files that produced it, `run.json` the git
+commit and the command line, each `machine.json` every value its point
+ran with and the function that made its workload, `inputs/` the
+workload the point ran, and the csv files the facts.
 [The run folder](../reference/run_folder.md) has one row per file.
 
 ## Step 5. Read one row and one figure
@@ -209,7 +206,7 @@ the facts.
 columns. The distance and the first counts:
 
 ```bash
-cut -d, -f3,6,8,11-14 results/reference/combined/*/sweep.csv
+cut -d, -f3,6,8,11-14 results/reference/sweep.csv
 ```
 
 ```
@@ -237,11 +234,11 @@ of them groups by a setting with no parsing.
 `collect` also drew a figure. Draw a second one:
 
 ```bash
-decsim plot results/reference/combined/* --figure stage_breakdown
+decsim plot results/reference --figure stage_breakdown
 ```
 
 ```
-results/reference/combined/reference-6dc5065e/stage_breakdown.png
+results/reference/stage_breakdown.png
 ```
 
 `stage_breakdown.png` shows where a window's time went, stage by stage:
@@ -267,7 +264,7 @@ For one round, decsim prints the path itself:
 
 ```bash
 decsim trace follow \
-  results/reference/combined/*/trace/*_seed0.trace.json \
+  results/reference/trace/*_seed0.trace.json \
   --round 1:1
 ```
 
@@ -322,7 +319,7 @@ The same command follows a window instead of a round:
 
 ```bash
 decsim trace follow \
-  results/reference/combined/*/trace/*_seed0.trace.json \
+  results/reference/trace/*_seed0.trace.json \
   --window 1:0
 ```
 

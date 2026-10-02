@@ -42,7 +42,7 @@ STATE_FILE = "state.pickle"
 # A round's folder, round<k>/, and its plan: a row per piece, its task first.
 ROUND_PREFIX = "round"
 PLAN_FILE = "plan.csv"
-PLAN_COLUMNS = ("task", "configuration_id", "point_id", "first_seed", "count")
+PLAN_COLUMNS = ("task", "point_id", "first_seed", "count")
 
 
 def piece_dir(
@@ -237,7 +237,6 @@ def read_plan(plan_path: pathlib.Path) -> list:
     planned = []
     for row in rows:
         piece = round_plans.PlannedPiece(
-            row["configuration_id"],
             row["point_id"],
             int(row["first_seed"]),
             int(row["count"]),

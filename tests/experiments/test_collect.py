@@ -606,15 +606,15 @@ def test_one_yaml_saved_under_two_names_names_its_points_alike(tmp_path):
 
 
 def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
-    """resolved/<id>.json is where a label is read, so it keeps them all."""
+    """machine.json is where a label is read, so it keeps them all."""
     config_path = tmp_path / "t6.yaml"
     shutil.copyfile(REFERENCE_YAML, config_path)
     config = experiment.load_experiment(config_path)
     task = config.first_point_task()
 
-    point_id = run_folder.record_point(tmp_path, task)
+    run_folder.record_point(tmp_path, "point", task)
 
-    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_path = tmp_path / "points" / "point" / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     links = record["settings"]["links"]
@@ -670,9 +670,9 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
     plain_rows = _shot_rows_without_wall_clock(plain)
     recorded_rows = _shot_rows_without_wall_clock(recorded)
     printed = capsys.readouterr()
-    point_id = run_folder.record_point(tmp_path, recorded)
+    run_folder.record_point(tmp_path, "point", recorded)
 
-    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_path = tmp_path / "points" / "point" / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     recorded_observation = record["settings"]["observation"]

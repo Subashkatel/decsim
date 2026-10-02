@@ -144,10 +144,10 @@ sources, and the ideas behind the tree.
 ## How to cite decsim
 
 There is no paper for decsim yet. Cite the repository and the commit you
-ran, which every run folder records for you: `manifest.json` holds the
-git commit, the resolved config and the library versions, and
-`code_state.patch` holds any uncommitted change. Quoting the commit from
-the manifest is enough for someone else to reproduce the run.
+ran, which every results folder records for you: `run.json` holds the
+git commit and the library versions, each point's `machine.json` every
+value it ran with, and `code_state.patch` any uncommitted change.
+Quoting the commit from `run.json` is enough for someone else to reproduce the run.
 
 The decoders, the circuits and the models decsim runs are other people's
 work and are cited where they are used: the papers behind each design

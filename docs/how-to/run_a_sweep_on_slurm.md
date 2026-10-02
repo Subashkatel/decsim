@@ -62,10 +62,8 @@ This writes `results/redo_window_switching/round1/plan.csv`, with its
 pieces dealt to at most 300 tasks, and `tasks.csv`, with each task's
 cores, memory and hours.
 
-Several yamls may share one experiment folder. Yamls of one
-configuration, such as a grid split into one file per distance, are
-planned as one. A point two configurations both reach is planned once,
-and refused if they give it two collections.
+A results folder holds one experiment. A point two sweep blocks both
+reach is planned once, and refused if they give it two collections.
 
 How the plan decides a point's pieces:
 
@@ -105,7 +103,7 @@ The script submits one job array per shape of job in `tasks.csv`,
 since an array has one memory request. Each array task runs `decsim
 collect --plan results/redo_window_switching/round1/plan.csv --task
 <id>`, one process per core. Its log goes to `round1/<id>/log.txt`,
-beside its manifest.
+beside its `run.json`.
 
 The script writes no account, partition or QOS. `sbatch` reads them from
 the environment variables SBATCH_ACCOUNT, SBATCH_PARTITION and
@@ -140,15 +138,13 @@ whichever runs first.
 decsim status results/redo_window_switching
 ```
 
-This folds every saved piece into its configuration's run folder,
-`results/redo_window_switching/combined/<name>-<id8>/`. It reads what
-the plans and collects recorded of each point, not the yamls, so a
-point a yaml no longer sweeps is still counted, and a point two
-configurations reach is counted once. It writes
+This folds every saved piece into the csv files at the top of
+`results/redo_window_switching/`. It reads what the plans and collects
+recorded of each point, not the yaml, so a point the yaml no longer
+sweeps is still counted. It writes
 `results/redo_window_switching/status.csv`, one row per point, with
 these columns:
 
-- its configuration id
 - its row of the run folder's `sweep.csv`, whole: its values, its state
   (`running`, `target`, `minimum`, `cap`, `time cap`, or `no data`), its
   shots, failures and unscored shots, and every estimate and exact

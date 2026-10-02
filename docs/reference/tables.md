@@ -145,9 +145,9 @@ In `decsim/links/fabric.py`. A row of it is named under `links.<path_name>.proto
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `ideal` | `Channel` in `decsim/links/channel.py` | One channel at run time: a setup engine, then a wire moving each whole. |
-| `credit` | `CreditChannel` in `decsim/links/credit_channel.py` | A channel whose frames wait for receive-buffer credits. |
-| `reliable` | `ReliableChannel` in `decsim/links/reliable_channel.py` | A channel whose lost frames are resent by go-back-N. |
+| `ideal` | none | the check is off |
+| `credit` | | |
+| `reliable` | | |
 
 ## `STRONG_WINDOW_SHAPES`
 

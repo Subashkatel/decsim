@@ -1074,13 +1074,11 @@ def _carded_path(
     )
 
 
-def _card_protocol(
-    path_name: str, card: Mapping, clocks: config.ClockSettings
-) -> settings.ProtocolSettings:
-    """The card's protocol, counted on its clock; ideal when it names none."""
+def _card_protocol(path_name: str, card: Mapping, clocks: config.ClockSettings):
+    """The card's protocol, counted on its clock; None when it names none."""
     section = card.get("protocol")
     if section is None:
-        return settings.ProtocolSettings()
+        return None
     clock = clocks.clock(card["clock"])
     return fabric.protocol_settings_from_yaml(section, clock, path_name)
 

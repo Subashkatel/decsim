@@ -1834,8 +1834,9 @@ class Channel(Protocol):
     fabric calls once per channel name with that channel's
     ChannelSettings and the engine, so a jittered or credit-limited
     channel is one class and no fabric subclass. The shipped rows hand
-    it the PROTOCOLS row each card names: ideal, credit and reliable
-    (links/fabric.py), named by links.<path>.protocol.kind. framed is a
+    it the channel each card's protocol record builds, credit or
+    reliable, or the ideal wire for a card with none (links/fabric.py
+    protocol_channel). framed is a
     FramedPayload (decsim/links/channel.py): the payload bits a
     component sent and the header bits its path adds.
 
@@ -1865,9 +1866,9 @@ class Channel(Protocol):
 class Framing(Protocol):
     """How a packet channel cuts one message into its wire's frames.
 
-    Table rows: whole, flits, aurora_64b66b, pcie_tlp, roce_v2,
-    ethernet_udp (FRAMINGS, links/framings.py), named by
-    links.<path>.protocol.framing.kind. A message is the path's header
+    Built by its settings record: whole, flits, aurora_64b66b, pcie_tlp,
+    roce_v2 or ethernet_udp (links/framings.py). A message is the path's
+    header
     and its payload; the frames carry it with the protocol's own
     framing, and the channel serializes, credits and acknowledges them
     one by one. The cut is Garnet's, where a network interface turns a

@@ -1,6 +1,6 @@
 """A channel whose frames need a credit from a finite receive buffer.
 
-The protocol row `credit`. A message is cut into frames by its framing
+The packet protocol `credit`. A message is cut into frames by its framing
 row; each frame takes the wire when the wire is free and the sender
 holds a credit, one frame at a time in order; the receive buffer holds
 receive_buffer_frames frames, the receiver takes each frame as it
@@ -45,9 +45,9 @@ drain.
 import collections
 import copy
 import dataclasses
-from collections.abc import Mapping
 
 import decsim.config as config
+import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.framings as framings
 import decsim.links.settings as link_settings
@@ -62,31 +62,34 @@ class CreditChannel(channel_module.Channel):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The credit row's keys: the framing, the buffer, the credit's return.
+        """The framing, the buffer, the credit's return, and their clock.
 
         receive_buffer_frames is C, the frames the receiver can hold;
-        credit_latency_cycles is L_c on the card's clock, from the
-        receiver taking a frame to its credit being usable at the
-        sender. Every key is written, because each is a number of the
-        hardware the card describes and carries its source.
+        credit_latency_cycles is L_c on clock, the card's clock domain,
+        from the receiver taking a frame to its credit being usable at
+        the sender. Every field is written, because each is a number of
+        the hardware the card describes and carries its source.
         """
 
         framing: framings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
+        clock: config.Clock
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, path_name: str
-        ) -> "CreditChannel.Settings":
-            """The keys of a card's protocol mapping."""
-            credit_keys = read_credit_keys(section, path_name)
-            return cls(*credit_keys)
+        def __post_init__(self) -> None:
+            check_credit_fields(self)
+
+        def build(
+            self,
+            channel_settings: link_settings.ChannelSettings,
+            engine: decsim.engine.Engine,
+        ) -> "CreditChannel":
+            """A fresh channel whose protocol is these settings."""
+            return CreditChannel(channel_settings, engine)
 
     def _new_wire(self) -> "CreditWire":
-        """The wire this row serializes on."""
-        protocol = self._settings.protocol.row_settings
-        return CreditWire(self._settings, protocol)
+        """The wire this protocol serializes on."""
+        return CreditWire(self._settings, self._settings.protocol)
 
 
 class CreditWire:
@@ -179,23 +182,19 @@ class CreditWire:
         return self._credit_returns[0]
 
 
-def read_credit_keys(section: Mapping, path_name: str) -> tuple:
-    """(framing, receive_buffer_frames, credit_latency_cycles) of a card."""
-    section_name = f"links.{path_name}.protocol"
-    framing_section = link_settings.required_key(
-        section, "framing", section_name
-    )
-    framing = framings.framing_settings_from_yaml(framing_section, path_name)
-    receive_buffer_frames = link_settings.positive_count_key(
-        section, "receive_buffer_frames", section_name
-    )
-    credit_latency_cycles = link_settings.required_key(
-        section, "credit_latency_cycles", section_name
+def check_credit_fields(protocol_settings) -> None:
+    """The credit loop's fields, which the reliable protocol shares."""
+    link_settings.check_positive_count(
+        "receive_buffer_frames", protocol_settings.receive_buffer_frames
     )
     config.check_cycles(
-        f"{section_name}.credit_latency_cycles", credit_latency_cycles
+        "credit_latency_cycles", protocol_settings.credit_latency_cycles
     )
-    return framing, receive_buffer_frames, credit_latency_cycles
+    if protocol_settings.clock is not None:
+        return
+    raise ValueError(
+        "a packet protocol counts its cycles on the card's clock; give it one"
+    )
 
 
 def credit_latency_ticks(
@@ -203,5 +202,5 @@ def credit_latency_ticks(
 ) -> int:
     """L_c in ticks: the protocol's cycles on the card's clock."""
     protocol = channel_settings.protocol
-    cycles = protocol.row_settings.credit_latency_cycles
+    cycles = protocol.credit_latency_cycles
     return cycles * protocol.clock.period_ticks

@@ -19,7 +19,7 @@ import dataclasses
 import fractions
 import math
 from collections.abc import Mapping
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import decsim.config as config
 import decsim.records.identity as identity_records
@@ -76,28 +76,17 @@ class PayloadSettings:
 
 
 @dataclasses.dataclass(frozen=True)
-class ProtocolSettings:
-    """What a channel's frames follow: a PROTOCOLS row and its keys.
-
-    ideal is the whole transfer on an unbounded buffer with nothing
-    lost; credit and reliable are packet rows (decsim/links/fabric.py
-    PROTOCOLS). row_settings is the row's own Settings record, None for
-    ideal; its cycles count on clock, the card's clock domain.
-    """
-
-    kind: str = "ideal"
-    row_settings: Optional[object] = None
-    clock: Optional[config.Clock] = None
-
-
-@dataclasses.dataclass(frozen=True)
 class ChannelSettings:
     """One physical channel: its name, a propagation latency, a bandwidth.
 
     No capacity means an unbounded wire that charges its latency only.
     Two paths whose channels carry the same name share one channel, so
-    the name is the identity a fabric wires by. A packet protocol cuts
-    every message into frames of known size, so it needs a bounded wire.
+    the name is the identity a fabric wires by. protocol is a packet
+    protocol's settings record, which builds the channel
+    (credit_channel.py, reliable_channel.py); None is the ideal wire,
+    the whole transfer on an unbounded buffer with nothing lost. A
+    packet protocol cuts every message into frames of known size, so it
+    needs a bounded wire.
     """
 
     name: str
@@ -105,7 +94,7 @@ class ChannelSettings:
     capacity: Optional[CapacitySettings]
     # where the card was written, a label: no part of a point's id
     configuration_source: str = dataclasses.field(compare=False)
-    protocol: ProtocolSettings = ProtocolSettings()
+    protocol: Optional[Any] = None
 
     def __post_init__(self) -> None:
         propagation_latency_ticks = _as_whole_number(
@@ -116,12 +105,11 @@ class ChannelSettings:
         )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
-        is_packet_protocol = self.protocol.kind != "ideal"
-        if is_packet_protocol and self.capacity is None:
+        if self.protocol is not None and self.capacity is None:
             raise ValueError(
-                f"channel {self.name!r} runs the {self.protocol.kind} "
-                f"protocol, which cuts every message into frames of known "
-                f"size; give it a bounded wire (bits_per_cycle)"
+                f"channel {self.name!r} runs a packet protocol, which cuts "
+                f"every message into frames of known size; give it a "
+                f"bounded wire (bits_per_cycle)"
             )
 
 
@@ -271,13 +259,6 @@ def required_key(section: Mapping, key: str, section_name: str) -> object:
     if key not in section:
         raise ValueError(f"{section_name} needs {key}")
     return section[key]
-
-
-def positive_count_key(section: Mapping, key: str, section_name: str) -> int:
-    """A key a link card needs: a positive whole number, never a boolean."""
-    value = required_key(section, key, section_name)
-    check_positive_count(f"{section_name}.{key}", value)
-    return value
 
 
 def check_positive_count(name: str, value) -> None:

@@ -864,8 +864,8 @@ def test_the_nvqlink_rows_strong_side_retransmits_nothing():
         profile.strong_buffer_to_strong_decoder,
         profile.strong_decoder_to_frame,
     )
-    protocols = [path.channel.protocol.kind for path in strong_side]
-    assert protocols == ["ideal"] * 4
+    protocols = [path.channel.protocol for path in strong_side]
+    assert protocols == [None] * 4
 
 
 @pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)

@@ -30,11 +30,10 @@ def credit_settings(
     latency_ticks,
     clock_period_ticks=1,
 ):
-    row = credit_channel.CreditChannel.Settings(
-        framing, buffer_frames, credit_latency_cycles
-    )
     clock = config.Clock(clock_period_ticks)
-    protocol = link_settings.ProtocolSettings("credit", row, clock)
+    protocol = credit_channel.CreditChannel.Settings(
+        framing, buffer_frames, credit_latency_cycles, clock
+    )
     capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     return link_settings.ChannelSettings(
         "test", latency_ticks, capacity, "test", protocol

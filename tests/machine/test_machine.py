@@ -1726,7 +1726,7 @@ def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused_by_name(
     walks (pymatching 2.4.0 Matching).
     """
     settings = _switching_memory(weak_kind, confidence)
-    match = re.escape(f"weak_decoder.kind {weak_kind!r}")
+    match = re.escape(f"weak_decoder {weak_kind!r} cannot serve")
     with pytest.raises(ValueError, match=match):
         machine_module.Machine.build(settings, 0)
     citation = re.escape(sentence)

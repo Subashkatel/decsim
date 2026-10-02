@@ -265,7 +265,7 @@ def _tier_formation(
 
 
 def _check_serves_the_confidence(
-    algorithm, kind, tier: str, signal: ports.ConfidenceSignal
+    algorithm, row_name: str, tier: str, signal: ports.ConfidenceSignal
 ) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
@@ -281,7 +281,7 @@ def _check_serves_the_confidence(
     reason = _missing_evidence_reason(algorithm, missing, signal)
     signal_name = signal.source.method
     raise ValueError(
-        f"{tier}_decoder.kind {kind!r} cannot serve the confidence "
+        f"{tier}_decoder {row_name!r} cannot serve the confidence "
         f"{signal_name}: {reason}"
     )
 

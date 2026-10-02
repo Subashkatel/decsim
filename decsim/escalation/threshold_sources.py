@@ -216,10 +216,11 @@ class TableThreshold(FixedThreshold):
             """A fresh source at the point's threshold, once looked up."""
             if self.threshold_nats is None:
                 raise ValueError(
-                    "escalation.threshold_source table resolves the "
-                    "threshold per sweep point in the experiments layer "
-                    "(ExperimentConfig.point_task); build the machine "
-                    "through it, or give gap_threshold_db"
+                    "a table threshold resolves the threshold per sweep "
+                    "point (at_sweep_point) and holds no threshold_nats "
+                    "before; look the point up first, build the machine "
+                    "through the experiments layer "
+                    "(ExperimentConfig.point_task), or use a fixed threshold"
                 )
             return TableThreshold(self.threshold_nats)
 
@@ -598,7 +599,8 @@ class OnlineThreshold:
                 knobs[key] = config.finite_number(
                     section, "escalation.online", key, default
                 )
-            return cls(threshold_nats=threshold_nats, **knobs)
+            values = {"threshold_nats": threshold_nats, **knobs}
+            return tables.section_record("escalation.online", cls, values)
 
         def step_nats(self) -> float:
             """The step in natural-log weight units."""
@@ -648,11 +650,11 @@ class OnlineThreshold:
         def build(self) -> "OnlineThreshold":
             """Refused: the source learns across a point's shots."""
             raise ValueError(
-                "escalation.threshold_source online is built once per sweep "
-                "point by the experiments layer "
-                "(ExperimentConfig.point_task), which seeds it and "
-                "shares it across the point's shots; build the machine "
-                "through it"
+                "an online threshold learns across a sweep point's shots, "
+                "so it is built once per point by for_sweep_point and "
+                "shared: set it as the switching slot's online_threshold, "
+                "or build the machine through the experiments layer "
+                "(ExperimentConfig.point_task)"
             )
 
     def __init__(
@@ -776,23 +778,18 @@ def _check_online_numbers(online) -> None:
 def _check_online_steps(online) -> None:
     """Refuse a step, an audit share or a factor outside its range."""
     if online.step_db <= 0:
-        raise ValueError(
-            f"escalation.online.step_db must be positive (got {online.step_db})"
-        )
+        raise ValueError(f"step_db must be positive (got {online.step_db})")
     if not 0 < online.audit_rate < 1:
         raise ValueError(
-            "escalation.online.audit_rate must be in (0, 1) "
-            f"(got {online.audit_rate})"
+            f"audit_rate must be in (0, 1) (got {online.audit_rate})"
         )
     if not 0 < online.kept_bad_budget < 1:
         raise ValueError(
-            "escalation.online.kept_bad_budget must be in (0, 1) "
-            f"(got {online.kept_bad_budget})"
+            f"kept_bad_budget must be in (0, 1) (got {online.kept_bad_budget})"
         )
     if online.adjust_factor <= 1:
         raise ValueError(
-            "escalation.online.adjust_factor must exceed 1 "
-            f"(got {online.adjust_factor})"
+            f"adjust_factor must exceed 1 (got {online.adjust_factor})"
         )
 
 
@@ -801,13 +798,14 @@ def _check_online_rates(online) -> None:
     high = online.max_escalation_rate
     if not 0 < low <= high <= 1:
         raise ValueError(
-            "escalation.online needs 0 < min_escalation_rate <= "
-            f"max_escalation_rate <= 1 (got {low} and {high})"
+            "min_escalation_rate must be above 0 and at most "
+            "max_escalation_rate, which is at most 1 "
+            f"(got {low} and {high})"
         )
     target_cap = high - online.audit_rate
     if not low <= online.target_escalation_rate <= target_cap:
         raise ValueError(
-            "escalation.online.target_escalation_rate must lie inside "
+            "target_escalation_rate must lie inside "
             "[min_escalation_rate, max_escalation_rate - audit_rate], "
             "since the audits reach the strong tier beside it "
             f"(got {online.target_escalation_rate}, cap {target_cap})"

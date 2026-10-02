@@ -353,11 +353,11 @@ def _check_decode_slots(settings: MachineSettings) -> None:
         return
     if not has_strong:
         raise ValueError(
-            "escalation switching escalates to the strong_decoder, which "
-            "this configuration does not define"
+            "switching is set and strong_decoder is not; switching "
+            "escalates a window to the strong decoder, so set strong_decoder"
         )
     if not has_weak:
         raise ValueError(
-            "escalation switching decodes every window on the "
-            "weak_decoder first, which this configuration does not define"
+            "switching is set and weak_decoder is not; switching decodes "
+            "every window on the weak decoder first, so set weak_decoder"
         )

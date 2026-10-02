@@ -299,14 +299,14 @@ def test_the_row_builds_from_the_threshold_and_the_weak_row():
 
 
 def test_a_threshold_with_no_number_at_build_is_refused():
-    """An online source has no epsilon_max to grow to."""
+    """A table not yet looked up has no epsilon_max to grow to."""
     record = extra_cluster.ExtraClusterGap.Settings()
     union_find_settings = union_find.UnionFindDecoder.Settings()
 
     with pytest.raises(ValueError) as refusal:
         record.build(union_find_settings, None)
 
-    assert "threshold_source online has no fixed number" in str(refusal.value)
+    assert "needs the threshold as one number" in str(refusal.value)
 
 
 def compare_random_graphs(count: int, seed: int) -> int:

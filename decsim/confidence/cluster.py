@@ -76,9 +76,8 @@ class ClusterGap:
         "the cluster gap walks the radii a growth left behind, and "
         "PyMatching's API reports no regions, blossoms or radii "
         "(pymatching 2.4.0 Matching), while belief propagation and "
-        "search decoders grow no clusters at all; use "
-        "weak_decoder.kind union_find, or escalation.confidence "
-        "complementary_gap"
+        "search decoders grow no clusters at all; use a union_find weak "
+        "decoder, or the complementary_gap confidence"
     )
 
     def __init__(

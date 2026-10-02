@@ -129,7 +129,8 @@ class SwitchingSettings:
     online_threshold: Optional[ports.ThresholdSource] = None
 
     def __post_init__(self) -> None:
-        _check_verdict_cycles(self.threshold_cycles, self.switch_cycles)
+        config.check_cycles("threshold_cycles", self.threshold_cycles)
+        config.check_cycles("switch_cycles", self.switch_cycles)
 
     @classmethod
     def from_yaml(
@@ -193,7 +194,7 @@ def escalation_kind(section: Mapping) -> str:
 
 
 def _check_verdict_cycles(threshold_cycles, switch_cycles) -> None:
-    """The verdict's two costs are whole cycle counts."""
+    """The verdict's two costs are whole cycle counts, on any kind."""
     config.check_cycles("escalation.threshold_cycles", threshold_cycles)
     config.check_cycles("escalation.switch_cycles", switch_cycles)
 
@@ -241,15 +242,16 @@ def _switching_settings(
     )
     _check_serial_only(threshold_source, threshold_row, window_row)
     strong_window = _strong_window(section, named_window, window_row)
-    return SwitchingSettings(
-        confidence=confidence,
-        threshold=threshold,
-        clock=clock,
-        threshold_cycles=threshold_cycles,
-        switch_cycles=switch_cycles,
-        run_both_at_once=run_both_at_once,
-        strong_window=strong_window,
-    )
+    values = {
+        "confidence": confidence,
+        "threshold": threshold,
+        "clock": clock,
+        "threshold_cycles": threshold_cycles,
+        "switch_cycles": switch_cycles,
+        "run_both_at_once": run_both_at_once,
+        "strong_window": strong_window,
+    }
+    return tables.section_record("escalation", SwitchingSettings, values)
 
 
 def _threshold(
@@ -293,7 +295,8 @@ def _strong_window(section: Mapping, named_window: str, window_row):
     if not window_row.absorbs_weak_windows:
         return window_row.Settings()
     regions = section.get("restart_reread_buffer_regions", 1)
-    return window_row.Settings(restart_reread_buffer_regions=regions)
+    values = {"restart_reread_buffer_regions": regions}
+    return tables.section_record("escalation", window_row.Settings, values)
 
 
 def _refuse_restart_without_absorption(row, strong_window: str) -> None:
@@ -332,7 +335,9 @@ def _gap_threshold_db(
             "escalation.gap_threshold_db must be a number of decibels "
             f"(got {value!r})"
         )
-    return float(value)
+    return threshold_sources.checked_decibels(
+        float(value), "escalation.gap_threshold_db"
+    )
 
 
 def _calibrated_threshold(
@@ -398,4 +403,8 @@ def _confidence_walk_microseconds(section: Mapping) -> Optional[float]:
             f"microseconds, or null to leave the signal on its own cost "
             f"model (got {value!r})"
         )
-    return float(value)
+    microseconds = float(value)
+    config.check_microseconds(
+        "escalation.confidence_walk_microseconds", microseconds
+    )
+    return microseconds

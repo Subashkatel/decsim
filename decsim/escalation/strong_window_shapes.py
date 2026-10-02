@@ -927,7 +927,7 @@ def _check_restart_reread(regions) -> None:
     if is_a_count and regions in (0, 1):
         return
     raise ValueError(
-        "escalation.restart_reread_buffer_regions must be 0, a "
+        "restart_reread_buffer_regions must be 0, a "
         "restart on the rounds stored after the strong region, or 1, "
         "a re-read of the region's last buffer region as Toshio "
         f"2510.25222 Fig. 12 step 5 draws it; got {regions!r}"

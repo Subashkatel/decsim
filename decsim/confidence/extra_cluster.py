@@ -68,12 +68,11 @@ def _refuse_a_threshold_with_no_number(threshold_nats) -> None:
     if threshold_nats is not None:
         return
     raise ValueError(
-        "escalation.confidence extra_cluster_gap grows to the "
-        "threshold, so it needs the threshold as one number when "
-        "the machine is built (Kishi 2602.03336 Sec. III, the "
-        "early-stopping threshold is the switching threshold): "
-        "give gap_threshold_db, or threshold_source table; "
-        "threshold_source online has no fixed number"
+        "the extra_cluster_gap confidence grows to the threshold, so it "
+        "needs the threshold as one number when the machine is built "
+        "(Kishi 2602.03336 Sec. III, the early-stopping threshold is the "
+        "switching threshold): give a fixed threshold, or look a table "
+        "threshold up at its sweep point first"
     )
 
 
@@ -95,7 +94,7 @@ def growth_limit_ticks(growth_limit_nats: float, weight_step: float) -> int:
     if limit_ticks > _LARGEST_TICK_COUNT:
         raise ValueError(
             f"the extra-cluster gap's growth limit of {limit_ticks} ticks "
-            "passes the unit's 64-bit tick counter; lower gap_threshold_db "
+            "passes the unit's 64-bit tick counter; lower the threshold "
             "or raise the weak decoder's weight_step"
         )
     return limit_ticks
@@ -112,9 +111,8 @@ class ExtraClusterGap:
         "the extra-cluster gap grows the clusters a decode left on, and "
         "PyMatching's API reports no regions, blossoms or radii "
         "(pymatching 2.4.0 Matching), while belief propagation and "
-        "search decoders grow no clusters at all; use "
-        "weak_decoder.kind union_find, or escalation.confidence "
-        "complementary_gap"
+        "search decoders grow no clusters at all; use a union_find weak "
+        "decoder, or the complementary_gap confidence"
     )
 
     def __init__(

@@ -334,7 +334,7 @@ def test_a_refusal_names_the_strong_window_row_the_yaml_chose():
     """
     with pytest.raises(
         ValueError,
-        match="escalation.strong_window double_window defers the "
+        match="switching.strong_window double_window defers the "
         "strong start until the far weak boundary exists",
     ):
         fabric.switching_machine(

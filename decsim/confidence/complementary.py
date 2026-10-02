@@ -51,8 +51,8 @@ class ComplementaryGap:
         "inside a fixed logical class reports a weight that cannot be "
         "compared across classes, and a virtual detector wrecks a "
         "cluster-growing decoder's locality (Lee et al. "
-        "arXiv:2510.05795 Sec. 2.1.1); use escalation.confidence "
-        "cluster_gap, or a matching weak decoder"
+        "arXiv:2510.05795 Sec. 2.1.1); use the cluster_gap confidence, "
+        "or a matching weak decoder"
     )
 
     @dataclasses.dataclass(frozen=True)

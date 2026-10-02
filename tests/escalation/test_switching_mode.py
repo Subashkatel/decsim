@@ -95,7 +95,7 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
         "escalation": {"kind": "switching", "gap_threshold_db": 20.0}
     }
     weak_only_path = write_config(tmp_path, weak_only_card)
-    with pytest.raises(ValueError, match="escalates to the strong_decoder"):
+    with pytest.raises(ValueError, match="strong_decoder is not"):
         load_experiment(weak_only_path)
     strong_decoder = strong_unit("belief_matching")
     no_threshold_card = {"escalation": {"kind": "switching"}}
@@ -282,8 +282,8 @@ def test_a_kind_written_as_a_list_is_refused_with_the_rows(tmp_path):
 @pytest.mark.parametrize(
     "threshold, sentence",
     [
-        (-1.0, "threshold_nats must be finite and not negative"),
-        (math.inf, "threshold_nats must be finite and not negative"),
+        (-1.0, "gap_threshold_db must be finite and not negative"),
+        (math.inf, "gap_threshold_db must be finite and not negative"),
         (True, "gap_threshold_db must be a number of decibels"),
         ("20", "gap_threshold_db must be a number of decibels"),
     ],
@@ -853,7 +853,8 @@ def test_a_negative_confidence_walk_is_refused_by_name(tmp_path):
     card = _walk_card(-1.0, "union_find", "cluster_gap")
     config_path = write_config(tmp_path, card)
     with pytest.raises(
-        ValueError, match="walk_microseconds must be finite and not negative"
+        ValueError,
+        match="escalation.confidence_walk_microseconds must be finite",
     ):
         load_experiment(config_path)
 

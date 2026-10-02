@@ -89,7 +89,16 @@ def _plan(device: "_PhysicalDevice", round_count: int) -> plan_build.Plan:
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(distance=3, source=source)
     settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)
-    return plan_build.build_plan(settings, None)
+    return plan_build.build_plan(
+        settings.qpu,
+        settings.workload,
+        settings.windows,
+        settings.idle_policy,
+        settings.detection_events,
+        settings.switching,
+        settings.decoder_manager.bulk_strong,
+        None,
+    )
 
 
 class _PhysicalDevice:

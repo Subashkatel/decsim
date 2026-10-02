@@ -72,7 +72,16 @@ def _pool(settings, detection_events=None):
         settings.switching, settings.weak_decoder, engine
     )
     signal = _signal(switching_part)
-    plan = plan_build.build_plan(settings, switching_part)
+    plan = plan_build.build_plan(
+        settings.qpu,
+        settings.workload,
+        settings.windows,
+        settings.idle_policy,
+        settings.detection_events,
+        settings.switching,
+        settings.decoder_manager.bulk_strong,
+        switching_part,
+    )
     if detection_events is None:
         at_the_controller = event_settings.DetectionEventSettings()
         detection_events = event_formation.SeatedFormation(

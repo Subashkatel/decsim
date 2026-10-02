@@ -99,7 +99,16 @@ def _plan(
     switching_part = escalation_build.build_switching(
         settings.switching, settings.weak_decoder, engine
     )
-    return plan_build.build_plan(settings, switching_part)
+    return plan_build.build_plan(
+        settings.qpu,
+        settings.workload,
+        settings.windows,
+        settings.idle_policy,
+        settings.detection_events,
+        settings.switching,
+        settings.decoder_manager.bulk_strong,
+        switching_part,
+    )
 
 
 def _with_switching(settings, switching):

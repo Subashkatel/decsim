@@ -129,7 +129,16 @@ class Machine:
         switching = escalation_build.build_switching(
             settings.switching, settings.weak_decoder, engine
         )
-        plan = plan_build.build_plan(settings, switching)
+        plan = plan_build.build_plan(
+            settings.qpu,
+            settings.workload,
+            settings.windows,
+            settings.idle_policy,
+            settings.detection_events,
+            settings.switching,
+            settings.decoder_manager.bulk_strong,
+            switching,
+        )
         burst_detector = escalation_build.build_burst_detector(
             settings, engine, plan
         )

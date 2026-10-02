@@ -14,7 +14,6 @@ from typing import Any
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.controller.settings as controller_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
@@ -165,7 +164,7 @@ def build_plan(
         settings, escalation_policy, device, error_model_provider
     )
     _install_operation_circuits(device, error_model_provider, all_operations)
-    idle_policy = _idle_policy(settings.idle_policy)
+    idle_policy = settings.idle_policy.build()
     return Plan(
         code=code,
         layout=layout,
@@ -401,21 +400,6 @@ def _boundaries_name(
         return escalation_policy.default_boundary_policy
     shape = escalation_build.strong_window_row(escalation)
     return shape.default_boundary_policy
-
-
-def _idle_policy(settings: controller_settings.IdlePolicySettings):
-    """The Python-built policy, or the kind's row.
-
-    A row with keys of its own is built with its Settings record.
-    """
-    if settings.policy is not None:
-        return settings.policy
-    row = tables.row(
-        controller_settings.IDLE_POLICIES, "idle_policy.kind", settings.kind
-    )
-    if settings.row_settings is None:
-        return row()
-    return row(settings=settings.row_settings)
 
 
 def _syndrome_source(

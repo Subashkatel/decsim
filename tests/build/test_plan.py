@@ -15,7 +15,6 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.controller.policies as policies
-import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
 import decsim.escalation.policies as escalation_policies
@@ -54,7 +53,7 @@ def _plan(
 ):
     """The plan of a six-round memory run with the given sections."""
     if idle_policy is None:
-        idle_policy = controller_settings.IdlePolicySettings()
+        idle_policy = policies.SeparateDecodeJobsSettings()
     if escalation is None:
         escalation = escalation_settings.EscalationSettings()
     if windows is None:
@@ -376,30 +375,24 @@ def test_a_scheme_row_with_settings_is_built_with_its_record(monkeypatch):
 
 
 class _SettingsRecordingIdlePolicy(policies.Ignore):
-    """An idle row that keeps the Settings record it is built with."""
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        every_nth_round: int = 1
+    """An idle policy that keeps the record it is built from."""
 
     def __init__(self, settings) -> None:
         self.settings = settings
 
 
-def test_an_idle_policy_row_with_settings_is_built_with_its_record(
-    monkeypatch,
-):
-    monkeypatch.setitem(
-        controller_settings.IDLE_POLICIES,
-        "recording",
-        _SettingsRecordingIdlePolicy,
-    )
-    own_settings = _SettingsRecordingIdlePolicy.Settings(every_nth_round=2)
-    idle_policy = controller_settings.IdlePolicySettings(
-        kind="recording", row_settings=own_settings
-    )
+@dataclasses.dataclass(frozen=True)
+class _RecordingIdlePolicySettings:
+    every_nth_round: int = 1
 
-    plan = _plan(idle_policy=idle_policy)
+    def build(self) -> _SettingsRecordingIdlePolicy:
+        return _SettingsRecordingIdlePolicy(self)
+
+
+def test_the_idle_policy_record_builds_the_plans_policy():
+    own_settings = _RecordingIdlePolicySettings(every_nth_round=2)
+
+    plan = _plan(idle_policy=own_settings)
 
     assert plan.idle_policy.settings is own_settings
 

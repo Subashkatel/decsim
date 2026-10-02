@@ -4,7 +4,6 @@ A section's kind names the record (SYNDROME_BUFFERS) and its other keys
 are that record's fields; the records check their own values.
 """
 
-import dataclasses
 from collections.abc import Mapping
 from typing import Union
 
@@ -42,14 +41,7 @@ def from_yaml(
     """A store section: its kind's record, from the keys the yaml wrote."""
     kind = section.get("kind", "syndrome_buffer")
     record = tables.row(SYNDROME_BUFFERS, f"{section_name}.kind", kind)
-    fields = dataclasses.fields(record)
-    field_names = tuple(field.name for field in fields)
-    known_keys = ("kind",) + field_names
-    tables.refuse_unknown_keys(section_name, section, known_keys)
-    values = {}
-    for key in field_names:
-        if key in section:
-            values[key] = section[key]
+    values = tables.record_fields(record, section_name, section, ("kind",))
     if "clock" in section:
         values["clock"] = clocks.clock(section["clock"])
     return record(**values)

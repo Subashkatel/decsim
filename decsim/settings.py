@@ -15,6 +15,7 @@ from typing import Optional, Union
 
 import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.config as config
+import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
@@ -86,9 +87,9 @@ class MachineSettings:
     controller: controller_settings.ControllerSettings = (
         controller_settings.ControllerSettings()
     )
-    idle_policy: controller_settings.IdlePolicySettings = (
-        controller_settings.IdlePolicySettings()
-    )
+    idle_policy: Union[
+        idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings
+    ] = idle_policies.SeparateDecodeJobsSettings()
     detection_events: detection_event_settings.DetectionEventSettings = (
         detection_event_settings.DetectionEventSettings()
     )
@@ -168,7 +169,7 @@ class MachineSettings:
         controller = controller_settings.ControllerSettings.from_yaml(
             sections["controller"], clocks
         )
-        idle_policy = controller_settings.IdlePolicySettings.from_yaml(
+        idle_policy = controller_settings.idle_policy_from_yaml(
             idle_policy_section
         )
         event_settings = detection_event_settings.DetectionEventSettings

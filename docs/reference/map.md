@@ -82,10 +82,10 @@ docstring.
 - `decsim/controller/idle_rounds.py`: Idle rounds per patch: how they travel and what decode work they cost.
 - `decsim/controller/instruction_output.py`: The controller's output: commands and decisions to the QPU.
 - `decsim/controller/operation_issue.py`: The issuer: an admitted operation becomes one QPU command.
-- `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policy rows.
+- `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policies.
 - `decsim/controller/round_assembly.py`: The assembler: raw measurement fragments become one packed round.
 - `decsim/controller/round_transmission.py`: The transmitter: a stored round leaves on its route at the write.
-- `decsim/controller/settings.py`: The controller's settings, and the idle policy it relays through.
+- `decsim/controller/settings.py`: The controller's settings, and the yaml's idle policy section.
 - `decsim/controller/syndrome_round_sender.py`: The sender: a finished round into every store it must reach, or held.
 
 ### detector_error_model

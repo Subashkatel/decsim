@@ -21,7 +21,6 @@ import pathlib
 
 import pytest
 
-import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
@@ -45,7 +44,6 @@ TABLES_WITH_ROW_KEYS = (
     qpu_settings.SYNDROME_SOURCES,
     qpu_settings.CODE_CARDS,
     qpu_settings.MAGIC_STATE_FACTORIES,
-    controller_settings.IDLE_POLICIES,
 )
 
 

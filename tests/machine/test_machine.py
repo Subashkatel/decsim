@@ -40,7 +40,6 @@ import decsim.build.windows as windows_part
 import decsim.collect as collect
 import decsim.config as config
 import decsim.controller.policies as idle_policies
-import decsim.controller.settings as controller_settings
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_memory as decoder_memory
@@ -989,12 +988,16 @@ def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
         _run(settings)
 
 
+SEPARATE_DECODE_JOBS = idle_policies.SeparateDecodeJobsSettings()
+IGNORE_IDLE_ROUNDS = idle_policies.IgnoreSettings()
+
+
 @pytest.mark.parametrize(
     ("idle_policy", "load_job_count"),
-    [("separate_decode_jobs", 2), ("ignore", 0)],
+    [(SEPARATE_DECODE_JOBS, 2), (IGNORE_IDLE_ROUNDS, 0)],
 )
 def test_static_idle_rounds_use_strong_slots_until_the_decoder_arrival(
-    idle_policy: str, load_job_count: int
+    idle_policy, load_job_count: int
 ) -> None:
     settings = _static_idle_settings(idle_policy)
     run, release_ticks_by_round = _run_static(settings)
@@ -1995,6 +1998,14 @@ class RecordingIdlePolicy:
         del idle_rounds, operation, patch
 
 
+@dataclasses.dataclass(frozen=True)
+class RecordingIdlePolicySettings:
+    """Its settings record, which builds it."""
+
+    def build(self) -> RecordingIdlePolicy:
+        return RecordingIdlePolicy()
+
+
 def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
     """Two builds of the same settings each get their own policy objects."""
     settings = machine_settings.MachineSettings()
@@ -2017,8 +2028,7 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     windows = window_settings.WindowSettings(boundary_policy=boundary_policy)
     boundary_settings = machine_settings.MachineSettings(windows=windows)
     with_boundary = machine_module.Machine.build(boundary_settings)
-    idle_policy = RecordingIdlePolicy()
-    idle_row = controller_settings.IdlePolicySettings(policy=idle_policy)
+    idle_row = RecordingIdlePolicySettings()
     idle_settings = machine_settings.MachineSettings(idle_policy=idle_row)
     with_idle = machine_module.Machine.build(idle_settings)
     assert with_boundary.windows.window_manager.courier.boundary_policy is (
@@ -2027,7 +2037,7 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     assert type(with_boundary.control.idle_rounds.policy) is (
         idle_policies.SeparateDecodeJobs
     )
-    assert with_idle.control.idle_rounds.policy is idle_policy
+    assert type(with_idle.control.idle_rounds.policy) is RecordingIdlePolicy
     assert type(with_idle.windows.window_manager.courier.boundary_policy) is (
         boundary_policies.Eager
     )
@@ -3213,8 +3223,7 @@ def test_an_operation_claims_every_idle_cycle_before_it_starts():
     windows = window_settings.WindowSettings(scheme=scheme)
     decoder = decoders.PresetLatencyDecoder(10.0)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    ignore = idle_policies.Ignore()
-    idle = controller_settings.IdlePolicySettings(policy=ignore)
+    idle = idle_policies.IgnoreSettings()
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -3608,7 +3617,7 @@ def _scheduled_workload(
     )
 
 
-def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
+def _static_idle_settings(idle_policy) -> machine_settings.MachineSettings:
     """Declare the two-patch workload beside the timings it exercises.
 
     The operation definitions and card remain together so the four idle
@@ -3636,13 +3645,12 @@ def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
     engine = decoder_settings.EngineSettings(clock=clock)
     strong = decoder_settings.DecoderSettings(kind=0.2, engine=engine)
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
-    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         strong_decoder=strong,
         escalation=escalation,
-        idle_policy=idle,
+        idle_policy=idle_policy,
     )
     observation = dataclasses.replace(
         settings.observation, record_switching_windows=True

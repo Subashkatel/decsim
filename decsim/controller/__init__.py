@@ -11,8 +11,9 @@ round_transmission.py tells the window side what landed.
 On the way out, operation_issue.py admits one operation and issues it
 as one QPU command, feedback_streams.py keeps the protected cycle of a
 stream that feeds back, idle_rounds.py routes the rounds of a waiting
-patch under the IDLE_POLICIES row in policies.py,
+patch under one of the idle policies in policies.py,
 conditional_release.py lets go of the operations that waited on a
 result, and instruction_output.py sends the instruction to the QPU.
-settings.py holds the controller's per-round costs and both tables.
+settings.py holds the controller's per-round costs and reads the idle
+policy's yaml section.
 """

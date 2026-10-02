@@ -114,8 +114,8 @@ In `decsim/controller/settings.py`. A row of it is named under `idle_policy.kind
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `separate_decode_jobs` | `SeparateDecodeJobs` in `decsim/controller/policies.py` | Idle rounds travel as memory rounds and are charged as decode jobs. |
-| `ignore` | `Ignore` in `decsim/controller/policies.py` | Idle rounds travel as feedback-memory rounds and cost no decode work. |
+| `separate_decode_jobs` | `SeparateDecodeJobsSettings` in `decsim/controller/policies.py` | The default card: idle rounds are decode jobs (SeparateDecodeJobs). |
+| `ignore` | `IgnoreSettings` in `decsim/controller/policies.py` | The optimistic card: idle rounds cost no decode work (Ignore). |
 
 ## `LINK_FABRICS`
 

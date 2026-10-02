@@ -12,11 +12,10 @@ parameters and its children and is reached through its ports
 (src/sim/sim_object.hh, src/mem/port.hh); the trace source is ns-3's
 TracedCallback fired at the device's transition
 (point-to-point-net-device.cc TransmitComplete). The channels are what
-the row's build names (the Channel port in decsim/ports.py), one per
-channel name; the shipped rows build the channel each card's protocol
-record builds, or the ideal wire. The fabric is the seed composite of
-its channels, so a channel that draws (the reliable row's losses) is
-seeded under its name.
+each card's protocol record builds (the Channel port in decsim/ports.py),
+or the ideal wire for a card with none, one per channel name. The
+fabric is the seed composite of its channels, so a channel that draws
+(the reliable row's losses) is seeded under its name.
 """
 
 import dataclasses
@@ -35,12 +34,6 @@ import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
 import decsim.tables as tables
 import decsim.trace_source as trace_source
-
-# What a Link row's build hands the fabric: called once per channel name
-# with that channel's settings and the run's engine.
-ChannelClass = Callable[
-    [link_settings.ChannelSettings, decsim.engine.Engine], ports.Channel
-]
 
 # links.<path>.protocol.kind names one of these records: how the path's
 # channel moves a message. ideal is no packet protocol, the whole
@@ -111,7 +104,6 @@ class LinkFabric:
         self,
         fabric_settings: link_settings.FabricSettings,
         engine: decsim.engine.Engine,
-        channel_class: ChannelClass,
     ) -> None:
         self._channel_by_name: dict[str, ports.Channel] = {}
         self._binding_by_path: dict[
@@ -121,14 +113,10 @@ class LinkFabric:
         self._send_count = 0
         for path in transfer_records.LinkPath:
             path_settings = fabric_settings.path_settings(path)
-            channel = self._channel_for(
-                path_settings.channel, engine, channel_class
-            )
+            channel = self._channel_for(path_settings.channel, engine)
             self._binding_by_path[path] = _PathBinding(path_settings, channel)
         for route in fabric_settings.readout_routes:
-            channel = self._channel_for(
-                route.settings.channel, engine, channel_class
-            )
+            channel = self._channel_for(route.settings.channel, engine)
             binding = _PathBinding(route.settings, channel)
             self._readout_by_footprint[route.patch_ids] = binding
         built_channels = self._channel_by_name.values()
@@ -225,12 +213,11 @@ class LinkFabric:
         self,
         channel_settings: link_settings.ChannelSettings,
         engine: decsim.engine.Engine,
-        channel_class: ChannelClass,
     ) -> ports.Channel:
-        """The named channel, built of the row's class on its first path."""
+        """The named channel, built by its protocol on its first path."""
         channel = self._channel_by_name.get(channel_settings.name)
         if channel is None:
-            channel = channel_class(channel_settings, engine)
+            channel = protocol_channel(channel_settings, engine)
             self._channel_by_name[channel_settings.name] = channel
         return channel
 

@@ -11,6 +11,8 @@ declared card of tests/declared_run.py: which of the wired paths a
 round actually crosses when only one decoder tier exists.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.config as config
@@ -68,7 +70,7 @@ def fabric_with(engine, listener=None, **paths):
     wiring = every_path_free()
     wiring.update(paths)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
-    fabric = fabric_module.LinkFabric(settings, engine, channel_module.Channel)
+    fabric = fabric_module.LinkFabric(settings, engine)
     if listener is not None:
         fabric.trace.transfer_delivered.connect(listener.on_transfer)
     return fabric
@@ -578,21 +580,32 @@ class _CountingChannel:
         return self.inner.expected_delay_ticks(framed, now_ticks, setup_ticks)
 
 
-def test_the_fabric_builds_one_channel_of_the_rows_class_per_channel_name():
-    """The Channel port: a row's channel class carries every path it names."""
-    engine = decsim.engine.Engine()
-    built = []
+@dataclasses.dataclass(frozen=True)
+class _CountingProtocol:
+    """A protocol record written outside the links package."""
 
-    def counting_channel(channel_settings, engine):
+    built: list = dataclasses.field(compare=False)
+
+    def build(self, channel_settings, engine):
         channel = _CountingChannel(channel_settings, engine)
-        built.append(channel)
+        self.built.append(channel)
         return channel
 
+
+def test_the_fabric_builds_one_channel_of_the_protocols_per_channel_name():
+    """The Channel port: a protocol's channel carries every path it names."""
+    engine = decsim.engine.Engine()
+    built = []
     shared = bounded_path("shared", 1000.0, 300)
+    counting_protocol = _CountingProtocol(built)
+    counting_channel = dataclasses.replace(
+        shared.channel, protocol=counting_protocol
+    )
+    shared = dataclasses.replace(shared, channel=counting_channel)
     wiring = every_path_free()
     wiring.update(qpu_to_controller=shared, controller_to_weak_buffer=shared)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
-    fabric = fabric_module.LinkFabric(settings, engine, counting_channel)
+    fabric = fabric_module.LinkFabric(settings, engine)
     delivered = []
     first_round = round_attribution(1)
     second_round = round_attribution(2)
@@ -609,12 +622,9 @@ def test_the_fabric_builds_one_channel_of_the_rows_class_per_channel_name():
         delivered,
     )
     engine.run()
-    channel_by_name = {channel.name: channel for channel in built}
-
-    assert len(built) == 2
+    assert len(built) == 1
     assert isinstance(built[0], ports.Channel)
-    assert channel_by_name["shared"].carried_bits == [8, 4]
-    assert channel_by_name["free"].carried_bits == []
+    assert built[0].carried_bits == [8, 4]
     assert delivered[1].queue_wait_ticks == 8000
 
 

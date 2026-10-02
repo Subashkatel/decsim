@@ -186,17 +186,15 @@ class ReadoutRoute:
 
 @dataclasses.dataclass(frozen=True)
 class FabricSettings:
-    """A fabric card: one path setting per hop, a profile name and a kind.
+    """A fabric card: one path setting per hop and a profile name.
 
     Every hop of the reaction path is priced, so a card names all eleven
     and a caller that leaves one out is refused where it constructs the
     card. A card whose QPU-to-controller latency leaves out the
     controller's readout processing says so, because the timing card
-    prices that processing on its own line. kind names the row of
-    LINK_FABRICS (link_profiles.py) that supplied these numbers and
-    builds the run's fabric from them with build(card, engine);
-    profile_name is the row's name, or the yaml's own file name for a
-    card read from a yaml, which the run's description prints. Python
+    prices that processing on its own line. profile_name is the preset's
+    name, or the yaml's own file name for a card read from a yaml, which
+    the run's description prints. Python
     callers can set readout_routes to choose a path card by the complete
     contributing patch footprint.
     Unmatched footprints use qpu_to_controller. Equal channel names share
@@ -217,7 +215,6 @@ class FabricSettings:
     # the card's name for the run's description, a label: no part of a
     # point's id
     profile_name: str = dataclasses.field(compare=False)
-    kind: str = "logical_reference"
     readout_routes: tuple[ReadoutRoute, ...] = ()
 
     def __post_init__(self) -> None:

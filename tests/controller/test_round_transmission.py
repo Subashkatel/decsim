@@ -25,7 +25,6 @@ import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -161,7 +160,7 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
 
 def transmitter_with(engine, profile, windows=None, settings=None):
     ledger = link_traffic.TrafficLedger(profile)
-    links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
+    links = fabric_module.LinkFabric(profile, engine)
     links.trace.transfer_delivered.connect(ledger.on_transfer)
     if settings is None:
         settings = syndrome_buffer_module.SyndromeBufferSettings()

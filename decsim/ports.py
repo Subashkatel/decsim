@@ -1714,10 +1714,9 @@ class WindowModelSource(Protocol):
 class Link(Protocol):
     """The link fabric as every sender sees it.
 
-    Table rows: logical_reference, bandwidth_limited, roce_v2_cpu,
-    roce_v2_gpu, nvqlink_gpu (LINK_FABRICS, links/link_profiles.py),
-    named by links.kind; a row supplies the numbers the section's per-path cards
-    override and builds the fabric the root sends on. Every hop of the
+    Built by links/fabric.py LinkFabric from a FabricSettings card, a
+    preset of links/link_profiles.py or one the run writes. Every hop of
+    the
     reaction path is priced, and a send delivers by callback with every
     tick of the transfer on the record.
 
@@ -1830,13 +1829,12 @@ class Channel(Protocol):
     port hands its packets to the packet queue that decides when each
     one goes (gem5 src/mem/port.hh, src/mem/packet_queue.hh:62-63).
 
-    A Link row's build hands the fabric a channel class, which the
-    fabric calls once per channel name with that channel's
-    ChannelSettings and the engine, so a jittered or credit-limited
-    channel is one class and no fabric subclass. The shipped rows hand
-    it the channel each card's protocol record builds, credit or
-    reliable, or the ideal wire for a card with none (links/fabric.py
-    protocol_channel). framed is a
+    The fabric builds one per channel name: the channel the card's
+    protocol record builds from that channel's ChannelSettings and the
+    engine, credit or reliable, or the ideal wire for a card with none
+    (links/fabric.py protocol_channel), so a jittered or credit-limited
+    channel is one record and one class and no fabric subclass. framed
+    is a
     FramedPayload (decsim/links/channel.py): the payload bits a
     component sent and the header bits its path adds.
 

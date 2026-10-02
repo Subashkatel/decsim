@@ -28,10 +28,8 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
-import decsim.engine
 import decsim.links.fabric as fabric
 import decsim.links.settings as settings
-import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.tables as tables
@@ -403,7 +401,6 @@ def logical_reference_profile() -> settings.FabricSettings:
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="logical_reference",
-        kind="logical_reference",
     )
 
 
@@ -582,7 +579,6 @@ def bandwidth_limited_profile(
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="bandwidth_limited",
-        kind="bandwidth_limited",
     )
 
 
@@ -629,9 +625,7 @@ def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
     )
     reference = logical_reference_profile()
     row_name = f"roce_v2_{coprocessor}"
-    return dataclasses.replace(
-        reference, **strong_paths, profile_name=row_name, kind=row_name
-    )
+    return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
 
 
 def nvqlink_measured_profile() -> settings.FabricSettings:
@@ -667,21 +661,7 @@ def nvqlink_measured_profile() -> settings.FabricSettings:
     )
     reference = logical_reference_profile()
     row_name = "nvqlink_gpu"
-    return dataclasses.replace(
-        reference, **strong_paths, profile_name=row_name, kind=row_name
-    )
-
-
-def build_protocol_fabric(
-    card: settings.FabricSettings, engine: decsim.engine.Engine
-) -> ports.Link:
-    """The fabric every shipped row carries its transfers on.
-
-    Each row's build is this one function: the rows differ only in the
-    card their base_card supplies, and a row with its own fabric model
-    defines its own build.
-    """
-    return fabric.LinkFabric(card, engine, fabric.protocol_channel)
+    return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
 
 
 class LogicalReferenceFabric:
@@ -696,8 +676,6 @@ class LogicalReferenceFabric:
     def base_card() -> settings.FabricSettings:
         """The numbers a yaml's per-path cards override."""
         return logical_reference_profile()
-
-    build = staticmethod(build_protocol_fabric)
 
 
 class BandwidthLimitedFabric:
@@ -724,8 +702,6 @@ class BandwidthLimitedFabric:
             "the machine's links setting"
         )
 
-    build = staticmethod(build_protocol_fabric)
-
 
 class RoceV2CpuFabric:
     """The reference card with the strong path on Backline's CPU round trip.
@@ -742,8 +718,6 @@ class RoceV2CpuFabric:
     def base_card() -> settings.FabricSettings:
         """The numbers a yaml's per-path cards override."""
         return roce_v2_measured_profile("cpu")
-
-    build = staticmethod(build_protocol_fabric)
 
 
 class RoceV2GpuFabric:
@@ -764,8 +738,6 @@ class RoceV2GpuFabric:
         """The numbers a yaml's per-path cards override."""
         return roce_v2_measured_profile("gpu")
 
-    build = staticmethod(build_protocol_fabric)
-
 
 class NvqlinkGpuFabric:
     """The reference card with the strong path on NVQLink's GPU round trip.
@@ -783,12 +755,9 @@ class NvqlinkGpuFabric:
         """The numbers a yaml's per-path cards override."""
         return nvqlink_measured_profile()
 
-    build = staticmethod(build_protocol_fabric)
 
-
-# links.kind names one of these rows: which fabric model carries the
-# transfers and which numbers the section's per-path cards override. A
-# row answers base_card at the yaml boundary and build at the root.
+# links.kind names one of these rows: which numbers the section's
+# per-path cards override. A row answers base_card at the yaml boundary.
 LINK_FABRICS = {
     "logical_reference": LogicalReferenceFabric,
     "bandwidth_limited": BandwidthLimitedFabric,
@@ -831,10 +800,7 @@ def from_yaml(
             carded, excludes_receiver_processing=True
         )
     return dataclasses.replace(
-        profile,
-        **replacements,
-        kind=kind,
-        profile_name=f"{name}.yaml",
+        profile, **replacements, profile_name=f"{name}.yaml"
     )
 
 

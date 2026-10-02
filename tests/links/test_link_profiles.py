@@ -23,7 +23,6 @@ import decsim.config as config
 import decsim.engine
 import decsim.experiments.experiment as experiment
 import decsim.links.channel as channel_module
-import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
 import decsim.records.transfers as transfer_records
@@ -467,63 +466,6 @@ def test_a_run_without_a_card_uses_the_reference_card():
     assert default_result == explicit_result
 
 
-class CountingFabric:
-    """A fabric row written outside decsim: it counts what it carried.
-
-    Its base card is the reference row's, so a run on it prices every hop
-    exactly as the shipped row does and the count is the only difference.
-    """
-
-    sent = []
-
-    @staticmethod
-    def base_card():
-        """The numbers the section's per-path cards override."""
-        return link_profiles.logical_reference_profile()
-
-    @staticmethod
-    def build(card, engine):
-        """One LinkFabric, with every send counted on the way through."""
-        return _CountingLinkFabric(card, engine, channel_module.Channel)
-
-
-class _CountingLinkFabric(fabric_module.LinkFabric):
-    """The reference fabric, counting the transfers it carried."""
-
-    def send(self, path, payload_bits, now_ticks, attribution, on_delivered):
-        """Count the send, then carry it."""
-        CountingFabric.sent.append(path)
-        reference = super()
-        reference.send(path, payload_bits, now_ticks, attribution, on_delivered)
-
-
-def test_a_fabric_row_written_outside_decsim_runs_from_a_yaml(
-    monkeypatch, tmp_path
-):
-    """One LINK_FABRICS row and one links.kind is the whole edit."""
-    monkeypatch.setitem(link_profiles.LINK_FABRICS, "counting", CountingFabric)
-    monkeypatch.setattr(CountingFabric, "sent", [])
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "counting"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    built = machine.Machine.build(settings, 0)
-    result = built.run()
-
-    assert settings.links.kind == "counting"
-    assert isinstance(built.links, _CountingLinkFabric)
-    assert result.terminal_status == "complete"
-    assert CountingFabric.sent != []
-
-
 def test_a_links_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
     """The table's own refusal, at the yaml boundary."""
     links = dict(yaml_configs.MINIMAL_CONFIG["links"])
@@ -815,7 +757,6 @@ def test_the_measured_cpu_row_runs_from_a_yaml(tmp_path):
     built = machine.Machine.build(settings, 0)
     result = built.run()
 
-    assert settings.links.kind == "roce_v2_cpu"
     assert result.terminal_status == "complete"
     assert "2609.09270" in strong_buffer_source_of(built)
 
@@ -837,7 +778,6 @@ def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
     built = machine.Machine.build(settings, 0)
     result = built.run()
 
-    assert settings.links.kind == "roce_v2_gpu"
     assert result.terminal_status == "complete"
     assert "2609.09270" in strong_buffer_source_of(built)
 

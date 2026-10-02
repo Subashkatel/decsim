@@ -77,7 +77,7 @@ import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
 import decsim.engine as engine_module
-import decsim.links.link_profiles as link_profiles
+import decsim.links.fabric as fabric
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.observation as observation_module
 import decsim.observe.wiring as wiring
@@ -88,7 +88,6 @@ import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
-import decsim.tables as tables
 
 
 @dataclasses.dataclass(frozen=True)
@@ -301,11 +300,8 @@ class Machine:
 def build_links(
     settings: machine_settings.MachineSettings, engine: engine_module.Engine
 ) -> ports.Link:
-    """The link fabric of the run's kind, carded by the links section."""
-    row = tables.row(
-        link_profiles.LINK_FABRICS, "links.kind", settings.links.kind
-    )
-    return row.build(settings.links, engine)
+    """The link fabric, on the run's links card."""
+    return fabric.LinkFabric(settings.links, engine)
 
 
 def store_slots(

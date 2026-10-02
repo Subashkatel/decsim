@@ -9,7 +9,6 @@ paths' counters by construction (one counter stream, folded twice).
 import json
 
 import decsim.engine
-import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
 import decsim.observe.link_traffic as link_traffic
@@ -145,9 +144,7 @@ class Run:
         settings = link_settings.FabricSettings(profile_name="test", **wiring)
         self.engine = decsim.engine.Engine()
         self.ledger = link_traffic.TrafficLedger(settings)
-        self.fabric = fabric_module.LinkFabric(
-            settings, self.engine, channel_module.Channel
-        )
+        self.fabric = fabric_module.LinkFabric(settings, self.engine)
         self.fabric.trace.transfer_delivered.connect(self.ledger.on_transfer)
 
     def send(self, path, payload_bits, tick, attribution):

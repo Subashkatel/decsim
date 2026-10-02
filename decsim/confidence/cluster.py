@@ -97,7 +97,7 @@ class ClusterGap:
     def from_settings(
         cls,
         escalation: escalation_settings.EscalationSettings,
-        weak_decoder: decoder_settings.DecoderSettings,
+        weak_decoder: decoder_settings.DecoderPoolSettings,
     ) -> "ClusterGap":
         """The row at the weak decoder's weight step, priced by the card.
 

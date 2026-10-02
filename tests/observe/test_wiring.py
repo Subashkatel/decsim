@@ -267,7 +267,7 @@ def _machine_on(decoder, **observation):
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
     algorithm = declared_run.OneDecoder(decoder)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
     )
     qpu = declared_run.declared_qpu()

@@ -16,7 +16,6 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
 import decsim.decoders.decoder_output as decoder_output_module
-import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_redecode as strong_redecode_module
@@ -24,7 +23,6 @@ import decsim.escalation.strong_regions as strong_regions
 import decsim.links.window_transfers as window_transfers_module
 import decsim.ports as ports
 import decsim.settings as machine_settings
-import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
@@ -381,15 +379,7 @@ def _copies_the_boundary_fold(
     settings: machine_settings.MachineSettings,
     escalation_policy: ports.EscalationPolicy,
 ) -> bool:
-    """Whether the tier that decodes the plan's windows folds into a copy.
-
-    <tier>.boundary_fold names the row; a value that is not one is
-    refused here, where the tier is named.
-    """
+    """Whether the tier that decodes the plan's windows folds into a copy."""
     tier = escalation_policy.primary_tier.value
     tier_settings = settings.decoder_settings_for(tier)
-    return tables.row(
-        decoder_settings.DECODER_BOUNDARY_FOLDS,
-        f"{tier}_decoder.boundary_fold",
-        tier_settings.boundary_fold,
-    )
+    return tier_settings.copies_boundary_fold

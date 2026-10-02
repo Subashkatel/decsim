@@ -400,8 +400,8 @@ def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
     assert transfers.sends == []
 
 
-@pytest.mark.parametrize("decoder_input", ["copy", "in_place"])
-def test_read_cycles_delay_the_decode_from_dispatch_on(decoder_input):
+@pytest.mark.parametrize("copies_input", [True, False])
+def test_read_cycles_delay_the_decode_from_dispatch_on(copies_input):
     """Readiness, queueing and dispatch stand; the decode and frame move."""
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "read_cycles": 3}
@@ -411,9 +411,9 @@ def test_read_cycles_delay_the_decode_from_dispatch_on(decoder_input):
         clocks,
         ported_syndrome_buffer.SYNDROME_BUFFERS,
     )
-    free = declared_run.weak_only_run(decoder_input=decoder_input)
+    free = declared_run.weak_only_run(copies_input=copies_input)
     charged = declared_run.weak_only_run(
-        weak_syndrome_buffer=settings, decoder_input=decoder_input
+        weak_syndrome_buffer=settings, copies_input=copies_input
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)

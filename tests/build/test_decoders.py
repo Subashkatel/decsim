@@ -37,9 +37,9 @@ def _settings(*, escalation=None, weak=None, strong=None):
     if escalation is None:
         escalation = escalation_settings.EscalationSettings()
     if weak is None:
-        weak = decoder_settings.DecoderSettings()
+        weak = decoder_settings.DecoderPoolSettings()
     if strong is None:
-        strong = decoder_settings.DecoderSettings()
+        strong = decoder_settings.DecoderPoolSettings()
     workload = declared_run.declared_workload(None, 6)
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
@@ -76,7 +76,7 @@ def _preset(microseconds: float):
     preset = mwpm.PyMatchingDecoder.Settings(
         preset_latency_microseconds=microseconds
     )
-    return decoder_settings.DecoderSettings(
+    return decoder_settings.DecoderPoolSettings(
         algorithm=preset, engine=declared_run.DECLARED_ENGINE
     )
 
@@ -98,7 +98,9 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
         release_cycles_per_round=7,
     )
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=matching, engine=engine)
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = _settings(weak=weak)
     policy = escalation_build.build_escalation_policy(
         settings.escalation, settings.weak_decoder
@@ -120,7 +122,7 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     clock = config.Clock(period_ticks)
     engine = decoder_settings.EngineSettings(clock=clock)
     union_find_settings = union_find.UnionFindDecoder.Settings(weight_step=0.25)
-    weak = decoder_settings.DecoderSettings(
+    weak = decoder_settings.DecoderPoolSettings(
         algorithm=union_find_settings, engine=engine
     )
     settings = _settings(weak=weak)
@@ -290,10 +292,10 @@ class _SeedRecordingScheduler(schedulers.FifoScheduler):
 def test_each_managers_scheduler_is_seeded_on_its_own_path():
     weak, strong = declared_run.switching_decoders(False)
     engine = declared_run.DECLARED_ENGINE
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak, engine=engine
     )
-    strong_decoder = decoder_settings.DecoderSettings(
+    strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=strong, engine=engine
     )
     manager_settings = decoder_settings.DecoderManagerSettings(

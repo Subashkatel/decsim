@@ -312,7 +312,7 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
     buffer = buffer_settings.SyndromeBufferSettings(bits=twelve_rounds_bits)
     memory = decoder_settings.UnitMemorySettings(bits=twelve_rounds_bits)
     decoder = dataclasses.replace(
-        settings.weak_decoder, unit_memory=memory, units=2
+        settings.weak_decoder, unit_memory=memory, unit_count=2
     )
     settings = dataclasses.replace(
         settings, weak_syndrome_buffer=buffer, weak_decoder=decoder

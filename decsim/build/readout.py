@@ -15,7 +15,6 @@ import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.memory_rounds as memory_rounds
-import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
@@ -305,7 +304,7 @@ def _weak_output(
     settings: machine_settings.MachineSettings, engine: engine_module.Engine
 ) -> round_output.SyndromeBufferOutput:
     """The weak syndrome buffer's outgoing end, which executes every send."""
-    reads_in_place = _reads_in_place(settings.weak_decoder, "weak")
+    reads_in_place = _reads_in_place(settings.weak_decoder)
     return round_output.SyndromeBufferOutput(
         engine,
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
@@ -319,7 +318,7 @@ def _strong_output(
     settings: machine_settings.MachineSettings, engine: engine_module.Engine
 ) -> round_output.SyndromeBufferOutput:
     """The strong syndrome buffer's outgoing end."""
-    reads_in_place = _reads_in_place(settings.strong_decoder, "strong")
+    reads_in_place = _reads_in_place(settings.strong_decoder)
     return round_output.SyndromeBufferOutput(
         engine,
         transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
@@ -329,20 +328,14 @@ def _strong_output(
     )
 
 
-def _reads_in_place(tier_settings, tier: str) -> bool:
+def _reads_in_place(tier_settings) -> bool:
     """Whether the tier a store feeds reads the rounds where they sit.
 
-    The rule is the tier's input row (<tier>.input); a run without that
-    tier builds the store's end and never sends on it.
+    A run without that tier builds the store's end and never sends on it.
     """
     if tier_settings is None:
         return False
-    copies = tables.row(
-        decoder_settings.DECODER_INPUTS,
-        f"{tier}_decoder.input",
-        tier_settings.input,
-    )
-    return not copies
+    return not tier_settings.copies_input
 
 
 def _check_store_kinds(settings: machine_settings.MachineSettings) -> None:

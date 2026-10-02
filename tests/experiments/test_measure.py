@@ -1442,9 +1442,9 @@ def seam_streams_settings(
     engine_clock = config_module.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=engine_clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=1.0)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
-        units=8,
+        unit_count=8,
         engine=engine,
     )
     manager = decoder_settings.DecoderManagerSettings(dispatch_cycles=0)

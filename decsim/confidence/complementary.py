@@ -61,7 +61,7 @@ class ComplementaryGap:
     def from_settings(
         cls,
         escalation: escalation_settings.EscalationSettings,
-        weak_decoder: decoder_settings.DecoderSettings,
+        weak_decoder: decoder_settings.DecoderPoolSettings,
     ) -> "ComplementaryGap":
         """The row priced by the card; the weak row's settings say nothing."""
         del weak_decoder

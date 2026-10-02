@@ -162,7 +162,7 @@ def memory_machine(decoder, circuit):
     qpu = qpu_settings.QpuSettings(distance=MEMORY_DISTANCE, device=device)
     algorithm = declared_run.OneDecoder(decoder)
     engine = decoder_settings.EngineSettings(clock=CLOCK)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=engine
     )
     settings = machine_settings.MachineSettings(

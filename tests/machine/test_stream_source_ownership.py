@@ -264,7 +264,7 @@ def _machine(
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     links = link_profiles.logical_reference_profile()

@@ -296,7 +296,7 @@ def test_the_row_builds_from_the_threshold_and_the_weak_row():
     union_find_settings = union_find.UnionFindDecoder.Settings(
         weight_step=0.2, cycle_count=count
     )
-    weak = decoder_settings.DecoderSettings(algorithm=union_find_settings)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=union_find_settings)
 
     signal = extra_cluster.ExtraClusterGap.from_settings(escalation, weak)
 
@@ -313,7 +313,7 @@ def test_a_threshold_with_no_number_at_build_is_refused():
         threshold_source="online",
     )
     union_find_settings = union_find.UnionFindDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=union_find_settings)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=union_find_settings)
 
     with pytest.raises(ValueError) as refusal:
         extra_cluster.ExtraClusterGap.from_settings(escalation, weak)

@@ -75,7 +75,7 @@ def weak_settings(**changes):
     decoder = decoders.PresetLatencyDecoder.Settings(WEAK_MICROSECONDS)
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
-    weak = decoder_settings.DecoderSettings(
+    weak = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     qpu = declared_run.declared_qpu()
@@ -98,7 +98,7 @@ def strong_settings():
     decoder = decoders.PresetLatencyDecoder.Settings(STRONG_MICROSECONDS)
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
-    strong = decoder_settings.DecoderSettings(
+    strong = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)

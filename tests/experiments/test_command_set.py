@@ -580,7 +580,7 @@ def test_a_streams_rounds_are_its_segments_counted_once():
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     settings = machine_settings.MachineSettings(

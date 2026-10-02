@@ -125,7 +125,7 @@ class ExtraClusterGap:
     def from_settings(
         cls,
         escalation: escalation_settings.EscalationSettings,
-        weak_decoder: decoder_settings.DecoderSettings,
+        weak_decoder: decoder_settings.DecoderPoolSettings,
     ) -> "ExtraClusterGap":
         """The row grown to the threshold, on the weak row's unit.
 

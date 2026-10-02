@@ -87,7 +87,7 @@ def builds_a_confidence_signal(
 
 def build_escalation_policy(
     settings: escalation_settings.EscalationSettings,
-    weak_decoder: decoder_settings.DecoderSettings,
+    weak_decoder: decoder_settings.DecoderPoolSettings,
 ):
     """The policy of the escalation kind, or a copy of the Python-built one.
 
@@ -120,7 +120,7 @@ def confidence_row(escalation: escalation_settings.EscalationSettings):
 
 def confidence_signal(
     escalation: escalation_settings.EscalationSettings,
-    weak_decoder: decoder_settings.DecoderSettings,
+    weak_decoder: decoder_settings.DecoderPoolSettings,
 ):
     """The signal row a switching run's weak decoder reports and decides on.
 
@@ -163,7 +163,7 @@ def build_burst_detector(
 def _collaborators(
     row,
     settings: escalation_settings.EscalationSettings,
-    weak_decoder: decoder_settings.DecoderSettings,
+    weak_decoder: decoder_settings.DecoderPoolSettings,
 ) -> escalation_policies.EscalationCollaborators:
     """The one record every escalation row is built from.
 

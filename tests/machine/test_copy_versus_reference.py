@@ -531,7 +531,7 @@ def test_the_boundary_fold_default_leaves_the_run_as_it_is():
     """
     copied = _machine()
     copied_result = copied.run()
-    folded = _machine(boundary_fold="copy")
+    folded = _machine(copies_boundary_fold=True)
     folded_result = folded.run()
     windows = len(copied.observation.windows.windows)
     assert _observables(folded_result) == _observables(copied_result)
@@ -543,7 +543,7 @@ def test_an_in_place_input_references_the_rounds_and_moves_nothing():
     """In place: no deposit, no link move, the store's hold kept instead."""
     copied = _machine()
     copied_result = copied.run()
-    in_place = _machine(input="in_place")
+    in_place = _machine(copies_input=False)
     in_place_result = in_place.run()
     assert _unit_input_copies(in_place) == 0
     assert _weak_input_transfers(in_place) == 0
@@ -556,16 +556,14 @@ def test_an_in_place_input_references_the_rounds_and_moves_nothing():
     assert in_place_observables == copied_observables
 
 
-def test_an_input_kind_that_is_not_a_row_is_refused_by_name():
-    with pytest.raises(ValueError, match="weak_decoder.input 'in-place'"):
-        _machine(input="in-place")
+def test_an_input_rule_that_is_not_a_flag_is_refused_by_name():
+    with pytest.raises(ValueError, match="copies_input 'in-place'"):
+        _machine(copies_input="in-place")
 
 
-def test_a_boundary_fold_that_is_not_a_row_is_refused_by_name():
-    with pytest.raises(
-        ValueError, match="weak_decoder.boundary_fold 'in place'"
-    ):
-        _machine(boundary_fold="in place")
+def test_a_boundary_fold_rule_that_is_not_a_flag_is_refused_by_name():
+    with pytest.raises(ValueError, match="copies_boundary_fold 'in place'"):
+        _machine(copies_boundary_fold="in place")
 
 
 def test_the_result_default_frees_the_unit_at_the_decodes_end():
@@ -1028,7 +1026,7 @@ def _parallel_lookback_machine(unit_count: int):
         settings.weak_decoder,
         algorithm=weak,
         engine=declared_run.DECLARED_ENGINE,
-        units=unit_count,
+        unit_count=unit_count,
     )
     preset = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
     strong = dataclasses.replace(settings.strong_decoder, algorithm=preset)
@@ -1153,13 +1151,13 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
         settings.weak_decoder,
         algorithm=weak,
         engine=declared_run.DECLARED_ENGINE,
-        units=3,
+        unit_count=3,
     )
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
     strong_decoder = dataclasses.replace(
         settings.strong_decoder,
         algorithm=matching,
-        units=3,
+        unit_count=3,
     )
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(

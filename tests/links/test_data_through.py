@@ -229,12 +229,12 @@ def machine_settings(shape: str, distance: int):
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     links = link_profiles.logical_reference_profile()
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(
+    weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
     )
     matching = mwpm.PyMatchingDecoder.Settings()
-    strong = decoder_settings.DecoderSettings(
+    strong = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
     )
@@ -610,7 +610,7 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(
+    weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
     )

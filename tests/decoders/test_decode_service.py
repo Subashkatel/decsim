@@ -204,7 +204,7 @@ def strong_primary_run(decoder):
     """
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 3)
-    strong_decoder = decoder_settings.DecoderSettings(
+    strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)

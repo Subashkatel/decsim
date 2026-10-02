@@ -178,8 +178,8 @@ class EngineSettings:
 
 
 @dataclasses.dataclass(frozen=True)
-class DecoderSettings:
-    """The yaml's `weak_decoder` and `strong_decoder` sections.
+class DecoderPoolSettings:
+    """One tier's pool of decoder units: the yaml's `<tier>_decoder` section.
 
     Table rows (DECODERS, above): pymatching, belief_matching (the two
     tiers of the decoder-switching setting, decoded per window and
@@ -192,8 +192,8 @@ class DecoderSettings:
     (Helios 2301.08419v2's controller takes one header byte and then a
     round's bytes and a loading cycle, and streams three header bytes
     and a round's correction bytes back).
-    units is the count of identical decoding engines inside this tier's
-    one chip, gem5's FUDesc.count ("number of these FU's available",
+    unit_count is the count of identical decoding engines inside this
+    tier's one chip, gem5's FUDesc.count ("number of these FU's available",
     gem5 src/cpu/FuncUnit.py): every unit has its own input memory and
     all of them share the tier's links. Hardware holds several engines
     on a chip too: AFS "uses L/N decoder blocks to perform error
@@ -205,11 +205,12 @@ class DecoderSettings:
     unit_memory is the input SRAM of one unit, sized in bits
     (UnitMemorySettings, above); a unit overlaps input transfer with
     compute only when two windows fit.
-    input names a row of DECODER_INPUTS (above): whether this tier's
-    unit is given a copy of the rounds it reads or reads them where the
-    store keeps them. boundary_fold names a row of
-    DECODER_BOUNDARY_FOLDS: whether the window's boundary mask is XORed
-    into a duplicate of the landed input or into the unit's own memory.
+    copies_input says whether this tier's unit is given a copy of the
+    rounds it reads, or reads them where the store keeps them
+    (DECODER_INPUTS, above, names the two). copies_boundary_fold says
+    whether the window's boundary mask is XORed into a duplicate of the
+    landed input, or into the unit's own memory, which needs that copy
+    (DECODER_BOUNDARY_FOLDS).
     result_blocks_unit says when a unit's compute goes back to its pool:
     false at the decode's end, or when the confidence walk charged on
     the unit ends, which is Chen's frame manager taking the
@@ -232,12 +233,20 @@ class DecoderSettings:
     # a decoder row's Settings record, opaque to the tier: the record
     # whose build() returns the decoder
     algorithm: Optional[Any] = None
-    units: int = 1
-    input: str = "copy"
-    boundary_fold: str = "copy"
-    result_blocks_unit: bool = False
-    unit_memory: UnitMemorySettings = UnitMemorySettings()
+    unit_count: int = 1
     engine: EngineSettings = EngineSettings()
+    unit_memory: UnitMemorySettings = UnitMemorySettings()
+    copies_input: bool = True
+    copies_boundary_fold: bool = True
+    result_blocks_unit: bool = False
+
+    def __post_init__(self) -> None:
+        _check_unit_count(self.unit_count)
+        _check_flag("copies_input", self.copies_input)
+        _check_flag("copies_boundary_fold", self.copies_boundary_fold)
+        _check_flag("result_blocks_unit", self.result_blocks_unit)
+        _check_fold_has_a_memory(self)
+        _check_word_has_a_memory(self)
 
     @classmethod
     def from_yaml(
@@ -245,7 +254,7 @@ class DecoderSettings:
         section: Mapping,
         clocks: config.ClockSettings,
         section_name: str,
-    ) -> "DecoderSettings":
+    ) -> "DecoderPoolSettings":
         """A tier section: kind, units, unit memory and the engine card."""
         tables.refuse_missing_keys(
             section_name, section, _REQUIRED_DECODER_KEYS
@@ -255,23 +264,19 @@ class DecoderSettings:
         engine = _engine_card(engine_section, clocks, section_name)
         memory_section = _block(section, section_name, "unit_memory")
         unit_memory = UnitMemorySettings.from_yaml(memory_section, section_name)
-        input_kind = _copy_row(section, section_name, "input", DECODER_INPUTS)
-        boundary_fold = _copy_row(
+        copies_input = _copy_row(section, section_name, "input", DECODER_INPUTS)
+        copies_boundary_fold = _copy_row(
             section, section_name, "boundary_fold", DECODER_BOUNDARY_FOLDS
         )
-        _check_fold_has_a_memory(section_name, input_kind, boundary_fold)
-        _check_word_has_a_memory(section_name, input_kind, unit_memory)
         result_blocks_unit = section.get("result_blocks_unit", False)
-        _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
-        units = _unit_count(section, section_name)
         return cls(
             algorithm=algorithm,
-            units=units,
-            input=input_kind,
-            boundary_fold=boundary_fold,
-            result_blocks_unit=result_blocks_unit,
-            unit_memory=unit_memory,
+            unit_count=section["units"],
             engine=engine,
+            unit_memory=unit_memory,
+            copies_input=copies_input,
+            copies_boundary_fold=copies_boundary_fold,
+            result_blocks_unit=result_blocks_unit,
         )
 
 
@@ -412,48 +417,44 @@ def _check_boolean(section_name: str, key: str, value) -> None:
 
 def _copy_row(
     section: Mapping, section_name: str, key: str, table: dict
-) -> str:
-    """A copy-or-in-place key's row name, copy when the yaml leaves it out."""
+) -> bool:
+    """Whether a copy-or-in-place key copies; an absent key copies."""
     name = section.get(key, "copy")
-    tables.row(table, f"{section_name}.{key}", name)
-    return name
+    return tables.row(table, f"{section_name}.{key}", name)
 
 
-def _check_fold_has_a_memory(
-    section_name: str, input_kind: str, boundary_fold: str
-) -> None:
+def _check_fold_has_a_memory(pool: DecoderPoolSettings) -> None:
     """Folding into the unit's memory needs the unit to hold a copy.
 
     A tier that reads its input in place holds no rounds of its own, so
     there is no single-writer memory to XOR the mask into (Helios
     2301.08419 lines 632-640).
     """
-    if input_kind == "copy" or boundary_fold == "copy":
+    if pool.copies_input or pool.copies_boundary_fold:
         return
     raise ValueError(
-        f"{section_name}.boundary_fold in_place needs the unit's own copy "
-        "of the rounds, and input in_place reads them where the store "
-        "keeps them; fold into a copy, or copy the input"
+        "a decoder pool that folds the boundary into the unit's memory "
+        "(copies_boundary_fold False, boundary_fold in_place) needs the "
+        "unit's own copy of the rounds, and one that reads its input in "
+        "place (copies_input False) has none; fold into a copy, or copy "
+        "the input"
     )
 
 
-def _check_word_has_a_memory(
-    section_name: str,
-    input_kind: str,
-    unit_memory: UnitMemorySettings,
-) -> None:
+def _check_word_has_a_memory(pool: DecoderPoolSettings) -> None:
     """A word width prices reads of the unit's own memory, which in_place lacks.
 
     Under input in_place the unit reads the store's words, and the store
     prices that read (syndrome_buffer/round_output.py); a width here would
     price the same bits twice.
     """
-    if input_kind == "copy" or unit_memory.word_bits is None:
+    if pool.copies_input or pool.unit_memory.word_bits is None:
         return
     raise ValueError(
-        f"{section_name}.unit_memory.word_bits prices reads of the unit's own "
-        "memory, and input in_place reads the rounds where the store keeps "
-        "them, which the store prices; leave word_bits out, or copy the input"
+        "a decoder pool's unit_memory.word_bits prices reads of the unit's "
+        "own memory, and a pool that reads its input in place "
+        "(copies_input False) reads the rounds where the store keeps them, "
+        "which the store prices; leave word_bits out, or copy the input"
     )
 
 
@@ -469,14 +470,22 @@ def _check_word_bits(key: str, word_bits) -> None:
     )
 
 
-def _unit_count(section: Mapping, section_name: str) -> int:
-    """A tier's engine count, checked where it enters."""
-    units = section["units"]
-    if config.is_whole_count(units):
-        return units
+def _check_flag(name: str, value) -> None:
+    """A pool's yes-or-no field is True or False, nothing that reads as one."""
+    if value is True or value is False:
+        return
     raise ValueError(
-        f"{section_name}.units must be a whole number of engines, at least "
-        f"one (got {units!r})"
+        f"a decoder pool's {name} {value!r} is not a flag; give True or False"
+    )
+
+
+def _check_unit_count(unit_count) -> None:
+    """A pool's engine count is a whole number, at least one."""
+    if config.is_whole_count(unit_count):
+        return
+    raise ValueError(
+        "a decoder pool's unit_count (<tier>_decoder.units) must be a whole "
+        f"number of engines, at least one (got {unit_count!r})"
     )
 
 

@@ -364,7 +364,7 @@ def weak_only_run(
     seed=0,
     io_trace=False,
     weak_syndrome_buffer=None,
-    decoder_input="copy",
+    copies_input=True,
     windows=None,
     controller=None,
     observation=None,
@@ -378,8 +378,8 @@ def weak_only_run(
     workload = declared_workload(operations, rounds)
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
     algorithm = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(
-        algorithm=algorithm, input=decoder_input, engine=DECLARED_ENGINE
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, copies_input=copies_input, engine=DECLARED_ENGINE
     )
     links = declared_profile()
     if controller is None:
@@ -415,7 +415,7 @@ def strong_only_run(
     workload = declared_workload(operations, rounds)
     strong_microseconds = DECLARED_MICROSECONDS["strong"]
     algorithm = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
-    strong_decoder = decoder_settings.DecoderSettings(
+    strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=DECLARED_ENGINE
     )
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
@@ -515,7 +515,7 @@ def switching_run(
     clock=None,
     threshold_cycles=0,
     switch_cycles=0,
-    strong_input="copy",
+    strong_copies_input=True,
 ):
     """Weak-primary switching on the declared fabric.
 
@@ -524,14 +524,16 @@ def switching_run(
     """
     weak, strong = switching_decoders(escalates)
     weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak,
-        units=weak_units,
+        unit_count=weak_units,
         unit_memory=weak_memory,
         engine=DECLARED_ENGINE,
     )
-    strong_decoder = decoder_settings.DecoderSettings(
-        algorithm=strong, input=strong_input, engine=DECLARED_ENGINE
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=strong,
+        copies_input=strong_copies_input,
+        engine=DECLARED_ENGINE,
     )
     threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
     collaborators = escalation_policies.EscalationCollaborators(

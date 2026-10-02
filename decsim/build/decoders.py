@@ -220,22 +220,13 @@ def _pool(
     formation: Optional[detection_events_module.TierFormation],
     blocks_unit: bool,
 ) -> decoder_pool_module.PoolSettings:
-    """One manager's pool, from the settings of the tier whose units it holds.
-
-    A value of <tier>.input that is not a row of DECODER_INPUTS is
-    refused here, where the tier is named.
-    """
+    """One manager's pool, from the settings of the tier it holds units of."""
     tier_settings = settings.decoder_settings_for(tier)
-    copies_input = tables.row(
-        decoder_settings.DECODER_INPUTS,
-        f"{tier}_decoder.input",
-        tier_settings.input,
-    )
     return decoder_pool_module.PoolSettings(
         name=name,
-        unit_count=tier_settings.units,
+        unit_count=tier_settings.unit_count,
         capacity_bits=tier_settings.unit_memory.bits,
-        copies_input=copies_input,
+        copies_input=tier_settings.copies_input,
         blocks_unit=blocks_unit,
         formation=formation,
     )
@@ -326,7 +317,7 @@ def _evidence_order(member) -> str:
 
 
 def _staged_unit(
-    tier_settings: decoder_settings.DecoderSettings,
+    tier_settings: decoder_settings.DecoderPoolSettings,
     algorithm,
     formation: Optional[detection_events_module.TierFormation],
 ) -> staged_decoder.StagedDecoder:

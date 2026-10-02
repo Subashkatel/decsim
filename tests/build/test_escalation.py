@@ -41,7 +41,7 @@ def test_a_built_policy_answers_for_itself_and_the_kind_is_ignored():
     tier = escalation_build.primary_tier(settings)
     row = escalation_build.escalation_row(settings)
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=matching)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
     policy = escalation_build.build_escalation_policy(settings, weak)
 
     assert tier == window_records.DecoderTier.STRONG.value
@@ -65,7 +65,7 @@ def test_a_row_that_decides_on_no_confidence_is_built_from_an_empty_record():
     settings = escalation_settings.EscalationSettings(kind="weak_baseline")
     row = escalation_build.escalation_row(settings)
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=matching)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
 
     policy = escalation_build.build_escalation_policy(settings, weak)
 
@@ -82,7 +82,7 @@ def test_a_row_that_decides_on_a_confidence_gets_the_three_fields():
     )
 
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=matching)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
     signal = escalation_build.confidence_signal(settings, weak)
     policy = escalation_build.build_escalation_policy(settings, weak)
 
@@ -114,7 +114,7 @@ def test_every_machine_binds_its_own_copy_of_a_built_policy():
         confidence="complementary_gap",
     )
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=matching)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
     built = escalation_build.build_escalation_policy(switching, weak)
     settings = escalation_settings.EscalationSettings(policy=built)
 
@@ -138,7 +138,7 @@ def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
     )
 
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=matching)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
     with pytest.raises(ValueError) as refusal:
         escalation_build.build_escalation_policy(settings, weak)
 
@@ -177,7 +177,7 @@ def test_the_confidence_row_is_built_with_the_sections_walk_card():
     )
 
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderSettings(algorithm=matching)
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
 
     signal = escalation_build.confidence_signal(settings, weak)
 

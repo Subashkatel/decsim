@@ -675,7 +675,7 @@ def test_an_unbuffered_live_region_finds_the_round_before_it_held(
     weak = declared_run.DeclaredConfidenceDecoder.Settings(
         0.1, _escalate_window_one
     )
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
     threshold = threshold_sources.FixedThreshold(0.5)
@@ -746,10 +746,10 @@ def test_a_live_region_reads_a_round_an_earlier_region_landed(
     settings = _settings(program, "live", "controller")
     is_escalated = functools.partial(_escalates_one_of, escalated)
     weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, is_escalated)
-    weak_decoder = decoder_settings.DecoderSettings(
-        algorithm=weak, engine=declared_run.DECLARED_ENGINE, units=3
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE, unit_count=3
     )
-    strong_decoder = dataclasses.replace(settings.strong_decoder, units=3)
+    strong_decoder = dataclasses.replace(settings.strong_decoder, unit_count=3)
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -803,7 +803,7 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     weak = declared_run.DeclaredConfidenceDecoder.Settings(
         0.028, _escalates_none
     )
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
     threshold = threshold_sources.FixedThreshold(0.5)
@@ -883,7 +883,7 @@ def _switching_live_settings(
     settings = _settings(program, "live", "controller")
     is_escalated = functools.partial(_escalates_one_of, escalated)
     weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, is_escalated)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
     threshold = threshold_sources.FixedThreshold(0.5)
@@ -1388,7 +1388,7 @@ def _circuit_less_terminal_run(
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=engine,
     )
@@ -1536,7 +1536,7 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     with a model holds the unit for its measured time.
     """
     matching = mwpm.PyMatchingDecoder.Settings()
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=FAST_ENGINE_CARD,
     )
@@ -1575,12 +1575,12 @@ def _switching_memory(weak_kind: str, confidence: str):
     )
     row = decoder_settings.DECODERS[weak_kind]
     weak_algorithm = row.Settings()
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak_algorithm,
         engine=ENGINE_CARD,
     )
     matching = mwpm.PyMatchingDecoder.Settings()
-    strong_decoder = decoder_settings.DecoderSettings(
+    strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
     )
@@ -1903,7 +1903,7 @@ def test_the_run_result_carries_the_factorys_supply_stall():
     )
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
     decoder = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     qpu = declared_run.declared_qpu()
@@ -2104,7 +2104,7 @@ def _one_memory_operation_on(card) -> machine_settings.MachineSettings:
     workload = workload_settings.WorkloadSettings(operations=[operation])
     qpu = qpu_settings.QpuSettings(code=card)
     decoder = decoders.PresetLatencyDecoder.Settings(0.0)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     return machine_settings.MachineSettings(
@@ -2188,7 +2188,7 @@ def replayed_run(circuit, measurements, shot):
     device = stim_device.RecordedStimDevice(measurements, shot)
     qpu = qpu_settings.QpuSettings(distance=RECORDED_DISTANCE, device=device)
     decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.028)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     settings = machine_settings.MachineSettings(
@@ -2479,7 +2479,7 @@ def twelve_rounds_with_packing_bound(bound):
     workload = declared_run.declared_workload([operation], 12)
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
     decoder = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     links = declared_run.declared_profile()
@@ -2622,7 +2622,7 @@ def strong_primary_settings(escalation):
     workload = declared_run.declared_workload([operation], 6)
     latency = declared_run.DECLARED_MICROSECONDS["strong"]
     decoder = decoders.PresetLatencyDecoder.Settings(latency)
-    strong_decoder = decoder_settings.DecoderSettings(
+    strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     qpu = declared_run.declared_qpu()
@@ -2675,7 +2675,7 @@ def test_a_policy_object_whose_tier_names_no_decoder_is_refused():
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     settings = strong_primary_settings(escalation)
-    no_decoder = decoder_settings.DecoderSettings()
+    no_decoder = decoder_settings.DecoderPoolSettings()
     settings = dataclasses.replace(settings, strong_decoder=no_decoder)
     with pytest.raises(ValueError) as refusal:
         machine_module.Machine.build(settings, 0)
@@ -3170,7 +3170,7 @@ def test_an_operation_claims_every_idle_cycle_before_it_starts():
     scheme = naive_online.NaiveOnlineScheme()
     windows = window_settings.WindowSettings(scheme=scheme)
     decoder = decoders.PresetLatencyDecoder.Settings(10.0)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     ignore = idle_policies.Ignore()
@@ -3257,7 +3257,7 @@ def _protected_memory_settings(circuit, source):
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
     )
@@ -3309,7 +3309,7 @@ def _settings(
         base.weak_decoder,
         algorithm=matching,
     )
-    weak = decoder_settings.DecoderSettings()
+    weak = decoder_settings.DecoderPoolSettings()
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
     seats = SEATS_BY_PLACEMENT[placement]
     detection_events = dataclasses.replace(
@@ -3600,7 +3600,7 @@ def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
     clock = config.Clock(4000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
-    strong = decoder_settings.DecoderSettings(
+    strong = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=engine,
     )

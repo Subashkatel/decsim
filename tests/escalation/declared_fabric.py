@@ -115,10 +115,10 @@ def switching_machine(
     )
     strong_microseconds = DECLARED_MICROSECONDS["strong"]
     strong = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
-    strong_decoder = decoder_settings.DecoderSettings(
+    strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=strong, engine=declared_run.DECLARED_ENGINE
     )
     threshold = threshold_sources.FixedThreshold(0.5)

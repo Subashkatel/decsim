@@ -44,8 +44,8 @@ def _weak_run():
     code = code_geometry.SurfaceCodeModel(distance=3)
     qpu = qpu_settings.QpuSettings(code=code, round_period_microseconds=1.0)
     decoder = decoders.PresetLatencyDecoder.Settings(2.0)
-    weak_decoder = decoder_settings.DecoderSettings(
-        algorithm=decoder, units=1, engine=declared_run.DECLARED_ENGINE
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, unit_count=1, engine=declared_run.DECLARED_ENGINE
     )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
@@ -82,8 +82,8 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
         distance=3, device=device, round_period_microseconds=1.0
     )
     decoder = decoders.PresetLatencyDecoder.Settings(2.0)
-    weak_decoder = decoder_settings.DecoderSettings(
-        algorithm=decoder, units=1, engine=declared_run.DECLARED_ENGINE
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, unit_count=1, engine=declared_run.DECLARED_ENGINE
     )
     windows = window_settings.WindowSettings(terminal_policy=terminal_policy)
     settings = machine_settings.MachineSettings(
@@ -257,9 +257,9 @@ def _tan_sandwich_run(unit_count):
         distance=3, round_period_microseconds=1.0, device=device
     )
     decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=5.0)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder,
-        units=unit_count,
+        unit_count=unit_count,
         engine=declared_run.DECLARED_ENGINE,
     )
     scheme = sandwich_scheme.TanSandwichScheme()

@@ -371,7 +371,7 @@ def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
         }
     )
     point = gate_point.settings(trace="chrome")
-    weak_decoder = dataclasses.replace(point.weak_decoder, units=2)
+    weak_decoder = dataclasses.replace(point.weak_decoder, unit_count=2)
     point = dataclasses.replace(
         point, weak_decoder=weak_decoder, magic_state_factory=factory
     )

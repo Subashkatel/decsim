@@ -480,7 +480,7 @@ def test_every_axis_kind_resolves_to_the_settings_a_written_file_gives(
     swept_settings = collect.json_value(swept_task.settings)
     written_settings = collect.json_value(written_task.settings)
     assert swept_settings == written_settings
-    assert swept_task.settings.weak_decoder.units == 2
+    assert swept_task.settings.weak_decoder.unit_count == 2
     assert written_task.metadata == {}
 
 

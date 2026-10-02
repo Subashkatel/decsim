@@ -581,7 +581,7 @@ def _committed_windows(
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     settings = machine_settings.MachineSettings(
@@ -741,7 +741,7 @@ def _stim_machine(
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     settings = machine_settings.MachineSettings(
@@ -780,7 +780,7 @@ def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     idle = controller_settings.IdlePolicySettings(kind=idle_policy)
@@ -848,7 +848,7 @@ def _prefix_run(operations: tuple, mode: str) -> tuple:
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     settings = machine_settings.MachineSettings(
@@ -945,7 +945,7 @@ def _feedback_run(
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     idle = controller_settings.IdlePolicySettings(kind=idle_policy)
@@ -1012,7 +1012,7 @@ def _machine(
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     links = _zero_delay_links(data_hop_ticks)

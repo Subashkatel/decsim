@@ -33,7 +33,7 @@ def test_a_unit_memory_capacity_that_is_not_whole_bits_is_refused_by_name(
     with pytest.raises(
         ValueError, match="weak_decoder.unit_memory.bits must be at least"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -44,7 +44,7 @@ def test_an_unknown_key_under_unit_memory_is_refused_by_name():
     with pytest.raises(
         ValueError, match=r"weak_decoder.unit_memory does not know \['rounds'\]"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -53,7 +53,7 @@ def test_a_null_unit_memory_capacity_is_an_unbounded_memory():
     clocks = config.ClockSettings({"decoder": 250.0})
     section = _tier_section({"bits": None})
 
-    settings = decoder_settings.DecoderSettings.from_yaml(
+    settings = decoder_settings.DecoderPoolSettings.from_yaml(
         section, clocks, "weak_decoder"
     )
 
@@ -76,9 +76,9 @@ def test_a_result_blocking_value_that_is_not_a_boolean_is_refused_by_name():
         },
     }
     with pytest.raises(
-        ValueError, match="weak_decoder.result_blocks_unit 'yes'"
+        ValueError, match="result_blocks_unit 'yes' is not a flag"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -105,7 +105,7 @@ def test_the_engine_card_reads_the_per_job_and_per_round_stage_cycles():
         },
     }
 
-    settings = decoder_settings.DecoderSettings.from_yaml(
+    settings = decoder_settings.DecoderPoolSettings.from_yaml(
         section, clocks, "weak_decoder"
     )
 
@@ -132,7 +132,7 @@ def test_an_engine_cycle_count_refusal_names_its_tier_and_card(
     section["engine"][key] = -1
 
     with pytest.raises(ValueError) as refusal:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, section_name
         )
     assert str(refusal.value) == (
@@ -163,7 +163,7 @@ def test_a_cycle_count_refusal_names_its_tier(
     section["cycle_count"] = {"clock": "helios", key: value}
 
     with pytest.raises(ValueError) as refusal:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, section_name
         )
     message = str(refusal.value)
@@ -180,7 +180,7 @@ def test_a_cycle_count_key_it_does_not_read_is_refused_naming_its_tier(
     section["cycle_count"] = {"clock": "helios", "cycles_per_edeg": 4}
 
     with pytest.raises(ValueError) as refusal:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, section_name
         )
     message = str(refusal.value)
@@ -205,7 +205,7 @@ def test_an_engine_card_without_a_stage_key_is_refused_by_name():
     }
 
     with pytest.raises(ValueError) as refusal:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
     assert str(refusal.value) == (
@@ -216,7 +216,7 @@ def test_an_engine_card_without_a_stage_key_is_refused_by_name():
     del section["engine"]["release_cycles_per_job"]
     section["engine"]["fetch_cycles_per_job"] = 0
     with pytest.raises(ValueError) as older:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "strong_decoder"
         )
     assert str(older.value) == (
@@ -242,12 +242,12 @@ def test_the_weight_step_is_read_and_absent_is_the_shipped_one():
         },
     }
 
-    settings = decoder_settings.DecoderSettings.from_yaml(
+    settings = decoder_settings.DecoderPoolSettings.from_yaml(
         section, clocks, "weak_decoder"
     )
     without = dict(section)
     del without["weight_step"]
-    plain = decoder_settings.DecoderSettings.from_yaml(
+    plain = decoder_settings.DecoderPoolSettings.from_yaml(
         without, clocks, "weak_decoder"
     )
 
@@ -272,7 +272,7 @@ def test_a_weight_step_that_is_not_positive_is_refused_with_a_sentence():
     }
 
     with pytest.raises(ValueError) as refusal:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
     message = str(refusal.value)
@@ -295,12 +295,12 @@ def test_the_cycle_count_block_is_read_and_absent_is_none():
         },
     }
 
-    settings = decoder_settings.DecoderSettings.from_yaml(
+    settings = decoder_settings.DecoderPoolSettings.from_yaml(
         section, clocks, "weak_decoder"
     )
     without = dict(section)
     del without["cycle_count"]
-    plain = decoder_settings.DecoderSettings.from_yaml(
+    plain = decoder_settings.DecoderPoolSettings.from_yaml(
         without, clocks, "weak_decoder"
     )
 
@@ -318,7 +318,7 @@ def test_a_tier_section_without_a_required_key_is_refused_by_name(key):
     del section[key]
 
     with pytest.raises(ValueError) as refusal:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
     assert str(refusal.value) == (
@@ -335,7 +335,7 @@ def test_an_engine_card_without_a_clock_is_refused_by_name():
     with pytest.raises(
         ValueError, match="weak_decoder.engine needs clock, the domain"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -349,7 +349,7 @@ def test_an_unknown_key_on_the_engine_card_is_refused_by_name():
         ValueError,
         match=r"weak_decoder.engine does not know \['fetch_cycle_per_round'\]",
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -364,7 +364,7 @@ def test_a_kind_that_is_neither_a_row_nor_a_latency_is_refused_by_name(kind):
     with pytest.raises(
         ValueError, match="weak_decoder.kind .* is neither a row nor a latency"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -383,7 +383,7 @@ def test_the_cluster_gap_is_not_a_decoder_row():
         ValueError,
         match="weak_decoder.kind 'union_find_cluster_gap' is not a row",
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -394,7 +394,7 @@ def test_a_finite_nonnegative_kind_is_a_preset_core_latency(kind):
     section = _tier_section({"bits": None})
     section["kind"] = kind
 
-    settings = decoder_settings.DecoderSettings.from_yaml(
+    settings = decoder_settings.DecoderPoolSettings.from_yaml(
         section, clocks, "weak_decoder"
     )
 
@@ -409,9 +409,9 @@ def test_a_unit_count_that_is_not_a_whole_count_is_refused_by_name(units):
     section["units"] = units
 
     with pytest.raises(
-        ValueError, match="weak_decoder.units must be a whole number"
+        ValueError, match="_decoder.units\\) must be a whole number"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -426,7 +426,7 @@ def test_a_memory_row_that_is_not_a_row_is_refused_at_load_by_name(key):
     with pytest.raises(
         ValueError, match=f"weak_decoder.{key} 'in-place' is not a row"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -452,7 +452,7 @@ def test_a_weight_step_that_is_not_a_number_is_refused_naming_its_tier(
     section["weight_step"] = weight_step
 
     with pytest.raises(ValueError) as refusal:
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, section_name
         )
     message = str(refusal.value)
@@ -466,7 +466,7 @@ def test_a_cycle_count_block_without_a_clock_is_refused_by_name():
     section["cycle_count"] = {"delay_cycles": 3}
 
     with pytest.raises(ValueError, match="weak_decoder.cycle_count needs"):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -480,7 +480,7 @@ def test_a_nested_block_written_as_one_value_is_refused_by_name(key):
     with pytest.raises(
         ValueError, match=f"weak_decoder.{key} holds 4096; it is a mapping"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -489,7 +489,7 @@ def test_a_unit_memory_word_is_read_from_its_block():
     clocks = config.ClockSettings({"decoder": 250.0})
     section = _tier_section({"bits": None, "word_bits": 8})
 
-    settings = decoder_settings.DecoderSettings.from_yaml(
+    settings = decoder_settings.DecoderPoolSettings.from_yaml(
         section, clocks, "weak_decoder"
     )
 
@@ -506,7 +506,7 @@ def test_a_unit_memory_word_that_is_not_whole_bits_is_refused_by_name(
         ValueError,
         match="weak_decoder.unit_memory.word_bits must be a whole number",
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
 
@@ -517,8 +517,8 @@ def test_a_unit_memory_word_under_an_in_place_input_is_refused():
     section = _tier_section({"bits": None, "word_bits": 8})
     section["input"] = "in_place"
     with pytest.raises(
-        ValueError, match="input in_place reads the rounds where the store"
+        ValueError, match="reads the rounds where the store keeps them"
     ):
-        decoder_settings.DecoderSettings.from_yaml(
+        decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )

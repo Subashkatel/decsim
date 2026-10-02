@@ -196,7 +196,7 @@ def supplied_settings(
     matching = mwpm.PyMatchingDecoder.Settings(
         preset_latency_microseconds=decoder_microseconds
     )
-    decoder = decoder_settings.DecoderSettings(
+    decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
     reference = link_profiles.logical_reference_profile()

@@ -261,9 +261,9 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     # one microsecond a round, over each operation's three rounds
     decoder = decoders.PresetLatencyDecoder.Settings(3.0)
     unit_memory = decoder_settings.UnitMemorySettings(bits=bits_per_unit)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder,
-        units=unit_count,
+        unit_count=unit_count,
         unit_memory=unit_memory,
         engine=declared_run.DECLARED_ENGINE,
     )

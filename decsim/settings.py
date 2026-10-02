@@ -99,11 +99,11 @@ class MachineSettings:
         syndrome_buffer_settings.SyndromeBufferSettings()
     )
     windows: window_settings.WindowSettings = window_settings.WindowSettings()
-    weak_decoder: decoder_settings.DecoderSettings = (
-        decoder_settings.DecoderSettings()
+    weak_decoder: decoder_settings.DecoderPoolSettings = (
+        decoder_settings.DecoderPoolSettings()
     )
-    strong_decoder: decoder_settings.DecoderSettings = (
-        decoder_settings.DecoderSettings()
+    strong_decoder: decoder_settings.DecoderPoolSettings = (
+        decoder_settings.DecoderPoolSettings()
     )
     decoder_manager: decoder_settings.DecoderManagerSettings = (
         decoder_settings.DecoderManagerSettings()
@@ -127,7 +127,7 @@ class MachineSettings:
 
     def decoder_settings_for(
         self, tier: str
-    ) -> decoder_settings.DecoderSettings:
+    ) -> decoder_settings.DecoderPoolSettings:
         """The card of one decoder tier, named the way the yaml names it."""
         if tier == "weak":
             return self.weak_decoder
@@ -273,10 +273,10 @@ def _not_a_mapping_sentence(name: str, section) -> str:
 
 def _tier_settings(
     sections: Mapping, tier: str, clocks: config.ClockSettings
-) -> decoder_settings.DecoderSettings:
+) -> decoder_settings.DecoderPoolSettings:
     """A tier's section, or no decoder when the yaml leaves it out."""
     if tier not in sections:
-        return decoder_settings.DecoderSettings()
-    return decoder_settings.DecoderSettings.from_yaml(
+        return decoder_settings.DecoderPoolSettings()
+    return decoder_settings.DecoderPoolSettings.from_yaml(
         sections[tier], clocks, tier
     )

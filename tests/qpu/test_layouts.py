@@ -82,7 +82,7 @@ def settings_with(layout=None, code=None):
     workload = workload_settings.WorkloadSettings(operations=[operation])
     qpu = qpu_settings.QpuSettings(code=code, layout=layout)
     decoder = decoders.PresetLatencyDecoder.Settings(1.0)
-    weak_decoder = decoder_settings.DecoderSettings(
+    weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     return machine_settings.MachineSettings(

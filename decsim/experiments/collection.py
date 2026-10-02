@@ -1,8 +1,10 @@
-"""The collection section: how a sweep point's shots are cut and stopped.
+"""The collection: how a point's shots are cut and stopped.
 
-sinter's CollectionOptions as yaml (sinter/_data/_collection_options.py:
-34-38), at the top of a file or in one sweep block, whose keys override
-the top's one by one. None of its keys enters a point's id or a
+sinter's CollectionOptions (sinter/_data/_collection_options.py:34-38):
+an experiment's default and a point's own, or, read from a yaml, the
+collection section at the top of a file or in one sweep block, whose
+keys override the top's one by one. None of its keys enters a point's
+id or a
 configuration's id, as sinter's strong id leaves the collection options
 out (sinter/_data/_task.py:167-204): collecting longer is the same point
 run longer.
@@ -52,7 +54,9 @@ class CollectionSettings:
 
     max_failures is the target, None for none; min_shots the scored
     shots a point runs whatever its failures; max_shots and
-    max_core_seconds the caps, at least one of them set.
+    max_core_seconds the caps, at least one of them set. The record is
+    where a Python experiment's input enters, so it checks its own
+    values and raises ValueError naming the key.
     """
 
     max_shots: Optional[int] = None
@@ -61,25 +65,29 @@ class CollectionSettings:
     min_shots: int = 0
     piece_rounds: int = DEFAULT_PIECE_ROUNDS
 
+    def __post_init__(self) -> None:
+        _check_caps(self)
+        _check_optional_count(self.max_shots, "max_shots")
+        _check_optional_count(self.max_failures, "max_failures")
+        _check_core_seconds(self.max_core_seconds)
+        _check_minimum(self.min_shots)
+        _check_count(self.piece_rounds, "piece_rounds")
+
     @classmethod
     def from_yaml(
         cls, top: Optional[Mapping], block: Optional[Mapping], where: str
     ) -> "CollectionSettings":
-        """The top section's keys, the block's written over them, checked.
+        """The top section's keys, the block's written over them.
 
         where names the block in a refusal, as the other block checks do.
         """
         merged = {}
         _add_section(merged, top, "the collection section")
         _add_section(merged, block, f"{where} collection")
-        _check_caps(merged, where)
-        _check_optional_count(merged, "max_shots", where)
-        _check_optional_count(merged, "max_failures", where)
-        _check_core_seconds(merged, where)
-        _check_minimum(merged, where)
-        piece_rounds = merged.get("piece_rounds", DEFAULT_PIECE_ROUNDS)
-        _check_count(piece_rounds, "piece_rounds", where)
-        return cls(**merged)
+        try:
+            return cls(**merged)
+        except ValueError as refused:
+            raise refusal.RefusalError(f"{where} {refused}") from refused
 
     def text(self) -> str:
         """Every key the collection sets and its value, as one phrase."""
@@ -313,61 +321,58 @@ def _add_section(merged: dict, section: Optional[Mapping], name: str) -> None:
     merged.update(section)
 
 
-def _check_caps(merged: dict, where: str) -> None:
+def _check_caps(settings: CollectionSettings) -> None:
     """A point stops only at a cap it is given, so it needs one."""
-    for key in CAP_KEYS:
-        if merged.get(key) is not None:
-            return
-    raise refusal.RefusalError(
-        f"{where} has no cap; its collection sets max_shots or "
-        "max_core_seconds, or a point may never stop"
+    if settings.max_shots is not None:
+        return
+    if settings.max_core_seconds is not None:
+        return
+    raise ValueError(
+        "collection has no cap; it sets max_shots or max_core_seconds, or a "
+        "point may never stop"
     )
 
 
-def _check_optional_count(merged: dict, key: str, where: str) -> None:
-    """A count that may be null is null or a whole number of at least one."""
-    value = merged.get(key)
+def _check_optional_count(value, key: str) -> None:
+    """A count that may be None is None or a whole number of at least one."""
     if value is None:
         return
-    _check_count(value, key, where)
+    _check_count(value, key)
 
 
-def _check_count(value, key: str, where: str) -> None:
+def _check_count(value, key: str) -> None:
     """A count the collection reads is a whole number of at least one."""
     is_whole_number = isinstance(value, int) and not isinstance(value, bool)
     if is_whole_number and value >= 1:
         return
-    raise refusal.RefusalError(
-        f"{where} collection {key} must be a whole number of at least 1, "
-        f"got {value!r}"
+    raise ValueError(
+        f"collection {key} must be a whole number of at least 1, got {value!r}"
     )
 
 
-def _check_core_seconds(merged: dict, where: str) -> None:
+def _check_core_seconds(value) -> None:
     """The time cap, when given, is a finite number of seconds above zero.
 
     An infinite cap is no cap: a point with no other would never stop.
     """
-    value = merged.get("max_core_seconds")
     if value is None:
         return
     is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
     is_finite_number = is_number and math.isfinite(value)
     if is_finite_number and value > 0:
         return
-    raise refusal.RefusalError(
-        f"{where} collection max_core_seconds must be a finite number of "
-        f"seconds above 0, got {value!r}"
+    raise ValueError(
+        "collection max_core_seconds must be a finite number of seconds "
+        f"above 0, got {value!r}"
     )
 
 
-def _check_minimum(merged: dict, where: str) -> None:
+def _check_minimum(value) -> None:
     """min_shots is a whole number, zero for no minimum."""
-    value = merged.get("min_shots", 0)
     is_whole_number = isinstance(value, int) and not isinstance(value, bool)
     if is_whole_number and value >= 0:
         return
-    raise refusal.RefusalError(
-        f"{where} collection min_shots must be a whole number of at least "
-        f"0, got {value!r}"
+    raise ValueError(
+        f"collection min_shots must be a whole number of at least 0, got "
+        f"{value!r}"
     )

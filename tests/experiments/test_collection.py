@@ -1,4 +1,4 @@
-"""The collection section read from yaml (decsim/experiments/collection.py).
+"""The collection, built in Python or read from yaml (collection.py).
 
 A block's key replaces the top's, as a file's key replaces its base's
 under `extends`. sinter's CollectionOptions.combine takes the smaller of
@@ -51,7 +51,7 @@ def test_a_point_with_no_cap_is_refused():
         collection.CollectionSettings.from_yaml(None, None, "block 3")
 
     message = str(refused.value)
-    assert message.startswith("block 3 has no cap")
+    assert message.startswith("block 3 collection has no cap")
     assert "max_shots or max_core_seconds" in message
 
 
@@ -64,7 +64,7 @@ def test_a_time_cap_alone_is_a_cap():
 
 
 def test_a_piece_holds_its_rounds_over_a_shots_whole_shots():
-    settings = collection.CollectionSettings(piece_rounds=20000)
+    settings = collection.CollectionSettings(max_shots=10, piece_rounds=20000)
 
     shots = settings.piece_shots(15)
 
@@ -72,7 +72,7 @@ def test_a_piece_holds_its_rounds_over_a_shots_whole_shots():
 
 
 def test_a_shot_longer_than_a_piece_is_a_piece_of_one_shot():
-    settings = collection.CollectionSettings(piece_rounds=10)
+    settings = collection.CollectionSettings(max_shots=10, piece_rounds=10)
 
     shots = settings.piece_shots(15)
 
@@ -131,6 +131,24 @@ def test_a_minimum_that_is_no_count_is_refused(value):
 
     message = str(refused.value)
     assert message.startswith("block 2 collection min_shots must be")
+
+
+def test_a_collection_built_in_python_with_no_cap_is_refused():
+    with pytest.raises(ValueError) as refused:
+        collection.CollectionSettings(max_failures=100)
+
+    message = str(refused.value)
+    assert message.startswith("collection has no cap")
+
+
+def test_a_collection_built_in_python_names_the_count_it_refuses():
+    with pytest.raises(ValueError) as refused:
+        collection.CollectionSettings(max_shots=10, piece_rounds=0)
+
+    message = str(refused.value)
+    assert message == (
+        "collection piece_rounds must be a whole number of at least 1, got 0"
+    )
 
 
 def test_a_prefix_short_of_every_stop_runs_on():

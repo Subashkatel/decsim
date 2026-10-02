@@ -85,6 +85,7 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.tables as tables
@@ -131,11 +132,20 @@ class Machine:
         burst_detector = escalation_build.build_burst_detector(
             settings, engine, plan, escalation_policy
         )
+        window_tier = escalation_policy.primary_tier
+        escalates = escalation_policy.requires_strong_context
         detection_events = readout_part.build_detection_events(
-            settings, plan.device, escalation_policy, burst_detector
+            settings.detection_events,
+            plan.device,
+            window_tier,
+            escalates,
+            burst_detector,
         )
         pool = decoders_part.build_decoder_pool(
             settings, plan, escalation_policy, detection_events
+        )
+        weak_store_slot, strong_store_slot = store_slots(
+            settings, window_tier, pool
         )
         links = build_links(settings, engine)
         qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -143,7 +153,13 @@ class Machine:
             settings.controller, settings.pauli_frame, engine, plan, links
         )
         readout = readout_part.Readout.build(
-            settings, engine, escalation_policy, detection_events, links
+            settings.controller,
+            settings.links,
+            weak_store_slot,
+            strong_store_slot,
+            engine,
+            detection_events,
+            links,
         )
         windows = windows_part.Windows.build(
             settings, engine, plan, escalation_policy, burst_detector, links
@@ -283,6 +299,36 @@ def build_links(
         link_profiles.LINK_FABRICS, "links.kind", settings.links.kind
     )
     return row.build(settings.links, engine)
+
+
+def store_slots(
+    settings: machine_settings.MachineSettings,
+    window_tier: window_records.DecoderTier,
+    pool: decoders_part.DecoderPool,
+) -> tuple:
+    """The weak and the strong syndrome buffer slots; None for an unread one.
+
+    The tier that decodes the plan's windows reads its own store through
+    the chip's pool, and a switching run's strong tier reads the strong
+    store through the host's; each pool says whether its units read the
+    rounds in place.
+    """
+    chip_reads_in_place = not pool.chip.copies_input
+    if window_tier is window_records.DecoderTier.STRONG:
+        strong_store_slot = readout_part.StoreSlot(
+            settings.strong_syndrome_buffer, chip_reads_in_place
+        )
+        return None, strong_store_slot
+    weak_store_slot = readout_part.StoreSlot(
+        settings.weak_syndrome_buffer, chip_reads_in_place
+    )
+    if pool.host is None:
+        return weak_store_slot, None
+    host_reads_in_place = not pool.host.copies_input
+    strong_store_slot = readout_part.StoreSlot(
+        settings.strong_syndrome_buffer, host_reads_in_place
+    )
+    return weak_store_slot, strong_store_slot
 
 
 def _seed_roots(

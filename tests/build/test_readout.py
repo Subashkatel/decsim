@@ -10,7 +10,6 @@ it is about.
 import dataclasses
 import pathlib
 import shutil
-import types
 
 import pytest
 
@@ -61,17 +60,11 @@ def _settings_forming_at(formed_at=("controller",)):
     return _machine_settings(detection_events=detection_events)
 
 
-def _policy(primary_tier="weak", requires_strong_context=False):
-    """The two facts the paths of a run are read off."""
-    tier = window_records.DecoderTier(primary_tier)
-    return types.SimpleNamespace(
-        primary_tier=tier, requires_strong_context=requires_strong_context
-    )
-
-
-WEAK_BASELINE = _policy()
-SWITCHING = _policy(requires_strong_context=True)
-STRONG_ONLY = _policy("strong")
+# The two facts the paths of a run are read off: the tier that decodes
+# the plan's windows, and whether regions escalate to the strong tier.
+WEAK_BASELINE = (window_records.DecoderTier.WEAK, False)
+SWITCHING = (window_records.DecoderTier.WEAK, True)
+STRONG_ONLY = (window_records.DecoderTier.STRONG, False)
 
 
 def test_a_source_that_does_not_answer_the_port_forms_nothing():
@@ -88,14 +81,14 @@ def test_a_source_that_does_not_answer_the_port_forms_nothing():
     carried = (fragment,)
 
     placement = readout_part.build_detection_events(
-        settings, device, WEAK_BASELINE
+        settings.detection_events, device, *WEAK_BASELINE
     )
 
     assert placement.form_at("controller", carried) == carried
 
 
 @pytest.mark.parametrize(
-    "policy, formed_at",
+    "run_facts, formed_at",
     [
         (WEAK_BASELINE, ("controller",)),
         (WEAK_BASELINE, ("weak_syndrome_buffer",)),
@@ -107,17 +100,19 @@ def test_a_source_that_does_not_answer_the_port_forms_nothing():
         (STRONG_ONLY, ("weak_syndrome_buffer", "strong_decoder")),
     ],
 )
-def test_a_seat_list_every_path_crosses_once_is_built(policy, formed_at):
+def test_a_seat_list_every_path_crosses_once_is_built(run_facts, formed_at):
     settings = _settings_forming_at(formed_at)
     device = _DeviceWithNoFormationTable()
 
-    placement = readout_part.build_detection_events(settings, device, policy)
+    placement = readout_part.build_detection_events(
+        settings.detection_events, device, *run_facts
+    )
 
     assert placement.forms_at(formed_at[0])
 
 
 @pytest.mark.parametrize(
-    "policy, formed_at, crossed",
+    "run_facts, formed_at, crossed",
     [
         (WEAK_BASELINE, ("strong_decoder",), "[]"),
         (WEAK_BASELINE, ("controller", "weak_decoder"), "['controller', "),
@@ -131,14 +126,16 @@ def test_a_seat_list_every_path_crosses_once_is_built(policy, formed_at):
     ],
 )
 def test_a_path_that_crosses_no_seat_or_two_is_refused(
-    policy, formed_at, crossed
+    run_facts, formed_at, crossed
 ):
     """None decodes raw outcomes; two form events of events."""
     settings = _settings_forming_at(formed_at)
     device = _DeviceWithNoFormationTable()
 
     with pytest.raises(ValueError) as refusal:
-        readout_part.build_detection_events(settings, device, policy)
+        readout_part.build_detection_events(
+            settings.detection_events, device, *run_facts
+        )
 
     sentence = str(refusal.value)
     assert f"at {crossed}" in sentence
@@ -151,7 +148,7 @@ def test_the_burst_detector_counts_at_the_primary_tiers_seat():
     source = _OneRoundSource()
     detector = _CountingDetector()
     placement = readout_part.build_detection_events(
-        settings, source, SWITCHING, detector
+        settings.detection_events, source, *SWITCHING, detector
     )
     raw = (_OneRoundSource.fragment(),)
 
@@ -168,7 +165,7 @@ def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
 
     with pytest.raises(ValueError, match="burst_detector counts detection"):
         readout_part.build_detection_events(
-            settings, device, WEAK_BASELINE, detector
+            settings.detection_events, device, *WEAK_BASELINE, detector
         )
 
 
@@ -193,16 +190,10 @@ PORTED_STORES = [
 
 
 @pytest.mark.parametrize("strong_syndrome_buffer", PORTED_STORES)
-@pytest.mark.parametrize("plan", ["weak_only", "strong_only"])
-def test_a_ported_strong_store_is_refused_at_build(
-    strong_syndrome_buffer, plan
-):
-    """Its writes land unbooked, so its reads alone would be priced.
-
-    The build refuses it whether or not a tier reads the room side.
-    """
+def test_a_ported_strong_store_is_refused_at_build(strong_syndrome_buffer):
+    """Its writes land unbooked, so its reads alone would be priced."""
     settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
-    planned = _with_one_tier(settings, plan)
+    planned = _strong_only(settings)
 
     with pytest.raises(ValueError, match="ported_syndrome_buffer prices"):
         machine_module.Machine.build(planned)
@@ -422,12 +413,10 @@ def test_a_ported_store_beside_an_unrated_link_is_accepted():
     machine_module.Machine.build(settings)
 
 
-def _with_one_tier(settings, plan: str):
-    """The settings with one decoding tier: the weak one or the strong one."""
+def _strong_only(settings):
+    """The settings with the strong tier alone decoding the windows."""
     decoder = decoders.PresetLatencyDecoder(1.0)
     tier = decoder_settings.DecoderSettings(decoder=decoder)
-    if plan == "weak_only":
-        return dataclasses.replace(settings, weak_decoder=tier)
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     return dataclasses.replace(

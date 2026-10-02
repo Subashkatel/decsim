@@ -10,25 +10,25 @@ neither has ends for its missing store.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.controller.controller as controller_module
 import decsim.controller.round_assembly as round_assembly
 import decsim.controller.round_transmission as round_transmission
+import decsim.controller.settings as controller_settings_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.decoders.memory_rounds as memory_rounds
-import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
+import decsim.links.settings as link_settings
 import decsim.links.window_transfers as window_transfers
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-import decsim.tables as tables
 from decsim.syndrome_buffer import (
     strong_syndrome_round_receiver as strong_receiver_module,
 )
@@ -38,13 +38,30 @@ from decsim.syndrome_buffer import (
 
 
 @dataclasses.dataclass(frozen=True)
+class StoreSlot:
+    """A syndrome buffer a decoder reads, and how that decoder reads it.
+
+    reads_in_place is the reading decoder's fact: its unit reads the
+    rounds where the store keeps them rather than a copy of them
+    (decoders/settings.py DECODER_INPUTS).
+    """
+
+    settings: Union[
+        syndrome_buffer_module.SyndromeBufferSettings,
+        ported_syndrome_buffer.PortedSyndromeBufferSettings,
+    ]
+    reads_in_place: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class Readout:
     """Every component a round passes on its way into the stores.
 
     The three weak fields are None on a run whose plan's windows the
     strong tier decodes, and the three strong fields on a run that never
     reads the room side. primary_output is one of the two outgoing ends:
-    the one the tier that decodes the plan's windows reads.
+    the weak one when the weak store exists, since the tier that decodes
+    the plan's windows reads it, and the strong one otherwise.
     """
 
     controller: controller_module.Controller
@@ -72,21 +89,23 @@ class Readout:
     @classmethod
     def build(
         cls,
-        settings: machine_settings.MachineSettings,
+        controller_settings: controller_settings_module.ControllerSettings,
+        link_card: link_settings.FabricSettings,
+        weak_store_slot: Optional[StoreSlot],
+        strong_store_slot: Optional[StoreSlot],
         engine: engine_module.Engine,
-        escalation_policy: ports.EscalationPolicy,
         detection_events: ports.DetectionEventPlacement,
         links: ports.Link,
     ) -> "Readout":
         """Every component of the readout path, wired to one another.
 
-        One line per component, in the order a round meets them, then
-        the wires inside the part.
+        A store slot left None is a store no decoder reads, which the
+        part does not build. One line per component, in the order a
+        round meets them, then the wires inside the part.
         """
-        _check_readout_cost_is_priced(settings)
-        _check_one_price_for_a_read(settings)
-        _check_strong_store_charges_nothing(settings.strong_syndrome_buffer)
-        controller_settings = settings.controller
+        _check_readout_cost_is_priced(controller_settings, link_card)
+        _check_one_price_for_a_read(weak_store_slot, link_card)
+        _check_strong_store_charges_nothing(strong_store_slot)
         controller = controller_module.Controller(engine, controller_settings)
         assembler = round_assembly.RoundAssembler(engine, controller_settings)
         packing_line = syndrome_round_sender.HeldRounds(engine)
@@ -98,13 +117,13 @@ class Readout:
         store_transfers = window_transfers.WindowTransfers(engine)
         memory_arrivals = memory_rounds.MemoryRoundArrivals(engine)
         weak_store, weak_output, weak_receiver = _weak_store(
-            settings, engine, escalation_policy
+            weak_store_slot, engine
         )
         strong_store, strong_output, strong_receiver = _strong_store(
-            settings, engine, escalation_policy
+            strong_store_slot, engine
         )
         primary_output = weak_output
-        if _uses_the_room_side(escalation_policy):
+        if weak_output is None:
             primary_output = strong_output
         readout = cls(
             controller=controller,
@@ -233,9 +252,10 @@ class Readout:
 
 
 def build_detection_events(
-    settings: machine_settings.MachineSettings,
+    detection_event_settings: event_settings.DetectionEventSettings,
     device,
-    escalation_policy: ports.EscalationPolicy,
+    window_tier: window_records.DecoderTier,
+    escalates: bool,
     burst_detector: Optional[ports.BurstDetector] = None,
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
@@ -246,11 +266,13 @@ def build_detection_events(
     events, a wrong answer either way. A source that does not answer
     the DetectionEventFormer port forms nothing. A burst detector
     counts the rounds the first seat on the primary tier's path forms.
+    window_tier is the tier that decodes the plan's windows, and
+    escalates says a switching run sends regions on to the strong tier.
     The decoder units are compiled from this placement, so the machine
     builds it before the parts.
     """
-    formed_at = settings.detection_events.formed_at
-    paths = _paths_of_the_run(escalation_policy)
+    formed_at = detection_event_settings.formed_at
+    paths = _paths_of_the_run(window_tier, escalates)
     for path in paths:
         _check_one_seat_on(path, formed_at)
     source = None
@@ -261,104 +283,53 @@ def build_detection_events(
         _check_forms_events(source)
         observed_seat = _first_seat_on(paths[0], formed_at)
     return formation.SeatedFormation(
-        source, settings.detection_events, observed_seat, burst_detector
+        source, detection_event_settings, observed_seat, burst_detector
     )
 
 
-def _uses_strong_store(escalation_policy: ports.EscalationPolicy) -> bool:
-    """Whether a tier of this run reads its rounds from the room side."""
-    if escalation_policy.requires_strong_context:
-        return True
-    return _uses_the_room_side(escalation_policy)
-
-
-def _uses_the_room_side(escalation_policy: ports.EscalationPolicy) -> bool:
-    """Whether the plan's decoding tier reads the strong syndrome buffer."""
-    strong = window_records.DecoderTier.STRONG
-    return escalation_policy.primary_tier is strong
-
-
 def _weak_store(
-    settings: machine_settings.MachineSettings,
-    engine: engine_module.Engine,
-    escalation_policy: ports.EscalationPolicy,
+    slot: Optional[StoreSlot], engine: engine_module.Engine
 ) -> tuple:
     """The weak syndrome buffer, its outgoing end and its receiving end.
 
-    Three Nones on a run whose plan's windows the strong tier decodes.
+    Three Nones when no decoder reads the store.
     """
-    if _uses_the_room_side(escalation_policy):
+    if slot is None:
         return None, None, None
-    store = settings.weak_syndrome_buffer.build(engine)
-    output = _weak_output(settings, engine)
+    store = slot.settings.build(engine)
+    output = round_output.SyndromeBufferOutput(
+        engine,
+        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        "weak syndrome buffer",
+        slot.reads_in_place,
+        "weak_decoder",
+    )
     receiver = weak_receiver_module.WeakSyndromeRoundReceiver(engine)
     return store, output, receiver
 
 
 def _strong_store(
-    settings: machine_settings.MachineSettings,
-    engine: engine_module.Engine,
-    escalation_policy: ports.EscalationPolicy,
+    slot: Optional[StoreSlot], engine: engine_module.Engine
 ) -> tuple:
     """The strong syndrome buffer, its outgoing end and its receiving end.
 
-    Three Nones on a run that never reads the room side.
+    Three Nones when no decoder reads the store.
     """
-    if not _uses_strong_store(escalation_policy):
+    if slot is None:
         return None, None, None
-    store = settings.strong_syndrome_buffer.build(engine)
-    output = _strong_output(settings, engine)
+    store = slot.settings.build(engine)
+    output = round_output.SyndromeBufferOutput(
+        engine,
+        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
+        "strong syndrome buffer",
+        slot.reads_in_place,
+        "strong_decoder",
+    )
     receiver = strong_receiver_module.StrongSyndromeRoundReceiver(engine)
     return store, output, receiver
 
 
-def _weak_output(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
-) -> round_output.SyndromeBufferOutput:
-    """The weak syndrome buffer's outgoing end, which executes every send."""
-    reads_in_place = _reads_in_place(settings.weak_decoder, "weak")
-    return round_output.SyndromeBufferOutput(
-        engine,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
-        "weak syndrome buffer",
-        reads_in_place,
-        "weak_decoder",
-    )
-
-
-def _strong_output(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
-) -> round_output.SyndromeBufferOutput:
-    """The strong syndrome buffer's outgoing end."""
-    reads_in_place = _reads_in_place(settings.strong_decoder, "strong")
-    return round_output.SyndromeBufferOutput(
-        engine,
-        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
-        "strong syndrome buffer",
-        reads_in_place,
-        "strong_decoder",
-    )
-
-
-def _reads_in_place(tier_settings, tier: str) -> bool:
-    """Whether the tier a store feeds reads the rounds where they sit.
-
-    The rule is the tier's input row (<tier>.input); a run without that
-    tier builds the store's end and never sends on it.
-    """
-    if tier_settings is None:
-        return False
-    copies = tables.row(
-        decoder_settings.DECODER_INPUTS,
-        f"{tier}_decoder.input",
-        tier_settings.input,
-    )
-    return not copies
-
-
-def _check_strong_store_charges_nothing(
-    strong_store: syndrome_buffer_module.SyndromeBufferSettings,
-) -> None:
+def _check_strong_store_charges_nothing(slot: Optional[StoreSlot]) -> None:
     """The strong syndrome buffer is not a store that prices its reads.
 
     Its receiving end stores a round as it lands and never books the
@@ -367,7 +338,7 @@ def _check_strong_store_charges_nothing(
     refuses a wrong neighbour when it binds the port whatever script
     built it (src/mem/port.cc:152, fatal_if).
     """
-    if not strong_store.prices_read_bits:
+    if slot is None or not slot.settings.prices_read_bits:
         return
     raise ValueError(
         "strong_syndrome_buffer.kind ported_syndrome_buffer prices its "
@@ -377,7 +348,8 @@ def _check_strong_store_charges_nothing(
 
 
 def _check_one_price_for_a_read(
-    settings: machine_settings.MachineSettings,
+    weak_store_slot: Optional[StoreSlot],
+    link_card: link_settings.FabricSettings,
 ) -> None:
     """A ported weak store prices its reads; the link out of it may not.
 
@@ -385,9 +357,11 @@ def _check_one_price_for_a_read(
     weak_buffer_to_weak_decoder as well would charge the same bits twice.
     The link keeps its latency.
     """
-    if not settings.weak_syndrome_buffer.prices_read_bits:
+    if weak_store_slot is None:
         return
-    path = settings.links.weak_buffer_to_weak_decoder
+    if not weak_store_slot.settings.prices_read_bits:
+        return
+    path = link_card.weak_buffer_to_weak_decoder
     if path.channel.capacity is None:
         return
     raise ValueError(
@@ -399,7 +373,8 @@ def _check_one_price_for_a_read(
 
 
 def _check_readout_cost_is_priced(
-    settings: machine_settings.MachineSettings,
+    controller_settings: controller_settings_module.ControllerSettings,
+    link_card: link_settings.FabricSettings,
 ) -> None:
     """A readout cost on the controller needs a card that leaves it out.
 
@@ -408,13 +383,11 @@ def _check_readout_cost_is_priced(
     covers the controller turning the readout into bits, so a second
     charge for that work would count it twice.
     """
-    readout_cycles = settings.controller.readout_to_bits_cycles
+    readout_cycles = controller_settings.readout_to_bits_cycles
     if readout_cycles == 0:
         return
-    readout_hops = [settings.links.qpu_to_controller]
-    readout_hops.extend(
-        route.settings for route in settings.links.readout_routes
-    )
+    readout_hops = [link_card.qpu_to_controller]
+    readout_hops.extend(route.settings for route in link_card.readout_routes)
     for readout_hop in readout_hops:
         if not readout_hop.excludes_receiver_processing:
             raise ValueError(
@@ -434,11 +407,13 @@ def _check_forms_events(source) -> None:
     )
 
 
-def _paths_of_the_run(escalation_policy: ports.EscalationPolicy) -> tuple:
+def _paths_of_the_run(
+    window_tier: window_records.DecoderTier, escalates: bool
+) -> tuple:
     """The paths this run's rounds take to a decoder, the primary first."""
-    if _uses_the_room_side(escalation_policy):
+    if window_tier is window_records.DecoderTier.STRONG:
         return (event_settings.STRONG_PATH,)
-    if escalation_policy.requires_strong_context:
+    if escalates:
         return (event_settings.WEAK_PATH, event_settings.ESCALATION_PATH)
     return (event_settings.WEAK_PATH,)
 

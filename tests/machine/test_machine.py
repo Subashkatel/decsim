@@ -379,11 +379,20 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     burst_detector = escalation_build.build_burst_detector(
         settings, engine, plan, escalation_policy
     )
+    window_tier = escalation_policy.primary_tier
+    escalates = escalation_policy.requires_strong_context
     detection_events = readout_part.build_detection_events(
-        settings, plan.device, escalation_policy, burst_detector
+        settings.detection_events,
+        plan.device,
+        window_tier,
+        escalates,
+        burst_detector,
     )
     pool = decoders_part.build_decoder_pool(
         settings, plan, escalation_policy, detection_events
+    )
+    weak_store_slot, strong_store_slot = machine_module.store_slots(
+        settings, window_tier, pool
     )
     links = machine_module.build_links(settings, engine)
     qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -391,7 +400,13 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings.controller, settings.pauli_frame, engine, plan, links
     )
     readout = readout_part.Readout.build(
-        settings, engine, escalation_policy, detection_events, links
+        settings.controller,
+        settings.links,
+        weak_store_slot,
+        strong_store_slot,
+        engine,
+        detection_events,
+        links,
     )
     windows = windows_part.Windows.build(
         settings, engine, plan, escalation_policy, burst_detector, links

@@ -188,10 +188,12 @@ _PULSE_SOURCE = (
 # the on-chip memory word above: the width is Caune's, and one word a
 # 250 MHz cycle is an estimate, since Caune clock that bus at 156.25 MHz
 # (lines 1021-1027) and give no transaction rate. One 128-bit
-# instruction word per cycle into the pulse generator. Off board, the
-# 100 Gb direct-attach cable from an FPGA controller to its coprocessor
-# host (Backline, arXiv 2609.09270, lines 1229-1230), the one off-board
-# line rate a referent of this scale gives.
+# instruction word per cycle into the pulse generator: the width is
+# QubiC's, and decsim runs it on its 250 MHz controller clock, while
+# QubiC's processors run at 500 MHz (2404.15260 lines 716-717). Off
+# board, the 100 Gb direct-attach cable from an FPGA controller to its
+# coprocessor host (Backline, arXiv 2609.09270, lines 1229-1230), the
+# one off-board line rate a referent of this scale gives.
 _WORD_BITS_PER_MICROSECOND = BUS_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
 _WORD_RATE_SOURCE = (
     "one 32-bit word per 250 MHz cycle, an estimate: the width is Caune "
@@ -202,8 +204,9 @@ _INSTRUCTION_BITS_PER_MICROSECOND = (
     INSTRUCTION_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
 )
 _INSTRUCTION_RATE_SOURCE = (
-    "one 128-bit instruction word per 250 MHz cycle (QubiC 2404.15260 "
-    "lines 176-179)"
+    "one 128-bit instruction word per 250 MHz controller cycle, an "
+    "estimate: the width is QubiC 2404.15260 lines 176-179's, whose "
+    "processors run at 500 MHz (lines 716-717)"
 )
 _OFF_BOARD_BITS_PER_MICROSECOND = 100_000  # 2609.09270 lines 1229-1230
 _OFF_BOARD_RATE_SOURCE = (

@@ -102,7 +102,7 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count(tmp_path):
     settings = point.settings
     machine = machine_module.Machine.build(settings)
     machine.run()
-    cycle_count = settings.weak_decoder.row_settings.cycle_count
+    cycle_count = settings.weak_decoder.algorithm.cycle_count
     period_ticks = cycle_count.clock.period_ticks
     algorithm = _algorithm_records(machine)
     ticks_past_an_edge = {

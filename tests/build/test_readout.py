@@ -393,8 +393,10 @@ def _machine_settings(**changes):
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
-    decoder = decoders.PresetLatencyDecoder(1.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
@@ -439,8 +441,10 @@ def test_a_ported_store_beside_an_unrated_link_is_accepted():
 
 def _with_one_tier(settings, plan: str):
     """The settings with one decoding tier: the weak one or the strong one."""
-    decoder = decoders.PresetLatencyDecoder(1.0)
-    tier = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    tier = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     if plan == "weak_only":
         return dataclasses.replace(settings, weak_decoder=tier)
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)

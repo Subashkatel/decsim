@@ -51,7 +51,7 @@ def test_the_input_block_changes_the_input_and_nothing_else():
 
     assert variant.weak_decoder.input == "in_place"
     assert variant.weak_decoder.boundary_fold == base.weak_decoder.boundary_fold
-    assert variant.weak_decoder.kind == base.weak_decoder.kind
+    assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
     assert variant.escalation.kind == base.escalation.kind
 
 
@@ -61,7 +61,7 @@ def test_the_fold_block_changes_the_fold_and_nothing_else():
 
     assert variant.weak_decoder.boundary_fold == "in_place"
     assert variant.weak_decoder.input == base.weak_decoder.input
-    assert variant.weak_decoder.kind == base.weak_decoder.kind
+    assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
     assert variant.escalation.kind == base.escalation.kind
 
 
@@ -71,7 +71,7 @@ def test_the_switching_block_opens_the_last_two_hops():
     fabric = variant.links
 
     assert variant.escalation.kind == "switching"
-    assert variant.strong_decoder.kind == 10.0
+    assert variant.strong_decoder.algorithm.name == 10.0
     assert variant.strong_decoder.input == "copy"
     assert fabric.weak_decoder_to_strong_decoder is not None
     assert fabric.strong_buffer_to_strong_decoder is not None
@@ -102,7 +102,7 @@ def test_every_study_block_sweeps_the_same_points_on_priced_cards(
     """A priced card decodes on no host clock, so the counts repeat."""
     settings = block_settings(block_index)
     distances = swept_distances(block_index)
-    assert settings.weak_decoder.kind == 1.0
+    assert settings.weak_decoder.algorithm.name == 1.0
     assert distances == [3, 5, 7]
 
 

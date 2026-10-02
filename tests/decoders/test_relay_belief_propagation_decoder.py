@@ -253,7 +253,7 @@ def test_the_tier_sections_keys_reach_the_rows_settings():
     tier = decoder_settings.DecoderSettings.from_yaml(
         section, clocks, "weak_decoder"
     )
-    assert tier.row_settings == relay.RelayBeliefPropagationDecoder.Settings(
+    assert tier.algorithm == relay.RelayBeliefPropagationDecoder.Settings(
         alpha=0.5,
         alpha_iteration_scaling_factor=2.0,
         gamma0=0.35,

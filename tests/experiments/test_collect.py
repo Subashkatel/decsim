@@ -58,7 +58,6 @@ import yaml
 
 import decsim.collect as collect
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
-import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collect_command as run
@@ -263,27 +262,6 @@ def test_a_task_named_by_two_blocks_runs_once(tmp_path):
     seeds = [shot["seed"] for shot in shots]
     assert len(tasks) == 2
     assert seeds == ["0", "1"]
-
-
-def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
-    settings = dataclasses.replace(task.settings, weak_decoder=weak_decoder)
-    unknown = dataclasses.replace(task, settings=settings)
-    rows = sorted(decoder_settings.DECODERS)
-    sentence = (
-        "weak_decoder.kind 'lookup_table' is not a row of its table; "
-        "the rows are " + re.escape(repr(rows))
-    )
-    with pytest.raises(ValueError, match=sentence):
-        collect.run_shot(unknown, 0)
 
 
 def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):

@@ -19,7 +19,7 @@ import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
-import decsim.decoders.decoders as decoders
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.decoder as union_find
@@ -73,8 +73,12 @@ def _pool(settings, detection_events=None):
 
 
 def _preset(microseconds: float):
-    preset = decoders.PresetLatencyDecoder(microseconds)
-    return decoder_settings.DecoderSettings(decoder=preset)
+    preset = mwpm.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=microseconds
+    )
+    return decoder_settings.DecoderSettings(
+        algorithm=preset, engine=declared_run.DECLARED_ENGINE
+    )
 
 
 def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
@@ -93,7 +97,8 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
         release_cycles_per_job=5,
         release_cycles_per_round=7,
     )
-    weak = decoder_settings.DecoderSettings(kind="pymatching", engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderSettings(algorithm=matching, engine=engine)
     settings = _settings(weak=weak)
     policy = escalation_build.build_escalation_policy(
         settings.escalation, settings.weak_decoder
@@ -116,9 +121,7 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     engine = decoder_settings.EngineSettings(clock=clock)
     union_find_settings = union_find.UnionFindDecoder.Settings(weight_step=0.25)
     weak = decoder_settings.DecoderSettings(
-        kind="union_find",
-        engine=engine,
-        row_settings=union_find_settings,
+        algorithm=union_find_settings, engine=engine
     )
     settings = _settings(weak=weak)
     policy = escalation_build.build_escalation_policy(
@@ -128,19 +131,6 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     unit = decoder_build.build_decoder_unit(settings, "weak", policy)
 
     assert unit.decoder.weight_step == 0.25
-
-
-def test_a_python_built_decoder_is_returned_as_it_is():
-    built = decoders.PresetLatencyDecoder(10.0)
-    weak = decoder_settings.DecoderSettings(decoder=built)
-    settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-
-    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
-
-    assert unit is built
 
 
 def test_a_tier_that_names_no_decoder_builds_none():
@@ -253,19 +243,6 @@ def test_a_decoder_seat_gives_each_pool_its_stage_whatever_the_source():
     assert formed_at_the_controller.chip.formation is None
 
 
-def test_a_decoder_kind_that_names_no_row_is_refused():
-    weak = decoder_settings.DecoderSettings(kind="oracle")
-    settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-
-    with pytest.raises(ValueError) as refusal:
-        decoder_build.build_decoder_unit(settings, "weak", policy)
-
-    assert "oracle" in str(refusal.value)
-
-
 def test_a_weak_only_run_has_no_host_manager():
     machine = declared_run.weak_only_run()
 
@@ -312,8 +289,13 @@ class _SeedRecordingScheduler(schedulers.FifoScheduler):
 
 def test_each_managers_scheduler_is_seeded_on_its_own_path():
     weak, strong = declared_run.switching_decoders(False)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
-    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
+    engine = declared_run.DECLARED_ENGINE
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=weak, engine=engine
+    )
+    strong_decoder = decoder_settings.DecoderSettings(
+        algorithm=strong, engine=engine
+    )
     manager_settings = decoder_settings.DecoderManagerSettings(
         scheduler=_SeedRecordingScheduler
     )

@@ -259,10 +259,13 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     )
     qpu = qpu_settings.QpuSettings(distance=3)
     # one microsecond a round, over each operation's three rounds
-    decoder = decoders.PresetLatencyDecoder(3.0)
+    decoder = decoders.PresetLatencyDecoder.Settings(3.0)
     unit_memory = decoder_settings.UnitMemorySettings(bits=bits_per_unit)
     weak_decoder = decoder_settings.DecoderSettings(
-        decoder=decoder, units=unit_count, unit_memory=unit_memory
+        algorithm=decoder,
+        units=unit_count,
+        unit_memory=unit_memory,
+        engine=declared_run.DECLARED_ENGINE,
     )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder

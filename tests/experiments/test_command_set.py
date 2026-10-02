@@ -30,6 +30,7 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.collect_command as collect_command
@@ -578,7 +579,10 @@ def test_a_streams_rounds_are_its_segments_counted_once():
     qpu = qpu_settings.QpuSettings(distance=3, kind="timing_only")
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    weak_decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )

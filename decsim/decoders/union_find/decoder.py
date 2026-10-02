@@ -57,6 +57,12 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
         cycle_count: Optional[cycle_count_module.CycleCount] = None
+        # the word the yaml and the reports name this row by
+        name = "union_find"
+
+        def build(self) -> "UnionFindDecoder":
+            """A fresh decoder of these settings."""
+            return UnionFindDecoder(settings=self)
 
         @classmethod
         def from_yaml(
@@ -93,6 +99,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         if settings is None:
             settings = UnionFindDecoder.Settings()
+        self.compile_key = (UnionFindDecoder, settings)
         # absolute natural-log units represented by one weight tick
         self.weight_step = evidence_records.normalized_weight_step(
             settings.weight_step

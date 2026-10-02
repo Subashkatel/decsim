@@ -7,6 +7,7 @@ overruns past n - m, so the order is clamped to the window's own n - m,
 as stimbposd clamps it (bp_osd.py:62-68).
 """
 
+import dataclasses
 from typing import Optional
 
 import ldpc
@@ -23,6 +24,28 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.PHYSICAL
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """Ldpc's BP-OSD arguments, by their decsim names."""
+
+        max_iterations: int = 2
+        osd_order: int = 0
+        belief_propagation_method: str = "product_sum"
+        schedule: str = "serial"
+        osd_method: str = "osd_cs"
+        # the word the yaml and the reports name this row by
+        name = "bposd"
+
+        def build(self) -> "BeliefPropagationOsdDecoder":
+            """A fresh decoder of these settings."""
+            return BeliefPropagationOsdDecoder(
+                max_iterations=self.max_iterations,
+                osd_order=self.osd_order,
+                belief_propagation_method=self.belief_propagation_method,
+                schedule=self.schedule,
+                osd_method=self.osd_method,
+            )
+
     def __init__(
         self,
         latency_model: Optional[decoder_module.DecoderBase] = None,
@@ -38,6 +61,14 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
         self.belief_propagation_method = belief_propagation_method
         self.schedule = schedule
         self.osd_method = osd_method
+        self.compile_key = (
+            BeliefPropagationOsdDecoder,
+            max_iterations,
+            osd_order,
+            belief_propagation_method,
+            schedule,
+            osd_method,
+        )
 
     def compile(self, faults, model=None):
         """Ldpc's BP-OSD decoder over the window's physical check."""

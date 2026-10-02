@@ -310,21 +310,6 @@ class Windows:
         self.window_manager.strong_redecode = strong_redecode
 
 
-def _decides_on_a_confidence(
-    settings: machine_settings.MachineSettings,
-) -> bool:
-    """Whether the run joins the confidence of every solve of a window.
-
-    False when the row decides on no confidence, and false for a
-    Python-built policy, which brings its own decoder and reports its
-    own soft output from one decode.
-    """
-    if settings.escalation.policy is not None:
-        return False
-    row = escalation_build.escalation_row(settings.escalation)
-    return row.decides_on_a_confidence
-
-
 def _retention(
     plan: plan_build.Plan, escalation_policy: ports.EscalationPolicy
 ) -> round_retention_module.RoundRetention:
@@ -348,7 +333,7 @@ def _confidence(
 
     Two Nones on a run that decides on no confidence.
     """
-    if not _decides_on_a_confidence(settings):
+    if not escalation_build.builds_a_confidence_signal(settings.escalation):
         return None, None
     signal = escalation_build.confidence_signal(
         settings.escalation, settings.weak_decoder

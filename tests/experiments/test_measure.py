@@ -44,6 +44,7 @@ import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
@@ -1440,8 +1441,9 @@ def seam_streams_settings(
     )
     engine_clock = config_module.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=engine_clock)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=1.0)
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=1.0,
+        algorithm=matching,
         units=8,
         engine=engine,
     )

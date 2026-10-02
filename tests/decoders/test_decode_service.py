@@ -17,7 +17,6 @@ import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
-import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
@@ -28,9 +27,6 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
-# a 1 MHz unit clock; these units declare no stage, so the period only
-# has to be a real one
-UNIT_CLOCK = config.Clock(1_000_000)
 # a one-tick period for the manager, so its dispatch cost is its cycles
 # and every tick is one of its edges
 DISPATCH_CLOCK = config.Clock(1)
@@ -208,7 +204,9 @@ def strong_primary_run(decoder):
     """
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 3)
-    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    strong_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     qpu = declared_run.declared_qpu()
@@ -354,10 +352,8 @@ def test_a_strong_primary_window_is_priced_on_the_strong_buffer_path():
     publish the strong syndrome buffer at 15, the 6 us strong-buffer
     transfer lands the input at 21, and the 100 us row returns at 121.
     """
-    timing = staged_decoder.UnitTiming((), (), UNIT_CLOCK)
-    algorithm = decoders.PresetLatencyDecoder(100.0)
-    decoder = staged_decoder.StagedDecoder(algorithm, timing)
-    machine = strong_primary_run(decoder)
+    algorithm = decoders.PresetLatencyDecoder.Settings(100.0)
+    machine = strong_primary_run(algorithm)
     window = machine.observation.windows.windows[(1, 0)]
     assert window.t_data_complete == config.microseconds_to_ticks(15.0)
     assert window.t_done == config.microseconds_to_ticks(121.0)

@@ -1,7 +1,7 @@
 """The decoders part: each tier's units and the manager that schedules them.
 
-A tier's kind names a row of decoders/settings.py's DECODERS, and the
-unit is that algorithm between its fetch and release stages. The two
+A tier's algorithm is a decoder row's Settings record, and the unit is
+the decoder it builds between its fetch and release stages. The two
 tiers' units and the managers' pools are one record, gem5's
 CacheConfig.config_cache shape (configs/common/CacheConfig.py), built
 before the parts because the window models are compiled for the units.
@@ -15,7 +15,6 @@ import decsim.build.plan as plan_build
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_pool as decoder_pool_module
-import decsim.decoders.decoders as decoders
 import decsim.decoders.detection_events as detection_events_module
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
@@ -26,9 +25,6 @@ import decsim.observe.settings as observe_settings
 import decsim.ports as ports
 import decsim.settings as machine_settings
 import decsim.tables as tables
-from decsim.decoders.minimum_weight_perfect_matching import (
-    decoder as minimum_weight_perfect_matching,
-)
 
 # The name the tier's event-detection stage carries in the trace, the
 # stage ledger and the narrator log.
@@ -132,27 +128,26 @@ def build_decoder_unit(
 ):
     """The decoder unit of one tier, weak or strong, as the root builds it.
 
-    A named row decodes for real inside a StagedDecoder whose fetch and
+    The tier's algorithm decodes inside a StagedDecoder whose fetch and
     release stages are cycles of the tier's clock, with this tier's
     event-detection logic in front of them when the tier's decoder is a
-    seat of the run's detection event placement (formation); a number is a
-    fixed core latency on the MWPM path. The tier that decodes the plan's
-    windows carries the Tesseract referee when the observation asks for
-    it, and under a switching escalation must produce the evidence the
-    run's confidence signal reads. A Python-built decoder is returned as
-    it is. None when the tier names no decoder.
+    seat of the run's detection event placement (formation). The tier
+    that decodes the plan's windows carries the Tesseract referee when
+    the observation asks for it, and must produce the evidence the run's
+    confidence signal reads when the run builds one. None when the tier
+    names no decoder.
     """
     tier_settings = settings.decoder_settings_for(tier)
-    if tier_settings.decoder is not None:
-        return tier_settings.decoder
-    if tier_settings.kind is None:
+    algorithm_settings = tier_settings.algorithm
+    if algorithm_settings is None:
         return None
-    algorithm = _algorithm(tier_settings, tier)
+    algorithm = algorithm_settings.build()
     is_active = tier == policy.primary_tier.value
-    decides_on_a_confidence = policy.decides_on_a_confidence
-    if is_active and decides_on_a_confidence:
+    escalation = settings.escalation
+    builds_a_signal = escalation_build.builds_a_confidence_signal(escalation)
+    if is_active and builds_a_signal:
         _check_serves_the_confidence(
-            algorithm, tier_settings.kind, tier, settings.escalation
+            algorithm, algorithm_settings.name, tier, settings.escalation
         )
     check = tables.row(
         observe_settings.WINDOW_CHECKS,
@@ -214,7 +209,7 @@ def _check_the_active_tier_decodes(
         return
     raise ValueError(
         f"the plan decodes windows on the {active_tier} tier, which "
-        "names no decoder: give it a kind or a Python-built decoder"
+        "names no decoder: give it an algorithm"
     )
 
 
@@ -283,28 +278,6 @@ def _tier_formation(
     if not detection_events.forms_at(seat):
         return None
     return detection_events_module.TierFormation(detection_events, seat)
-
-
-def _algorithm(tier_settings: decoder_settings.DecoderSettings, tier: str):
-    """A tier's algorithm: a table row, or a fixed latency on MWPM.
-
-    A table row is built from its own settings alone: with keys of its
-    own it takes the Settings record the section reader split off the
-    tier's keys (decsim/tables.py), and with none it takes nothing, so a
-    new row declares no parameter it does not read.
-    """
-    kind = tier_settings.kind
-    if not isinstance(kind, str):
-        latency_model = decoders.PresetLatencyDecoder(kind)
-        return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
-    row = tables.row(decoder_settings.DECODERS, f"{tier}_decoder.kind", kind)
-    row_settings = tier_settings.row_settings
-    if row_settings is None:
-        algorithm = row()
-    else:
-        algorithm = row(settings=row_settings)
-    algorithm.compile_key = (row, row_settings)
-    return algorithm
 
 
 def _check_serves_the_confidence(

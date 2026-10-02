@@ -769,7 +769,10 @@ def active_decoder_kind(settings: machine_settings.MachineSettings):
     """The kind of the tier that decodes the plan's windows."""
     tier = escalation_build.primary_tier(settings.escalation)
     tier_settings = settings.decoder_settings_for(tier)
-    return tier_settings.kind
+    algorithm = tier_settings.algorithm
+    if algorithm is None:
+        return None
+    return algorithm.name
 
 
 def trace_path_for_shot(path: str, label: str) -> str:

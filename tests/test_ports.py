@@ -40,7 +40,6 @@ SHARED_PROTOCOL_MODULE = "seeding"
 # The tables whose section reads a row's own keys (decsim/tables.py
 # row_settings), so whose rows may declare a Settings.
 TABLES_WITH_ROW_KEYS = (
-    decoder_settings.DECODERS,
     window_settings.WINDOWING_SCHEMES,
     ported_syndrome_buffer.SYNDROME_BUFFERS,
     workload_settings.WORKLOADS,
@@ -263,6 +262,17 @@ def test_every_code_card_row_is_a_code_model(kind):
 def test_every_workload_row_is_a_workload_row(kind):
     row = workload_settings.WORKLOADS[kind]
     assert isinstance(row, ports.WorkloadRow)
+
+
+@pytest.mark.parametrize("kind", sorted(decoder_settings.DECODERS))
+def test_every_decoder_rows_settings_builds_the_row(kind):
+    """A tier's algorithm is the row's Settings record, which builds it."""
+    row = decoder_settings.DECODERS[kind]
+    settings = row.Settings()
+    parameters = settings.__dataclass_params__
+    assert parameters.frozen
+    decoder = settings.build()
+    assert isinstance(decoder, row)
 
 
 def _declared_row_settings() -> list:

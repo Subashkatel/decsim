@@ -129,9 +129,9 @@ class ExtraClusterGap:
     ) -> "ExtraClusterGap":
         """The row grown to the threshold, on the weak row's unit.
 
-        A weak row with no Settings grows no clusters: the row takes the
-        shipped step and the host clock, and the build refuses the
-        pairing by name (build/decoders.py).
+        A weak row that keeps no weight step grows no clusters: the row
+        takes the shipped step and the host clock, and the build refuses
+        the pairing by name (build/decoders.py).
         """
         threshold_nats = escalation.gap_threshold_nats
         if threshold_nats is None:
@@ -144,14 +144,15 @@ class ExtraClusterGap:
                 "threshold_source online has no fixed number"
             )
         walk_microseconds = escalation.confidence_walk_microseconds
-        row_settings = weak_decoder.row_settings
-        if row_settings is None:
+        algorithm = weak_decoder.algorithm
+        weight_step = getattr(algorithm, "weight_step", None)
+        if weight_step is None:
             return cls(threshold_nats, walk_microseconds=walk_microseconds)
         return cls(
             threshold_nats,
-            weight_step=row_settings.weight_step,
+            weight_step=weight_step,
             walk_microseconds=walk_microseconds,
-            cycle_count=row_settings.cycle_count,
+            cycle_count=algorithm.cycle_count,
         )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:

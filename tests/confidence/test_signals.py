@@ -13,6 +13,7 @@ import pytest
 
 import decsim.confidence.signals as confidence_signals
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
 
 ESCALATION = escalation_settings.EscalationSettings(
@@ -20,7 +21,8 @@ ESCALATION = escalation_settings.EscalationSettings(
     confidence_walk_microseconds=0.5,
     gap_threshold_nats=2.0,
 )
-WEAK = decoder_settings.DecoderSettings(kind="union_find")
+UNION_FIND = union_find.UnionFindDecoder.Settings()
+WEAK = decoder_settings.DecoderSettings(algorithm=UNION_FIND)
 
 
 def test_the_shipped_rows_are_reachable_by_the_name_the_yaml_writes():

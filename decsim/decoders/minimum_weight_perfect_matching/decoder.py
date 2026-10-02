@@ -22,6 +22,7 @@ import scipy.sparse
 
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.decoders as decoders
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -56,8 +57,38 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
     decoder_evidence = decoding_records.FORCED_CLASS_SOLVES
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row as a run names it: measured, or at a preset latency.
+
+        preset_latency_microseconds prices every decode at one fixed core
+        latency (decoders.py PresetLatencyDecoder) instead of the host
+        clock; the matching still decodes every window.
+        """
+
+        preset_latency_microseconds: Optional[float] = None
+
+        @property
+        def name(self):
+            """The yaml's word for the row, or the latency it writes instead."""
+            if self.preset_latency_microseconds is None:
+                return "pymatching"
+            return self.preset_latency_microseconds
+
+        def build(self) -> "PyMatchingDecoder":
+            """A fresh decoder of these settings."""
+            if self.preset_latency_microseconds is None:
+                return PyMatchingDecoder()
+            latency_model = decoders.PresetLatencyDecoder(
+                self.preset_latency_microseconds
+            )
+            return PyMatchingDecoder(latency_model)
+
     def __init__(self, latency_model=None):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
+        # the latency model prices the decode and leaves the graph alone
+        row = type(self)
+        self.compile_key = (row, None)
         self.forced_solve_unavailable = trace_source.TraceSource()
 
     def compile(self, faults, model=None) -> MatchingGraphs:
@@ -165,6 +196,17 @@ class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     worse than weighted MWPM because hook-error paths are no longer
     penalized.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row has no settings of its own."""
+
+        # the word the yaml and the reports name this row by
+        name = "unweighted_pymatching"
+
+        def build(self) -> "UnweightedPyMatchingDecoder":
+            """A fresh decoder."""
+            return UnweightedPyMatchingDecoder()
 
     def _weights_for(self, faults):
         fault_count = len(faults.priors)

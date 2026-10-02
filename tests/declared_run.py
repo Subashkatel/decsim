@@ -11,6 +11,7 @@ tests/controller/test_round_assembly.py).
 
 import dataclasses
 import functools
+from collections.abc import Callable
 from typing import Optional
 
 import decsim.config as config
@@ -60,6 +61,32 @@ DECLARED_MICROSECONDS = {
 # every declared microsecond above is a whole number of its cycles and
 # every declared instant lands on one of its edges
 DECLARED_CLOCK = config.Clock(500_000)
+
+
+# the unit's fetch and release are free, so a decode holds its unit for
+# its declared latency alone
+DECLARED_ENGINE = decoder_settings.EngineSettings(
+    clock=DECLARED_CLOCK,
+    fetch_cycles_per_round=0,
+    fetch_cycles_per_job=0,
+    release_cycles_per_job=0,
+    release_cycles_per_round=0,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class OneDecoder:
+    """A test's own decoder instance, as the record a tier builds it from.
+
+    It hands back the same instance, so it builds one machine only.
+    """
+
+    decoder: object
+    name = "test_decoder"
+
+    def build(self):
+        """The test's instance."""
+        return self.decoder
 
 
 def declared_cycles(name):
@@ -349,9 +376,10 @@ def weak_only_run(
     only the component card whose reaction-time shift it measures.
     """
     workload = declared_workload(operations, rounds)
-    decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
+    weak_microseconds = DECLARED_MICROSECONDS["weak"]
+    algorithm = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
     weak_decoder = decoder_settings.DecoderSettings(
-        decoder=decoder, input=decoder_input
+        algorithm=algorithm, input=decoder_input, engine=DECLARED_ENGINE
     )
     links = declared_profile()
     if controller is None:
@@ -385,8 +413,11 @@ def strong_only_run(
 ):
     """The strong-primary baseline listens to the strong syndrome buffer."""
     workload = declared_workload(operations, rounds)
-    decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    strong_microseconds = DECLARED_MICROSECONDS["strong"]
+    algorithm = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
+    strong_decoder = decoder_settings.DecoderSettings(
+        algorithm=algorithm, engine=DECLARED_ENGINE
+    )
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     observation = observe_settings.ObservationSettings(
@@ -418,6 +449,20 @@ class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
     it; gap 1.0 elsewhere, so the weak result is kept.
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The latency and which windows declare a gap under the threshold."""
+
+        latency_microseconds: float
+        is_escalated: Callable
+        name = "declared_confidence"
+
+        def build(self):
+            """A fresh decoder of these settings."""
+            return DeclaredConfidenceDecoder(
+                self.latency_microseconds, self.is_escalated
+            )
+
     def __init__(self, latency_microseconds, is_escalated):
         self.latency_microseconds = latency_microseconds
         self.is_escalated = is_escalated
@@ -446,8 +491,9 @@ def switching_decoders(escalates):
         return escalates
 
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
-    weak = DeclaredConfidenceDecoder(weak_microseconds, is_escalated)
-    strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
+    weak = DeclaredConfidenceDecoder.Settings(weak_microseconds, is_escalated)
+    strong_microseconds = DECLARED_MICROSECONDS["strong"]
+    strong = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
     return weak, strong
 
 
@@ -479,10 +525,13 @@ def switching_run(
     weak, strong = switching_decoders(escalates)
     weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
     weak_decoder = decoder_settings.DecoderSettings(
-        decoder=weak, units=weak_units, unit_memory=weak_memory
+        algorithm=weak,
+        units=weak_units,
+        unit_memory=weak_memory,
+        engine=DECLARED_ENGINE,
     )
     strong_decoder = decoder_settings.DecoderSettings(
-        decoder=strong, input=strong_input
+        algorithm=strong, input=strong_input, engine=DECLARED_ENGINE
     )
     threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
     collaborators = escalation_policies.EscalationCollaborators(

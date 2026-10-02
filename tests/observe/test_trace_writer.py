@@ -15,7 +15,6 @@ import json
 import pytest
 
 import decsim.decoders.decoders as decoders
-import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.qpu.settings as qpu_settings
@@ -823,12 +822,6 @@ def test_the_observation_section_names_the_log_and_the_trace_apart():
         observe_settings.ObservationSettings.from_yaml({"log": "chrome"})
 
 
-def _timing_only_row(latency_model=None):
-    """A DECODERS row on the shipped timing-only decoder."""
-    del latency_model
-    return decoders.PresetLatencyDecoder(1.0)
-
-
 def _corrections(document) -> list:
     corrections = []
     for row in document:
@@ -843,9 +836,7 @@ def _is_a_correction(row) -> bool:
     return is_complete and row["name"].endswith(" correction")
 
 
-def test_a_write_with_no_prediction_is_traced_without_observables(
-    tmp_path, monkeypatch
-):
+def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
     """A result may carry no observables, and the residence then names none.
 
     decsim/ports.py's Decoder.decode returns a result whose correction
@@ -857,11 +848,11 @@ def test_a_write_with_no_prediction_is_traced_without_observables(
     """
     trace_path = tmp_path / "timing_only.trace.json"
     point = _settings(trace_path)
-    weak_decoder = dataclasses.replace(point.weak_decoder, kind="timing_only")
-    point = dataclasses.replace(point, weak_decoder=weak_decoder)
-    monkeypatch.setitem(
-        decoder_settings.DECODERS, "timing_only", _timing_only_row
+    timing_only = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak_decoder = dataclasses.replace(
+        point.weak_decoder, algorithm=timing_only
     )
+    point = dataclasses.replace(point, weak_decoder=weak_decoder)
     machine = machine_module.Machine.build(point, SEED)
     result = machine.run()
     machine.observation.trace_writer.write(str(trace_path))

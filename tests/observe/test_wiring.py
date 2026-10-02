@@ -266,7 +266,10 @@ def _machine_on(decoder, **observation):
     """The declared weak-only run with this row as the weak tier."""
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    algorithm = declared_run.OneDecoder(decoder)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()

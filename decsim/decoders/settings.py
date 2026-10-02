@@ -11,7 +11,7 @@ import dataclasses
 import math
 import numbers
 from collections.abc import Mapping
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -21,7 +21,6 @@ import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
-import decsim.ports as ports
 import decsim.tables as tables
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -36,9 +35,9 @@ from decsim.decoders.relay_belief_propagation import (
 # charged a GPU's measured time for decsim's own Relay-BP decode, whole
 # or step by step (measured_table/, dispatch_steps/); a
 # number instead of a name is a fixed core latency in microseconds on
-# the MWPM path (decsim/build/decoders.py). Every row is one class on
-# the Decoder port (decsim/decoders/decoder.py); sinter's
-# BUILT_IN_DECODERS is the shape.
+# the MWPM path (PyMatchingDecoder.Settings). Every row is one class on
+# the Decoder port (decsim/decoders/decoder.py) whose Settings record
+# builds it; sinter's BUILT_IN_DECODERS is the shape.
 DECODERS = {
     "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder,
     "unweighted_pymatching": (
@@ -223,24 +222,22 @@ class DecoderSettings:
     tiles outputs", and true is that decoder without them. No referent
     found measures a whole decoder unit held this way. It is read on
     the tier that decodes the plan's windows.
-    row_settings is the row's own Settings, read from the section's keys
-    outside DECODER_KEYS (union_find's weight_step and cycle_count), or
-    None for a row that declares none; the tier never reads it.
-    kind None is no decoder at all, right for a run that plans no
-    windows. A Python-built decoder is used as it is, with no engine
-    stages around it.
+    algorithm is the row's own Settings record, whose build makes the
+    unit's decoder (UnionFindDecoder.Settings and the rest); the section
+    fills it from its keys outside DECODER_KEYS (union_find's weight_step
+    and cycle_count). None is no decoder at all, right for a run that
+    plans no windows. Every decoder runs between the engine's stages.
     """
 
-    kind: Union[str, float, None] = None
+    # a decoder row's Settings record, opaque to the tier: the record
+    # whose build() returns the decoder
+    algorithm: Optional[Any] = None
     units: int = 1
     input: str = "copy"
     boundary_fold: str = "copy"
     result_blocks_unit: bool = False
     unit_memory: UnitMemorySettings = UnitMemorySettings()
     engine: EngineSettings = EngineSettings()
-    decoder: Optional[ports.Decoder] = None
-    # the row's own Settings record, opaque to the tier
-    row_settings: Optional[Any] = None
 
     @classmethod
     def from_yaml(
@@ -253,11 +250,7 @@ class DecoderSettings:
         tables.refuse_missing_keys(
             section_name, section, _REQUIRED_DECODER_KEYS
         )
-        kind = section["kind"]
-        row = _decoder_row(kind, section_name)
-        row_settings = tables.row_settings(
-            row, section_name, section, DECODER_KEYS, clocks, section_name
-        )
+        algorithm = _algorithm(section, clocks, section_name)
         engine_section = _block(section, section_name, "engine")
         engine = _engine_card(engine_section, clocks, section_name)
         memory_section = _block(section, section_name, "unit_memory")
@@ -272,13 +265,12 @@ class DecoderSettings:
         _check_boolean(section_name, "result_blocks_unit", result_blocks_unit)
         units = _unit_count(section, section_name)
         return cls(
-            kind=kind,
+            algorithm=algorithm,
             units=units,
             input=input_kind,
             boundary_fold=boundary_fold,
             result_blocks_unit=result_blocks_unit,
             unit_memory=unit_memory,
-            row_settings=row_settings,
             engine=engine,
         )
 
@@ -488,23 +480,42 @@ def _unit_count(section: Mapping, section_name: str) -> int:
     )
 
 
-def _decoder_row(kind, section_name: str):
-    """The row a tier's kind names; None for a number or no decoder.
+def _algorithm(
+    section: Mapping, clocks: config.ClockSettings, section_name: str
+):
+    """The Settings record of the row the tier's kind names.
 
-    A number is a fixed core latency on the MWPM path
-    (decsim/build/decoders.py), so it is no row and takes no keys.
+    A number is a fixed core latency on the MWPM path and takes no keys;
+    a row reads the keys its Settings declares when the record reads
+    yaml, and takes none otherwise; kind null is no decoder.
     """
-    key = f"{section_name}.kind"
-    if isinstance(kind, str):
-        return tables.row(DECODERS, key, kind)
+    kind = section["kind"]
     if kind is None:
+        tables.refuse_unknown_keys(section_name, section, DECODER_KEYS)
         return None
+    if not isinstance(kind, str):
+        _check_latency_microseconds(kind, section_name)
+        tables.refuse_unknown_keys(section_name, section, DECODER_KEYS)
+        matching = minimum_weight_perfect_matching.PyMatchingDecoder
+        return matching.Settings(preset_latency_microseconds=kind)
+    row = tables.row(DECODERS, f"{section_name}.kind", kind)
+    if not hasattr(row.Settings, "from_yaml"):
+        tables.refuse_unknown_keys(section_name, section, DECODER_KEYS)
+        return row.Settings()
+    return tables.row_settings(
+        row, section_name, section, DECODER_KEYS, clocks, section_name
+    )
+
+
+def _check_latency_microseconds(kind, section_name: str) -> None:
+    """A number in the kind's place is a latency, or it is refused."""
     if _is_latency_microseconds(kind):
-        return None
+        return
     rows = sorted(DECODERS)
     raise ValueError(
-        f"{key} {kind!r} is neither a row nor a latency; name one of "
-        f"{rows}, or write a finite nonnegative number of microseconds"
+        f"{section_name}.kind {kind!r} is neither a row nor a latency; name "
+        f"one of {rows}, or write a finite nonnegative number of "
+        "microseconds"
     )
 
 

@@ -59,6 +59,12 @@ class DispatchStepsSettings:
     device: str = "gh200"
     path: str = "device"
     workers: int = 1
+    # the word the yaml and the reports name this row by
+    name = "dispatch_steps"
+
+    def build(self) -> "DispatchStepsDecoder":
+        """A fresh decoder of these settings."""
+        return DispatchStepsDecoder(settings=self)
 
     @classmethod
     def from_yaml(

@@ -120,16 +120,6 @@ ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 RUN_SEED = 17
 
 
-def tier_rows() -> str:
-    """The decoder table's rows as a refusal prints them, as a pattern.
-
-    Read from the table, so a row added to it breaks no test here:
-    that is what the plug-in page promises a new decoder costs.
-    """
-    rows = sorted(decoder_settings.DECODERS)
-    return re.escape(repr(rows))
-
-
 class RecordingReceiver:
     """A readout receiver that keeps every readout with its arrival tick."""
 
@@ -164,10 +154,16 @@ class FinishingRuntime:
 
 
 class FakeWeakDecoder(decoder_module.DecoderBase):
-    """A table row for the plug-in test: fixed latency, no correction."""
+    """A new decoder for the plug-in test: fixed latency, no correction."""
 
-    def __init__(self, latency_model=None):
-        del latency_model
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The record a tier builds the decoder from."""
+
+        name = "fake"
+
+        def build(self) -> "FakeWeakDecoder":
+            return FakeWeakDecoder()
 
     def latency(self, job: decoding_records.DecodeJob) -> int:
         del job
@@ -209,8 +205,8 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     ]
 
 
-def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
-    """Gate point 1's settings run to completion on a decoder added as a row."""
+def test_a_new_decoder_is_one_class_and_its_settings_record():
+    """Gate point 1's settings run to completion on a decoder added here."""
     config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
@@ -221,9 +217,9 @@ def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
         },
     )
     settings = point.settings
-    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
+    fake = FakeWeakDecoder.Settings()
+    weak_decoder = dataclasses.replace(settings.weak_decoder, algorithm=fake)
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
-    monkeypatch.setitem(decoder_settings.DECODERS, "fake", FakeWeakDecoder)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -246,7 +242,10 @@ def test_a_second_table_row_runs_gate_point_one():
         },
     )
     settings = point.settings
-    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
+    union_find_settings = union_find_decoder.UnionFindDecoder.Settings()
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, algorithm=union_find_settings
+    )
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -283,17 +282,6 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     machine.start()
 
     assert machine.engine.idle is False
-
-
-def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
-    weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
-    settings = machine_settings.MachineSettings(weak_decoder=weak_decoder)
-    sentence = (
-        "weak_decoder.kind 'lookup_table' is not a row of its table; "
-        "the rows are " + tier_rows()
-    )
-    with pytest.raises(ValueError, match=sentence):
-        machine_module.Machine.build(settings)
 
 
 def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
@@ -684,8 +672,12 @@ def test_an_unbuffered_live_region_finds_the_round_before_it_held(
     """
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")
-    weak = declared_run.DeclaredConfidenceDecoder(0.1, _escalate_window_one)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.1, _escalate_window_one
+    )
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
+    )
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -753,8 +745,10 @@ def test_a_live_region_reads_a_round_an_earlier_region_landed(
     program = _two_round_lookback_program()
     settings = _settings(program, "live", "controller")
     is_escalated = functools.partial(_escalates_one_of, escalated)
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, is_escalated)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak, units=3)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, is_escalated)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE, units=3
+    )
     strong_decoder = dataclasses.replace(settings.strong_decoder, units=3)
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
@@ -806,8 +800,12 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     """
     program = _readout_only_program()
     settings = _settings(program, "live", "controller")
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _escalates_none)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.028, _escalates_none
+    )
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
+    )
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -884,8 +882,10 @@ def _switching_live_settings(
     """Windows of one round, both decoders forming, these windows escalated."""
     settings = _settings(program, "live", "controller")
     is_escalated = functools.partial(_escalates_one_of, escalated)
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, is_escalated)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, is_escalated)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
+    )
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -1033,8 +1033,11 @@ def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
     window_bits = SIX_ROUND_WINDOW_BITS["controller"]
     buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=5.0)
     decoder = dataclasses.replace(
-        settings.strong_decoder, kind=5.0, unit_memory=memory
+        settings.strong_decoder,
+        algorithm=matching,
+        unit_memory=memory,
     )
     links = _price_path(
         settings.links, "strong_buffer_to_strong_decoder", 1_000_000
@@ -1384,7 +1387,11 @@ def _circuit_less_terminal_run(
     qpu = qpu_settings.QpuSettings(distance=distance, device=source)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderSettings(
+        algorithm=matching,
+        engine=engine,
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -1528,8 +1535,9 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     The unit's algorithm stage is zero ticks for it, while every window
     with a model holds the unit for its measured time.
     """
+    matching = mwpm.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=FAST_ENGINE_CARD,
     )
     settings = _two_patch_memory(weak_decoder)
@@ -1556,7 +1564,7 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
 
 
 def _switching_memory(weak_kind: str, confidence: str):
-    """A d=3 memory whose weak tier reports the named confidence signal."""
+    """A d=3 memory whose weak tier, the named row, reports the signal."""
     decibels = 20.0
     nats = escalation_settings.decibels_to_nats(decibels)
     escalation = escalation_settings.EscalationSettings(
@@ -1565,12 +1573,15 @@ def _switching_memory(weak_kind: str, confidence: str):
         gap_threshold_db=decibels,
         gap_threshold_nats=nats,
     )
+    row = decoder_settings.DECODERS[weak_kind]
+    weak_algorithm = row.Settings()
     weak_decoder = decoder_settings.DecoderSettings(
-        kind=weak_kind,
+        algorithm=weak_algorithm,
         engine=ENGINE_CARD,
     )
+    matching = mwpm.PyMatchingDecoder.Settings()
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
     operation = program_records.Operation(
@@ -1720,56 +1731,6 @@ def test_a_weak_tier_that_serves_the_confidence_is_accepted():
     assert machine_module.Machine.build(settings, 0) is not None
     settings = _switching_memory("pymatching", "complementary_gap")
     assert machine_module.Machine.build(settings, 0) is not None
-
-
-@pytest.mark.parametrize(
-    "escalation_kind, tier",
-    [
-        ("weak_baseline", "weak"),
-        ("strong_only", "strong"),
-        ("switching", "weak"),
-        ("switching", "strong"),
-    ],
-)
-def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
-    escalation_kind, tier
-):
-    """The cluster gap is a confidence row, not a decoder row.
-
-    escalation.confidence names it (confidence/signals.py) and
-    it reads the growth of whatever weak decoder the tier table names,
-    so it is not a kind of that table under any escalation kind.
-    """
-    tiers = {
-        "weak": decoder_settings.DecoderSettings(
-            kind="pymatching",
-            engine=ENGINE_CARD,
-        ),
-        "strong": decoder_settings.DecoderSettings(
-            kind="belief_matching",
-            engine=ENGINE_CARD,
-        ),
-    }
-    tiers[tier] = decoder_settings.DecoderSettings(
-        kind="union_find_cluster_gap",
-        engine=ENGINE_CARD,
-    )
-    escalation = escalation_settings.EscalationSettings(kind=escalation_kind)
-    if escalation_kind == "switching":
-        escalation = escalation_settings.EscalationSettings(
-            kind="switching", gap_threshold_nats=1.0
-        )
-    settings = machine_settings.MachineSettings(
-        weak_decoder=tiers["weak"],
-        strong_decoder=tiers["strong"],
-        escalation=escalation,
-    )
-    sentence = (
-        f"{tier}_decoder.kind 'union_find_cluster_gap' is not a row of its "
-        "table; the rows are " + tier_rows()
-    )
-    with pytest.raises(ValueError, match=sentence):
-        machine_module.Machine.build(settings, 0)
 
 
 class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
@@ -1941,8 +1902,10 @@ def test_the_run_result_carries_the_factorys_supply_stall():
         kind="distillation", row_settings=card
     )
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
-    decoder = decoders.PresetLatencyDecoder(weak_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -2140,8 +2103,10 @@ def _one_memory_operation_on(card) -> machine_settings.MachineSettings:
     operation = program_records.Operation(id=1, name="memory", qubits=(0,))
     workload = workload_settings.WorkloadSettings(operations=[operation])
     qpu = qpu_settings.QpuSettings(code=card)
-    decoder = decoders.PresetLatencyDecoder(0.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(0.0)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
@@ -2222,9 +2187,10 @@ def replayed_run(circuit, measurements, shot):
     )
     device = stim_device.RecordedStimDevice(measurements, shot)
     qpu = qpu_settings.QpuSettings(distance=RECORDED_DISTANCE, device=device)
-    inner = decoders.PresetLatencyDecoder(0.028)
-    decoder = mwpm.PyMatchingDecoder(inner)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.028)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
@@ -2512,8 +2478,10 @@ def twelve_rounds_with_packing_bound(bound):
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 12)
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
-    decoder = decoders.PresetLatencyDecoder(weak_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     links = declared_run.declared_profile()
     qpu = declared_run.declared_qpu()
     frame = declared_run.declared_frame()
@@ -2653,8 +2621,10 @@ def strong_primary_settings(escalation):
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
     latency = declared_run.DECLARED_MICROSECONDS["strong"]
-    decoder = decoders.PresetLatencyDecoder(latency)
-    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(latency)
+    strong_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -3199,8 +3169,10 @@ def test_an_operation_claims_every_idle_cycle_before_it_starts():
     workload = declared_run.declared_workload([first, second, both], 3)
     scheme = naive_online.NaiveOnlineScheme()
     windows = window_settings.WindowSettings(scheme=scheme)
-    decoder = decoders.PresetLatencyDecoder(10.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(10.0)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     ignore = idle_policies.Ignore()
     idle = controller_settings.IdlePolicySettings(policy=ignore)
     qpu = declared_run.declared_qpu()
@@ -3284,7 +3256,11 @@ def _protected_memory_settings(circuit, source):
         rounds_policy=policy,
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=ENGINE_CARD)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderSettings(
+        algorithm=matching,
+        engine=ENGINE_CARD,
+    )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -3328,7 +3304,11 @@ def _settings(
     period_microseconds: float = 1.1,
 ) -> machine_settings.MachineSettings:
     base = _physical_settings(program, history, period_microseconds)
-    strong = dataclasses.replace(base.weak_decoder, kind=0.2)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    strong = dataclasses.replace(
+        base.weak_decoder,
+        algorithm=matching,
+    )
     weak = decoder_settings.DecoderSettings()
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
     seats = SEATS_BY_PLACEMENT[placement]
@@ -3619,7 +3599,11 @@ def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
     clock = config.Clock(4000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    strong = decoder_settings.DecoderSettings(kind=0.2, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    strong = decoder_settings.DecoderSettings(
+        algorithm=matching,
+        engine=engine,
+    )
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
     idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     settings = machine_settings.MachineSettings(
@@ -3880,9 +3864,8 @@ def _bb_settings(
     qpu = dataclasses.replace(settings.qpu, distance=None, code=code)
     price = decoders.PresetLatencyDecoder(0.2)
     backend = belief_propagation_osd.BeliefPropagationOsdDecoder(price)
-    decoder = dataclasses.replace(
-        settings.strong_decoder, kind=None, decoder=backend
-    )
+    algorithm = declared_run.OneDecoder(backend)
+    decoder = dataclasses.replace(settings.strong_decoder, algorithm=algorithm)
     workload = _bb_logical_qubits(settings.workload)
     return dataclasses.replace(
         settings, qpu=qpu, strong_decoder=decoder, workload=workload

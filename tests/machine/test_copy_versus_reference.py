@@ -23,6 +23,8 @@ import pytest
 import stim
 
 import decsim.build.decoders as decoder_build
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
+import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
@@ -984,7 +986,10 @@ def _lookback_switching_machine(formed_at, seed):
     windows = dataclasses.replace(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
-    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
+    union_find_settings = union_find.UnionFindDecoder.Settings()
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, algorithm=union_find_settings
+    )
     escalation = dataclasses.replace(
         settings.escalation, confidence="cluster_gap", gap_threshold_db=15.0
     )
@@ -1018,11 +1023,15 @@ def _parallel_lookback_machine(unit_count: int):
     )
     # a declared decoder decodes no syndrome, so no fault's ownership is
     # asked of the blocks; the landed events are the check
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_no_window)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, _is_no_window)
     weak_decoder = dataclasses.replace(
-        settings.weak_decoder, decoder=weak, units=unit_count
+        settings.weak_decoder,
+        algorithm=weak,
+        engine=declared_run.DECLARED_ENGINE,
+        units=unit_count,
     )
-    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
+    preset = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    strong = dataclasses.replace(settings.strong_decoder, algorithm=preset)
     collaborators = escalation_policies.EscalationCollaborators()
     policy = escalation_policies.Baseline(collaborators)
     escalation = dataclasses.replace(settings.escalation, policy=policy)
@@ -1031,7 +1040,7 @@ def _parallel_lookback_machine(unit_count: int):
         workload=workload,
         windows=windows,
         weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
+        strong_decoder=strong,
         escalation=escalation,
     )
     return machine_module.Machine.build(settings, 0)
@@ -1070,9 +1079,19 @@ def _reach_growing_machine(formed_at):
     windows = dataclasses.replace(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_window_one)
-    weak_decoder = dataclasses.replace(settings.weak_decoder, decoder=weak)
-    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.028, _is_window_one
+    )
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder,
+        algorithm=weak,
+        engine=declared_run.DECLARED_ENGINE,
+    )
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    strong_decoder = dataclasses.replace(
+        settings.strong_decoder,
+        algorithm=matching,
+    )
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,
@@ -1127,12 +1146,20 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
     windows = dataclasses.replace(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_every_third)
-    weak_decoder = dataclasses.replace(
-        settings.weak_decoder, decoder=weak, units=3
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.028, _is_every_third
     )
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder,
+        algorithm=weak,
+        engine=declared_run.DECLARED_ENGINE,
+        units=3,
+    )
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
     strong_decoder = dataclasses.replace(
-        settings.strong_decoder, kind=0.2, units=3
+        settings.strong_decoder,
+        algorithm=matching,
+        units=3,
     )
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(

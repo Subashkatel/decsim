@@ -5,6 +5,8 @@ latency(job) prices one window job's compute as a service time in
 ticks, and decode(job) produces an empty DecodeResult.
 """
 
+import dataclasses
+
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.records.decoding as decoding_records
@@ -12,6 +14,18 @@ import decsim.records.decoding as decoding_records
 
 class PresetLatencyDecoder(decoder_module.DecoderBase):
     """Timing-only decoder with one fixed latency for every job."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The one latency every job takes."""
+
+        latency_microseconds: float = 1.0
+        # the word the reports name this row by
+        name = "preset_latency"
+
+        def build(self) -> "PresetLatencyDecoder":
+            """A fresh decoder of this latency."""
+            return PresetLatencyDecoder(self.latency_microseconds)
 
     def __init__(self, latency_us: float = 1.0):
         self.latency_us = latency_us

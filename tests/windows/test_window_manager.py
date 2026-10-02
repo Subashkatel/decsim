@@ -32,6 +32,7 @@ import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
 import decsim.windows.window_planner as window_planner
+import tests.declared_run as declared_run
 
 
 def _weak_run():
@@ -42,8 +43,10 @@ def _weak_run():
     )
     code = code_geometry.SurfaceCodeModel(distance=3)
     qpu = qpu_settings.QpuSettings(code=code, round_period_microseconds=1.0)
-    decoder = decoders.PresetLatencyDecoder(2.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder, units=1)
+    decoder = decoders.PresetLatencyDecoder.Settings(2.0)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, units=1, engine=declared_run.DECLARED_ENGINE
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
@@ -78,8 +81,10 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
     qpu = qpu_settings.QpuSettings(
         distance=3, device=device, round_period_microseconds=1.0
     )
-    decoder = decoders.PresetLatencyDecoder(2.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder, units=1)
+    decoder = decoders.PresetLatencyDecoder.Settings(2.0)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=decoder, units=1, engine=declared_run.DECLARED_ENGINE
+    )
     windows = window_settings.WindowSettings(terminal_policy=terminal_policy)
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder, windows=windows
@@ -251,10 +256,11 @@ def _tan_sandwich_run(unit_count):
     qpu = qpu_settings.QpuSettings(
         distance=3, round_period_microseconds=1.0, device=device
     )
-    inner = decoders.PresetLatencyDecoder(5.0)
-    decoder = mwpm.PyMatchingDecoder(inner)
+    decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=5.0)
     weak_decoder = decoder_settings.DecoderSettings(
-        decoder=decoder, units=unit_count
+        algorithm=decoder,
+        units=unit_count,
+        engine=declared_run.DECLARED_ENGINE,
     )
     scheme = sandwich_scheme.TanSandwichScheme()
     windows = window_settings.WindowSettings(scheme=scheme)

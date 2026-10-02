@@ -110,12 +110,17 @@ def switching_machine(
     """
     is_escalated = escalate_only(escalated_windows)
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
-    weak = declared_run.DeclaredConfidenceDecoder(
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
         weak_microseconds, is_escalated
     )
-    strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
-    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
+    strong_microseconds = DECLARED_MICROSECONDS["strong"]
+    strong = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
+    weak_decoder = decoder_settings.DecoderSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
+    )
+    strong_decoder = decoder_settings.DecoderSettings(
+        algorithm=strong, engine=declared_run.DECLARED_ENGINE
+    )
     threshold = threshold_sources.FixedThreshold(0.5)
     collaborators = escalation_policies.EscalationCollaborators(
         threshold=threshold,

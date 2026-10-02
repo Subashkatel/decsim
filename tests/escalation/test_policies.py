@@ -18,6 +18,8 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
 import decsim.config as config
+import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
@@ -170,12 +172,14 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         scheme=scheme, boundary_policy=held
     )
     decoder_manager = decoder_settings.DecoderManagerSettings()
+    matching = mwpm.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
+    matching = mwpm.PyMatchingDecoder.Settings()
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
     escalation = escalation_settings.EscalationSettings(
@@ -355,12 +359,14 @@ def _double_window_settings(
     windows = window_settings.WindowSettings(
         commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
     )
+    matching = mwpm.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
+    belief_matching_settings = belief_matching.BeliefMatchingDecoder.Settings()
     strong_decoder = decoder_settings.DecoderSettings(
-        kind="belief_matching",
+        algorithm=belief_matching_settings,
         engine=ENGINE_CARD,
     )
     escalation = escalation_settings.EscalationSettings(
@@ -679,8 +685,12 @@ def _serial_switching_settings(
     windows = window_settings.WindowSettings(
         scheme=scheme, boundary_policy=boundary_policy
     )
-    weak_decoder = decoder_settings.DecoderSettings(kind="pymatching")
-    strong_decoder = decoder_settings.DecoderSettings(kind="belief_matching")
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak_decoder = decoder_settings.DecoderSettings(algorithm=matching)
+    belief_matching_settings = belief_matching.BeliefMatchingDecoder.Settings()
+    strong_decoder = decoder_settings.DecoderSettings(
+        algorithm=belief_matching_settings
+    )
     escalation = escalation_settings.EscalationSettings(
         kind="switching", gap_threshold_nats=1.0
     )
@@ -914,7 +924,8 @@ def _switching_policy(threshold_nats: float):
         gap_threshold_nats=threshold_nats,
         confidence="complementary_gap",
     )
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderSettings(algorithm=matching)
     return escalation_build.build_escalation_policy(settings, weak)
 
 
@@ -1005,7 +1016,8 @@ def test_the_policy_instance_is_the_authority_over_its_settings_row():
     )
 
     row = escalation_build.escalation_row(settings)
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderSettings(algorithm=matching)
     policy = escalation_build.build_escalation_policy(settings, weak)
     tier = escalation_build.primary_tier(settings)
 

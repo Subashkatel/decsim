@@ -70,6 +70,21 @@ def escalation_row(settings: escalation_settings.EscalationSettings):
     )
 
 
+def builds_a_confidence_signal(
+    settings: escalation_settings.EscalationSettings,
+) -> bool:
+    """Whether the run joins the confidence of every solve of a window.
+
+    False when the row decides on no confidence, and false for a
+    Python-built policy, which brings its own decoder and reports its
+    own soft output from one decode.
+    """
+    if settings.policy is not None:
+        return False
+    row = escalation_row(settings)
+    return row.decides_on_a_confidence
+
+
 def build_escalation_policy(
     settings: escalation_settings.EscalationSettings,
     weak_decoder: decoder_settings.DecoderSettings,

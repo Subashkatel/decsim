@@ -57,6 +57,12 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         detector_order_count: int = 16
         detector_order_seed: Optional[int] = None
         merge_errors: bool = False
+        # the word the yaml and the reports name this row by
+        name = "tesseract"
+
+        def build(self) -> "TesseractDecoder":
+            """A fresh decoder of these settings."""
+            return TesseractDecoder(settings=self)
 
         @classmethod
         def from_yaml(
@@ -92,6 +98,7 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         if settings is None:
             settings = TesseractDecoder.Settings()
+        self.compile_key = (TesseractDecoder, settings)
         self.window_decoder = window_decoder.TesseractWindowDecoder(settings)
 
     def run_seed_children(self) -> tuple:

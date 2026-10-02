@@ -251,10 +251,8 @@ def test_the_weight_step_is_read_and_absent_is_the_shipped_one():
         without, clocks, "weak_decoder"
     )
 
-    assert settings.row_settings.weight_step == 0.5
-    assert plain.row_settings.weight_step == (
-        evidence_records.DEFAULT_WEIGHT_STEP
-    )
+    assert settings.algorithm.weight_step == 0.5
+    assert plain.algorithm.weight_step == (evidence_records.DEFAULT_WEIGHT_STEP)
 
 
 def test_a_weight_step_that_is_not_positive_is_refused_with_a_sentence():
@@ -306,10 +304,10 @@ def test_the_cycle_count_block_is_read_and_absent_is_none():
         without, clocks, "weak_decoder"
     )
 
-    cycle_count = settings.row_settings.cycle_count
+    cycle_count = settings.algorithm.cycle_count
     assert cycle_count.setup_cycles == 11
     assert cycle_count.clock == clocks.clock("helios")
-    assert plain.row_settings.cycle_count is None
+    assert plain.algorithm.cycle_count is None
 
 
 @pytest.mark.parametrize("key", ["kind", "units", "unit_memory", "engine"])
@@ -371,6 +369,25 @@ def test_a_kind_that_is_neither_a_row_nor_a_latency_is_refused_by_name(kind):
         )
 
 
+def test_the_cluster_gap_is_not_a_decoder_row():
+    """The cluster gap is a confidence row, not a decoder row.
+
+    escalation.confidence names it (confidence/signals.py) and it reads
+    the growth of whatever weak decoder the tier names.
+    """
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = "union_find_cluster_gap"
+
+    with pytest.raises(
+        ValueError,
+        match="weak_decoder.kind 'union_find_cluster_gap' is not a row",
+    ):
+        decoder_settings.DecoderSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+
+
 @pytest.mark.parametrize("kind", [0, 0.028, 10])
 def test_a_finite_nonnegative_kind_is_a_preset_core_latency(kind):
     clocks = config.ClockSettings({"decoder": 250.0})
@@ -381,7 +398,7 @@ def test_a_finite_nonnegative_kind_is_a_preset_core_latency(kind):
         section, clocks, "weak_decoder"
     )
 
-    assert settings.kind == kind
+    assert settings.algorithm.preset_latency_microseconds == kind
 
 
 @pytest.mark.parametrize("units", [0, -1, True, 1.5, "two"])

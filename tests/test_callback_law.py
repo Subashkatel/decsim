@@ -72,10 +72,12 @@ def _strong():
 
 def weak_settings(**changes):
     """The declared weak-only run, the one every test here starts from."""
-    decoder = decoders.PresetLatencyDecoder(WEAK_MICROSECONDS)
+    decoder = decoders.PresetLatencyDecoder.Settings(WEAK_MICROSECONDS)
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
-    weak = decoder_settings.DecoderSettings(decoder=decoder)
+    weak = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -93,10 +95,12 @@ def weak_settings(**changes):
 
 def strong_settings():
     """The strong-primary run: its rounds land in the strong syndrome buffer."""
-    decoder = decoders.PresetLatencyDecoder(STRONG_MICROSECONDS)
+    decoder = decoders.PresetLatencyDecoder.Settings(STRONG_MICROSECONDS)
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
-    strong = decoder_settings.DecoderSettings(decoder=decoder)
+    strong = decoder_settings.DecoderSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
     escalation = escalation_settings.EscalationSettings(policy=policy)
     qpu = declared_run.declared_qpu()

@@ -63,7 +63,7 @@ In `decsim/confidence/signals.py`. A row of it is named under `escalation.confid
 
 ## `DECODERS`
 
-In `decsim/decoders/settings.py`. A row of it is named under `<tier>_decoder.kind`.
+In `decsim/decoders/settings.py`. A row of it is named under `<section_name>.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |

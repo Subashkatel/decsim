@@ -48,6 +48,7 @@ import dataclasses
 import pytest
 
 import decsim.config as config
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
@@ -227,12 +228,14 @@ def machine_settings(shape: str, distance: int):
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     links = link_profiles.logical_reference_profile()
+    matching = mwpm.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
+    matching = mwpm.PyMatchingDecoder.Settings()
     strong = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
     if shape == "weak":
@@ -606,8 +609,9 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
+    matching = mwpm.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderSettings(
-        kind="pymatching",
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
     links = link_profiles.logical_reference_profile()

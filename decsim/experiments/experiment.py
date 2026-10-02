@@ -1,21 +1,33 @@
-"""One yaml file is one experiment; this module is the only yaml reader.
+"""An experiment: named points, each a machine to collect shots of.
 
-The file's sections are handed to the packages that own them, one
-settings record each (decsim.settings.MachineSettings.from_mapping), at
-every point of its sweep; the sweep blocks stay here, since the machine
-knows nothing of sweeps. `extends: other.yaml` starts from that file
-(same folder) and overrides the top-level keys this file names.
+A run file is a Python file that sets `experiment = Experiment(...)` at
+module level; `decsim run` loads it (load). This is gem5 MultiSim's
+shape, one script adding simulators by id
+(src/python/gem5/utils/multisim/multisim.py:285-353), with sinter's
+point: a machine's settings and json metadata, collected until a stop
+rule (sinter/_data/_task.py:36-52). The machine knows nothing of
+experiments; a point holds its settings and every shot builds a fresh
+machine from them.
+
+This module is also the one yaml reader: a yaml experiment file's
+sections are handed to the packages that own them, one settings record
+each (decsim.settings.MachineSettings.from_mapping), at every point of
+its sweep, and the sweep becomes an Experiment's points
+(ExperimentConfig.experiment). `extends: other.yaml` starts from that
+file (same folder) and overrides the top-level keys this file names.
 """
 
 import contextlib
 import copy
 import dataclasses
+import importlib.util
 import itertools
 import json
 import os
 import pathlib
 import re
-from collections.abc import Mapping
+import sys
+from collections.abc import Mapping, Sequence
 from typing import Optional
 
 import yaml
@@ -43,6 +55,144 @@ OPTIONAL_SWEEP_BLOCK_KEYS = ("collection",)
 # node" (OmegaConf 2.3, "Variable interpolation"), kept to a whole value
 # so that no text is spliced.
 WHOLE_VALUE_REFERENCE = re.compile(r"\$\{([^${}]+)\}")
+# A name a folder can take on any filesystem the results go to.
+FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# A yaml point has no name of its own, so it is named by the start of
+# its id: as many hex characters as git shows of a commit.
+YAML_POINT_NAME_LENGTH = 12
+# The module-level name a run file binds its experiment to.
+EXPERIMENT_NAME_IN_A_RUN_FILE = "experiment"
+
+
+@dataclasses.dataclass(frozen=True)
+class Point:
+    """One machine to collect shots of, under a name.
+
+    name is the point's folder in the results and what `decsim run
+    --only` picks. machine is the settings every shot builds a fresh
+    machine from. metadata is sinter's json_metadata: the columns the
+    point's rows carry beside its results; it is part of the point's id,
+    as it is of a sinter task's strong id. collection overrides the
+    experiment's. sections is the yaml a point the yaml translator made
+    resolved to, which its swept cells are read from; None for a point
+    built in Python, whose cells are its metadata.
+    """
+
+    name: str
+    machine: machine_settings.MachineSettings
+    metadata: Mapping = dataclasses.field(default_factory=dict)
+    collection: Optional[collection_module.CollectionSettings] = None
+    sections: Optional[Mapping] = dataclasses.field(
+        default=None, compare=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        _check_folder_name(self.name, "point")
+
+
+@dataclasses.dataclass(frozen=True)
+class Experiment:
+    """A named set of points and the collection they stop by.
+
+    name names the results folder. collection is every point's unless
+    the point carries its own. A point's name is its folder, so two
+    points of one name are refused, as is a point no collection stops.
+    """
+
+    name: str
+    points: Sequence[Point]
+    collection: Optional[collection_module.CollectionSettings] = None
+
+    def __post_init__(self) -> None:
+        _check_folder_name(self.name, "experiment")
+        if not self.points:
+            raise ValueError(f"the experiment {self.name} has no points")
+        _refuse_a_repeated_name(self.points)
+        for point in self.points:
+            self._refuse_a_point_without_a_collection(point)
+
+    def collection_of(
+        self, point: Point
+    ) -> collection_module.CollectionSettings:
+        """The collection a point stops by: its own, else the experiment's."""
+        if point.collection is not None:
+            return point.collection
+        return self.collection
+
+    def point_named(self, name: str) -> Point:
+        """The point of this name; a name it does not have is refused."""
+        for point in self.points:
+            if point.name == name:
+                return point
+        names = [point.name for point in self.points]
+        listed = ", ".join(names)
+        raise refusal.RefusalError(
+            f"the experiment {self.name} has no point {name}; its points "
+            f"are {listed}"
+        )
+
+    def _refuse_a_point_without_a_collection(self, point: Point) -> None:
+        if self.collection_of(point) is not None:
+            return
+        raise ValueError(
+            f"the point {point.name} has no collection; give the experiment "
+            "a collection, or the point one of its own"
+        )
+
+
+def grid(**axes) -> list:
+    """Every combination of the axes' values, as one dict each.
+
+    The product runs in the order the axes are given, the last axis
+    fastest, as itertools.product and Hydra's multi-run do, so the
+    points keep the order the experiment writes them in.
+    """
+    names = list(axes)
+    value_lists = axes.values()
+    combinations = itertools.product(*value_lists)
+    points = []
+    for values in combinations:
+        pairs = zip(names, values, strict=True)
+        points.append(dict(pairs))
+    return points
+
+
+def load(path) -> Experiment:
+    """The experiment a run file defines, or a yaml's, translated.
+
+    A Python file is executed as a module of its own, registered under
+    its name so a worker process can unpickle what it defines, and its
+    module-level `experiment` is the run's. A yaml goes through the yaml
+    reader and becomes an Experiment (ExperimentConfig.experiment).
+    """
+    path = pathlib.Path(path)
+    if path.suffix != ".py":
+        config = load_experiment(path)
+        return config.experiment()
+    _refuse_a_path_that_is_not_a_file(path)
+    module = _executed_run_file(path)
+    defined = getattr(module, EXPERIMENT_NAME_IN_A_RUN_FILE, None)
+    if defined is None:
+        raise refusal.RefusalError(
+            f"{path} defines no experiment; a run file sets experiment = "
+            "Experiment(...) at module level"
+        )
+    return defined
+
+
+def task_of(point: Point) -> collect.Task:
+    """The task a point's shots run: its settings, metadata and state.
+
+    The online threshold source is the point's state, not a setting:
+    every shot of the point shares the one instance and it learns over
+    them, so it is taken off the settings and carried on the task, and
+    the point's id is that of the settings without it.
+    """
+    escalation = point.machine.escalation
+    online_threshold = escalation.online_threshold
+    plain_escalation = dataclasses.replace(escalation, online_threshold=None)
+    settings = dataclasses.replace(point.machine, escalation=plain_escalation)
+    return collect.Task(settings, point.metadata, online_threshold)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -63,14 +213,7 @@ class SweepBlock:
 
     def points(self) -> list:
         """Its cartesian product, one {yaml path: value} per point."""
-        paths = list(self.axes)
-        value_lists = self.axes.values()
-        combinations = itertools.product(*value_lists)
-        points = []
-        for values in combinations:
-            pairs = zip(paths, values, strict=True)
-            points.append(dict(pairs))
-        return points
+        return grid(**self.axes)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -121,6 +264,30 @@ class ExperimentConfig:
         with _refused_in(path):
             resolved, settings = self._read_point(values)
             return _point_task_of(settings, resolved, values)
+
+    def experiment(self) -> Experiment:
+        """The sweep as an Experiment, one point per distinct sweep point.
+
+        A point two blocks name is one point, the first block's, and two
+        blocks that collect it two ways are refused, since a point stops
+        by one rule. Each point carries its block's collection, its
+        resolved sections, and its online threshold source on its
+        escalation, where task_of takes it back off, so its id is the
+        one its task has.
+        """
+        points_by_id = {}
+        collections_by_id = {}
+        for task, collection in self.point_tasks():
+            point_id = task.strong_id()
+            earlier = collections_by_id.setdefault(point_id, collection)
+            if earlier != collection:
+                _refuse_two_collections(task, earlier, collection)
+            if point_id in points_by_id:
+                continue
+            sections = self.resolved_sections(task.metadata)
+            points_by_id[point_id] = _point_of(task, collection, sections)
+        points = points_by_id.values()
+        return Experiment(self.name, tuple(points))
 
     def first_point_task(self) -> collect.Task:
         """The task of the first point of the first sweep block."""
@@ -258,6 +425,67 @@ def load_experiment(path) -> ExperimentConfig:
     with _refused_in(path):
         config._read_point(first_points[0])
     return config
+
+
+def _check_folder_name(name, what: str) -> None:
+    """A name that becomes a folder: letters, digits, '.', '_' and '-'."""
+    if isinstance(name, str) and FOLDER_NAME.fullmatch(name):
+        return
+    raise ValueError(
+        f"the {what} name {name!r} is not a folder name; a name is letters, "
+        "digits, '.', '_' and '-', starting with a letter or a digit"
+    )
+
+
+def _refuse_a_repeated_name(points: Sequence) -> None:
+    """Each point's name is its folder, so no two points share one."""
+    seen = set()
+    for point in points:
+        if point.name in seen:
+            raise ValueError(
+                f"two points are named {point.name}; a point's name is its "
+                "folder in the results, so each point has its own"
+            )
+        seen.add(point.name)
+
+
+def _executed_run_file(path: pathlib.Path):
+    """The run file run as a module, a refusal in it one sentence."""
+    stem = path.stem
+    module_name = f"decsim_run_file_{stem}"
+    specification = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    with _refused_in(path):
+        specification.loader.exec_module(module)
+    return module
+
+
+def _point_of(
+    task: collect.Task,
+    collection: collection_module.CollectionSettings,
+    sections: dict,
+) -> Point:
+    """A yaml point: its task's settings with the online source put back."""
+    settings = task.settings
+    escalation = dataclasses.replace(
+        settings.escalation, online_threshold=task.online_threshold
+    )
+    machine = dataclasses.replace(settings, escalation=escalation)
+    point_id = task.strong_id()
+    name = point_id[:YAML_POINT_NAME_LENGTH]
+    return Point(name, machine, task.metadata, collection, sections)
+
+
+def _refuse_two_collections(task: collect.Task, first, second) -> None:
+    """The sentence for a point that two blocks collect two ways."""
+    metadata = collect.metadata_text(task.metadata)
+    first_text = first.text()
+    second_text = second.text()
+    raise refusal.RefusalError(
+        f"the point {metadata} is in two sweep blocks that collect it two "
+        f"ways, {first_text} and {second_text}; a point stops by one rule"
+    )
 
 
 def _refuse_a_path_that_is_not_a_file(path: pathlib.Path) -> None:

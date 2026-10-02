@@ -3378,9 +3378,11 @@ def _run(
     weak_writes = []
     strong_occupancies = []
     machine.qpu.device.trace.round_emitted.connect(packets.append)
-    machine.readout.weak_syndrome_buffer.trace.round_stored.connect(
-        lambda *event: weak_writes.append(event)
-    )
+    weak_store = machine.readout.weak_syndrome_buffer
+    if weak_store is not None:
+        weak_store.trace.round_stored.connect(
+            lambda *event: weak_writes.append(event)
+        )
     observe = functools.partial(
         _record_strong_occupancy, machine, strong_occupancies
     )
@@ -3463,7 +3465,8 @@ def _assert_actual_truth(run: _Run) -> None:
 
 
 def _assert_drained(run: _Run) -> None:
-    assert run.machine.readout.weak_syndrome_buffer.occupancy == 0
+    weak_store = run.machine.readout.weak_syndrome_buffer
+    assert weak_store is None or weak_store.occupancy == 0
     assert run.machine.readout.strong_syndrome_buffer.occupancy == 0
     receiver = run.machine.readout.strong_syndrome_round_receiver
     assert receiver.reserved_bits_by_round == {}
@@ -3633,9 +3636,11 @@ def _run_static(
 ) -> tuple[_Run, dict]:
     machine = machine_module.Machine.build(settings, seed)
     weak_writes = []
-    machine.readout.weak_syndrome_buffer.trace.round_stored.connect(
-        lambda *event: weak_writes.append(event)
-    )
+    weak_store = machine.readout.weak_syndrome_buffer
+    if weak_store is not None:
+        weak_store.trace.round_stored.connect(
+            lambda *event: weak_writes.append(event)
+        )
     release_ticks_by_round = {}
     released = functools.partial(
         _record_release, machine, release_ticks_by_round

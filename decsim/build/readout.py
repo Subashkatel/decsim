@@ -3,8 +3,10 @@
 The controller takes each readout, the packing stage turns its fragments
 into one packed round, the sender writes the round into every store that
 must hold it, and each store's outgoing end hands the rounds on to the
-decoder that reads them. A run that never reads the room side has no
-strong syndrome buffer and no ends for one.
+decoder that reads them. A store exists only when a decoder reads it: a
+run whose plan's windows the strong tier decodes has no weak syndrome
+buffer, and a run that never reads the room side no strong one, and
+neither has ends for its missing store.
 """
 
 import dataclasses
@@ -39,9 +41,10 @@ from decsim.syndrome_buffer import (
 class Readout:
     """Every component a round passes on its way into the stores.
 
-    The three strong fields are None on a run that never reads the room
-    side. primary_output is one of the two outgoing ends: the one the
-    tier that decodes the plan's windows reads.
+    The three weak fields are None on a run whose plan's windows the
+    strong tier decodes, and the three strong fields on a run that never
+    reads the room side. primary_output is one of the two outgoing ends:
+    the one the tier that decodes the plan's windows reads.
     """
 
     controller: controller_module.Controller
@@ -54,9 +57,11 @@ class Readout:
     held_rounds: syndrome_round_sender.HeldRounds
     store_transfers: window_transfers.WindowTransfers
     memory_arrivals: memory_rounds.MemoryRoundArrivals
-    weak_syndrome_buffer: ports.SyndromeBuffer
-    weak_output: round_output.SyndromeBufferOutput
-    weak_syndrome_round_receiver: weak_receiver_module.WeakSyndromeRoundReceiver
+    weak_syndrome_buffer: Optional[ports.SyndromeBuffer]
+    weak_output: Optional[round_output.SyndromeBufferOutput]
+    weak_syndrome_round_receiver: Optional[
+        weak_receiver_module.WeakSyndromeRoundReceiver
+    ]
     strong_syndrome_buffer: Optional[ports.SyndromeBuffer]
     strong_output: Optional[round_output.SyndromeBufferOutput]
     strong_syndrome_round_receiver: Optional[
@@ -92,9 +97,9 @@ class Readout:
         held_rounds = syndrome_round_sender.HeldRounds(engine)
         store_transfers = window_transfers.WindowTransfers(engine)
         memory_arrivals = memory_rounds.MemoryRoundArrivals(engine)
-        weak_store = settings.weak_syndrome_buffer.build(engine)
-        weak_output = _weak_output(settings, engine)
-        weak_receiver = weak_receiver_module.WeakSyndromeRoundReceiver(engine)
+        weak_store, weak_output, weak_receiver = _weak_store(
+            settings, engine, escalation_policy
+        )
         strong_store, strong_output, strong_receiver = _strong_store(
             settings, engine, escalation_policy
         )
@@ -134,7 +139,8 @@ class Readout:
         """Tell the window side of every round that lands."""
         self.syndrome_round_sender.windows = windows
         self.memory_arrivals.windows = windows
-        self.weak_syndrome_round_receiver.windows = windows
+        if self.weak_syndrome_round_receiver is not None:
+            self.weak_syndrome_round_receiver.windows = windows
         self.store_transfers.retention = retention
         if self.strong_syndrome_round_receiver is not None:
             self.strong_syndrome_round_receiver.windows = windows
@@ -151,7 +157,8 @@ class Readout:
         seats last, since every round has left the stores by then.
         """
         self.assembler.check_settled()
-        self.weak_syndrome_round_receiver.check_settled()
+        if self.weak_syndrome_round_receiver is not None:
+            self.weak_syndrome_round_receiver.check_settled()
         if self.strong_syndrome_round_receiver is not None:
             self.strong_syndrome_round_receiver.check_settled()
         self.syndrome_round_sender.check_settled()
@@ -182,12 +189,14 @@ class Readout:
         self.store_transfers.link = links
 
     def _wire_the_weak_store(self, links: ports.Link) -> None:
+        receiver = self.weak_syndrome_round_receiver
+        if receiver is None:
+            return
         self.weak_syndrome_buffer.held_rounds = self.held_rounds
         self.weak_output.transfers = self.store_transfers
         self.weak_output.store = self.weak_syndrome_buffer
         self.weak_output.link = links
         self.weak_output.detection_events = self.detection_events
-        receiver = self.weak_syndrome_round_receiver
         receiver.store = self.weak_syndrome_buffer
         receiver.output = self.weak_output
         receiver.detection_events = self.detection_events
@@ -267,6 +276,23 @@ def _uses_the_room_side(escalation_policy: ports.EscalationPolicy) -> bool:
     """Whether the plan's decoding tier reads the strong syndrome buffer."""
     strong = window_records.DecoderTier.STRONG
     return escalation_policy.primary_tier is strong
+
+
+def _weak_store(
+    settings: machine_settings.MachineSettings,
+    engine: engine_module.Engine,
+    escalation_policy: ports.EscalationPolicy,
+) -> tuple:
+    """The weak syndrome buffer, its outgoing end and its receiving end.
+
+    Three Nones on a run whose plan's windows the strong tier decodes.
+    """
+    if _uses_the_room_side(escalation_policy):
+        return None, None, None
+    store = settings.weak_syndrome_buffer.build(engine)
+    output = _weak_output(settings, engine)
+    receiver = weak_receiver_module.WeakSyndromeRoundReceiver(engine)
+    return store, output, receiver
 
 
 def _strong_store(

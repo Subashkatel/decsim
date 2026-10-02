@@ -52,7 +52,8 @@ import decsim.windows.window_planner as window_planner
 class RoundRetention:
     """Which rounds each window and request keeps alive, and where."""
 
-    weak_store = ports.Port(ports.RetainedRounds)
+    # a run whose plan's windows the strong tier decodes has no weak store
+    weak_store = ports.Port(ports.RetainedRounds, optional=True)
     # a run that reads no rounds from the room side has no store there
     strong_store = ports.Port(ports.RetainedRounds, optional=True)
     planner = ports.Port(window_planner.WindowPlanner)
@@ -106,6 +107,8 @@ class RoundRetention:
 
     def release_round_if_unheld(self, round_key: tuple) -> None:
         """Free a weak syndrome buffer round whose every consumer resolved."""
+        if self.weak_store is None:
+            return
         self.weak_store.release_round_if_unheld(round_key)
 
     # ---- a window's reads
@@ -576,7 +579,7 @@ class RoundRetention:
         if self.primary_store.has_hold(reads):
             self.primary_store.replace_hold(reads, primary_reads)
         restart = decoding_records.PotentialRestart(key)
-        if self.weak_store.has_hold(restart):
+        if self.weak_store is not None and self.weak_store.has_hold(restart):
             self.weak_store.replace_hold(restart, primary_reads)
 
     def _strong_rounds_read_before(

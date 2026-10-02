@@ -160,7 +160,7 @@ class Windows:
 
     def connect(
         self,
-        weak_store: ports.SyndromeBuffer,
+        weak_store: Optional[ports.SyndromeBuffer],
         strong_store: Optional[ports.SyndromeBuffer],
         store_output: ports.SyndromeBufferOutput,
         strong_output: Optional[ports.SyndromeBufferOutput],

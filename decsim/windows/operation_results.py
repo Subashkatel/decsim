@@ -99,7 +99,8 @@ class OperationResults:
         self.deliveries.finished_operation_ids.add(operation.id)
         self._deliver_result(operation)
         weak_store = self.retention.weak_store
-        weak_store.close_operation(operation.id)
+        if weak_store is not None:
+            weak_store.close_operation(operation.id)
         self._close_strong_store_operation(operation.id)
         self.finish_workload_if_ready()
 
@@ -204,7 +205,9 @@ class OperationResults:
         if self._has_window_awaiting_strong(operation_id):
             return False
         weak_store = self.retention.weak_store
-        if weak_store.has_live_operation_reference(operation_id):
+        if weak_store is not None and weak_store.has_live_operation_reference(
+            operation_id
+        ):
             return False
         if self._strong_store_references(operation_id):
             return False

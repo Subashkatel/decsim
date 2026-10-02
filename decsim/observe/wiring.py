@@ -226,7 +226,9 @@ def _connect_data_movement(
     """
     qpu.device.trace.round_emitted.connect(data_movement.round_emitted)
     links.trace.transfer_delivered.connect(data_movement.transfer_delivered)
-    _connect_store_counts(data_movement, readout.weak_syndrome_buffer)
+    weak_syndrome_buffer = readout.weak_syndrome_buffer
+    if weak_syndrome_buffer is not None:
+        _connect_store_counts(data_movement, weak_syndrome_buffer)
     strong_syndrome_buffer = readout.strong_syndrome_buffer
     if strong_syndrome_buffer is not None:
         _connect_store_counts(data_movement, strong_syndrome_buffer)
@@ -257,9 +259,11 @@ def _connect_trace_writer(
     for source in _copy_sources(readout, windows, decoders):
         source.connect(trace_writer.copy_made)
     _connect_controller_trace(trace_writer, readout)
-    _connect_store_trace(
-        trace_writer, readout.weak_syndrome_buffer, "weak syndrome buffer"
-    )
+    weak_syndrome_buffer = readout.weak_syndrome_buffer
+    if weak_syndrome_buffer is not None:
+        _connect_store_trace(
+            trace_writer, weak_syndrome_buffer, "weak syndrome buffer"
+        )
     strong_syndrome_buffer = readout.strong_syndrome_buffer
     if strong_syndrome_buffer is not None:
         _connect_store_trace(
@@ -321,8 +325,10 @@ def _copy_sources(readout, windows, decoders) -> list:
     sources = [
         readout.controller.trace.copy_made,
         readout.assembler.trace.copy_made,
-        readout.weak_syndrome_round_receiver.trace.copy_made,
     ]
+    weak_syndrome_round_receiver = readout.weak_syndrome_round_receiver
+    if weak_syndrome_round_receiver is not None:
+        sources.append(weak_syndrome_round_receiver.trace.copy_made)
     strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
     if strong_syndrome_round_receiver is not None:
         sources.append(strong_syndrome_round_receiver.trace.copy_made)
@@ -467,6 +473,8 @@ def _connect_round_events(
         readout.weak_syndrome_round_receiver,
     )
     for component in components:
+        if component is None:
+            continue
         component.trace.round_event.connect(round_events.record)
     instruction_output = control.instruction_output
     instruction_output.trace.output_event.connect(round_events.output)

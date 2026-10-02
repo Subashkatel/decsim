@@ -4,10 +4,11 @@ A run whose switching slot is filled decodes weak first and escalates a
 window on low confidence. This part builds what only that run has (the
 signal the weak decoder reports, the policy that decides on it with its
 threshold, the strong regions, the strong window's shape, the pending
-strong windows and the strong re-decode) and binds the policy onto the
-window side's and the decoder managers' optional ports. A run with no
-switching builds none of it and leaves those ports unbound, as a gem5
-cache with no prefetcher holds a NULL one
+strong windows and the strong re-decode), wires the strong side to the
+window side, and binds the re-decode, the signal and the policy onto
+the window side's and the decoder managers' optional ports. A run with
+no switching builds none of it and leaves those ports unbound, as a
+gem5 cache with no prefetcher holds a NULL one
 (src/mem/cache/Cache.py:108, Param.BasePrefetcher(NULL)).
 """
 
@@ -27,6 +28,7 @@ import decsim.ports as ports
 if TYPE_CHECKING:
     import decsim.build.decoders as decoders_part
     import decsim.build.plan as plan_build
+    import decsim.build.readout as readout_part
     import decsim.build.windows as windows_part
 
 
@@ -38,8 +40,8 @@ class Switching:
     on; regions says which rounds an escalated window covers, shape lays
     the strong window over them, pending_strong_windows holds one until
     the conditions its row named are met, and strong_redecode submits it
-    and takes its result back. The windows part wires the four strong
-    components among its own.
+    and takes its result back. connect wires the four strong components
+    to the window side's.
     """
 
     confidence_signal: ports.ConfidenceSignal
@@ -91,21 +93,71 @@ class Switching:
 
     def connect(
         self,
+        plan: "plan_build.Plan",
+        readout: "readout_part.Readout",
         windows: "windows_part.Windows",
         decoders: "decoders_part.Decoders",
     ) -> None:
-        """Bind the policy on the ports a run with no switching leaves empty.
+        """Wire the strong side, then bind it on the ports left empty.
 
-        The verdict asks it to keep or escalate, the requester which tiers
-        decode a ready window, both managers teach it a strong result, and
-        a burst detector, when the run has one, overrides its threshold.
+        The strong side reads the window side's plan, rounds and stores,
+        takes an escalated region from the strong store and submits to
+        the host's manager. The committer, the verdict and the window
+        manager hand the re-decode its windows, and the join reads the
+        signal. The verdict asks the policy to keep or escalate, the
+        requester which tiers decode a ready window, both managers teach
+        it a strong result, and a burst detector, when the run has one,
+        overrides its threshold.
         """
+        self._wire_the_strong_side(plan, windows)
+        strong_redecode = self.strong_redecode
+        strong_redecode.strong_receiver = readout.strong_syndrome_round_receiver
+        strong_redecode.strong_output = readout.strong_output
+        strong_redecode.decode_queue = decoders.strong_decoder_manager
+        windows.committer.strong_redecode = strong_redecode
+        windows.verdict.strong_redecode = strong_redecode
+        windows.window_manager.strong_redecode = strong_redecode
+        windows.gap_join.signal = self.confidence_signal
         windows.verdict.escalation_policy = self.policy
         windows.requester.escalation_policy = self.policy
         decoders.decoder_manager.escalation_policy = self.policy
         decoders.strong_decoder_manager.escalation_policy = self.policy
         if windows.burst_detector is not None:
             self.policy.burst_detector = windows.burst_detector
+
+    def check_settled(self) -> None:
+        """No strong escalation is pending."""
+        strong_redecode = self.strong_redecode
+        if not strong_redecode.has_pending():
+            return
+        pending = strong_redecode.pending_work()
+        raise RuntimeError(
+            f"the run ended with pending strong escalations: {pending}"
+        )
+
+    def _wire_the_strong_side(
+        self, plan: "plan_build.Plan", windows: "windows_part.Windows"
+    ) -> None:
+        regions = self.regions
+        regions.interaction = plan.window_interaction
+        regions.planner = windows.planner
+        regions.tracker = windows.tracker
+        regions.retention = windows.retention
+        regions.burst_detector = windows.burst_detector
+        shape = self.shape
+        shape.regions = regions
+        shape.planner = windows.planner
+        shape.retention = windows.retention
+        shape.builder = windows.builder
+        shape.requester = windows.requester
+        shape.ledger = windows.ledger
+        shape.courier = windows.courier
+        strong_redecode = self.strong_redecode
+        strong_redecode.shape = shape
+        strong_redecode.pending = self.pending_strong_windows
+        strong_redecode.retention = windows.retention
+        strong_redecode.decoder_output = windows.decoder_output
+        strong_redecode.verdict = windows.verdict
 
 
 def build_switching(

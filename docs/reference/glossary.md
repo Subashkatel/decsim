@@ -183,8 +183,8 @@ is a field of a part in `decsim/build/` or a pool inside one.
 | The part | decsim | What it does |
 | --- | --- | --- |
 | strong syndrome buffer | the readout part's `strong_syndrome_buffer`, a `SyndromeBuffer`, with `strong_syndrome_round_receiver` as its landing and `strong_output` as its read | holds the rounds an escalation carried up until the strong decode has read them |
-| ledger of pending regions | the windows part's `pending_strong_windows`, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
-| strong window manager | the windows part's `shape`, one row of `STRONG_WINDOW_SHAPES` in `decsim/escalation/strong_window_shapes.py`, with its `regions` as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
+| ledger of pending regions | the switching part's `pending_strong_windows`, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
+| strong window manager | the switching part's `shape`, one row of `STRONG_WINDOW_SHAPES` in `decsim/escalation/strong_window_shapes.py`, with its `regions` as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
 | strong decoder manager | the decoders part's `strong_decoder_manager`, a second `DecoderManager` over the strong pool alone, with its own ready queue, staging and outcomes; its `strong_requests` is the ledger it shares with the chip's `decoder_manager` | gives each strong job a free strong unit and returns its result; halts a request the weak result made unnecessary |
 | the strong decoders, `strong_decoder.units` of them | the `strong_decoder` row's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
 

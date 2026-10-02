@@ -5,24 +5,20 @@ stores tell it which rounds landed, it closes each window whose rounds
 are in, the requester asks the decoder manager for a decode, the
 verdict keeps the result or escalates it, and the committer writes the
 correction and carries the boundary to the next window. A switching run
-adds the switching part's strong re-decode, and its signal with the
-join of a window's solves.
+adds the join of a window's solves; the switching part binds its strong
+re-decode and its signal onto this part's components.
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
-import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
 import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
-import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.settings as escalation_settings
-import decsim.escalation.strong_redecode as strong_redecode_module
-import decsim.escalation.strong_regions as strong_regions
 import decsim.frontends.settings as workload_settings
 import decsim.links.window_transfers as window_transfers_module
 import decsim.ports as ports
@@ -44,13 +40,10 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    confidence_signal, gap_join and the four strong fields are None on a
-    run with no switching; the switching part builds the signal and the
-    strong fields (build/escalation.py Switching): regions says which
-    rounds an escalated window covers, shape lays the strong window over
-    them, pending_strong_windows holds one until the conditions its row
-    named are met, and strong_redecode submits it and takes its result
-    back.
+    gap_join is None on a run with no switching. The switching part
+    (build/escalation.py Switching) owns the strong side and binds it
+    onto these components' optional ports when the machine connects the
+    parts.
     """
 
     # the detector is built before the parts, since the decoder units
@@ -70,15 +63,7 @@ class Windows:
     committer: window_commits.WindowCommitter
     verdict: window_commits.WindowVerdict
     requester: decode_requests.DecodeRequester
-    confidence_signal: Optional[ports.ConfidenceSignal]
     gap_join: Optional[gap_join_module.WindowGapJoin]
-    regions: Optional[strong_regions.StrongRegions]
-    # the row escalation.strong_window names
-    shape: Optional[Any]
-    pending_strong_windows: Optional[
-        pending_strong_windows.PendingStrongWindows
-    ]
-    strong_redecode: Optional[strong_redecode_module.StrongRedecode]
     window_manager: window_manager_module.WindowManager
 
     @classmethod
@@ -94,7 +79,6 @@ class Windows:
         plan: plan_build.Plan,
         burst_detector: Optional[ports.BurstDetector],
         links: ports.Link,
-        switching: Optional[escalation_build.Switching],
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
@@ -133,10 +117,7 @@ class Windows:
             clock=clocked_windows.clock,
             decision_cycles=clocked_windows.decision_cycles,
         )
-        confidence_signal, regions, shape, pending, strong_redecode = (
-            _switching_side(switching)
-        )
-        gap_join = _gap_join(confidence_signal, engine)
+        gap_join = _gap_join(is_switching, engine)
         feedback_boundary_mode = workload.feedback_boundary_mode
         window_manager = window_manager_module.WindowManager(
             engine, feedback_boundary_mode=feedback_boundary_mode
@@ -157,18 +138,12 @@ class Windows:
             committer=committer,
             verdict=verdict,
             requester=requester,
-            confidence_signal=confidence_signal,
             gap_join=gap_join,
-            regions=regions,
-            shape=shape,
-            pending_strong_windows=pending,
-            strong_redecode=strong_redecode,
             window_manager=window_manager,
         )
         windows._wire_the_plan(plan)
         windows._wire_the_window_chain(links)
         windows._wire_the_decision()
-        windows._wire_the_strong_redecode()
         return windows
 
     def connect(
@@ -176,8 +151,6 @@ class Windows:
         weak_store: Optional[ports.SyndromeBuffer],
         strong_store: Optional[ports.SyndromeBuffer],
         store_output: ports.SyndromeBufferOutput,
-        strong_output: Optional[ports.SyndromeBufferOutput],
-        strong_receiver: Optional[ports.StrongSyndromeRoundReceiver],
         primary_decoder: Optional[ports.Decoder],
         strong_decoder: Optional[ports.Decoder],
         decode_queue: ports.DecodeQueue,
@@ -205,10 +178,6 @@ class Windows:
         self.results.factory = factory
         if self.gap_join is not None:
             self.gap_join.decode_queue = decode_queue
-        if self.strong_redecode is not None:
-            self.strong_redecode.strong_receiver = strong_receiver
-            self.strong_redecode.strong_output = strong_output
-            self.strong_redecode.decode_queue = strong_decode_queue
 
     def start(self) -> None:
         """Build every planned window's model, then its first boundary."""
@@ -216,13 +185,7 @@ class Windows:
         self.window_manager.start()
 
     def check_settled(self) -> None:
-        """No strong escalation is pending and every window has closed."""
-        strong_redecode = self.strong_redecode
-        if strong_redecode is not None and strong_redecode.has_pending():
-            pending = strong_redecode.pending_work()
-            raise RuntimeError(
-                f"the run ended with pending strong escalations: {pending}"
-            )
+        """Every window has closed."""
         self.window_manager.check_settled()
 
     def _wire_the_plan(self, plan: plan_build.Plan) -> None:
@@ -237,8 +200,6 @@ class Windows:
         self.courier.interaction = interaction
         self.courier.boundary_policy = plan.boundary_policy
         self.window_manager.window_interaction = interaction
-        if self.regions is not None:
-            self.regions.interaction = interaction
 
     def _wire_the_window_chain(self, links: ports.Link) -> None:
         planner = self.planner
@@ -285,34 +246,7 @@ class Windows:
         requester.verdict = verdict
         requester.gap_join = self.gap_join
         if self.gap_join is not None:
-            self.gap_join.signal = self.confidence_signal
             self.gap_join.verdict = verdict
-
-    def _wire_the_strong_redecode(self) -> None:
-        strong_redecode = self.strong_redecode
-        if strong_redecode is None:
-            return
-        regions = self.regions
-        regions.planner = self.planner
-        regions.tracker = self.tracker
-        regions.retention = self.retention
-        regions.burst_detector = self.burst_detector
-        shape = self.shape
-        shape.regions = regions
-        shape.planner = self.planner
-        shape.retention = self.retention
-        shape.builder = self.builder
-        shape.requester = self.requester
-        shape.ledger = self.ledger
-        shape.courier = self.courier
-        strong_redecode.shape = shape
-        strong_redecode.pending = self.pending_strong_windows
-        strong_redecode.retention = self.retention
-        strong_redecode.decoder_output = self.decoder_output
-        strong_redecode.verdict = self.verdict
-        self.committer.strong_redecode = strong_redecode
-        self.verdict.strong_redecode = strong_redecode
-        self.window_manager.strong_redecode = strong_redecode
 
 
 def _retention(
@@ -334,25 +268,11 @@ def _retention(
     )
 
 
-def _switching_side(switching: Optional[escalation_build.Switching]) -> tuple:
-    """The signal and the four strong components; five Nones without one."""
-    if switching is None:
-        return None, None, None, None, None
-    return (
-        switching.confidence_signal,
-        switching.regions,
-        switching.shape,
-        switching.pending_strong_windows,
-        switching.strong_redecode,
-    )
-
-
 def _gap_join(
-    confidence_signal: Optional[ports.ConfidenceSignal],
-    engine: engine_module.Engine,
+    is_switching: bool, engine: engine_module.Engine
 ) -> Optional[gap_join_module.WindowGapJoin]:
-    """The join of a window's solves; None on a run with no signal."""
-    if confidence_signal is None:
+    """The join of a window's solves; None on a run with no switching."""
+    if not is_switching:
         return None
     return gap_join_module.WindowGapJoin(engine)
 

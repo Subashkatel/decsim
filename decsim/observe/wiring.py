@@ -52,6 +52,7 @@ def observe(
     readout: Any,
     windows: Any,
     decoders: Any,
+    switching: Any,
     process_name: str,
     traffic_ledger: link_traffic.TrafficLedger,
 ) -> observation_module.Observation:
@@ -86,9 +87,7 @@ def observe(
     sampled_shots = _connect_sampled_shots(qpu.syndrome_source)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
-    confidence = _connect_confidence(
-        windows.confidence_signal, decoder_managers
-    )
+    confidence = _connect_confidence(switching, decoder_managers)
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
     if data_movement is not None:
@@ -436,10 +435,10 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    confidence_signal, decoder_managers: tuple
+    switching, decoder_managers: tuple
 ) -> Optional[decode_records_module.ConfidenceLedger]:
-    """The confidence ledger, only when a confidence decides the verdict."""
-    if confidence_signal is None:
+    """The confidence ledger, only on a run whose confidence decides."""
+    if switching is None:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:

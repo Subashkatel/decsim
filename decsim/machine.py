@@ -192,7 +192,6 @@ class Machine:
             plan,
             burst_detector,
             links,
-            switching,
         )
         decoders = decoders_part.Decoders.build(
             settings.decoder_manager, settings.clock, engine, pool
@@ -230,8 +229,8 @@ class Machine:
 
         The connections are every wire that crosses from one part to
         another, in the order a readout travels; each part wired its own
-        inside when it was built, and a switching part binds its policy
-        last. Nothing is scheduled until the machine
+        inside when it was built, and a switching part wires its strong
+        side to the window side last. Nothing is scheduled until the machine
         runs, so the order the parts were built in cannot move a tick
         (gem5 src/sim/sim_object.hh lines 194 and 280).
         """
@@ -251,8 +250,6 @@ class Machine:
             weak_store=readout.weak_syndrome_buffer,
             strong_store=readout.strong_syndrome_buffer,
             store_output=readout.primary_output,
-            strong_output=readout.strong_output,
-            strong_receiver=readout.strong_syndrome_round_receiver,
             primary_decoder=decoders.primary_decoder,
             strong_decoder=decoders.strong_decoder,
             decode_queue=decoders.decoder_manager,
@@ -270,7 +267,7 @@ class Machine:
             decode_queue=decoders.decoder_manager,
         )
         if switching is not None:
-            switching.connect(windows, decoders)
+            switching.connect(plan, readout, windows, decoders)
         # the managers hear their rows before the planner compiles a
         # model, and the sender asks the wired window side where it reads
         decoders.start()
@@ -289,6 +286,7 @@ class Machine:
             readout=readout,
             windows=windows,
             decoders=decoders,
+            switching=switching,
             seed=seed,
         )
         program_build.load_program(plan, control, windows)
@@ -322,6 +320,8 @@ class Machine:
         """Start every component, run to quiescence, read the result."""
         self.start()
         self.engine.run()
+        if self.switching is not None:
+            self.switching.check_settled()
         self.windows.check_settled()
         self.decoders.check_settled()
         self.readout.check_settled()
@@ -411,6 +411,7 @@ def _observe(
     readout: readout_part.Readout,
     windows: windows_part.Windows,
     decoders: decoders_part.Decoders,
+    switching: Optional[escalation_build.Switching],
     seed: Optional[int],
 ) -> observation_module.Observation:
     """Connect the run's listeners, before the workload is loaded."""
@@ -425,6 +426,7 @@ def _observe(
         readout=readout,
         windows=windows,
         decoders=decoders,
+        switching=switching,
         process_name=name,
         traffic_ledger=traffic_ledger,
     )

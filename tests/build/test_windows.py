@@ -6,7 +6,7 @@ wire by assignment. The windows part binds its own wires when it is
 built and takes the stores and the decoder managers when the machine
 connects the parts. This file pins the binds the window side makes
 late: the courier names the facade it tells of a landing, the committer
-and the verdict name the strong redecode built after them, which a run
+and the verdict name the switching part's strong redecode, which a run
 that never escalates leaves unbound, and the strong side submits to the
 host's manager. A window decision or a verdict that names no clock runs
 on the machine's.
@@ -41,7 +41,7 @@ def test_a_run_that_never_escalates_leaves_the_redecode_unbound():
     machine = declared_run.weak_only_run(rounds=6)
     verdict = machine.windows.window_manager.requester.verdict
 
-    assert machine.windows.pending_strong_windows is None
+    assert machine.switching is None
     assert machine.windows.window_manager.strong_redecode is None
     assert verdict.strong_redecode is None
     assert verdict.committer.strong_redecode is None
@@ -55,10 +55,10 @@ def test_a_switching_run_builds_only_the_window_side_it_names():
     """
     machine = declared_run.switching_run(escalates=True)
     windows = machine.windows
+    switching = machine.switching
 
-    assert windows.strong_redecode is machine.switching.strong_redecode
-    assert windows.confidence_signal is machine.switching.confidence_signal
-    assert windows.gap_join is not None
+    assert windows.window_manager.strong_redecode is switching.strong_redecode
+    assert windows.gap_join.signal is switching.confidence_signal
     assert windows.burst_detector is None
 
 
@@ -68,7 +68,7 @@ def test_the_strong_side_submits_to_the_hosts_manager():
     host = machine.decoders.strong_decoder_manager
     requester = machine.windows.requester
 
-    assert machine.windows.strong_redecode.decode_queue is host
+    assert machine.switching.strong_redecode.decode_queue is host
     assert requester.strong_decode_queue is host
     assert requester.decode_queue is chip
 

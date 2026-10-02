@@ -80,6 +80,16 @@ class BoundaryPayloadSettings(Protocol):
         """A fresh payload."""
 
 
+class StrongWindowBoundaries(Protocol):
+    """What a switching run's strong window declares to the windows.
+
+    default_boundary_policy is the BOUNDARY_POLICIES row it needs
+    (escalation/strong_window_shapes.py).
+    """
+
+    default_boundary_policy: str
+
+
 @dataclasses.dataclass(frozen=True)
 class WindowSettings:
     """How the rounds are cut into decode windows, and what a window ships.
@@ -124,36 +134,50 @@ class WindowSettings:
         """The `windows` section: a scheme of the table, its sizes, the wire.
 
         A section that leaves terminal_policy or boundaries null gets the
-        value its run's shape takes: on a switching run the lookahead tail,
-        since a strong recovery reads past the last window's commit, and
-        the boundary row its strong window shape declares
-        (default_boundary_policy on escalation/strong_window_shapes.py);
-        otherwise the flush tail and eager boundaries. switching is the
-        run's switching slot, None for a run that keeps one decoder.
+        value its run's shape takes: on a switching run the ones
+        switching_windows gives, otherwise the record's flush tail and
+        eager boundaries. switching is the run's switching slot, None for
+        a run that keeps one decoder.
         """
         _check_required_keys(section)
         kind = section["kind"]
         row = tables.row(WINDOWING_SCHEMES, "windows.kind", kind)
         scheme = _scheme_settings(section, row)
-        terminal_policy = _terminal_policy(section, switching)
         payload_word = section.get("boundary_payload", "dense_seam_mask")
         payload_row = tables.row(
             BOUNDARY_PAYLOADS, "windows.boundary_payload", payload_word
         )
         boundary_payload = payload_row.Settings()
-        boundary_policy = _boundary_policy(section, switching)
         clock = None
         if "clock" in section:
             clock = clocks.clock(section["clock"])
         decision_cycles = section.get("decision_cycles", 0)
-        return cls(
+        windows = cls(
             clock=clock,
             decision_cycles=decision_cycles,
             scheme=scheme,
-            terminal_policy=terminal_policy,
-            boundary_policy=boundary_policy,
             boundary_payload=boundary_payload,
         )
+        if switching is not None:
+            windows = switching_windows(windows, switching.strong_window)
+        return _with_written_tail_and_boundaries(windows, section)
+
+
+def switching_windows(
+    windows: WindowSettings, strong_window: StrongWindowBoundaries
+) -> WindowSettings:
+    """The windows with the tail and boundary row a switching run takes.
+
+    A strong recovery reads past the last window's commit, so the tail is
+    lookahead. The boundary row is the one the strong window declares;
+    its row says why (escalation/strong_window_shapes.py).
+    """
+    boundaries = strong_window.default_boundary_policy
+    row = tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
+    boundary_policy = row.Settings()
+    return dataclasses.replace(
+        windows, terminal_policy="lookahead", boundary_policy=boundary_policy
+    )
 
 
 def _scheme_settings(section: Mapping, row):
@@ -172,30 +196,22 @@ def _scheme_settings(section: Mapping, row):
     return tables.section_record("windows", row.Settings, values)
 
 
-def _terminal_policy(section: Mapping, switching) -> str:
-    """The section's terminal tail, or the one its run's shape takes."""
+def _with_written_tail_and_boundaries(
+    windows: WindowSettings, section: Mapping
+) -> WindowSettings:
+    """The windows with the tail and the boundary row the section writes.
+
+    A null key keeps the windows' own: the run's shape decided it.
+    """
     terminal_policy = section.get("terminal_policy")
     if terminal_policy is not None:
-        return terminal_policy
-    if switching is not None:
-        return "lookahead"
-    return "flush"
-
-
-def _boundary_policy(section: Mapping, switching):
-    """The boundary row the section names, or the one its run's shape takes.
-
-    A run with no switching never revises a committed window and ships
-    every boundary at its commit; a switching run hands the default to
-    its strong window shape, whose absorption is what decides.
-    """
+        windows = dataclasses.replace(windows, terminal_policy=terminal_policy)
     boundaries = section.get("boundaries")
-    if boundaries is None and switching is None:
-        boundaries = "eager"
     if boundaries is None:
-        boundaries = switching.strong_window.default_boundary_policy
+        return windows
     row = tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
-    return row.Settings()
+    boundary_policy = row.Settings()
+    return dataclasses.replace(windows, boundary_policy=boundary_policy)
 
 
 def _check_required_keys(section: Mapping) -> None:

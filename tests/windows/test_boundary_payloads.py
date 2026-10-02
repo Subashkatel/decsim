@@ -254,7 +254,9 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
     switching = dataclasses.replace(
         settings.switching, strong_window=strong_window_settings
     )
-    windows = declared_run.switching_windows(settings.windows, switching)
+    windows = window_settings.switching_windows(
+        settings.windows, switching.strong_window
+    )
     settings = dataclasses.replace(
         settings, switching=switching, windows=windows
     )

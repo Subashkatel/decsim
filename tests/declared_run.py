@@ -33,7 +33,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
-import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.settings as window_settings
 
 # every declared stage of the fabric, in microseconds
@@ -195,22 +194,6 @@ def windows_on(windows, kind=None, **sizes):
         )
     scheme = dataclasses.replace(scheme, **sizes)
     return dataclasses.replace(windows, scheme=scheme)
-
-
-def switching_windows(windows, switching):
-    """The windows with the tail and boundary row a yaml gives switching.
-
-    A switching run reads past the last window's commit, and its strong
-    window shape declares the boundary row it needs.
-    """
-    boundaries = switching.strong_window.default_boundary_policy
-    row = tables.row(
-        window_settings.BOUNDARY_POLICIES, "windows.boundaries", boundaries
-    )
-    boundary_policy = row.Settings()
-    return dataclasses.replace(
-        windows, terminal_policy="lookahead", boundary_policy=boundary_policy
-    )
 
 
 def declared_edge(base_edge, latency_microseconds):
@@ -653,18 +636,14 @@ def switching_run(
         engine=DECLARED_ENGINE,
     )
     workload = declared_workload(operations, rounds)
-    # serial switching needs Held boundaries; the double window refuses
-    # them (escalation.policies.Switching.check_plan)
-    boundary_policy = boundary_policies.Held.Settings()
-    if strong_window == "double_window":
-        boundary_policy = boundary_policies.Eager.Settings()
-    windows = window_settings.WindowSettings(
-        terminal_policy="lookahead", boundary_policy=boundary_policy
+    strong_window_record = strong_window_settings(strong_window)
+    plain_windows = window_settings.WindowSettings()
+    windows = window_settings.switching_windows(
+        plain_windows, strong_window_record
     )
     decoder_manager = decoder_settings.DecoderManagerSettings(
         bulk_strong=bulk_strong
     )
-    strong_window_record = strong_window_settings(strong_window)
     switching = declared_switching(
         run_both_at_once=run_both_at_once,
         strong_window=strong_window_record,

@@ -261,7 +261,9 @@ def machine_settings(shape: str, distance: int):
         confidence=confidence, threshold=threshold
     )
     plain_windows = window_settings.WindowSettings()
-    windows = declared_run.switching_windows(plain_windows, switching)
+    windows = window_settings.switching_windows(
+        plain_windows, switching.strong_window
+    )
     return machine_settings_module.MachineSettings(
         workload=workload,
         qpu=qpu,

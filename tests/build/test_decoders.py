@@ -47,7 +47,9 @@ def _settings(*, switching=None, weak=None, strong=None):
     frame = declared_run.declared_frame()
     windows = window_settings.WindowSettings()
     if switching is not None:
-        windows = declared_run.switching_windows(windows, switching)
+        windows = window_settings.switching_windows(
+            windows, switching.strong_window
+        )
     return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,

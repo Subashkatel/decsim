@@ -33,6 +33,7 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.workload as workload_records
+import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -183,7 +184,9 @@ def _seated_machine(
     if switching is not None:
         named = declared_run.strong_window_settings(strong_window)
         switching = dataclasses.replace(switching, strong_window=named)
-        windows = declared_run.switching_windows(windows, switching)
+        windows = window_settings.switching_windows(
+            windows, switching.strong_window
+        )
     settings = dataclasses.replace(
         settings,
         detection_events=detection_events,
@@ -335,7 +338,9 @@ def _double_window_switching_at_the_decoder():
     switching = dataclasses.replace(
         settings.switching, strong_window=double_window
     )
-    windows = declared_run.switching_windows(settings.windows, switching)
+    windows = window_settings.switching_windows(
+        settings.windows, switching.strong_window
+    )
     settings = dataclasses.replace(
         settings,
         detection_events=detection_events,

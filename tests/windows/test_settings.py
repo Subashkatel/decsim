@@ -12,7 +12,11 @@ from typing import Optional
 
 import pytest
 
+import decsim.confidence.complementary as complementary
 import decsim.config as config
+import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.records.windows as window_records
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
@@ -20,6 +24,11 @@ import decsim.windows.settings as window_settings
 
 CLOCKS = config.ClockSettings({"decisions": 250.0})
 SCHEME_ROWS = window_settings.WINDOWING_SCHEMES.values()
+# each strong window record and the boundary row it declares
+PRESET_ROWS = [
+    (strong_window_shapes.RedoWindow.Settings(), boundary_policies.Held),
+    (strong_window_shapes.DoubleWindow.Settings(), boundary_policies.Eager),
+]
 
 
 def _section(**overrides) -> dict:
@@ -104,6 +113,58 @@ def test_a_python_record_defaults_to_flush_and_eager():
     assert settings.scheme.name == "sliding"
     assert settings.terminal_policy == "flush"
     assert settings.boundary_policy == boundary_policies.Eager.Settings()
+
+
+@pytest.mark.parametrize("strong_window, boundary_row", PRESET_ROWS)
+def test_the_switching_preset_takes_lookahead_and_the_strong_windows_row(
+    strong_window, boundary_row
+):
+    plain_windows = window_settings.WindowSettings()
+
+    windows = window_settings.switching_windows(plain_windows, strong_window)
+
+    assert windows.terminal_policy == "lookahead"
+    assert windows.boundary_policy == boundary_row.Settings()
+    assert windows.scheme == plain_windows.scheme
+
+
+def _double_window_switching():
+    """A switching slot whose strong window is the double window."""
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    return escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold, strong_window=double_window
+    )
+
+
+def test_a_switching_run_reads_null_keys_as_the_switching_preset():
+    switching = _double_window_switching()
+    section = _section()
+
+    settings = window_settings.WindowSettings.from_yaml(
+        section, CLOCKS, switching
+    )
+
+    plain_windows = window_settings.WindowSettings()
+    preset = window_settings.switching_windows(
+        plain_windows, switching.strong_window
+    )
+    assert settings == preset
+
+
+def test_keys_a_switching_section_writes_win_over_the_preset():
+    switching = _double_window_switching()
+    section = _section(terminal_policy="flush", boundaries="held")
+
+    settings = window_settings.WindowSettings.from_yaml(
+        section, CLOCKS, switching
+    )
+
+    assert settings.terminal_policy == "flush"
+    assert settings.boundary_policy == boundary_policies.Held.Settings()
 
 
 def test_a_section_without_its_sizes_is_refused_by_name():

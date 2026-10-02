@@ -726,7 +726,9 @@ def test_an_unbuffered_live_region_finds_the_round_before_it_held(
     windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    windows = declared_run.switching_windows(windows, switching)
+    windows = window_settings.switching_windows(
+        windows, switching.strong_window
+    )
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -791,7 +793,9 @@ def test_a_live_region_reads_a_round_an_earlier_region_landed(
     windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    windows = declared_run.switching_windows(windows, switching)
+    windows = window_settings.switching_windows(
+        windows, switching.strong_window
+    )
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -842,7 +846,9 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    windows = declared_run.switching_windows(windows, switching)
+    windows = window_settings.switching_windows(
+        windows, switching.strong_window
+    )
     one_round = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
     settings = dataclasses.replace(
         settings,
@@ -915,7 +921,9 @@ def _switching_live_settings(
     windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    windows = declared_run.switching_windows(windows, switching)
+    windows = window_settings.switching_windows(
+        windows, switching.strong_window
+    )
     return dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -1618,7 +1626,9 @@ def _switching_memory(weak_kind: str, confidence: str):
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True
     )
-    windows = declared_run.switching_windows(settings.windows, switching)
+    windows = window_settings.switching_windows(
+        settings.windows, switching.strong_window
+    )
     return dataclasses.replace(
         settings,
         strong_decoder=strong_decoder,

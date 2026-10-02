@@ -264,3 +264,12 @@ def _optional_float(value) -> Optional[float]:
     if value is None:
         return None
     return float(value)
+
+
+# The gross code, Bravyi et al.'s [[144, 12, 12]] bivariate bicycle code
+# (2308.07915v2 lines 180-184); its card's distance is twelve when the
+# run names none. These are the card's defaults.
+GROSS_CODE = BivariateBicycleCodeModel.Settings(
+    qubit_count=144,  # n
+    logical_qubit_count=12,  # k
+)

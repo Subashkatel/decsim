@@ -114,15 +114,19 @@ writes each results file from the rows of the points that name it.
 ## Plot and keep the results
 
 ```bash
-PYTHONPATH=. python experiments/decoder_baseline/plot.py results/2026-09-27_decoder_baseline
+PYTHONPATH=. python experiments/decoder_baseline/plot.py results/<date>_decoder_baseline
 ```
 
 This draws the folder's `plots/` from its `stats.csv`: the logical
 error rate per round against the physical error rate, a figure per
 decoder and one comparing the decoders for each basis. Its decoders,
 distances, rates and rounds come from the folder's own `run.py`, the
-script that made its `stats.csv`, read and not run, so an older folder
-is drawn by the recipe that made it and not today's. The script is a
+script that made its `stats.csv`, loaded as a module and not run as a
+script, so an older folder is drawn by the recipe that made it and not
+today's. The recipe imports what it imported when it ran, so a folder
+whose `run.py` imports code since removed (the 2026-09-27 baseline's
+imports the old experiment runner) is drawn from a checkout of the
+commit it names. The script is a
 few lines because `decsim/plots.py` holds the figure kinds (an error
 rate and plain values) and their one axis style; another experiment's
 plot.py draws with the same calls. The repository tracks a results

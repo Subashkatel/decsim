@@ -15,7 +15,6 @@ _THIS_FILE = pathlib.Path(__file__)
 _TEST_FILE = _THIS_FILE.resolve()
 REPOSITORY_ROOT = _TEST_FILE.parents[3]
 SCRIPT_FOLDER = REPOSITORY_ROOT / "experiments" / "decoder_baseline"
-SAVED_RESULTS = REPOSITORY_ROOT / "results" / "2026-09-27_decoder_baseline"
 EXPECTED_PLOTS = {
     "union-find.png",
     "pymatching.png",
@@ -38,22 +37,22 @@ def test_every_decoder_and_basis_gets_its_figure(tmp_path):
     assert written == EXPECTED_PLOTS
 
 
-def test_saved_results_are_drawn_by_the_recipe_that_made_them(tmp_path):
-    """The saved run.py imports a module since removed; its figures still draw.
-
-    The recipe's constants are read from the saved file, never run.
-    """
+def test_a_recipe_is_evaluated_as_the_script_it_is(tmp_path):
+    """Its grid may be any expression, and a name may take two at once."""
     plot = script_module()
-    stats_path = SAVED_RESULTS / "stats.csv"
-    recipe_path = SAVED_RESULTS / "run.py"
-    shutil.copy(stats_path, tmp_path)
-    shutil.copy(recipe_path, tmp_path)
+    recipe_path = SCRIPT_FOLDER / "run.py"
+    recipe_text = recipe_path.read_text()
+    written_grid = "DISTANCES = [5, 7, 9, 11, 13, 15]\n"
+    computed_grid = "DISTANCES = SAME_DISTANCES = list(range(5, 16, 2))\n"
+    assert written_grid in recipe_text
+    computed_text = recipe_text.replace(written_grid, computed_grid)
+    computed_path = tmp_path / "run.py"
+    computed_path.write_text(computed_text)
 
-    plot.main(tmp_path)
+    recipe = plot.recipe_of(tmp_path)
 
-    drawn = {path.name for path in (tmp_path / "plots").iterdir()}
-    saved = {path.name for path in (SAVED_RESULTS / "plots").iterdir()}
-    assert drawn == saved
+    assert recipe.DISTANCES == [5, 7, 9, 11, 13, 15]
+    assert recipe.SAME_DISTANCES is recipe.DISTANCES
 
 
 def write_stats(folder: pathlib.Path) -> None:

@@ -348,7 +348,7 @@ def test_a_cadence_that_is_a_numpy_scalar_is_taken_as_its_value(
 
 
 def test_an_operation_planned_for_no_rounds_is_refused():
-    rounds_policy = round_policies.PerOperationRounds({1: 0})
+    rounds_policy = round_policies.PerOperationRounds(((1, 0),))
     only = operation_of(1)
     with pytest.raises(ValueError, match="at least one round"):
         compiled_plan((only,), (1,), rounds_policy=rounds_policy)
@@ -356,7 +356,7 @@ def test_an_operation_planned_for_no_rounds_is_refused():
 
 def test_an_operation_nobody_plans_may_run_for_no_rounds():
     """Only the planned operations decode, so only they need a round."""
-    rounds_policy = round_policies.PerOperationRounds({1: 2, 2: 0})
+    rounds_policy = round_policies.PerOperationRounds(((1, 2), (2, 0)))
     first = operation_of(1)
     second = operation_of(2)
     plan = compiled_plan((first, second), (1,), rounds_policy=rounds_policy)

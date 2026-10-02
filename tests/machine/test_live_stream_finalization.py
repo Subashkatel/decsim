@@ -95,7 +95,7 @@ def test_a_live_stream_that_no_region_ends_is_refused_at_its_seal(
     first = _segment(1, 0, ())
     second = _segment(2, 3, (1,))
     segments = (first, second)[:segment_count]
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 3})
+    policy = round_policies.PerOperationRounds(((100, 0), (1, 3), (2, 3)))
     workload = workload_settings.WorkloadSettings(
         operations=segments, dynamic_streams=(owner,), rounds_policy=policy
     )
@@ -168,7 +168,7 @@ def test_a_finished_finite_stream_leaves_its_idle_patch_to_the_policy() -> None:
         blocked_by=1,
         emits_detector_data=False,
     )
-    policy = round_policies.PerOperationRounds({100: 3, 1: 3, 2: 2})
+    policy = round_policies.PerOperationRounds(((100, 3), (1, 3), (2, 2)))
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting),
         dynamic_streams=(owner,),
@@ -330,7 +330,9 @@ def test_a_continuation_s_last_round_ends_a_window_of_its_source() -> None:
         emits_detector_data=False,
     )
     counts = {100: owner_round_count, 1: 15, 2: 3, 4: 0}
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, resumed, readout),
         dynamic_streams=(owner,),
@@ -536,7 +538,9 @@ def _released_region_workload(
         emits_detector_data=False,
     )
     region = program_records.ProtectedRegion(100, 2, 3)
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 1, 3: 0})
+    policy = round_policies.PerOperationRounds(
+        ((100, 0), (1, 3), (2, 1), (3, 0))
+    )
     return workload_settings.WorkloadSettings(
         operations=(prefix, waiting, readout),
         dynamic_streams=(owner,),
@@ -578,7 +582,9 @@ def _finite_windows(round_count: int, distance: int, mode: str) -> list:
         3, "after", (0,), patches=(0,), predecessors=(1,), circuit=after_circuit
     )
     counts = {100: round_count, 1: round_count, 2: 1, 3: 3}
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting, after),
         dynamic_streams=(owner,),
@@ -655,7 +661,7 @@ def _finite_group_workload() -> tuple:
         blocked_by=1,
         emits_detector_data=False,
     )
-    policy = round_policies.PerOperationRounds({100: 9, 1: 3, 2: 8})
+    policy = round_policies.PerOperationRounds(((100, 9), (1, 3), (2, 8)))
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting),
         dynamic_streams=(owner,),
@@ -741,7 +747,9 @@ def _region_workload(
         owner, id=1, name="prefix", stream_id=100, stream_offset=0
     )
     region = program_records.ProtectedRegion(100, 3, 4)
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     return workload_settings.WorkloadSettings(
         operations=(prefix, *later),
         dynamic_streams=(owner,),
@@ -793,7 +801,7 @@ def _shrunk_group_run(blocked_by, idle_policy: IdlePolicySettings) -> dict:
     later = program_records.Operation(
         2, "later", (0,), patches=(0,), predecessors=(1,), blocked_by=blocked_by
     )
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 1})
+    policy = round_policies.PerOperationRounds(((100, 0), (1, 3), (2, 1)))
     workload = workload_settings.WorkloadSettings(
         operations=(segment, later),
         dynamic_streams=(owner,),
@@ -861,7 +869,9 @@ def _recorder(events: list, kind: str):
 def _prefix_run(operations: tuple, mode: str) -> tuple:
     """Ticks from the prefix's end to the release, and to its commit."""
     stream = program_records.Operation(100, "memory", (0,), patches=(0,))
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 0, 3: 1, 4: 3})
+    policy = round_policies.PerOperationRounds(
+        ((100, 0), (1, 3), (2, 0), (3, 1), (4, 3))
+    )
     workload = workload_settings.WorkloadSettings(
         operations=operations,
         dynamic_streams=(stream,),
@@ -960,7 +970,9 @@ def _feedback_run(
     waiting = program_records.Operation(
         2, "waiting", patches, patches=patches, predecessors=(1,), blocked_by=1
     )
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting),
         dynamic_streams=streams,
@@ -1077,7 +1089,7 @@ def _workload(final_round: int) -> workload_settings.WorkloadSettings:
         emits_detector_data=False,
     )
     region = program_records.ProtectedRegion(100, 1, 2)
-    policy = round_policies.PerOperationRounds({100: 0, 1: 0, 2: 0})
+    policy = round_policies.PerOperationRounds(((100, 0), (1, 0), (2, 0)))
     return workload_settings.WorkloadSettings(
         operations=(begin, finish),
         dynamic_streams=(owner,),

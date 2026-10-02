@@ -82,7 +82,7 @@ def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
 
     assert result.terminal_status == "complete"
     assert len(machine.plan.all_operations) == 2
-    assert rounds == {1: 4, 2: 7}
+    assert rounds == ((1, 4), (2, 7))
 
 
 @pytest.mark.parametrize("arguments, rounds", [({}, 3), ({"rounds": 9}, 9)])
@@ -101,7 +101,7 @@ def test_a_maker_with_keyword_arguments_takes_what_the_yaml_writes(
     settings = _point(config_path, AT_DISTANCE_3_AND_P)
 
     policy = settings.workload.rounds_policy
-    assert policy.rounds_by_operation == {1: rounds}
+    assert policy.rounds_by_operation == ((1, rounds),)
 
 
 def test_a_maker_that_returns_no_workload_is_refused_at_the_point(

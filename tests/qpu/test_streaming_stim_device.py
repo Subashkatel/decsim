@@ -432,7 +432,9 @@ def _protected_workload():
         emits_detector_data=False,
     )
     region = program_records.ProtectedRegion(100, 2, 4)
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 0, 3: 1, 4: 0})
+    policy = round_policies.PerOperationRounds(
+        ((100, 0), (1, 3), (2, 0), (3, 1), (4, 0))
+    )
     return workload_settings.WorkloadSettings(
         operations=(prefix, begin, resume, finish),
         dynamic_streams=(owner,),

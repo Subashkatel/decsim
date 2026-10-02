@@ -335,7 +335,9 @@ def _workload(circuit=None, source_round_count=0, final_round=0):
     )
     region = program_records.ProtectedRegion(100, 2, 4)
     counts = {100: source_round_count, 1: 3, 2: 0, 3: 1, 4: 0}
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     return workload_settings.WorkloadSettings(
         operations=(prefix, begin, resume, finish),
         dynamic_streams=(owner,),

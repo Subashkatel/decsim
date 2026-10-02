@@ -112,7 +112,9 @@ def test_a_generic_one_qubit_operation_costs_memory():
 
 def test_per_operation_counts_win_over_the_fallback_and_may_be_zero():
     fallback = round_policies.FixedRounds(9)
-    policy = round_policies.PerOperationRounds({1: 0, 2: 4}, fallback=fallback)
+    policy = round_policies.PerOperationRounds(
+        ((1, 0), (2, 4)), fallback=fallback
+    )
     code = code_geometry.SurfaceCodeModel(distance=3)
     first = operation(1)
     second = operation(2)
@@ -129,4 +131,23 @@ def test_a_fixed_policy_without_a_round_is_refused():
 
 def test_a_negative_per_operation_count_is_refused():
     with pytest.raises(ValueError, match=">= 0 rounds"):
-        round_policies.PerOperationRounds({1: -1})
+        round_policies.PerOperationRounds(((1, -1),))
+
+
+def test_a_policy_is_a_plain_record_two_equal_ones_hash_alike():
+    first = round_policies.PerOperationRounds(((1, 3),))
+    second = round_policies.PerOperationRounds(((1, 3),))
+
+    assert first == second
+    assert hash(first) == hash(second)
+
+
+def test_per_operation_counts_given_as_a_dict_are_refused_naming_the_form():
+    with pytest.raises(ValueError, match=r"tuple\(counts.items\(\)\)"):
+        round_policies.PerOperationRounds({1: 3})
+
+
+@pytest.mark.parametrize("round_count", [2.5, True, "3"])
+def test_a_round_count_that_is_not_a_whole_number_is_refused(round_count):
+    with pytest.raises(ValueError, match="a whole number of rounds"):
+        round_policies.FixedRounds(round_count)

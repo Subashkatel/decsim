@@ -681,7 +681,7 @@ def test_a_streams_rounds_are_its_segments_counted_once():
         syndrome_fragment_index=0,
         syndrome_fragment_count=1,
     )
-    rounds = round_policies.PerOperationRounds({100: 3, 1: 3})
+    rounds = round_policies.PerOperationRounds(((100, 3), (1, 3)))
     workload = workload_settings.WorkloadSettings(
         operations=(segment,), decode_operations=(owner,), rounds_policy=rounds
     )

@@ -240,7 +240,9 @@ def _rounds_policy(round_counts: dict) -> Optional[ports.RoundsPolicy]:
     if not round_counts:
         return None
     fallback = round_policies.GateRounds()
-    return round_policies.PerOperationRounds(round_counts, fallback)
+    count_items = round_counts.items()
+    count_pairs = tuple(count_items)
+    return round_policies.PerOperationRounds(count_pairs, fallback)
 
 
 def _boundary_predecessors(

@@ -969,8 +969,8 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         },
     )
     at_five = point.settings
-    assert at_three.workload.rounds_policy.rounds_by_operation[1] == 30
-    assert at_five.workload.rounds_policy.rounds_by_operation[1] == 50
+    assert at_three.workload.rounds_policy.rounds_by_operation == ((1, 30),)
+    assert at_five.workload.rounds_policy.rounds_by_operation == ((1, 50),)
     measurement = yaml_configs.measure_point_shot(
         config,
         physical_error_probability=0.001,

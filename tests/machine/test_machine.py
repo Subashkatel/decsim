@@ -1165,7 +1165,9 @@ def test_bb_live_feedback_preserves_the_full_logical_vector() -> None:
     pytest.importorskip("deltakit_explorer")
     program = _bb_memory("Z")
     settings = _bb_settings(program, "controller", commit_round_count=2)
-    rounds = round_policies.PerOperationRounds({100: 0, 1: 2, 2: 0, 3: 1, 4: 0})
+    rounds = round_policies.PerOperationRounds(
+        ((100, 0), (1, 2), (2, 0), (3, 1), (4, 0))
+    )
     workload = dataclasses.replace(settings.workload, rounds_policy=rounds)
     settings = dataclasses.replace(settings, workload=workload)
 
@@ -1413,7 +1415,9 @@ def _circuit_less_terminal_run(
     """round_count rounds of stream 100 on the patches, circuit-less."""
     owner = program_records.Operation(100, "memory", patches, patches=patches)
     operations, counts = _stream_rounds(owner, is_split, round_count)
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     workload = workload_settings.WorkloadSettings(
         operations=operations, decode_operations=(owner,), rounds_policy=policy
     )
@@ -3144,7 +3148,9 @@ def test_a_released_feedback_source_binds_to_the_round_it_starts_at():
     )
     finish = dataclasses.replace(finish, predecessors=(5,))
     rounds = {100: 24, 1: 3, 2: 0, 3: 1, 5: 1, 4: 0}
-    policy = round_policies.PerOperationRounds(rounds)
+    count_items = rounds.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     operations = (prefix, protect, resume, check, finish)
     workload = dataclasses.replace(
         settings.workload, operations=operations, rounds_policy=policy
@@ -3265,7 +3271,7 @@ def _protected_memory_settings(circuit, source):
     )
     region = program_records.ProtectedRegion(100, 2, 4)
     policy = round_policies.PerOperationRounds(
-        {100: 24, 1: 3, 2: 0, 3: 1, 4: 0}
+        ((100, 24), (1, 3), (2, 0), (3, 1), (4, 0))
     )
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, begin, resume, finish),
@@ -3586,7 +3592,7 @@ def _scheduled_workload(
         emits_detector_data=False,
     )
     region = program_records.ProtectedRegion(100, 1, 2)
-    policy = round_policies.PerOperationRounds({100: 0, 1: 0, 2: 0})
+    policy = round_policies.PerOperationRounds(((100, 0), (1, 0), (2, 0)))
     return workload_settings.WorkloadSettings(
         operations=(begin, finish),
         dynamic_streams=(owner,),
@@ -3791,7 +3797,9 @@ def _separate_terminal_workload(
         finalizes_stream_round=True,
         syndrome_fragment_index=1,
     )
-    policy = round_policies.PerOperationRounds({100: 3, 1: 2, 2: 1, 3: 0})
+    policy = round_policies.PerOperationRounds(
+        ((100, 3), (1, 2), (2, 1), (3, 0))
+    )
     return workload_settings.WorkloadSettings(
         operations=(prefix, syndrome, finalizer),
         decode_operations=(owner,),

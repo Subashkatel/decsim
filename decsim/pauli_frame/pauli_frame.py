@@ -47,9 +47,9 @@ class PauliFrameConfig:
     """The frame's settings: what one write costs.
 
     A write is one XOR into a register, one clock cycle of the frame unit.
-    Yang et al. (2605.04892, Fig. 1) measure 4 ns per frame update inside a
-    550 ns loop, one cycle at 250 MHz. Writes to different windows are
-    charged in parallel, never queued behind each other.
+    Yang et al. (2605.04892 Table I, line 1051) measure 4 ns per frame
+    update inside a 550 ns loop, one cycle at 250 MHz. Writes to different
+    windows are charged in parallel, never queued behind each other.
 
     It builds the frame that XORs an observable bitmask per window. clock
     None is the machine's clock.

@@ -43,10 +43,9 @@ rotated surface memory. `--patch` names the patch the operations occupy;
 the default is `memory-patch`.
 
 The output folder is a run folder. Its `points/shot/inputs/` holds the circuit
-and its measurement map, beside the argument values, the result, the
-command arrival/start events and the Chrome trace, which `decsim run`
-writes in the same places. Inspect `result.json`, `commands.json` and
-`trace/seed<seed>.trace.json` together. The separate
+and its measurement map, beside the argument values, the result and
+the Chrome trace, which `decsim run` writes in the same places. Inspect
+`result.json` and `trace/seed<seed>.trace.json` together. The separate
 `setup_seconds.json` measures host export/build time, not simulated latency.
 Sampling and execution also consume host time during the run; that cost
 is not included in this setup measurement.

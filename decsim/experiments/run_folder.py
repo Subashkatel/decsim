@@ -394,13 +394,12 @@ def write_shot(
 ) -> None:
     """One narrated shot's files in its folder, the log and trace named label.
 
-    result.json and commands.json always, and the log and the trace when
-    the observation asks for them. tools/deltakit_example.py and
+    result.json always, and the log and the trace when the observation
+    asks for them. tools/deltakit_example.py and
     tools/live_memory_example.py write their shot through it too.
     """
     _write_the_log_and_trace(machine, settings, run_dir, label)
     _write_result(result, run_dir)
-    _write_commands(machine, run_dir)
 
 
 def point_records(run_dir: pathlib.Path) -> dict:
@@ -549,22 +548,6 @@ def _write_result(
     value = collect.json_value(result, record_classes=False)
     result_path = run_dir / "result.json"
     write_json(result_path, value)
-
-
-def _write_commands(
-    machine: machine_module.Machine, run_dir: pathlib.Path
-) -> None:
-    """commands.json: when each QPU command arrived and when it started."""
-    values = []
-    for event in machine.observation.command_events.events:
-        value = {
-            "kind": event.kind,
-            "tick": event.tick,
-            "operation_id": event.command.operation.id,
-        }
-        values.append(value)
-    commands_path = run_dir / "commands.json"
-    write_json(commands_path, values)
 
 
 def _write_the_log_and_trace(

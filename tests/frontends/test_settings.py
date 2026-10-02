@@ -8,15 +8,18 @@ below run a maker written outside decsim with no change to decsim's
 tables, and pin the sentence every refusal reads as.
 """
 
+import dataclasses
 import json
 import pathlib
 import textwrap
 
 import pytest
 
+import decsim.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.producers as producers
 import tests.experiments.yaml_configs as yaml_configs
 
 OUTSIDE_MAKER = '''
@@ -64,6 +67,31 @@ MERGE_OPERATIONS = {
         {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"},
     ],
 }
+
+
+def test_a_python_workload_is_the_point_the_yaml_maker_makes(tmp_path):
+    """The maker's name and its "5d" are the yaml's labels, not the id.
+
+    The lowered workload names the point, so a Python caller states the
+    workload directly and names the same point.
+    """
+    yaml_workload = yaml_configs.memory_workload("5d")
+    config_path = yaml_configs.write_config(
+        tmp_path, {"workload": yaml_workload}
+    )
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(AT_DISTANCE_3_AND_P)
+    made = producers.memory_circuit(
+        "surface_code:rotated_memory_z", 15, 3, 0.001
+    )
+    python_workload = workload_settings.WorkloadSettings.running(made)
+    python_settings = dataclasses.replace(
+        task.settings, workload=python_workload
+    )
+    python_task = collect.Task(python_settings, task.metadata)
+
+    assert python_workload == task.settings.workload
+    assert python_task.strong_id() == task.strong_id()
 
 
 def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):

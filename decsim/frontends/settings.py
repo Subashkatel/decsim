@@ -1,11 +1,12 @@
 """The workload settings: what the machine runs, and for how many rounds.
 
-A yaml names what makes its workload (WORKLOADS, below): a maker
-function with its arguments (producer), or the maker's two outputs read
-from disk (files). A maker runs once per sweep point (made) and its
-records.workload.Workload is lowered into the operations the machine
-issues (circuit_frontend.lowered); a Python caller hands the same
-fields in directly.
+A Python caller hands a maker's records.workload.Workload to
+WorkloadSettings.running, which lowers it into the operations the
+machine issues (circuit_frontend.lowered), or hands the lowered fields
+in directly. A yaml names what makes its workload (WORKLOADS, below): a
+maker function with its arguments (producer), or the maker's two
+outputs read from disk (files); the maker runs once per sweep point
+(made) and its workload is lowered the same way.
 """
 
 import dataclasses
@@ -67,15 +68,18 @@ class RoundsPerShot:
 
 @dataclasses.dataclass(frozen=True)
 class WorkloadSettings:
-    """The yaml's `workload` section, and the program it lowers to.
+    """The program the machine runs: a maker's workload, lowered.
 
-    kind names the row that makes the workload (WORKLOADS, below); None
-    is a Python-built workload, its fields handed in directly. A row's
-    workload is made at each sweep point and lowered into the fields
-    below. decode_operations and feedback_boundary_mode are Python-only.
+    kind and row_settings are the yaml's: the row that makes the
+    workload at each sweep point (WORKLOADS, below) and its own record.
+    They are labels, as sinter keeps a task's circuit_path out of its
+    strong id (sinter/_data/_task.py:157): the lowered fields name the
+    point, so a Python caller who runs the same workload through running
+    builds an equal record. decode_operations and
+    feedback_boundary_mode are Python-only.
     """
 
-    kind: Optional[str] = None
+    kind: Optional[str] = dataclasses.field(default=None, compare=False)
     operations: tuple = ()
     decode_operations: Optional[tuple] = None
     dynamic_streams: tuple = ()
@@ -87,7 +91,7 @@ class WorkloadSettings:
     # writes to its inputs (experiments/run_folder.py record_point)
     workload_record: Optional[workload_records.Workload] = None
     # the row's own Settings record, opaque to the section
-    row_settings: Optional[Any] = None
+    row_settings: Optional[Any] = dataclasses.field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if self.feedback_boundary_mode not in FEEDBACK_BOUNDARY_MODES:
@@ -113,7 +117,10 @@ class WorkloadSettings:
         """The section running the workload its row makes, once per point."""
         row = tables.row(WORKLOADS, "workload.kind", self.kind)
         workload = row.workload(self.row_settings)
-        return self.running(workload)
+        running = WorkloadSettings.running(workload)
+        return dataclasses.replace(
+            running, kind=self.kind, row_settings=self.row_settings
+        )
 
     def maker(self) -> Optional[dict]:
         """What the row says made the workload; None for a Python-built one."""
@@ -122,13 +129,15 @@ class WorkloadSettings:
         row = tables.row(WORKLOADS, "workload.kind", self.kind)
         return row.maker(self.row_settings)
 
-    def running(
-        self, workload: workload_records.Workload
-    ) -> "WorkloadSettings":
-        """This section running a maker's workload, lowered for the machine."""
+    @classmethod
+    def running(cls, workload: workload_records.Workload) -> "WorkloadSettings":
+        """The settings that run a maker's workload, lowered for the machine.
+
+        A Python caller states its workload here:
+        WorkloadSettings.running(producers.memory_circuit(...)).
+        """
         program = circuit_frontend.lowered(workload)
-        return dataclasses.replace(
-            self,
+        return cls(
             operations=program.operations,
             dynamic_streams=program.dynamic_streams,
             protected_regions=program.protected_regions,

@@ -28,6 +28,7 @@ import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
@@ -967,9 +968,7 @@ def test_the_forming_seat_reports_the_two_raw_rounds_it_holds(where, seat):
     assert data_movement.formation_state_bits_by_seat == {seat: 25}
 
 
-def _lookback_workload(
-    settings, noisy_round: str = "X_ERROR(0.05) 0\nM(0.05) 0\n"
-):
+def _lookback_workload(noisy_round: str = "X_ERROR(0.05) 0\nM(0.05) 0\n"):
     """Ten rounds of one qubit whose detector reads two rounds back.
 
     Round r's detector is rec[-1] ^ rec[-3], so a seat that joins at a
@@ -985,7 +984,7 @@ def _lookback_workload(
     physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
     workload = workload_records.Workload((operation,), {1: 10}, physical)
-    return settings.workload.running(workload)
+    return workload_settings.WorkloadSettings.running(workload)
 
 
 def _lookback_switching_machine(formed_at, seed):
@@ -997,7 +996,7 @@ def _lookback_switching_machine(formed_at, seed):
         formed_at,
     )
     settings = machine.settings
-    workload = _lookback_workload(settings)
+    workload = _lookback_workload()
     windows = declared_run.windows_on(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
@@ -1031,7 +1030,7 @@ def _parallel_lookback_machine(unit_count: int):
     )
     settings = machine.settings
     # a flipped readout alone, so no fault straddles two blocks' commits
-    workload = _lookback_workload(settings, "M(0.15) 0\n")
+    workload = _lookback_workload("M(0.15) 0\n")
     windows = declared_run.windows_on(
         settings.windows, "parallel", commit_rounds=1, buffer_rounds=1
     )
@@ -1104,7 +1103,7 @@ def _reach_growing_machine(formed_at):
         algorithm=matching,
     )
     switching = _declared_confidence(settings.switching)
-    running = settings.workload.running(workload)
+    running = workload_settings.WorkloadSettings.running(workload)
     settings = dataclasses.replace(
         settings,
         workload=running,
@@ -1180,7 +1179,7 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
         unit_count=3,
     )
     switching = _declared_confidence(settings.switching)
-    running = settings.workload.running(workload)
+    running = workload_settings.WorkloadSettings.running(workload)
     settings = dataclasses.replace(
         settings,
         workload=running,

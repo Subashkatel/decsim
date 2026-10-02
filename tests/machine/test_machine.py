@@ -560,8 +560,7 @@ def test_a_string_stream_owner_beside_integer_operations_is_captured():
     prefix = dataclasses.replace(first, stream_id="live")
     operations = (prefix, *rest)
     named = dataclasses.replace(workload, operations=operations)
-    section = workload_settings.WorkloadSettings()
-    lowered = section.running(named)
+    lowered = workload_settings.WorkloadSettings.running(named)
     settings = dataclasses.replace(settings, workload=lowered)
 
     machine = machine_module.Machine.build(settings, 17)

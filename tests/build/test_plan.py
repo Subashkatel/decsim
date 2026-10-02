@@ -23,6 +23,7 @@ import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.frontends.settings as workload_settings
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
@@ -210,8 +211,7 @@ def _live_fragments_workload():
         fragment, fragment, fragment, fragment
     )
     workload = workload_records.Workload((segment,), {1: 3}, program)
-    section = declared_run.declared_workload(None, 6)
-    return section.running(workload)
+    return workload_settings.WorkloadSettings.running(workload)
 
 
 RECORDED_SOURCE = stim_device.RecordedStimDevice.Settings()
@@ -262,8 +262,7 @@ def _lookback_workload():
     physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
     operation = declared_run.memory_operation()
     workload = workload_records.Workload((operation,), {1: 10}, physical)
-    section = declared_run.declared_workload(None, 10)
-    return section.running(workload)
+    return workload_settings.WorkloadSettings.running(workload)
 
 
 def _second_window_strong_hold(plan) -> tuple:

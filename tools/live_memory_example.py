@@ -117,8 +117,7 @@ def live_settings(
     streaming_stim is, by its settings record.
     """
     workload = producers.live_memory(program, prefix_round_count, patch)
-    section = workload_settings.WorkloadSettings()
-    lowered = section.running(workload)
+    lowered = workload_settings.WorkloadSettings.running(workload)
     source = streaming_stim_device.StreamingStimDevice.Settings()
     qpu = qpu_settings.QpuSettings(
         source=source,

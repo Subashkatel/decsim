@@ -668,8 +668,7 @@ def test_patches_named_by_an_int_and_a_str_are_measured(tmp_path):
     mixed = dataclasses.replace(
         workload, operations=(first, named), round_counts=round_counts
     )
-    section = workload_settings.WorkloadSettings()
-    lowered = section.running(mixed)
+    lowered = workload_settings.WorkloadSettings.running(mixed)
     settings = dataclasses.replace(task.settings, workload=lowered)
     mixed_task = collect.Task(settings, {})
     shot = collect.run_shot(mixed_task, 0)

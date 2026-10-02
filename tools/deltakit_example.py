@@ -193,8 +193,7 @@ def supplied_settings(
         raise ValueError(
             "the declared horizon must equal the final readout round"
         )
-    section = workload_settings.WorkloadSettings()
-    lowered = section.running(workload)
+    lowered = workload_settings.WorkloadSettings.running(workload)
     qpu = qpu_settings.QpuSettings(
         source=stim_device.StimDevice.Settings(),
         distance=distance,

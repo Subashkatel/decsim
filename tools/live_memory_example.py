@@ -14,7 +14,6 @@ import pathlib
 import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
-import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
@@ -85,7 +84,7 @@ def main() -> None:
     run_folder.record_point(arguments.output, POINT_NAME, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
-    run_command.write_shot(machine, settings, arguments.output, label, result)
+    run_folder.write_shot(machine, settings, arguments.output, label, result)
     _write_execution(arguments.output, machine)
     selected_arguments = vars(arguments)
     argument_values = dict(selected_arguments)

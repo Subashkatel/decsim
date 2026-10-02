@@ -1430,10 +1430,10 @@ mistake a gap for a result.
   Its card is built before the sweep point sets the geometry, so
   reaching it from a config would mean building the links card inside
   the per-point settings.
-- **O8. `decsim collect` refuses a `timing_only` device.** The device
+- **O8. `decsim run` refuses a `timing_only` device.** The device
   builds and runs as a machine, but the experiments layer's per-shot
   measurement compares the loop's prediction against PyMatching on the
-  sampled shot, and a timing-only device samples none, so `collect`
+  sampled shot, and a timing-only device samples none, so `decsim run`
   refuses the shot and names a qpu.kind that samples. A priced card on
   a real device is the way to a host-independent run today.
 - **O11. A staged job never moves to another unit.** A job that cannot

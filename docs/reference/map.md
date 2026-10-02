@@ -344,7 +344,7 @@ docstring.
 ### experiments
 
 - `decsim/experiments/__init__.py`: The experiments layer: the yaml experiment, the sweep, the rows and figures.
-- `decsim/experiments/collect_command.py`: `decsim collect`: every point of one experiment, each until it stops.
+- `decsim/experiments/collect_command.py`: `decsim run`: every point of one experiment, each until it stops.
 - `decsim/experiments/collection.py`: The collection: how a point's shots are cut and stopped.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
 - `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
@@ -358,7 +358,6 @@ docstring.
 - `decsim/experiments/refusal.py`: The one refusal decsim.experiments raises when it will not do what was asked.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
 - `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
-- `decsim/experiments/run_command.py`: `decsim run`: one seeded shot of one yaml, narrated.
 - `decsim/experiments/run_folder.py`: The results folder: one experiment's records, pieces and rows.
 - `decsim/experiments/status_command.py`: `decsim status`: a results folder's pieces folded, and where each point is.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.

@@ -110,7 +110,7 @@ def _pieces_of_one_point(tmp_path, shots, piece_shots):
     folder.mkdir()
     config_path = _one_point_config(folder, shots, piece_shots)
     experiment_dir = folder / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 
@@ -730,12 +730,12 @@ def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
     """A resumed collect's record holds the saved seeds and the new ones."""
     config_path = _one_point_config(tmp_path, 2, 1)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     run_dir = experiment_dir
     first_seeds = _seeds_of_the_one_point(run_dir)
     _one_point_config(tmp_path, 4, 1)
 
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
 
     assert first_seeds == [[0, 2]]
     assert _seeds_of_the_one_point(run_dir) == [[0, 4]]
@@ -808,7 +808,7 @@ def _burst_and_quiet_pieces(tmp_path):
     ]
     config_path = yaml_configs.write_config(tmp_path, overrides)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 
@@ -1038,7 +1038,7 @@ def _confidence_run(
     ]
     config_path = yaml_configs.write_config(tmp_path, overrides)
     experiment_dir = tmp_path / out
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 

@@ -17,7 +17,7 @@
 # (1000 unless set, Della's short QOS) is refused before any array.
 #
 # Inside the array, where SLURM_ARRAY_TASK_ID is set, this script is the
-# job: it runs `decsim collect --plan <plan.csv> --task <id>` with one
+# job: it runs `decsim run --plan <plan.csv> --task <id>` with one
 # process per core it was given.
 #
 # $ALLOW_DIRTY lets a round start from a tree whose state git does not
@@ -102,7 +102,7 @@ refuse_a_round_past_the_submit_limit() {
 if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
   cd "$SLURM_SUBMIT_DIR"
   refuse_an_unnamed_tree
-  exec "$python" -m decsim collect \
+  exec "$python" -m decsim run \
     --plan "$1/round$2/plan.csv" \
     --task "$SLURM_ARRAY_TASK_ID" \
     --processes "${SLURM_CPUS_PER_TASK:-1}"

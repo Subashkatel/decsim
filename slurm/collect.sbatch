@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --nodes 1 --ntasks 1 --cpus-per-task 32 --mem 160G --time 6-00:00:00
-# One experiment yaml run to its end on one node: `decsim collect` runs
+# One experiment yaml run to its end on one node: `decsim run` runs
 # every point until its collection rule stops it, one piece per core,
 # and saves each piece the moment it ends. A job stopped by its time
 # limit loses only the pieces still running, and the same line again
@@ -25,5 +25,5 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 echo "decsim tree: $PWD"
 echo "decsim commit: $(git rev-parse HEAD)"
-exec "$python" -m decsim collect "$1" --out "$2" \
+exec "$python" -m decsim run "$1" --out "$2" \
   --processes "$SLURM_CPUS_PER_TASK"

@@ -163,7 +163,7 @@ the strong decoder, and nothing else in this run.
 ## Step 2. Run the sweep
 
 ```bash
-decsim collect configs/examples/two_tiers.yaml --out results/two_tiers
+decsim run configs/examples/two_tiers.yaml --out results/two_tiers
 ```
 
 The command prints the same resolved config, then one line per point as

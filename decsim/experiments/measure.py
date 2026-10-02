@@ -1047,7 +1047,7 @@ def _scored_owners(result: result_records.RunResult) -> tuple:
             owners.append(operation_result)
     if not owners:
         raise refusal.RefusalError(
-            "decsim collect scores every shot against the logical "
+            "decsim run scores every shot against the logical "
             "observables its syndrome source sampled, and the source "
             "sampled none; name a qpu.kind that samples the circuit, such "
             "as stim_device"

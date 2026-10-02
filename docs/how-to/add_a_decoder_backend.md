@@ -75,7 +75,7 @@ package to the `bb-decoders` extra in `pyproject.toml`.
 ## 4. Run it and check it against a referent
 
 ```bash
-decsim collect configs/reference.yaml
+decsim run configs/reference.yaml
 ```
 
 with your row named as `weak_decoder.kind`. To check its answers, make

@@ -1,4 +1,4 @@
-"""`decsim collect`: every point of one experiment, each until it stops.
+"""`decsim run`: every point of one experiment, each until it stops.
 
 The experiment says what runs; this module only orchestrates. It runs
 each point's seeds in order, a piece at a time (decsim.collect), and
@@ -34,8 +34,10 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
+import decsim.machine as machine_module
 import decsim.records.results as result_records
 import decsim.records.round_plans as round_plans
+import decsim.settings as machine_settings
 
 
 @dataclasses.dataclass
@@ -193,17 +195,25 @@ def run_experiment(
     out_dir: Optional[pathlib.Path] = None,
     *,
     processes: int = 1,
+    only: Optional[str] = None,
+    shot_count: Optional[int] = None,
 ) -> tuple:
     """Every point of one run file collected into its results folder.
 
-    out_dir is the results folder, a new dated one when None. Returns
-    the folder and its folded rows.
+    out_dir is the results folder, a new dated one when None. only
+    names the one point to collect, and shot_count stops every point at
+    that many shots (Experiment.with_max_shots). Returns the folder and
+    its folded rows.
     """
     _check_processes(processes)
     run_path = pathlib.Path(run_file)
     study = experiment.load(run_path)
+    if shot_count is not None:
+        study = study.with_max_shots(shot_count)
     run_dir = run_folder.run_dir_for(study.name, out_dir)
-    rows = collect_experiment(study, run_dir, run_path, processes=processes)
+    rows = collect_experiment(
+        study, run_dir, run_path, processes=processes, only=only
+    )
     return run_dir, rows
 
 
@@ -213,29 +223,70 @@ def collect_experiment(
     run_file: pathlib.Path,
     *,
     processes: int = 1,
+    only: Optional[str] = None,
 ) -> list:
-    """One full experiment: pieces until every point stops, then the fold.
+    """One experiment: pieces until every point stops, then the fold.
 
-    run_dir is the results folder. Each piece is saved when it ends,
+    run_dir is the results folder, and only names the one point to
+    collect, every point when None. Each piece is saved when it ends,
     and a piece already saved is counted and skipped, so a killed
-    collect run again runs only what it had not saved. Returns the
-    folded rows.
+    run started again runs only what it had not saved. run.json lists
+    every point of the experiment, the order the fold writes its rows
+    in whichever points ran. Returns the folded rows.
     """
     _check_processes(processes)
     run_folder.refuse_another_tree(run_dir)
-    points = recorded_points(run_dir, study)
+    every_id = _experiment_point_ids(study)
+    chosen = _chosen_points(study, only)
+    points = recorded_points(run_dir, chosen)
     point_ids = _point_ids(points)
     saved_pieces = pieces.folders_of(run_dir, point_ids)
     report.refuse_pieces_of_another_tree(saved_pieces)
-    started_utc = run_folder.start_run(run_dir, run_file, point_ids)
-    _echo_description(study, run_file, run_dir)
+    started_utc = run_folder.start_run(run_dir, run_file, every_id)
+    _echo_description(chosen, run_file, run_dir)
     measure_shot = _shot_measure(points, run_dir)
     _collect_until_stopped(points, run_dir, measure_shot, processes)
-    folded_ids = run_folder.recorded_point_ids(run_dir, point_ids)
+    folded_ids = run_folder.recorded_point_ids(run_dir, every_id)
     folders = pieces.folders_of(run_dir, folded_ids)
     rows = fold_the_folder(run_dir, folded_ids, folders)
-    run_folder.finish_run(run_dir, run_file, point_ids, started_utc)
+    run_folder.finish_run(run_dir, run_file, every_id, started_utc)
     return rows
+
+
+def run_one_shot(
+    study: experiment.Experiment,
+    run_file: pathlib.Path,
+    seed: int,
+    out_dir: Optional[pathlib.Path] = None,
+    *,
+    log: Optional[str] = None,
+    trace: bool = False,
+) -> list:
+    """The experiment's first point at one seed, run and narrated.
+
+    log and trace override the point's observation for this shot, as
+    gem5's --debug-flags and --debug-file set what the config script did
+    not (src/python/m5/main.py:280, 299). The shot writes its results
+    folder: run.json, the run file, the point's machine.json and
+    workload, and the shot's files (run_folder.write_shot). Returns the
+    lines the command prints.
+    """
+    point = study.points[0]
+    task = experiment.task_of(point)
+    settings = _with_observation(task.settings, log, trace)
+    task = dataclasses.replace(task, settings=settings)
+    shot_settings = task.shot_settings()
+    machine = _built_machine(shot_settings, seed, run_file)
+    run_dir = run_folder.run_dir_for(study.name, out_dir)
+    point_id = task.strong_id()
+    started_utc = run_folder.start_run(run_dir, run_file, [point_id])
+    seeds = [(seed, 1)]
+    run_folder.record_point(run_dir, point.name, task, seeds, point.sections)
+    result = machine.run()
+    label = measure.shot_label(point_id, seed)
+    run_folder.write_shot(machine, settings, run_dir, label, result)
+    run_folder.finish_run(run_dir, run_file, [point_id], started_utc)
+    return _shot_lines(study, task, seed, result, run_dir)
 
 
 def fold_the_folder(
@@ -536,6 +587,86 @@ def _traces_one_shot(tasks: list) -> bool:
     return len(observation.trace_shots) == 1
 
 
+def _experiment_point_ids(study: experiment.Experiment) -> list:
+    """Every point's id, in the experiment's order."""
+    point_ids = []
+    for point in study.points:
+        task = experiment.task_of(point)
+        point_id = task.strong_id()
+        point_ids.append(point_id)
+    return point_ids
+
+
+def _chosen_points(
+    study: experiment.Experiment, only: Optional[str]
+) -> experiment.Experiment:
+    """The experiment, or its one point only names."""
+    if only is None:
+        return study
+    return study.only(only)
+
+
+def _with_observation(
+    settings: machine_settings.MachineSettings,
+    log: Optional[str],
+    trace: bool,
+) -> machine_settings.MachineSettings:
+    """The flags this shot was given, over the point's observation."""
+    changes = {}
+    if log is not None:
+        changes["log"] = log
+    if trace:
+        changes["trace"] = "chrome"
+    if not changes:
+        return settings
+    observation = dataclasses.replace(settings.observation, **changes)
+    return dataclasses.replace(settings, observation=observation)
+
+
+def _built_machine(
+    settings: machine_settings.MachineSettings,
+    seed: int,
+    run_file: pathlib.Path,
+) -> machine_module.Machine:
+    """The shot's machine; a build refusal one sentence naming the file."""
+    try:
+        return machine_module.Machine.build(settings, seed)
+    except ValueError as refused:
+        raise refusal.RefusalError(f"{run_file}: {refused}") from refused
+
+
+def _shot_lines(
+    study: experiment.Experiment,
+    task: collect.Task,
+    seed: int,
+    result: result_records.RunResult,
+    run_dir: pathlib.Path,
+) -> list:
+    """The point, the terminal status, the ticks and every result."""
+    metadata = collect.metadata_text(task.metadata)
+    lines = [
+        f"config: {study.name}",
+        f"point: {metadata} seed {seed}",
+        f"terminal status: {result.terminal_status}",
+        f"execution done: {result.execution_done_ticks} ticks",
+        f"fully done: {result.fully_done_ticks} ticks",
+    ]
+    for row in result.operation_results:
+        operation_line = _operation_line(row)
+        lines.append(operation_line)
+    lines.append(f"run dir: {run_dir}")
+    return lines
+
+
+def _operation_line(row) -> str:
+    """One operation's status, prediction and truth, as the gate reads it."""
+    return (
+        f"operation {row.operation_id}: {row.result_status}, "
+        f"observables {row.logical_observables}, "
+        f"truth {row.observable_truth}"
+    )
+
+
 def _point_ids(points: list) -> list:
     """The points' ids in the experiment's order."""
     point_ids = []
@@ -633,7 +764,7 @@ def _point_collection(
         raise refusal.RefusalError(
             f"the point {metadata} runs no operation that sends detector "
             "data, so its shots have no rounds to size a piece by or to "
-            "score; decsim collect needs a workload whose operations emit "
+            "score; decsim run needs a workload whose operations emit "
             "detector data (decsim run times the others)"
         )
     settings = resolved.settings

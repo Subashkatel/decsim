@@ -407,7 +407,7 @@ def test_an_outside_escalation_row_is_measured_over_its_tiers_links(
     """The tier is read off the row, so a row off the table measures.
 
     The experiments layer reads the tier the row declares, never the
-    escalation's name, so `decsim collect` measures any row the machine
+    escalation's name, so `decsim run` measures any row the machine
     runs.
     """
     shipped_directory = tmp_path / "shipped"

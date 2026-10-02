@@ -99,12 +99,12 @@ how to run a timing study that does not depend on your hardware.
 
 ## Step 3. Run the sweep and get a run folder
 
-`decsim run` is one shot: it prints to the terminal and keeps that
-shot's record in a folder. To get the results of every point, use
-`collect`, which runs every point of the yaml's sweep:
+With `--seed`, `decsim run` runs one shot: it prints to the terminal
+and keeps that shot's record in a folder. Without it, `decsim run` runs
+every point of the yaml's sweep until its collection stops it:
 
 ```bash
-decsim collect configs/reference.yaml --out results/reference
+decsim run configs/reference.yaml --out results/reference
 ```
 
 It first prints what the yaml resolved to, one line per component, then
@@ -179,8 +179,8 @@ window_samples.csv
 in pieces, each saved whole the moment it ends, and running the command
 again into the same folder runs only the pieces it has not saved. The
 csv files at the top are folded from the pieces. Without `--out`,
-`collect` writes a new folder, `results/<date>_<name>/`, and a second
-one the same day gets `_2`, so no two collects share one.
+`decsim run` writes a new folder, `results/<date>_<name>/`, and a
+second one the same day gets `_2`, so no two runs share one.
 
 ```bash
 ls results/reference/points/*
@@ -231,7 +231,7 @@ lines the terminal printed at the top of the point's block. Every other
 csv file of the folder names its rows the same way, so a table of any
 of them groups by a setting with no parsing.
 
-`collect` also drew a figure. Draw a second one:
+`decsim run` also drew a figure. Draw a second one:
 
 ```bash
 decsim plot results/reference --figure stage_breakdown

@@ -5,9 +5,12 @@ subcommand per word, and each verb's module imported only when that verb
 runs, so `decsim show` never loads matplotlib and `decsim plot` never
 loads Stim. The console script and `python -m decsim` both land here.
 
-    decsim run <yaml> [--seed N] [--out DIR] [--log ...] [--trace]
-    decsim collect <run file> [--out DIR] [--processes N]
-    decsim collect --plan <round>/plan.csv --task K [--processes N]
+    decsim run <run file> [--out DIR] [--processes N] [--only NAME]
+        [--shots N]
+    decsim run <run file> --list
+    decsim run <run file> --seed S [--only NAME] [--out DIR] [--log ...]
+        [--trace]
+    decsim run --plan <round>/plan.csv --task K [--processes N]
     decsim plan <run file> --out DIR --tasks N [--cores C] [--hours H]
     decsim status <results folder>
     decsim show <yaml>
@@ -61,30 +64,38 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 
 def _run(argv: list) -> None:
-    """One seeded shot of one yaml."""
-    import decsim.experiments.run_command as run_command
-
-    run_command.main(argv)
-
-
-def _collect(argv: list) -> None:
-    """Every point of one run file, or one task of a round's plan."""
+    """An experiment's points, one point, one narrated shot, or a task."""
     import decsim.experiments.collect_command as collect_command
-    import decsim.experiments.report as report
 
-    parser = _collect_parser()
+    parser = _run_parser()
     parsed = parser.parse_args(argv)
+    _check_the_run_arguments(parser, parsed)
     if parsed.plan is not None:
-        _check_the_plan_arguments(parser, parsed)
         plan_path = pathlib.Path(parsed.plan)
         collect_command.run_planned(
             plan_path, parsed.task, processes=parsed.processes
         )
         return
-    if parsed.run_file is None:
-        parser.error("name the run file, or --plan and --task")
+    if parsed.list:
+        _list_the_points(parsed.run_file)
+        return
+    if parsed.seed is not None:
+        _run_one_shot(parsed)
+        return
+    _collect(parsed)
+
+
+def _collect(parsed) -> None:
+    """Every chosen point collected until it stops, then the summary."""
+    import decsim.experiments.collect_command as collect_command
+    import decsim.experiments.report as report
+
     run_dir, rows = collect_command.run_experiment(
-        parsed.run_file, parsed.out, processes=parsed.processes
+        parsed.run_file,
+        parsed.out,
+        processes=parsed.processes,
+        only=parsed.only,
+        shot_count=parsed.shots,
     )
     if not rows:
         return
@@ -94,11 +105,39 @@ def _collect(argv: list) -> None:
     print(f"\nevery column: {run_dir}/sweep.csv")
 
 
-def _collect_parser():
-    """The collect command's arguments."""
+def _run_one_shot(parsed) -> None:
+    """One seeded shot of the chosen point, narrated."""
+    import decsim.experiments.collect_command as collect_command
+    import decsim.experiments.experiment as experiment
+
+    run_path = pathlib.Path(parsed.run_file)
+    study = experiment.load_one_point(run_path, parsed.only)
+    lines = collect_command.run_one_shot(
+        study,
+        run_path,
+        parsed.seed,
+        parsed.out,
+        log=parsed.log,
+        trace=parsed.trace,
+    )
+    text = "\n".join(lines)
+    print(text)
+
+
+def _list_the_points(run_file: str) -> None:
+    """The experiment's point names, one a line, MultiSim's --list."""
+    import decsim.experiments.experiment as experiment
+
+    study = experiment.load(run_file)
+    for point in study.points:
+        print(point.name)
+
+
+def _run_parser():
+    """The run command's arguments."""
     import argparse
 
-    parser = argparse.ArgumentParser(prog="decsim collect")
+    parser = argparse.ArgumentParser(prog="decsim run")
     parser.add_argument(
         "run_file",
         nargs="?",
@@ -114,6 +153,7 @@ def _collect_parser():
         default=1,
         help="worker processes, one piece each (shots stay serial)",
     )
+    _add_the_choice_arguments(parser)
     parser.add_argument(
         "--plan", default=None, help="a round's plan.csv, from decsim plan"
     )
@@ -123,8 +163,73 @@ def _collect_parser():
     return parser
 
 
+def _add_the_choice_arguments(parser) -> None:
+    """Which points run, and whether as a collection or one narrated shot."""
+    parser.add_argument(
+        "--list", action="store_true", help="print the point names and stop"
+    )
+    parser.add_argument(
+        "--only", default=None, help="the one point to run, by its name"
+    )
+    parser.add_argument(
+        "--shots",
+        type=_shot_count,
+        default=None,
+        help="stop every point at this many shots, its first seeds",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="run one narrated shot of this seed, of the first point or "
+        "the --only one",
+    )
+    parser.add_argument(
+        "--log",
+        default=None,
+        choices=("off", "print", "file", "both"),
+        help="the narrated shot's engine log, over the point's",
+    )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="write the narrated shot's Chrome trace of the data path",
+    )
+
+
+def _shot_count(text: str) -> int:
+    """A shot count: a whole number of at least one."""
+    import argparse
+
+    count = int(text)
+    if count < 1:
+        raise argparse.ArgumentTypeError(
+            f"a shot count is at least 1, got {count}"
+        )
+    return count
+
+
+def _check_the_run_arguments(parser, parsed) -> None:
+    """The run's arguments name one thing to do."""
+    if parsed.plan is not None:
+        _check_the_plan_arguments(parser, parsed)
+        return
+    if parsed.run_file is None:
+        parser.error("name the run file, or --plan and --task")
+    if parsed.seed is not None and parsed.shots is not None:
+        parser.error(
+            "--seed runs one narrated shot and --shots a collection; give one"
+        )
+    narrates = parsed.log is not None or parsed.trace
+    if narrates and parsed.seed is None:
+        parser.error(
+            "--log and --trace narrate the one shot --seed runs; a "
+            "collection traces the shots its observation names"
+        )
+
+
 def _check_the_plan_arguments(parser, parsed) -> None:
-    """A planned task takes its yaml and folder from the plan, and a task."""
+    """A planned task takes its run file and folder from the plan."""
     if parsed.task is None:
         parser.error("--plan runs one task of the plan; name it with --task")
     if parsed.run_file is not None or parsed.out is not None:
@@ -234,7 +339,6 @@ def _report_no_verb(verb: Optional[str]) -> None:
 # Each verb and the function that runs it, in the order usage lists them.
 _RUN_BY_VERB = {
     "run": _run,
-    "collect": _collect,
     "plan": _plan,
     "status": _status,
     "show": _show,

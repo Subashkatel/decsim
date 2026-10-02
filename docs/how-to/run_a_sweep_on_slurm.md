@@ -101,7 +101,7 @@ SBATCH_QOS=short slurm/round.sh results/redo_window_switching 1
 
 The script submits one job array per shape of job in `tasks.csv`,
 since an array has one memory request. Each array task runs `decsim
-collect --plan results/redo_window_switching/round1/plan.csv --task
+run --plan results/redo_window_switching/round1/plan.csv --task
 <id>`, one process per core. Its log goes to `round1/<id>/log.txt`,
 beside its `run.json`.
 
@@ -124,10 +124,10 @@ too.
 Nothing is lost but the pieces it was running. A piece folder appears
 only once the piece is whole, so nothing is counted twice. The next
 `decsim plan` finds each planned piece whose seeds no piece holds and
-plans it again. Running the same task again (`decsim collect --plan ...
+plans it again. Running the same task again (`decsim run --plan ...
 --task <id>`) runs only the seeds no saved piece holds.
 
-A plain `decsim collect` of the same yaml in the same folder cuts its
+A plain `decsim run` of the same yaml in the same folder cuts its
 pieces where planned pieces begin and end, so a round's task run after
 it finds those seeds saved and runs nothing. Each seed is saved once,
 whichever runs first.
@@ -162,7 +162,7 @@ its counts, and `decsim.results.load` reads it beside every setting
 ## Or run a yaml to its end in one job
 
 `slurm/collect.sbatch` runs one yaml on one node with no plan and no
-rounds: `decsim collect` runs every point until its collection rule
+rounds: `decsim run` runs every point until its collection rule
 stops it, one piece per core, and saves each piece as it ends.
 
 ```bash
@@ -173,7 +173,7 @@ sbatch --output results/my_run/collect_%j.log \
 It asks for 32 cores, 160 GB and 6 days; `--cpus-per-task`, `--mem` and
 `--time` on the `sbatch` line override them. A job stopped by its time
 limit loses only the pieces still running, and the same line again
-carries on from the saved ones. Each step of a collect waits for its
+carries on from the saved ones. Each step of a run waits for its
 slowest piece, so a yaml whose points differ widely in seconds a shot
 keeps more cores busy as rounds. It refuses a tree with uncommitted
 changes, as `slurm/round.sh` does.
@@ -183,4 +183,4 @@ changes, as `slurm/round.sh` does.
 - [Your first sweep](../tutorials/first_sweep.md): a small sweep end to end, with the
   error bars explained.
 - [The run folder](../reference/run_folder.md): what a piece, a plan and a run folder hold.
-- [The commands](../reference/cli.md): every flag of `plan`, `collect` and `status`.
+- [The commands](../reference/cli.md): every flag of `plan`, `run` and `status`.

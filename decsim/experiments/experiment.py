@@ -125,11 +125,29 @@ class Experiment:
             if point.name == name:
                 return point
         names = [point.name for point in self.points]
-        listed = ", ".join(names)
-        raise refusal.RefusalError(
-            f"the experiment {self.name} has no point {name}; its points "
-            f"are {listed}"
-        )
+        _refuse_an_unknown_point(self.name, name, names)
+
+    def only(self, name: str) -> "Experiment":
+        """The experiment cut to its one point of this name."""
+        point = self.point_named(name)
+        return Experiment(self.name, [point], self.collection)
+
+    def with_max_shots(self, shot_count: int) -> "Experiment":
+        """Every point stopped at its first shot_count shots.
+
+        Its target, minimum and time cap are dropped and its piece size
+        kept. The collection is not part of a point's id, so the shots
+        are the first shot_count of the full run's.
+        """
+        points = []
+        for point in self.points:
+            collection = self.collection_of(point)
+            capped = collection_module.CollectionSettings(
+                max_shots=shot_count, piece_rounds=collection.piece_rounds
+            )
+            capped_point = dataclasses.replace(point, collection=capped)
+            points.append(capped_point)
+        return Experiment(self.name, points, self.collection)
 
     def _refuse_a_point_without_a_collection(self, point: Point) -> None:
         if self.collection_of(point) is not None:
@@ -178,6 +196,22 @@ def load(path) -> Experiment:
             "Experiment(...) at module level"
         )
     return defined
+
+
+def load_one_point(path, name: Optional[str] = None) -> Experiment:
+    """The run file's experiment cut to one point, the named or the first.
+
+    A yaml is read for that point alone (ExperimentConfig.one_point).
+    """
+    path = pathlib.Path(path)
+    if path.suffix != ".py":
+        config = load_experiment(path)
+        return config.one_point(name)
+    study = load(path)
+    if name is None:
+        first_point = study.points[0]
+        name = first_point.name
+    return study.only(name)
 
 
 def run_files(path) -> tuple:
@@ -323,6 +357,30 @@ class ExperimentConfig:
             points_by_id[point_id] = _point_of(task, collection, sections)
         points = points_by_id.values()
         return Experiment(self.name, tuple(points))
+
+    def one_point(self, name: Optional[str] = None) -> Experiment:
+        """The sweep cut to one point: the one named, else the first.
+
+        A narrated shot needs one point, so the points are not checked
+        against each other: a base whose blocks collect a point two ways
+        still runs a shot, and without a name only the first point is
+        read.
+        """
+        pairs = self.point_tasks()
+        if name is None:
+            first_block = self.sweep[0]
+            first_task = self.first_point_task()
+            pairs = [(first_task, first_block.collection)]
+        names = []
+        for task, collection in pairs:
+            point_id = task.strong_id()
+            point_name = point_id[:YAML_POINT_NAME_LENGTH]
+            names.append(point_name)
+            if name in (None, point_name):
+                sections = self.resolved_sections(task.metadata)
+                point = _point_of(task, collection, sections)
+                return Experiment(self.name, (point,))
+        _refuse_an_unknown_point(self.name, name, names)
 
     def first_point_task(self) -> collect.Task:
         """The task of the first point of the first sweep block."""
@@ -510,6 +568,17 @@ def _point_of(
     point_id = task.strong_id()
     name = point_id[:YAML_POINT_NAME_LENGTH]
     return Point(name, machine, task.metadata, collection, sections)
+
+
+def _refuse_an_unknown_point(
+    experiment_name: str, name: str, names: list
+) -> None:
+    """A point name the experiment does not have, with the names it has."""
+    listed = ", ".join(names)
+    raise refusal.RefusalError(
+        f"the experiment {experiment_name} has no point {name}; its points "
+        f"are {listed}"
+    )
 
 
 def _refuse_two_collections(task: collect.Task, first, second) -> None:

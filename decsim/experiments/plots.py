@@ -6,7 +6,7 @@ timeline.png         one traced shot, read from its Chrome trace file:
                      reads solid, buffer reads lighter, geometry in the
                      subtitle). `decsim run --trace`, or `trace: chrome`
                      in the observation section, writes the file this
-                     reads, and `decsim collect` draws it for the first
+                     reads, and `decsim run` draws it for the first
                      traced shot of the sweep's first traced point
 stage_breakdown.png  where a window's time goes, one stacked bar per
                      sweep point, the stages in the order the pipeline
@@ -184,7 +184,7 @@ def stage_breakdown_plot(run_dir, path: pathlib.Path) -> None:
 
 
 def plots(report_dir: pathlib.Path) -> None:
-    """The figure `decsim collect` draws itself: the first traced shot.
+    """The figure `decsim run` draws itself: the first traced shot.
 
     timeline.png needs a traced shot, so it is drawn only when the
     observation section asked for a trace.

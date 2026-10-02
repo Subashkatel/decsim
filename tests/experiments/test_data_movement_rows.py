@@ -335,8 +335,8 @@ def test_pieces_of_one_shot_fold_to_the_whole_runs_movement_rows(tmp_path):
     cut_path = yaml_configs.write_config(cut_folder, cut_card)
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(cut_path), "--out", str(cut_dir)])
     whole_run_dir = whole_dir
     cut_run_dir = cut_dir
     whole_movement_path = whole_run_dir / "data_movement.csv"

@@ -1,6 +1,6 @@
 """A round plan's records: one piece a round deals to a task.
 
-decsim plan writes them to round<k>/plan.csv, and decsim collect --plan
+decsim plan writes them to round<k>/plan.csv, and decsim run --plan
 reads its task's share back (decsim/experiments/pieces.py).
 """
 

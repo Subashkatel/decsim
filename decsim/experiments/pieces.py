@@ -13,7 +13,7 @@ writer left is no piece and is passed over; no writer can tell from
 another host whether its owner is still writing, so none removes it.
 
 A round's plan, round<k>/plan.csv, is a list of pieces, each with the
-task it was dealt to; `decsim plan` writes it and `decsim collect
+task it was dealt to; `decsim plan` writes it and `decsim run
 --plan` runs one task's share of it.
 """
 

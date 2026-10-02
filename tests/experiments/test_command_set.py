@@ -42,7 +42,6 @@ import decsim.experiments.pieces as pieces
 import decsim.experiments.plan_command as plan_command
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
-import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
@@ -66,6 +65,15 @@ FOUR_POINT_SWEEP = {
         }
     ]
 }
+
+
+def _run_one_shot(config_path, seed=0, out_dir=None, *, trace=False):
+    """`decsim run <file> --seed S`: the first point's one narrated shot."""
+    run_path = pathlib.Path(config_path)
+    study = experiment.load_one_point(run_path)
+    return collect_command.run_one_shot(
+        study, run_path, seed, out_dir, trace=trace
+    )
 
 
 # The suite's container ships no git, so the tests that need it skip.
@@ -228,7 +236,7 @@ def test_run_builds_a_point_whose_threshold_learns_online(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, overrides)
     out_dir = tmp_path / "run"
 
-    run_command.run_one_shot(config_path, out_dir=out_dir)
+    _run_one_shot(config_path, out_dir=out_dir)
 
     assert (out_dir / "result.json").exists()
 
@@ -452,7 +460,7 @@ def test_show_prints_every_value_after_the_sections(capsys):
 
 def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
     config_path = gate_point.CONFIG_PATH
-    lines = run_command.run_one_shot(config_path, seed=0, out_dir=tmp_path)
+    lines = _run_one_shot(config_path, seed=0, out_dir=tmp_path)
     config = experiment.load_experiment(config_path)
     point = config.first_point_task()
     settings = point.settings
@@ -469,11 +477,107 @@ def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
 
 def test_run_with_trace_writes_the_shots_trace_file(tmp_path):
     config_path = gate_point.CONFIG_PATH
-    run_command.run_one_shot(config_path, seed=0, out_dir=tmp_path, trace=True)
+    _run_one_shot(config_path, seed=0, out_dir=tmp_path, trace=True)
     trace_dir = tmp_path / "trace"
     entries = trace_dir.iterdir()
     written = sorted(entries)
     assert len(written) == 1
+
+
+def _four_point_names(tmp_path) -> tuple:
+    """The four-point sweep's yaml, and its point names in order."""
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    study = experiment.load(config_path)
+    names = [point.name for point in study.points]
+    return config_path, names
+
+
+def test_run_list_prints_the_point_names_in_order(tmp_path, capsys):
+    config_path, names = _four_point_names(tmp_path)
+
+    command.main(["run", str(config_path), "--list"])
+
+    printed = capsys.readouterr()
+    assert printed.out.splitlines() == names
+
+
+def test_run_only_collects_the_one_point_it_names(tmp_path):
+    config_path, names = _four_point_names(tmp_path)
+    out_dir = tmp_path / "out"
+
+    command.main(
+        ["run", str(config_path), "--out", str(out_dir), "--only", names[1]]
+    )
+
+    points_dir = out_dir / "points"
+    recorded = sorted(path.name for path in points_dir.iterdir())
+    assert recorded == [names[1]]
+    manifest = _manifest_of(out_dir)
+    assert len(manifest["points"]) == 4
+    sweep_path = out_dir / "sweep.csv"
+    sweep_rows = _rows(sweep_path)
+    assert len(sweep_rows) == 1
+
+
+def test_run_shots_gives_the_first_shots_of_the_full_collection(tmp_path):
+    config_path, names = _four_point_names(tmp_path)
+    full_dir = tmp_path / "full"
+    first_dir = tmp_path / "first"
+
+    command.main(["run", str(config_path), "--out", str(full_dir)])
+    command.main(
+        ["run", str(config_path), "--out", str(first_dir), "--shots", "1"]
+    )
+
+    full_rows = _rows_without_wall_clock(full_dir, "shots.csv")
+    first_rows = _rows_without_wall_clock(first_dir, "shots.csv")
+    seed_zero_rows = [row for row in full_rows if row["seed"] == "0"]
+    assert len(full_rows) == 8
+    assert first_rows == seed_zero_rows
+
+
+def test_run_seed_narrates_the_shot_of_the_point_only_names(tmp_path):
+    config_path, names = _four_point_names(tmp_path)
+    out_dir = tmp_path / "out"
+
+    command.main(
+        [
+            "run",
+            str(config_path),
+            "--seed",
+            "1",
+            "--only",
+            names[2],
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    record_path = out_dir / "points" / names[2] / "machine.json"
+    record = run_folder.read_json(record_path)
+    assert record["seeds"] == [[1, 1]]
+    assert (out_dir / "result.json").exists()
+
+
+@pytest.mark.parametrize(
+    "arguments, message",
+    [
+        (["--seed", "0", "--shots", "2"], "--seed runs one narrated shot"),
+        (["--trace"], "--log and --trace narrate the one shot --seed runs"),
+        (["--shots", "0"], "a shot count is at least 1, got 0"),
+    ],
+)
+def test_run_refuses_options_that_ask_two_things(
+    tmp_path, capsys, arguments, message
+):
+    config_path = yaml_configs.write_config(tmp_path, {})
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["run", str(config_path), *arguments])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 2
+    assert message in printed.err
 
 
 def _csv_rows(path: pathlib.Path) -> list:
@@ -509,7 +613,7 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     """What the run ran, every value of it, and the workload as files."""
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
-    lines = run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    lines = _run_one_shot(config_path, seed=0, out_dir=out_dir)
     resolved_dir = out_dir / "points"
     resolved_path = _one_file(resolved_dir, "*/machine.json")
     resolved_text = resolved_path.read_text()
@@ -623,7 +727,7 @@ def test_a_collect_makes_each_points_workload_once(tmp_path, monkeypatch):
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
     run_dir = tmp_path / "run"
 
-    command.main(["collect", str(config_path), "--out", str(run_dir)])
+    command.main(["run", str(config_path), "--out", str(run_dir)])
 
     growing_maker = sys.modules["growing_maker"]
     assert growing_maker.CALLS == [3]
@@ -664,7 +768,7 @@ def test_a_collect_of_a_workload_with_no_detector_rounds_is_refused(
     run_dir = tmp_path / "run"
 
     with pytest.raises(SystemExit) as stopped:
-        command.main(["collect", str(config_path), "--out", str(run_dir)])
+        command.main(["run", str(config_path), "--out", str(run_dir)])
     printed = capsys.readouterr()
 
     assert stopped.value.code == 1
@@ -675,7 +779,7 @@ def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
     """The files row reads inputs/ back, and the shot is the same shot."""
     config_path = yaml_configs.write_config(tmp_path, {})
     first_dir = tmp_path / "first"
-    run_command.run_one_shot(config_path, seed=0, out_dir=first_dir)
+    _run_one_shot(config_path, seed=0, out_dir=first_dir)
     resolved_dir = first_dir / "points"
     resolved_path = _one_file(resolved_dir, "*/machine.json")
     inputs_dir = resolved_path.parent / "inputs"
@@ -686,7 +790,7 @@ def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
     rerun_card = {"workload": files, "sweep": yaml_configs.QPU_ONLY_SWEEP}
     rerun_path = yaml_configs.write_config(rerun_folder, rerun_card)
     second_dir = tmp_path / "second"
-    run_command.run_one_shot(rerun_path, seed=0, out_dir=second_dir)
+    _run_one_shot(rerun_path, seed=0, out_dir=second_dir)
     first_result = (first_dir / "result.json").read_text()
     second_result = (second_dir / "result.json").read_text()
 
@@ -706,7 +810,7 @@ def test_a_points_record_names_the_maker_in_either_of_its_forms(
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
     out_dir = tmp_path / "out"
 
-    run_command.run_one_shot(config_path, out_dir=out_dir)
+    _run_one_shot(config_path, out_dir=out_dir)
 
     resolved_dir = out_dir / "points"
     resolved_path = _one_file(resolved_dir, "*/machine.json")
@@ -731,7 +835,7 @@ def test_a_points_record_names_the_maker_its_row_answers(tmp_path, monkeypatch):
     config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
     out_dir = tmp_path / "out"
 
-    run_command.run_one_shot(config_path, out_dir=out_dir)
+    _run_one_shot(config_path, out_dir=out_dir)
 
     resolved_dir = out_dir / "points"
     resolved_path = _one_file(resolved_dir, "*/machine.json")
@@ -767,14 +871,14 @@ def test_a_collect_run_again_into_its_folder_reruns_no_saved_piece(tmp_path):
     """
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     pieces_dir = out_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
     first_status = piece_path.stat()
     report_dir = out_dir
     first_rows = _rows_without_wall_clock(report_dir, "sweep.csv")
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     second_status = piece_path.stat()
     second_rows = _rows_without_wall_clock(report_dir, "sweep.csv")
@@ -794,7 +898,7 @@ def test_a_piece_records_the_peak_memory_of_the_process_that_ran_it(
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     pieces_dir = out_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
@@ -819,7 +923,7 @@ def test_a_piece_records_the_interpreter_packages_and_slurm_task(
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     pieces_dir = out_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
@@ -848,7 +952,7 @@ def test_a_pooled_piece_names_the_decoder_package_its_worker_loaded(
         tmp_path, {"weak_decoder": weak_decoder}
     )
     out_dir = tmp_path / "out"
-    pooled = ["collect", str(config_path), "--out", str(out_dir)]
+    pooled = ["run", str(config_path), "--out", str(out_dir)]
 
     command.main([*pooled, "--processes", "2"])
 
@@ -916,8 +1020,8 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     cut_path = yaml_configs.write_config(cut_folder, cut_card)
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(cut_path), "--out", str(cut_dir)])
     second_pieces = cut_dir.glob("pieces/*/1-1")
     cut_pieces = sorted(second_pieces)
     lost_piece = cut_pieces[0]
@@ -925,7 +1029,7 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     kept_status = (kept_piece / "piece.json").stat()
     shutil.rmtree(lost_piece)
 
-    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    command.main(["run", str(cut_path), "--out", str(cut_dir)])
 
     reissued_status = (kept_piece / "piece.json").stat()
     whole_run_dir = whole_dir
@@ -942,7 +1046,7 @@ def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {})
     whole_dir = tmp_path / "whole"
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(whole_dir)])
+    command.main(["run", str(config_path), "--out", str(whole_dir)])
     pieces_dir = whole_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
     point_dir = piece_path.parent.parent
@@ -955,7 +1059,7 @@ def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
     partial.mkdir(parents=True)
     (partial / "shots.csv").write_text("half a file")
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     written = out_dir / "pieces" / point_dir.name / piece_path.parent.name
     whole_run_dir = whole_dir
@@ -1058,7 +1162,7 @@ def test_a_piece_records_its_counts_and_rounds(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     pairs = _piece_facts_and_references(out_dir)
     written = [pair[0] for pair in pairs]
@@ -1102,12 +1206,12 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
     target_path = yaml_configs.write_config(target_folder, target_card)
     whole_dir = tmp_path / "whole"
     target_dir = tmp_path / "target"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
     whole_run_dir = whole_dir
     whole_shots_path = whole_run_dir / "shots.csv"
     expected_shots = _shots_to_the_target(whole_shots_path, 3)
 
-    command.main(["collect", str(target_path), "--out", str(target_dir)])
+    command.main(["run", str(target_path), "--out", str(target_dir)])
 
     target_run_dir = target_dir
     target_pieces = target_dir.glob("pieces/*/*")
@@ -1221,7 +1325,7 @@ def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
     keys = {**collection, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
     card = {"sweep": [{"axes": NOISY_AXES, "collection": keys}]}
     config_path = yaml_configs.write_config(folder, card)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     return out_dir
 
 
@@ -1249,12 +1353,12 @@ def test_a_resumed_collect_keeps_every_saved_shots_residence_rows(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, card)
     whole_dir = tmp_path / "whole"
     resumed_dir = tmp_path / "resumed"
-    command.main(["collect", str(config_path), "--out", str(whole_dir)])
-    command.main(["collect", str(config_path), "--out", str(resumed_dir)])
+    command.main(["run", str(config_path), "--out", str(whole_dir)])
+    command.main(["run", str(config_path), "--out", str(resumed_dir)])
     (first_piece,) = resumed_dir.glob("pieces/*/0-0")
     shutil.rmtree(first_piece)
 
-    command.main(["collect", str(config_path), "--out", str(resumed_dir)])
+    command.main(["run", str(config_path), "--out", str(resumed_dir)])
 
     whole_run_dir = whole_dir
     whole_path = whole_run_dir / "residence.csv"
@@ -1291,7 +1395,7 @@ def test_a_target_stop_reports_its_exact_limits_and_unbiased_estimate(
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     run_dir = out_dir
     row = _sweep_row_of(run_dir)
@@ -1328,8 +1432,8 @@ def test_pieces_past_the_stop_leave_the_estimate_as_the_serial_run_has_it(
     config_path = yaml_configs.write_config(tmp_path, card)
     serial_dir = tmp_path / "serial"
     pooled_dir = tmp_path / "pooled"
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
-    pooled = ["collect", str(config_path), "--out", str(pooled_dir)]
+    command.main(["run", str(config_path), "--out", str(serial_dir)])
+    pooled = ["run", str(config_path), "--out", str(pooled_dir)]
 
     command.main([*pooled, "--processes", "8"])
 
@@ -1365,12 +1469,12 @@ def test_a_point_that_saved_its_stop_starts_no_piece_when_run_again(
     card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     first_pieces = out_dir.glob("pieces/*/*")
     first_names = sorted(first_pieces)
     capsys.readouterr()
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
     second_pieces = out_dir.glob("pieces/*/*")
@@ -1469,7 +1573,7 @@ def test_a_collect_of_no_processes_is_refused_before_its_folder(
     with pytest.raises(SystemExit):
         command.main(
             [
-                "collect",
+                "run",
                 str(config_path),
                 "--out",
                 str(out_dir),
@@ -1490,7 +1594,7 @@ def test_a_sweep_block_that_says_shots_is_refused(tmp_path, capsys):
     config_path = yaml_configs.write_config(tmp_path, card)
 
     with pytest.raises(SystemExit):
-        command.main(["collect", str(config_path)])
+        command.main(["run", str(config_path)])
 
     printed = capsys.readouterr()
     assert "sweep block 1 is" in printed.err
@@ -1505,7 +1609,7 @@ def test_a_point_two_blocks_collect_two_ways_is_refused(tmp_path, capsys):
     out_dir = tmp_path / "out"
 
     with pytest.raises(SystemExit):
-        command.main(["collect", str(config_path), "--out", str(out_dir)])
+        command.main(["run", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
     lines = printed.err.splitlines()
@@ -1522,7 +1626,7 @@ def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
     out_dir = tmp_path / "out"
 
     with pytest.raises(SystemExit):
-        command.main(["collect", str(config_path), "--out", str(out_dir)])
+        command.main(["run", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
     lines = printed.err.splitlines()
@@ -1545,13 +1649,13 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     whole_config = _online_config(tmp_path, 60)
-    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
+    command.main(["run", str(whole_config), "--out", str(whole_dir)])
     cut_config = _online_config(tmp_path, 15)
-    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+    command.main(["run", str(cut_config), "--out", str(cut_dir)])
     _lose_the_piece(cut_dir, "2-2")
     _lose_the_piece(cut_dir, "3-3")
 
-    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+    command.main(["run", str(cut_config), "--out", str(cut_dir)])
 
     whole_run_dir = whole_dir
     cut_run_dir = cut_dir
@@ -1655,7 +1759,7 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     run_dir = out_dir
     sweep_path = run_dir / "sweep.csv"
@@ -1709,7 +1813,7 @@ def test_a_point_holds_its_own_value_at_a_path_another_block_sets(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     sweep_path = out_dir / "sweep.csv"
     first, second = _csv_rows(sweep_path)
@@ -1740,7 +1844,7 @@ def test_a_swept_reference_is_written_as_the_value_it_resolved_to(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     sweep_path = out_dir / "sweep.csv"
     rows = _csv_rows(sweep_path)
@@ -1770,7 +1874,7 @@ def test_a_child_axis_under_a_swept_mapping_shows_in_the_mappings_cell(
     config_path = yaml_configs.write_config(tmp_path, card)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     sweep_path = out_dir / "sweep.csv"
     (row,) = _csv_rows(sweep_path)
@@ -1783,7 +1887,7 @@ def test_every_point_records_its_own_makers_arguments(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     records = run_folder.point_records(out_dir)
     arguments = [record["maker"]["arguments"] for record in records.values()]
@@ -1797,7 +1901,7 @@ def test_every_point_records_its_own_makers_arguments(tmp_path):
 def test_a_manifest_names_every_installed_package(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
-    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
     manifest = _manifest_of(out_dir)
     packages = manifest["versions"]["packages"]
 
@@ -1816,7 +1920,7 @@ def test_a_manifest_names_the_library_a_loader_loads(
     monkeypatch.delenv(compiled_decoder.LIBRARY_VARIABLE, raising=False)
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
-    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
     manifest = _manifest_of(out_dir)
     union_find_path = compiled_union_find_library.resolve()
     expected = {str(union_find_path): _sha256_of(union_find_path)}
@@ -1848,7 +1952,7 @@ def test_a_manifest_names_a_library_loaded_from_outside_the_package(
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
 
-    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
 
     manifest = _manifest_of(out_dir)
     expected = _named_library(library_path, expected_digest)
@@ -1925,10 +2029,10 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     serial_dir = tmp_path / "serial"
     pooled_dir = tmp_path / "pooled"
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
+    command.main(["run", str(config_path), "--out", str(serial_dir)])
     command.main(
         [
-            "collect",
+            "run",
             str(config_path),
             "--out",
             str(pooled_dir),
@@ -1958,9 +2062,9 @@ def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_point(tmp_path):
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     pooled_dir = tmp_path / "pooled"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
-    pooled = ["collect", str(cut_path), "--out", str(pooled_dir)]
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(cut_path), "--out", str(cut_dir)])
+    pooled = ["run", str(cut_path), "--out", str(pooled_dir)]
     command.main([*pooled, "--processes", "4"])
 
     whole_pieces = whole_dir.glob("pieces/*/*")
@@ -1991,7 +2095,7 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     out_dir = tmp_path / "run"
     monkeypatch.chdir(tmp_path)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     run_dir = out_dir
     manifest = _manifest_of(run_dir)
     recorded = manifest["git"]
@@ -2019,10 +2123,10 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     clean_dir = tmp_path / "clean"
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
     run_folder._tree_reading.cache_clear()
-    command.main(["collect", str(config_path), "--out", str(dirty_dir)])
+    command.main(["run", str(config_path), "--out", str(dirty_dir)])
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
     run_folder._tree_reading.cache_clear()
-    command.main(["collect", str(config_path), "--out", str(clean_dir)])
+    command.main(["run", str(config_path), "--out", str(clean_dir)])
 
     dirty_run_dir = dirty_dir
     clean_run_dir = clean_dir
@@ -2071,7 +2175,7 @@ def test_two_pieces_that_hold_the_same_shot_are_refused(tmp_path, capsys):
     """A piece copied in under another range would count its shots twice."""
     config_path = yaml_configs.write_config(tmp_path, {})
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     pieces_dir = out_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
     piece_dir = piece_path.parent
@@ -2080,7 +2184,7 @@ def test_two_pieces_that_hold_the_same_shot_are_refused(tmp_path, capsys):
     capsys.readouterr()
 
     with pytest.raises(SystemExit) as stopped:
-        command.main(["collect", str(config_path), "--out", str(out_dir)])
+        command.main(["run", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
     lines = printed.err.splitlines()
@@ -2216,7 +2320,7 @@ def test_a_build_refusal_under_run_is_one_line(tmp_path, capsys):
     )
 
     with pytest.raises(SystemExit) as stopped:
-        command.main(["run", str(config_path)])
+        command.main(["run", str(config_path), "--seed", "0"])
 
     printed = capsys.readouterr()
     assert stopped.value.code == 1
@@ -2262,7 +2366,7 @@ def _run_the_round(round_dir: pathlib.Path, task_order=None) -> None:
     plan_path = round_dir / "plan.csv"
     for task_number in task_numbers:
         command.main(
-            ["collect", "--plan", str(plan_path), "--task", str(task_number)]
+            ["run", "--plan", str(plan_path), "--task", str(task_number)]
         )
 
 
@@ -2310,7 +2414,7 @@ def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
     cut_path = _cut_four_point_sweep(tmp_path)
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
     first_round = _plan([cut_path], cut_dir, 3)
     _run_the_round(first_round)
     second_pieces = cut_dir.glob("pieces/*/1-1")
@@ -2451,10 +2555,10 @@ def test_pieces_of_two_distances_fold_to_one_run(tmp_path):
     ]
     whole_dir = tmp_path / "whole"
     split_dir = tmp_path / "split"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
 
     for split_path in reversed(split_paths):
-        command.main(["collect", str(split_path), "--out", str(split_dir)])
+        command.main(["run", str(split_path), "--out", str(split_dir)])
     command.main(["status", str(split_dir)])
 
     whole_run_dir = whole_dir
@@ -2530,12 +2634,12 @@ def test_an_online_points_planned_pieces_run_in_one_task_as_the_uncut_point(
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     whole_config = _online_config(tmp_path, 60)
-    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
+    command.main(["run", str(whole_config), "--out", str(whole_dir)])
     cut_config = _online_config(tmp_path, 15)
 
     round_dir = _plan([cut_config], cut_dir, 3)
     _run_the_round(round_dir)
-    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+    command.main(["run", str(cut_config), "--out", str(cut_dir)])
 
     plan_path = round_dir / "plan.csv"
     plan_rows = _csv_rows(plan_path)
@@ -2609,7 +2713,7 @@ def test_a_task_whose_point_its_yaml_no_longer_makes_is_refused(
     plan_path = round_dir / "plan.csv"
 
     with pytest.raises(SystemExit):
-        command.main(["collect", "--plan", str(plan_path), "--task", "0"])
+        command.main(["run", "--plan", str(plan_path), "--task", "0"])
 
     printed = capsys.readouterr()
     assert "no point of" in printed.err
@@ -2633,7 +2737,7 @@ def test_status_keeps_a_point_its_yaml_no_longer_sweeps(tmp_path):
     """
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     (block,) = FOUR_POINT_SWEEP["sweep"]
     narrower_axes = {**block["axes"], ERROR_RATE_AXIS: [0.001]}
     narrower_card = {"sweep": [{**block, "axes": narrower_axes}]}
@@ -2665,7 +2769,7 @@ def test_a_status_row_is_its_points_sweep_row_and_its_rounds(tmp_path):
     """
     config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
 
     command.main(["status", str(experiment_dir)])
 
@@ -2793,7 +2897,7 @@ def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     whole_config = _online_config(tmp_path, 60)
-    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
+    command.main(["run", str(whole_config), "--out", str(whole_dir)])
     cut_config = _online_config(tmp_path, 15)
     first_round = _plan([cut_config], cut_dir, 3)
     second_round = _plan([cut_config], cut_dir, 3)
@@ -2833,11 +2937,11 @@ def test_a_plain_collect_and_an_older_planned_task_run_each_seed_once(
     out_dir = tmp_path / "out"
     round_dir = _plan([config_path], out_dir, 2)
     plan_path = round_dir / "plan.csv"
-    command.main(["collect", "--plan", str(plan_path), "--task", "0"])
+    command.main(["run", "--plan", str(plan_path), "--task", "0"])
     _capped_noisy_config(tmp_path, 10, 90)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    command.main(["collect", "--plan", str(plan_path), "--task", "1"])
+    command.main(["run", "--plan", str(plan_path), "--task", "1"])
     command.main(["status", str(out_dir)])
 
     (row,) = _typed_status_rows(out_dir)
@@ -2858,7 +2962,7 @@ def test_a_planned_piece_saved_under_another_cut_is_not_run_again(tmp_path):
     out_dir = tmp_path / "out"
     round_dir = _plan([config_path], out_dir, 2)
     _capped_noisy_config(tmp_path, 7, 30)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     _run_the_round(round_dir)
     command.main(["status", str(out_dir)])
@@ -2930,7 +3034,7 @@ def test_an_online_piece_with_no_saved_piece_before_it_is_refused(
     point_id = third_rows[0]["point_id"]
 
     with pytest.raises(SystemExit):
-        command.main(["collect", "--plan", str(plan_path), "--task", "0"])
+        command.main(["run", "--plan", str(plan_path), "--task", "0"])
 
     printed = capsys.readouterr()
     point_folders = pieces.folders_of(out_dir, [point_id])
@@ -2957,7 +3061,7 @@ def test_a_refused_status_leaves_the_last_run_folder_as_it_was(tmp_path):
     """
     config_path = _capped_noisy_config(tmp_path, 10, 75)
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     command.main(["status", str(out_dir)])
     before = _run_folder_bytes(out_dir)
     piece_folders = out_dir.glob("pieces/*/*")
@@ -2996,7 +3100,7 @@ def test_rounds_planned_again_before_the_last_ran_run_each_seed_once(
     config_path = _capped_noisy_config(tmp_path, 10, 150)
     _plan([config_path], out_dir, 1)
     _capped_noisy_config(tmp_path, 5, 150)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     _capped_noisy_config(tmp_path, 10, 150)
     _plan([config_path], out_dir, 1)
     third_round = _plan([config_path], out_dir, 1)

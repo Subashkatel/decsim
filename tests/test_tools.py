@@ -488,7 +488,7 @@ def test_a_round_submits_one_array_per_shape_of_job(tmp_path):
 
 
 def test_a_round_task_runs_its_share_of_the_plan(tmp_path):
-    """Inside the array the script is the job: one collect --plan task.
+    """Inside the array the script is the job: one run --plan task.
 
     It runs the task the array gives it, one process per core, on the
     python of the job's environment.
@@ -508,7 +508,7 @@ def test_a_round_task_runs_its_share_of_the_plan(tmp_path):
     assert arguments == [
         "-m",
         "decsim",
-        "collect",
+        "run",
         "--plan",
         str(plan_path),
         "--task",

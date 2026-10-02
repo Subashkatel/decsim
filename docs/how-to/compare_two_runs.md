@@ -7,7 +7,7 @@ depends on what the two runs are.
 
 ## If they are pieces of one sweep, they are already added
 
-`decsim collect` folds every piece of an experiment into the csv
+`decsim run` folds every piece of an experiment into the csv
 files at the top of its results folder: it reads the pieces' additive
 files, adds them, and recomputes `sweep.csv` and `links.csv` from the
 sum. Two runs of different points are never added: the result would be

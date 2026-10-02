@@ -77,7 +77,7 @@ decsim show configs/examples/my_first_sweep.yaml
 ## Step 2. Run it, on four processes
 
 ```bash
-decsim collect configs/examples/my_first_sweep.yaml --processes 4 --out results/first_sweep
+decsim run configs/examples/my_first_sweep.yaml --processes 4 --out results/first_sweep
 ```
 
 `--processes` gives each worker one piece at a time. A piece is a block
@@ -240,7 +240,7 @@ A sweep that takes two minutes is never stopped halfway. A sweep that
 takes 350 core hours is, by a time limit or a node going down, and the
 mechanism is worth seeing on something small.
 
-`collect` saves each point's shots as pieces under
+`decsim run` saves each point's shots as pieces under
 `results/first_sweep/pieces/`, one folder per point and one per piece,
 named by its first and last seed. A piece holds a set number of QEC
 rounds, 20,000 unless the yaml's `collection` section says otherwise
@@ -250,7 +250,7 @@ leave them missing, and run the same command again:
 
 ```bash
 rm -r results/first_sweep/pieces/*/0-*
-decsim collect configs/examples/my_first_sweep.yaml --processes 4 --out results/first_sweep
+decsim run configs/examples/my_first_sweep.yaml --processes 4 --out results/first_sweep
 cut -d, -f3,6,8,12 results/first_sweep/sweep.csv
 ```
 
@@ -261,7 +261,7 @@ qpu.distance,shots,logical_failures,logical_error_rate_estimate
 7,400,8,0.02
 ```
 
-The second `collect` ran only the pieces that were missing, then folded
+The second `decsim run` ran only the pieces that were missing, then folded
 every piece again into the results folder. The counts are the single run's.
 That is not luck: a shot's seed is derived from the run's seed and the
 shot's position, so shot 173 of distance 5 is the same shot whichever

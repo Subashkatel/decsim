@@ -33,7 +33,10 @@ import decsim.compiled_libraries as compiled_libraries
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
 import decsim.frontends.workload_files as workload_files
+import decsim.machine as machine_module
 import decsim.records.program as program_records
+import decsim.records.results as result_records
+import decsim.settings as machine_settings
 
 RESULTS_DIR = pathlib.Path("results")
 RUN_FILE = "run.json"
@@ -328,6 +331,24 @@ def write_point_record(
     return record["id"]
 
 
+def write_shot(
+    machine: machine_module.Machine,
+    settings: machine_settings.MachineSettings,
+    run_dir: pathlib.Path,
+    label: str,
+    result: result_records.RunResult,
+) -> None:
+    """One narrated shot's files in its folder, the log and trace named label.
+
+    result.json and commands.json always, and the log and the trace when
+    the observation asks for them. tools/deltakit_example.py and
+    tools/live_memory_example.py write their shot through it too.
+    """
+    _write_the_log_and_trace(machine, settings, run_dir, label)
+    _write_result(result, run_dir)
+    _write_commands(machine, run_dir)
+
+
 def point_records(run_dir: pathlib.Path) -> dict:
     """Each point's machine.json, keyed by its point id."""
     records = {}
@@ -461,6 +482,62 @@ def utc_now() -> str:
     """This moment as an iso timestamp, for run.json's times."""
     now = datetime.datetime.now(datetime.timezone.utc)
     return now.isoformat()
+
+
+def _write_result(
+    result: result_records.RunResult, run_dir: pathlib.Path
+) -> None:
+    """result.json: every field of the shot's result record."""
+    value = collect.json_value(result)
+    result_path = run_dir / "result.json"
+    write_json(result_path, value)
+
+
+def _write_commands(
+    machine: machine_module.Machine, run_dir: pathlib.Path
+) -> None:
+    """commands.json: when each QPU command arrived and when it started."""
+    values = []
+    for event in machine.observation.command_events.events:
+        value = {
+            "kind": event.kind,
+            "tick": event.tick,
+            "operation_id": event.command.operation.id,
+        }
+        values.append(value)
+    commands_path = run_dir / "commands.json"
+    write_json(commands_path, values)
+
+
+def _write_the_log_and_trace(
+    machine: machine_module.Machine,
+    settings: machine_settings.MachineSettings,
+    run_dir: pathlib.Path,
+    label: str,
+) -> None:
+    """The shot's log and trace, each where its knob says."""
+    observation = settings.observation
+    if observation.writes_log:
+        log_dir = run_dir / "log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        text = "\n".join(machine.observation.log.lines)
+        log_path = log_dir / f"{label}.log"
+        contents = text + "\n"
+        log_path.write_text(contents)
+    if not observation.writes_trace:
+        return
+    trace_path = _trace_path(observation, run_dir, label)
+    machine.observation.trace_writer.write(str(trace_path))
+
+
+def _trace_path(observation, run_dir: pathlib.Path, label: str) -> pathlib.Path:
+    """Where this shot's trace goes: the named path, or trace/ in the folder."""
+    named = observation.trace_path
+    if named is not None:
+        return pathlib.Path(named)
+    trace_dir = run_dir / "trace"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    return trace_dir / f"{label}.trace.json"
 
 
 def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:

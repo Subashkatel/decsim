@@ -94,13 +94,13 @@ def _point_text(probability: float) -> str:
 
 
 def _collected(folder, overrides: dict):
-    """One `decsim collect` of the minimal config into its own folder."""
+    """One `decsim run` of the minimal config into its own folder."""
     folder.mkdir()
     sweep = {"sweep": TWO_POINT_SWEEP}
     sweep.update(overrides)
     config_path = yaml_configs.write_config(folder, sweep)
     run_dir = folder / "run"
-    command.main(["collect", str(config_path), "--out", str(run_dir)])
+    command.main(["run", str(config_path), "--out", str(run_dir)])
     return run_dir
 
 

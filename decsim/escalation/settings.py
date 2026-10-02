@@ -82,19 +82,15 @@ class ConfidenceSettings(Protocol):
 
 
 class ThresholdSettings(Protocol):
-    """A threshold row's settings record (THRESHOLD_SOURCES, above).
+    """A threshold row's settings record (THRESHOLD_SOURCES, above)."""
 
-    threshold_nats is None only on a table not yet looked up at its
-    sweep point.
-    """
+    threshold_nats: float
 
-    threshold_nats: Optional[float]
-
-    def at_sweep_point(self, resolved: Mapping) -> "ThresholdSettings":
-        """The record at one sweep point, its threshold looked up."""
-
-    def for_sweep_point(
-        self, resolved: Mapping
+    def for_point(
+        self,
+        *,
+        distance: Optional[int],
+        physical_error_probability: Optional[float],
     ) -> Optional[ports.ThresholdSource]:
         """The source a sweep point's shots share; None for most rows."""
 
@@ -150,14 +146,15 @@ class SwitchingSettings:
     threshold is the Settings record of the row of THRESHOLD_SOURCES
     the yaml's threshold_source names, which keeps the weak result when
     its gap is at or above the threshold (the paper uses 20 dB): fixed
-    holds it as given, table looks the sweep point up in an offline
-    calibration csv (threshold_column, calibrated for this run's window
-    geometry), online starts there and adapts it across a point's shots,
-    serial switching only; run_both_at_once is Sec. III A's Step 1, the strong
-    decoder started with the weak one and cancelled on confidence
-    (false, the default, is the same section's on-demand variant, lines
-    631-640); strong_window is the Settings record of the shape of the
-    window the strong tier re-decodes, a row of STRONG_WINDOW_SHAPES
+    holds it as given, table holds the one an offline calibration csv
+    gives the sweep point (threshold_column, calibrated for this run's
+    window geometry), online starts there and adapts it across a point's
+    shots, serial switching only; run_both_at_once is Sec. III A's Step
+    1, the strong decoder started with the weak one and cancelled on
+    confidence (false, the default, is the same section's on-demand
+    variant, lines 631-640); strong_window is the Settings record of the
+    shape of the window the strong tier re-decodes, a row of
+    STRONG_WINDOW_SHAPES
     (decsim/escalation/strong_window_shapes.py): redo_window, the
     default, re-decodes the escalated window's commit region with its
     past face pinned on the earlier neighbour's committed correction and
@@ -177,11 +174,9 @@ class SwitchingSettings:
     jobs of the weak pool, so weak_decoder.units alone decides whether
     they overlap. clock, threshold_cycles and switch_cycles price the
     verdict's threshold and switch logic; clock None is the machine's
-    clock. The experiments layer sets the
-    sweep point's threshold (at_sweep_point) and installs the point's
-    online threshold source, the one instance every shot of the point
-    shares (the threshold record's for_sweep_point,
-    collect.Task.shot_settings).
+    clock. The experiments layer installs the point's online threshold
+    source, the one instance every shot of the point shares (the
+    threshold record's for_point, collect.Task.shot_settings).
     """
 
     confidence: ConfidenceSettings
@@ -210,6 +205,7 @@ class SwitchingSettings:
         clocks: config.ClockSettings,
         base_directory: Optional[pathlib.Path],
         confidence_settings: Callable,
+        point_facts: Mapping,
     ) -> Optional["SwitchingSettings"]:
         """The `escalation` section: the switching slot, None if it keeps one.
 
@@ -218,7 +214,9 @@ class SwitchingSettings:
         confidence keys. confidence_settings turns escalation.confidence
         and its walk card into the row's record (confidence/signals.py
         confidence_settings), handed in by the caller, since the
-        confidence package sits above this one.
+        confidence package sits above this one. point_facts are the
+        sweep point's facts by name, which a calibration table is read
+        at (threshold_sources.POINT_FACTS).
         """
         kind = escalation_kind(section)
         clock = None
@@ -238,17 +236,8 @@ class SwitchingSettings:
             threshold_cycles,
             switch_cycles,
             confidence_settings,
+            point_facts,
         )
-
-    def at_sweep_point(self, resolved: Mapping) -> "SwitchingSettings":
-        """The slot at one sweep point: a table's threshold looked up.
-
-        The threshold record answers for itself (threshold_sources.py):
-        a table finds the point's row in its csv, the other rows are
-        the same at every point.
-        """
-        threshold = self.threshold.at_sweep_point(resolved)
-        return dataclasses.replace(self, threshold=threshold)
 
 
 def escalation_kind(section: Mapping) -> str:
@@ -287,6 +276,7 @@ def _switching_settings(
     threshold_cycles: int,
     switch_cycles: int,
     confidence_settings: Callable,
+    point_facts: Mapping,
 ) -> SwitchingSettings:
     """The confidence knobs of an escalating kind, every rule checked once.
 
@@ -301,7 +291,7 @@ def _switching_settings(
         THRESHOLD_SOURCES, "escalation.threshold_source", threshold_source
     )
     threshold = _threshold(
-        section, threshold_source, threshold_row, base_directory
+        section, threshold_source, threshold_row, base_directory, point_facts
     )
     named_confidence = section.get("confidence", "complementary_gap")
     walk_microseconds = _confidence_walk_microseconds(section)
@@ -330,10 +320,12 @@ def _threshold(
     threshold_source: str,
     threshold_row,
     base_directory: Optional[pathlib.Path],
+    point_facts: Mapping,
 ):
     """The Settings record of the threshold row the section names.
 
-    A row that reads a calibration table takes the csv and its column,
+    A row that reads a calibration table takes the point's threshold
+    from the csv's column, a relative csv path read from base_directory;
     a row built once per sweep point takes the online card and its
     starting threshold, and any other row the threshold alone, in nats.
     """
@@ -342,16 +334,26 @@ def _threshold(
     )
     online = _online_card(section, threshold_source, threshold_row)
     if threshold_row.reads_a_calibration_table:
-        table = section["threshold_table"]
+        table_path = _table_path(section["threshold_table"], base_directory)
         raw_column = section.get("threshold_column", "gth_eq4_wilson")
         column = str(raw_column)
-        return threshold_row.Settings(
-            table=table, column=column, base_directory=base_directory
+        return threshold_row.Settings.from_table(
+            table_path, column, **point_facts
         )
     threshold_nats = threshold_sources.decibels_to_nats(gap_threshold_db)
     if threshold_row.built_per_sweep_point:
         return threshold_row.Settings.from_yaml(online, threshold_nats)
     return threshold_row.Settings(threshold_nats=threshold_nats)
+
+
+def _table_path(
+    table: str, base_directory: Optional[pathlib.Path]
+) -> pathlib.Path:
+    """The csv path, a relative one read from the yaml's folder."""
+    table_path = pathlib.Path(table)
+    if table_path.is_absolute() or base_directory is None:
+        return table_path
+    return base_directory / table_path
 
 
 def _strong_window(section: Mapping, named_window: str, window_row):

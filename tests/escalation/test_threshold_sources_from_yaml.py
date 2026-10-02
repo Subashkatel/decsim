@@ -2,9 +2,9 @@
 
 fixed uses the card's gap_threshold_db as given (the paper's constant
 gth). table computes nothing at run time: it looks the sweep point up
-in an offline calibration csv, its key columns headed by the yaml paths
-they match in the point's resolved sections, and refuses a point the
-table does not certify. online starts at
+in an offline calibration csv, its key columns headed by the point
+facts they match, read from the point's resolved sections, and refuses
+a point the table does not certify. online starts at
 gap_threshold_db and adapts it across the point's shots with the
 two-loop controller (rate tracker + audit lane); one calibrator per
 point, shared by every shot, so the controller learns over the point's
@@ -84,7 +84,7 @@ def source_config(tmp_path, switching_card: dict, shots: int = 1):
 def calibration_table(tmp_path) -> str:
     table_path = tmp_path / "calibration_table.csv"
     table_path.write_text(
-        f"qpu.distance,{yaml_configs.ERROR_RATE_PATH},gth_brute_force,gth_eq4,"
+        "distance,physical_error_probability,gth_brute_force,gth_eq4,"
         "gth_eq4_wilson\n"
         f"3,{NEAR_THRESHOLD_P},2.5,18.0,19.5\n"
         "5,0.005,10.0,20.1,21.4\n"
@@ -127,7 +127,7 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     resolved_decibels = resolved * NATS_TO_DB
     assert math.isclose(resolved_decibels, 19.5)
 
-    off_the_table = {"qpu.distance": 3, yaml_configs.ERROR_RATE_PATH: 0.002}
+    off_the_table = {"distance": 3, "physical_error_probability": 0.002}
     sentence = re.escape(f"has no row for {off_the_table}")
     with pytest.raises(ValueError, match=sentence):
         resolve_gap_threshold_nats(
@@ -177,7 +177,7 @@ def test_a_table_read_from_two_folders_names_its_points_alike(tmp_path):
     second_task = second_config.first_point_task()
 
     first_escalation = first_task.settings.switching
-    assert first_escalation.threshold.base_directory == first_folder
+    assert first_escalation.threshold.table == first_folder / table
     assert first_task.strong_id() == second_task.strong_id()
 
 
@@ -189,83 +189,37 @@ def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
     tmp_path, cell, sentence
 ):
     table_path = tmp_path / "negative_table.csv"
-    header = f"qpu.distance,{yaml_configs.ERROR_RATE_PATH},gth_eq4_wilson"
-    table_path.write_text(f"{header}\n3,0.002,{cell}\n")
+    header = "distance,physical_error_probability,gth_eq4_wilson"
+    table_path.write_text(f"{header}\n3,{NEAR_THRESHOLD_P},{cell}\n")
     card = {"threshold_source": "table", "threshold_table": table_path.name}
     config_path = source_config(tmp_path, card)
-    config = load_experiment(config_path)
     with pytest.raises(ValueError, match=sentence):
-        resolve_gap_threshold_nats(
-            config, physical_error_probability=0.002, distance=3
-        )
+        load_experiment(config_path)
 
 
 def test_a_table_with_no_key_column_is_refused(tmp_path):
-    """Headers that name no yaml path would match every point to row one."""
+    """Headers that name no point fact would match every point to row one."""
     table_path = tmp_path / "unkeyed_table.csv"
-    table_path.write_text(
-        f"distance,p,gth_eq4_wilson\n3,{NEAR_THRESHOLD_P},19.5\n"
-    )
+    table_path.write_text(f"d,p,gth_eq4_wilson\n3,{NEAR_THRESHOLD_P},19.5\n")
     card = {"threshold_source": "table", "threshold_table": table_path.name}
     config_path = source_config(tmp_path, card)
-    config = load_experiment(config_path)
 
     with pytest.raises(ValueError, match="has no key column"):
-        config.first_point_task()
+        load_experiment(config_path)
 
 
-def test_a_window_only_sweep_finds_its_table_row_by_path(tmp_path):
+def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
     """The distance and the error rate are written once and not swept.
 
     The table's key columns read them from each point's resolved
-    sections, so a sweep over the window alone finds its row.
+    sections, so a sweep over the round period alone finds its row.
     """
-    table_path = tmp_path / "window_table.csv"
+    table_path = tmp_path / "period_table.csv"
     table_path.write_text(
-        f"qpu.distance,{yaml_configs.ERROR_RATE_PATH},windows.commit_rounds,"
+        "distance,physical_error_probability,round_period_microseconds,"
         "gth_eq4_wilson\n"
-        f"3,{NEAR_THRESHOLD_P},2,12.0\n"
-        f"3,{NEAR_THRESHOLD_P},3,13.0\n"
-    )
-    card = {"threshold_source": "table", "threshold_table": table_path.name}
-    config_path = source_config(tmp_path, card)
-    config_text = config_path.read_text()
-    raw = yaml.safe_load(config_text)
-    raw["qpu"]["distance"] = 3
-    raw["qpu"]["round_period_microseconds"] = 1.0
-    raw["workload"]["arguments"]["physical_error_probability"] = (
-        NEAR_THRESHOLD_P
-    )
-    raw["sweep"] = [
-        {
-            "axes": {"windows.commit_rounds": [2, 3]},
-            "collection": {"max_shots": 1},
-        }
-    ]
-    edited_text = yaml.safe_dump(raw)
-    config_path.write_text(edited_text)
-    config = load_experiment(config_path)
-
-    two, three = config.tasks()
-
-    two_nats = two.settings.switching.threshold.threshold_nats
-    three_nats = three.settings.switching.threshold.threshold_nats
-    two_decibels = two_nats * NATS_TO_DB
-    three_decibels = three_nats * NATS_TO_DB
-    assert math.isclose(two_decibels, 12.0)
-    assert math.isclose(three_decibels, 13.0)
-    assert two.metadata == {"windows.commit_rounds": 2}
-
-
-def test_an_integer_key_matches_its_row_exactly(tmp_path):
-    """Only a float key reads back within a relative 1e-9 of its text.
-
-    A whole number is written exactly, so 1000000001 finds no row keyed
-    1000000000 although the two lie within 1e-9 of each other.
-    """
-    table_path = tmp_path / "window_table.csv"
-    table_path.write_text(
-        "windows.commit_rounds,gth_eq4_wilson\n1000000000,12.0\n"
+        f"3,{NEAR_THRESHOLD_P},0.5,12.0\n"
+        f"3,{NEAR_THRESHOLD_P},1.0,13.0\n"
     )
     card = {"threshold_source": "table", "threshold_table": table_path.name}
     config_path = source_config(tmp_path, card)
@@ -277,21 +231,23 @@ def test_an_integer_key_matches_its_row_exactly(tmp_path):
     )
     raw["sweep"] = [
         {
-            "axes": {"windows.commit_rounds": [1000000001]},
+            "axes": {"qpu.round_period_microseconds": [0.5, 1.0]},
             "collection": {"max_shots": 1},
         }
     ]
     edited_text = yaml.safe_dump(raw)
     config_path.write_text(edited_text)
     config = load_experiment(config_path)
-    sentence = (
-        "has no row for {'windows.commit_rounds': 1000000001}; its rows "
-        "are [{'windows.commit_rounds': '1000000000'}]"
-    )
-    pattern = re.escape(sentence)
 
-    with pytest.raises(ValueError, match=pattern):
-        config.tasks()
+    half, whole = config.tasks()
+
+    half_nats = half.settings.switching.threshold.threshold_nats
+    whole_nats = whole.settings.switching.threshold.threshold_nats
+    half_decibels = half_nats * NATS_TO_DB
+    whole_decibels = whole_nats * NATS_TO_DB
+    assert math.isclose(half_decibels, 12.0)
+    assert math.isclose(whole_decibels, 13.0)
+    assert half.metadata == {"qpu.round_period_microseconds": 0.5}
 
 
 def test_table_source_key_guards(tmp_path):
@@ -320,13 +276,8 @@ def test_table_source_key_guards(tmp_path):
         "threshold_table": "missing.csv",
     }
     missing_table_path = source_config(tmp_path, missing_table_card)
-    missing_table = load_experiment(missing_table_path)
     with pytest.raises(ValueError, match="does not exist"):
-        resolve_gap_threshold_nats(
-            missing_table,
-            physical_error_probability=NEAR_THRESHOLD_P,
-            distance=3,
-        )
+        load_experiment(missing_table_path)
 
 
 def test_online_card_guards(tmp_path):
@@ -575,10 +526,10 @@ class _OutsideCalibratedThreshold:
 class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
     """A threshold row from outside that builds its own per-point source.
 
-    for_sweep_point is what built_per_sweep_point promises. This row
-    starts at the point's threshold in nats and learns nothing, which is
-    all the law needs: what the experiments layer installs is an
-    instance of the row the table names.
+    for_point is what built_per_sweep_point promises. This row starts at
+    the point's threshold in nats and learns nothing, which is all the
+    law needs: what the experiments layer installs is an instance of the
+    row the table names.
     """
 
     reads_a_calibration_table = False
@@ -588,9 +539,11 @@ class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
     class Settings(threshold_sources.OnlineThreshold.Settings):
         """The online row's record, building this row for a point."""
 
-        def for_sweep_point(self, resolved) -> "_OutsideLearningThreshold":
+        def for_point(
+            self, *, distance, physical_error_probability
+        ) -> "_OutsideLearningThreshold":
             """One instance of this row for the point."""
-            del resolved
+            del distance, physical_error_probability
             return _OutsideLearningThreshold(self.threshold_nats)
 
 

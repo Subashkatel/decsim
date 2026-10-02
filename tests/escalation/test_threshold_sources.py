@@ -10,7 +10,9 @@ rule-of-three clean quota.
 """
 
 import math
+import pathlib
 import random
+import re
 import types
 
 import pytest
@@ -309,11 +311,16 @@ def test_a_threshold_that_is_no_nonnegative_number_is_refused(threshold_nats):
     fixed = threshold_sources.FixedThreshold.Settings
     table = threshold_sources.TableThreshold.Settings
     online = threshold_sources.OnlineThreshold.Settings
+    table_path = pathlib.Path("calibration.csv")
 
     with pytest.raises(ValueError, match=sentence):
         fixed(threshold_nats)
     with pytest.raises(ValueError, match=sentence):
-        table(table="calibration.csv", threshold_nats=threshold_nats)
+        table(
+            threshold_nats=threshold_nats,
+            table=table_path,
+            column="gth_eq4_wilson",
+        )
     with pytest.raises(ValueError, match=sentence):
         online(threshold_nats)
 
@@ -324,3 +331,84 @@ def test_an_online_step_that_is_not_a_number_is_refused():
 
     with pytest.raises(ValueError, match=sentence):
         online(1.0, step_db=float("nan"))
+
+
+def _write_table(tmp_path, text: str) -> pathlib.Path:
+    table_path = tmp_path / "calibration.csv"
+    table_path.write_text(text)
+    return table_path
+
+
+def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
+    tmp_path,
+):
+    """A float key matches within a relative 1e-9; the first row wins."""
+    table_path = _write_table(
+        tmp_path,
+        "distance,physical_error_probability,gth_eq4_wilson\n"
+        "5,0.003,19.5\n"
+        "5,0.0030000000001,12.0\n",
+    )
+
+    threshold = threshold_sources.TableThreshold.Settings.from_table(
+        table_path, distance=5, physical_error_probability=0.003
+    )
+
+    expected_nats = 19.5 * math.log(10.0) / 10.0
+    assert threshold.threshold_nats == expected_nats
+    assert threshold.table == table_path
+    assert threshold.column == "gth_eq4_wilson"
+
+
+def test_an_integer_key_matches_its_row_exactly(tmp_path):
+    """Only a float key reads back within a relative 1e-9 of its text.
+
+    A whole number is written exactly, so 1000000001 finds no row keyed
+    1000000000 although the two lie within 1e-9 of each other.
+    """
+    table_path = _write_table(
+        tmp_path, "distance,gth_eq4_wilson\n1000000000,12.0\n"
+    )
+    sentence = (
+        "has no row for {'distance': 1000000001}; its rows are "
+        "[{'distance': '1000000000'}]"
+    )
+    pattern = re.escape(sentence)
+
+    with pytest.raises(ValueError, match=pattern):
+        threshold_sources.TableThreshold.Settings.from_table(
+            table_path, distance=1000000001
+        )
+
+
+def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
+    tmp_path,
+):
+    table_path = _write_table(
+        tmp_path, "round_period_microseconds,gth_eq4_wilson\n1.0,12.0\n"
+    )
+    sentence = "keys its rows on round_period_microseconds, and the point"
+
+    with pytest.raises(ValueError, match=sentence):
+        threshold_sources.TableThreshold.Settings.from_table(
+            table_path, distance=5, physical_error_probability=0.003
+        )
+
+
+def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
+    """The seed text is the one the experiments layer's yaml points use."""
+    settings = threshold_sources.OnlineThreshold.Settings(2.0)
+
+    source = settings.for_point(distance=5, physical_error_probability=0.003)
+
+    expected = random.Random("online-threshold d=5 p=0.003")
+    assert source.random_generator.getstate() == expected.getstate()
+    assert source.controller.tracker.threshold == 2.0
+
+
+def test_an_online_source_with_no_error_probability_is_refused():
+    settings = threshold_sources.OnlineThreshold.Settings(2.0)
+    sentence = "physical_error_probability=None"
+
+    with pytest.raises(ValueError, match=sentence):
+        settings.for_point(distance=5, physical_error_probability=None)

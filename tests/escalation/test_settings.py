@@ -38,7 +38,11 @@ def test_switching_reads_both_cycle_costs_on_the_named_clock():
         "switch_cycles": 4,
     }
     settings = escalation_settings.SwitchingSettings.from_yaml(
-        section, clocks, None, confidence_signals.confidence_settings
+        section,
+        clocks,
+        None,
+        confidence_signals.confidence_settings,
+        {},
     )
     assert settings.clock.period_ticks == 8000
     assert settings.threshold_cycles == 3
@@ -49,7 +53,11 @@ def test_an_unnamed_escalation_clock_is_left_to_the_machine():
     clocks = config.ClockSettings({})
     section = {"kind": "switching", "gap_threshold_db": 20.0}
     settings = escalation_settings.SwitchingSettings.from_yaml(
-        section, clocks, None, confidence_signals.confidence_settings
+        section,
+        clocks,
+        None,
+        confidence_signals.confidence_settings,
+        {},
     )
     assert settings.clock is None
     assert settings.threshold_cycles == 0
@@ -86,7 +94,11 @@ def test_a_kind_that_keeps_one_decoder_fills_no_switching_slot():
     section = {"kind": "weak_baseline", "threshold_cycles": 0}
 
     switching = escalation_settings.SwitchingSettings.from_yaml(
-        section, clocks, None, confidence_signals.confidence_settings
+        section,
+        clocks,
+        None,
+        confidence_signals.confidence_settings,
+        {},
     )
 
     assert switching is None
@@ -98,7 +110,11 @@ def test_a_kind_that_keeps_one_decoder_refuses_the_confidence_keys():
 
     with pytest.raises(ValueError, match="decides on no confidence"):
         escalation_settings.SwitchingSettings.from_yaml(
-            section, clocks, None, confidence_signals.confidence_settings
+            section,
+            clocks,
+            None,
+            confidence_signals.confidence_settings,
+            {},
         )
 
 
@@ -126,7 +142,11 @@ def test_the_escalation_section_refuses_a_cost_by_its_yaml_path():
 
     with pytest.raises(ValueError, match="^escalation.switch_cycles must not"):
         escalation_settings.SwitchingSettings.from_yaml(
-            section, clocks, None, confidence_signals.confidence_settings
+            section,
+            clocks,
+            None,
+            confidence_signals.confidence_settings,
+            {},
         )
 
 

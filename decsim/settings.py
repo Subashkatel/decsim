@@ -71,6 +71,18 @@ REQUIRED_SECTIONS = (
     "pauli_frame",
     "workload",
 )
+# Where a point's yaml writes each fact a threshold row reads at the
+# point (threshold_sources.POINT_FACTS): the code distance, the physical
+# error probability the workload's maker takes, and the round period.
+POINT_FACT_PATHS = {
+    "distance": ("qpu", "distance"),
+    "physical_error_probability": (
+        "workload",
+        "arguments",
+        "physical_error_probability",
+    ),
+    "round_period_microseconds": ("qpu", "round_period_microseconds"),
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -218,11 +230,13 @@ class MachineSettings:
             decoder_manager_section, clocks
         )
         escalation_folder = section_folders.get("escalation")
+        facts = point_facts(sections)
         switching = escalation_settings.SwitchingSettings.from_yaml(
             escalation_section,
             clocks,
             escalation_folder,
             confidence_signals.confidence_settings,
+            facts,
         )
         windows = window_settings.WindowSettings.from_yaml(
             sections["windows"], clocks, switching
@@ -282,6 +296,24 @@ class MachineSettings:
             magic_state_factory=magic_state_factory,
             observation=observation,
         )
+
+
+def point_facts(sections: Mapping) -> dict:
+    """A point's facts by name, from its resolved sections; None if absent."""
+    facts = {}
+    for name, path in POINT_FACT_PATHS.items():
+        facts[name] = _value_at(sections, path)
+    return facts
+
+
+def _value_at(sections: Mapping, path: tuple) -> object:
+    """The value a path of keys reaches, or None where a key is missing."""
+    value = sections
+    for key in path:
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(key)
+    return value
 
 
 def _checked(

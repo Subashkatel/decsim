@@ -199,11 +199,9 @@ def build_burst_detector(
 def _threshold_source(settings: escalation_settings.SwitchingSettings):
     """The point's threshold source, built from its row's record.
 
-    A row the experiments layer builds once per point (it learns across
-    the point's shots) arrives already built as online_threshold; every
-    other row's record builds its source here. The table record holds
-    its number once the experiments layer has looked the point up
-    (ExperimentConfig.point_task), and refuses to build before.
+    A row built once per point (it learns across the point's shots)
+    arrives already built as online_threshold; every other row's record
+    builds its source here.
     """
     if settings.online_threshold is not None:
         return settings.online_threshold

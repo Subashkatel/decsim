@@ -34,6 +34,7 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config_module
+import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
 import decsim.machine as machine_module
@@ -700,23 +701,30 @@ def _point_task_of(
     resolved: dict,
     values: Mapping,
 ) -> collect.Task:
-    """A point's task: its workload made, its escalation's threshold set.
+    """A point's task: its workload made, its online threshold source built.
 
-    The calibration table and the online source read the point's values
-    by path from its resolved sections, so a point that sweeps no
-    distance or error rate still finds them.
+    The online source's seed reads the point's distance and error rate
+    from its resolved sections, so a point that sweeps neither still
+    finds them.
     """
     workload = settings.workload.made()
-    switching = settings.switching
-    online_threshold = None
-    if switching is not None:
-        switching = switching.at_sweep_point(resolved)
-        online_threshold = switching.threshold.for_sweep_point(resolved)
-    point_settings = dataclasses.replace(
-        settings, workload=workload, switching=switching
-    )
+    online_threshold = _online_threshold_of(settings.switching, resolved)
+    point_settings = dataclasses.replace(settings, workload=workload)
     metadata = copy.deepcopy(dict(values))
     return collect.Task(point_settings, metadata, online_threshold)
+
+
+def _online_threshold_of(
+    switching: Optional[escalation_settings.SwitchingSettings], resolved: dict
+) -> Optional[Any]:
+    """The source the point's shots share, when its threshold row has one."""
+    if switching is None:
+        return None
+    facts = machine_settings.point_facts(resolved)
+    return switching.threshold.for_point(
+        distance=facts["distance"],
+        physical_error_probability=facts["physical_error_probability"],
+    )
 
 
 def _split_record_options(resolved: dict) -> tuple:

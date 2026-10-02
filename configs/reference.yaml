@@ -198,10 +198,11 @@ escalation:
 #                                  # starts at gap_threshold_db and adapts it
 #                                  # across the point's shots (serial only)
 #   threshold_table: cal.csv       # table only: a calibration csv whose key
-#                                  # columns are headed by the yaml path of
-#                                  # the setting each matches, as
-#                                  # qpu.distance and workload.arguments.
-#                                  # physical_error_probability, with one
+#                                  # columns are headed by the point fact
+#                                  # each matches: distance (qpu.distance),
+#                                  # physical_error_probability (workload.
+#                                  # arguments) or round_period_microseconds
+#                                  # (qpu), with one
 #                                  # threshold column per method, in dB, set
 #                                  # as Toshio 2510.25222 Sec. III B sets g_th
 #                                  # (brute force, or Eq. (4)); path relative to this

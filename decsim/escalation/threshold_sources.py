@@ -6,9 +6,10 @@ the paper's constant g_th (Toshio et al. 2510.25222 Sec. III A, step
 shots with two loops: a rate tracker that pins the escalation fraction
 at a target, and an audit lane that strong-decodes a random sample of
 kept windows to learn whether the target is safe; it is one instance
-per sweep point, shared by every shot. The third source, TableThreshold,
-looks each sweep point up in an offline calibration csv
-(TableThreshold.Settings.at_sweep_point), so at run time it decides as
+per sweep point, shared by every shot, and built for it from the
+point's facts (OnlineThreshold.Settings.for_point). The third source,
+TableThreshold, looks a point's facts up in an offline calibration csv
+(TableThreshold.Settings.from_table), so at run time it decides as
 FixedThreshold does. Every row fills the ThresholdSource port
 (decsim/ports.py) and is built from its own Settings record, which the
 switching settings hold. Thresholds and gaps are natural-log weight
@@ -29,9 +30,13 @@ import decsim.config as config
 import decsim.records.decoding as decoding_records
 import decsim.tables as tables
 
-# The resolved paths the online source's seed reads its two numbers from.
-SEED_DISTANCE_PATH = "qpu.distance"
-SEED_PROBABILITY_PATH = "workload.arguments.physical_error_probability"
+# The point's facts a calibration table keys its rows on, each column
+# headed by the fact's name.
+POINT_FACTS = (
+    "distance",
+    "physical_error_probability",
+    "round_period_microseconds",
+)
 # Decibels are 10 log10 of the likelihood ratio; matching weights are
 # its natural log: nats = decibels * ln(10) / 10.
 LN_TEN = math.log(10.0)
@@ -84,10 +89,10 @@ class FixedThreshold:
     reads_a_calibration_table says its number comes from a csv, which
     opens threshold_table and threshold_column and closes
     gap_threshold_db; built_per_sweep_point says the row builds its own
-    instance for a sweep point, through for_sweep_point, which is what
-    the online card configures, while a row that declares it False is
-    built by the root from the point's threshold in nats, its one
-    constructor argument.
+    instance for a sweep point, through for_point, which is what the
+    online card configures, while a row that declares it False is built
+    by the root from the point's threshold in nats, its one constructor
+    argument.
     """
 
     audits_by_escalating = False
@@ -103,16 +108,14 @@ class FixedThreshold:
         def __post_init__(self) -> None:
             _check_threshold_nats(self.threshold_nats)
 
-        def at_sweep_point(
-            self, resolved: Mapping
-        ) -> "FixedThreshold.Settings":
-            """A constant is the same at every sweep point."""
-            del resolved
-            return self
-
-        def for_sweep_point(self, resolved: Mapping) -> None:
+        def for_point(
+            self,
+            *,
+            distance: Optional[int],
+            physical_error_probability: Optional[float],
+        ) -> None:
             """A constant builds nothing shared across a point's shots."""
-            del resolved
+            del distance, physical_error_probability
 
         def build(self) -> "FixedThreshold":
             """A fresh source at this threshold."""
@@ -141,97 +144,71 @@ class FixedThreshold:
 class TableThreshold(FixedThreshold):
     """The calibration table's g_th for this sweep point.
 
-    An offline calibration csv holds one row per (distance, p) with the
+    An offline calibration csv holds one row per point with the
     threshold in decibels, set as Toshio et al. 2510.25222 Sec. III B
     sets it (by brute force, or as Eq. (4)'s smallest g_th, line 890);
-    the experiments layer looks the point up and converts it before the
-    machine is built (Settings.at_sweep_point), so at run time this row
-    decides on a constant exactly as FixedThreshold does. What it
-    declares that the fixed row does not is where its number came from,
-    which is what the settings need to know to demand the csv.
+    the point is looked up and converted before the machine is built
+    (Settings.from_table), so at run time this row decides on a constant
+    exactly as FixedThreshold does. What it declares that the fixed row
+    does not is where its number came from, which is what the settings
+    need to know to demand the csv.
     """
 
     reads_a_calibration_table = True
 
     @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """The csv and its column; the point's number once looked up.
+    class Settings(FixedThreshold.Settings):
+        """The point's threshold, and the csv column it was read from.
 
-        table is escalation.threshold_table and column
-        escalation.threshold_column. threshold_nats is None until the
-        experiments layer looks the sweep point up (at_sweep_point).
-        base_directory resolves a relative table; it is a label, no
-        part of a point's id, since the number the table gives a point
-        names the point and the folder the table sits in does not.
+        table is a label, no part of a point's id, since the number the
+        table gives a point names the point and the file it sits in
+        does not.
         """
 
-        table: str
-        column: str = "gth_eq4_wilson"
-        threshold_nats: Optional[float] = None
-        base_directory: Optional[pathlib.Path] = dataclasses.field(
-            compare=False, default=None
-        )
+        table: pathlib.Path = dataclasses.field(compare=False)
+        column: str
 
-        def __post_init__(self) -> None:
-            if self.threshold_nats is None:
-                return
-            _check_threshold_nats(self.threshold_nats)
-
-        def at_sweep_point(
-            self, resolved: Mapping
+        @classmethod
+        def from_table(
+            cls,
+            table: pathlib.Path,
+            column: str = "gth_eq4_wilson",
+            *,
+            distance: Optional[int] = None,
+            physical_error_probability: Optional[float] = None,
+            round_period_microseconds: Optional[float] = None,
         ) -> "TableThreshold.Settings":
-            """The sweep point's threshold, looked up in the calibration csv.
+            """The threshold of the point these facts name, in its column.
 
-            The point is refused when the table does not certify it,
-            instead of guessed. The table's key columns are headed by
-            yaml paths (qpu.distance,
-            workload.arguments.physical_error_probability), each matched
-            against the value at that path in the point's resolved
-            sections, so a point that sweeps neither still finds its
-            row; every other column is one method's threshold in dB
-            (Toshio et al. 2510.25222 Sec. III B sets g_th by brute force
-            over P_L(g_th), lines 855-863, or as the smallest g_th with
-            P_L,th(g_th) <= epsilon P_L,strong, Eq. (4) at line 890). The
-            first row that holds the point wins.
+            The table's key columns are headed by the POINT_FACTS they
+            match, and the point is refused when the table does not
+            certify it, instead of guessed; every other column is one
+            method's threshold in dB (Toshio et al. 2510.25222 Sec. III B
+            sets g_th by brute force over P_L(g_th), lines 855-863, or as
+            the smallest g_th with P_L,th(g_th) <= epsilon P_L,strong,
+            Eq. (4) at line 890). The first row that holds the point
+            wins.
             """
-            table_path = self._table_path()
-            rows = _table_rows(table_path, self.column)
-            for row in rows:
-                point = _point_at(row, resolved, table_path)
-                if _is_point(row, point):
-                    cell = row[self.column]
-                    threshold_nats = _certified_nats(
-                        cell, table_path, self.column, point
-                    )
-                    return dataclasses.replace(
-                        self, threshold_nats=threshold_nats
-                    )
-            _refuse_a_point_off_the_table(rows, resolved, table_path)
-
-        def for_sweep_point(self, resolved: Mapping) -> None:
-            """A table builds nothing shared across a point's shots."""
-            del resolved
-
-        def build(self) -> "TableThreshold":
-            """A fresh source at the point's threshold, once looked up."""
-            if self.threshold_nats is None:
-                raise ValueError(
-                    "a table threshold resolves the threshold per sweep "
-                    "point (at_sweep_point) and holds no threshold_nats "
-                    "before; look the point up first, build the machine "
-                    "through the experiments layer "
-                    "(ExperimentConfig.point_task), or use a fixed threshold"
-                )
-            return TableThreshold(self.threshold_nats)
-
-        def _table_path(self) -> pathlib.Path:
-            table_path = pathlib.Path(self.table)
-            is_relative = not table_path.is_absolute()
-            if is_relative and self.base_directory is not None:
-                table_path = self.base_directory / table_path
+            table_path = pathlib.Path(table)
             if not table_path.exists():
                 raise ValueError(f"threshold_table {table_path} does not exist")
-            return table_path
+            facts = {
+                "distance": distance,
+                "physical_error_probability": physical_error_probability,
+                "round_period_microseconds": round_period_microseconds,
+            }
+            columns, rows = _table_rows(table_path, column)
+            point = _point_of(columns, facts, table_path)
+            row = _first_row_holding(rows, point, table_path)
+            cell = row[column]
+            threshold_nats = _certified_nats(cell, table_path, column, point)
+            return cls(
+                threshold_nats=threshold_nats, table=table_path, column=column
+            )
+
+        def build(self) -> "TableThreshold":
+            """A fresh source at the point's threshold."""
+            return TableThreshold(self.threshold_nats)
 
 
 class EscalationRateTracker:
@@ -501,23 +478,22 @@ class OnlineThreshold:
             """The step in natural-log weight units."""
             return decibels_to_nats(self.step_db)
 
-        def at_sweep_point(
-            self, resolved: Mapping
-        ) -> "OnlineThreshold.Settings":
-            """The start and the knobs are the same at every sweep point."""
-            del resolved
-            return self
-
-        def for_sweep_point(self, resolved: Mapping) -> "OnlineThreshold":
+        def for_point(
+            self,
+            *,
+            distance: Optional[int],
+            physical_error_probability: Optional[float],
+        ) -> "OnlineThreshold":
             """The one instance a sweep point's shots share, point-seeded.
 
             Both loops are assembled here, where they are read: the rate
             tracker starting at the threshold in nats, the audit lane,
             and the target adjustment. The random stream is seeded from
-            the point's distance and error rate alone, read by path from
-            its resolved sections, so a rerun of the point draws the same
+            the point's distance and physical error probability alone,
+            as they are written, so a rerun of the point draws the same
             audits.
             """
+            _refuse_a_seed_with_no_fact(distance, physical_error_probability)
             step_nats = self.step_nats()
             tracker = EscalationRateTracker(
                 target_escalation_rate=self.target_escalation_rate,
@@ -532,13 +508,8 @@ class OnlineThreshold:
                 max_escalation_rate=self.max_escalation_rate,
             )
             controller = OnlineThresholdController(tracker, audit, adjustment)
-            reader = "the online threshold's seed"
-            distance = config.setting_at(resolved, SEED_DISTANCE_PATH, reader)
-            probability = config.setting_at(
-                resolved, SEED_PROBABILITY_PATH, reader
-            )
             generator = random.Random(
-                f"online-threshold d={distance} p={probability}"
+                f"online-threshold d={distance} p={physical_error_probability}"
             )
             return OnlineThreshold(controller, generator)
 
@@ -546,10 +517,9 @@ class OnlineThreshold:
             """Refused: the source learns across a point's shots."""
             raise ValueError(
                 "an online threshold learns across a sweep point's shots, "
-                "so it is built once per point by for_sweep_point and "
-                "shared: set it as the switching slot's online_threshold, "
-                "or build the machine through the experiments layer "
-                "(ExperimentConfig.point_task)"
+                "so it is built once per point by for_point and shared: "
+                "give it to the point as its online_threshold, or set it "
+                "as the switching slot's online_threshold for one machine"
             )
 
     def __init__(
@@ -707,8 +677,20 @@ def _check_online_rates(online) -> None:
         )
 
 
-def _table_rows(table_path: pathlib.Path, column: str) -> list:
-    """The table's rows, which name the threshold column and a key column.
+def _refuse_a_seed_with_no_fact(distance, physical_error_probability) -> None:
+    """The seed text names both facts, so neither may be missing."""
+    if distance is not None and physical_error_probability is not None:
+        return
+    raise ValueError(
+        "an online threshold seeds its audits from the point's distance "
+        "and physical_error_probability, and the point gives "
+        f"distance={distance!r}, "
+        f"physical_error_probability={physical_error_probability!r}"
+    )
+
+
+def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
+    """The table's columns and rows; the threshold column must be one.
 
     A table with no key column would match every point to its first row,
     a wrong threshold with no sign of it, so it is refused.
@@ -716,9 +698,7 @@ def _table_rows(table_path: pathlib.Path, column: str) -> list:
     with open(table_path, newline="") as table_file:
         reader = csv.DictReader(table_file)
         rows = list(reader)
-    if not rows:
-        return rows
-    columns = list(rows[0])
+        columns = reader.fieldnames or []
     if column not in columns:
         raise ValueError(
             f"threshold_table {table_path} has no column {column!r}; its "
@@ -728,28 +708,51 @@ def _table_rows(table_path: pathlib.Path, column: str) -> list:
     if not key_columns:
         raise ValueError(
             f"threshold_table {table_path} has no key column; a key column "
-            "is headed by the yaml path of the setting it matches, as "
-            "qpu.distance"
+            f"is headed by the point fact it matches, one of {POINT_FACTS}"
         )
-    return rows
+    return columns, rows
 
 
 def _key_columns(columns: list) -> list:
-    """The columns headed by a yaml path, which name a table's points."""
-    keys = []
-    for column in columns:
-        if "." in column:
-            keys.append(column)
-    return keys
+    """The columns headed by a point fact, which name a table's points."""
+    return [column for column in columns if column in POINT_FACTS]
 
 
-def _point_at(row: dict, resolved: Mapping, table_path) -> dict:
+def _point_of(columns: list, facts: Mapping, table_path) -> dict:
     """The point's value at each of the table's key columns."""
     point = {}
-    reader = f"threshold_table {table_path}"
-    for column in _key_columns(list(row)):
-        point[column] = config.setting_at(resolved, column, reader)
+    for column in _key_columns(columns):
+        value = facts[column]
+        if value is None:
+            raise ValueError(
+                f"threshold_table {table_path} keys its rows on {column}, "
+                f"and the point gives no {column}"
+            )
+        point[column] = value
     return point
+
+
+def _first_row_holding(rows: list, point: dict, table_path) -> dict:
+    """The first row whose key cells hold the point; none is refused."""
+    for row in rows:
+        if _is_point(row, point):
+            return row
+    calibrated = _calibrated_points(rows, point)
+    raise ValueError(
+        f"threshold_table {table_path} has no row for {point}; its rows "
+        f"are {calibrated}"
+    )
+
+
+def _calibrated_points(rows: list, point: dict) -> list:
+    """Each row's key cells, the points the table does certify."""
+    calibrated = []
+    for row in rows:
+        keys = {}
+        for column in point:
+            keys[column] = row[column]
+        calibrated.append(keys)
+    return calibrated
 
 
 def _is_point(row: dict, point: dict) -> bool:
@@ -773,24 +776,6 @@ def _cell_holds(cell: str, value) -> bool:
         return fractions.Fraction(cell) == value
     number = float(cell)
     return math.isclose(number, value, rel_tol=1e-9)
-
-
-def _refuse_a_point_off_the_table(
-    rows: list, resolved: Mapping, table_path
-) -> None:
-    """The point, and the points the table does certify."""
-    point = {}
-    calibrated = []
-    for row in rows:
-        point = _point_at(row, resolved, table_path)
-        keys = {}
-        for column in point:
-            keys[column] = row[column]
-        calibrated.append(keys)
-    raise ValueError(
-        f"threshold_table {table_path} has no row for {point}; its rows "
-        f"are {calibrated}"
-    )
 
 
 def _certified_nats(

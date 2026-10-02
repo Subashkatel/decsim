@@ -168,8 +168,8 @@ def setting_at(sections: Mapping, path: str, reader: str) -> object:
     """The value at a dotted yaml path, a step that is not there refused.
 
     One lookup serves every reader of a point's resolved sections: a
-    sweep axis's section, a whole-value reference, a calibration table's
-    key columns and the online threshold's seed. reader names who asked.
+    sweep axis's section and a whole-value reference. reader names who
+    asked.
     """
     value = sections
     walked = ()

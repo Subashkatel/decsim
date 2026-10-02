@@ -8,8 +8,6 @@ and the escalation ports stay unbound.
 
 import types
 
-import pytest
-
 import decsim.build.escalation as escalation_build
 import decsim.burst_detectors.event_count.detector as event_count
 import decsim.confidence.complementary as complementary
@@ -88,24 +86,6 @@ def test_every_machine_builds_its_own_policy_from_one_settings_record():
 
     assert first.policy is not second.policy
     assert first.strong_redecode is not second.strong_redecode
-
-
-def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
-    """The table row is resolved per sweep point, before the root builds."""
-    confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.TableThreshold.Settings(
-        table="calibration.csv"
-    )
-    settings = escalation_settings.SwitchingSettings(
-        confidence=confidence, threshold=threshold
-    )
-    weak = _weak()
-    engine = engine_module.Engine()
-
-    with pytest.raises(ValueError) as refusal:
-        escalation_build.Switching.build(settings, weak, engine)
-
-    assert "resolves the threshold per sweep point" in str(refusal.value)
 
 
 def test_the_strong_window_record_declares_whether_it_absorbs():

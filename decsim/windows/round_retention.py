@@ -301,9 +301,15 @@ class RoundRetention:
     # ---- what a strong window holds
 
     def open_operation_store(self, operation_id: Any) -> None:
-        """Open the operation's rounds in the store its windows read."""
+        """Open the operation's rounds in the store its windows read.
+
+        A run with no decoder has no such store and opens nothing.
+        """
+        primary_store = self.primary_store
+        if primary_store is None:
+            return
         # Operation identities are opaque to retention.
-        self.primary_store.open_operation(operation_id)
+        primary_store.open_operation(operation_id)
 
     def has_operation_store(self, operation_id: Any) -> bool:
         """Whether the operation's syndrome RAM is still open."""

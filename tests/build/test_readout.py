@@ -332,6 +332,21 @@ def test_a_strong_primary_run_reads_the_room_side():
     assert readout.primary_output is readout.strong_output
 
 
+def test_a_run_with_no_decoder_builds_no_syndrome_buffer():
+    """No decoder reads a store, so neither store nor its ends is built."""
+    operation = declared_run.memory_operation(emits_detector_data=False)
+    workload = declared_run.declared_workload([operation], 4)
+    settings = machine_settings.MachineSettings(workload=workload)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    readout = machine.readout
+
+    assert readout.weak_syndrome_buffer is None
+    assert readout.strong_syndrome_buffer is None
+    assert readout.primary_output is None
+    assert result.terminal_status == "complete"
+
+
 def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():
     """Otherwise the reference latency charges the same work twice."""
     settings = _settings_with_readout_cost(

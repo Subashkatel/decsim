@@ -326,8 +326,10 @@ def store_slots(
     The tier that decodes the plan's windows reads its own store through
     the chip's pool, and a switching run's strong tier reads the strong
     store through the host's; each pool says whether its units read the
-    rounds in place.
+    rounds in place. A run with no decoder reads neither store.
     """
+    if pool.active is None:
+        return None, None
     chip_reads_in_place = not pool.chip.copies_input
     if window_tier is window_records.DecoderTier.STRONG:
         strong_store_slot = readout_part.StoreSlot(

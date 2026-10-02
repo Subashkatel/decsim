@@ -80,8 +80,6 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
@@ -293,23 +291,6 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         "the rows are " + tier_rows()
     )
     with pytest.raises(ValueError, match=sentence):
-        machine_module.Machine.build(settings)
-
-
-def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
-    # The weak baseline never reads the strong store, but the yaml still
-    # names its kind, and a kind off the table is a mistake in the yaml.
-    strong_syndrome_buffer = syndrome_buffer_settings.SyndromeBufferSettings(
-        kind="off_table"
-    )
-    settings = machine_settings.MachineSettings(
-        strong_syndrome_buffer=strong_syndrome_buffer
-    )
-    with pytest.raises(
-        ValueError,
-        match="strong_syndrome_buffer.kind 'off_table' is not a row of its "
-        r"table; the rows are \['ported_syndrome_buffer', 'syndrome_buffer'\]",
-    ):
         machine_module.Machine.build(settings)
 
 
@@ -614,7 +595,7 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     program = memory_programs.memory_program()
     settings = _settings(program, "live", placement)
     window_bits = SIX_ROUND_WINDOW_BITS[placement]
-    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    buffer = syndrome_buffer_module.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
     # a three microsecond strong input keeps the live stream running
@@ -823,7 +804,7 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     windows = dataclasses.replace(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    one_round = syndrome_buffer_settings.SyndromeBufferSettings(bits=1)
+    one_round = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -1031,7 +1012,7 @@ def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")
     window_bits = SIX_ROUND_WINDOW_BITS["controller"]
-    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    buffer = syndrome_buffer_module.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(
         settings.strong_decoder, kind=5.0, unit_memory=memory
@@ -1773,7 +1754,7 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 
 
 class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
-    """A table row for the plug-in test: the store, counting its writes."""
+    """A store for the plug-in test: the plain store, counting its writes."""
 
     def __init__(self, settings, engine):
         syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
@@ -1786,8 +1767,18 @@ class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
         )
 
 
-def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
-    """Gate point 1's settings run to completion on a store added as a row."""
+@dataclasses.dataclass(frozen=True)
+class CountingSyndromeBufferSettings(
+    syndrome_buffer_module.SyndromeBufferSettings
+):
+    """The plain store's settings, building the counting store."""
+
+    def build(self, engine) -> CountingSyndromeBuffer:
+        return CountingSyndromeBuffer(self, engine)
+
+
+def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
+    """Gate point 1's settings run to completion on a store plugged in."""
     config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
@@ -1798,15 +1789,14 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
         },
     )
     settings = point.settings
-    counting = dataclasses.replace(
-        settings.weak_syndrome_buffer, kind="counting"
+    weak_store = settings.weak_syndrome_buffer
+    counting = CountingSyndromeBufferSettings(
+        bits=weak_store.bits,
+        clock=weak_store.clock,
+        write_cycles=weak_store.write_cycles,
+        read_cycles=weak_store.read_cycles,
     )
     settings = dataclasses.replace(settings, weak_syndrome_buffer=counting)
-    monkeypatch.setitem(
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
-        "counting",
-        CountingSyndromeBuffer,
-    )
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -2417,7 +2407,7 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     input to land instead of being dropped.
     """
     seven_rounds_bits = 7 * BITS_PER_ROUND
-    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(
+    seven_rounds = syndrome_buffer_module.SyndromeBufferSettings(
         bits=seven_rounds_bits
     )
     machine = declared_run.weak_only_run(

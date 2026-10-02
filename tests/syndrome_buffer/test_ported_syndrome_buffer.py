@@ -31,7 +31,6 @@ D3_LAST_WINDOW_BITS = (8, 8, 8, 8, 8, 8, 12)
 # the d = 11 windows: 60 then 21 x 120 bits, or 22 x 120 then 180
 D11_FIRST_WINDOW_BITS = (60,) + (120,) * 21
 D11_READOUT_WINDOW_BITS = (120,) * 22 + (180,)
-PORTED_ROWS = ported_syndrome_buffer.SYNDROME_BUFFERS
 # read, write and read/write port counts; each reads and writes somewhere
 PORT_SHAPES = (
     (1, 1, 0),
@@ -70,13 +69,10 @@ def law_completions(requests, port_kinds, cycles_per_access, latency_cycles):
     return completions
 
 
-def _store(engine, **row_keys) -> ported_syndrome_buffer.PortedSyndromeBuffer:
+def _store(engine, **port_keys) -> ported_syndrome_buffer.PortedSyndromeBuffer:
     clock = config.Clock(PERIOD_TICKS)
-    row_settings = ported_syndrome_buffer.PortedSyndromeBuffer.Settings(
-        **row_keys
-    )
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        kind="ported_syndrome_buffer", clock=clock, row_settings=row_settings
+    settings = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=clock, **port_keys
     )
     return ported_syndrome_buffer.PortedSyndromeBuffer(settings, engine)
 
@@ -255,7 +251,7 @@ def test_each_access_is_reported_with_its_port_and_its_three_ticks():
 
 def test_the_default_shape_is_one_byte_fifo_port_each_way():
     """sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 15-16."""
-    defaults = ported_syndrome_buffer.PortedSyndromeBuffer.Settings()
+    defaults = ported_syndrome_buffer.PortedSyndromeBufferSettings()
 
     assert (defaults.read_ports, defaults.write_ports) == (1, 1)
     assert defaults.read_write_ports == 0
@@ -266,8 +262,8 @@ def test_the_default_shape_is_one_byte_fifo_port_each_way():
 
 def _section_settings(section):
     clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
-    return syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks, PORTED_ROWS
+    return syndrome_buffer_settings.from_yaml(
+        section, "weak_syndrome_buffer", clocks
     )
 
 
@@ -311,21 +307,12 @@ def test_a_ported_key_out_of_its_domain_is_refused_by_name(
         _section_settings(section)
 
 
-def test_a_ported_strong_syndrome_buffer_is_refused():
-    section = {"kind": "ported_syndrome_buffer"}
-
-    with pytest.raises(
-        ValueError, match="strong_syndrome_buffer.kind ported_syndrome_buffer"
-    ):
-        syndrome_buffer_settings.check_strong_section_charges_nothing(section)
-
-
 def test_a_declared_weak_run_on_a_ported_store_delays_the_decode_only():
     """The byte port's reads and writes cost cycles the flat row does not."""
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"kind": "ported_syndrome_buffer", "clock": "storage"}
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks, PORTED_ROWS
+    settings = syndrome_buffer_settings.from_yaml(
+        section, "weak_syndrome_buffer", clocks
     )
     free = declared_run.weak_only_run()
     ported = declared_run.weak_only_run(weak_syndrome_buffer=settings)

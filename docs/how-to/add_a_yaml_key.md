@@ -14,9 +14,8 @@ record is built by its own package's `settings.py`.
 
 Add the field to the dataclass, with a default, read it in the
 section's `from_yaml`, and add its name to the tuple of keys the
-section shares (`WINDOWS_KEYS` here; `DECODER_KEYS`,
-`SYNDROME_BUFFER_KEYS`, `QPU_KEYS` and `WORKLOAD_KEYS` beside the other
-tables). A key off that tuple is handed to the kind's row, and a row
+section shares (`WINDOWS_KEYS` here; `DECODER_KEYS`, `QPU_KEYS` and
+`WORKLOAD_KEYS` beside the other tables). A key off that tuple is handed to the kind's row, and a row
 that does not declare it refuses it:
 
 ```python

@@ -26,7 +26,6 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 from decsim.syndrome_buffer import (
@@ -139,7 +138,7 @@ def _nothing() -> None:
 def room_side(
     engine, bits=None, listener=None, windows=None, detection_events=None
 ):
-    store_settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
+    store_settings = syndrome_buffer_module.SyndromeBufferSettings(bits=bits)
     store = syndrome_buffer_module.SyndromeBuffer(store_settings, engine)
     if listener is not None:
         store.trace.round_stored.connect(listener.round_stored)
@@ -619,7 +618,7 @@ def test_a_region_asks_the_store_for_each_round_beside_the_ones_before_it():
     receiver = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(
         engine
     )
-    store_settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=9)
+    store_settings = syndrome_buffer_module.SyndromeBufferSettings(bits=9)
     receiver.store = RoomAskingStore(store_settings, engine)
     receiver.detection_events = RecordingFormer()
     carried = region(1, 2)

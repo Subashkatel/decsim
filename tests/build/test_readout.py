@@ -29,7 +29,6 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.settings as store_settings
 import tests.declared_run as declared_run
 
 THIS_FILE = pathlib.Path(__file__)
@@ -173,50 +172,35 @@ def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
         )
 
 
-def test_buffer_zero_is_built_from_the_kind_the_section_names():
-    settings = _machine_settings()
+def test_the_weak_store_is_the_one_its_settings_build():
+    settings = _ported_run_with_a_rate(None)
 
     machine = machine_module.Machine.build(settings)
 
-    kind = settings.weak_syndrome_buffer.kind
     store = machine.readout.weak_syndrome_buffer
-    assert isinstance(store, ported_syndrome_buffer.SYNDROME_BUFFERS[kind])
+    assert type(store) is ported_syndrome_buffer.PortedSyndromeBuffer
 
 
-def test_a_syndrome_buffer_kind_that_names_no_row_is_refused():
-    weak_syndrome_buffer = store_settings.SyndromeBufferSettings(kind="tape")
-    settings = _machine_settings(weak_syndrome_buffer=weak_syndrome_buffer)
-
-    with pytest.raises(ValueError) as refusal:
-        machine_module.Machine.build(settings)
-
-    assert "weak_syndrome_buffer.kind" in str(refusal.value)
-
-
-# A ported strong store's row settings: the default byte FIFO, and AFS's
-# 32-bit word at four cycles an access (ported_syndrome_buffer.py).
-PORTED_ROW_SETTINGS = [
-    ported_syndrome_buffer.PortedSyndromeBuffer.Settings(),
-    ported_syndrome_buffer.PortedSyndromeBuffer.Settings(
-        word_bits=32, cycles_per_access=4
+# A ported strong store: the default byte FIFO, and AFS's 32-bit word at
+# four cycles an access (ported_syndrome_buffer.py).
+PORTED_CLOCK = config.Clock(1000)
+PORTED_STORES = [
+    ported_syndrome_buffer.PortedSyndromeBufferSettings(clock=PORTED_CLOCK),
+    ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=PORTED_CLOCK, word_bits=32, cycles_per_access=4
     ),
 ]
 
 
-@pytest.mark.parametrize("row_settings", PORTED_ROW_SETTINGS)
+@pytest.mark.parametrize("strong_syndrome_buffer", PORTED_STORES)
 @pytest.mark.parametrize("plan", ["weak_only", "strong_only"])
-def test_a_ported_strong_store_is_refused_at_build(row_settings, plan):
+def test_a_ported_strong_store_is_refused_at_build(
+    strong_syndrome_buffer, plan
+):
     """Its writes land unbooked, so its reads alone would be priced.
 
-    The build refuses it whether or not a tier reads the room side, as
-    it refuses a kind off the table.
+    The build refuses it whether or not a tier reads the room side.
     """
-    storage_clock = config.Clock(1000)
-    strong_syndrome_buffer = store_settings.SyndromeBufferSettings(
-        kind="ported_syndrome_buffer",
-        clock=storage_clock,
-        row_settings=row_settings,
-    )
     settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
     planned = _with_one_tier(settings, plan)
 
@@ -227,7 +211,7 @@ def test_a_ported_strong_store_is_refused_at_build(row_settings, plan):
 def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
     tmp_path,
 ):
-    """Both routes ask the one check, so they refuse in one sentence."""
+    """Both routes reach the one check, so they refuse in one sentence."""
     configs = tmp_path / "configs"
     shutil.copytree(CONFIGS, configs)
     path = configs / "experiments" / "data_movement" / "data_movement.yaml"
@@ -239,24 +223,25 @@ def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
     values["workload.arguments.physical_error_probability"] = 0.001
     point = config.point_task(values)
     settings = point.settings
-    ported_strong = dataclasses.replace(
-        settings.strong_syndrome_buffer, kind="ported_syndrome_buffer"
-    )
+    ported_strong = ported_syndrome_buffer.PortedSyndromeBufferSettings()
     python_built = dataclasses.replace(
         settings, strong_syndrome_buffer=ported_strong
     )
     ported_section = "strong_syndrome_buffer:\n  kind: ported_syndrome_buffer\n"
     ported_text = text + ported_section
     path.write_text(ported_text)
+    ported_config = experiment.load_experiment(path)
+    ported_point = ported_config.point_task(values)
+    yaml_built = ported_point.settings
 
     with pytest.raises(ValueError) as yaml_refusal:
-        experiment.load_experiment(path)
+        machine_module.Machine.build(yaml_built)
     with pytest.raises(ValueError) as python_refusal:
         machine_module.Machine.build(python_built)
 
     yaml_sentence = str(yaml_refusal.value)
     python_sentence = str(python_refusal.value)
-    assert yaml_sentence.endswith(python_sentence)
+    assert yaml_sentence == python_sentence
 
 
 def test_a_weak_only_run_reads_nothing_from_the_room_side():
@@ -417,8 +402,8 @@ def _ported_run_with_a_rate(bits_per_microsecond):
     path = dataclasses.replace(path, channel=channel)
     links = dataclasses.replace(links, weak_buffer_to_weak_decoder=path)
     storage_clock = config.Clock(1000)
-    ported = store_settings.SyndromeBufferSettings(
-        kind="ported_syndrome_buffer", clock=storage_clock
+    ported = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=storage_clock
     )
     return _machine_settings(weak_syndrome_buffer=ported, links=links)
 

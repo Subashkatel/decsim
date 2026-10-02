@@ -32,7 +32,6 @@ import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
@@ -84,7 +83,7 @@ def held_rounds() -> syndrome_round_sender.HeldRounds:
 
 
 def store(bits=None, waiting_line=None, listener=None):
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
+    settings = syndrome_buffer_module.SyndromeBufferSettings(bits=bits)
     engine = engine_module.Engine()
     the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if waiting_line is not None:
@@ -653,9 +652,8 @@ def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, write_cycles=3
     )
     the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
 

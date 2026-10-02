@@ -35,7 +35,6 @@ import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 from decsim.syndrome_buffer import (
     weak_syndrome_round_receiver as weak_syndrome_round_receiver,
@@ -165,7 +164,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
     links.trace.transfer_delivered.connect(ledger.on_transfer)
     if settings is None:
-        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        settings = syndrome_buffer_module.SyndromeBufferSettings()
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if windows is None:
         windows = RecordingWindows(engine)
@@ -255,9 +254,8 @@ def test_a_window_round_is_in_flight_until_its_write_publishes_it():
     engine = engine_module.Engine()
     profile = priced_cwb_profile()
     clock = config.Clock(CYCLE_TICKS)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=5)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, write_cycles=5
     )
     transmitter, _store, windows, _recorder, _ledger = transmitter_with(
         engine, profile, settings=settings

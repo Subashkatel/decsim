@@ -160,12 +160,12 @@ In `decsim/escalation/settings.py`. A row of it is named under `escalation.stron
 
 ## `SYNDROME_BUFFERS`
 
-In `decsim/syndrome_buffer/ported_syndrome_buffer.py`. A row of it is named under `<tier>_syndrome_buffer.kind` and `weak_syndrome_buffer.kind` and `strong_syndrome_buffer.kind`.
+In `decsim/syndrome_buffer/settings.py`. A row of it is named under `<section_name>.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `syndrome_buffer` | `SyndromeBuffer` in `decsim/syndrome_buffer/syndrome_buffer.py` | The store: rounds by key, their holds, and the operations it serves. |
-| `ported_syndrome_buffer` | `PortedSyndromeBuffer` in `decsim/syndrome_buffer/ported_syndrome_buffer.py` | The store whose writes and reads take words on ports in arrival order. |
+| `syndrome_buffer` | `SyndromeBufferSettings` in `decsim/syndrome_buffer/syndrome_buffer.py` | The plain store: its capacity, and a flat cost per write and per read. |
+| `ported_syndrome_buffer` | `PortedSyndromeBufferSettings` in `decsim/syndrome_buffer/ported_syndrome_buffer.py` | The ported store: its capacity, its ports, its word and its timing. |
 
 ## `SYNDROME_SOURCES`
 

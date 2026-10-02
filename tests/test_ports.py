@@ -26,7 +26,6 @@ import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
 import decsim.qpu.settings as qpu_settings
-import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.windows.settings as window_settings
 
 TESTS_FILE = pathlib.Path(__file__)
@@ -42,7 +41,6 @@ SHARED_PROTOCOL_MODULE = "seeding"
 TABLES_WITH_ROW_KEYS = (
     decoder_settings.DECODERS,
     window_settings.WINDOWING_SCHEMES,
-    ported_syndrome_buffer.SYNDROME_BUFFERS,
     workload_settings.WORKLOADS,
     qpu_settings.SYNDROME_SOURCES,
     qpu_settings.CODE_CARDS,

@@ -24,9 +24,8 @@ import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.tables as tables
 from decsim.syndrome_buffer import (
     strong_syndrome_round_receiver as strong_receiver_module,
@@ -81,7 +80,7 @@ class Readout:
         """
         _check_readout_cost_is_priced(settings)
         _check_one_price_for_a_read(settings)
-        _check_store_kinds(settings)
+        _check_strong_store_charges_nothing(settings.strong_syndrome_buffer)
         controller_settings = settings.controller
         controller = controller_module.Controller(engine, controller_settings)
         assembler = round_assembly.RoundAssembler(engine, controller_settings)
@@ -93,7 +92,7 @@ class Readout:
         held_rounds = syndrome_round_sender.HeldRounds(engine)
         store_transfers = window_transfers.WindowTransfers(engine)
         memory_arrivals = memory_rounds.MemoryRoundArrivals(engine)
-        weak_store = _store(settings.weak_syndrome_buffer, "weak", engine)
+        weak_store = settings.weak_syndrome_buffer.build(engine)
         weak_output = _weak_output(settings, engine)
         weak_receiver = weak_receiver_module.WeakSyndromeRoundReceiver(engine)
         strong_store, strong_output, strong_receiver = _strong_store(
@@ -281,24 +280,10 @@ def _strong_store(
     """
     if not _uses_strong_store(escalation_policy):
         return None, None, None
-    store = _store(settings.strong_syndrome_buffer, "strong", engine)
+    store = settings.strong_syndrome_buffer.build(engine)
     output = _strong_output(settings, engine)
     receiver = strong_receiver_module.StrongSyndromeRoundReceiver(engine)
     return store, output, receiver
-
-
-def _store(
-    store_settings: syndrome_buffer_settings.SyndromeBufferSettings,
-    tier: str,
-    engine: engine_module.Engine,
-) -> ports.SyndromeBuffer:
-    """One syndrome buffer, of the row its section names."""
-    row = tables.row(
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
-        f"{tier}_syndrome_buffer.kind",
-        store_settings.kind,
-    )
-    return row(store_settings, engine)
 
 
 def _weak_output(
@@ -345,26 +330,23 @@ def _reads_in_place(tier_settings, tier: str) -> bool:
     return not copies
 
 
-def _check_store_kinds(settings: machine_settings.MachineSettings) -> None:
-    """Both store sections name a row, including the one nothing reads.
+def _check_strong_store_charges_nothing(
+    strong_store: syndrome_buffer_module.SyndromeBufferSettings,
+) -> None:
+    """The strong syndrome buffer is not a store that prices its reads.
 
-    A run that never reads the room side builds no store for it, so the
-    kind its yaml names would otherwise go unread; a kind off the table
-    is a mistake in the file either way, and so is a ported strong store,
-    which a Python-built settings record reaches without the yaml.
+    Its receiving end stores a round as it lands and never books the
+    write, so a store that books its reads by words would price half its
+    accesses. The settings are refused whoever built them, as gem5
+    refuses a wrong neighbour when it binds the port whatever script
+    built it (src/mem/port.cc:152, fatal_if).
     """
-    tables.row(
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
-        "weak_syndrome_buffer.kind",
-        settings.weak_syndrome_buffer.kind,
-    )
-    tables.row(
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
-        "strong_syndrome_buffer.kind",
-        settings.strong_syndrome_buffer.kind,
-    )
-    syndrome_buffer_settings.check_strong_store_kind(
-        settings.strong_syndrome_buffer.kind
+    if not strong_store.prices_read_bits:
+        return
+    raise ValueError(
+        "strong_syndrome_buffer.kind ported_syndrome_buffer prices its "
+        "accesses on ports; the strong syndrome buffer stores a round "
+        "as it lands and charges nothing, so name syndrome_buffer"
     )
 
 
@@ -377,7 +359,7 @@ def _check_one_price_for_a_read(
     weak_buffer_to_weak_decoder as well would charge the same bits twice.
     The link keeps its latency.
     """
-    if settings.weak_syndrome_buffer.kind != "ported_syndrome_buffer":
+    if not settings.weak_syndrome_buffer.prices_read_bits:
         return
     path = settings.links.weak_buffer_to_weak_decoder
     if path.channel.capacity is None:

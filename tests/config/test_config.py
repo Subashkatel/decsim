@@ -84,6 +84,30 @@ def test_a_named_domains_clock_has_that_frequencys_period_in_ticks():
     assert room.period_ticks == 2000
 
 
+def test_a_clock_from_megahertz_rounds_its_period_to_whole_ticks():
+    """A third of a microsecond is 333333.33 ticks, rounded to 333333."""
+    assert config.Clock.from_megahertz(250.0) == config.Clock(4000)
+    assert config.Clock.from_megahertz(3) == config.Clock(333_333)
+
+
+def test_a_clock_from_megahertz_is_the_clock_its_domain_hands_out():
+    clocks = config.ClockSettings.from_yaml({"helios": 100.0})
+
+    assert clocks.clock("helios") == config.Clock.from_megahertz(100.0)
+
+
+@pytest.mark.parametrize("megahertz", [0, -250.0, float("nan"), True, "250"])
+def test_a_clock_from_no_positive_frequency_is_refused(megahertz):
+    sentence = "a clock's frequency must be a positive number of megahertz"
+    with pytest.raises(ValueError, match=sentence):
+        config.Clock.from_megahertz(megahertz)
+
+
+def test_a_clock_faster_than_one_tick_is_refused():
+    with pytest.raises(ValueError, match="has a period below one tick"):
+        config.Clock.from_megahertz(3e6)
+
+
 @dataclasses.dataclass(frozen=True)
 class _PartSettings:
     """A part's settings, which may name its own clock."""

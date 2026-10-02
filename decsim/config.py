@@ -197,6 +197,27 @@ class Clock:
 
     period_ticks: int
 
+    @classmethod
+    def from_megahertz(cls, megahertz: float) -> "Clock":
+        """The clock of a frequency, its period rounded to whole ticks.
+
+        gem5's Clock param takes a frequency the same way and keeps its
+        period, rounded to ticks (src/python/m5/params/time_params.py
+        lines 149-154 and 165-200).
+        """
+        if not _is_frequency(megahertz):
+            raise ValueError(
+                "a clock's frequency must be a positive number of "
+                f"megahertz, got {megahertz!r}"
+            )
+        period_microseconds = 1.0 / megahertz
+        period_ticks = microseconds_to_ticks(period_microseconds)
+        if period_ticks == 0:
+            raise ValueError(
+                f"a clock at {megahertz} megahertz has a period below one tick"
+            )
+        return cls(period_ticks)
+
     def edge(self, cycles: int, now: int) -> int:
         """The tick `cycles` periods after the edge at or after `now`."""
         aligned_cycles = self.cycles_for(now)
@@ -282,16 +303,9 @@ class ClockSettings(Mapping):
         return self[clock]
 
     def clock(self, clock: str) -> Clock:
-        """The named domain's clock, its period rounded to whole ticks."""
+        """The named domain's clock."""
         frequency = self.megahertz(clock)
-        period_microseconds = 1.0 / frequency
-        period_ticks = microseconds_to_ticks(period_microseconds)
-        if period_ticks == 0:
-            raise ValueError(
-                f"clock {clock!r} at {frequency} megahertz has a period "
-                f"below one tick"
-            )
-        return Clock(period_ticks)
+        return Clock.from_megahertz(frequency)
 
 
 def _missing_setting_sentence(

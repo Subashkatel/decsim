@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 import decsim.collect as collect
+import decsim.config as config_module
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
@@ -40,7 +41,9 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     assert settings.switching is None
     assert settings.window_tier.value == "weak"
     # engine cycles price on a named domain, resolved once like the links
-    assert settings.weak_decoder.engine.clock == settings.clocks.clock("fridge")
+    fridge_megahertz = config.sections["clocks"]["fridge"]
+    fridge = config_module.Clock.from_megahertz(fridge_megahertz)
+    assert settings.weak_decoder.engine.clock == fridge
 
 
 def test_the_reference_controller_charges_the_traced_issue_pipeline():
@@ -56,7 +59,9 @@ def test_the_reference_controller_charges_the_traced_issue_pipeline():
     point = config.first_point_task()
     controller = point.settings.controller
     assert controller.decision_to_pulse_cycles == 8
-    assert controller.clock == point.settings.clocks.clock("fridge")
+    fridge_megahertz = config.sections["clocks"]["fridge"]
+    fridge = config_module.Clock.from_megahertz(fridge_megahertz)
+    assert controller.clock == fridge
 
 
 @pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)

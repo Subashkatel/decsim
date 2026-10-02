@@ -143,8 +143,6 @@ sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distan
 log: off
 trace: off
 values:
-clocks.fridge = 250.0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:56]
-clocks.room = 250.0  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:57]
 qpu.kind = "stim_device"  [preset weak_decoder_baseline.yaml, configs/bases/weak_decoder_baseline.yaml:4]
 qpu.code_card = "rotated_surface"  [default, configs/reference.yaml:89]
 qpu.round_period_microseconds = [1.0]  [sweep, configs/examples/two_tiers.yaml:51-56]

@@ -334,8 +334,8 @@ def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
 
     A channel's ticks come from its card's latency and clock, and a
     section's clock period from the domain it names and that domain's
-    frequency; neither is one yaml key's value. unit_memory.bits and
-    clocks.fridge are their own keys'.
+    frequency; neither is one yaml key's value. unit_memory.bits is its
+    own key's.
     """
     reference_path = CONFIGS_DIR / "reference.yaml"
     config_path = tmp_path / "mine.yaml"
@@ -353,15 +353,10 @@ def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
     lines = experiment.value_lines(config, first_point.settings)
 
     bits_line = _first_line_starting(reference_path, "    bits: null")
-    fridge_line = _first_line_starting(reference_path, "  fridge:")
     assert (
         "links.qpu_to_controller.channel.propagation_latency_ticks = 28000"
     ) in lines
     assert "controller.clock.period_ticks = 4000" in lines
-    assert (
-        "clocks.fridge = 250.0  "
-        f"[preset reference.yaml, {reference_path}:{fridge_line}]"
-    ) in lines
     assert (
         "weak_decoder.unit_memory.bits = null  "
         f"[preset reference.yaml, {reference_path}:{bits_line}]"

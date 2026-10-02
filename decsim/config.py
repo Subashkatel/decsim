@@ -262,9 +262,9 @@ class ClockSettings(Mapping):
     A link, a controller, a decoder engine or a frame prices its cycles
     on the domain it names; more domains (an mK stage, a 4K SFQ decoder)
     are one more entry. Both shipped domains start at LILLIPUT's 250 MHz
-    (2108.06569 Table 4). It is the section's own mapping, so a domain's
-    frequency is clocks.<name> as the yaml writes it. `clock` hands out
-    the domain's Clock, which is what a component charges cycles on.
+    (2108.06569 Table 4). The yaml reader alone reads it: `clock` hands
+    each section the domain's Clock, which is what a component charges
+    cycles on, and a settings record holds that Clock.
     """
 
     def __init__(self, megahertz_of: Mapping = _NO_DOMAINS) -> None:
@@ -278,11 +278,6 @@ class ClockSettings(Mapping):
 
     def __len__(self) -> int:
         return len(self._megahertz_of)
-
-    def __hash__(self) -> int:
-        items = self._megahertz_of.items()
-        frozen = frozenset(items)
-        return hash(frozen)
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ClockSettings":

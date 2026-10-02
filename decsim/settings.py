@@ -103,7 +103,6 @@ class MachineSettings:
     decoders without switching, or switching without both, is refused.
     """
 
-    clocks: config.ClockSettings = config.ClockSettings()
     clock: Optional[config.Clock] = None
     qpu: qpu_settings.QpuSettings = qpu_settings.QpuSettings()
     controller: controller_settings.ControllerSettings = (
@@ -277,7 +276,6 @@ class MachineSettings:
         elif strong_decoder is not None:
             strong_decoder = _checked(strong_decoder, window_check)
         return cls(
-            clocks=clocks,
             clock=controller.clock,
             qpu=qpu,
             controller=controller,

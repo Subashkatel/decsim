@@ -62,6 +62,8 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings_module
+import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 
 ROUNDS = 15
 NAME_BITS = window_records.REQUEST_KEY_WIRE_BITS
@@ -254,12 +256,15 @@ def machine_settings(shape: str, distance: int):
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
+    plain_windows = window_settings.WindowSettings()
+    windows = declared_run.switching_windows(plain_windows, switching)
     return machine_settings_module.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak,
         strong_decoder=strong,
         switching=switching,
+        windows=windows,
         links=links,
     )
 

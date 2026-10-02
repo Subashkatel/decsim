@@ -33,6 +33,7 @@ import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.settings as machine_settings
+import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 
@@ -42,12 +43,16 @@ def _settings(*, switching=None, weak=None, strong=None):
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
+    windows = window_settings.WindowSettings()
+    if switching is not None:
+        windows = declared_run.switching_windows(windows, switching)
     return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         links=links,
         controller=controller,
         pauli_frame=frame,
+        windows=windows,
         switching=switching,
         weak_decoder=weak,
         strong_decoder=strong,

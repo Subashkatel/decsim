@@ -147,7 +147,7 @@ def _parallel_machine_formed_at(where: str):
     """The weak baseline on Skoric's A/B blocks, formed there."""
     formed_there = _machine_formed_at(where)
     settings = formed_there.settings
-    windows = dataclasses.replace(settings.windows, kind="parallel")
+    windows = declared_run.windows_on(settings.windows, "parallel")
     settings = dataclasses.replace(settings, windows=windows)
     return machine_module.Machine.build(settings, 0)
 
@@ -175,11 +175,12 @@ def _seated_machine(
         formed_at=formed_at,
         latency_cycles=latency_cycles,
     )
-    windows = dataclasses.replace(settings.windows, kind=windows_kind)
+    windows = declared_run.windows_on(settings.windows, windows_kind)
     switching = settings.switching
     if switching is not None:
         named = declared_run.strong_window_settings(strong_window)
         switching = dataclasses.replace(switching, strong_window=named)
+        windows = declared_run.switching_windows(windows, switching)
     settings = dataclasses.replace(
         settings,
         detection_events=detection_events,
@@ -330,8 +331,12 @@ def _double_window_switching_at_the_decoder():
     switching = dataclasses.replace(
         settings.switching, strong_window=double_window
     )
+    windows = declared_run.switching_windows(settings.windows, switching)
     settings = dataclasses.replace(
-        settings, detection_events=detection_events, switching=switching
+        settings,
+        detection_events=detection_events,
+        switching=switching,
+        windows=windows,
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -984,7 +989,7 @@ def _lookback_switching_machine(formed_at, seed):
     )
     settings = machine.settings
     workload = _lookback_workload(settings)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
     union_find_settings = union_find.UnionFindDecoder.Settings()
@@ -1018,8 +1023,8 @@ def _parallel_lookback_machine(unit_count: int):
     settings = machine.settings
     # a flipped readout alone, so no fault straddles two blocks' commits
     workload = _lookback_workload(settings, "M(0.15) 0\n")
-    windows = dataclasses.replace(
-        settings.windows, kind="parallel", commit_rounds=1, buffer_rounds=1
+    windows = declared_run.windows_on(
+        settings.windows, "parallel", commit_rounds=1, buffer_rounds=1
     )
     # a declared decoder decodes no syndrome, so no fault's ownership is
     # asked of the blocks; the landed events are the check
@@ -1071,7 +1076,7 @@ def _reach_growing_machine(formed_at):
     physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
     workload = workload_records.Workload((operation,), {1: 10}, physical)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
     weak = declared_run.DeclaredConfidenceDecoder.Settings(
@@ -1143,7 +1148,7 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
     workload = workload_records.Workload(
         (operation,), {1: round_count}, physical
     )
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
     weak = declared_run.DeclaredConfidenceDecoder.Settings(

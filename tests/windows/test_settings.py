@@ -2,17 +2,19 @@
 
 STYLE.md rule 7: a pluggable component's section carries one kind key
 naming a row of the root's table. This section carries four such keys,
-and two of them, terminal_policy and boundaries, carry
-a null default whose meaning is decided later, so the refusal each
+and two of them, terminal_policy and boundaries, carry a null default
+the reader resolves from the run's switching slot, so the refusal each
 one raises at the yaml boundary is what a user meets first.
 """
 
 import dataclasses
+from typing import Optional
 
 import pytest
 
 import decsim.config as config
 import decsim.records.windows as window_records
+import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 
@@ -81,17 +83,26 @@ def test_a_boundary_payload_that_names_no_row_is_refused_at_load():
 def test_both_boundary_policy_rows_are_reachable_by_name(name):
     section = _section(boundaries=name)
     settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
+    row = window_settings.BOUNDARY_POLICIES[name]
 
-    assert settings.boundaries == name
+    assert isinstance(settings.boundary_policy, row.Settings)
 
 
-def test_both_keys_default_to_null_so_the_plan_decides_them():
-    """Null is not a policy: the escalation row's declared fact picks one."""
+def test_a_run_with_no_switching_reads_null_keys_as_flush_and_eager():
+    """Null is not a policy: the run's shape picks one as the yaml is read."""
     section = _section()
     settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
-    assert settings.terminal_policy is None
-    assert settings.boundaries is None
+    assert settings.terminal_policy == "flush"
+    assert settings.boundary_policy == boundary_policies.Eager.Settings()
+
+
+def test_a_python_record_defaults_to_flush_and_eager():
+    settings = window_settings.WindowSettings()
+
+    assert settings.kind == "sliding"
+    assert settings.terminal_policy == "flush"
+    assert settings.boundary_policy == boundary_policies.Eager.Settings()
 
 
 def test_a_section_without_its_sizes_is_refused_by_name():
@@ -128,7 +139,8 @@ def test_the_smallest_whole_window_size_is_accepted():
     section = _section(commit_rounds=1, buffer_rounds=0)
     settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
-    assert (settings.commit_rounds, settings.buffer_rounds) == (1, 0)
+    sizes = (settings.scheme.commit_rounds, settings.scheme.buffer_rounds)
+    assert sizes == (1, 0)
 
 
 class _SteppedScheme(sliding_scheme.SlidingWindowScheme):
@@ -136,11 +148,10 @@ class _SteppedScheme(sliding_scheme.SlidingWindowScheme):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
         stride_rounds: int = 1
-
-        @classmethod
-        def from_yaml(cls, section):
-            return cls(**section)
+        name = "stepped"
 
 
 def test_a_scheme_rows_own_key_reaches_its_settings(monkeypatch):
@@ -152,7 +163,7 @@ def test_a_scheme_rows_own_key_reaches_its_settings(monkeypatch):
 
     settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
-    assert settings.row_settings == _SteppedScheme.Settings(stride_rounds=2)
+    assert settings.scheme == _SteppedScheme.Settings(stride_rounds=2)
 
 
 def test_a_key_no_row_declares_is_refused_naming_the_sections_keys():

@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from typing import Any, Optional
 
 import decsim.config as config
-import decsim.ports as ports
 import decsim.records.windows as window_records
 import decsim.tables as tables
 import decsim.windows.boundary_payloads as boundary_payloads
@@ -35,8 +34,8 @@ BOUNDARY_PAYLOADS = {
     "dense_seam_mask": boundary_payloads.DenseSeamMask,
     "sparse_seam_list": boundary_payloads.SparseSeamList,
 }
-# The keys every row of the windows section shares; any other key is the
-# scheme row's own (its Settings, decsim/tables.py row_settings).
+# The keys every row of the windows section shares; any other key is a
+# field of the scheme row's own Settings record.
 WINDOWS_KEYS = (
     "kind",
     "clock",
@@ -53,72 +52,81 @@ _REQUIRED_WINDOWS_KEYS = ("kind", "commit_rounds", "buffer_rounds")
 
 @dataclasses.dataclass(frozen=True)
 class WindowSettings:
-    """The yaml's `windows` section.
+    """How the rounds are cut into decode windows, and what a window ships.
 
-    Table rows (WINDOWING_SCHEMES, above): sliding, parallel,
-    sandwich,
-    naive_online. commit_rounds and buffer_rounds size every window; None
-    is the code distance. boundary_payload names a row of
-    BOUNDARY_PAYLOADS (above): how the
-    hand-off between windows is written on decoder_to_decoder.
-    terminal_policy is flush or lookahead (TERMINAL_POLICIES,
+    scheme is a windowing scheme row's Settings record (WINDOWING_SCHEMES,
+    above: sliding, parallel, sandwich, naive_online), which holds the
+    window sizes, commit_rounds and buffer_rounds, None being the code
+    distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES,
     records/windows.py), how a finite stream drains its last buffered
-    window; null, the default, leaves the row on flush, and on lookahead
-    when the run switches, since a strong recovery needs a last window
-    that reads past its own commit. boundaries names a row of
-    BOUNDARY_POLICIES (above): when a committed window ships its boundary
-    to the windows after it; null, the default, is eager on a run with no
-    switching, and on a switching run the row its strong window shape
-    declares (default_boundary_policy on
-    escalation/strong_window_shapes.py): held when the strong window does
-    not absorb the weak windows it covers, and eager otherwise. A
-    Python-built scheme or boundary policy is used as it is; the root's
-    defaults are the sliding scheme and Eager shipping. row_settings is
-    the scheme row's own Settings, read from the section's keys outside
-    WINDOWS_KEYS, or None for a row that declares none. clock None is
-    the machine's clock.
+    window; the rows that lay their own tail read none.
+    boundary_policy is a boundary row's Settings record
+    (BOUNDARY_POLICIES, above: eager or held), when a committed window
+    ships its boundary to the windows after it. A switching run's policy
+    refuses a tail or a boundary row its strong window cannot serve.
+    boundary_payload is a payload row's Settings record
+    (BOUNDARY_PAYLOADS, above: dense_seam_mask or sparse_seam_list), how
+    the hand-off between windows is written on decoder_to_decoder. clock and
+    decision_cycles price issuing one decode request; clock None is the
+    machine's clock.
     """
 
     clock: Optional[config.Clock] = None
     decision_cycles: int = 0
-    kind: str = "sliding"
-    commit_rounds: Optional[int] = None
-    buffer_rounds: Optional[int] = None
-    boundary_payload: str = "dense_seam_mask"
-    terminal_policy: Optional[str] = None
-    boundaries: Optional[str] = None
-    scheme: Optional[ports.WindowingScheme] = None
-    boundary_policy: Optional[ports.BoundaryPolicy] = None
-    # the scheme row's own Settings record, opaque to the section
-    row_settings: Optional[Any] = None
+    # the scheme row's Settings record, opaque here: its build() returns
+    # the scheme, and it holds commit_rounds and buffer_rounds
+    scheme: Any = sliding_scheme.SlidingWindowScheme.Settings()
+    terminal_policy: str = "flush"
+    # the boundary row's Settings record, opaque here: its build()
+    # returns the policy
+    boundary_policy: Any = boundary_policies.Eager.Settings()
+    # the payload row's Settings record, opaque here: its build()
+    # returns the payload
+    boundary_payload: Any = boundary_payloads.DenseSeamMask.Settings()
 
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
-        _check_window_rounds("windows.commit_rounds", self.commit_rounds, 1)
-        _check_window_rounds("windows.buffer_rounds", self.buffer_rounds, 0)
+        _check_terminal_policy(self.terminal_policy)
+        _check_window_rounds(
+            "windows.commit_rounds", self.scheme.commit_rounds, 1
+        )
+        _check_window_rounds(
+            "windows.buffer_rounds", self.scheme.buffer_rounds, 0
+        )
+
+    @property
+    def kind(self) -> str:
+        """The yaml's windows.kind word for the scheme."""
+        return self.scheme.name
 
     @classmethod
     def from_yaml(
         cls,
         section: Mapping,
         clocks: config.ClockSettings,
+        switching=None,
     ) -> "WindowSettings":
-        """The `windows` section: a kind of the table, two sizes, the wire."""
+        """The `windows` section: a scheme of the table, its sizes, the wire.
+
+        A section that leaves terminal_policy or boundaries null gets the
+        value its run's shape takes: on a switching run the lookahead tail,
+        since a strong recovery reads past the last window's commit, and
+        the boundary row its strong window shape declares
+        (default_boundary_policy on escalation/strong_window_shapes.py);
+        otherwise the flush tail and eager boundaries. switching is the
+        run's switching slot, None for a run that keeps one decoder.
+        """
         _check_required_keys(section)
         kind = section["kind"]
         row = tables.row(WINDOWING_SCHEMES, "windows.kind", kind)
-        row_settings = tables.row_settings(
-            row, "windows", section, WINDOWS_KEYS
+        scheme = _scheme_settings(section, row)
+        terminal_policy = _terminal_policy(section, switching)
+        payload_word = section.get("boundary_payload", "dense_seam_mask")
+        payload_row = tables.row(
+            BOUNDARY_PAYLOADS, "windows.boundary_payload", payload_word
         )
-        boundary_payload = section.get("boundary_payload", "dense_seam_mask")
-        tables.row(
-            BOUNDARY_PAYLOADS, "windows.boundary_payload", boundary_payload
-        )
-        terminal_policy = section.get("terminal_policy")
-        _check_terminal_policy(terminal_policy)
-        boundaries = section.get("boundaries")
-        if boundaries is not None:
-            tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
+        boundary_payload = payload_row.Settings()
+        boundary_policy = _boundary_policy(section, switching)
         clock = None
         if "clock" in section:
             clock = clocks.clock(section["clock"])
@@ -126,14 +134,53 @@ class WindowSettings:
         return cls(
             clock=clock,
             decision_cycles=decision_cycles,
-            kind=kind,
-            commit_rounds=section["commit_rounds"],
-            buffer_rounds=section["buffer_rounds"],
-            boundary_payload=boundary_payload,
+            scheme=scheme,
             terminal_policy=terminal_policy,
-            boundaries=boundaries,
-            row_settings=row_settings,
+            boundary_policy=boundary_policy,
+            boundary_payload=boundary_payload,
         )
+
+
+def _scheme_settings(section: Mapping, row):
+    """The scheme row's record, from the section's keys it declares."""
+    declared_keys = tables.row_keys(row)
+    own_keys = []
+    for key in declared_keys:
+        if key not in WINDOWS_KEYS:
+            own_keys.append(key)
+    known_keys = WINDOWS_KEYS + tuple(own_keys)
+    tables.refuse_unknown_keys("windows", section, known_keys)
+    values = {}
+    for key in declared_keys:
+        if key in section:
+            values[key] = section[key]
+    return row.Settings(**values)
+
+
+def _terminal_policy(section: Mapping, switching) -> str:
+    """The section's terminal tail, or the one its run's shape takes."""
+    terminal_policy = section.get("terminal_policy")
+    if terminal_policy is not None:
+        return terminal_policy
+    if switching is not None:
+        return "lookahead"
+    return "flush"
+
+
+def _boundary_policy(section: Mapping, switching):
+    """The boundary row the section names, or the one its run's shape takes.
+
+    A run with no switching never revises a committed window and ships
+    every boundary at its commit; a switching run hands the default to
+    its strong window shape, whose absorption is what decides.
+    """
+    boundaries = section.get("boundaries")
+    if boundaries is None and switching is None:
+        boundaries = "eager"
+    if boundaries is None:
+        boundaries = switching.strong_window.default_boundary_policy
+    row = tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
+    return row.Settings()
 
 
 def _check_required_keys(section: Mapping) -> None:
@@ -169,9 +216,7 @@ def _check_window_rounds(key: str, rounds, least: int) -> None:
 
 
 def _check_terminal_policy(terminal_policy) -> None:
-    """windows.terminal_policy is one of the two words, or absent."""
-    if terminal_policy is None:
-        return
+    """windows.terminal_policy is one of the two words."""
     if terminal_policy in window_records.TERMINAL_POLICIES:
         return
     listed = list(window_records.TERMINAL_POLICIES)

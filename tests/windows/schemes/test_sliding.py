@@ -7,7 +7,6 @@ windows.terminal_policy is the one key it reads, so both branches are
 pinned here on the row, not through the planner.
 """
 
-import decsim.records.windows as window_records
 import decsim.windows.schemes.sliding as sliding_scheme
 
 
@@ -27,8 +26,7 @@ def _geometries(plan) -> list:
 
 
 def test_the_flush_policy_ends_the_last_window_at_the_streams_last_round():
-    card = window_records.WindowingSchemeCard(terminal_policy="flush")
-    row = sliding_scheme.SlidingWindowScheme(card)
+    row = sliding_scheme.SlidingWindowScheme(terminal_policy="flush")
 
     plan = row.plan_operation(1, 20, commit_round_count=3, buffer_round_count=3)
 
@@ -43,8 +41,7 @@ def test_the_flush_policy_ends_the_last_window_at_the_streams_last_round():
 
 def test_the_lookahead_policy_keeps_the_stride_and_reads_past_the_stream():
     """Every window strides F, so the last still reads past its commit."""
-    card = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-    row = sliding_scheme.SlidingWindowScheme(card)
+    row = sliding_scheme.SlidingWindowScheme(terminal_policy="lookahead")
 
     plan = row.plan_operation(1, 20, commit_round_count=3, buffer_round_count=3)
 
@@ -61,19 +58,17 @@ def test_the_lookahead_policy_keeps_the_stride_and_reads_past_the_stream():
 
 def test_only_the_lookahead_policy_declares_trailing_tail_context():
     """The fact the escalation policy reads, declared by the policy."""
-    flush = window_records.WindowingSchemeCard(terminal_policy="flush")
-    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-
-    flush_row = sliding_scheme.SlidingWindowScheme(flush)
-    lookahead_row = sliding_scheme.SlidingWindowScheme(lookahead)
+    flush_row = sliding_scheme.SlidingWindowScheme(terminal_policy="flush")
+    lookahead_row = sliding_scheme.SlidingWindowScheme(
+        terminal_policy="lookahead"
+    )
 
     assert flush_row.has_trailing_tail_context is False
     assert lookahead_row.has_trailing_tail_context is True
 
 
 def test_every_window_chains_to_the_one_after_it():
-    card = window_records.WindowingSchemeCard(terminal_policy="flush")
-    row = sliding_scheme.SlidingWindowScheme(card)
+    row = sliding_scheme.SlidingWindowScheme(terminal_policy="flush")
 
     plan = row.plan_operation(1, 20, commit_round_count=3, buffer_round_count=3)
 

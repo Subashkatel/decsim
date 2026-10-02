@@ -254,7 +254,10 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
     switching = dataclasses.replace(
         settings.switching, strong_window=strong_window_settings
     )
-    settings = dataclasses.replace(settings, switching=switching)
+    windows = declared_run.switching_windows(settings.windows, switching)
+    settings = dataclasses.replace(
+        settings, switching=switching, windows=windows
+    )
     machine = machine_module.Machine.build(settings, seed)
     return machine.run()
 
@@ -408,9 +411,9 @@ def _parallel_run(distance: int, seed: int):
         },
     )
     settings = point.settings
-    windows = dataclasses.replace(
-        settings.windows, kind="parallel", boundary_payload="sparse_seam_list"
-    )
+    windows = declared_run.windows_on(settings.windows, "parallel")
+    sparse = boundary_payloads.SparseSeamList.Settings()
+    windows = dataclasses.replace(windows, boundary_payload=sparse)
     settings = dataclasses.replace(settings, windows=windows)
     machine = machine_module.Machine.build(settings, seed)
     return machine.run()

@@ -27,7 +27,6 @@ import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
 import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.windows.settings as window_settings
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -40,7 +39,6 @@ SHARED_PROTOCOL_MODULE = "seeding"
 # The tables whose section reads a row's own keys (decsim/tables.py
 # row_settings), so whose rows may declare a Settings.
 TABLES_WITH_ROW_KEYS = (
-    window_settings.WINDOWING_SCHEMES,
     ported_syndrome_buffer.SYNDROME_BUFFERS,
     workload_settings.WORKLOADS,
     qpu_settings.SYNDROME_SOURCES,

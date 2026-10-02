@@ -23,7 +23,6 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
@@ -118,10 +117,10 @@ def switching_machine(
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=strong, engine=declared_run.DECLARED_ENGINE
     )
-    boundary_policy = boundary_policies.Held()
+    boundary_policy = boundary_policies.Held.Settings()
     strong_window_settings = declared_run.strong_window_settings(strong_window)
     if strong_window_settings.absorbs_weak_windows:
-        boundary_policy = None
+        boundary_policy = boundary_policies.Eager.Settings()
     operation = program_records.Operation(
         id=1, name="mem1", qubits=(1,), patches=(1,)
     )
@@ -133,14 +132,12 @@ def switching_machine(
         distance=3, round_period_microseconds=round_microseconds
     )
     if scheme is None:
-        lookahead = window_records.WindowingSchemeCard(
-            terminal_policy="lookahead"
-        )
-        scheme = sliding_scheme.SlidingWindowScheme(lookahead)
+        scheme = sliding_scheme.SlidingWindowScheme.Settings()
     windows = window_settings.WindowSettings(
         clock=DECLARED_CLOCK,
         decision_cycles=decision_cycles,
         scheme=scheme,
+        terminal_policy="lookahead",
         boundary_policy=boundary_policy,
     )
     if switching is None:

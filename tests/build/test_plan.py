@@ -1,13 +1,13 @@
-"""The run plan: the rows the yaml names and the defaults the plan derives.
+"""The run plan: the rows the yaml names and the defaults it is given.
 
-Two window keys carry a null default whose meaning the plan derives
-from whether the switching slot is filled and from its strong window
-row's declared facts, never from a kind string.
-Both are pinned here through build_plan, on settings shaped as a yaml
-would leave them.
+Two window keys carry a null yaml default whose meaning the yaml reader
+derives from whether the switching slot is filled and from its strong
+window row's declared facts, never from a kind string. Both are pinned
+here through build_plan, on settings read as a yaml would leave them.
 """
 
 import dataclasses
+from typing import Optional
 
 import pytest
 import stim
@@ -15,6 +15,7 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.complementary as complementary
+import decsim.config as config
 import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
@@ -42,6 +43,21 @@ import tests.declared_run as declared_run
 NO_BULK_STRONG = decoder_settings.DecoderManagerSettings()
 # the detection events section a run gets when the test names none
 CONTROLLER_FORMS = event_settings.DetectionEventSettings()
+# the windows section a yaml writes when it names the scheme alone
+WINDOWS_SECTION = {
+    "kind": "sliding",
+    "commit_rounds": None,
+    "buffer_rounds": None,
+}
+NO_CLOCKS = config.ClockSettings({})
+
+
+def _windows(switching=None, **keys):
+    """The windows a yaml section with these keys reads as, beside switching."""
+    section = {**WINDOWS_SECTION, **keys}
+    return window_settings.WindowSettings.from_yaml(
+        section, NO_CLOCKS, switching
+    )
 
 
 def _plan(
@@ -58,7 +74,7 @@ def _plan(
     if idle_policy is None:
         idle_policy = controller_settings.IdlePolicySettings()
     if windows is None:
-        windows = window_settings.WindowSettings()
+        windows = _windows(switching)
     if qpu is None:
         qpu = declared_run.declared_qpu()
     if workload is None:
@@ -316,7 +332,7 @@ def test_a_run_that_may_escalate_gets_the_lookahead_tail():
 
 
 def test_a_terminal_policy_written_in_the_section_wins_over_the_default():
-    windows = window_settings.WindowSettings(terminal_policy="lookahead")
+    windows = _windows(terminal_policy="lookahead")
 
     plan = _plan(windows=windows)
 
@@ -339,7 +355,7 @@ def test_a_serial_escalation_holds_its_boundaries():
 
 
 def test_a_boundaries_row_written_in_the_section_wins_over_the_default():
-    windows = window_settings.WindowSettings(boundaries="held")
+    windows = _windows(boundaries="held")
 
     plan = _plan(windows=windows)
 
@@ -347,10 +363,8 @@ def test_a_boundaries_row_written_in_the_section_wins_over_the_default():
 
 
 def test_a_windows_kind_that_names_no_row_is_refused():
-    windows = window_settings.WindowSettings(kind="diagonal")
-
     with pytest.raises(ValueError) as refusal:
-        _plan(windows=windows)
+        _windows(kind="diagonal")
 
     assert "windows.kind" in str(refusal.value)
 
@@ -360,21 +374,23 @@ class _SettingsRecordingScheme(sliding_scheme.SlidingWindowScheme):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
         stride_rounds: int = 1
+        name = "recording"
 
-    def __init__(self, card, settings) -> None:
-        sliding_scheme.SlidingWindowScheme.__init__(self, card)
+        def build(self, terminal_policy) -> "_SettingsRecordingScheme":
+            del terminal_policy
+            return _SettingsRecordingScheme(self)
+
+    def __init__(self, settings) -> None:
+        sliding_scheme.SlidingWindowScheme.__init__(self)
         self.settings = settings
 
 
-def test_a_scheme_row_with_settings_is_built_with_its_record(monkeypatch):
-    monkeypatch.setitem(
-        window_settings.WINDOWING_SCHEMES, "recording", _SettingsRecordingScheme
-    )
+def test_a_scheme_row_with_settings_is_built_with_its_record():
     own_settings = _SettingsRecordingScheme.Settings(stride_rounds=2)
-    windows = window_settings.WindowSettings(
-        kind="recording", row_settings=own_settings
-    )
+    windows = window_settings.WindowSettings(scheme=own_settings)
 
     plan = _plan(windows=windows)
 
@@ -412,7 +428,7 @@ def test_an_idle_policy_row_with_settings_is_built_with_its_record(
 
 def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():
     """Every row answers what the plan and the policy read off it."""
-    silent = _SilentScheme()
+    silent = _SilentScheme.Settings()
     windows = window_settings.WindowSettings(scheme=silent)
 
     with pytest.raises(ValueError) as refusal:
@@ -423,6 +439,16 @@ def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():
 
 class _SilentScheme:
     """A scheme row that declares nothing the plan reads."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        name = "silent"
+
+        def build(self, terminal_policy) -> "_SilentScheme":
+            del terminal_policy
+            return _SilentScheme()
 
     def plan_operation(self, *arguments, **sizes):
         """Never reached: the plan refuses this row first."""
@@ -437,6 +463,13 @@ class _OutsideBoundaryPolicy:
     """A boundary policy row written outside decsim; it ships when final."""
 
     ships_provisional_boundaries = False
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The outside row's record, which takes no setting."""
+
+        def build(self) -> "_OutsideBoundaryPolicy":
+            return _OutsideBoundaryPolicy()
 
     def on_commit(self, window, *, final: bool) -> bool:
         """Ship when the committing result is final."""

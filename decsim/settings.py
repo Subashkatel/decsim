@@ -217,9 +217,6 @@ class MachineSettings:
         strong_syndrome_buffer = buffer_settings.from_yaml(
             strong_section, "strong_syndrome_buffer", clocks, buffer_rows
         )
-        windows = window_settings.WindowSettings.from_yaml(
-            sections["windows"], clocks
-        )
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
         strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
         decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
@@ -231,6 +228,9 @@ class MachineSettings:
             clocks,
             escalation_folder,
             confidence_signals.confidence_settings,
+        )
+        windows = window_settings.WindowSettings.from_yaml(
+            sections["windows"], clocks, switching
         )
         kind = escalation_settings.escalation_kind(escalation_section)
         kept_sections = escalation_settings.ESCALATION_KINDS[kind]

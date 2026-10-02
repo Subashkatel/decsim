@@ -22,6 +22,7 @@ import functools
 import importlib.util
 import pathlib
 import re
+from typing import Any
 
 import ldpc
 import ldpc.ckt_noise.dem_matrices as dem_matrices
@@ -652,7 +653,7 @@ def test_an_unbuffered_live_reader_forms_each_window_from_its_own_ring(
     """
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "decoder")
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=commit_rounds, buffer_rounds=0
     )
     settings = dataclasses.replace(settings, windows=windows)
@@ -691,9 +692,10 @@ def test_an_unbuffered_live_region_finds_the_round_before_it_held(
     )
     switching = declared_run.declared_switching()
     seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -755,9 +757,10 @@ def test_a_live_region_reads_a_round_an_earlier_region_landed(
     strong_decoder = dataclasses.replace(settings.strong_decoder, unit_count=3)
     switching = declared_run.declared_switching()
     seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -805,9 +808,10 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     seats = dataclasses.replace(
         settings.detection_events, formed_at=("weak_decoder", "strong_decoder")
     )
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     one_round = syndrome_buffer_settings.SyndromeBufferSettings(bits=1)
     settings = dataclasses.replace(
         settings,
@@ -877,9 +881,10 @@ def _switching_live_settings(
     seats = dataclasses.replace(
         settings.detection_events, formed_at=("weak_decoder", "strong_decoder")
     )
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     return dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -1569,11 +1574,13 @@ def _switching_memory(weak_kind: str, confidence: str):
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True
     )
+    windows = declared_run.switching_windows(settings.windows, switching)
     return dataclasses.replace(
         settings,
         strong_decoder=strong_decoder,
         switching=switching,
         observation=observation,
+        windows=windows,
     )
 
 
@@ -1864,6 +1871,16 @@ def test_the_run_result_carries_the_factorys_supply_stall():
     assert result.magic_state_stall_ticks == built_factory.total_stall_ticks
 
 
+@dataclasses.dataclass(frozen=True)
+class _BuiltPolicy:
+    """A boundary record whose build hands back the policy the test holds."""
+
+    policy: Any
+
+    def build(self):
+        return self.policy
+
+
 class RecordingBoundaryPolicy:
     """A boundary policy written outside decsim: one method, plain names."""
 
@@ -1903,7 +1920,8 @@ def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
 def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     """The two policy axes are independent: one given, the other default."""
     boundary_policy = RecordingBoundaryPolicy()
-    windows = window_settings.WindowSettings(boundary_policy=boundary_policy)
+    boundary_record = _BuiltPolicy(boundary_policy)
+    windows = window_settings.WindowSettings(boundary_policy=boundary_record)
     boundary_settings = machine_settings.MachineSettings(windows=windows)
     with_boundary = machine_module.Machine.build(boundary_settings)
     idle_policy = RecordingIdlePolicy()
@@ -1949,7 +1967,8 @@ class SeedRecordingPolicy:
 
 
 def _machine_with_seed(policy, seed):
-    windows = window_settings.WindowSettings(boundary_policy=policy)
+    boundary_record = _BuiltPolicy(policy)
+    windows = window_settings.WindowSettings(boundary_policy=boundary_record)
     settings = machine_settings.MachineSettings(windows=windows)
     return machine_module.Machine.build(settings, seed)
 
@@ -3091,7 +3110,7 @@ def test_an_operation_claims_every_idle_cycle_before_it_starts():
         blocked_by=1,
     )
     workload = declared_run.declared_workload([first, second, both], 3)
-    scheme = naive_online.NaiveOnlineScheme()
+    scheme = naive_online.NaiveOnlineScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
     decoder = decoders.PresetLatencyDecoder.Settings(10.0)
     weak_decoder = decoder_settings.DecoderPoolSettings(

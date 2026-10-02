@@ -80,9 +80,10 @@ def build_plan(
     A switching run's policy refuses a run shape it cannot serve.
     """
     is_switching = settings.switching is not None
+    window_sizes = settings.windows.scheme
     code, layout = settings.qpu.build_code(
-        commit_rounds_override=settings.windows.commit_rounds,
-        buffer_rounds_override=settings.windows.buffer_rounds,
+        commit_rounds_override=window_sizes.commit_rounds,
+        buffer_rounds_override=window_sizes.buffer_rounds,
     )
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
         settings.workload
@@ -99,8 +100,8 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
-    scheme = _scheme(settings.windows, is_switching)
-    boundary_policy = _boundary_policy(settings.windows, settings.switching)
+    scheme = _scheme(settings.windows)
+    boundary_policy = _boundary_policy(settings.windows)
     absorbs_weak_windows = escalation_build.absorbs_weak_windows(
         settings.switching
     )
@@ -207,12 +208,7 @@ def _resource_claims(operations, view_by_id, layout):
 
 
 def _window_interaction(settings, reread_regions):
-    payload_row = tables.row(
-        window_settings.BOUNDARY_PAYLOADS,
-        "windows.boundary_payload",
-        settings.boundary_payload,
-    )
-    boundary_payload = payload_row()
+    boundary_payload = settings.boundary_payload.build()
     return window_interactions.DefaultWindowInteraction(
         reread_regions, boundary_payload
     )
@@ -312,50 +308,15 @@ def _strong_window(
     return strong_window.name
 
 
-def _scheme(windows: window_settings.WindowSettings, is_switching: bool):
-    """The windowing scheme of the kind, or the Python-built one.
+def _scheme(windows: window_settings.WindowSettings):
+    """The windowing scheme the section's record builds, with its tail.
 
-    A switching run needs the lookahead terminal policy on sliding
-    windows: the literature-exact flush has no trailing tail context,
-    which is the fact the policy's own refusal reads.
+    A switching run's policy refuses a scheme whose last window has no
+    trailing tail context, the fact the terminal tail sets.
     """
-    scheme = _chosen_scheme(windows, is_switching)
+    scheme = windows.scheme.build(windows.terminal_policy)
     _refuse_undeclared_scheme(scheme)
     return scheme
-
-
-def _chosen_scheme(windows: window_settings.WindowSettings, is_switching: bool):
-    """The Python-built scheme, or the kind's row on the section's card.
-
-    A row with keys of its own is built with its Settings record too.
-    """
-    if windows.scheme is not None:
-        return windows.scheme
-    row = tables.row(
-        window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind
-    )
-    terminal_policy = _terminal_policy(windows, is_switching)
-    card = window_records.WindowingSchemeCard(terminal_policy=terminal_policy)
-    if windows.row_settings is None:
-        return row(card)
-    return row(card, settings=windows.row_settings)
-
-
-def _terminal_policy(
-    windows: window_settings.WindowSettings, is_switching: bool
-) -> str:
-    """The section's terminal policy, or the one switching needs.
-
-    A switching run reads context past the last window's commit, so a
-    silent section gets the lookahead tail; the policy's own refusal
-    (escalation/policies.py) is what stops a scheme whose last window
-    carries no trailing tail.
-    """
-    if windows.terminal_policy is not None:
-        return windows.terminal_policy
-    if is_switching:
-        return "lookahead"
-    return "flush"
 
 
 def _refuse_undeclared_scheme(scheme) -> None:
@@ -386,47 +347,15 @@ def _refuse_undeclared_boundary_policy(boundary_policy) -> None:
     )
 
 
-def _boundary_policy(
-    windows: window_settings.WindowSettings,
-    switching: Optional[escalation_settings.SwitchingSettings],
-):
-    """The row windows.boundaries names, or the one switching needs.
+def _boundary_policy(windows: window_settings.WindowSettings):
+    """The section's boundary policy, once it declares what it ships.
 
-    A switching run holds boundaries until results are final
-    (descendants wait out an escalation); a strong window that absorbs
-    the weak windows it covers keeps the weak chain committing eagerly.
-    The boundary policy's own check_plan refuses the wrong pairing when a
-    yaml names it against the escalation.
+    A switching run's policy refuses the row its strong window cannot
+    serve (escalation/policies.py check_plan).
     """
-    if windows.boundary_policy is not None:
-        _refuse_undeclared_boundary_policy(windows.boundary_policy)
-        return windows.boundary_policy
-    boundaries = _boundaries_name(windows, switching)
-    row = tables.row(
-        window_settings.BOUNDARY_POLICIES, "windows.boundaries", boundaries
-    )
-    return row()
-
-
-def _boundaries_name(
-    windows: window_settings.WindowSettings,
-    switching: Optional[escalation_settings.SwitchingSettings],
-) -> str:
-    """The section's boundaries row, or the one the rows declare.
-
-    A default lives on the class that owns the parameter, gem5's rule for
-    a SimObject's params (gem5 src/python/m5/SimObject.py
-    :313-318, _new_param setting the ParamDesc's default on the class it
-    is declared in, inherited through the _values parent chain set at
-    :240-254). A run with no switching never revises a committed window
-    and ships every boundary at its commit; a switching run hands the
-    default to its strong window shape, whose absorption is what decides.
-    """
-    if windows.boundaries is not None:
-        return windows.boundaries
-    if switching is None:
-        return "eager"
-    return switching.strong_window.default_boundary_policy
+    boundary_policy = windows.boundary_policy.build()
+    _refuse_undeclared_boundary_policy(boundary_policy)
+    return boundary_policy
 
 
 def _idle_policy(settings: controller_settings.IdlePolicySettings):

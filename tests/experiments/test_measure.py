@@ -1448,9 +1448,7 @@ def seam_streams_settings(
         engine=engine,
     )
     manager = decoder_settings.DecoderManagerSettings(dispatch_cycles=0)
-    windows = window_settings.WindowSettings(
-        kind="sliding", terminal_policy="flush"
-    )
+    windows = window_settings.WindowSettings(terminal_policy="flush")
     # a 1 GHz frame beside the 1 GHz decoder engine, so one write is the
     # 4 ns of Yang et al. 2605.04892 Fig. 1 and every correction reaches
     # the frame on one of its edges

@@ -262,7 +262,7 @@ def _tan_sandwich_run(unit_count):
         unit_count=unit_count,
         engine=declared_run.DECLARED_ENGINE,
     )
-    scheme = sandwich_scheme.TanSandwichScheme()
+    scheme = sandwich_scheme.TanSandwichScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
     settings = machine_settings.MachineSettings(
         workload=workload,

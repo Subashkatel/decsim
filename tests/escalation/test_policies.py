@@ -11,6 +11,7 @@ own two forced-class solves). The port is gem5's conditional predictor
 
 import dataclasses
 import math
+from typing import Optional
 
 import pytest
 import stim
@@ -168,11 +169,9 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=3, device=device)
-    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-    scheme = sliding_scheme.SlidingWindowScheme(lookahead)
-    held = boundary_policies.Held()
+    held = boundary_policies.Held.Settings()
     windows = window_settings.WindowSettings(
-        scheme=scheme, boundary_policy=held
+        terminal_policy="lookahead", boundary_policy=held
     )
     decoder_manager = decoder_settings.DecoderManagerSettings()
     matching = mwpm.PyMatchingDecoder.Settings()
@@ -353,8 +352,11 @@ def _double_window_settings(
 
     Every part is a table row, the way the yaml builds it.
     """
-    windows = window_settings.WindowSettings(
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
         commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
+    )
+    windows = window_settings.WindowSettings(
+        scheme=scheme, terminal_policy="lookahead"
     )
     matching = mwpm.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderPoolSettings(
@@ -584,10 +586,8 @@ def _serial_switching_settings(
     boundary_policy,
 ) -> machine_settings.MachineSettings:
     """Serial switching (no double window) with the boundary policy given."""
-    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-    scheme = sliding_scheme.SlidingWindowScheme(lookahead)
     windows = window_settings.WindowSettings(
-        scheme=scheme, boundary_policy=boundary_policy
+        terminal_policy="lookahead", boundary_policy=boundary_policy
     )
     matching = mwpm.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderPoolSettings(algorithm=matching)
@@ -615,7 +615,7 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
     decoder, so the boundary waits for the final result; Eager would
     hand a successor a correction the strong tier later replaces.
     """
-    eager = boundary_policies.Eager()
+    eager = boundary_policies.Eager.Settings()
     settings = _serial_switching_settings(eager)
     with pytest.raises(
         ValueError, match="serial switching requires held boundaries"
@@ -632,9 +632,12 @@ def test_the_double_window_refuses_held_boundaries_at_build():
     strong window on itself.
     """
     settings = _double_window_settings(3, 3)
-    held = boundary_policies.Held()
+    held = boundary_policies.Held.Settings()
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
+        commit_rounds=3, buffer_rounds=3
+    )
     windows = window_settings.WindowSettings(
-        commit_rounds=3, buffer_rounds=3, boundary_policy=held
+        scheme=scheme, terminal_policy="lookahead", boundary_policy=held
     )
     settings = dataclasses.replace(settings, windows=windows)
     with pytest.raises(
@@ -658,17 +661,22 @@ class DelegatingWindowScheme:
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
 
-    def __init__(
-        self,
-        card: window_records.WindowingSchemeCard = (
-            window_records.DEFAULT_SCHEME_CARD
-        ),
-    ) -> None:
-        del card
-        lookahead = window_records.WindowingSchemeCard(
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The delegating row's record: the sizes, and its build."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        name = "delegating"
+
+        def build(self, terminal_policy) -> "DelegatingWindowScheme":
+            del terminal_policy
+            return DelegatingWindowScheme()
+
+    def __init__(self) -> None:
+        self.inner = sliding_scheme.SlidingWindowScheme(
             terminal_policy="lookahead"
         )
-        self.inner = sliding_scheme.SlidingWindowScheme(lookahead)
 
     def plan_operation(
         self,
@@ -698,6 +706,18 @@ class UndeclaredWindowScheme:
     it plans a window.
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The undeclared row's record: the sizes, and its build."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        name = "undeclared"
+
+        def build(self, terminal_policy) -> "UndeclaredWindowScheme":
+            del terminal_policy
+            return UndeclaredWindowScheme()
+
 
 def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     """The double window reads the row's declaration, not its class.
@@ -705,7 +725,7 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     A row that commits in one serial chain and keeps trailing tail
     context serves the double window, whatever class it is.
     """
-    scheme = DelegatingWindowScheme()
+    scheme = DelegatingWindowScheme.Settings()
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
@@ -791,7 +811,7 @@ def test_held_boundaries_named_in_a_yaml_are_the_rows_the_run_gets(tmp_path):
     machine = machine_module.Machine.build(settings, 0)
     boundary_policy = machine.windows.window_manager.courier.boundary_policy
 
-    assert settings.windows.boundaries == "held"
+    assert settings.windows.boundary_policy == boundary_policies.Held.Settings()
     assert isinstance(boundary_policy, boundary_policies.Held)
 
 
@@ -813,7 +833,7 @@ def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):
 
 def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
     """A row that declares nothing is refused at build, by the fact it lacks."""
-    scheme = UndeclaredWindowScheme()
+    scheme = UndeclaredWindowScheme.Settings()
     with pytest.raises(
         ValueError,
         match="UndeclaredWindowScheme does not declare "

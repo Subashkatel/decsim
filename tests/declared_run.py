@@ -31,11 +31,9 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.tables as tables
 import decsim.windows.boundary_policies as boundary_policies
-import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 
 # every declared stage of the fabric, in microseconds
@@ -179,10 +177,39 @@ def strong_window_settings(name):
     return row.Settings()
 
 
-def lookahead_sliding_scheme():
-    """The sliding windows with the lookahead tail every run here uses."""
-    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-    return sliding_scheme.SlidingWindowScheme(lookahead)
+def windows_on(windows, kind=None, **sizes):
+    """The windows with another scheme row, other sizes, or both.
+
+    kind is the yaml's windows.kind word; None keeps the windows' own
+    row. A size left out keeps the scheme's own.
+    """
+    scheme = windows.scheme
+    if kind is not None:
+        row = tables.row(
+            window_settings.WINDOWING_SCHEMES, "windows.kind", kind
+        )
+        scheme = row.Settings(
+            commit_rounds=scheme.commit_rounds,
+            buffer_rounds=scheme.buffer_rounds,
+        )
+    scheme = dataclasses.replace(scheme, **sizes)
+    return dataclasses.replace(windows, scheme=scheme)
+
+
+def switching_windows(windows, switching):
+    """The windows with the tail and boundary row a yaml gives switching.
+
+    A switching run reads past the last window's commit, and its strong
+    window shape declares the boundary row it needs.
+    """
+    boundaries = switching.strong_window.default_boundary_policy
+    row = tables.row(
+        window_settings.BOUNDARY_POLICIES, "windows.boundaries", boundaries
+    )
+    boundary_policy = row.Settings()
+    return dataclasses.replace(
+        windows, terminal_policy="lookahead", boundary_policy=boundary_policy
+    )
 
 
 def declared_edge(base_edge, latency_microseconds):
@@ -591,12 +618,11 @@ def switching_run(
     workload = declared_workload(operations, rounds)
     # serial switching needs Held boundaries; the double window refuses
     # them (escalation.policies.Switching.check_plan)
-    boundary_policy = boundary_policies.Held()
+    boundary_policy = boundary_policies.Held.Settings()
     if strong_window == "double_window":
-        boundary_policy = None
-    scheme = lookahead_sliding_scheme()
+        boundary_policy = boundary_policies.Eager.Settings()
     windows = window_settings.WindowSettings(
-        scheme=scheme, boundary_policy=boundary_policy
+        terminal_policy="lookahead", boundary_policy=boundary_policy
     )
     decoder_manager = decoder_settings.DecoderManagerSettings(
         bulk_strong=bulk_strong

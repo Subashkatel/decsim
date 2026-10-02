@@ -57,7 +57,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.collect as collect
 import decsim.experiments.collect_command as collect_command
@@ -141,7 +141,7 @@ class SlurmRequest:
 
 
 def launch(
-    run_file,
+    run_file: Union[str, pathlib.Path],
     out_dir: Optional[pathlib.Path],
     task_count: int,
     job: JobShape,
@@ -174,22 +174,8 @@ def launch(
     _plan_and_submit(request, python)
 
 
-def _plan_and_submit(request: SlurmRequest, python: str) -> None:
-    """The next batch planned, then its arrays and the next step queued."""
-    batch_folder = plan_batch(
-        request.run_file, request.results_dir, request.task_count, request.job
-    )
-    if batch_folder is None:
-        print(f"every point has stopped; decsim status {request.results_dir}")
-        return
-    task_rows = _task_rows(batch_folder)
-    _refuse_a_batch_past_the_submit_limit(batch_folder, task_rows)
-    job_ids = _submit_the_arrays(batch_folder, task_rows, python, request)
-    _submit_the_next_step(batch_folder, job_ids, python, request)
-
-
 def plan_batch(
-    run_file,
+    run_file: Union[str, pathlib.Path],
     results_dir: pathlib.Path,
     task_count: int,
     job: JobShape,
@@ -263,6 +249,20 @@ def refuse_an_unnamed_tree() -> None:
             "task cannot name the code it ran; submit from a git checkout "
             f"pinned at a commit, or set {run_folder.ALLOW_DIRTY_VARIABLE}=1"
         )
+
+
+def _plan_and_submit(request: SlurmRequest, python: str) -> None:
+    """The next batch planned, then its arrays and the next step queued."""
+    batch_folder = plan_batch(
+        request.run_file, request.results_dir, request.task_count, request.job
+    )
+    if batch_folder is None:
+        print(f"every point has stopped; decsim status {request.results_dir}")
+        return
+    task_rows = _task_rows(batch_folder)
+    _refuse_a_batch_past_the_submit_limit(batch_folder, task_rows)
+    job_ids = _submit_the_arrays(batch_folder, task_rows, python, request)
+    _submit_the_next_step(batch_folder, job_ids, python, request)
 
 
 def _dirty_text(is_dirty: Optional[bool]) -> str:

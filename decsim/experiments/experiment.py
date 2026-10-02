@@ -28,7 +28,7 @@ import pathlib
 import re
 import sys
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import yaml
 
@@ -201,7 +201,7 @@ class Experiment:
         )
 
 
-def grid(**axes) -> list:
+def grid(**axes: Sequence) -> list:
     """Every combination of the axes' values, as one dict each.
 
     The product runs in the order the axes are given, the last axis
@@ -218,7 +218,7 @@ def grid(**axes) -> list:
     return points
 
 
-def load(path) -> Experiment:
+def load(path: Union[str, pathlib.Path]) -> Experiment:
     """The experiment a run file defines, or a yaml's, translated.
 
     A Python file is executed as a module of its own, registered under
@@ -241,7 +241,9 @@ def load(path) -> Experiment:
     return defined
 
 
-def load_one_point(path, name: Optional[str] = None) -> Experiment:
+def load_one_point(
+    path: Union[str, pathlib.Path], name: Optional[str] = None
+) -> Experiment:
     """The run file's experiment cut to one point, the named or the first.
 
     A yaml is read for that point alone (ExperimentConfig.one_point).
@@ -257,7 +259,7 @@ def load_one_point(path, name: Optional[str] = None) -> Experiment:
     return study.only(name)
 
 
-def run_files(path) -> tuple:
+def run_files(path: Union[str, pathlib.Path]) -> tuple:
     """The files a run reads: the run file, and a yaml's extends chain.
 
     A yaml names its bases nearest first, as the reader follows them.

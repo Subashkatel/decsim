@@ -20,7 +20,7 @@ import math
 import pathlib
 import sys
 import tempfile
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.collect as collect
 import decsim.escalation.settings as escalation_settings
@@ -191,7 +191,7 @@ class PointCollection:
 
 
 def run_experiment(
-    run_file,
+    run_file: Union[str, pathlib.Path],
     out_dir: Optional[pathlib.Path] = None,
     *,
     processes: int = 1,

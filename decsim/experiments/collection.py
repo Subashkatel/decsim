@@ -38,10 +38,6 @@ KEYS = (
     "min_shots",
     "piece_rounds",
 )
-# The keys that stop a point; sinter refuses a collection without
-# max_shots for the same reason (sinter/_collection/_collection_manager.py:
-# 230-231): a point with no cap may never stop.
-CAP_KEYS = ("max_shots", "max_core_seconds")
 # the state of a prefix its time cap stopped, whose limits assume a
 # shot's time is independent of its failure
 TIME_CAP_STATE = "time cap"

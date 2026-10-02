@@ -222,7 +222,9 @@ def _print_points(points: list) -> None:
         print(f"{point_id} decoder={point.task.decoder} {labels_text}")
 
 
-def _refuse_no_workers(parser, worker_count: int) -> None:
+def _refuse_no_workers(
+    parser: argparse.ArgumentParser, worker_count: int
+) -> None:
     """Sinter waits for its workers to answer, so none would hang it."""
     if worker_count < 1:
         parser.error(
@@ -231,7 +233,9 @@ def _refuse_no_workers(parser, worker_count: int) -> None:
         )
 
 
-def _point_ids(parser, target: Optional[str], point_count: int) -> list:
+def _point_ids(
+    parser: argparse.ArgumentParser, target: Optional[str], point_count: int
+) -> list:
     """Every point for no target, none for combine, else the one named."""
     if target is None:
         return list(range(point_count))
@@ -246,7 +250,9 @@ def _point_ids(parser, target: Optional[str], point_count: int) -> list:
     return [int(target)]
 
 
-def _results_folder(parser, parsed) -> pathlib.Path:
+def _results_folder(
+    parser: argparse.ArgumentParser, parsed: argparse.Namespace
+) -> pathlib.Path:
     """--out, or a new dated folder for a run of every point.
 
     One point and combine name their folder, since every task of an

@@ -322,7 +322,9 @@ def _print_points(points: list) -> None:
         print(f"{point_id} {point.results_file} {labels_text}")
 
 
-def _point_ids(parser, target: Optional[str], point_count: int) -> list:
+def _point_ids(
+    parser: argparse.ArgumentParser, target: Optional[str], point_count: int
+) -> list:
     """Every point for no target, none for combine, else the one named."""
     if target is None:
         return list(range(point_count))
@@ -337,7 +339,9 @@ def _point_ids(parser, target: Optional[str], point_count: int) -> list:
     return [int(target)]
 
 
-def _results_folder(parser, parsed) -> pathlib.Path:
+def _results_folder(
+    parser: argparse.ArgumentParser, parsed: argparse.Namespace
+) -> pathlib.Path:
     """--out, or a new dated folder for a run of every point.
 
     One point and combine name their folder, since every task of an

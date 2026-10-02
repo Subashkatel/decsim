@@ -1,0 +1,22 @@
+# Experiment 2, the threshold sweep: Experiment 1's switching machine
+# with the cluster-gap threshold moved from 5 to 30 dB, to trade the
+# share of windows escalated against the logical error rate: the
+# brute-force threshold search of Toshio et al. 2510.25222 lines
+# 854-862. Only the threshold and the grid differ from
+# switching_baseline.yaml.
+extends: ../switching_baseline/switching_baseline.yaml
+
+sweep:
+  - axes:
+      workload.arguments.physical_error_probability: [0.001, 0.003]
+      qpu.distance: [9, 11]
+      qpu.round_period_microseconds: [1.0]
+      escalation.gap_threshold_db: [5.0, 10.0, 15.0, 20.0, 30.0]
+
+# extends replaces a section whole, so the stop rule is restated here.
+collection:
+  max_failures: 100
+  max_shots: 5000000
+  min_shots: 0
+  # 50 shots a piece, as in switching_baseline.yaml
+  piece_rounds: 5000

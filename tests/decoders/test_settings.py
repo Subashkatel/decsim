@@ -354,6 +354,25 @@ def test_an_unknown_key_on_the_engine_card_is_refused_by_name():
         )
 
 
+def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
+    """A typo is refused by the one sentence every table refuses with."""
+    clocks = config.ClockSettings({"decoder": 250.0})
+    section = _tier_section({"bits": None})
+    section["kind"] = "my_decodr"
+    rows = sorted(decoder_settings.DECODERS)
+    sentence = (
+        f"weak_decoder.kind 'my_decodr' is not a row of its table; the rows "
+        f"are {rows}"
+    )
+
+    with pytest.raises(ValueError) as refusal:
+        decoder_settings.DecoderPoolSettings.from_yaml(
+            section, clocks, "weak_decoder"
+        )
+
+    assert str(refusal.value) == sentence
+
+
 @pytest.mark.parametrize("kind", [-1, True, float("nan"), float("inf"), [1]])
 def test_a_kind_that_is_neither_a_row_nor_a_latency_is_refused_by_name(kind):
     """A negative, a flag, an infinity and a list are no core latency."""

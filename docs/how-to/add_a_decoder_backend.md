@@ -59,11 +59,13 @@ fails on a module that tests against a row's class).
 
 One entry in `DECODERS` (`decsim/decoders/settings.py`), one folder or
 one module beside the other rows, and the key in
-`configs/reference.yaml` in the same commit. A knob of your backend's
-own (a step size, an iteration cap) is a field of a nested `Settings`
-on your class, written in the tier's section beside `kind`, as
-`union_find`'s `weight_step` is; your constructor takes the record as
-`settings`.
+`configs/reference.yaml` in the same commit. Your class declares a
+nested frozen `Settings` record, even with no fields: the tier's
+algorithm is that record, which names your row in `name`, checks its
+fields in `__post_init__` and builds your decoder in `build()`. A knob
+of your backend's own (a step size, an iteration cap) is a field of it,
+written in the tier's section beside `kind`, as `union_find`'s
+`weight_step` is; your constructor takes the record as `settings`.
 [How to add a row to a table](add_a_table_row.md) is the general recipe with the refusal
 a typo gets.
 
@@ -100,7 +102,7 @@ window with Tesseract and counts the disagreements into
 
 ## 5. Read the worked example
 
-`tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_one_table_row`
+`tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_its_settings_record`
 plugs a decoder in from outside decsim in a few lines, and
 `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one`
 runs one through a whole run of a shipped config.

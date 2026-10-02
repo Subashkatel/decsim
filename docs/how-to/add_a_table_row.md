@@ -15,31 +15,45 @@ more, something is wrong with the port rather than with your class.
 
 A row with yaml keys of its own declares them on a nested frozen
 dataclass named `Settings`, which fills the `RowSettings` port in
-`decsim/ports.py`: its fields are the keys, its classmethod
-`from_yaml(section)` reads and checks the ones the yaml wrote, and your
-constructor takes the record as `settings`. The section keeps the keys
-every row of its table shares and hands your row the rest
-(`decsim/tables.py`, `row_settings`); a key that neither declares is
-refused by name when the yaml loads. A row with no keys of its own
-declares no `Settings`. A decoder row's `from_yaml` is also handed the
-run's clocks, since a decoder's own timing names a clock domain, and its
-tier's section name (`weak_decoder` or `strong_decoder`), which a
-refusal leads with, since both tiers take the same rows:
+`decsim/ports.py`: its fields are the keys, its `__post_init__` checks
+their values, so a record written in Python is refused as the yaml is,
+its classmethod `from_yaml(section)` turns what the yaml wrote into the
+record and checks only what a yaml alone gets wrong (a key's yaml
+type), and your constructor takes the record as `settings`. The section
+keeps the keys every row of its table shares and hands your row the
+rest (`decsim/tables.py`, `row_settings`); a key that neither declares
+is refused by name when the yaml loads. A row with no keys of its own
+declares no `Settings`, except a decoder row.
+
+A decoder row always declares `Settings`, even with no fields, because
+a tier's algorithm is that record (the `DecoderSettings` port): it names
+its row in `name`, which the results name the tier by, and its `build()`
+returns a fresh decoder. Its `from_yaml` is also handed the run's
+clocks, since a decoder's own timing names a clock domain, and its
+tier's section name (`weak_decoder` or `strong_decoder`), which
+`tables.section_record` puts before the record's refusal, since both
+tiers take the same rows:
 
 ```python
 class MyDecoder(decoder_module.WindowDecoderBase):
     @dataclasses.dataclass(frozen=True)
     class Settings:
         step_count: int = 1
+        # the word the yaml and the reports name this row by
+        name = "my_decoder"
+
+        def __post_init__(self):
+            config.check_whole_count("step_count", self.step_count, "steps")
+
+        def build(self):
+            return MyDecoder(settings=self)
 
         @classmethod
         def from_yaml(cls, section, clocks, section_name):
-            step_count = section.get("step_count", 1)
-            if step_count < 1:
-                raise ValueError(f"{section_name}.step_count is at least 1")
-            return cls(step_count=step_count)
+            del clocks
+            return tables.section_record(section_name, cls, section)
 
-    def __init__(self, settings=None):
+    def __init__(self, settings):
         decoder_module.WindowDecoderBase.__init__(self)
         ...
 ```
@@ -78,7 +92,7 @@ study most often extends:
 
 | Table | The root builds your row as | Where |
 | --- | --- | --- |
-| `DECODERS` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
+| `DECODERS` | `settings.build()`, where `settings` is the tier's `algorithm`, the row's `Settings` record | `decsim/build/decoders.py`, `build_decoder_unit` |
 | `WINDOWING_SCHEMES` | `row.Settings(...).build(terminal_policy)`; the row's `Settings` holds `commit_rounds` and `buffer_rounds` and any key of its own | `decsim/build/plan.py`, `_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
 | `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
@@ -86,7 +100,7 @@ study most often extends:
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/readout.py`, `_store` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
 | `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row.Settings().build()` | `decsim/build/plan.py` |
-| `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root calls `row.build(card, engine)` for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger; a row that keeps the fabric and changes how a wire times its bits hands `LinkFabric` its own `Channel` class instead | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/machine.py`, `build_links` |
+| `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root builds one `LinkFabric` from the card for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger; a path whose wire times its bits another way names a packet protocol on its card, whose record builds that path's `Channel` | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/machine.py`, `build_links` |
 
 A syndrome source also says where the run's window models come from,
 through its `window_model_source` method, unless Python names another
@@ -144,7 +158,7 @@ weak_decoder.kind 'my_decodr' is not a row of its table; the rows are
 
 One function does that for every table (`decsim/tables.py`, `row`), so
 the refusal reads the same wherever it comes from. It is pinned by
-`tests/machine/test_machine.py::test_a_decoder_kind_off_the_table_is_refused_naming_the_rows`.
+`tests/decoders/test_settings.py::test_a_decoder_kind_off_the_table_is_refused_naming_the_rows`.
 
 A key that neither the section nor your row declares is refused the
 same way, with the keys the section reads and your row's own listed:
@@ -166,10 +180,10 @@ than any description of it.
 
 | You are writing | Read |
 | --- | --- |
-| a decoder | `tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_one_table_row` |
+| a decoder | `tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_its_settings_record` |
 | a decoder, through a whole run of a shipped config | `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one` |
-| a syndrome buffer | `tests/machine/test_machine.py::test_a_new_syndrome_buffer_is_one_class_and_one_table_row` |
-| a syndrome buffer with a key of its own | `tests/syndrome_buffer/test_settings.py::test_a_buffer_rows_own_key_reaches_its_settings` |
+| a syndrome buffer | `tests/machine/test_machine.py::test_a_new_syndrome_buffer_is_one_class_and_one_settings_record` |
+| a syndrome buffer's keys | `tests/syndrome_buffer/test_settings.py::test_a_store_sections_keys_are_its_records_fields` |
 | a syndrome source with a key of its own | `tests/experiments/test_yaml_surface.py::test_a_source_rows_own_key_reaches_the_built_source` |
 | a workload maker | `tests/frontends/test_settings.py::test_a_maker_written_outside_decsim_runs_from_a_yaml` |
 | a code card | `tests/machine/test_machine.py::test_a_code_card_written_outside_decsim_runs_with_no_registration` |
@@ -178,7 +192,7 @@ than any description of it.
 | a boundary or idle policy | `tests/machine/test_machine.py::test_a_policy_written_outside_decsim_is_used_on_its_own_axis` |
 | a windowing scheme | `tests/windows/test_window_planner.py`, and the `WindowingScheme` port |
 | a windowing scheme with a key of its own | `tests/windows/test_settings.py::test_a_scheme_rows_own_key_reaches_its_settings` |
-| a link fabric | `tests/links/test_link_profiles.py::test_a_fabric_row_written_outside_decsim_runs_from_a_yaml`, and the `Link` port |
+| a link fabric | `tests/links/test_link_profiles.py::test_the_measured_cpu_row_runs_from_a_yaml`, and the `Link` port |
 | an escalation policy | `tests/escalation/test_policies.py`, and the `EscalationPolicy` port |
 | a burst detector | `tests/burst_detectors/test_settings.py`, and [How to add a burst detector](add_a_burst_detector.md) |
 

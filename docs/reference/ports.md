@@ -344,6 +344,18 @@ One decoder: correctness and timing from one object.
 | `cancel` | Stop a started job; on_result never runs for it. |
 | `occupancy` | Ticks the unit's compute is held from the start; None if measured. |
 
+### `DecoderSettings`
+
+A decoder row's settings record, as a tier and a confidence see it.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+
+| Method | What it does |
+| --- | --- |
+| `build` | A fresh decoder of these settings. |
+
 ### `StrongBackend`
 
 The device a strong decode runs on, as the strong decoder sees it.

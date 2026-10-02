@@ -161,7 +161,7 @@ docstring.
 - `decsim/windows/schemes/parallel.py`: The parallel row: Skoric block A/B windows.
 - `decsim/windows/schemes/sandwich.py`: The sandwich row: Tan et al.'s zero-seam sandwich decoder.
 - `decsim/windows/schemes/sliding.py`: The sliding row: serial commit windows with a look-ahead buffer.
-- `decsim/windows/schemes/window_data.py`: When a window has the rounds it reads.
+- `decsim/windows/schemes/window_data.py`: The rounds a window reads: how many a scheme names, and when they are in.
 - `decsim/windows/settings.py`: The window scheme, its sizes, and its decision cost on a named clock.
 - `decsim/windows/window_boundaries.py`: The boundary courier: residual defects travel to dependent windows.
 - `decsim/windows/window_commits.py`: The window commits: a result rides home and commits its window once.

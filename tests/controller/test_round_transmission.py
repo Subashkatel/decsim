@@ -25,7 +25,6 @@ import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -35,7 +34,6 @@ import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 from decsim.syndrome_buffer import (
     weak_syndrome_round_receiver as weak_syndrome_round_receiver,
@@ -125,7 +123,10 @@ def priced_cwb_profile():
         base.channel.name, CWB_TICKS, None, "test"
     )
     path = link_settings.PathSettings(
-        channel, base.default_payload, base.actual_payload_source
+        channel,
+        base.default_payload,
+        base.actual_payload_source,
+        excludes_receiver_processing=base.excludes_receiver_processing,
     )
     return dataclasses.replace(reference, controller_to_weak_buffer=path)
 
@@ -146,7 +147,10 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
         edge.channel.name, WBD_TICKS, capacity, "test"
     )
     path = link_settings.PathSettings(
-        channel, edge.default_payload, edge.actual_payload_source
+        channel,
+        edge.default_payload,
+        edge.actual_payload_source,
+        excludes_receiver_processing=edge.excludes_receiver_processing,
     )
     store_hop = reference.controller_to_weak_buffer
     store_channel = link_settings.ChannelSettings(
@@ -162,10 +166,10 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
 
 def transmitter_with(engine, profile, windows=None, settings=None):
     ledger = link_traffic.TrafficLedger(profile)
-    links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
+    links = fabric_module.LinkFabric(profile, engine)
     links.trace.transfer_delivered.connect(ledger.on_transfer)
     if settings is None:
-        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        settings = syndrome_buffer_module.SyndromeBufferSettings()
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if windows is None:
         windows = RecordingWindows(engine)
@@ -255,9 +259,8 @@ def test_a_window_round_is_in_flight_until_its_write_publishes_it():
     engine = engine_module.Engine()
     profile = priced_cwb_profile()
     clock = config.Clock(CYCLE_TICKS)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=5)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, write_cycles=5
     )
     transmitter, _store, windows, _recorder, _ledger = transmitter_with(
         engine, profile, settings=settings

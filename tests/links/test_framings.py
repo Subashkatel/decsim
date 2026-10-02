@@ -13,17 +13,13 @@ rxe_req.c:423-430 (the RoCE v2 headers, the four-byte pad, the ICRC).
 import pytest
 
 import decsim.links.framings as framings
-import decsim.links.settings as link_settings
 import decsim.ports as ports
 
 
 def framing(kind, **keys):
-    row = framings.FRAMINGS[kind]
-    row_settings = None
-    if keys:
-        row_settings = row.Settings(**keys)
-    settings = link_settings.FramingSettings(kind, row_settings)
-    return framings.build(settings)
+    record = framings.FRAMINGS[kind]
+    settings = record(**keys)
+    return settings.build()
 
 
 def aurora_blocks(aurora, octets):

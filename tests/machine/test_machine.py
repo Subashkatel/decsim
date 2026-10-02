@@ -40,7 +40,6 @@ import decsim.build.windows as windows_part
 import decsim.collect as collect
 import decsim.config as config
 import decsim.controller.policies as idle_policies
-import decsim.controller.settings as controller_settings
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_memory as decoder_memory
@@ -80,8 +79,6 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
-import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
@@ -296,23 +293,6 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         machine_module.Machine.build(settings)
 
 
-def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
-    # The weak baseline never reads the strong store, but the yaml still
-    # names its kind, and a kind off the table is a mistake in the yaml.
-    strong_syndrome_buffer = syndrome_buffer_settings.SyndromeBufferSettings(
-        kind="off_table"
-    )
-    settings = machine_settings.MachineSettings(
-        strong_syndrome_buffer=strong_syndrome_buffer
-    )
-    with pytest.raises(
-        ValueError,
-        match="strong_syndrome_buffer.kind 'off_table' is not a row of its "
-        r"table; the rows are \['ported_syndrome_buffer', 'syndrome_buffer'\]",
-    ):
-        machine_module.Machine.build(settings)
-
-
 def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
     with pytest.raises(
         ValueError, match=r"the yaml has no section \['buffers'\]; the sections"
@@ -398,19 +378,41 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     burst_detector = escalation_build.build_burst_detector(
         settings, engine, plan, escalation_policy
     )
+    window_tier = escalation_policy.primary_tier
+    escalates = escalation_policy.requires_strong_context
     detection_events = readout_part.build_detection_events(
-        settings, plan.device, escalation_policy, burst_detector
+        settings.detection_events,
+        settings.clock,
+        plan.device,
+        window_tier,
+        escalates,
+        burst_detector,
     )
     pool = decoders_part.build_decoder_pool(
         settings, plan, escalation_policy, detection_events
     )
+    weak_store_slot, strong_store_slot = machine_module.store_slots(
+        settings, window_tier, pool
+    )
     links = machine_module.build_links(settings, engine)
     qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
     control = control_part.Control.build(
-        settings.controller, settings.pauli_frame, engine, plan, links
+        settings.controller,
+        settings.pauli_frame,
+        settings.clock,
+        engine,
+        plan,
+        links,
     )
     readout = readout_part.Readout.build(
-        settings, engine, escalation_policy, detection_events, links
+        settings.controller,
+        settings.links,
+        weak_store_slot,
+        strong_store_slot,
+        settings.clock,
+        engine,
+        detection_events,
+        links,
     )
     windows = windows_part.Windows.build(
         settings, engine, plan, escalation_policy, burst_detector, links
@@ -614,7 +616,7 @@ def test_bounded_strong_storage_and_unit_memory_drain_without_weak_data(
     program = memory_programs.memory_program()
     settings = _settings(program, "live", placement)
     window_bits = SIX_ROUND_WINDOW_BITS[placement]
-    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    buffer = syndrome_buffer_module.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(settings.strong_decoder, unit_memory=memory)
     # a three microsecond strong input keeps the live stream running
@@ -823,7 +825,7 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     windows = dataclasses.replace(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    one_round = syndrome_buffer_settings.SyndromeBufferSettings(bits=1)
+    one_round = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
@@ -986,12 +988,16 @@ def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
         _run(settings)
 
 
+SEPARATE_DECODE_JOBS = idle_policies.SeparateDecodeJobsSettings()
+IGNORE_IDLE_ROUNDS = idle_policies.IgnoreSettings()
+
+
 @pytest.mark.parametrize(
     ("idle_policy", "load_job_count"),
-    [("separate_decode_jobs", 2), ("ignore", 0)],
+    [(SEPARATE_DECODE_JOBS, 2), (IGNORE_IDLE_ROUNDS, 0)],
 )
 def test_static_idle_rounds_use_strong_slots_until_the_decoder_arrival(
-    idle_policy: str, load_job_count: int
+    idle_policy, load_job_count: int
 ) -> None:
     settings = _static_idle_settings(idle_policy)
     run, release_ticks_by_round = _run_static(settings)
@@ -1031,7 +1037,7 @@ def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")
     window_bits = SIX_ROUND_WINDOW_BITS["controller"]
-    buffer = syndrome_buffer_settings.SyndromeBufferSettings(bits=window_bits)
+    buffer = syndrome_buffer_module.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
     decoder = dataclasses.replace(
         settings.strong_decoder, kind=5.0, unit_memory=memory
@@ -1773,7 +1779,7 @@ def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
 
 
 class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
-    """A table row for the plug-in test: the store, counting its writes."""
+    """A store for the plug-in test: the plain store, counting its writes."""
 
     def __init__(self, settings, engine):
         syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
@@ -1786,8 +1792,18 @@ class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
         )
 
 
-def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
-    """Gate point 1's settings run to completion on a store added as a row."""
+@dataclasses.dataclass(frozen=True)
+class CountingSyndromeBufferSettings(
+    syndrome_buffer_module.SyndromeBufferSettings
+):
+    """The plain store's settings, building the counting store."""
+
+    def build(self, engine) -> CountingSyndromeBuffer:
+        return CountingSyndromeBuffer(self, engine)
+
+
+def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
+    """Gate point 1's settings run to completion on a store plugged in."""
     config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
@@ -1798,15 +1814,14 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_table_row(monkeypatch):
         },
     )
     settings = point.settings
-    counting = dataclasses.replace(
-        settings.weak_syndrome_buffer, kind="counting"
+    weak_store = settings.weak_syndrome_buffer
+    counting = CountingSyndromeBufferSettings(
+        bits=weak_store.bits,
+        clock=weak_store.clock,
+        write_cycles=weak_store.write_cycles,
+        read_cycles=weak_store.read_cycles,
     )
     settings = dataclasses.replace(settings, weak_syndrome_buffer=counting)
-    monkeypatch.setitem(
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
-        "counting",
-        CountingSyndromeBuffer,
-    )
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -1865,18 +1880,17 @@ class _SilentFactoryTrace:
 
 
 class AlwaysReadyFactory:
-    """A factory row written outside decsim: the collaborators alone.
+    """A factory written outside decsim, built from the engine alone.
 
-    Its constructor is InfiniteFactory's own shape, one parameter: the
-    collaborators record every row is built from. It declares the decode
-    queue port the root binds on every factory row, and the trace source
-    the port declares, silent because no request waits.
+    It declares the decode queue port the part binds on every factory,
+    and the trace source the port declares, silent because no request
+    waits.
     """
 
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators):
-        self.engine = collaborators.engine
+    def __init__(self, engine):
+        self.engine = engine
         self.requests = []
         self.trace = _SilentFactoryTrace()
 
@@ -1892,10 +1906,17 @@ class AlwaysReadyFactory:
         """Nothing runs, so nothing stops."""
 
 
-def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
-    monkeypatch,
-):
-    """One constructor call, so a row that reads only the engine builds."""
+@dataclasses.dataclass(frozen=True)
+class AlwaysReadyFactorySettings:
+    """The record that builds an AlwaysReadyFactory."""
+
+    def build(self, engine, round_ticks):
+        del round_ticks
+        return AlwaysReadyFactory(engine)
+
+
+def test_a_factory_written_outside_decsim_is_built_by_its_record():
+    """The part calls the record's build, whatever factory it is."""
     config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
@@ -1906,13 +1927,8 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
         },
     )
     settings = point.settings
-    factory_settings = qpu_settings.FactorySettings(kind="always_ready")
-    settings = dataclasses.replace(
-        settings, magic_state_factory=factory_settings
-    )
-    monkeypatch.setitem(
-        qpu_settings.MAGIC_STATE_FACTORIES, "always_ready", AlwaysReadyFactory
-    )
+    always_ready = AlwaysReadyFactorySettings()
+    settings = dataclasses.replace(settings, magic_state_factory=always_ready)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert isinstance(machine.qpu.factory, AlwaysReadyFactory)
@@ -1937,9 +1953,6 @@ def test_the_run_result_carries_the_factorys_supply_stall():
         correction_decode_count=0,
         return_ticks=return_ticks,
     )
-    factory = qpu_settings.FactorySettings(
-        kind="distillation", row_settings=card
-    )
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
     decoder = decoders.PresetLatencyDecoder(weak_microseconds)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
@@ -1952,7 +1965,7 @@ def test_the_run_result_carries_the_factorys_supply_stall():
         weak_decoder=weak_decoder,
         links=links,
         controller=controller,
-        magic_state_factory=factory,
+        magic_state_factory=card,
     )
 
     machine = machine_module.Machine.build(settings, 0)
@@ -1983,6 +1996,14 @@ class RecordingIdlePolicy:
         del idle_rounds, operation, patch
 
 
+@dataclasses.dataclass(frozen=True)
+class RecordingIdlePolicySettings:
+    """Its settings record, which builds it."""
+
+    def build(self) -> RecordingIdlePolicy:
+        return RecordingIdlePolicy()
+
+
 def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
     """Two builds of the same settings each get their own policy objects."""
     settings = machine_settings.MachineSettings()
@@ -2005,8 +2026,7 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     windows = window_settings.WindowSettings(boundary_policy=boundary_policy)
     boundary_settings = machine_settings.MachineSettings(windows=windows)
     with_boundary = machine_module.Machine.build(boundary_settings)
-    idle_policy = RecordingIdlePolicy()
-    idle_row = controller_settings.IdlePolicySettings(policy=idle_policy)
+    idle_row = RecordingIdlePolicySettings()
     idle_settings = machine_settings.MachineSettings(idle_policy=idle_row)
     with_idle = machine_module.Machine.build(idle_settings)
     assert with_boundary.windows.window_manager.courier.boundary_policy is (
@@ -2015,7 +2035,7 @@ def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     assert type(with_boundary.control.idle_rounds.policy) is (
         idle_policies.SeparateDecodeJobs
     )
-    assert with_idle.control.idle_rounds.policy is idle_policy
+    assert type(with_idle.control.idle_rounds.policy) is RecordingIdlePolicy
     assert type(with_idle.windows.window_manager.courier.boundary_policy) is (
         boundary_policies.Eager
     )
@@ -2417,7 +2437,7 @@ def test_a_full_syndrome_buffer_stalls_the_controller_instead_of_dropping():
     input to land instead of being dropped.
     """
     seven_rounds_bits = 7 * BITS_PER_ROUND
-    seven_rounds = syndrome_buffer_settings.SyndromeBufferSettings(
+    seven_rounds = syndrome_buffer_module.SyndromeBufferSettings(
         bits=seven_rounds_bits
     )
     machine = declared_run.weak_only_run(
@@ -3201,8 +3221,7 @@ def test_an_operation_claims_every_idle_cycle_before_it_starts():
     windows = window_settings.WindowSettings(scheme=scheme)
     decoder = decoders.PresetLatencyDecoder(10.0)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    ignore = idle_policies.Ignore()
-    idle = controller_settings.IdlePolicySettings(policy=ignore)
+    idle = idle_policies.IgnoreSettings()
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -3388,9 +3407,11 @@ def _run(
     weak_writes = []
     strong_occupancies = []
     machine.qpu.device.trace.round_emitted.connect(packets.append)
-    machine.readout.weak_syndrome_buffer.trace.round_stored.connect(
-        lambda *event: weak_writes.append(event)
-    )
+    weak_store = machine.readout.weak_syndrome_buffer
+    if weak_store is not None:
+        weak_store.trace.round_stored.connect(
+            lambda *event: weak_writes.append(event)
+        )
     observe = functools.partial(
         _record_strong_occupancy, machine, strong_occupancies
     )
@@ -3473,7 +3494,8 @@ def _assert_actual_truth(run: _Run) -> None:
 
 
 def _assert_drained(run: _Run) -> None:
-    assert run.machine.readout.weak_syndrome_buffer.occupancy == 0
+    weak_store = run.machine.readout.weak_syndrome_buffer
+    assert weak_store is None or weak_store.occupancy == 0
     assert run.machine.readout.strong_syndrome_buffer.occupancy == 0
     receiver = run.machine.readout.strong_syndrome_round_receiver
     assert receiver.reserved_bits_by_round == {}
@@ -3593,7 +3615,7 @@ def _scheduled_workload(
     )
 
 
-def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
+def _static_idle_settings(idle_policy) -> machine_settings.MachineSettings:
     """Declare the two-patch workload beside the timings it exercises.
 
     The operation definitions and card remain together so the four idle
@@ -3621,13 +3643,12 @@ def _static_idle_settings(idle_policy: str) -> machine_settings.MachineSettings:
     engine = decoder_settings.EngineSettings(clock=clock)
     strong = decoder_settings.DecoderSettings(kind=0.2, engine=engine)
     escalation = escalation_settings.EscalationSettings(kind="strong_only")
-    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         strong_decoder=strong,
         escalation=escalation,
-        idle_policy=idle,
+        idle_policy=idle_policy,
     )
     observation = dataclasses.replace(
         settings.observation, record_switching_windows=True
@@ -3643,9 +3664,11 @@ def _run_static(
 ) -> tuple[_Run, dict]:
     machine = machine_module.Machine.build(settings, seed)
     weak_writes = []
-    machine.readout.weak_syndrome_buffer.trace.round_stored.connect(
-        lambda *event: weak_writes.append(event)
-    )
+    weak_store = machine.readout.weak_syndrome_buffer
+    if weak_store is not None:
+        weak_store.trace.round_stored.connect(
+            lambda *event: weak_writes.append(event)
+        )
     release_ticks_by_round = {}
     released = functools.partial(
         _record_release, machine, release_ticks_by_round

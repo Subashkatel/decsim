@@ -1217,9 +1217,8 @@ class StrongBackend(Protocol):
 class Frame(Protocol):
     """The Pauli frame, as the decoder output sees it.
 
-    Table row: logical_register (FRAMES,
-    pauli_frame/pauli_frame.py), named by pauli_frame.kind; every row
-    takes the engine, the clock and the write cost in cycles of it.
+    Built by PauliFrameConfig.build (pauli_frame/pauli_frame.py) from the
+    write cost in cycles and the clock it counts on.
     """
 
     def commit_correction(
@@ -1715,10 +1714,9 @@ class WindowModelSource(Protocol):
 class Link(Protocol):
     """The link fabric as every sender sees it.
 
-    Table rows: logical_reference, bandwidth_limited, roce_v2_cpu,
-    roce_v2_gpu, nvqlink_gpu (LINK_FABRICS, links/link_profiles.py),
-    named by links.kind; a row supplies the numbers the section's per-path cards
-    override and builds the fabric the root sends on. Every hop of the
+    Built by links/fabric.py LinkFabric from a FabricSettings card, a
+    preset of links/link_profiles.py or one the run writes. Every hop of
+    the
     reaction path is priced, and a send delivers by callback with every
     tick of the transfer on the record.
 
@@ -1831,12 +1829,12 @@ class Channel(Protocol):
     port hands its packets to the packet queue that decides when each
     one goes (gem5 src/mem/port.hh, src/mem/packet_queue.hh:62-63).
 
-    A Link row's build hands the fabric a channel class, which the
-    fabric calls once per channel name with that channel's
-    ChannelSettings and the engine, so a jittered or credit-limited
-    channel is one class and no fabric subclass. The shipped rows hand
-    it the PROTOCOLS row each card names: ideal, credit and reliable
-    (links/fabric.py), named by links.<path>.protocol.kind. framed is a
+    The fabric builds one per channel name: the channel the card's
+    protocol record builds from that channel's ChannelSettings and the
+    engine, credit or reliable, or the ideal wire for a card with none
+    (links/fabric.py protocol_channel), so a jittered or credit-limited
+    channel is one record and one class and no fabric subclass. framed
+    is a
     FramedPayload (decsim/links/channel.py): the payload bits a
     component sent and the header bits its path adds.
 
@@ -1866,9 +1864,9 @@ class Channel(Protocol):
 class Framing(Protocol):
     """How a packet channel cuts one message into its wire's frames.
 
-    Table rows: whole, flits, aurora_64b66b, pcie_tlp, roce_v2,
-    ethernet_udp (FRAMINGS, links/framings.py), named by
-    links.<path>.protocol.framing.kind. A message is the path's header
+    Built by its settings record: whole, flits, aurora_64b66b, pcie_tlp,
+    roce_v2 or ethernet_udp (links/framings.py). A message is the path's
+    header
     and its payload; the frames carry it with the protocol's own
     framing, and the channel serializes, credits and acknowledges them
     one by one. The cut is Garnet's, where a network interface turns a
@@ -2172,9 +2170,8 @@ class RoundsPolicy(Protocol):
 class MagicStateFactory(Protocol):
     """Where a non-Clifford operation gets its magic state.
 
-    Table rows: infinite, distillation, multi_level
-    (MAGIC_STATE_FACTORIES, qpu/settings.py), each built from one
-    FactoryCollaborators record. The runtime asks and is called back; a
+    Built by its settings record (qpu/magic_state_factories.py) from the
+    run's engine and round. The runtime asks and is called back; a
     factory that produces on demand answers at once. A row that produces
     ahead of demand queues its first attempt in start, never in its
     constructor, so the order the machine builds its components in

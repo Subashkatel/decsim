@@ -159,8 +159,8 @@ class SyndromeRoundSender:
     # the slot
     weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver)
     # The weak syndrome buffer itself, which the window side either reads its
-    # windows from or does not
-    weak_store = ports.Port(ports.SyndromeBuffer)
+    # windows from or does not; absent on a strong-primary run
+    weak_store = ports.Port(ports.SyndromeBuffer, optional=True)
     # the room side's end, written by a strong-primary run; absent on a run
     # that never reads from it
     strong_receiver = ports.Port(

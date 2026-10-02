@@ -92,11 +92,8 @@ class _Link:
 def _store(engine, read_cycles=0) -> syndrome_buffer_module.SyndromeBuffer:
     """An unbounded store on a 10-tick clock, its read priced as asked."""
     clock = config.Clock(10)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(
-        read_cycles=read_cycles
-    )
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, read_cycles=read_cycles
     )
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
@@ -145,11 +142,10 @@ def _ported_store(engine) -> syndrome_buffer_module.SyndromeBuffer:
         "clock": "storage",
         "word_bits": 2,
     }
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
+    settings = syndrome_buffer_settings.from_yaml(
         section,
         "weak_syndrome_buffer",
         clocks,
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
     )
     return ported_syndrome_buffer.PortedSyndromeBuffer(settings, engine)
 
@@ -405,11 +401,10 @@ def test_read_cycles_delay_the_decode_from_dispatch_on(decoder_input):
     """Readiness, queueing and dispatch stand; the decode and frame move."""
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "read_cycles": 3}
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
+    settings = syndrome_buffer_settings.from_yaml(
         section,
         "weak_syndrome_buffer",
         clocks,
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
     )
     free = declared_run.weak_only_run(decoder_input=decoder_input)
     charged = declared_run.weak_only_run(

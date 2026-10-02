@@ -17,7 +17,9 @@ Clock, whose two methods are gem5's clockEdge and ticksToCycles
 current tick, and a span of ticks is rounded up to whole cycles.
 """
 
+import dataclasses
 import decimal
+from typing import Optional
 
 import pytest
 
@@ -80,6 +82,26 @@ def test_a_named_domains_clock_has_that_frequencys_period_in_ticks():
     room = clocks.clock("room")
     assert fridge.period_ticks == 4000
     assert room.period_ticks == 2000
+
+
+@dataclasses.dataclass(frozen=True)
+class _PartSettings:
+    """A part's settings, which may name its own clock."""
+
+    clock: Optional[config.Clock] = None
+
+
+def test_settings_that_name_no_clock_run_on_the_machines():
+    machine_clock = config.Clock(4000)
+    own_clock = config.Clock(2000)
+    unclocked = _PartSettings()
+    clocked = _PartSettings(clock=own_clock)
+
+    on_the_machine = config.with_machine_clock(unclocked, machine_clock)
+    on_its_own = config.with_machine_clock(clocked, machine_clock)
+
+    assert on_the_machine.clock == machine_clock
+    assert on_its_own.clock == own_clock
 
 
 def test_a_cost_charged_on_an_edge_is_that_many_whole_periods():

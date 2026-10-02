@@ -59,7 +59,8 @@ does.
 Some things are read from the settings before any part exists, because
 more than one part is built for them: the escalation policy, the plan
 (the windows, the circuit and the round clock), the burst detector, the
-detection event formation and the decoder units.
+detection event formation, the decoder units, and the store slots: which
+syndrome buffers a decoder reads, and whether it reads them in place.
 
 ```python
 engine = engine_module.Engine()
@@ -70,11 +71,21 @@ plan = plan_build.build_plan(settings, escalation_policy)
 burst_detector = escalation_build.build_burst_detector(
     settings, engine, plan, escalation_policy
 )
+window_tier = escalation_policy.primary_tier
+escalates = escalation_policy.requires_strong_context
 detection_events = readout_part.build_detection_events(
-    settings, plan.device, escalation_policy, burst_detector
+    settings.detection_events,
+    settings.clock,
+    plan.device,
+    window_tier,
+    escalates,
+    burst_detector,
 )
 pool = decoders_part.build_decoder_pool(
     settings, plan, escalation_policy, detection_events
+)
+weak_store_slot, strong_store_slot = machine_module.store_slots(
+    settings, window_tier, pool
 )
 print(type(escalation_policy).__name__, plan.round_ticks)
 ```
@@ -96,10 +107,22 @@ One line per part:
 links = machine_module.build_links(settings, engine)
 qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
 control = control_part.Control.build(
-    settings.controller, settings.pauli_frame, engine, plan, links
+    settings.controller,
+    settings.pauli_frame,
+    settings.clock,
+    engine,
+    plan,
+    links,
 )
 readout = readout_part.Readout.build(
-    settings, engine, escalation_policy, detection_events, links
+    settings.controller,
+    settings.links,
+    weak_store_slot,
+    strong_store_slot,
+    settings.clock,
+    engine,
+    detection_events,
+    links,
 )
 windows = windows_part.Windows.build(
     settings, engine, plan, escalation_policy, burst_detector, links

@@ -1,10 +1,11 @@
 """A syndrome buffer: finished rounds held until their last hold releases.
 
-Table row syndrome_buffer. The store's own round receiver writes each round
-once at its landing (accept_packed_round) after asking has_room, the
-window side keeps it alive with holds (RoundHolds), and the slot is
-freed when the last hold releases; the waiting line then hears it, so a
-round held for room enters in order. Capacity is bits, gem5's packet
+The plain store, built from SyndromeBufferSettings. The store's own
+round receiver writes each round once at its landing
+(accept_packed_round) after asking has_room, the window side keeps it
+alive with holds (RoundHolds), and the slot is freed when the last hold
+releases; the waiting line then hears it, so a round held for room
+enters in order. Capacity is bits, gem5's packet
 store: its size is declared on the store itself
 (`rx_fifo_size = Param.MemorySize("384KiB", ...)`,
 src/dev/net/Ethernet.py) and the room test takes the packet's own
@@ -22,13 +23,13 @@ for the windows, round_released(round_key) when the slot frees;
 hold_registered(holder, round_keys), hold_transferred(old_holder,
 new_holder) and hold_released(holder) for the consumers' tokens;
 access_served(direction, port_index, round_keys, arrival_tick,
-start_tick, completion_tick) for every write and read a row with ports
-books (ported_syndrome_buffer.py). This row holds no port and fires none.
+start_tick, completion_tick) for every write and read a store with ports
+books (ported_syndrome_buffer.py). This store holds no port and fires none.
 """
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional
+from typing import ClassVar, Optional
 
 import decsim.config as config
 import decsim.engine as engine_module
@@ -36,8 +37,49 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.trace_source as trace_source
+
+
+@dataclasses.dataclass(frozen=True)
+class SyndromeBufferSettings:
+    """The plain store: its capacity, and a flat cost per write and per read.
+
+    bits bounds the store, the capacity a memory is declared in; None is
+    unbounded. gem5 sizes its packet store the same way, in bytes on the
+    store itself (`rx_fifo_size = Param.MemorySize("384KiB", ...)`,
+    src/dev/net/Ethernet.py) and answers room against the packet's own
+    size (`avail()` over the reserved bytes, `reserve(len)` before the
+    data lands, src/dev/net/pktfifo.hh). A full store makes the
+    controller hold the finished round and write it in order once a slot
+    frees, the backpressure real systems apply to their source (Caune et
+    al. 2410.05202: the sequencer stalls on the decoder's status
+    register).
+    A write of a round costs write_cycles and a read of a decode's
+    rounds, or of an idle round leaving for the decoder, read_cycles, on
+    clock, whatever their width, and no access waits for another:
+    SimpleMemory's latency with no bandwidth term (gem5
+    src/mem/SimpleMemory.py:49, simple_mem.cc:174). A zero cost runs
+    synchronously without clock-edge alignment. clock None is the
+    machine's clock.
+    """
+
+    bits: Optional[int] = None
+    clock: Optional[config.Clock] = None
+    write_cycles: int = 0
+    read_cycles: int = 0
+
+    # the read is one flat cost, so a rate on the link out of the store
+    # is the only price of the read's bits
+    prices_read_bits: ClassVar[bool] = False
+
+    def __post_init__(self) -> None:
+        config.check_capacity_bits("syndrome_buffer.bits", self.bits)
+        config.check_cycles("syndrome_buffer.write_cycles", self.write_cycles)
+        config.check_cycles("syndrome_buffer.read_cycles", self.read_cycles)
+
+    def build(self, engine: engine_module.Engine) -> "SyndromeBuffer":
+        """A fresh store on these settings."""
+        return SyndromeBuffer(self, engine)
 
 
 class SyndromeBuffer:
@@ -55,40 +97,9 @@ class SyndromeBuffer:
     # store
     detection_events = ports.Port(ports.DetectionEventPlacement, optional=True)
 
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """The row's own keys: a flat cost per write and per read, in cycles.
-
-        A write of a round costs write_cycles and a read of a decode's
-        rounds, or of an idle round leaving for the decoder, read_cycles,
-        on the section's clock, whatever their width,
-        and no access waits for another: SimpleMemory's latency with no
-        bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174).
-        A row built on this store with keys of its own answers book_write
-        and book_read itself, or declares these two keys too.
-        """
-
-        write_cycles: int = 0
-        read_cycles: int = 0
-
-        def __post_init__(self) -> None:
-            config.check_cycles(
-                "weak_syndrome_buffer.write_cycles", self.write_cycles
-            )
-            config.check_cycles(
-                "weak_syndrome_buffer.read_cycles", self.read_cycles
-            )
-
-        @classmethod
-        def from_yaml(cls, section: Mapping) -> "SyndromeBuffer.Settings":
-            """Both costs, zero when absent."""
-            write_cycles = section.get("write_cycles", 0)
-            read_cycles = section.get("read_cycles", 0)
-            return cls(write_cycles=write_cycles, read_cycles=read_cycles)
-
     def __init__(
         self,
-        settings: syndrome_buffer_settings.SyndromeBufferSettings,
+        settings: SyndromeBufferSettings,
         engine: engine_module.Engine,
     ) -> None:
         self.settings = settings
@@ -154,14 +165,13 @@ class SyndromeBuffer:
     def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
         """The tick this round's write completes: write_cycles on its clock.
 
-        This row holds no port, so a write never waits for another
+        This store holds no port, so a write never waits for another
         access: it takes write_cycles from the clock edge at or after
         now, gem5 SimpleMemory's latency with no bandwidth term
         (src/mem/simple_mem.cc:174), and a zero cost completes now.
         """
         del round_key, bits
-        costs = _costs(self.settings)
-        return self._access_completion_tick(costs.write_cycles)
+        return self._access_completion_tick(self.settings.write_cycles)
 
     def book_read(self, round_keys: tuple) -> int:
         """The tick a read of these rounds completes: read_cycles on its clock.
@@ -170,8 +180,7 @@ class SyndromeBuffer:
         width, and never waits for another access (book_write).
         """
         del round_keys
-        costs = _costs(self.settings)
-        return self._access_completion_tick(costs.read_cycles)
+        return self._access_completion_tick(self.settings.read_cycles)
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
@@ -185,7 +194,7 @@ class SyndromeBuffer:
         """The bits this store is bounded to, or None for unbounded.
 
         The trace lane and the two round receivers ask this instead of
-        reading the settings record, so a row bounded some other way
+        reading the settings record, so a store bounded some other way
         answers for itself.
         """
         return self.settings.bits
@@ -345,8 +354,7 @@ class SyndromeBuffer:
     # ---- private
 
     def _check_costs_have_a_clock(self) -> None:
-        costs = _costs(self.settings)
-        charged = costs.write_cycles + costs.read_cycles
+        charged = self.settings.write_cycles + self.settings.read_cycles
         if charged > 0 and self.settings.clock is None:
             raise ValueError("charged weak_syndrome_buffer costs need a clock")
 
@@ -505,15 +513,6 @@ class _StoredRound:
         self.packet = packet
         self.held_bits = held_bits
         self.publication_tick: Optional[int] = None
-
-
-def _costs(
-    settings: syndrome_buffer_settings.SyndromeBufferSettings,
-) -> "SyndromeBuffer.Settings":
-    """The default row's costs; a section built with none charges nothing."""
-    if settings.row_settings is None:
-        return SyndromeBuffer.Settings()
-    return settings.row_settings
 
 
 def _round_ranges_text(sorted_round_indices: list) -> str:

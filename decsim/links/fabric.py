@@ -12,10 +12,10 @@ parameters and its children and is reached through its ports
 (src/sim/sim_object.hh, src/mem/port.hh); the trace source is ns-3's
 TracedCallback fired at the device's transition
 (point-to-point-net-device.cc TransmitComplete). The channels are what
-the row's build names (the Channel port in decsim/ports.py), one per
-channel name; the shipped rows build the PROTOCOLS row each card's
-protocol names. The fabric is the seed composite of its channels, so a
-channel that draws (the reliable row's losses) is seeded under its name.
+each card's protocol record builds (the Channel port in decsim/ports.py),
+or the ideal wire for a card with none, one per channel name. The
+fabric is the seed composite of its channels, so a channel that draws
+(the reliable row's losses) is seeded under its name.
 """
 
 import dataclasses
@@ -26,6 +26,7 @@ import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
+import decsim.links.framings as framings
 import decsim.links.reliable_channel as reliable_channel
 import decsim.links.settings as link_settings
 import decsim.ports as ports
@@ -34,20 +35,15 @@ import decsim.records.transfers as transfer_records
 import decsim.tables as tables
 import decsim.trace_source as trace_source
 
-# What a Link row's build hands the fabric: called once per channel name
-# with that channel's settings and the run's engine.
-ChannelClass = Callable[
-    [link_settings.ChannelSettings, decsim.engine.Engine], ports.Channel
-]
-
-# links.<path>.protocol.kind names one of these rows: how the path's
-# channel moves a message. ideal is the whole transfer on an unbounded
-# buffer with nothing lost; credit cuts it into frames that wait for
-# receive-buffer credits; reliable adds loss and go-back-N recovery.
+# links.<path>.protocol.kind names one of these records: how the path's
+# channel moves a message. ideal is no packet protocol, the whole
+# transfer on an unbounded buffer with nothing lost; credit cuts it into
+# frames that wait for receive-buffer credits; reliable adds loss and
+# go-back-N recovery.
 PROTOCOLS = {
-    "ideal": channel_module.Channel,
-    "credit": credit_channel.CreditChannel,
-    "reliable": reliable_channel.ReliableChannel,
+    "ideal": None,
+    "credit": credit_channel.CreditChannel.Settings,
+    "reliable": reliable_channel.ReliableChannel.Settings,
 }
 
 
@@ -55,15 +51,21 @@ def protocol_channel(
     channel_settings: link_settings.ChannelSettings,
     engine: decsim.engine.Engine,
 ) -> ports.Channel:
-    """The channel of the PROTOCOLS row the channel's settings name."""
-    row = PROTOCOLS[channel_settings.protocol.kind]
-    return row(channel_settings, engine)
+    """The channel the settings' protocol builds; the ideal wire for none."""
+    protocol = channel_settings.protocol
+    if protocol is None:
+        return channel_module.Channel(channel_settings, engine)
+    return protocol.build(channel_settings, engine)
 
 
 def protocol_settings_from_yaml(
-    section, clock: config.Clock, path_name: str
-) -> link_settings.ProtocolSettings:
-    """A card's protocol mapping: a kind, and the keys its row declares."""
+    section: object, clock: config.Clock, path_name: str
+) -> Optional[link_settings.PacketProtocolSettings]:
+    """A card's protocol mapping: its kind's record, None for ideal.
+
+    Every field but the clock is written in the mapping; the clock is
+    the card's own.
+    """
     section_name = f"links.{path_name}.protocol"
     if not isinstance(section, Mapping):
         raise ValueError(
@@ -71,13 +73,23 @@ def protocol_settings_from_yaml(
             f"one of {sorted(PROTOCOLS)}"
         )
     kind = section.get("kind", "ideal")
-    row = tables.row(PROTOCOLS, f"links.{path_name}.protocol.kind", kind)
-    row_settings = tables.row_settings(
-        row, section_name, section, ("kind",), path_name
+    record = tables.row(PROTOCOLS, f"links.{path_name}.protocol.kind", kind)
+    if record is None:
+        tables.refuse_unknown_keys(section_name, section, ("kind",))
+        return None
+    card_keys = []
+    for field in dataclasses.fields(record):
+        if field.name != "clock":
+            card_keys.append(field.name)
+    known_keys = ["kind"] + card_keys
+    tables.refuse_unknown_keys(section_name, section, known_keys)
+    values = {}
+    for key in card_keys:
+        values[key] = link_settings.required_key(section, key, section_name)
+    values["framing"] = framings.framing_settings_from_yaml(
+        values["framing"], path_name
     )
-    return link_settings.ProtocolSettings(
-        kind=kind, row_settings=row_settings, clock=clock
-    )
+    return record(clock=clock, **values)
 
 
 class LinkFabric:
@@ -94,7 +106,6 @@ class LinkFabric:
         self,
         fabric_settings: link_settings.FabricSettings,
         engine: decsim.engine.Engine,
-        channel_class: ChannelClass,
     ) -> None:
         self._channel_by_name: dict[str, ports.Channel] = {}
         self._binding_by_path: dict[
@@ -104,14 +115,10 @@ class LinkFabric:
         self._send_count = 0
         for path in transfer_records.LinkPath:
             path_settings = fabric_settings.path_settings(path)
-            channel = self._channel_for(
-                path_settings.channel, engine, channel_class
-            )
+            channel = self._channel_for(path_settings.channel, engine)
             self._binding_by_path[path] = _PathBinding(path_settings, channel)
         for route in fabric_settings.readout_routes:
-            channel = self._channel_for(
-                route.settings.channel, engine, channel_class
-            )
+            channel = self._channel_for(route.settings.channel, engine)
             binding = _PathBinding(route.settings, channel)
             self._readout_by_footprint[route.patch_ids] = binding
         built_channels = self._channel_by_name.values()
@@ -208,12 +215,11 @@ class LinkFabric:
         self,
         channel_settings: link_settings.ChannelSettings,
         engine: decsim.engine.Engine,
-        channel_class: ChannelClass,
     ) -> ports.Channel:
-        """The named channel, built of the row's class on its first path."""
+        """The named channel, built by its protocol on its first path."""
         channel = self._channel_by_name.get(channel_settings.name)
         if channel is None:
-            channel = channel_class(channel_settings, engine)
+            channel = protocol_channel(channel_settings, engine)
             self._channel_by_name[channel_settings.name] = channel
         return channel
 

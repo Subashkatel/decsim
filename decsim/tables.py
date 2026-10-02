@@ -75,6 +75,36 @@ def row_keys(row_class) -> tuple:
     return tuple(names)
 
 
+def record_fields(
+    record_class, section_name: str, section: Mapping, other_keys
+) -> dict:
+    """The section's values of a settings record's fields, by field name.
+
+    other_keys are the keys the section reads for itself, its kind; any
+    key that is neither those nor a field is refused by name.
+    """
+    fields = dataclasses.fields(record_class)
+    field_names = tuple(field.name for field in fields)
+    known_keys = tuple(other_keys) + field_names
+    refuse_unknown_keys(section_name, section, known_keys)
+    values = {}
+    for key in field_names:
+        if key in section:
+            values[key] = section[key]
+    return values
+
+
+def required_fields(record_class) -> tuple:
+    """The names of a settings record's fields that have no default."""
+    names = []
+    for field in dataclasses.fields(record_class):
+        has_default = field.default is not dataclasses.MISSING
+        has_factory = field.default_factory is not dataclasses.MISSING
+        if not has_default and not has_factory:
+            names.append(field.name)
+    return tuple(names)
+
+
 def refuse_unknown_keys(
     section_name: str, section: Mapping, known_keys
 ) -> None:

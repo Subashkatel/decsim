@@ -9,7 +9,6 @@ paths' counters by construction (one counter stream, folded twice).
 import json
 
 import decsim.engine
-import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
 import decsim.observe.link_traffic as link_traffic
@@ -19,7 +18,9 @@ import decsim.records.windows as window_records
 
 PATH = transfer_records.LinkPath
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
-FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
+FREE_PATH = link_settings.PathSettings(
+    FREE_CHANNEL, None, "test payload", excludes_receiver_processing=False
+)
 OPERATION_ID = ("experiment", 7)
 
 TRAFFIC_KEYS = {
@@ -107,13 +108,20 @@ def bounded_path(
         name, latency_ticks, capacity, "test"
     )
     return link_settings.PathSettings(
-        channel, None, "test payload", setup_ticks, header_bits
+        channel,
+        None,
+        "test payload",
+        setup_ticks,
+        header_bits,
+        excludes_receiver_processing=False,
     )
 
 
 def unbounded_path(name, latency_ticks):
     channel = link_settings.ChannelSettings(name, latency_ticks, None, "test")
-    return link_settings.PathSettings(channel, None, "test payload")
+    return link_settings.PathSettings(
+        channel, None, "test payload", excludes_receiver_processing=False
+    )
 
 
 def every_path_free():
@@ -145,9 +153,7 @@ class Run:
         settings = link_settings.FabricSettings(profile_name="test", **wiring)
         self.engine = decsim.engine.Engine()
         self.ledger = link_traffic.TrafficLedger(settings)
-        self.fabric = fabric_module.LinkFabric(
-            settings, self.engine, channel_module.Channel
-        )
+        self.fabric = fabric_module.LinkFabric(settings, self.engine)
         self.fabric.trace.transfer_delivered.connect(self.ledger.on_transfer)
 
     def send(self, path, payload_bits, tick, attribution):

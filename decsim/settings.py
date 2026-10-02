@@ -11,10 +11,11 @@ resolves a section's `kind` against that package's plug-in table.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.config as config
+import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
@@ -24,9 +25,11 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.settings as window_settings
 
 # The yaml sections, in the order MachineSettings reads them. Each
@@ -75,28 +78,31 @@ class MachineSettings:
     Every field has a default, so a Python caller names only what
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
-    prices propagation only.
+    prices propagation only. clock is the machine's clock, the one every
+    part that names none of its own counts its cycles on.
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
+    clock: Optional[config.Clock] = None
     qpu: qpu_settings.QpuSettings = qpu_settings.QpuSettings()
     controller: controller_settings.ControllerSettings = (
         controller_settings.ControllerSettings()
     )
-    idle_policy: controller_settings.IdlePolicySettings = (
-        controller_settings.IdlePolicySettings()
-    )
+    idle_policy: Union[
+        idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings
+    ] = idle_policies.SeparateDecodeJobsSettings()
     detection_events: detection_event_settings.DetectionEventSettings = (
         detection_event_settings.DetectionEventSettings()
     )
     links: link_settings.FabricSettings = (
         link_profiles.logical_reference_profile()
     )
-    weak_syndrome_buffer: syndrome_buffer_settings.SyndromeBufferSettings = (
-        syndrome_buffer_settings.SyndromeBufferSettings()
-    )
-    strong_syndrome_buffer: syndrome_buffer_settings.SyndromeBufferSettings = (
-        syndrome_buffer_settings.SyndromeBufferSettings()
+    weak_syndrome_buffer: Union[
+        syndrome_buffer_module.SyndromeBufferSettings,
+        ported_syndrome_buffer.PortedSyndromeBufferSettings,
+    ] = syndrome_buffer_module.SyndromeBufferSettings()
+    strong_syndrome_buffer: syndrome_buffer_module.SyndromeBufferSettings = (
+        syndrome_buffer_module.SyndromeBufferSettings()
     )
     windows: window_settings.WindowSettings = window_settings.WindowSettings()
     weak_decoder: decoder_settings.DecoderSettings = (
@@ -119,7 +125,7 @@ class MachineSettings:
         workload_settings.WorkloadSettings()
     )
     magic_state_factory: qpu_settings.FactorySettings = (
-        qpu_settings.FactorySettings()
+        magic_state_factories.InfiniteFactory.Settings()
     )
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
@@ -164,29 +170,20 @@ class MachineSettings:
         controller = controller_settings.ControllerSettings.from_yaml(
             sections["controller"], clocks
         )
-        idle_policy = controller_settings.IdlePolicySettings.from_yaml(
+        idle_policy = controller_settings.idle_policy_from_yaml(
             idle_policy_section
         )
         event_settings = detection_event_settings.DetectionEventSettings
         detection_events = event_settings.from_yaml(
-            detection_events_section, clocks, controller.clock
+            detection_events_section, clocks
         )
         links = link_profiles.from_yaml(sections["links"], clocks, name)
-        buffer_settings = syndrome_buffer_settings.SyndromeBufferSettings
-        buffer_rows = ported_syndrome_buffer.SYNDROME_BUFFERS
-        weak_syndrome_buffer = buffer_settings.from_yaml(
-            sections["weak_syndrome_buffer"],
-            "weak_syndrome_buffer",
-            clocks,
-            buffer_rows,
-            controller.clock,
+        weak_syndrome_buffer = syndrome_buffer_settings.from_yaml(
+            sections["weak_syndrome_buffer"], "weak_syndrome_buffer", clocks
         )
         strong_section = sections["strong_syndrome_buffer"]
-        syndrome_buffer_settings.check_strong_section_charges_nothing(
-            strong_section
-        )
-        strong_syndrome_buffer = buffer_settings.from_yaml(
-            strong_section, "strong_syndrome_buffer", clocks, buffer_rows
+        strong_syndrome_buffer = syndrome_buffer_settings.from_yaml(
+            strong_section, "strong_syndrome_buffer", clocks
         )
         windows = window_settings.WindowSettings.from_yaml(
             sections["windows"], clocks, controller.clock
@@ -213,14 +210,13 @@ class MachineSettings:
         workload = workload_settings.WorkloadSettings.from_yaml(
             sections["workload"], workload_folder
         )
-        magic_state_factory = qpu_settings.FactorySettings.from_yaml(
-            factory_section
-        )
+        magic_state_factory = qpu_settings.factory_from_yaml(factory_section)
         observation = observe_settings.ObservationSettings.from_yaml(
             observation_section
         )
         return cls(
             clocks=clocks,
+            clock=controller.clock,
             qpu=qpu,
             controller=controller,
             idle_policy=idle_policy,

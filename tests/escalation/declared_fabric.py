@@ -247,5 +247,8 @@ def _declared_edge(
         "escalation test declared tick",
     )
     return link_settings.PathSettings(
-        channel, base_edge.default_payload, base_edge.actual_payload_source
+        channel,
+        base_edge.default_payload,
+        base_edge.actual_payload_source,
+        excludes_receiver_processing=base_edge.excludes_receiver_processing,
     )

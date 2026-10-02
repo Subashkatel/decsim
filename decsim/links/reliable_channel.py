@@ -1,6 +1,6 @@
 """A credit channel that loses frames and recovers them by go-back-N.
 
-The protocol row `reliable`: the credit row's wire and framing, with
+The packet protocol `reliable`: the credit protocol's wire and framing, with
 every frame a packet of a reliable connection, numbered by a packet
 sequence number (PSN), and the recovery Linux's soft-RoCE driver runs,
 transcribed step by step:
@@ -69,13 +69,13 @@ checked against is a transcription of the lines above.
 
 import dataclasses
 import math
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
+import decsim.links.framings as framings
 import decsim.links.settings as link_settings
 import decsim.seeding as seeding
 
@@ -93,17 +93,17 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The reliable row's keys: the credit row's, then the connection's.
+        """The credit protocol's fields, the connection's, and their clock.
 
         window_packets is the most unacknowledged packets in flight;
         ack_every_packets bounds the packets between two acknowledgement
-        requests; retransmit_timeout_cycles is on the card's clock;
-        retry_count is rxe's retry_cnt, 0 to 7, the retries allowed
-        without an ACK between them; bit_error_rate is the probability
-        that one wire bit is wrong.
+        requests; retransmit_timeout_cycles is on clock, the card's
+        clock domain; retry_count is rxe's retry_cnt, 0 to 7, the
+        retries allowed without an ACK between them; bit_error_rate is
+        the probability that one wire bit is wrong.
         """
 
-        framing: link_settings.FramingSettings
+        framing: framings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
         window_packets: int
@@ -111,17 +111,29 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         retransmit_timeout_cycles: int
         retry_count: int
         bit_error_rate: float
+        clock: config.Clock
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, path_name: str
-        ) -> "ReliableChannel.Settings":
-            """The keys of a card's protocol mapping."""
-            credit_keys = credit_channel.read_credit_keys(section, path_name)
-            framing = credit_keys[0]
-            _require_roce_framing(framing, path_name)
-            connection_keys = _read_connection_keys(section, path_name)
-            return cls(*credit_keys, *connection_keys)
+        def __post_init__(self) -> None:
+            credit_channel.check_credit_fields(self)
+            _require_roce_framing(self.framing)
+            link_settings.check_positive_count(
+                "window_packets", self.window_packets
+            )
+            link_settings.check_positive_count(
+                "ack_every_packets", self.ack_every_packets
+            )
+            _check_timeout_cycles(self.retransmit_timeout_cycles)
+            _check_retry_count(self.retry_count)
+            bit_error_rate = _bit_error_rate(self.bit_error_rate)
+            object.__setattr__(self, "bit_error_rate", bit_error_rate)
+
+        def build(
+            self,
+            channel_settings: link_settings.ChannelSettings,
+            engine: decsim.engine.Engine,
+        ) -> "ReliableChannel":
+            """A fresh channel whose protocol is these settings."""
+            return ReliableChannel(channel_settings, engine)
 
     def __init__(
         self,
@@ -130,7 +142,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
     ):
         channel_module.Channel.__init__(self, channel_settings, engine)
         self._initialize_run_seed_state(None)
-        self._connection = channel_settings.protocol.row_settings
+        self._connection = channel_settings.protocol
         self._sending = _SendState(retries_left=self._connection.retry_count)
         self._receiving = _ReceiveState()
         self._timer = _TimerState()
@@ -141,7 +153,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
 
     def _new_wire(self) -> credit_channel.CreditWire:
         """The credit row's wire."""
-        protocol = self._settings.protocol.row_settings
+        protocol = self._settings.protocol
         return credit_channel.CreditWire(self._settings, protocol)
 
     def _wire_as_it_stands(self) -> credit_channel.CreditWire:
@@ -521,72 +533,52 @@ class _TimerState:
     expiry: Optional[decsim.engine.Event] = None
 
 
-def _require_roce_framing(
-    framing: link_settings.FramingSettings, path_name: str
-) -> None:
-    """This row is RoCE's go-back-N, whose ACKs are RoCE packets.
+def _require_roce_framing(framing: framings.FramingSettings) -> None:
+    """This protocol is RoCE's go-back-N, whose ACKs are RoCE packets.
 
     PCIe recovers by its data link layer's replay, which needs the base
     specification, not in hand; flits, Aurora blocks and UDP datagrams
     have no acknowledgement packet of their own. Those run on the credit
-    row.
+    protocol.
     """
-    if framing.kind == "roce_v2":
+    if framing.has_acknowledgement_packet:
         return
     raise ValueError(
-        f"links.{path_name}.protocol runs the reliable row on "
-        f"{framing.kind} frames; the row is RoCE's go-back-N and its "
-        f"acknowledgements are RoCE packets, so it runs on roce_v2 "
-        f"frames, and {framing.kind} runs on the credit row"
+        "the reliable protocol runs on frames with no acknowledgement "
+        "packet of their own; it is RoCE's go-back-N and its "
+        "acknowledgements are RoCE packets, so it runs on roce_v2 frames, "
+        "and any other framing runs on the credit row"
     )
 
 
-def _read_connection_keys(section: Mapping, path_name: str) -> tuple:
-    """(window, ack interval, timeout, retry count, bit error rate)."""
-    section_name = f"links.{path_name}.protocol"
-    window_packets = link_settings.positive_count_key(
-        section, "window_packets", section_name
-    )
-    ack_every_packets = link_settings.positive_count_key(
-        section, "ack_every_packets", section_name
-    )
-    timeout_cycles = link_settings.required_key(
-        section, "retransmit_timeout_cycles", section_name
-    )
-    timeout_name = f"{section_name}.retransmit_timeout_cycles"
-    config.check_cycles(timeout_name, timeout_cycles)
-    if timeout_cycles == 0:
-        raise ValueError(f"{timeout_name} must be positive")
-    retry_count = _retry_count(section, section_name)
-    bit_error_rate = _bit_error_rate(section, section_name)
-    return (
-        window_packets,
-        ack_every_packets,
-        timeout_cycles,
-        retry_count,
-        bit_error_rate,
-    )
+def _check_timeout_cycles(timeout_cycles: int) -> None:
+    """A retransmit timer that fires at once would resend for ever."""
+    name = "retransmit_timeout_cycles"
+    config.check_cycles(name, timeout_cycles)
+    if timeout_cycles > 0:
+        return
+    raise ValueError(f"{name} must be positive")
 
 
-def _retry_count(section: Mapping, section_name: str) -> int:
-    """The card's retry count, rxe's retry_cnt: a whole number, 0 to 7."""
-    value = link_settings.required_key(section, "retry_count", section_name)
-    is_whole = isinstance(value, int) and not isinstance(value, bool)
-    if is_whole and 0 <= value <= UNSPENT_RETRY_COUNT:
-        return value
+def _check_retry_count(retry_count) -> None:
+    """Rxe's retry_cnt: a whole number, 0 to 7."""
+    is_whole = isinstance(retry_count, int) and not isinstance(
+        retry_count, bool
+    )
+    if is_whole and 0 <= retry_count <= UNSPENT_RETRY_COUNT:
+        return
     raise ValueError(
-        f"{section_name}.retry_count is {value!r}; it is a whole number "
-        f"from 0 to {UNSPENT_RETRY_COUNT}"
+        f"retry_count is {retry_count!r}; it is a whole number from 0 to "
+        f"{UNSPENT_RETRY_COUNT}"
     )
 
 
-def _bit_error_rate(section: Mapping, section_name: str) -> float:
+def _bit_error_rate(value) -> float:
     """A probability below one: a wire that always errs never delivers."""
-    value = link_settings.required_key(section, "bit_error_rate", section_name)
     is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
     if is_number and 0 <= value < 1:
         return float(value)
     raise ValueError(
-        f"{section_name}.bit_error_rate is {value!r}; it is the probability "
-        f"that one bit is wrong, at least 0 and below 1"
+        f"bit_error_rate is {value!r}; it is the probability that one bit "
+        f"is wrong, at least 0 and below 1"
     )

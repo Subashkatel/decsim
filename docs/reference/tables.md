@@ -93,7 +93,7 @@ In `decsim/pauli_frame/pauli_frame.py`. A row of it is named under `pauli_frame.
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `logical_register` | `PauliFrame` in `decsim/pauli_frame/pauli_frame.py` | Keeps every committed correction and charges each write once. |
+| `logical_register` | `PauliFrameConfig` in `decsim/pauli_frame/pauli_frame.py` | The frame's settings: what one write costs. |
 
 ## `FRAMINGS`
 
@@ -101,12 +101,12 @@ In `decsim/links/framings.py`. A row of it is named under `links.<path_name>.pro
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `whole` | `Whole` in `decsim/links/framings.py` | One frame of the whole message, the header with it. |
-| `flits` | `Flits` in `decsim/links/framings.py` | Flits of flit_bits each; the last one is padded to the full width. |
-| `aurora_64b66b` | `Aurora64b66b` in `decsim/links/framings.py` | 66-bit blocks: floor(n / 8) + 1 of them for a frame of n octets. |
-| `pcie_tlp` | `PcieTlp` in `decsim/links/framings.py` | Memory write TLPs of at most max_payload_bytes, 24 bytes on each. |
-| `roce_v2` | `RoceV2` in `decsim/links/framings.py` | RDMA write packets of at most path_mtu_bytes, each an Ethernet frame. |
-| `ethernet_udp` | `EthernetUdp` in `decsim/links/framings.py` | UDP datagrams of at most mtu_bytes, IPv4 and UDP headers inside it. |
+| `whole` | | |
+| `flits` | | |
+| `aurora_64b66b` | | |
+| `pcie_tlp` | | |
+| `roce_v2` | | |
+| `ethernet_udp` | | |
 
 ## `IDLE_POLICIES`
 
@@ -114,8 +114,8 @@ In `decsim/controller/settings.py`. A row of it is named under `idle_policy.kind
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `separate_decode_jobs` | `SeparateDecodeJobs` in `decsim/controller/policies.py` | Idle rounds travel as memory rounds and are charged as decode jobs. |
-| `ignore` | `Ignore` in `decsim/controller/policies.py` | Idle rounds travel as feedback-memory rounds and cost no decode work. |
+| `separate_decode_jobs` | `SeparateDecodeJobsSettings` in `decsim/controller/policies.py` | The default card: idle rounds are decode jobs (SeparateDecodeJobs). |
+| `ignore` | `IgnoreSettings` in `decsim/controller/policies.py` | The optimistic card: idle rounds cost no decode work (Ignore). |
 
 ## `LINK_FABRICS`
 
@@ -135,9 +135,9 @@ In `decsim/qpu/settings.py`. A row of it is named under `magic_state_factory.kin
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `infinite` | `InfiniteFactory` in `decsim/qpu/magic_state_factories.py` | The idealized factory: a magic state is always in stock. |
-| `distillation` | `DistillationFactory` in `decsim/qpu/magic_state_factories.py` | One 15-to-1 distillation stage with optional continuous production. |
-| `multi_level` | `MultiLevelDistillationFactory` in `decsim/qpu/magic_state_factories.py` | A pull-driven chain of distillation levels feeding one store. |
+| `infinite` | | |
+| `distillation` | | |
+| `multi_level` | | |
 
 ## `PROTOCOLS`
 
@@ -145,9 +145,9 @@ In `decsim/links/fabric.py`. A row of it is named under `links.<path_name>.proto
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `ideal` | `Channel` in `decsim/links/channel.py` | One channel at run time: a setup engine, then a wire moving each whole. |
-| `credit` | `CreditChannel` in `decsim/links/credit_channel.py` | A channel whose frames wait for receive-buffer credits. |
-| `reliable` | `ReliableChannel` in `decsim/links/reliable_channel.py` | A channel whose lost frames are resent by go-back-N. |
+| `ideal` | none | the check is off |
+| `credit` | | |
+| `reliable` | | |
 
 ## `STRONG_WINDOW_SHAPES`
 
@@ -160,12 +160,12 @@ In `decsim/escalation/settings.py`. A row of it is named under `escalation.stron
 
 ## `SYNDROME_BUFFERS`
 
-In `decsim/syndrome_buffer/ported_syndrome_buffer.py`. A row of it is named under `<tier>_syndrome_buffer.kind` and `weak_syndrome_buffer.kind` and `strong_syndrome_buffer.kind`.
+In `decsim/syndrome_buffer/settings.py`. A row of it is named under `<section_name>.kind`.
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `syndrome_buffer` | `SyndromeBuffer` in `decsim/syndrome_buffer/syndrome_buffer.py` | The store: rounds by key, their holds, and the operations it serves. |
-| `ported_syndrome_buffer` | `PortedSyndromeBuffer` in `decsim/syndrome_buffer/ported_syndrome_buffer.py` | The store whose writes and reads take words on ports in arrival order. |
+| `syndrome_buffer` | `SyndromeBufferSettings` in `decsim/syndrome_buffer/syndrome_buffer.py` | The plain store: its capacity, and a flat cost per write and per read. |
+| `ported_syndrome_buffer` | `PortedSyndromeBufferSettings` in `decsim/syndrome_buffer/ported_syndrome_buffer.py` | The ported store: its capacity, its ports, its word and its timing. |
 
 ## `SYNDROME_SOURCES`
 

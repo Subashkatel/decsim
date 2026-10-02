@@ -55,9 +55,8 @@ def reliable_settings(
     credit_latency_cycles=2,
     timeout_cycles=200,
 ):
-    roce_settings = framings.RoceV2.Settings(PATH_MTU_BYTES)
-    framing_settings = link_settings.FramingSettings("roce_v2", roce_settings)
-    row = reliable_channel.ReliableChannel.Settings(
+    framing_settings = framings.RoceV2.Settings(PATH_MTU_BYTES)
+    protocol = reliable_channel.ReliableChannel.Settings(
         framing=framing_settings,
         receive_buffer_frames=buffer_frames,
         credit_latency_cycles=credit_latency_cycles,
@@ -66,8 +65,8 @@ def reliable_settings(
         retransmit_timeout_cycles=timeout_cycles,
         retry_count=retry_count,
         bit_error_rate=bit_error_rate,
+        clock=CLOCK,
     )
-    protocol = link_settings.ProtocolSettings("reliable", row, CLOCK)
     capacity = link_settings.CapacitySettings(RATE, "test")
     return link_settings.ChannelSettings(
         "test", PROPAGATION, capacity, "test", protocol
@@ -399,11 +398,8 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
         engine = decsim.engine.Engine()
         settings = reliable_settings(0.0, window_packets=10_000)
         reliable = seeded_channel(engine, settings, 1)
-        credit_row = credit_channel.CreditChannel.Settings(
-            settings.protocol.row_settings.framing, 16, 2
-        )
-        credit_protocol = link_settings.ProtocolSettings(
-            "credit", credit_row, CLOCK
+        credit_protocol = credit_channel.CreditChannel.Settings(
+            settings.protocol.framing, 16, 2, CLOCK
         )
         credit_settings = link_settings.ChannelSettings(
             "test", PROPAGATION, settings.capacity, "test", credit_protocol
@@ -515,41 +511,38 @@ def test_one_seed_draws_the_same_losses_twice():
     assert first_run == second_run
 
 
-def _reliable_section(framing: dict, bit_error_rate: float) -> dict:
-    return {
-        "framing": framing,
-        "receive_buffer_frames": 16,
-        "credit_latency_cycles": 2,
-        "window_packets": 128,
-        "ack_every_packets": 66,
-        "retransmit_timeout_cycles": 1000,
-        "retry_count": 7,
-        "bit_error_rate": bit_error_rate,
-    }
+def _reliable_protocol(framing, bit_error_rate: float, retry_count: int = 7):
+    return reliable_channel.ReliableChannel.Settings(
+        framing=framing,
+        receive_buffer_frames=16,
+        credit_latency_cycles=2,
+        window_packets=128,
+        ack_every_packets=66,
+        retransmit_timeout_cycles=1000,
+        retry_count=retry_count,
+        bit_error_rate=bit_error_rate,
+        clock=CLOCK,
+    )
 
 
 def test_a_bit_error_rate_of_one_is_refused():
-    framing = {"kind": "roce_v2", "path_mtu_bytes": 1024}
-    section = _reliable_section(framing, 1.0)
+    framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
 
     with pytest.raises(ValueError, match="below 1"):
-        reliable_channel.ReliableChannel.Settings.from_yaml(section, "path")
+        _reliable_protocol(framing, 1.0)
 
 
-def test_a_reliable_card_on_frames_other_than_roce_v2_is_refused():
+def test_a_reliable_protocol_on_frames_other_than_roce_v2_is_refused():
     """The ACK is a RoCE packet; flits have no acknowledgement of theirs."""
-    framing = {"kind": "flits", "flit_bits": 64}
-    section = _reliable_section(framing, 0.0)
-    settings_class = reliable_channel.ReliableChannel.Settings
+    framing = framings.Flits.Settings(flit_bits=64)
 
-    with pytest.raises(ValueError, match="flits runs on the credit row"):
-        settings_class.from_yaml(section, "p")
+    sentence = "any other framing runs on the credit row"
+    with pytest.raises(ValueError, match=sentence):
+        _reliable_protocol(framing, 0.0)
 
 
 def test_a_retry_count_above_seven_is_refused():
-    framing = {"kind": "roce_v2", "path_mtu_bytes": 1024}
-    section = _reliable_section(framing, 0.0)
-    section["retry_count"] = 8
+    framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
 
     with pytest.raises(ValueError, match="from 0 to 7"):
-        reliable_channel.ReliableChannel.Settings.from_yaml(section, "p")
+        _reliable_protocol(framing, 0.0, retry_count=8)

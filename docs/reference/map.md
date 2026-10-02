@@ -82,10 +82,10 @@ docstring.
 - `decsim/controller/idle_rounds.py`: Idle rounds per patch: how they travel and what decode work they cost.
 - `decsim/controller/instruction_output.py`: The controller's output: commands and decisions to the QPU.
 - `decsim/controller/operation_issue.py`: The issuer: an admitted operation becomes one QPU command.
-- `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policy rows.
+- `decsim/controller/policies.py`: How an idle round of a waiting patch travels: the idle policies.
 - `decsim/controller/round_assembly.py`: The assembler: raw measurement fragments become one packed round.
 - `decsim/controller/round_transmission.py`: The transmitter: a stored round leaves on its route at the write.
-- `decsim/controller/settings.py`: The controller's settings, and the idle policy it relays through.
+- `decsim/controller/settings.py`: The controller's settings, and the yaml's idle policy section.
 - `decsim/controller/syndrome_round_sender.py`: The sender: a finished round into every store it must reach, or held.
 
 ### detector_error_model
@@ -140,7 +140,7 @@ docstring.
 - `decsim/syndrome_buffer/ported_syndrome_buffer.py`: The ported syndrome buffer: the store of rounds behind memory ports.
 - `decsim/syndrome_buffer/round_holds.py`: Which consumer keeps which rounds alive in a syndrome buffer.
 - `decsim/syndrome_buffer/round_output.py`: A syndrome buffer's outgoing port: it sends the rounds that leave the store.
-- `decsim/syndrome_buffer/settings.py`: A syndrome buffer's capacity and access costs on its named clock.
+- `decsim/syndrome_buffer/settings.py`: The yaml's two store sections, read into the stores' settings records.
 - `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`: The strong syndrome buffer's receiving end: room, then landing.
 - `decsim/syndrome_buffer/syndrome_buffer.py`: A syndrome buffer: finished rounds held until their last hold releases.
 - `decsim/syndrome_buffer/weak_syndrome_round_receiver.py`: The weak syndrome round receiver: room, and the slot a landing takes.

@@ -15,6 +15,7 @@ import yaml
 
 import decsim.build.escalation as escalation_build
 import decsim.collect as collect
+import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
@@ -22,6 +23,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -194,7 +196,7 @@ def test_the_idle_policy_kind_reaches_the_controller(tmp_path):
     )
     config = experiment.load_experiment(config_path)
     first_point = config.first_point_task()
-    assert first_point.settings.idle_policy.kind == "ignore"
+    assert first_point.settings.idle_policy == idle_policies.IgnoreSettings()
 
 
 def test_an_idle_policy_written_as_a_bare_word_is_refused_with_its_mapping(
@@ -224,12 +226,12 @@ def test_a_key_no_idle_policy_row_declares_is_refused(tmp_path):
         experiment.load_experiment(config_path)
 
 
-def test_an_idle_policy_rows_own_key_reaches_its_settings(
-    monkeypatch, tmp_path
-):
-    """gem5's shape: the row declares its key, the section hands it over."""
+def test_an_idle_policy_records_own_key_reaches_it(monkeypatch, tmp_path):
+    """gem5's shape: the record declares its key, the section hands it over."""
     monkeypatch.setitem(
-        controller_settings.IDLE_POLICIES, "every_nth", _EveryNthIdlePolicy
+        controller_settings.IDLE_POLICIES,
+        "every_nth",
+        _EveryNthIdlePolicySettings,
     )
     idle_policy = {"kind": "every_nth", "every_nth_round": 2}
     config_path = yaml_configs.write_config(
@@ -239,20 +241,15 @@ def test_an_idle_policy_rows_own_key_reaches_its_settings(
     config = experiment.load_experiment(config_path)
 
     first_point = config.first_point_task()
-    row_settings = first_point.settings.idle_policy.row_settings
-    assert row_settings == _EveryNthIdlePolicy.Settings(every_nth_round=2)
+    expected = _EveryNthIdlePolicySettings(every_nth_round=2)
+    assert first_point.settings.idle_policy == expected
 
 
-class _EveryNthIdlePolicy:
-    """An idle row with one key of its own, for the section's split."""
+@dataclasses.dataclass(frozen=True)
+class _EveryNthIdlePolicySettings:
+    """An idle policy record with one key of its own."""
 
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        every_nth_round: int = 1
-
-        @classmethod
-        def from_yaml(cls, section):
-            return cls(**section)
+    every_nth_round: int = 1
 
 
 def test_a_factory_row_named_in_the_yaml_is_built_with_its_own_keys(
@@ -316,7 +313,8 @@ def test_a_yaml_without_a_factory_section_runs_the_infinite_row(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {})
     config = experiment.load_experiment(config_path)
     first_point = config.first_point_task()
-    assert first_point.settings.magic_state_factory.kind == "infinite"
+    infinite = magic_state_factories.InfiniteFactory.Settings()
+    assert first_point.settings.magic_state_factory == infinite
 
 
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):

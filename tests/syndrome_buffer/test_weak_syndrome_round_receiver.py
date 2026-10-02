@@ -28,7 +28,6 @@ import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
@@ -83,7 +82,7 @@ def _packed(
 
 
 def _store(engine, bits=None) -> syndrome_buffer_module.SyndromeBuffer:
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
+    settings = syndrome_buffer_module.SyndromeBufferSettings(bits=bits)
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
 
@@ -271,9 +270,8 @@ def test_a_timing_only_round_takes_its_slot_once_its_write_completes():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, write_cycles=3
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     output = _Output()
@@ -306,7 +304,7 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
 
 def test_a_weak_store_too_small_for_a_window_stops_the_run_at_its_hold():
     """The first round forms 4 events, the rest 8; the window reads six."""
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=16)
+    settings = syndrome_buffer_module.SyndromeBufferSettings(bits=16)
 
     with pytest.raises(RuntimeError) as stop:
         declared_run.weak_only_run(weak_syndrome_buffer=settings)
@@ -328,11 +326,10 @@ def test_the_incoming_port_fills_the_declared_port():
 def test_write_cycles_move_every_reaction_point_by_the_store_periods():
     clocks = config.ClockSettings.from_yaml({"storage": 1.0})
     section = {"clock": "storage", "write_cycles": 3}
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
+    settings = syndrome_buffer_settings.from_yaml(
         section,
         "weak_syndrome_buffer",
         clocks,
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
     )
     free = declared_run.weak_only_run()
     charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)
@@ -352,9 +349,8 @@ def test_the_sender_hears_the_publication_after_the_windows_do():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        bits=BITS_PER_ROUND, clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        bits=BITS_PER_ROUND, clock=clock, write_cycles=3
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     receiver, windows = _receiver_with(engine, store)
@@ -376,9 +372,8 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        bits=BITS_PER_ROUND, clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        bits=BITS_PER_ROUND, clock=clock, write_cycles=3
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     receiver, windows = _receiver_with(engine, store)
@@ -485,11 +480,8 @@ def test_the_chips_formation_cycles_are_added_to_the_write_cycles():
     clock = config.Clock(10)
     formation_cycles = 5
     write_cycles = 3
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(
-        write_cycles=write_cycles
-    )
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, write_cycles=write_cycles
     )
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     on_the_chip = _on_the_chip(clock, formation_cycles)
@@ -525,7 +517,7 @@ class _RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
     """An unbounded store recording every room question it is asked."""
 
     def __init__(self, engine) -> None:
-        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        settings = syndrome_buffer_module.SyndromeBufferSettings()
         syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
         self.asked = []
 

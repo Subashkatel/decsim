@@ -1,12 +1,13 @@
 """The ported syndrome buffer: the store of rounds behind memory ports.
 
-Table row ported_syndrome_buffer. The same store of rounds, holds and
-room as the syndrome_buffer row, whose accesses take words on ports. A
-round is stored in whole words, so a request of rounds needs
-k = sum over its rounds of ceil(bits / word_bits) accesses, one word per
-round part: gem5's crossbar charges `divCeil(pkt->getSize(), width)` per
-packet (src/mem/xbar.cc:135), and Helios reads its syndrome FIFO a byte a
-clock with every round starting on a byte boundary (Helios_scalable_QEC
+Built from PortedSyndromeBufferSettings. The same store of rounds, holds
+and room as the plain store (syndrome_buffer.py), whose accesses take
+words on ports. A round is stored in whole words, so a request of rounds
+needs k = sum over its rounds of ceil(bits / word_bits) accesses, one
+word per round part: gem5's crossbar charges
+`divCeil(pkt->getSize(), width)` per packet (src/mem/xbar.cc:135), and
+Helios reads its syndrome FIFO a byte a clock with every round starting
+on a byte boundary (Helios_scalable_QEC
 design/stage_controller/control_node_single_FPGA.v lines 35-36 and
 152-167). Requests are served in the order they reach the store, each on
 the port that frees first among those its direction may use: gem5's
@@ -33,13 +34,11 @@ IBM's decoder FPGA puts the syndrome "into a FIFO" (2510.21600 lines
 """
 
 import dataclasses
-from collections.abc import Mapping
-from typing import Optional
+from typing import ClassVar, Optional
 
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 
 # the port kinds, each by the directions it serves
@@ -48,78 +47,85 @@ _WRITE = "write"
 _READ_WRITE = "read_write"
 
 
+@dataclasses.dataclass(frozen=True)
+class PortedSyndromeBufferSettings:
+    """The ported store: its capacity, its ports, its word and its timing.
+
+    bits bounds the store as the plain store's does; None is unbounded.
+    read_ports, write_ports and read_write_ports count OpenRAM's three
+    port kinds; one read/write port with the other two at zero is a
+    single-port memory. word_bits is what one access moves.
+    cycles_per_access is how long one access holds its port, and
+    access_latency_cycles how long after its last access a request's
+    data is usable, both on clock; clock None is the machine's clock.
+    AFS's one number for a memory read, "a readout time of four cycles
+    to read 32-bit data" multiplied by the count of reads (2001.06598
+    lines 529-531, 1107-1110), is an occupancy: word_bits 32,
+    cycles_per_access 4, access_latency_cycles 0.
+    """
+
+    bits: Optional[int] = None
+    clock: Optional[config.Clock] = None
+    read_ports: int = 1
+    write_ports: int = 1
+    read_write_ports: int = 0
+    word_bits: int = 8
+    cycles_per_access: int = 1
+    access_latency_cycles: int = 0
+
+    # the read port moves a read's bits by words, so a rate on the link
+    # out of the store would charge them twice
+    prices_read_bits: ClassVar[bool] = True
+
+    def __post_init__(self) -> None:
+        config.check_capacity_bits("ported_syndrome_buffer.bits", self.bits)
+        config.check_cycles(
+            "ported_syndrome_buffer.read_ports", self.read_ports
+        )
+        config.check_cycles(
+            "ported_syndrome_buffer.write_ports", self.write_ports
+        )
+        config.check_cycles(
+            "ported_syndrome_buffer.read_write_ports", self.read_write_ports
+        )
+        _check_word_bits(self.word_bits)
+        _check_at_least_one_cycle(self.cycles_per_access)
+        config.check_cycles(
+            "ported_syndrome_buffer.access_latency_cycles",
+            self.access_latency_cycles,
+        )
+        self._check_both_directions_have_a_port()
+
+    def build(self, engine: engine_module.Engine) -> "PortedSyndromeBuffer":
+        """A fresh store on these settings."""
+        return PortedSyndromeBuffer(self, engine)
+
+    def _check_both_directions_have_a_port(self) -> None:
+        """A store no round can enter or leave is a mistake in the file."""
+        reading_ports = self.read_ports + self.read_write_ports
+        writing_ports = self.write_ports + self.read_write_ports
+        if reading_ports >= 1 and writing_ports >= 1:
+            return
+        raise ValueError(
+            "a ported_syndrome_buffer needs a port that reads and a port "
+            "that writes: read_ports plus read_write_ports, and write_ports "
+            "plus read_write_ports, must each be at least one"
+        )
+
+
 class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
     """The store whose writes and reads take words on ports in arrival order.
 
     Its state over the store's is the ports, each with the tick it frees.
     """
 
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """The row's own keys: its ports, its word and its access timing.
-
-        read_ports, write_ports and read_write_ports count OpenRAM's three
-        port kinds; one read/write port with the other two at zero is a
-        single-port memory. word_bits is what one access moves.
-        cycles_per_access is how long one access holds its port, and
-        access_latency_cycles how long after its last access a request's
-        data is usable. AFS's one number for a memory read, "a readout
-        time of four cycles to read 32-bit data" multiplied by the count
-        of reads (2001.06598 lines 529-531, 1107-1110), is an occupancy:
-        word_bits 32, cycles_per_access 4, access_latency_cycles 0.
-        """
-
-        read_ports: int = 1
-        write_ports: int = 1
-        read_write_ports: int = 0
-        word_bits: int = 8
-        cycles_per_access: int = 1
-        access_latency_cycles: int = 0
-
-        def __post_init__(self) -> None:
-            config.check_cycles(
-                "weak_syndrome_buffer.read_ports", self.read_ports
-            )
-            config.check_cycles(
-                "weak_syndrome_buffer.write_ports", self.write_ports
-            )
-            config.check_cycles(
-                "weak_syndrome_buffer.read_write_ports", self.read_write_ports
-            )
-            _check_word_bits(self.word_bits)
-            _check_at_least_one_cycle(self.cycles_per_access)
-            config.check_cycles(
-                "weak_syndrome_buffer.access_latency_cycles",
-                self.access_latency_cycles,
-            )
-            self._check_both_directions_have_a_port()
-
-        @classmethod
-        def from_yaml(cls, section: Mapping) -> "PortedSyndromeBuffer.Settings":
-            """The row's keys the yaml wrote; absent keys take the default."""
-            return cls(**section)
-
-        def _check_both_directions_have_a_port(self) -> None:
-            """A store no round can enter or leave is a mistake in the file."""
-            reading_ports = self.read_ports + self.read_write_ports
-            writing_ports = self.write_ports + self.read_write_ports
-            if reading_ports >= 1 and writing_ports >= 1:
-                return
-            raise ValueError(
-                "weak_syndrome_buffer kind ported_syndrome_buffer needs a "
-                "port that reads and a port that writes: read_ports plus "
-                "read_write_ports, and write_ports plus read_write_ports, "
-                "must each be at least one"
-            )
-
     def __init__(
         self,
-        settings: syndrome_buffer_settings.SyndromeBufferSettings,
+        settings: PortedSyndromeBufferSettings,
         engine: engine_module.Engine,
     ) -> None:
         syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
-        row_settings = _ported_settings(settings)
-        self.memory_ports = _memory_ports(row_settings)
+        self.memory_ports = _memory_ports(settings)
 
     def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
         """Take the first free port that writes, for the round's words."""
@@ -150,8 +156,7 @@ class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
 
     def _words(self, bits: int) -> int:
         """A round stored in whole words: one more word for a part word."""
-        row_settings = _ported_settings(self.settings)
-        word_count, part_word_bits = divmod(bits, row_settings.word_bits)
+        word_count, part_word_bits = divmod(bits, self.settings.word_bits)
         if part_word_bits:
             word_count += 1
         return word_count
@@ -162,16 +167,15 @@ class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
         The port is held from the later of the clock edge at or after now
         and the tick the port frees, for word_count accesses.
         """
-        row_settings = _ported_settings(self.settings)
         period_ticks = self.settings.clock.period_ticks
         arrival_ticks = self.engine.now
         port_index = self._first_free_port(direction)
         port = self.memory_ports[port_index]
         edge_ticks = self.settings.clock.edge(0, arrival_ticks)
         start_ticks = max(edge_ticks, port.free_ticks)
-        busy_cycles = word_count * row_settings.cycles_per_access
+        busy_cycles = word_count * self.settings.cycles_per_access
         port.free_ticks = start_ticks + busy_cycles * period_ticks
-        latency_cycles = row_settings.access_latency_cycles
+        latency_cycles = self.settings.access_latency_cycles
         completion_ticks = port.free_ticks + latency_cycles * period_ticks
         self.trace.access_served.fire(
             direction,
@@ -211,26 +215,17 @@ class _MemoryPort:
         return self.kind == direction
 
 
-def _memory_ports(row_settings: PortedSyndromeBuffer.Settings) -> list:
-    """The row's ports in a fixed order: reads, writes, then read/writes."""
-    kinds = [_READ] * row_settings.read_ports
-    kinds += [_WRITE] * row_settings.write_ports
-    kinds += [_READ_WRITE] * row_settings.read_write_ports
+def _memory_ports(settings: PortedSyndromeBufferSettings) -> list:
+    """The store's ports in a fixed order: reads, writes, then read/writes."""
+    kinds = [_READ] * settings.read_ports
+    kinds += [_WRITE] * settings.write_ports
+    kinds += [_READ_WRITE] * settings.read_write_ports
     return [_MemoryPort(kind) for kind in kinds]
-
-
-def _ported_settings(
-    settings: syndrome_buffer_settings.SyndromeBufferSettings,
-) -> PortedSyndromeBuffer.Settings:
-    """The row's own keys; a section built with none takes the defaults."""
-    if settings.row_settings is None:
-        return PortedSyndromeBuffer.Settings()
-    return settings.row_settings
 
 
 def _check_word_bits(word_bits: int) -> None:
     """A word is a whole number of bits, at least one; never unbounded."""
-    key = "weak_syndrome_buffer.word_bits"
+    key = "ported_syndrome_buffer.word_bits"
     config.check_capacity_bits(key, word_bits)
     if word_bits is not None:
         return
@@ -240,19 +235,10 @@ def _check_word_bits(word_bits: int) -> None:
 def _check_at_least_one_cycle(cycles_per_access: int) -> None:
     """An access that holds its port no time is not a memory access."""
     config.check_cycles(
-        "weak_syndrome_buffer.cycles_per_access", cycles_per_access
+        "ported_syndrome_buffer.cycles_per_access", cycles_per_access
     )
     if cycles_per_access >= 1:
         return
     raise ValueError(
-        "weak_syndrome_buffer.cycles_per_access must be at least one cycle"
+        "ported_syndrome_buffer.cycles_per_access must be at least one cycle"
     )
-
-
-# weak_syndrome_buffer.kind and strong_syndrome_buffer.kind name one of these
-# rows. The table sits beside the last row it lists: this module imports
-# the store it extends, so the store's module cannot import this one.
-SYNDROME_BUFFERS = {
-    "syndrome_buffer": syndrome_buffer_module.SyndromeBuffer,
-    "ported_syndrome_buffer": PortedSyndromeBuffer,
-}

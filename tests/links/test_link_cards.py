@@ -8,6 +8,7 @@ import pytest
 
 import decsim.config as config_module
 import decsim.experiments.experiment as experiment
+import decsim.links.credit_channel as credit_channel
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
@@ -317,17 +318,16 @@ def test_a_card_without_a_protocol_is_the_ideal_row():
     profile = _load_readout_card(GOOD_CARD)
 
     protocol = profile.qpu_to_controller.channel.protocol
-    assert protocol.kind == "ideal"
-    assert protocol.row_settings is None
+    assert protocol is None
 
 
 def test_a_protocol_card_reaches_the_channel_counted_on_its_clock():
     profile = _load_readout_card(CREDIT_CARD)
 
     protocol = profile.qpu_to_controller.channel.protocol
-    assert protocol.kind == "credit"
-    assert protocol.row_settings.receive_buffer_frames == 1
-    assert protocol.row_settings.framing.row_settings.flit_bits == 8
+    assert type(protocol) is credit_channel.CreditChannel.Settings
+    assert protocol.receive_buffer_frames == 1
+    assert protocol.framing.flit_bits == 8
     assert protocol.clock.period_ticks == config_module.microseconds_to_ticks(
         0.004
     )

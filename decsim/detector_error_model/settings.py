@@ -71,7 +71,8 @@ class DetectionEventSettings:
     variables ... in FPGA registers, enabling fully pipelined
     operation"). A seat that forms one round at a time pays the latency
     for each. No source publishes a controller-side or buffer-side
-    figure, so both costs are zero by default.
+    figure, so both costs are zero by default. clock None is the
+    machine's clock.
     """
 
     formed_at: tuple = ("controller",)
@@ -87,25 +88,15 @@ class DetectionEventSettings:
             "detection_events.cycles_per_round", self.cycles_per_round
         )
         _check_seats(self.formed_at)
-        charged = self.latency_cycles + self.cycles_per_round
-        if charged > 0 and self.clock is None:
-            raise ValueError(
-                "a charged detection_events cost needs the clock its "
-                "cycles are counted on; name one, or give the controller "
-                "a clock"
-            )
 
     @classmethod
     def from_yaml(
-        cls,
-        section: Mapping,
-        clocks: config.ClockSettings,
-        controller_clock: Optional[config.Clock],
+        cls, section: Mapping, clocks: config.ClockSettings
     ) -> "DetectionEventSettings":
-        """The section's seats and cost, on controller.clock by default."""
+        """The section's seats and cost, on its clock when it names one."""
         tables.refuse_unknown_keys("detection_events", section, _KEYS)
         formed_at = _formed_at(section)
-        clock = controller_clock
+        clock = None
         if "clock" in section:
             clock = clocks.clock(section["clock"])
         latency_cycles = section.get("latency_cycles", 0)

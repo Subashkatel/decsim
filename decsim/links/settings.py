@@ -19,9 +19,11 @@ import dataclasses
 import fractions
 import math
 from collections.abc import Mapping
-from typing import Optional, Union
+from typing import Optional, Protocol, Union
 
 import decsim.config as config
+import decsim.engine
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 
@@ -75,31 +77,19 @@ class PayloadSettings:
             raise ValueError("input_bits must be nonnegative")
 
 
-@dataclasses.dataclass(frozen=True)
-class FramingSettings:
-    """How a packet channel cuts a message: a FRAMINGS row and its keys.
+class PacketProtocolSettings(Protocol):
+    """A packet protocol's settings record, which builds its channel.
 
-    row_settings is the row's own Settings record, None for a row with
-    no keys (decsim/links/framings.py).
+    CreditChannel.Settings and ReliableChannel.Settings
+    (credit_channel.py, reliable_channel.py) are the two.
     """
 
-    kind: str = "whole"
-    row_settings: Optional[object] = None
-
-
-@dataclasses.dataclass(frozen=True)
-class ProtocolSettings:
-    """What a channel's frames follow: a PROTOCOLS row and its keys.
-
-    ideal is the whole transfer on an unbounded buffer with nothing
-    lost; credit and reliable are packet rows (decsim/links/fabric.py
-    PROTOCOLS). row_settings is the row's own Settings record, None for
-    ideal; its cycles count on clock, the card's clock domain.
-    """
-
-    kind: str = "ideal"
-    row_settings: Optional[object] = None
-    clock: Optional[config.Clock] = None
+    def build(
+        self,
+        channel_settings: "ChannelSettings",
+        engine: decsim.engine.Engine,
+    ) -> ports.Channel:
+        """A fresh channel whose protocol is these settings."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,8 +98,12 @@ class ChannelSettings:
 
     No capacity means an unbounded wire that charges its latency only.
     Two paths whose channels carry the same name share one channel, so
-    the name is the identity a fabric wires by. A packet protocol cuts
-    every message into frames of known size, so it needs a bounded wire.
+    the name is the identity a fabric wires by. protocol is a packet
+    protocol's settings record, which builds the channel
+    (credit_channel.py, reliable_channel.py); None is the ideal wire,
+    the whole transfer on an unbounded buffer with nothing lost. A
+    packet protocol cuts every message into frames of known size, so it
+    needs a bounded wire.
     """
 
     name: str
@@ -117,7 +111,7 @@ class ChannelSettings:
     capacity: Optional[CapacitySettings]
     # where the card was written, a label: no part of a point's id
     configuration_source: str = dataclasses.field(compare=False)
-    protocol: ProtocolSettings = ProtocolSettings()
+    protocol: Optional["PacketProtocolSettings"] = None
 
     def __post_init__(self) -> None:
         propagation_latency_ticks = _as_whole_number(
@@ -128,12 +122,11 @@ class ChannelSettings:
         )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
-        is_packet_protocol = self.protocol.kind != "ideal"
-        if is_packet_protocol and self.capacity is None:
+        if self.protocol is not None and self.capacity is None:
             raise ValueError(
-                f"channel {self.name!r} runs the {self.protocol.kind} "
-                f"protocol, which cuts every message into frames of known "
-                f"size; give it a bounded wire (bits_per_cycle)"
+                f"channel {self.name!r} runs a packet protocol, which cuts "
+                f"every message into frames of known size; give it a "
+                f"bounded wire (bits_per_cycle)"
             )
 
 
@@ -160,7 +153,8 @@ class PathSettings:
     reference number measured end to end includes the receiver turning
     the arrival into bits, and a card the run's own yaml wrote times the
     wire alone, so only the second lets that processing be priced again
-    on the receiving component.
+    on the receiving component. It has no default, so every card says
+    which it is.
     """
 
     channel: ChannelSettings
@@ -170,7 +164,7 @@ class PathSettings:
     header_bits_per_transfer: int = 0
     # the card times the wire alone, so the receiving component's own
     # processing of what arrives is priced somewhere else
-    excludes_receiver_processing: bool = False
+    excludes_receiver_processing: bool = dataclasses.field(kw_only=True)
 
     def __post_init__(self) -> None:
         has_default = self.default_payload is not None
@@ -210,17 +204,15 @@ class ReadoutRoute:
 
 @dataclasses.dataclass(frozen=True)
 class FabricSettings:
-    """A fabric card: one path setting per hop, a profile name and a kind.
+    """A fabric card: one path setting per hop and a profile name.
 
     Every hop of the reaction path is priced, so a card names all eleven
     and a caller that leaves one out is refused where it constructs the
     card. A card whose QPU-to-controller latency leaves out the
     controller's readout processing says so, because the timing card
-    prices that processing on its own line. kind names the row of
-    LINK_FABRICS (link_profiles.py) that supplied these numbers and
-    builds the run's fabric from them with build(card, engine);
-    profile_name is the row's name, or the yaml's own file name for a
-    card read from a yaml, which the run's description prints. Python
+    prices that processing on its own line. profile_name is the preset's
+    name, or the yaml's own file name for a card read from a yaml, which
+    the run's description prints. Python
     callers can set readout_routes to choose a path card by the complete
     contributing patch footprint.
     Unmatched footprints use qpu_to_controller. Equal channel names share
@@ -241,7 +233,6 @@ class FabricSettings:
     # the card's name for the run's description, a label: no part of a
     # point's id
     profile_name: str = dataclasses.field(compare=False)
-    kind: str = "logical_reference"
     readout_routes: tuple[ReadoutRoute, ...] = ()
 
     def __post_init__(self) -> None:
@@ -285,14 +276,11 @@ def required_key(section: Mapping, key: str, section_name: str) -> object:
     return section[key]
 
 
-def positive_count_key(section: Mapping, key: str, section_name: str) -> int:
-    """A key a link card needs: a positive whole number, never a boolean."""
-    value = required_key(section, key, section_name)
+def check_positive_count(name: str, value) -> None:
+    """A positive whole number, never a boolean, or a refusal naming it."""
     if config.is_whole_count(value):
-        return value
-    raise ValueError(
-        f"{section_name}.{key} is {value!r}; it is a positive whole number"
-    )
+        return
+    raise ValueError(f"{name} is {value!r}; it is a positive whole number")
 
 
 def _as_whole_number(value, name: str) -> int:

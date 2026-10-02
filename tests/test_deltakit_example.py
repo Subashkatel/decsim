@@ -24,7 +24,7 @@ import decsim.frontends.deltakit as deltakit
 import decsim.machine as machines
 import decsim.producers as producers
 import decsim.qpu.stim_device as sources
-import decsim.syndrome_buffer.settings as buffer_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tools.deltakit_example as example
 
 pytestmark = pytest.mark.usefixtures("explorer")
@@ -309,7 +309,9 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
     # twelve rounds of the distance-three memory, the final round's data
     # readout included: 11 * 8 + 17 bits
     twelve_rounds_bits = 11 * 8 + 17
-    buffer = buffer_settings.SyndromeBufferSettings(bits=twelve_rounds_bits)
+    buffer = syndrome_buffer_module.SyndromeBufferSettings(
+        bits=twelve_rounds_bits
+    )
     memory = decoder_settings.UnitMemorySettings(bits=twelve_rounds_bits)
     decoder = dataclasses.replace(
         settings.weak_decoder, unit_memory=memory, units=2

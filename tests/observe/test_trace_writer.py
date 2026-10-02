@@ -360,7 +360,7 @@ def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
     that ran it, as each LLVM XRay record carries its thread, and each
     decode's stages sit on its own service's lane.
     """
-    factory = qpu_settings.FactorySettings.from_yaml(
+    factory = qpu_settings.factory_from_yaml(
         {
             "kind": "distillation",
             "unit_count": 1,
@@ -904,11 +904,9 @@ def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
     """
     path = tmp_path / "ported.trace.json"
     point = _settings(path)
-    row_settings = ported_syndrome_buffer.PortedSyndromeBuffer.Settings()
-    ported = dataclasses.replace(
-        point.weak_syndrome_buffer,
-        kind="ported_syndrome_buffer",
-        row_settings=row_settings,
+    weak_store = point.weak_syndrome_buffer
+    ported = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        bits=weak_store.bits, clock=weak_store.clock
     )
     point = dataclasses.replace(point, weak_syndrome_buffer=ported)
     machine = machine_module.Machine.build(point, SEED)

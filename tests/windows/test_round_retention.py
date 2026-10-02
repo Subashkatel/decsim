@@ -26,13 +26,12 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.round_retention as round_retention
 
 
 def _store() -> syndrome_buffer_module.SyndromeBuffer:
-    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    settings = syndrome_buffer_module.SyndromeBufferSettings()
     engine = engine_module.Engine()
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 

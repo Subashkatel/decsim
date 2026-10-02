@@ -27,7 +27,6 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
@@ -116,7 +115,7 @@ class _Fixture:
             buffer_hi=5,
             round_count=5,
         )
-        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        settings = syndrome_buffer_module.SyndromeBufferSettings()
         self.store = syndrome_buffer_module.SyndromeBuffer(
             settings, self.engine
         )
@@ -713,9 +712,8 @@ def test_withdrawal_cancels_a_pending_decision_and_releases_its_input():
 
 def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     clock = config.Clock(1_000_000)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(read_cycles=3)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, read_cycles=3
     )
     machine = declared_fabric.switching_machine(
         rounds=15,

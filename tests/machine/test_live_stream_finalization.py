@@ -5,13 +5,13 @@ seal boundary, using Stim's generated memory and functional PyMatching.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Optional, Union
 
 import numpy
 import pytest
 
 import decsim.config as config
-import decsim.controller.settings as controller_settings
+import decsim.controller.policies as idle_policies
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.settings as workload_settings
@@ -30,6 +30,19 @@ import tests.qpu.memory_programs as memory_programs
 
 # the default QPU round period, 1.1 microseconds, in ticks
 ROUND_TICKS = 1_100_000
+
+IdlePolicySettings = Union[
+    idle_policies.SeparateDecodeJobsSettings, idle_policies.IgnoreSettings
+]
+
+# each test below runs once under each idle policy
+SEPARATE_DECODE_JOBS = idle_policies.SeparateDecodeJobsSettings()
+IGNORE = idle_policies.IgnoreSettings()
+BOTH_IDLE_POLICIES = pytest.mark.parametrize(
+    "idle_policy",
+    [SEPARATE_DECODE_JOBS, IGNORE],
+    ids=["separate_decode_jobs", "ignore"],
+)
 
 
 @pytest.fixture(params=["live", "finite"])
@@ -369,9 +382,9 @@ def test_a_continuation_keeps_a_later_declared_segment_s_windows() -> None:
     assert rounds == list(range(1, 37))
 
 
-@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@BOTH_IDLE_POLICIES
 def test_a_stream_group_shrunk_to_one_patch_runs_to_completion(
-    idle_policy: str,
+    idle_policy: IdlePolicySettings,
 ) -> None:
     """A stream on patches 0 and 1, then an operation on patch 0 alone.
 
@@ -382,9 +395,9 @@ def test_a_stream_group_shrunk_to_one_patch_runs_to_completion(
     assert ("started", 2) in ticks
 
 
-@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@BOTH_IDLE_POLICIES
 def test_a_shrunk_group_gives_the_waiting_decision_its_buffer(
-    idle_policy: str,
+    idle_policy: IdlePolicySettings,
 ) -> None:
     """While the operation on patch 0 waits, both patches stay idle.
 
@@ -399,10 +412,10 @@ def test_a_shrunk_group_gives_the_waiting_decision_its_buffer(
 
 
 @pytest.mark.parametrize("distance", [3, 5])
-@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@BOTH_IDLE_POLICIES
 @pytest.mark.parametrize("waiting_patch", [0, 1])
 def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
-    idle_policy: str, waiting_patch: int, distance: int
+    idle_policy: IdlePolicySettings, waiting_patch: int, distance: int
 ) -> None:
     """The stream's last window is queued before the seal reaches it.
 
@@ -449,9 +462,9 @@ def test_a_waiting_stream_decision_reads_its_buffer_from_the_idle_patch(
     trailing = "trailing_buffer"
     stream_prefix = _stream_prefix()
     charged = _feedback_run(
-        stream_prefix, "separate_decode_jobs", waiting_patch, trailing
+        stream_prefix, SEPARATE_DECODE_JOBS, waiting_patch, trailing
     )
-    ignored = _feedback_run(stream_prefix, "ignore", waiting_patch, trailing)
+    ignored = _feedback_run(stream_prefix, IGNORE, waiting_patch, trailing)
     events = charged[0]
     assert events == ignored[0]
     ticks = _ticks_by_event(events)
@@ -754,7 +767,7 @@ def _emitted_rounds(machine: machine_module.Machine) -> list:
     return rounds
 
 
-def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
+def _shrunk_group_run(blocked_by, idle_policy: IdlePolicySettings) -> dict:
     """The runtime's ticks for a two-patch stream then a patch-0 operation."""
     group = (0, 1)
     owner = program_records.Operation(100, "memory", group, patches=group)
@@ -773,9 +786,8 @@ def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
-    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     settings = machine_settings.MachineSettings(
-        workload=workload, weak_decoder=decoder, idle_policy=idle
+        workload=workload, weak_decoder=decoder, idle_policy=idle_policy
     )
     machine = machine_module.Machine.build(settings, 0)
     events, _ = _events_and_end(machine)
@@ -911,7 +923,7 @@ def _commit_recorder(machine: machine_module.Machine, commit_ticks: dict):
 
 def _feedback_run(
     prefix_shape: tuple,
-    idle_policy: str,
+    idle_policy: IdlePolicySettings,
     waiting_patch: int,
     mode: str,
     distance: int = 3,
@@ -932,10 +944,12 @@ def _feedback_run(
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
     decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
-    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
     qpu = qpu_settings.QpuSettings(distance=distance)
     settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=decoder, idle_policy=idle
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=decoder,
+        idle_policy=idle_policy,
     )
     machine = machine_module.Machine.build(settings, 0)
     return _events_and_end(machine)

@@ -1,7 +1,8 @@
-"""How an idle round of a waiting patch travels: the idle policy rows.
+"""How an idle round of a waiting patch travels: the idle policies.
 
-idle_policy.kind names one of Ignore or SeparateDecodeJobs; each fills
-the IdlePolicy seam (decsim/ports.py). The boundary policy rows live
+Ignore and SeparateDecodeJobs each fill the IdlePolicy seam
+(decsim/ports.py), and each is built from its own settings record,
+IgnoreSettings or SeparateDecodeJobsSettings. The boundary policy rows live
 beside the windows they ship for (windows/boundary_policies.py). A patch
 that holds a stream never reaches a policy: its idle rounds continue the
 stream (controller/idle_rounds.py).
@@ -18,6 +19,26 @@ modeling choice: only data feeding the next non-Clifford decision is
 latency-critical (Skoric 2209.08552), so each policy below is valid for a
 different claim.
 """
+
+import dataclasses
+
+
+@dataclasses.dataclass(frozen=True)
+class IgnoreSettings:
+    """The optimistic card: idle rounds cost no decode work (Ignore)."""
+
+    def build(self) -> "Ignore":
+        """A fresh policy."""
+        return Ignore()
+
+
+@dataclasses.dataclass(frozen=True)
+class SeparateDecodeJobsSettings:
+    """The default card: idle rounds are decode jobs (SeparateDecodeJobs)."""
+
+    def build(self) -> "SeparateDecodeJobs":
+        """A fresh policy."""
+        return SeparateDecodeJobs()
 
 
 class Ignore:

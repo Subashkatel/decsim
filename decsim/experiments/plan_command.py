@@ -75,7 +75,6 @@ TASK_COLUMNS = ("task", "cores", "memory_mb", "hours", "estimated_core_hours")
 # a later piece of the point may hold more.
 MEMORY_MARGIN = 1.5
 SECONDS_PER_HOUR = 3600
-ALLOW_DIRTY_VARIABLE = "ALLOW_DIRTY"
 PYTHON_VARIABLE = "DECSIM_PYTHON"
 SUBMIT_LIMIT_VARIABLE = "SUBMIT_LIMIT"
 # Della's short QOS: 1,000 submitted jobs a user, each array task one.
@@ -213,6 +212,9 @@ def plan_batch(
     planned = pieces.planned_pieces(results_dir)
     points = collect_command.recorded_points(results_dir, study)
     point_ids = [point.task.strong_id() for point in points]
+    run_folder.accept_raised_stop_rules(
+        results_dir, absolute_run_file, point_ids
+    )
     started_utc = run_folder.start_run(
         results_dir, absolute_run_file, point_ids
     )
@@ -249,20 +251,20 @@ def refuse_an_unnamed_tree() -> None:
     print(f"decsim commit: {commit_text}, dirty: {dirty_text}")
     if is_dirty is not None:
         os.environ[run_folder.TREE_DIRTY_VARIABLE] = dirty_text
-    if os.environ.get(ALLOW_DIRTY_VARIABLE):
+    if os.environ.get(run_folder.ALLOW_DIRTY_VARIABLE):
         return
     if is_dirty:
         raise refusal.RefusalError(
             f"refusing to start: {checkout} has uncommitted changes, so a "
             "task would import whatever the tree holds when it starts; "
             "commit them, submit from a worktree pinned at a commit, or "
-            f"set {ALLOW_DIRTY_VARIABLE}=1"
+            f"set {run_folder.ALLOW_DIRTY_VARIABLE}=1"
         )
     if is_dirty is None:
         raise refusal.RefusalError(
             f"refusing to start: git says nothing about {checkout}, so a "
             "task cannot name the code it ran; submit from a git checkout "
-            f"pinned at a commit, or set {ALLOW_DIRTY_VARIABLE}=1"
+            f"pinned at a commit, or set {run_folder.ALLOW_DIRTY_VARIABLE}=1"
         )
 
 

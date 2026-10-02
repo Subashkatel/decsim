@@ -242,6 +242,7 @@ def collect_experiment(
     point_ids = _point_ids(points)
     saved_pieces = pieces.folders_of(run_dir, point_ids)
     report.refuse_pieces_of_another_tree(saved_pieces)
+    run_folder.accept_raised_stop_rules(run_dir, run_file, every_id)
     started_utc = run_folder.start_run(run_dir, run_file, every_id)
     _echo_description(chosen, run_file, run_dir)
     measure_shot = _shot_measure(points, run_dir)

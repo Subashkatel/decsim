@@ -19,7 +19,6 @@ import json
 import os
 import pathlib
 import platform
-import shutil
 import subprocess
 import sys
 import uuid
@@ -49,6 +48,10 @@ CONFIG_FOLDER = "config"
 # whose interpreter has no git of its own (a job script exports it):
 # "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
+# Set, it lets a run go on from a tree git does not vouch for.
+ALLOW_DIRTY_VARIABLE = "ALLOW_DIRTY"
+# what open gives a new file before the umask filters it
+ORDINARY_FILE_MODE = 0o666
 # where Linux names the processor; another system's piece records the
 # word platform.processor gives
 PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
@@ -110,6 +113,32 @@ def start_run(
     return started_utc
 
 
+def accept_raised_stop_rules(
+    run_dir: pathlib.Path, run_file: pathlib.Path, point_ids: list
+) -> None:
+    """A changed run file naming the folder's points replaces its copy.
+
+    A point's id hashes its machine and metadata and not its stop rule,
+    so a run file whose points have the ids run.json recorded differs
+    only in how far they run: a pilot's caps raised for the final run,
+    which goes on from the saved pieces. Its copy replaces the folder's;
+    any other change is refused when the copy is written (_copy_once).
+    A run whose point ids are not content hashes never calls this.
+    """
+    run_path = run_dir / RUN_FILE
+    if not run_path.is_file():
+        return
+    recorded = read_json(run_path)
+    if recorded["points"] != list(point_ids):
+        return
+    for source, target in _run_file_copies(run_file, run_dir):
+        if not target.exists():
+            continue
+        text = source.read_text()
+        with staged_replacement(target) as staging:
+            staging.write_text(text)
+
+
 def finish_run(
     run_dir: pathlib.Path,
     run_file: Optional[pathlib.Path],
@@ -127,10 +156,13 @@ def refuse_another_tree(run_dir: pathlib.Path) -> None:
     A folder's rows pool the shots of every run into it, so they must
     have run one simulator; a run asks before it writes anything. A
     dirty flag nobody could read says nothing either way, so only two
-    read flags that differ are refused.
+    read flags that differ are refused. A new folder from a tree whose
+    commit cannot be read is refused unless ALLOW_DIRTY_VARIABLE is set,
+    since its results could not say what ran.
     """
     run_path = run_dir / RUN_FILE
     if not run_path.is_file():
+        _refuse_an_unread_commit()
         return
     recorded = read_json(run_path)
     recorded_git = recorded["git"]
@@ -146,6 +178,20 @@ def refuse_another_tree(run_dir: pathlib.Path) -> None:
         f"dirty {this_git['dirty']}; a folder holds one tree's results, so "
         "give --out a new folder"
     )
+
+
+def _refuse_an_unread_commit() -> None:
+    """A tree whose commit neither git nor its .git files can name."""
+    commit, _is_dirty = _tree_reading()
+    if commit is not None or os.environ.get(ALLOW_DIRTY_VARIABLE):
+        return
+    checkout = _checkout()
+    message = (
+        f"the commit of the decsim tree at {checkout} cannot be read, so "
+        "run.json could not say what ran; run from a git checkout, whose "
+        f".git folder holds its HEAD, or set {ALLOW_DIRTY_VARIABLE}=1"
+    )
+    raise refusal.RefusalError(message)
 
 
 def piece_identity() -> dict:
@@ -554,28 +600,70 @@ def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
     A Python run file is copied under its own name, so a plot script
     loads the copy that made the rows. A yaml goes into config/ with
     every base of its extends chain, each at its place relative to the
-    others, so every `extends` still resolves.
+    others, so every `extends` still resolves. Each copy is written once
+    (_copy_once), so a folder's copy is the file that made its rows.
     """
+    for source, target in _run_file_copies(run_file, run_dir):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _copy_once(source, target)
+
+
+def _run_file_copies(run_file: pathlib.Path, run_dir: pathlib.Path) -> list:
+    """Each file the run reads, paired with where its copy goes."""
     run_files = experiment.run_files(run_file)
     if len(run_files) == 1 and run_file.suffix == ".py":
         target = run_dir / run_file.name
-        shutil.copy2(run_file, target)
-        return
-    _copy_the_config_chain(run_files, run_dir)
-
-
-def _copy_the_config_chain(config_files: tuple, run_dir: pathlib.Path) -> None:
-    """Every yaml of the chain into config/, each at its place."""
+        return [(run_file, target)]
     config_dir = run_dir / CONFIG_FOLDER
-    config_dir.mkdir(exist_ok=True)
-    chain_folder = _chain_folder(config_files)
-    for config_file in config_files:
+    chain_folder = _chain_folder(run_files)
+    copies = []
+    for config_file in run_files:
         config_path = pathlib.Path(config_file)
         source = config_path.resolve()
         place = source.relative_to(chain_folder)
         target = config_dir / place
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        copies.append((source, target))
+    return copies
+
+
+def _copy_once(source: pathlib.Path, target: pathlib.Path) -> None:
+    """The source's text at target, or a refusal if target holds another.
+
+    The first run into a folder writes the copy; a later one, a resume
+    or another array task, finds it and must bring the same text, since
+    a folder's rows come from one run file. The text is staged under a
+    random name and hard-linked into place, which fails when the target
+    exists, so a task starting beside another never reads half a file.
+    """
+    text = source.read_text()
+    if not target.exists():
+        _link_into_place(text, target)
+    held_text = target.read_text()
+    if held_text == text:
+        return
+    raise refusal.RefusalError(
+        f"{target} holds another {target.name} than {source}; a folder "
+        "holds the results of one run file, so give --out a new folder"
+    )
+
+
+def _link_into_place(text: str, target: pathlib.Path) -> None:
+    """The text written beside target, then linked to it if still free.
+
+    The staging file is created with mode 0666 filtered by the umask, as
+    open creates a file, so a group sharing the folder can read it.
+    """
+    identifier = uuid.uuid4()
+    staging = target.with_name(f".{target.name}.{identifier.hex}.partial")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    descriptor = os.open(staging, flags, ORDINARY_FILE_MODE)
+    try:
+        with os.fdopen(descriptor, "w") as staging_file:
+            staging_file.write(text)
+        with contextlib.suppress(FileExistsError):
+            os.link(staging, target)
+    finally:
+        staging.unlink()
 
 
 def _chain_folder(config_files: tuple) -> pathlib.Path:

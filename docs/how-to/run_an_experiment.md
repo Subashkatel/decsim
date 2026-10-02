@@ -53,8 +53,10 @@ The folder holds:
   `code_state.patch` when the tree had changes, as every decsim results
   folder holds ([The run folder](../reference/run_folder.md)).
 
-A folder belongs to one commit. Running another commit into it is
-refused; give `--out` a new folder.
+A folder belongs to one commit and one `run.py`. Running another
+commit, or an edited `run.py`, into it is refused; give `--out` a new
+folder. A tree whose commit cannot be read is refused too, unless
+`ALLOW_DIRTY=1` is set.
 
 ## Run every point on Slurm
 

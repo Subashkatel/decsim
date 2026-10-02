@@ -128,7 +128,7 @@ def one_tree_reading_per_test(monkeypatch):
     holds; here a task runs on the tree as it stands, and the reading
     it exports goes when the test ends.
     """
-    monkeypatch.setenv(plan_command.ALLOW_DIRTY_VARIABLE, "1")
+    monkeypatch.setenv(run_folder.ALLOW_DIRTY_VARIABLE, "1")
     monkeypatch.delenv(run_folder.TREE_DIRTY_VARIABLE, raising=False)
     run_folder._tree_reading.cache_clear()
     yield
@@ -1966,6 +1966,60 @@ def test_a_manifest_names_a_library_loaded_from_outside_the_package(
     assert manifest["compiled_libraries"] == expected
 
 
+def test_a_run_file_with_other_points_is_refused_in_the_folder(tmp_path):
+    """A folder's copy of its run file is the one that made its rows.
+
+    A grid split one file a distance names other points in each file,
+    so the second file into the first one's folder is refused and the
+    folder keeps its copy.
+    """
+    three_path = _one_distance_config(tmp_path, 3)
+    five_path = _one_distance_config(tmp_path, 5)
+    out_dir = tmp_path / "out"
+    collect_command.run_experiment(three_path, out_dir)
+    copy_path = out_dir / "config" / three_path.name
+    copy_text = copy_path.read_text()
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(five_path, out_dir)
+
+    assert "holds another unit_test_config.yaml" in str(refused.value)
+    assert copy_path.read_text() == copy_text
+
+
+def test_a_raised_stop_rule_replaces_the_folders_run_file_copy(tmp_path):
+    """The same points run further: the copy is the file that ran last."""
+    out_dir = tmp_path / "out"
+    _collected_noisy_point(tmp_path, "first", {"max_shots": 2}, out_dir)
+
+    _collected_noisy_point(tmp_path, "second", {"max_shots": 3}, out_dir)
+
+    second_path = tmp_path / "second" / "unit_test_config.yaml"
+    copy_path = out_dir / "config" / "unit_test_config.yaml"
+    assert copy_path.read_text() == second_path.read_text()
+
+
+def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
+    tmp_path, monkeypatch
+):
+    """A run whose commit cannot be read could not say what ran."""
+    monkeypatch.delenv(run_folder.ALLOW_DIRTY_VARIABLE)
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
+    monkeypatch.setattr(run_folder, "_commit_from_git_files", lambda _: None)
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    refused_dir = tmp_path / "refused"
+    allowed_dir = tmp_path / "allowed"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(config_path, refused_dir)
+    monkeypatch.setenv(run_folder.ALLOW_DIRTY_VARIABLE, "1")
+    collect_command.run_experiment(config_path, allowed_dir)
+
+    assert "cannot be read" in str(refused.value)
+    assert not (refused_dir / "run.json").exists()
+    assert (allowed_dir / "run.json").exists()
+
+
 def test_a_run_where_git_cannot_answer_records_no_patch(tmp_path, monkeypatch):
     """The container the suite runs in ships no git."""
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
@@ -2584,35 +2638,6 @@ def _sorted_rows_of_every_file(run_dir) -> dict:
 def _row_key(row: dict) -> list:
     cells = row.items()
     return sorted(cells)
-
-
-def test_pieces_of_two_distances_fold_to_one_run(tmp_path):
-    """Two yamls, one a distance, collected into one folder are one run.
-
-    A fold counts every point the folder recorded, so a grid split one
-    file a distance, each collected into one folder in reverse order and
-    folded by status, gives the uncut two-distance run's rows; the fold
-    writes points in its own order, so the rows are compared in one
-    order.
-    """
-    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    split_paths = [
-        _one_distance_config(tmp_path, 3),
-        _one_distance_config(tmp_path, 5),
-    ]
-    whole_dir = tmp_path / "whole"
-    split_dir = tmp_path / "split"
-    command.main(["run", str(whole_path), "--out", str(whole_dir)])
-
-    for split_path in reversed(split_paths):
-        command.main(["run", str(split_path), "--out", str(split_dir)])
-    command.main(["status", str(split_dir)])
-
-    whole_run_dir = whole_dir
-    whole_rows = _sorted_rows_of_every_file(whole_run_dir)
-    split_run_dir = split_dir
-    split_rows = _sorted_rows_of_every_file(split_run_dir)
-    assert split_rows == whole_rows
 
 
 def _typed_status_rows(experiment_dir: pathlib.Path) -> list:

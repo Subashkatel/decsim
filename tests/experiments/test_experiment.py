@@ -216,3 +216,17 @@ def test_one_point_reads_no_point_past_the_one_it_chooses(
 
     assert first_reads == [3]
     assert read_distances == [3, 5]
+
+
+def test_an_online_point_with_a_target_is_refused_when_built(tmp_path):
+    """The stop it cannot keep is refused before anything is planned."""
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    study = config.experiment()
+    (point,) = study.points
+    target = collection.CollectionSettings(max_shots=10, max_failures=5)
+    targeted = dataclasses.replace(point, collection=target)
+
+    with pytest.raises(refusal.RefusalError, match="max_shots alone"):
+        experiment.Experiment("online", [targeted])

@@ -699,8 +699,7 @@ class _ResolvedPoint:
 def _resolved_points(study: experiment.Experiment) -> list:
     """Each point checked and its record built, in the experiment's order.
 
-    Two points of one id would share their pieces, and an online point
-    stops at max_shots alone; either is refused.
+    Two points of one id would share their pieces, so they are refused.
     """
     resolved = []
     names_by_id = {}
@@ -711,7 +710,6 @@ def _resolved_points(study: experiment.Experiment) -> list:
         if earlier_name != point.name:
             _refuse_two_points_of_one_id(earlier_name, point.name)
         settings = study.collection_of(point)
-        _check_the_stop_of_an_online_point(task, settings)
         facts = _experiment_facts(task, settings)
         record = run_folder.point_record(
             point.name, task, None, point.sections, facts
@@ -837,36 +835,6 @@ def _experiment_facts(
         "adaptive": task.online_threshold is not None,
         "algorithm": measure.active_decoder_kind(task.settings),
     }
-
-
-def _check_the_stop_of_an_online_point(
-    task: collect.Task, settings: collection_module.CollectionSettings
-) -> None:
-    """An online point stops at max_shots alone; any other stop is refused.
-
-    Its shots are not independent draws, since each one's threshold
-    learned from those before it, so a failure count has no interval a
-    target stop could rest on, and a time cap would end its learning
-    wherever the machine was fast.
-    """
-    if task.online_threshold is None:
-        return
-    has_other_stops = settings.max_failures is not None
-    if settings.max_core_seconds is not None:
-        has_other_stops = True
-    if settings.max_shots is None or has_other_stops:
-        _refuse_an_online_stop(task)
-
-
-def _refuse_an_online_stop(task: collect.Task) -> None:
-    """The sentence for an online point given a stop it cannot keep."""
-    metadata = collect.metadata_text(task.metadata)
-    raise refusal.RefusalError(
-        f"the point {metadata} calibrates its threshold online, so its "
-        "shots are not independent draws and it stops at max_shots alone; "
-        "its collection sets max_shots and neither max_failures nor "
-        "max_core_seconds"
-    )
 
 
 def _collect_until_stopped(

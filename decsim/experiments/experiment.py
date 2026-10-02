@@ -108,7 +108,8 @@ class Experiment:
 
     name names the results folder. collection is every point's unless
     the point carries its own. A point's name is its folder, so two
-    points of one name are refused, as is a point no collection stops.
+    points of one name are refused, as is a point no collection stops,
+    or an online point a collection stops by more than max_shots.
     """
 
     name: str
@@ -122,6 +123,7 @@ class Experiment:
         _refuse_a_repeated_name(self.points)
         for point in self.points:
             self._refuse_a_point_without_a_collection(point)
+            self._refuse_an_online_stop(point)
 
     def collection_of(
         self, point: Point
@@ -167,6 +169,31 @@ class Experiment:
         raise ValueError(
             f"the point {point.name} has no collection; give the experiment "
             "a collection, or the point one of its own"
+        )
+
+    def _refuse_an_online_stop(self, point: Point) -> None:
+        """An online point stops at max_shots alone; any other stop is refused.
+
+        Its shots are not independent draws, since each one's threshold
+        learned from those before it, so a failure count has no interval
+        a target stop could rest on, and a time cap would end its learning
+        wherever the machine was fast.
+        """
+        if point.online_threshold is None:
+            return
+        settings = self.collection_of(point)
+        has_only_a_shot_cap = settings.max_shots is not None
+        if settings.max_failures is not None:
+            has_only_a_shot_cap = False
+        if settings.max_core_seconds is not None:
+            has_only_a_shot_cap = False
+        if has_only_a_shot_cap:
+            return
+        raise refusal.RefusalError(
+            f"the point {point.name} calibrates its threshold online, so "
+            "its shots are not independent draws and it stops at max_shots "
+            "alone; its collection sets max_shots and neither max_failures "
+            "nor max_core_seconds"
         )
 
 

@@ -269,8 +269,11 @@ def run_one_shot(
     gem5's --debug-flags and --debug-file set what the config script did
     not (src/python/m5/main.py:280, 299). The shot writes its results
     folder: run.json, the run file, the point's machine.json and
-    workload, and the shot's files (run_folder.write_shot). Returns the
-    lines the command prints.
+    workload, and the shot's files (run_folder.write_shot). A shot
+    replayed into a folder that recorded its point keeps that record,
+    which holds what the collection knew of it, and a point the folder
+    recorded with other settings is refused. Returns the lines the
+    command prints.
     """
     point = study.points[0]
     task = experiment.task_of(point)
@@ -279,14 +282,16 @@ def run_one_shot(
     shot_settings = task.shot_settings()
     machine = _built_machine(shot_settings, seed, run_file)
     run_dir = run_folder.run_dir_for(study.name, out_dir)
+    run_folder.refuse_another_tree(run_dir)
     point_id = task.strong_id()
-    started_utc = run_folder.start_run(run_dir, run_file, [point_id])
-    seeds = [(seed, 1)]
-    run_folder.record_point(run_dir, point.name, task, seeds, point.sections)
+    _refuse_a_name_recorded_for_another_point(run_dir, point.name, point_id)
+    run_points = _run_points(run_dir, point_id)
+    started_utc = run_folder.start_run(run_dir, run_file, run_points)
+    _record_a_new_point(run_dir, point, task, seed)
     result = machine.run()
     label = measure.shot_label(point_id, seed)
     run_folder.write_shot(machine, settings, run_dir, label, result)
-    run_folder.finish_run(run_dir, run_file, [point_id], started_utc)
+    run_folder.finish_run(run_dir, run_file, run_points, started_utc)
     return _shot_lines(study, task, seed, result, run_dir)
 
 
@@ -362,7 +367,9 @@ def recorded_points(
     """
     resolved = _resolved_points(study)
     for resolved_point in resolved:
-        _refuse_a_name_recorded_for_another_point(run_dir, resolved_point)
+        name = resolved_point.record["name"]
+        point_id = resolved_point.record["id"]
+        _refuse_a_name_recorded_for_another_point(run_dir, name, point_id)
     for resolved_point in resolved:
         run_folder.write_point_record(
             run_dir, resolved_point.task, resolved_point.record
@@ -724,7 +731,7 @@ def _refuse_two_points_of_one_id(first_name: str, second_name: str) -> None:
 
 
 def _refuse_a_name_recorded_for_another_point(
-    run_dir: pathlib.Path, resolved: _ResolvedPoint
+    run_dir: pathlib.Path, name: str, point_id: str
 ) -> None:
     """A name the folder recorded for another id is refused.
 
@@ -732,14 +739,11 @@ def _refuse_a_name_recorded_for_another_point(
     id, so a name whose settings or metadata changed would fold another
     point's shots under it.
     """
-    name = resolved.record["name"]
-    point_dir = run_dir / run_folder.POINTS_FOLDER / name
-    record_path = point_dir / run_folder.RECORD_FILE
+    record_path = _record_path(run_dir, name)
     if not record_path.is_file():
         return
     recorded = run_folder.read_json(record_path)
     recorded_id = recorded["id"]
-    point_id = resolved.record["id"]
     if recorded_id == point_id:
         return
     raise refusal.RefusalError(
@@ -748,6 +752,39 @@ def _refuse_a_name_recorded_for_another_point(
         f"{point_id[:12]}); give the point another name, or the run "
         "another folder with --out"
     )
+
+
+def _record_path(run_dir: pathlib.Path, name: str) -> pathlib.Path:
+    """Where the folder keeps the named point's machine.json."""
+    point_dir = run_dir / run_folder.POINTS_FOLDER / name
+    return point_dir / run_folder.RECORD_FILE
+
+
+def _record_a_new_point(
+    run_dir: pathlib.Path,
+    point: experiment.Point,
+    task: collect.Task,
+    seed: int,
+) -> None:
+    """The shot's point recorded, unless the folder recorded it already."""
+    record_path = _record_path(run_dir, point.name)
+    if record_path.is_file():
+        return
+    seeds = [(seed, 1)]
+    run_folder.record_point(run_dir, point.name, task, seeds, point.sections)
+
+
+def _run_points(run_dir: pathlib.Path, point_id: str) -> list:
+    """run.json's points for one shot: the folder's own when it has them.
+
+    A shot replayed into a collection folder leaves its points, the
+    order its fold writes rows in, as the collection recorded them.
+    """
+    run_path = run_dir / run_folder.RUN_FILE
+    if not run_path.is_file():
+        return [point_id]
+    recorded = run_folder.read_json(run_path)
+    return recorded["points"]
 
 
 def _point_collection(

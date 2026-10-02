@@ -1999,6 +1999,49 @@ def test_a_raised_stop_rule_replaces_the_folders_run_file_copy(tmp_path):
     assert copy_path.read_text() == second_path.read_text()
 
 
+def test_a_shot_replayed_into_a_collection_keeps_its_records(tmp_path):
+    """The collection's machine.json and run.json points stay as written.
+
+    The collection's record holds what its fold needs (experiment), which
+    a one-shot record does not, so a replay must not write over it.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "out"
+    collect_command.run_experiment(config_path, out_dir)
+    record_paths = sorted(out_dir.glob("points/*/machine.json"))
+    records_before = [path.read_bytes() for path in record_paths]
+    points_before = _manifest_of(out_dir)["points"]
+
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
+
+    records_after = [path.read_bytes() for path in record_paths]
+    assert records_after == records_before
+    assert _manifest_of(out_dir)["points"] == points_before
+    assert (out_dir / "result.json").exists()
+
+
+def test_a_replay_of_a_point_recorded_with_other_settings_is_refused(
+    tmp_path,
+):
+    """A saved record of another id under the name is another machine."""
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "out"
+    collect_command.run_experiment(config_path, out_dir)
+    study = experiment.load_one_point(config_path)
+    (point,) = study.points
+    record_path = out_dir / "points" / point.name / "machine.json"
+    record = json.loads(record_path.read_text())
+    record["id"] = "0" * 64
+    record_text = json.dumps(record)
+    record_path.write_text(record_text)
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        _run_one_shot(config_path, seed=0, out_dir=out_dir)
+
+    assert "with other settings or metadata" in str(refused.value)
+    assert not (out_dir / "result.json").exists()
+
+
 def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
     tmp_path, monkeypatch
 ):

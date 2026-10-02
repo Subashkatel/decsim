@@ -22,13 +22,21 @@ import decsim.plots as plots
 # Every baseline shot is a 100-round memory (run.py, ROUNDS), which
 # stats.csv does not carry.
 ROUNDS = 100
+# run.py's decoder order, so each decoder keeps its colour in every
+# figure; a decoder not listed here comes after these, sorted.
+DECODER_ORDER = (
+    "union-find",
+    "pymatching",
+    "xyz-relay-bp-5",
+    "tesseract-short-beam",
+)
 
 
 def main(folder: pathlib.Path) -> None:
     """Every figure of the folder's stats.csv, into its plots/."""
     stats_path = folder / "stats.csv"
     stats = sinter.read_stats_from_csv_files(stats_path)
-    decoders = sorted({stat.decoder for stat in stats})
+    decoders = decoders_in_order(stats)
     bases = labels(stats, "basis")
     distances = labels(stats, "d")
     rates = labels(stats, "p")
@@ -50,6 +58,14 @@ def main(folder: pathlib.Path) -> None:
         figure.suptitle(f"memory {basis}, decoders compared")
         path = plots_folder / f"decoders_{basis}.png"
         plots.save(figure, path)
+
+
+def decoders_in_order(stats: list) -> list:
+    """The stats' decoders, those in DECODER_ORDER first and in its order."""
+    present = {stat.decoder for stat in stats}
+    listed = [decoder for decoder in DECODER_ORDER if decoder in present]
+    unlisted = present.difference(DECODER_ORDER)
+    return listed + sorted(unlisted)
 
 
 def labels(stats: list, key: str) -> list:

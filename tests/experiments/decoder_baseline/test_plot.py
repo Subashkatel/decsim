@@ -63,6 +63,17 @@ def test_the_committed_baselines_grid_is_read_back_sorted():
     assert rates == [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
 
 
+def test_the_decoders_keep_run_pys_order():
+    """stats.csv lists Relay-BP last, as it was rerun after the others."""
+    plot = script_module()
+    committed_stats = COMMITTED_FOLDER / "stats.csv"
+    stats = sinter.read_stats_from_csv_files(committed_stats)
+
+    decoders = plot.decoders_in_order(stats)
+
+    assert decoders == list(DECODERS)
+
+
 def write_stats(folder: pathlib.Path) -> None:
     """Two rates of one distance for each decoder and basis."""
     lines = [sinter.CSV_HEADER]

@@ -19,6 +19,7 @@ import re
 
 import pytest
 
+import decsim.collect as collect
 import decsim.config as config
 import decsim.engine
 import decsim.experiments.experiment as experiment
@@ -823,6 +824,48 @@ def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
     measured = link_profiles.nvqlink_measured_profile()
     unchanged = paths_outside_the_strong_side(reference)
     assert paths_outside_the_strong_side(measured) == unchanged
+
+
+def test_a_python_path_card_is_the_yaml_card_of_the_same_numbers():
+    """One way to price a path: the yaml's card goes through path_card.
+
+    The rate stays the exact fraction of the decimal, so the two cards
+    name one point (collect.json_value, which a point's id hashes).
+    """
+    clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
+    card = {
+        "latency_cycles": 40,
+        "clock": "fridge",
+        "bits_per_cycle": 38.79,
+        "channels": 4,
+        "setup_cycles_per_transfer": 2,
+        "header_bits_per_transfer": 16,
+    }
+    section = {"controller_to_weak_buffer": card}
+    from_yaml = link_profiles.from_yaml(section, clocks, "mine")
+    reference = link_profiles.logical_reference_profile()
+    fridge = config.Clock.from_megahertz(250.0)
+
+    python_card = link_profiles.path_card(
+        reference,
+        "controller_to_weak_buffer",
+        clock=fridge,
+        latency_cycles=40,
+        bits_per_cycle=38.79,
+        source="2603.16203 lines 895-897",
+        lane_count=4,
+        setup_cycles_per_transfer=2,
+        header_bits_per_transfer=16,
+    )
+
+    yaml_card = from_yaml.controller_to_weak_buffer
+    python_value = collect.json_value(python_card, keep_labels=False)
+    yaml_value = collect.json_value(yaml_card, keep_labels=False)
+    rate = python_card.channel.capacity.input_bits_per_microsecond
+    assert python_card == yaml_card
+    assert python_value == yaml_value
+    assert rate == fractions.Fraction(38790)
+    assert python_card.excludes_receiver_processing is True
 
 
 def test_a_path_latency_in_microseconds_moves_that_path_alone():

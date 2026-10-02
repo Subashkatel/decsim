@@ -10,9 +10,9 @@ those latencies and provisions finite rates from the run's geometry so
 contention becomes measurable; capacity_scale sweeps the whole fabric.
 roce_v2_measured_profile is the reference card with the strong tier's
 off-board path priced by Backline's measured RoCE v2 round trip; it is
-the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
-on any path, a per-transfer setup cost (setup_cycles_per_transfer)
-included.
+the roce_v2_cpu and roce_v2_gpu rows. path_card prices one path in
+cycles of a clock, a per-transfer setup cost (setup_cycles_per_transfer)
+included, and from_yaml puts each of the yaml's own cards through it.
 
 Every number carries a source string on the settings record it sets,
 and a payload's source also travels into the traffic report with every
@@ -794,13 +794,59 @@ def from_yaml(
         if card is None:
             continue
         _check_card(path_name, card)
-        path_settings = getattr(profile, path_name)
-        carded = _carded_path(path_name, path_settings, card, clocks, source)
-        replacements[path_name] = dataclasses.replace(
-            carded, excludes_receiver_processing=True
+        replacements[path_name] = _carded_path(
+            profile, path_name, card, clocks, source
         )
     return dataclasses.replace(
         profile, **replacements, profile_name=f"{name}.yaml"
+    )
+
+
+def path_card(
+    links: settings.FabricSettings,
+    path_name: str,
+    *,
+    clock: config.Clock,
+    latency_cycles: int,
+    bits_per_cycle: Optional[float],
+    source: str,
+    lane_count: int = 1,
+    setup_cycles_per_transfer: int = 0,
+    header_bits_per_transfer: int = 0,
+    protocol: Optional[settings.PacketProtocolSettings] = None,
+) -> settings.PathSettings:
+    """One path priced in cycles of a clock, over its payload rule in links.
+
+    A cycle costs the clock's period in whole ticks, gem5's cyclesToTicks
+    (src/sim/clocked_object.hh:227, clockPeriod() * c), so a link's
+    cycles and every other component's cycles on one clock are the same
+    ticks. Each of lane_count lanes moves bits_per_cycle every period,
+    the rate kept as an exact fraction of the decimal; None is an
+    unbounded wire. The path gets a wire of its own, named for it, and
+    its latency times the wire alone, so the receiving component prices
+    its own processing of what arrives. source says where the numbers
+    come from.
+    """
+    period_ticks = clock.period_ticks
+    latency_ticks = latency_cycles * period_ticks
+    setup_ticks = setup_cycles_per_transfer * period_ticks
+    capacity = None
+    if bits_per_cycle is not None:
+        lane_bits_per_cycle = fractions.Fraction(str(bits_per_cycle))
+        bits_per_period = lane_bits_per_cycle * lane_count
+        bits_per_tick = bits_per_period / period_ticks
+        bits_per_microsecond = bits_per_tick * config.TICKS_PER_MICROSECOND
+        capacity = settings.CapacitySettings(bits_per_microsecond, source)
+    channel = settings.ChannelSettings(
+        path_name, latency_ticks, capacity, source, protocol
+    )
+    path_settings = getattr(links, path_name)
+    return dataclasses.replace(
+        path_settings,
+        channel=channel,
+        setup_ticks=setup_ticks,
+        header_bits_per_transfer=header_bits_per_transfer,
+        excludes_receiver_processing=True,
     )
 
 
@@ -811,8 +857,9 @@ def with_path_latency(
 ) -> settings.FabricSettings:
     """The card with one path's wire at a latency, the rest as it was.
 
-    The latency is rounded to whole ticks once, as every card's is
-    (config.microseconds_to_ticks).
+    The latency is rounded to whole ticks once (config.microseconds_to_
+    ticks), and the path keeps its rate, setup, framing and what its
+    latency covers; path_card writes a whole card instead.
     """
     config.check_duration("latency_microseconds", latency_microseconds)
     latency_ticks = config.microseconds_to_ticks(latency_microseconds)
@@ -995,65 +1042,40 @@ def _is_positive_number(value) -> bool:
     return 0 < value < math.inf
 
 
-def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
-    """(latency ticks, aggregate rate, setup ticks) of one card.
-
-    A cycle costs its domain's period in whole ticks, gem5's
-    cyclesToTicks (src/sim/clocked_object.hh:227, clockPeriod() * c),
-    so a link's cycles and every other component's cycles on one domain
-    are the same ticks. The rate moves bits_per_cycle on each lane every
-    period, kept as an exact fraction of the card's decimals.
-    """
-    clock = clocks.clock(card["clock"])
-    period_ticks = clock.period_ticks
-    latency_cycles = card["latency_cycles"]
-    latency_ticks = latency_cycles * period_ticks
-    bits_per_cycle = card["bits_per_cycle"]
-    lane_count = card.get("channels", 1)
-    bits_per_microsecond = None
-    if bits_per_cycle is not None:
-        lane_bits_per_cycle = fractions.Fraction(str(bits_per_cycle))
-        bits_per_period = lane_bits_per_cycle * lane_count
-        bits_per_tick = bits_per_period / period_ticks
-        bits_per_microsecond = bits_per_tick * config.TICKS_PER_MICROSECOND
-    setup_cycles = card.get("setup_cycles_per_transfer")
-    setup_ticks = 0
-    if setup_cycles is not None:
-        setup_ticks = setup_cycles * period_ticks
-    return latency_ticks, bits_per_microsecond, setup_ticks
-
-
 def _carded_path(
+    links: settings.FabricSettings,
     path_name: str,
-    path_settings: settings.PathSettings,
     card: Mapping,
     clocks: config.ClockSettings,
     source: str,
 ) -> settings.PathSettings:
-    """The reference path with the card's channel and setup cost."""
-    latency_ticks, bits_per_microsecond, setup_ticks = _card_ticks(card, clocks)
-    capacity = None
-    if bits_per_microsecond is not None:
-        capacity = settings.CapacitySettings(bits_per_microsecond, source)
-    protocol = _card_protocol(path_name, card, clocks)
-    channel = settings.ChannelSettings(
-        path_name, latency_ticks, capacity, source, protocol
-    )
+    """The yaml card of one path, its clock named in the clocks section."""
+    clock = clocks.clock(card["clock"])
+    protocol = _card_protocol(path_name, card, clock)
+    lane_count = card.get("channels", 1)
+    setup_cycles = card.get("setup_cycles_per_transfer")
+    if setup_cycles is None:
+        setup_cycles = 0
     header_bits = card.get("header_bits_per_transfer", 0)
-    return dataclasses.replace(
-        path_settings,
-        channel=channel,
-        setup_ticks=setup_ticks,
+    return path_card(
+        links,
+        path_name,
+        clock=clock,
+        latency_cycles=card["latency_cycles"],
+        bits_per_cycle=card["bits_per_cycle"],
+        source=source,
+        lane_count=lane_count,
+        setup_cycles_per_transfer=setup_cycles,
         header_bits_per_transfer=header_bits,
+        protocol=protocol,
     )
 
 
-def _card_protocol(path_name: str, card: Mapping, clocks: config.ClockSettings):
+def _card_protocol(path_name: str, card: Mapping, clock: config.Clock):
     """The card's protocol, counted on its clock; None when it names none."""
     section = card.get("protocol")
     if section is None:
         return None
-    clock = clocks.clock(card["clock"])
     return fabric.protocol_settings_from_yaml(section, clock, path_name)
 
 

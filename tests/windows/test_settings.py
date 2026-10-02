@@ -101,7 +101,7 @@ def test_a_run_with_no_switching_reads_null_keys_as_flush_and_eager():
 def test_a_python_record_defaults_to_flush_and_eager():
     settings = window_settings.WindowSettings()
 
-    assert settings.kind == "sliding"
+    assert settings.scheme.name == "sliding"
     assert settings.terminal_policy == "flush"
     assert settings.boundary_policy == boundary_policies.Eager.Settings()
 

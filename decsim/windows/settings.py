@@ -88,11 +88,6 @@ class WindowSettings:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
         _check_terminal_policy(self.terminal_policy)
 
-    @property
-    def kind(self) -> str:
-        """The yaml's windows.kind word for the scheme."""
-        return self.scheme.name
-
     @classmethod
     def from_yaml(
         cls,

@@ -874,11 +874,16 @@ def _files_line(config: ExperimentConfig) -> str:
 def _section_lines(settings: machine_settings.MachineSettings) -> list:
     """One line per section, its kind named where the section has one.
 
-    The escalation section's kind is the word for the filled decode slots,
-    and the burst detector's the word for the switching slot's detector.
+    The windows section's kind is its scheme's name, the escalation
+    section's the word for the filled decode slots, and the burst
+    detector's the name of the switching slot's detector.
     """
     lines = []
     for field in dataclasses.fields(settings):
+        if field.name == "windows":
+            scheme_name = settings.windows.scheme.name
+            lines.append(f"windows: kind {scheme_name}")
+            continue
         if field.name == "switching":
             lines.append(f"escalation: kind {settings.escalation_kind}")
             detector_name = _burst_detector_name(settings.switching)

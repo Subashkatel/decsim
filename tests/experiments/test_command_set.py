@@ -191,16 +191,18 @@ def test_show_lists_every_sections_kind_of_every_shipped_config(name):
         ("streaming_stim", "required positional argument: 'programs'"),
     ],
 )
-@pytest.mark.parametrize("verb", ["show", "run"])
+@pytest.mark.parametrize(
+    "verb, options", [("show", []), ("run", ["--seed", "0"])]
+)
 def test_show_and_run_stop_at_a_source_the_yaml_cannot_build(
-    tmp_path, verb, qpu_kind, sentence
+    tmp_path, verb, options, qpu_kind, sentence
 ):
-    """The first point's machine is built, so show stops where run would."""
+    """The first point's machine is built, so show stops where a shot would."""
     qpu = {"qpu": {"kind": qpu_kind}}
     config_path = yaml_configs.write_config(tmp_path, qpu)
 
     with pytest.raises(TypeError, match=sentence):
-        command.main([verb, str(config_path)])
+        command.main([verb, str(config_path), *options])
 
 
 @pytest.mark.parametrize("verb", ["show", "run"])

@@ -1069,13 +1069,21 @@ class _Provisioning:
         rate = nominal_bits_per_microsecond * self._capacity_scale
         capacity = settings.CapacitySettings(rate, source)
         reference_path = getattr(self._reference, name)
+        reference_excludes_processing = (
+            reference_path.excludes_receiver_processing
+        )
         reference_channel = reference_path.channel
         latency_ticks = reference_channel.propagation_latency_ticks
         channel = settings.ChannelSettings(
             name, latency_ticks, capacity, source
         )
         payload = settings.PayloadSettings(bits, source)
-        return settings.PathSettings(channel, payload, actual_payload_source)
+        return settings.PathSettings(
+            channel,
+            payload,
+            actual_payload_source,
+            excludes_receiver_processing=reference_excludes_processing,
+        )
 
 
 def _channel(
@@ -1096,7 +1104,10 @@ def _actual_path(
     capacity: Optional[settings.CapacitySettings] = None,
 ) -> settings.PathSettings:
     channel = _channel(name, latency_microseconds, source, capacity)
-    return settings.PathSettings(channel, None, actual_payload_source)
+    # a preset's latency is its referent's end-to-end number
+    return settings.PathSettings(
+        channel, None, actual_payload_source, excludes_receiver_processing=False
+    )
 
 
 def _default_path(
@@ -1109,4 +1120,7 @@ def _default_path(
 ) -> settings.PathSettings:
     channel = _channel(name, latency_microseconds, latency_source, capacity)
     payload = settings.PayloadSettings(bits, payload_source)
-    return settings.PathSettings(channel, payload, None)
+    # a preset's latency is its referent's end-to-end number
+    return settings.PathSettings(
+        channel, payload, None, excludes_receiver_processing=False
+    )

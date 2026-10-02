@@ -15,7 +15,9 @@ import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
 
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
-FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
+FREE_PATH = link_settings.PathSettings(
+    FREE_CHANNEL, None, "test payload", excludes_receiver_processing=False
+)
 
 
 def capacity(rate):
@@ -39,6 +41,7 @@ def actual_path(channel_settings, setup_ticks=0, header_bits=0):
         "test payload",
         setup_ticks,
         header_bits_per_transfer=header_bits,
+        excludes_receiver_processing=False,
     )
 
 
@@ -146,7 +149,9 @@ def test_a_fractional_setup_cost_is_refused():
 
 def test_a_path_without_a_payload_rule_is_refused():
     with pytest.raises(ValueError, match="a path needs a default payload"):
-        link_settings.PathSettings(FREE_CHANNEL, None, None)
+        link_settings.PathSettings(
+            FREE_CHANNEL, None, None, excludes_receiver_processing=False
+        )
 
 
 def test_a_card_that_leaves_out_a_path_is_refused_naming_it():

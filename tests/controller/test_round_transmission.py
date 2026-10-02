@@ -123,7 +123,10 @@ def priced_cwb_profile():
         base.channel.name, CWB_TICKS, None, "test"
     )
     path = link_settings.PathSettings(
-        channel, base.default_payload, base.actual_payload_source
+        channel,
+        base.default_payload,
+        base.actual_payload_source,
+        excludes_receiver_processing=base.excludes_receiver_processing,
     )
     return dataclasses.replace(reference, controller_to_weak_buffer=path)
 
@@ -144,7 +147,10 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
         edge.channel.name, WBD_TICKS, capacity, "test"
     )
     path = link_settings.PathSettings(
-        channel, edge.default_payload, edge.actual_payload_source
+        channel,
+        edge.default_payload,
+        edge.actual_payload_source,
+        excludes_receiver_processing=edge.excludes_receiver_processing,
     )
     store_hop = reference.controller_to_weak_buffer
     store_channel = link_settings.ChannelSettings(

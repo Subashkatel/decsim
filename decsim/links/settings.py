@@ -136,7 +136,8 @@ class PathSettings:
     reference number measured end to end includes the receiver turning
     the arrival into bits, and a card the run's own yaml wrote times the
     wire alone, so only the second lets that processing be priced again
-    on the receiving component.
+    on the receiving component. It has no default, so every card says
+    which it is.
     """
 
     channel: ChannelSettings
@@ -146,7 +147,7 @@ class PathSettings:
     header_bits_per_transfer: int = 0
     # the card times the wire alone, so the receiving component's own
     # processing of what arrives is priced somewhere else
-    excludes_receiver_processing: bool = False
+    excludes_receiver_processing: bool = dataclasses.field(kw_only=True)
 
     def __post_init__(self) -> None:
         has_default = self.default_payload is not None

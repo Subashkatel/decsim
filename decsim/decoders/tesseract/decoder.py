@@ -174,3 +174,19 @@ def _check_detector_order_seed(seed) -> None:
         "detector_order_seed must be None or a whole number from 0 to "
         f"{_LARGEST_SEED} (got {seed!r})"
     )
+
+
+# tesseract-decoder's tesseract-short-beam profile, the Tesseract paper's
+# short beam setting (2503.10988 lines 592-593), and the decoder
+# baseline's tesseract row. The paper names four of its values; the rest
+# are the profile's (src/tesseract_sinter_compat.pybind.h:466-472).
+TESSERACT_SHORT_BEAM = TesseractDecoder.Settings(
+    detector_beam=15,  # line 592
+    beam_climbing=True,  # line 593
+    no_revisit_detectors=True,  # no_revisit_dets, the profile's
+    priority_queue_limit=200_000,  # pqlimit, line 593
+    detector_order_method="index",  # DetOrder::DetIndex, the profile's
+    detector_order_count=16,  # line 593
+    detector_order_seed=2_384_753,  # the profile's seed
+    merge_errors=True,  # the profile's
+)

@@ -703,7 +703,7 @@ def _point_task_of(
     online_threshold = None
     if switching is not None:
         switching = switching.at_sweep_point(resolved)
-        online_threshold = switching.online_threshold_for(resolved)
+        online_threshold = switching.threshold.for_sweep_point(resolved)
     point_settings = dataclasses.replace(
         settings, workload=workload, switching=switching
     )

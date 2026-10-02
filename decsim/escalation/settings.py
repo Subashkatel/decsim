@@ -103,7 +103,8 @@ class SwitchingSettings:
     clock. The experiments layer sets the
     sweep point's threshold (at_sweep_point) and installs the point's
     online threshold source, the one instance every shot of the point
-    shares (online_threshold_for, collect.Task.shot_settings).
+    shares (the threshold record's for_sweep_point,
+    collect.Task.shot_settings).
     """
 
     # the confidence row's Settings record, opaque here: the record whose
@@ -176,18 +177,6 @@ class SwitchingSettings:
         """
         threshold = self.threshold.at_sweep_point(resolved)
         return dataclasses.replace(self, threshold=threshold)
-
-    def online_threshold_for(
-        self, resolved: Mapping
-    ) -> Optional[ports.ThresholdSource]:
-        """The source every shot of this sweep point shares, if any.
-
-        A row that learns across a point's shots builds its one
-        instance here, so the source learns over the point's whole
-        window stream; every other row answers None, and the root
-        builds those from the record per shot.
-        """
-        return self.threshold.for_sweep_point(resolved)
 
 
 def escalation_kind(section: Mapping) -> str:

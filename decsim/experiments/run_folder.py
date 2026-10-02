@@ -541,8 +541,12 @@ def utc_now() -> str:
 def _write_result(
     result: result_records.RunResult, run_dir: pathlib.Path
 ) -> None:
-    """result.json: every field of the shot's result record."""
-    value = collect.json_value(result)
+    """result.json: every field of the shot's result record.
+
+    A record's class names a setting's identity and not a result's, so
+    result.json holds the fields alone.
+    """
+    value = collect.json_value(result, record_classes=False)
     result_path = run_dir / "result.json"
     write_json(result_path, value)
 

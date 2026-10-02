@@ -2042,6 +2042,24 @@ def test_a_replay_of_a_point_recorded_with_other_settings_is_refused(
     assert not (out_dir / "result.json").exists()
 
 
+def test_a_record_class_names_settings_and_not_results(tmp_path):
+    """machine.json names each settings record's class; result.json none.
+
+    The class tells two records with the same fields apart, which is a
+    setting's identity; a result's fields are all it holds.
+    """
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "out"
+
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
+
+    (record_path,) = out_dir.glob("points/*/machine.json")
+    record = json.loads(record_path.read_text())
+    result_text = (out_dir / "result.json").read_text()
+    assert record["settings"]["class"] == "decsim.settings.MachineSettings"
+    assert '"class"' not in result_text
+
+
 def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
     tmp_path, monkeypatch
 ):

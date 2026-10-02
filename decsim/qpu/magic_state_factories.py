@@ -298,7 +298,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             callback()
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DistillLevel:
     """One level of the multi-level factory: its units and its protocol."""
 
@@ -310,6 +310,18 @@ class DistillLevel:
     # text lines 223-224 and 249-251).
     logical_cycles_per_round: Optional[int] = None
     success_probability: float = 1.0
+
+    def __post_init__(self) -> None:
+        _check_count("level.unit_count", self.unit_count, minimum=1)
+        _check_count("level.distance", self.distance, minimum=1)
+        _check_probability(
+            "level.success_probability", self.success_probability
+        )
+        if self.logical_cycles_per_round is None:
+            return
+        config.check_cycles(
+            "level.logical_cycles_per_round", self.logical_cycles_per_round
+        )
 
 
 class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
@@ -349,7 +361,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         buffer_capacity: Optional[int] = None
 
         def __post_init__(self) -> None:
-            _check_levels(self.levels)
             _check_production_mode(self.production_mode, self.buffer_capacity)
             _check_count(
                 "correction_decode_count",
@@ -789,20 +800,6 @@ def _distill_level_keys() -> tuple:
     for field in dataclasses.fields(DistillLevel):
         names.append(field.name)
     return tuple(names)
-
-
-def _check_levels(levels: tuple) -> None:
-    for index, level in enumerate(levels):
-        _check_count(f"levels[{index}].unit_count", level.unit_count, minimum=1)
-        _check_count(f"levels[{index}].distance", level.distance, minimum=1)
-        _check_probability(
-            f"levels[{index}].success_probability", level.success_probability
-        )
-        logical_cycles = level.logical_cycles_per_round
-        if logical_cycles is not None:
-            config.check_cycles(
-                f"levels[{index}].logical_cycles_per_round", logical_cycles
-            )
 
 
 def _with_the_papers_cycles(levels: tuple) -> tuple:

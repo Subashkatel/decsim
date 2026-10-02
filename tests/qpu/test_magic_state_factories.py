@@ -11,6 +11,8 @@ four are single-qubit rotations with Pauli corrections). The supply stall
 is the delay between a request and its delivery.
 """
 
+import dataclasses
+
 import pytest
 import yaml
 
@@ -740,12 +742,14 @@ def test_a_continuous_row_queues_nothing_until_it_is_started():
 
 @pytest.mark.parametrize("cycles", [True, 0.5, float("nan"), float("inf")])
 def test_factory_level_cycles_require_integers_by_key(cycles):
-    engine = decsim.engine.Engine()
-    level = magic_state_factories.DistillLevel(
-        unit_count=1, distance=3, logical_cycles_per_round=cycles
-    )
-    sentence = (
-        r"levels\[0\].logical_cycles_per_round must be a nonnegative integer"
-    )
+    sentence = "level.logical_cycles_per_round must be a nonnegative integer"
     with pytest.raises(ValueError, match=sentence):
-        chain(engine, [level])
+        magic_state_factories.DistillLevel(
+            unit_count=1, distance=3, logical_cycles_per_round=cycles
+        )
+
+
+def test_a_level_cannot_change_after_its_card_is_checked():
+    level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        level.distance = 0

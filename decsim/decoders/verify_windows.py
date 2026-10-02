@@ -7,10 +7,12 @@ a listener (observe/referee_audit.py). Never priced: the inner decoder
 starts every job on the engine, and the referee checks the result it
 delivers. The linked fault models are built
 whole-circuit, with memory linear in circuit length (verified through
-d=9 x 1000 rounds).
+d=9 x 1000 rounds). A run checks a tier by writing the referee's record
+around that tier's decoder record.
 """
 
-from typing import Optional
+import dataclasses
+from typing import Any, Optional
 
 import numpy
 
@@ -33,6 +35,38 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
     Trace source: window_checked(window_key, is_agreement) once per
     window the referee reached a verdict on.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The referee written around the record of the decoder it checks.
+
+        It reads as that record: the results name the inner decoder, and a
+        confidence signal reads the inner decoder's weight step and cycle
+        count, since the referee changes no result and costs no time.
+        """
+
+        # the checked decoder's own Settings record
+        inner: Any
+
+        @property
+        def name(self):
+            """The inner decoder's word, which the results name the tier by."""
+            return self.inner.name
+
+        @property
+        def weight_step(self):
+            """The inner decoder's weight step, None when it declares none."""
+            return getattr(self.inner, "weight_step", None)
+
+        @property
+        def cycle_count(self):
+            """The inner decoder's cycle count card."""
+            return self.inner.cycle_count
+
+        def build(self) -> "TesseractCheckedDecoder":
+            """The inner decoder, built, with the referee around it."""
+            inner = self.inner.build()
+            return TesseractCheckedDecoder(inner)
 
     def __init__(self, inner: decoder_module.DecoderBase):
         self.inner = inner

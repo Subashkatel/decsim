@@ -270,6 +270,13 @@ class MachineSettings:
         observation = dataclasses.replace(
             observation, catch_deadline_rounds=catch_deadline_rounds
         )
+        window_check = observe_settings.window_check_from_yaml(
+            observation_section
+        )
+        if weak_decoder is not None:
+            weak_decoder = _checked(weak_decoder, window_check)
+        elif strong_decoder is not None:
+            strong_decoder = _checked(strong_decoder, window_check)
         return cls(
             clocks=clocks,
             clock=controller.clock,
@@ -290,6 +297,20 @@ class MachineSettings:
             magic_state_factory=magic_state_factory,
             observation=observation,
         )
+
+
+def _checked(
+    pool: decoder_settings.DecoderPoolSettings, window_check
+) -> decoder_settings.DecoderPoolSettings:
+    """The pool of the tier that decodes the windows, with its referee.
+
+    The referee wraps that tier's decoder only, the one window_tier names;
+    window_check None leaves the pool as it is.
+    """
+    if window_check is None:
+        return pool
+    checked = window_check.Settings(inner=pool.algorithm)
+    return dataclasses.replace(pool, algorithm=checked)
 
 
 def _check_section_shapes(sections: Mapping) -> None:

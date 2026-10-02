@@ -19,10 +19,8 @@ import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
-import decsim.observe.settings as observe_settings
 import decsim.ports as ports
 import decsim.settings as machine_settings
-import decsim.tables as tables
 
 # The name the tier's event-detection stage carries in the trace, the
 # stage ledger and the narrator log.
@@ -130,8 +128,7 @@ def build_decoder_unit(
     release stages are cycles of the tier's clock, with this tier's
     event-detection logic in front of them when the tier's decoder is a
     seat of the run's detection event placement (formation). The tier
-    that decodes the plan's windows carries the Tesseract referee when
-    the observation asks for it, and must produce the evidence the run's
+    that decodes the plan's windows must produce the evidence the run's
     confidence signal reads when the run has one. None when the tier's
     slot is empty.
     """
@@ -146,13 +143,6 @@ def build_decoder_unit(
         _check_serves_the_confidence(
             algorithm, algorithm_settings.name, tier, signal, signal_name
         )
-    check = tables.row(
-        observe_settings.WINDOW_CHECKS,
-        "observation.check_windows_with",
-        settings.observation.check_windows_with,
-    )
-    if is_active and check is not None:
-        algorithm = check(algorithm)
     return _staged_unit(tier_settings, algorithm, formation)
 
 

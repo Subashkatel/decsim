@@ -5,8 +5,9 @@ figure per question: the share of windows escalated, the formed-to-
 commit latency, the logical error rate of switching against union-find
 alone, and whether the strong decoder keeps up. The folder holds
 status.csv, as `decsim status` writes it, and configurations.csv, each
-configuration's id and name. A point with no failures has no rate and is
-left out of the rate figure, as decsim.plots.error_rate leaves it.
+configuration's id and name. In the rate figure a point with no
+failures is a hollow marker at its upper bound, and a point failing more
+than half its shots is left out, as decsim.plots.error_rate draws them.
 """
 
 import csv
@@ -27,6 +28,7 @@ SHOWN_NAME = {
     "weak_alone": UNION_FIND_ALONE,
 }
 X = "physical error rate"
+RATE = "logical_error_rate_per_round"
 
 
 def main(folder: pathlib.Path) -> None:
@@ -35,34 +37,48 @@ def main(folder: pathlib.Path) -> None:
     plots_folder = folder / "plots"
     plots_folder.mkdir(exist_ok=True)
     switching_rows = [row for row in rows if row["decoder"] == SWITCHING]
-    escalated_figure(switching_rows, plots_folder / "escalated.png")
-    latency_figure(rows, plots_folder / "latency.png")
-    error_rate_figure(rows, plots_folder / "logical_error_rate.png")
-    strong_figure(switching_rows, plots_folder / "strong_decoder.png")
+    escalated_path = plots_folder / "escalated.png"
+    latency_path = plots_folder / "latency.png"
+    rate_path = plots_folder / "logical_error_rate.png"
+    strong_path = plots_folder / "strong_decoder.png"
+    escalated_figure(switching_rows, escalated_path)
+    latency_figure(rows, latency_path)
+    error_rate_figure(rows, rate_path)
+    strong_figure(switching_rows, strong_path)
 
 
 def rows_of(folder: pathlib.Path) -> list:
     """The points with data, as numbers, each named by its decoder."""
+    configurations_path = folder / "configurations.csv"
+    status_path = folder / "status.csv"
+    with open(configurations_path) as handle:
+        configuration_reader = csv.DictReader(handle)
+        configurations = list(configuration_reader)
+    with open(status_path) as handle:
+        status_reader = csv.DictReader(handle)
+        statuses = list(status_reader)
     name_by_id = {}
-    with open(folder / "configurations.csv") as handle:
-        for configuration in csv.DictReader(handle):
-            name = configuration["name"]
-            name_by_id[configuration["configuration_id"]] = SHOWN_NAME[name]
+    for configuration in configurations:
+        name = configuration["name"]
+        name_by_id[configuration["configuration_id"]] = SHOWN_NAME[name]
     rows = []
-    with open(folder / "status.csv") as handle:
-        for status in csv.DictReader(handle):
-            if status["state"] == "no data":
-                continue
-            row = {"decoder": name_by_id[status["configuration_id"]]}
-            row["d"] = int(status["qpu.distance"])
-            row[X] = float(
-                status["workload.arguments.physical_error_probability"]
-            )
-            for column, text in status.items():
-                if column not in row:
-                    row[column] = number(text)
+    for status in statuses:
+        if status["state"] != "no data":
+            row = row_of(status, name_by_id)
             rows.append(row)
     return rows
+
+
+def row_of(status: dict, name_by_id: dict) -> dict:
+    """One status.csv row as numbers, named by its decoder."""
+    error_rate_text = status["workload.arguments.physical_error_probability"]
+    row = {"decoder": name_by_id[status["configuration_id"]]}
+    row["d"] = int(status["qpu.distance"])
+    row[X] = float(error_rate_text)
+    for column, text in status.items():
+        if column not in row:
+            row[column] = number(text)
+    return row
 
 
 def number(text: str):
@@ -110,25 +126,42 @@ def latency_figure(rows: list, path: pathlib.Path) -> None:
 
 
 def error_rate_figure(rows: list, path: pathlib.Path) -> None:
-    """Switching against union-find alone, a panel per distance."""
-    failed_rows = [row for row in rows if row["logical_failures"]]
+    """Switching against union-find alone, a panel per distance.
+
+    A point failing more than half its shots has no per-round rate
+    (decsim/experiments/report.py _is_above_half).
+    """
+    decoders = [UNION_FIND_ALONE, SWITCHING]
+    failed_rows = [row for row in rows if has_per_round_rate(row)]
+    error_free_rows = [row for row in rows if row["logical_failures"] == 0]
     figure, axis_by_distance = plots.panels("d", DISTANCES)
     for distance, axis in axis_by_distance.items():
         distance_rows = [row for row in failed_rows if row["d"] == distance]
+        bound_rows = [row for row in error_free_rows if row["d"] == distance]
         plots.values(
             axis,
             distance_rows,
             X,
-            "logical_error_rate_per_round",
+            RATE,
             "decoder",
-            low="logical_error_rate_per_round_low",
-            high="logical_error_rate_per_round_high",
-            order=[UNION_FIND_ALONE, SWITCHING],
+            low=f"{RATE}_low",
+            high=f"{RATE}_high",
+            order=decoders,
+        )
+        plots.bounds(
+            axis, bound_rows, X, f"{RATE}_high", "decoder", order=decoders
         )
         axis.set_ylabel("logical error rate per round")
         axis.set_yscale("log")
         rate_axis(axis)
     plots.save(figure, path)
+
+
+def has_per_round_rate(row: dict) -> bool:
+    """Whether a point failed, on at most half its shots."""
+    if row["logical_failures"] == 0:
+        return False
+    return row["is_shot_rate_above_half"] == "False"
 
 
 def strong_figure(rows: list, path: pathlib.Path) -> None:
@@ -148,11 +181,10 @@ def strong_figure(rows: list, path: pathlib.Path) -> None:
         row["mean decode time / budget"] = mean / bound
         escalating_rows.append(row)
     # the two panels' values differ in kind, so they share no y axis
+    figure_width = 2 * plots.PANEL_WIDTH_INCHES
+    figure_size = (figure_width, plots.PANEL_HEIGHT_INCHES)
     figure, figure_axes = pyplot.subplots(
-        1,
-        2,
-        figsize=(2 * plots.PANEL_WIDTH_INCHES, plots.PANEL_HEIGHT_INCHES),
-        layout="constrained",
+        1, 2, figsize=figure_size, layout="constrained"
     )
     busy_axis, budget_axis = figure_axes
     plots.values(busy_axis, rows, X, "time busy (%)", "d", order=DISTANCES)
@@ -190,7 +222,8 @@ def rate_axis(axis) -> None:
     axis.set_xlim(left_limit, right_limit)
     rate_labels = [f"{rate:g}" for rate in ERROR_RATES]
     axis.set_xticks(ERROR_RATES, rate_labels, rotation=45)
-    axis.xaxis.set_minor_formatter(pyplot.NullFormatter())
+    no_labels = pyplot.NullFormatter()
+    axis.xaxis.set_minor_formatter(no_labels)
     axis.set_xlabel(X)
 
 

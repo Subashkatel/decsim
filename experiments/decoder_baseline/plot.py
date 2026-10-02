@@ -86,7 +86,7 @@ def draw(
     axis.set_xlim(left_limit, right_limit)
     rate_labels = [f"{rate:g}" for rate in rates]
     axis.set_xticks(rates, rate_labels, rotation=45)
-    axis.set_xlabel("physical error rate p")
+    axis.set_xlabel("physical error rate")
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ def test_error_rate_styles_a_curve_by_its_place_in_order():
     pyplot.close(figure)
 
 
-def test_error_rate_draws_nothing_for_a_point_with_no_errors():
+def test_error_rate_marks_a_point_with_no_errors_at_its_bound():
     stats = [
         stat("pymatching", d=5, p=0.001, errors=0),
         stat("pymatching", d=5, p=0.002, errors=10),
@@ -81,15 +81,55 @@ def test_error_rate_draws_nothing_for_a_point_with_no_errors():
     ]
     figure, axis = pyplot.subplots()
 
-    plots.error_rate(axis, stats, x="p", curve="d")
+    plots.error_rate(axis, stats, x="p", curve="d", rounds=10)
 
-    (line,) = axis.lines
+    line, bound = axis.lines
     band = axis.collections[0]
     (band_path,) = band.get_paths()
     band_xs = band_path.vertices[:, 0]
-    drawn_rates = line.get_xdata()
-    assert list(drawn_rates) == [0.002, 0.003]
+    fit = sinter.fit_binomial(
+        num_shots=1000, num_hits=0, max_likelihood_factor=1e3
+    )
+    expected = sinter.shot_error_rate_to_piece_error_rate(fit.high, pieces=10)
+    line_xs = line.get_xdata()
+    bound_xs = bound.get_xdata()
+    bound_ys = bound.get_ydata()
+    legend = axis.get_legend()
+    legend_lines = legend.get_lines()
+    assert list(line_xs) == [0.002, 0.003]
     assert min(band_xs) == 0.002
+    assert list(bound_xs) == [0.001]
+    assert bound_ys[0] == pytest.approx(expected, rel=1e-12)
+    assert bound.get_markerfacecolor() == "none"
+    assert bound.get_color() == line.get_color()
+    assert len(legend_lines) == 1
+    pyplot.close(figure)
+
+
+def test_error_rate_leaves_a_shot_rate_above_half_out_of_a_per_round_figure():
+    """Per round, sinter maps 600 errors in 1000 shots to about 0.99."""
+    stats = [
+        stat("pymatching", d=5, p=0.001, errors=100),
+        stat("pymatching", d=5, p=0.002, errors=600),
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.error_rate(axis, stats, x="p", curve="d", rounds=10)
+
+    drawn_xs = {x for line in axis.lines for x in line.get_xdata()}
+    assert drawn_xs == {0.001}
+    pyplot.close(figure)
+
+
+def test_error_rate_keeps_a_shot_rate_above_half_per_shot():
+    stats = [stat("pymatching", d=5, p=0.002, errors=600)]
+    figure, axis = pyplot.subplots()
+
+    plots.error_rate(axis, stats, x="p", curve="d")
+
+    curve_line = axis.lines[0]
+    curve_rates = curve_line.get_ydata()
+    assert list(curve_rates) == pytest.approx([0.6])
     pyplot.close(figure)
 
 
@@ -107,6 +147,24 @@ def test_values_draw_error_bars_from_the_low_and_high_columns():
     segments = first_bars.lines[2][0].get_segments()
     assert len(axis.containers) == 2
     assert segments[0][:, 1] == pytest.approx([0.1, 0.4])
+    pyplot.close(figure)
+
+
+def test_bounds_draw_hollow_markers_at_the_high_column_by_place():
+    rows = [
+        {"d": 7, "p": 0.001, "high": 0.02},
+        {"d": 7, "p": 0.002, "high": 0.03},
+    ]
+    figure, axis = pyplot.subplots()
+
+    plots.bounds(axis, rows, x="p", high="high", curve="d", order=[5, 7])
+
+    (bound,) = axis.lines
+    bound_ys = bound.get_ydata()
+    assert list(bound_ys) == [0.02, 0.03]
+    assert bound.get_linestyle() == "None"
+    assert bound.get_markerfacecolor() == "none"
+    assert bound.get_color() == "C1"
     pyplot.close(figure)
 
 

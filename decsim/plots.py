@@ -11,6 +11,10 @@ A curve's colour and marker come from its value's place in `order`, the
 list of every value the curve key takes across a figure, so a value
 keeps its style in a panel that lacks another; without `order` the
 place is among the values the call draws, sorted.
+
+A point with no failures has no likeliest rate, only an upper bound; it
+is drawn as a hollow marker at that bound in its curve's style, off the
+line, so a reader sees where it stands and that its rate lies below.
 """
 
 import collections
@@ -30,6 +34,9 @@ DOTS_PER_INCH = 150
 PANEL_WIDTH_INCHES = 5.0
 PANEL_HEIGHT_INCHES = 4.2
 MINOR_GRID_ALPHA = 0.3
+# sinter.plot_error_rate's default band (sinter/_plotting.py), so a
+# point's bound reads on the same scale as the other points' bands
+LIKELIHOOD_FACTOR = 1e3
 # sinter's marker order (sinter/_plotting.py:15), so a curve reads the
 # same here as in a figure sinter draws itself
 MARKERS = "ov*sp^<>8PhH+xXDd"
@@ -92,22 +99,33 @@ def error_rate(
     failure_units_per_shot_func (sinter/_plotting.py:338-342), and one is
     sinter's own default, a rate per shot.
 
-    A point with no errors is left out: it has no likeliest rate, only a
-    bound, and sinter draws it as a band from zero with no marker
+    A point with no errors is drawn as its bound (the module says how):
+    sinter draws it as a band from zero with no marker
     (sinter/_plotting.py:399-400), which on a log axis runs to the floor.
+    A point whose likeliest shot rate is above one half is left out of a
+    per-round figure: for an even round count no per-round rate gives
+    it (decsim/experiments/report.py _is_above_half), and sinter maps it
+    to its complement, near one.
     """
     x_of = functools.partial(_value, key=x)
     group_of = functools.partial(_group, curve=curve, marker=marker)
-    style_of = _sinter_style(stats, curve, marker, order)
+    places = _places(stats, curve, order)
+    style_of = functools.partial(
+        _place_style, curve=curve, marker=marker, places=places
+    )
+    has_rate = functools.partial(_has_rate, rounds=rounds)
     sinter.plot_error_rate(
         ax=axis,
         stats=stats,
         x_func=x_of,
         failure_units_per_shot_func=lambda _stat: rounds,
         group_func=group_of,
-        filter_func=_has_errors,
+        filter_func=has_rate,
         plot_args_func=style_of,
     )
+    for stat in stats:
+        if stat.errors == 0:
+            _draw_error_free(axis, stat, (x_of, curve, rounds), places)
     unit = "shot"
     if rounds > 1:
         unit = "round"
@@ -135,6 +153,23 @@ def values(
         style["label"] = str(curve_value)
         _draw_values(axis, curve_rows, (x, y, low, high), style)
     _style(axis, x, y, curve)
+
+
+def bounds(
+    axis: pyplot.Axes,
+    rows: list,
+    x: str,
+    high: str,
+    curve: str,
+    order: Optional[list] = None,
+) -> None:
+    """Points with no failures, as hollow markers at their high column."""
+    curves = _curves(rows, curve, x)
+    for curve_value, curve_rows in curves.items():
+        style = _curve_style(curve_value, curves, order)
+        xs = [row[x] for row in curve_rows]
+        ys = [row[high] for row in curve_rows]
+        _draw_bound(axis, xs, ys, style)
 
 
 def save(figure: pyplot.Figure, path: Union[str, pathlib.Path]) -> None:
@@ -167,7 +202,7 @@ def _group(stat: sinter.TaskStats, curve: str, marker: Optional[str]) -> dict:
     sinter orders the curves by "sort" and gives one marker and line
     style per "marker" and "linestyle" value (sinter/_plotting.py:350-357);
     the colour, and the marker when no second key is given, come from
-    _sinter_style instead, since sinter ranks them among the curves of
+    _place_style instead, since sinter ranks them among the curves of
     one call only.
     """
     curve_value = _value(stat, curve)
@@ -219,21 +254,56 @@ def _draw_values(
     axis.errorbar(xs, ys, yerr=bars, capsize=3, **style)
 
 
-def _has_errors(stat: sinter.TaskStats) -> bool:
-    """Whether a point saw an error, so it has a likeliest rate."""
-    return stat.errors > 0
+def _has_rate(stat: sinter.TaskStats, rounds: int) -> bool:
+    """Whether a point has a likeliest rate in the figure's unit."""
+    if stat.errors == 0:
+        return False
+    if rounds == 1:
+        return True
+    scored_shots = stat.shots - stat.discards
+    shot_rate = stat.errors / scored_shots
+    return shot_rate <= 0.5
 
 
-def _sinter_style(
-    stats: list, curve: str, marker: Optional[str], order: Optional[list]
-) -> functools.partial:
-    """The plot_args_func sinter calls: a curve's colour and marker by place."""
+def _places(stats: list, curve: str, order: Optional[list]) -> list:
+    """Every curve value in style order: order, or the values sorted."""
+    if order is not None:
+        return order
     curve_values = {_value(stat, curve) for stat in stats}
-    places = order
-    if places is None:
-        places = sorted(curve_values)
-    return functools.partial(
-        _place_style, curve=curve, marker=marker, places=places
+    return sorted(curve_values)
+
+
+def _draw_error_free(
+    axis: pyplot.Axes, stat: sinter.TaskStats, keys: tuple, places: list
+) -> None:
+    """A point with no errors at its bound, in its curve's style.
+
+    keys is (x_of, curve, rounds). The bound is the high end of sinter's
+    band for no hits, in the figure's unit.
+    """
+    x_of, curve, rounds = keys
+    scored_shots = stat.shots - stat.discards
+    fit = sinter.fit_binomial(
+        num_shots=scored_shots,
+        num_hits=0,
+        max_likelihood_factor=LIKELIHOOD_FACTOR,
+    )
+    bound = sinter.shot_error_rate_to_piece_error_rate(fit.high, pieces=rounds)
+    curve_value = _value(stat, curve)
+    style = _place(curve_value, places)
+    x_value = x_of(stat)
+    _draw_bound(axis, [x_value], [bound], style)
+
+
+def _draw_bound(axis: pyplot.Axes, xs: list, ys: list, style: dict) -> None:
+    """Hollow markers off the curve's line, kept out of the legend."""
+    axis.plot(
+        xs,
+        ys,
+        linestyle="none",
+        markerfacecolor="none",
+        label="_nolegend_",
+        **style,
     )
 
 

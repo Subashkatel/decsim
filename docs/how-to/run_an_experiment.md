@@ -120,15 +120,13 @@ PYTHONPATH=. python experiments/decoder_baseline/plot.py results/<date>_decoder_
 This draws the folder's `plots/` from its `stats.csv`: the logical
 error rate per round against the physical error rate, a figure per
 decoder and one comparing the decoders for each basis. Its decoders,
-distances, rates and rounds come from the folder's own `run.py`, the
-script that made its `stats.csv`, loaded as a module and not run as a
-script, so an older folder is drawn by the recipe that made it and not
-today's. The recipe imports what it imported when it ran, so a folder
-whose `run.py` imports code since removed (the 2026-09-27 baseline's
-imports the old experiment runner) is drawn from a checkout of the
-commit it names. The script is a
-few lines because `decsim/plots.py` holds the figure kinds (an error
-rate and plain values) and their one axis style; another experiment's
+bases, distances and rates are the ones `stats.csv` holds, each row's
+decoder and labels, so a folder of any date, the 2026-09-27 baseline
+included, is drawn by today's script; the folder's `run.py` is kept as
+the record of the run and never run. Every baseline shot is a 100-round
+memory, which `stats.csv` does not carry, so the script states it. The
+script is a few lines because `decsim/plots.py` holds the figure kinds
+(an error rate and plain values) and their one axis style; another experiment's
 plot.py draws with the same calls. The repository tracks a results
 folder's `stats.csv`, `run.json`, script copy and `plots/`, so every
 experiment's results live beside the code that made them; `points/` and

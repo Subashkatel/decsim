@@ -2524,7 +2524,8 @@ def reference_run(escalation_kind, folder):
     assert text.count(shipped_kind) == 1
     named_kind = f"  kind: {escalation_kind} "
     config_path = folder / "reference.yaml"
-    config_path.write_text(text.replace(shipped_kind, named_kind))
+    named_text = text.replace(shipped_kind, named_kind)
+    config_path.write_text(named_text)
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {

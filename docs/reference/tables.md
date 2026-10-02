@@ -101,12 +101,12 @@ In `decsim/links/framings.py`. A row of it is named under `links.<path_name>.pro
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `whole` | `Whole` in `decsim/links/framings.py` | One frame of the whole message, the header with it. |
-| `flits` | `Flits` in `decsim/links/framings.py` | Flits of flit_bits each; the last one is padded to the full width. |
-| `aurora_64b66b` | `Aurora64b66b` in `decsim/links/framings.py` | 66-bit blocks: floor(n / 8) + 1 of them for a frame of n octets. |
-| `pcie_tlp` | `PcieTlp` in `decsim/links/framings.py` | Memory write TLPs of at most max_payload_bytes, 24 bytes on each. |
-| `roce_v2` | `RoceV2` in `decsim/links/framings.py` | RDMA write packets of at most path_mtu_bytes, each an Ethernet frame. |
-| `ethernet_udp` | `EthernetUdp` in `decsim/links/framings.py` | UDP datagrams of at most mtu_bytes, IPv4 and UDP headers inside it. |
+| `whole` | | |
+| `flits` | | |
+| `aurora_64b66b` | | |
+| `pcie_tlp` | | |
+| `roce_v2` | | |
+| `ethernet_udp` | | |
 
 ## `IDLE_POLICIES`
 

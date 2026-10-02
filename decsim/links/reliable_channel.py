@@ -76,6 +76,7 @@ import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
+import decsim.links.framings as framings
 import decsim.links.settings as link_settings
 import decsim.seeding as seeding
 
@@ -103,7 +104,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         that one wire bit is wrong.
         """
 
-        framing: link_settings.FramingSettings
+        framing: framings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
         window_packets: int
@@ -522,7 +523,7 @@ class _TimerState:
 
 
 def _require_roce_framing(
-    framing: link_settings.FramingSettings, path_name: str
+    framing: framings.FramingSettings, path_name: str
 ) -> None:
     """This row is RoCE's go-back-N, whose ACKs are RoCE packets.
 
@@ -531,13 +532,13 @@ def _require_roce_framing(
     have no acknowledgement packet of their own. Those run on the credit
     row.
     """
-    if framing.kind == "roce_v2":
+    if framing.has_acknowledgement_packet:
         return
     raise ValueError(
-        f"links.{path_name}.protocol runs the reliable row on "
-        f"{framing.kind} frames; the row is RoCE's go-back-N and its "
-        f"acknowledgements are RoCE packets, so it runs on roce_v2 "
-        f"frames, and {framing.kind} runs on the credit row"
+        f"links.{path_name}.protocol runs the reliable row on frames with "
+        f"no acknowledgement packet of their own; the row is RoCE's "
+        f"go-back-N and its acknowledgements are RoCE packets, so it runs "
+        f"on roce_v2 frames, and any other framing runs on the credit row"
     )
 
 

@@ -94,6 +94,17 @@ def record_fields(
     return values
 
 
+def required_fields(record_class) -> tuple:
+    """The names of a settings record's fields that have no default."""
+    names = []
+    for field in dataclasses.fields(record_class):
+        has_default = field.default is not dataclasses.MISSING
+        has_factory = field.default_factory is not dataclasses.MISSING
+        if not has_default and not has_factory:
+            names.append(field.name)
+    return tuple(names)
+
+
 def refuse_unknown_keys(
     section_name: str, section: Mapping, known_keys
 ) -> None:

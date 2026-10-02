@@ -71,7 +71,7 @@ class CreditChannel(channel_module.Channel):
         hardware the card describes and carries its source.
         """
 
-        framing: link_settings.FramingSettings
+        framing: framings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
 
@@ -98,7 +98,7 @@ class CreditWire:
         protocol_settings,
     ):
         self._channel_settings = channel_settings
-        self._framing = framings.build(protocol_settings.framing)
+        self._framing = protocol_settings.framing.build()
         self._credit_latency_ticks = credit_latency_ticks(channel_settings)
         # the credit-return tick of each of the last C frames sent; the
         # oldest is the credit the next frame waits for

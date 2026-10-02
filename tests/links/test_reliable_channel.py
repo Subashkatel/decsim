@@ -55,8 +55,7 @@ def reliable_settings(
     credit_latency_cycles=2,
     timeout_cycles=200,
 ):
-    roce_settings = framings.RoceV2.Settings(PATH_MTU_BYTES)
-    framing_settings = link_settings.FramingSettings("roce_v2", roce_settings)
+    framing_settings = framings.RoceV2.Settings(PATH_MTU_BYTES)
     row = reliable_channel.ReliableChannel.Settings(
         framing=framing_settings,
         receive_buffer_frames=buffer_frames,
@@ -542,7 +541,8 @@ def test_a_reliable_card_on_frames_other_than_roce_v2_is_refused():
     section = _reliable_section(framing, 0.0)
     settings_class = reliable_channel.ReliableChannel.Settings
 
-    with pytest.raises(ValueError, match="flits runs on the credit row"):
+    sentence = "any other framing runs on the credit row"
+    with pytest.raises(ValueError, match=sentence):
         settings_class.from_yaml(section, "p")
 
 

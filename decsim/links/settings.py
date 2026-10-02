@@ -76,18 +76,6 @@ class PayloadSettings:
 
 
 @dataclasses.dataclass(frozen=True)
-class FramingSettings:
-    """How a packet channel cuts a message: a FRAMINGS row and its keys.
-
-    row_settings is the row's own Settings record, None for a row with
-    no keys (decsim/links/framings.py).
-    """
-
-    kind: str = "whole"
-    row_settings: Optional[object] = None
-
-
-@dataclasses.dataclass(frozen=True)
 class ProtocolSettings:
     """What a channel's frames follow: a PROTOCOLS row and its keys.
 
@@ -288,11 +276,15 @@ def required_key(section: Mapping, key: str, section_name: str) -> object:
 def positive_count_key(section: Mapping, key: str, section_name: str) -> int:
     """A key a link card needs: a positive whole number, never a boolean."""
     value = required_key(section, key, section_name)
+    check_positive_count(f"{section_name}.{key}", value)
+    return value
+
+
+def check_positive_count(name: str, value) -> None:
+    """A positive whole number, never a boolean, or a refusal naming it."""
     if config.is_whole_count(value):
-        return value
-    raise ValueError(
-        f"{section_name}.{key} is {value!r}; it is a positive whole number"
-    )
+        return
+    raise ValueError(f"{name} is {value!r}; it is a positive whole number")
 
 
 def _as_whole_number(value, name: str) -> int:

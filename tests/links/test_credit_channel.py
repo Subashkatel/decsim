@@ -42,12 +42,11 @@ def credit_settings(
 
 
 def flits(flit_bits):
-    row_settings = framings.Flits.Settings(flit_bits)
-    return link_settings.FramingSettings("flits", row_settings)
+    return framings.Flits.Settings(flit_bits)
 
 
 def whole():
-    return link_settings.FramingSettings("whole")
+    return framings.Whole.Settings()
 
 
 def send_at(engine, channel, tick, payload_bits, setup_ticks, delivered):

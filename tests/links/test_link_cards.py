@@ -327,7 +327,7 @@ def test_a_protocol_card_reaches_the_channel_counted_on_its_clock():
     protocol = profile.qpu_to_controller.channel.protocol
     assert protocol.kind == "credit"
     assert protocol.row_settings.receive_buffer_frames == 1
-    assert protocol.row_settings.framing.row_settings.flit_bits == 8
+    assert protocol.row_settings.framing.flit_bits == 8
     assert protocol.clock.period_ticks == config_module.microseconds_to_ticks(
         0.004
     )

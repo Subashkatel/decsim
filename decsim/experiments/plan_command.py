@@ -79,9 +79,6 @@ PYTHON_VARIABLE = "DECSIM_PYTHON"
 SUBMIT_LIMIT_VARIABLE = "SUBMIT_LIMIT"
 # Della's short QOS: 1,000 submitted jobs a user, each array task one.
 DEFAULT_SUBMIT_LIMIT = 1000
-# The values a shape keeps: each record's class, and the kind a row
-# names when one class serves several kinds.
-SHAPE_KEYS = (collect.RECORD_CLASS_KEY, "kind")
 # The next step only plans and submits, so it asks for one core, 16 GB
 # and twelve hours, what the loop's planning job has run with.
 NEXT_STEP_SHAPE = (
@@ -327,17 +324,14 @@ def _refuse_a_failed_check(point, python: str, completed) -> None:
 def _cheapest_point_of_each_shape(study: experiment.Experiment) -> list:
     """Per machine shape, the point with the fewest QEC rounds a shot.
 
-    A shape is the settings with every value but the records' classes
-    and the rows' kinds left out, so points that differ only in numbers
-    (a distance, an error rate) or in a workload made from them are one
-    shape. Ties go to the point the experiment lists first.
+    Points that differ only in numbers (a distance, an error rate) or in
+    a workload made from them are one shape (_shape_text). Ties go to
+    the point the experiment lists first.
     """
     cheapest_by_shape = {}
     for point in study.points:
         task = experiment.task_of(point)
-        settings_json = collect.json_value(task.settings)
-        shape = _shape_of(settings_json)
-        shape_text = json.dumps(shape, sort_keys=True)
+        shape_text = _shape_text(task)
         rounds = run_folder.rounds_per_shot(task)
         earlier = cheapest_by_shape.get(shape_text)
         if earlier is None or rounds < earlier[0]:
@@ -345,23 +339,42 @@ def _cheapest_point_of_each_shape(study: experiment.Experiment) -> list:
     return [point for _rounds, point in cheapest_by_shape.values()]
 
 
-def _shape_of(value):
-    """The json value with every leaf but a class or kind made None."""
+def _shape_text(task: collect.Task) -> str:
+    """The machine a point builds, numbers left out, as one text.
+
+    Each settings record's class names a part the build makes; the
+    escalation's kind and whether the point learns its threshold online
+    change the build within one class, so they are named beside them.
+    """
+    settings_json = collect.json_value(task.settings)
+    classes = _classes_of(settings_json)
+    escalation_kind = task.settings.escalation.kind
+    is_online = task.online_threshold is not None
+    shape = {
+        "classes": classes,
+        "escalation_kind": escalation_kind,
+        "online": is_online,
+    }
+    return json.dumps(shape, sort_keys=True)
+
+
+def _classes_of(value):
+    """The json value with every leaf but a record's class made None."""
     if isinstance(value, Mapping):
-        return _shape_of_a_mapping(value)
+        return _classes_of_a_mapping(value)
     if isinstance(value, list):
-        return [_shape_of(child) for child in value]
+        return [_classes_of(child) for child in value]
     return None
 
 
-def _shape_of_a_mapping(value: Mapping) -> dict:
-    """A mapping's shape: its keys, class and kind, children's shapes."""
+def _classes_of_a_mapping(value: Mapping) -> dict:
+    """A mapping's keys, its record class, and its children's classes."""
     shape = {}
     for key, child in value.items():
-        if key in SHAPE_KEYS:
+        if key == collect.RECORD_CLASS_KEY:
             shape[key] = child
             continue
-        shape[key] = _shape_of(child)
+        shape[key] = _classes_of(child)
     return shape
 
 

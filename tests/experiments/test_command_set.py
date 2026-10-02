@@ -2060,6 +2060,35 @@ def test_a_record_class_names_settings_and_not_results(tmp_path):
     assert '"class"' not in result_text
 
 
+def test_a_shape_is_the_record_classes_and_the_named_facts(tmp_path):
+    """Numbers make no new shape; another build within one class does.
+
+    The four plain points differ in distance and rate alone, so they
+    are one shape. A fixed-threshold switching point and an online one
+    build one set of record classes, and the online fact tells them
+    apart, so the one-shot check runs three shots.
+    """
+    overrides_by_folder = {
+        "plain": FOUR_POINT_SWEEP,
+        "fixed": yaml_configs.fixed_threshold_switching(),
+        "online": yaml_configs.online_threshold(),
+    }
+    points = []
+    for folder_name, overrides in overrides_by_folder.items():
+        folder = tmp_path / folder_name
+        folder.mkdir()
+        config_path = yaml_configs.write_config(folder, overrides)
+        config = experiment.load_experiment(config_path)
+        study = config.experiment()
+        points.extend(study.points)
+    every_point = experiment.Experiment("shapes", points)
+
+    checked = plan_command._cheapest_point_of_each_shape(every_point)
+
+    checked_names = [point.name for point in checked]
+    assert checked_names == [points[0].name, points[4].name, points[5].name]
+
+
 def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
     tmp_path, monkeypatch
 ):

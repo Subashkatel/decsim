@@ -408,12 +408,23 @@ def _submit_limit() -> int:
 
 
 def _queued_job_count() -> int:
-    """The user's queued and running jobs, each array task one; 0 off Slurm."""
+    """The user's queued and running jobs, each array task one; 0 off Slurm.
+
+    A squeue that fails says nothing of the queue, so the submission is
+    refused rather than counted against the limit as empty.
+    """
     if shutil.which("squeue") is None:
         return 0
     user = getpass.getuser()
     command = ["squeue", "-h", "-r", "-u", user]
     completed = subprocess.run(command, capture_output=True, text=True)
+    if completed.returncode != 0:
+        said = completed.stderr.strip()
+        raise refusal.RefusalError(
+            f"refusing to submit: squeue exited {completed.returncode} "
+            f"({said}), so the jobs already queued against "
+            f"{SUBMIT_LIMIT_VARIABLE} are not known"
+        )
     lines = completed.stdout.splitlines()
     return len(lines)
 

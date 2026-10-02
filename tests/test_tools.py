@@ -368,10 +368,18 @@ def _stub_git(tmp_path, status):
 
 
 def _stub_squeue(tmp_path):
-    """A squeue that lists $STUB_QUEUED_JOBS of the user's jobs, one a line."""
+    """A squeue that lists $STUB_QUEUED_JOBS of the user's jobs, one a line.
+
+    With STUB_SQUEUE_FAILS set it fails as a squeue that cannot reach
+    the controller does.
+    """
     stub = tmp_path / "squeue"
     stub.write_text(
         "#!/usr/bin/env bash\n"
+        'if [ -n "$STUB_SQUEUE_FAILS" ]; then\n'
+        '  echo "slurm_load_jobs error: Unable to contact controller" >&2\n'
+        "  exit 1\n"
+        "fi\n"
         "for ((job = 0; job < ${STUB_QUEUED_JOBS:-0}; job++)); do\n"
         '  echo "$job"\n'
         "done\n"
@@ -665,6 +673,26 @@ def test_a_submit_limit_that_is_no_positive_whole_number_is_refused(
 
     assert completed.returncode == 1
     assert "SUBMIT_LIMIT must be a whole number" in completed.stderr
+    assert not (tmp_path / "submissions.txt").exists()
+
+
+def test_a_squeue_that_fails_refuses_the_submission(tmp_path):
+    """A queue that cannot be read is not an empty queue.
+
+    Counted as empty, a batch could pass the limit and be half
+    submitted; only a node with no squeue at all counts none.
+    """
+    config_path, _names = _two_point_config(tmp_path)
+    results_dir = tmp_path / "results"
+    failing = {"STUB_SQUEUE_FAILS": "1"}
+    environment = _slurm_environment(tmp_path, "clean", failing)
+    arguments = _slurm_arguments(config_path, results_dir, "--tasks", "1")
+
+    completed = _decsim(tmp_path, arguments, environment)
+
+    assert completed.returncode == 1
+    assert "squeue exited 1" in completed.stderr
+    assert "Unable to contact controller" in completed.stderr
     assert not (tmp_path / "submissions.txt").exists()
 
 

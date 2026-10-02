@@ -184,16 +184,19 @@ _PULSE_SOURCE = (
 )
 
 # The rates. A word per cycle on the 32-bit bus the decoder is written
-# and read over (Caune 2410.05202 lines 998-1008 and 1252-1254; the paper
-# gives the width, not a transaction rate) and on the on-chip memory
-# word above; one 128-bit instruction word per cycle into the pulse
-# generator; and off board, the 100 Gb direct-attach cable from an FPGA
-# controller to its coprocessor host (Backline, arXiv 2609.09270, lines
-# 1229-1230), the one off-board line rate a referent of this scale gives.
+# and read over (Caune 2410.05202 lines 998-1008 and 1252-1254) and on
+# the on-chip memory word above: the width is Caune's, and one word a
+# 250 MHz cycle is an estimate, since Caune clock that bus at 156.25 MHz
+# (lines 1021-1027) and give no transaction rate. One 128-bit
+# instruction word per cycle into the pulse generator. Off board, the
+# 100 Gb direct-attach cable from an FPGA controller to its coprocessor
+# host (Backline, arXiv 2609.09270, lines 1229-1230), the one off-board
+# line rate a referent of this scale gives.
 _WORD_BITS_PER_MICROSECOND = BUS_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
 _WORD_RATE_SOURCE = (
-    "one 32-bit word per 250 MHz cycle (Caune 2410.05202 lines 998-1008, "
-    "the decoder's 32-bit bus)"
+    "one 32-bit word per 250 MHz cycle, an estimate: the width is Caune "
+    "2410.05202 line 999's bus, which Caune clock at 156.25 MHz (lines "
+    "1021-1027)"
 )
 _INSTRUCTION_BITS_PER_MICROSECOND = (
     INSTRUCTION_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ

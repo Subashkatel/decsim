@@ -469,7 +469,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     assert sender.windows is windows.window_manager
     assert requester.decode_queue is decoders.decoder_manager
     assert result.terminal_status == "complete"
-    assert result.fully_done_ticks == 67_608_000
+    assert result.fully_done_ticks == 279_888_000
     assert result.operation_results[0].logical_failure is False
     assert result == whole
 

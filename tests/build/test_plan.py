@@ -17,7 +17,6 @@ import decsim.build.plan as plan_build
 import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.controller.policies as policies
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
@@ -37,6 +36,9 @@ import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 # the decoder manager section a run gets when the test names none
 NO_BULK_STRONG = decoder_settings.DecoderManagerSettings()
@@ -103,7 +105,7 @@ def _plan(
 
 def _with_switching(settings, switching):
     """The settings with both decoders and the switching slot filled."""
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     decoder = decoder_settings.DecoderPoolSettings(algorithm=matching)
     return dataclasses.replace(
         settings,

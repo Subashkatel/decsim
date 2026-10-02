@@ -18,12 +18,14 @@ import pytest
 
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 from tests.confidence import independent_cluster_gap
 from tests.decoders import windows
 
@@ -48,7 +50,7 @@ def test_the_row_declares_one_decode_and_the_growth_it_reads():
     assert required == decoding_records.CLUSTER_GROWTH_EVIDENCE
     row = union_find.UnionFindDecoder()
     assert not required - row.decoder_evidence
-    matching = mwpm.PyMatchingDecoder()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder()
     assert required - matching.decoder_evidence == required
 
 
@@ -92,7 +94,7 @@ def test_the_cluster_and_complementary_gaps_agree_on_one_window_property():
     """
     circuit, model = _window_model()
     hard_row = union_find.UnionFindDecoder()
-    matching_row = mwpm.PyMatchingDecoder()
+    matching_row = minimum_weight_perfect_matching.PyMatchingDecoder()
     cluster_signal = cluster.ClusterGap()
     complementary_signal = complementary.ComplementaryGap()
     events, _observables = windows.sampled_shots(circuit, SHOTS, SEED)

@@ -9,7 +9,7 @@ when a window is decoded again by the strong tier.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -19,6 +19,7 @@ import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
+import decsim.ports as ports
 import decsim.tables as tables
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -235,9 +236,7 @@ class DecoderPoolSettings:
     machine's slot None. Every decoder runs between the engine's stages.
     """
 
-    # a decoder row's Settings record, opaque to the tier: the record
-    # whose build() returns the decoder
-    algorithm: Any
+    algorithm: ports.DecoderSettings
     unit_count: int = 1
     engine: EngineSettings = EngineSettings()
     # built per pool, since its check is defined below this class

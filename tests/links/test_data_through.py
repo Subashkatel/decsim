@@ -49,7 +49,6 @@ import pytest
 
 import decsim.confidence.complementary as complementary
 import decsim.config as config
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
@@ -64,6 +63,9 @@ import decsim.records.windows as window_records
 import decsim.settings as machine_settings_module
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 ROUNDS = 15
 NAME_BITS = window_records.REQUEST_KEY_WIRE_BITS
@@ -232,12 +234,12 @@ def machine_settings(shape: str, distance: int):
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     links = link_profiles.logical_reference_profile()
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
     )
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     strong = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
@@ -603,7 +605,7 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,

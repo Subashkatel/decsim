@@ -16,7 +16,6 @@ import stim
 
 import decsim.collect as collect
 import decsim.config as config
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.deltakit as deltakit
@@ -30,6 +29,9 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 # The one point this example runs, which names its folder in points/.
 POINT_NAME = "shot"
@@ -195,7 +197,7 @@ def supplied_settings(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=decoder_microseconds
     )
     decoder = decoder_settings.DecoderPoolSettings(

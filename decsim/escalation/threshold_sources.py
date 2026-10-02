@@ -234,111 +234,6 @@ class TableThreshold(FixedThreshold):
             return table_path
 
 
-def _table_rows(table_path: pathlib.Path, column: str) -> list:
-    """The table's rows, which name the threshold column and a key column.
-
-    A table with no key column would match every point to its first row,
-    a wrong threshold with no sign of it, so it is refused.
-    """
-    with open(table_path, newline="") as table_file:
-        reader = csv.DictReader(table_file)
-        rows = list(reader)
-    if not rows:
-        return rows
-    columns = list(rows[0])
-    if column not in columns:
-        raise ValueError(
-            f"threshold_table {table_path} has no column {column!r}; its "
-            f"columns are {sorted(columns)}"
-        )
-    key_columns = _key_columns(columns)
-    if not key_columns:
-        raise ValueError(
-            f"threshold_table {table_path} has no key column; a key column "
-            "is headed by the yaml path of the setting it matches, as "
-            "qpu.distance"
-        )
-    return rows
-
-
-def _key_columns(columns: list) -> list:
-    """The columns headed by a yaml path, which name a table's points."""
-    keys = []
-    for column in columns:
-        if "." in column:
-            keys.append(column)
-    return keys
-
-
-def _point_at(row: dict, resolved: Mapping, table_path) -> dict:
-    """The point's value at each of the table's key columns."""
-    point = {}
-    reader = f"threshold_table {table_path}"
-    for column in _key_columns(list(row)):
-        point[column] = config.setting_at(resolved, column, reader)
-    return point
-
-
-def _is_point(row: dict, point: dict) -> bool:
-    """Whether every key cell of the row holds the point's value."""
-    for column, value in point.items():
-        if not _cell_holds(row[column], value):
-            return False
-    return True
-
-
-def _cell_holds(cell: str, value) -> bool:
-    """Whether a cell holds a value: a float within a relative 1e-9.
-
-    A float written out as text reads back within that. A whole number
-    is written exactly, so it is compared exactly, and any other value
-    is compared as its text.
-    """
-    if not config.is_number(value):
-        return cell == str(value)
-    if isinstance(value, int):
-        return fractions.Fraction(cell) == value
-    number = float(cell)
-    return math.isclose(number, value, rel_tol=1e-9)
-
-
-def _refuse_a_point_off_the_table(
-    rows: list, resolved: Mapping, table_path
-) -> None:
-    """The point, and the points the table does certify."""
-    point = {}
-    calibrated = []
-    for row in rows:
-        point = _point_at(row, resolved, table_path)
-        keys = {}
-        for column in point:
-            keys[column] = row[column]
-        calibrated.append(keys)
-    raise ValueError(
-        f"threshold_table {table_path} has no row for {point}; its rows "
-        f"are {calibrated}"
-    )
-
-
-def _certified_nats(
-    cell: str, table_path: pathlib.Path, column: str, point: dict
-) -> float:
-    if cell == "":
-        raise ValueError(
-            f"threshold_table {table_path} refuses {point}: the {column} "
-            "entry is empty (not enough evidence at calibration time)"
-        )
-    entry = f"threshold_table {table_path} entry {column} at {point}"
-    try:
-        gap_threshold_db = float(cell)
-    except ValueError:
-        raise ValueError(
-            f"{entry} must be a number of decibels (got {cell!r})"
-        ) from None
-    checked = checked_decibels(gap_threshold_db, entry)
-    return decibels_to_nats(checked)
-
-
 class EscalationRateTracker:
     """Inner calibration loop: pin the escalation fraction at a target.
 
@@ -810,3 +705,108 @@ def _check_online_rates(online) -> None:
             "since the audits reach the strong tier beside it "
             f"(got {online.target_escalation_rate}, cap {target_cap})"
         )
+
+
+def _table_rows(table_path: pathlib.Path, column: str) -> list:
+    """The table's rows, which name the threshold column and a key column.
+
+    A table with no key column would match every point to its first row,
+    a wrong threshold with no sign of it, so it is refused.
+    """
+    with open(table_path, newline="") as table_file:
+        reader = csv.DictReader(table_file)
+        rows = list(reader)
+    if not rows:
+        return rows
+    columns = list(rows[0])
+    if column not in columns:
+        raise ValueError(
+            f"threshold_table {table_path} has no column {column!r}; its "
+            f"columns are {sorted(columns)}"
+        )
+    key_columns = _key_columns(columns)
+    if not key_columns:
+        raise ValueError(
+            f"threshold_table {table_path} has no key column; a key column "
+            "is headed by the yaml path of the setting it matches, as "
+            "qpu.distance"
+        )
+    return rows
+
+
+def _key_columns(columns: list) -> list:
+    """The columns headed by a yaml path, which name a table's points."""
+    keys = []
+    for column in columns:
+        if "." in column:
+            keys.append(column)
+    return keys
+
+
+def _point_at(row: dict, resolved: Mapping, table_path) -> dict:
+    """The point's value at each of the table's key columns."""
+    point = {}
+    reader = f"threshold_table {table_path}"
+    for column in _key_columns(list(row)):
+        point[column] = config.setting_at(resolved, column, reader)
+    return point
+
+
+def _is_point(row: dict, point: dict) -> bool:
+    """Whether every key cell of the row holds the point's value."""
+    for column, value in point.items():
+        if not _cell_holds(row[column], value):
+            return False
+    return True
+
+
+def _cell_holds(cell: str, value) -> bool:
+    """Whether a cell holds a value: a float within a relative 1e-9.
+
+    A float written out as text reads back within that. A whole number
+    is written exactly, so it is compared exactly, and any other value
+    is compared as its text.
+    """
+    if not config.is_number(value):
+        return cell == str(value)
+    if isinstance(value, int):
+        return fractions.Fraction(cell) == value
+    number = float(cell)
+    return math.isclose(number, value, rel_tol=1e-9)
+
+
+def _refuse_a_point_off_the_table(
+    rows: list, resolved: Mapping, table_path
+) -> None:
+    """The point, and the points the table does certify."""
+    point = {}
+    calibrated = []
+    for row in rows:
+        point = _point_at(row, resolved, table_path)
+        keys = {}
+        for column in point:
+            keys[column] = row[column]
+        calibrated.append(keys)
+    raise ValueError(
+        f"threshold_table {table_path} has no row for {point}; its rows "
+        f"are {calibrated}"
+    )
+
+
+def _certified_nats(
+    cell: str, table_path: pathlib.Path, column: str, point: dict
+) -> float:
+    if cell == "":
+        raise ValueError(
+            f"threshold_table {table_path} refuses {point}: the {column} "
+            "entry is empty (not enough evidence at calibration time)"
+        )
+    entry = f"threshold_table {table_path} entry {column} at {point}"
+    try:
+        gap_threshold_db = float(cell)
+    except ValueError:
+        raise ValueError(
+            f"{entry} must be a number of decibels (got {cell!r})"
+        ) from None
+    checked = checked_decibels(gap_threshold_db, entry)
+    return decibels_to_nats(checked)

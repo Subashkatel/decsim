@@ -46,7 +46,6 @@ import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
@@ -93,6 +92,9 @@ import tests.machine.decoder_arrangements as decoder_arrangements
 import tests.qpu.memory_programs as memory_programs
 import tools.deltakit_example as finite_example
 import tools.live_memory_example as live_example
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
@@ -1041,7 +1043,9 @@ def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
     window_bits = SIX_ROUND_WINDOW_BITS["controller"]
     buffer = syndrome_buffer_module.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=5.0)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=5.0
+    )
     decoder = dataclasses.replace(
         settings.strong_decoder,
         algorithm=matching,
@@ -1395,7 +1399,9 @@ def _circuit_less_terminal_run(
     qpu = qpu_settings.QpuSettings(distance=distance, device=source)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=engine,
@@ -1542,7 +1548,7 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     The unit's algorithm stage is zero ticks for it, while every window
     with a model holds the unit for its measured time.
     """
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=FAST_ENGINE_CARD,
@@ -1586,7 +1592,7 @@ def _switching_memory(weak_kind: str, confidence: str):
         algorithm=weak_algorithm,
         engine=ENGINE_CARD,
     )
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
@@ -2182,7 +2188,9 @@ def replayed_run(circuit, measurements, shot):
     )
     device = stim_device.RecordedStimDevice(measurements, shot)
     qpu = qpu_settings.QpuSettings(distance=RECORDED_DISTANCE, device=device)
-    decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.028)
+    decoder = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.028
+    )
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
@@ -3237,7 +3245,9 @@ def _protected_memory_settings(circuit, source):
         rounds_policy=policy,
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
@@ -3285,7 +3295,9 @@ def _settings(
     period_microseconds: float = 1.1,
 ) -> machine_settings.MachineSettings:
     base = _physical_settings(program, history, period_microseconds)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.2
+    )
     strong = dataclasses.replace(
         base.weak_decoder,
         algorithm=matching,
@@ -3580,7 +3592,9 @@ def _static_idle_settings(idle_policy) -> machine_settings.MachineSettings:
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
     clock = config.Clock(4000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.2
+    )
     strong = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=engine,

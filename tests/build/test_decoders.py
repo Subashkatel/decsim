@@ -20,7 +20,6 @@ import decsim.build.plan as plan_build
 import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.decoder as union_find
@@ -35,6 +34,9 @@ import decsim.records.seeds as seed_records
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
 def _settings(*, switching=None, weak=None, strong=None):
@@ -94,7 +96,7 @@ def _pool(settings, detection_events=None):
 
 
 def _preset(microseconds: float):
-    preset = mwpm.PyMatchingDecoder.Settings(
+    preset = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=microseconds
     )
     return decoder_settings.DecoderPoolSettings(
@@ -118,7 +120,7 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
         release_cycles_per_job=5,
         release_cycles_per_round=7,
     )
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
@@ -151,7 +153,7 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
 def test_an_engine_that_names_no_clock_counts_on_the_machines():
     machine_clock = config.Clock(4000)
     engine = decoder_settings.EngineSettings()
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )

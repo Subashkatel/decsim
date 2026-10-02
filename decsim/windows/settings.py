@@ -2,9 +2,10 @@
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Optional, Protocol
 
 import decsim.config as config
+import decsim.ports as ports
 import decsim.records.windows as window_records
 import decsim.tables as tables
 import decsim.windows.boundary_payloads as boundary_payloads
@@ -50,6 +51,35 @@ WINDOWS_KEYS = (
 _REQUIRED_WINDOWS_KEYS = ("kind", "commit_rounds", "buffer_rounds")
 
 
+class SchemeSettings(Protocol):
+    """A windowing scheme row's settings record (WINDOWING_SCHEMES, above).
+
+    It holds the window sizes, None being the code distance, and builds
+    the scheme with the terminal policy that drains a finite stream.
+    """
+
+    name: str
+    commit_rounds: Optional[int]
+    buffer_rounds: Optional[int]
+
+    def build(self, terminal_policy: str) -> ports.WindowingScheme:
+        """A fresh scheme of these sizes."""
+
+
+class BoundaryPolicySettings(Protocol):
+    """A boundary row's settings record (BOUNDARY_POLICIES, above)."""
+
+    def build(self) -> ports.BoundaryPolicy:
+        """A fresh policy."""
+
+
+class BoundaryPayloadSettings(Protocol):
+    """A payload row's settings record (BOUNDARY_PAYLOADS, above)."""
+
+    def build(self) -> ports.BoundaryPayload:
+        """A fresh payload."""
+
+
 @dataclasses.dataclass(frozen=True)
 class WindowSettings:
     """How the rounds are cut into decode windows, and what a window ships.
@@ -73,16 +103,12 @@ class WindowSettings:
 
     clock: Optional[config.Clock] = None
     decision_cycles: int = 0
-    # the scheme row's Settings record, opaque here: its build() returns
-    # the scheme, and it holds commit_rounds and buffer_rounds
-    scheme: Any = sliding_scheme.SlidingWindowScheme.Settings()
+    scheme: SchemeSettings = sliding_scheme.SlidingWindowScheme.Settings()
     terminal_policy: str = "flush"
-    # the boundary row's Settings record, opaque here: its build()
-    # returns the policy
-    boundary_policy: Any = boundary_policies.Eager.Settings()
-    # the payload row's Settings record, opaque here: its build()
-    # returns the payload
-    boundary_payload: Any = boundary_payloads.DenseSeamMask.Settings()
+    boundary_policy: BoundaryPolicySettings = boundary_policies.Eager.Settings()
+    boundary_payload: BoundaryPayloadSettings = (
+        boundary_payloads.DenseSeamMask.Settings()
+    )
 
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)

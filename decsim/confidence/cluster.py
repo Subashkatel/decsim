@@ -45,6 +45,7 @@ from typing import Optional, Union
 import decsim.config as config
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -109,7 +110,11 @@ class ClusterGap:
                 "walk_microseconds", self.walk_microseconds
             )
 
-        def build(self, weak_algorithm, threshold_nats) -> "ClusterGap":
+        def build(
+            self,
+            weak_algorithm: ports.DecoderSettings,
+            threshold_nats: Optional[float],
+        ) -> "ClusterGap":
             """The row at the weak decoder's weight step, priced by the card.
 
             A weak row that keeps no weight step grows no clusters, so the

@@ -30,7 +30,6 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.experiments.collect_command as collect_command
@@ -52,6 +51,9 @@ import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.gate_point as gate_point
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 CONFIGS_DIR = yaml_configs.CONFIGS_DIR
 FOUR_POINT_SWEEP = {
@@ -690,7 +692,9 @@ def test_a_streams_rounds_are_its_segments_counted_once():
     qpu = qpu_settings.QpuSettings(distance=3, kind="timing_only")
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )

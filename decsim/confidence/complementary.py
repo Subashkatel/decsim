@@ -16,6 +16,7 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 
 COMPLEMENTARY_GAP_SOURCE = decoding_records.SoftOutputSource(
@@ -73,7 +74,11 @@ class ComplementaryGap:
                 "walk_microseconds", self.walk_microseconds
             )
 
-        def build(self, weak_algorithm, threshold_nats) -> "ComplementaryGap":
+        def build(
+            self,
+            weak_algorithm: ports.DecoderSettings,
+            threshold_nats: Optional[float],
+        ) -> "ComplementaryGap":
             """The row priced by the card; the weak row says nothing to it."""
             del weak_algorithm
             del threshold_nats

@@ -12,7 +12,6 @@ import pytest
 
 import decsim.config as config
 import decsim.controller.policies as idle_policies
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.settings as workload_settings
@@ -28,6 +27,9 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
 import tests.qpu.memory_programs as memory_programs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 # the default QPU round period, 1.1 microseconds, in ticks
 ROUND_TICKS = 1_100_000
@@ -593,7 +595,9 @@ def _committed_windows(
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
@@ -753,7 +757,9 @@ def _stim_machine(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
@@ -792,7 +798,9 @@ def _shrunk_group_run(blocked_by, idle_policy: IdlePolicySettings) -> dict:
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
@@ -859,7 +867,9 @@ def _prefix_run(operations: tuple, mode: str) -> tuple:
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
@@ -956,7 +966,9 @@ def _feedback_run(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
@@ -1025,7 +1037,9 @@ def _machine(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )

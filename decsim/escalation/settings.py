@@ -12,9 +12,10 @@ import dataclasses
 import pathlib
 from collections.abc import Callable, Mapping
 from numbers import Real
-from typing import Any, Optional
+from typing import Optional, Protocol
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.ports as ports
@@ -63,6 +64,82 @@ ESCALATION_KEYS = (
 )
 
 
+class ConfidenceSettings(Protocol):
+    """A confidence row's settings record, which builds the signal.
+
+    ComplementaryGap.Settings, ClusterGap.Settings and
+    ExtraClusterGap.Settings (decsim/confidence/) are the three.
+    """
+
+    name: str
+
+    def build(
+        self,
+        weak_algorithm: ports.DecoderSettings,
+        threshold_nats: Optional[float],
+    ) -> ports.ConfidenceSignal:
+        """The signal, from the weak decoder's record and the threshold."""
+
+
+class ThresholdSettings(Protocol):
+    """A threshold row's settings record (THRESHOLD_SOURCES, above).
+
+    threshold_nats is None only on a table not yet looked up at its
+    sweep point.
+    """
+
+    threshold_nats: Optional[float]
+
+    def at_sweep_point(self, resolved: Mapping) -> "ThresholdSettings":
+        """The record at one sweep point, its threshold looked up."""
+
+    def for_sweep_point(
+        self, resolved: Mapping
+    ) -> Optional[ports.ThresholdSource]:
+        """The source a sweep point's shots share; None for most rows."""
+
+    def build(self) -> ports.ThresholdSource:
+        """A fresh source of this record."""
+
+
+class StrongWindowSettings(Protocol):
+    """A strong window row's settings record (STRONG_WINDOW_SHAPES, above).
+
+    absorbs_weak_windows and default_boundary_policy are its row's
+    declarations; restart_reread_buffer_regions is the double window's
+    re-read width.
+    """
+
+    name: str
+    absorbs_weak_windows: bool
+    default_boundary_policy: str
+    restart_reread_buffer_regions: int
+
+    def build(
+        self, engine: engine_module.Engine
+    ) -> strong_window_shapes.StrongWindowShape:
+        """A fresh shape on the run's engine."""
+
+
+class BurstDetectorSettings(Protocol):
+    """A burst detector row's settings record (burst_detectors/settings.py).
+
+    circuits maps each counted operation's id to its circuit and round
+    count; machine_clock prices a row whose record names no clock.
+    """
+
+    name: str
+
+    def build(
+        self,
+        engine: engine_module.Engine,
+        circuits: Mapping,
+        round_period_microseconds: float,
+        machine_clock: Optional[config.Clock],
+    ) -> ports.BurstDetector:
+        """A fresh detector calibrated on the circuits it counts."""
+
+
 @dataclasses.dataclass(frozen=True)
 class SwitchingSettings:
     """The machine's switching slot: weak first, escalate on low confidence.
@@ -107,23 +184,17 @@ class SwitchingSettings:
     collect.Task.shot_settings).
     """
 
-    # the confidence row's Settings record, opaque here: the record whose
-    # build(weak_algorithm, threshold_nats) returns the signal
-    confidence: Any
-    # the threshold row's Settings record (threshold_sources.py), opaque
-    # here: at_sweep_point, for_sweep_point and build answer for it
-    threshold: Any
+    confidence: ConfidenceSettings
+    threshold: ThresholdSettings
     clock: Optional[config.Clock] = None
     threshold_cycles: int = 0
     switch_cycles: int = 0
     run_both_at_once: bool = False
-    # the strong window row's Settings record, opaque here: the record
-    # whose build(engine) returns the shape
-    strong_window: Any = strong_window_shapes.RedoWindow.Settings()
-    # the burst detector row's Settings record, opaque here: the record
-    # whose build(engine, circuits, round_period_microseconds,
-    # machine_clock) returns the detector; None watches for no burst
-    burst_detector: Any = None
+    strong_window: StrongWindowSettings = (
+        strong_window_shapes.RedoWindow.Settings()
+    )
+    # None watches for no burst
+    burst_detector: Optional[BurstDetectorSettings] = None
     # the sweep point's live online source, shared by every shot of the
     # point and installed per shot by the experiments layer
     online_threshold: Optional[ports.ThresholdSource] = None

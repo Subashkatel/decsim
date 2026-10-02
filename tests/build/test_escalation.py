@@ -14,7 +14,6 @@ import decsim.build.escalation as escalation_build
 import decsim.burst_detectors.event_count.detector as event_count
 import decsim.confidence.complementary as complementary
 import decsim.config as config
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
@@ -22,6 +21,9 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 from decsim.burst_detectors.masked_regional_cusum import (
     detector as masked_regional_cusum,
+)
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
 )
 
 # The round period the qpu card names by default.
@@ -38,7 +40,7 @@ def _switching(**changes) -> escalation_settings.SwitchingSettings:
 
 
 def _weak() -> decoder_settings.DecoderPoolSettings:
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     return decoder_settings.DecoderPoolSettings(algorithm=matching)
 
 

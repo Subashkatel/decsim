@@ -1151,6 +1151,22 @@ class Decoder(Protocol):
 
 
 @runtime_checkable
+class DecoderSettings(Protocol):
+    """A decoder row's settings record, as a tier and a confidence see it.
+
+    Every row of DECODERS (decsim/decoders/settings.py) declares a frozen
+    Settings dataclass that checks its own values, names its row and
+    builds the decoder. A row that grows clusters also holds a
+    weight_step and a cycle_count, which a cluster confidence reads.
+    """
+
+    name: str
+
+    def build(self) -> Decoder:
+        """A fresh decoder of these settings."""
+
+
+@runtime_checkable
 class StrongBackend(Protocol):
     """The device a strong decode runs on, as the strong decoder sees it.
 

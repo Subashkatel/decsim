@@ -38,6 +38,7 @@ import decsim.config as config
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -60,19 +61,6 @@ def union_find_extra_cluster_gap_source(
         correction="none",
         weight_step_natural_log=normalized_step,
         references=("extra-cluster gap without cluster graph",),
-    )
-
-
-def _refuse_a_threshold_with_no_number(threshold_nats) -> None:
-    """The growth limit is the threshold, so it is one number at build."""
-    if threshold_nats is not None:
-        return
-    raise ValueError(
-        "the extra_cluster_gap confidence grows to the threshold, so it "
-        "needs the threshold as one number when the machine is built "
-        "(Kishi 2602.03336 Sec. III, the early-stopping threshold is the "
-        "switching threshold): give a fixed threshold, or look a table "
-        "threshold up at its sweep point first"
     )
 
 
@@ -150,7 +138,11 @@ class ExtraClusterGap:
                 "walk_microseconds", self.walk_microseconds
             )
 
-        def build(self, weak_algorithm, threshold_nats) -> "ExtraClusterGap":
+        def build(
+            self,
+            weak_algorithm: ports.DecoderSettings,
+            threshold_nats: Optional[float],
+        ) -> "ExtraClusterGap":
             """The row grown to the threshold, on the weak row's unit.
 
             A weak row that keeps no weight step grows no clusters: the
@@ -219,3 +211,16 @@ class ExtraClusterGap:
         return cluster.gap_half_ticks_to_natural_log_weight(
             half_ticks, self.weight_step
         )
+
+
+def _refuse_a_threshold_with_no_number(threshold_nats) -> None:
+    """The growth limit is the threshold, so it is one number at build."""
+    if threshold_nats is not None:
+        return
+    raise ValueError(
+        "the extra_cluster_gap confidence grows to the threshold, so it "
+        "needs the threshold as one number when the machine is built "
+        "(Kishi 2602.03336 Sec. III, the early-stopping threshold is the "
+        "switching threshold): give a fixed threshold, or look a table "
+        "threshold up at its sweep point first"
+    )

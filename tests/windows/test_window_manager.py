@@ -11,7 +11,6 @@ import types
 import pytest
 
 import decsim.decoders.decoders as decoders
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
@@ -33,6 +32,9 @@ import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
 import decsim.windows.window_planner as window_planner
 import tests.declared_run as declared_run
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
 def _weak_run():
@@ -256,7 +258,9 @@ def _tan_sandwich_run(unit_count):
     qpu = qpu_settings.QpuSettings(
         distance=3, round_period_microseconds=1.0, device=device
     )
-    decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=5.0)
+    decoder = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=5.0
+    )
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder,
         unit_count=unit_count,

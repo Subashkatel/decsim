@@ -12,15 +12,17 @@ around that tier's decoder record.
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
 import numpy
 
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.decoder as tesseract_decoder
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.trace_source as trace_source
@@ -46,20 +48,20 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         """
 
         # the checked decoder's own Settings record
-        inner: Any
+        inner: ports.DecoderSettings
 
         @property
-        def name(self):
+        def name(self) -> str:
             """The inner decoder's word, which the results name the tier by."""
             return self.inner.name
 
         @property
-        def weight_step(self):
+        def weight_step(self) -> Optional[float]:
             """The inner decoder's weight step, None when it declares none."""
             return getattr(self.inner, "weight_step", None)
 
         @property
-        def cycle_count(self):
+        def cycle_count(self) -> Optional[cycle_count_module.CycleCount]:
             """The inner decoder's cycle count card."""
             return self.inner.cycle_count
 
@@ -68,7 +70,7 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
             inner = self.inner.build()
             return TesseractCheckedDecoder(inner)
 
-    def __init__(self, inner: decoder_module.DecoderBase):
+    def __init__(self, inner: decoder_module.DecoderBase) -> None:
         self.inner = inner
         referee_settings = tesseract_decoder.TesseractDecoder.Settings()
         self.referee = tesseract_window_decoder.TesseractWindowDecoder(

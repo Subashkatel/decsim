@@ -21,7 +21,6 @@ import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.policies as policies
@@ -46,6 +45,9 @@ import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 import tests.experiments.yaml_configs as yaml_configs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 # the decoder engines run at 100 MHz, a 10000-tick period
 ENGINE_CLOCK = config.Clock(10_000)
@@ -174,12 +176,12 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         terminal_policy="lookahead", boundary_policy=held
     )
     decoder_manager = decoder_settings.DecoderManagerSettings()
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
     )
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
@@ -358,7 +360,7 @@ def _double_window_settings(
     windows = window_settings.WindowSettings(
         scheme=scheme, terminal_policy="lookahead"
     )
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
         engine=ENGINE_CARD,
@@ -589,7 +591,7 @@ def _serial_switching_settings(
     windows = window_settings.WindowSettings(
         terminal_policy="lookahead", boundary_policy=boundary_policy
     )
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = decoder_settings.DecoderPoolSettings(algorithm=matching)
     belief_matching_settings = belief_matching.BeliefMatchingDecoder.Settings()
     strong_decoder = decoder_settings.DecoderPoolSettings(
@@ -851,7 +853,7 @@ def _switching_policy(threshold_nats: float):
     settings = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
-    matching = mwpm.PyMatchingDecoder.Settings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
     engine = engine_module.Engine()
     switching = escalation_build.Switching.build(settings, weak, engine)

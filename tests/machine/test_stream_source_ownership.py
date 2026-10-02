@@ -13,7 +13,6 @@ import pytest
 import stim
 
 import decsim.config as config
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.frontends.deltakit as deltakit
@@ -33,6 +32,9 @@ import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.settings as machine_settings
 import tests.qpu.memory_programs as memory_programs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
 @pytest.mark.parametrize("producer", ["stim", "deltakit"])
@@ -263,7 +265,9 @@ def _machine(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )

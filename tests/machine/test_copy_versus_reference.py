@@ -24,7 +24,6 @@ import stim
 
 import decsim.build.decoders as decoder_build
 import decsim.confidence.cluster as cluster
-import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
@@ -34,6 +33,9 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.workload as workload_records
 import tests.declared_run as declared_run
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
@@ -1087,7 +1089,9 @@ def _reach_growing_machine(formed_at):
         algorithm=weak,
         engine=declared_run.DECLARED_ENGINE,
     )
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.2
+    )
     strong_decoder = dataclasses.replace(
         settings.strong_decoder,
         algorithm=matching,
@@ -1160,7 +1164,9 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
         engine=declared_run.DECLARED_ENGINE,
         unit_count=3,
     )
-    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.2
+    )
     strong_decoder = dataclasses.replace(
         settings.strong_decoder,
         algorithm=matching,

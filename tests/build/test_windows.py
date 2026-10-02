@@ -8,9 +8,14 @@ connects the parts. This file pins the binds the window side makes
 late: the courier names the facade it tells of a landing, the committer
 and the verdict name the strong redecode built after them, which a run
 that never escalates leaves unbound, and the strong side submits to the
-host's manager.
+host's manager. A window decision or a verdict that names no clock runs
+on the machine's.
 """
 
+import dataclasses
+
+import decsim.config as config
+import decsim.machine as machine_module
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 
@@ -45,15 +50,15 @@ def test_a_run_that_never_escalates_leaves_the_redecode_unbound():
 def test_a_switching_run_builds_only_the_window_side_it_names():
     """It may escalate, so it re-decodes on the strong side.
 
-    Its policy decides on no confidence and it names no burst detector,
-    so it has no confidence signal, no gap join and no detector.
+    Its signal is the switching part's, joined per window, and it names
+    no burst detector, so it has no detector.
     """
     machine = declared_run.switching_run(escalates=True)
     windows = machine.windows
 
-    assert windows.strong_redecode is not None
-    assert windows.confidence_signal is None
-    assert windows.gap_join is None
+    assert windows.strong_redecode is machine.switching.strong_redecode
+    assert windows.confidence_signal is machine.switching.confidence_signal
+    assert windows.gap_join is not None
     assert windows.burst_detector is None
 
 
@@ -66,3 +71,27 @@ def test_the_strong_side_submits_to_the_hosts_manager():
     assert machine.windows.strong_redecode.decode_queue is host
     assert requester.strong_decode_queue is host
     assert requester.decode_queue is chip
+
+
+def test_the_decision_and_the_verdict_run_on_the_machines_clock():
+    machine_clock = config.Clock(4000)
+    declared = declared_run.switching_run(escalates=True)
+    windows = dataclasses.replace(declared.settings.windows, decision_cycles=2)
+    switching = dataclasses.replace(
+        declared.settings.switching, threshold_cycles=3
+    )
+    settings = dataclasses.replace(
+        declared.settings,
+        clock=machine_clock,
+        windows=windows,
+        switching=switching,
+    )
+
+    machine = machine_module.Machine.build(settings)
+
+    requester = machine.windows.requester
+    verdict = requester.verdict
+    assert settings.windows.clock is None
+    assert settings.switching.clock is None
+    assert requester.clock == machine_clock
+    assert verdict.clock == machine_clock

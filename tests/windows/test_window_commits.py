@@ -129,8 +129,7 @@ class _Fixture:
         self.verdicts = {}
         self.verdict_ticks = []
         self.policy = types.SimpleNamespace(
-            verdict_for_weak_result=self._verdict_for,
-            decides_on_a_confidence=True,
+            verdict_for_weak_result=self._verdict_for
         )
         self.reads = []
         self.decode_queue = types.SimpleNamespace(
@@ -338,6 +337,15 @@ def test_a_frameless_run_commits_at_the_delivery():
     )
     fixture.engine.run()
     assert committed == [4]
+
+
+def test_a_charged_verdict_needs_its_clock():
+    engine = engine_module.Engine()
+
+    with pytest.raises(
+        ValueError, match="charged escalation costs need a clock"
+    ):
+        window_commits.WindowVerdict(engine, threshold_cycles=1)
 
 
 @pytest.mark.parametrize("escalates", [False, True])

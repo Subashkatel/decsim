@@ -15,40 +15,52 @@ import tests.burst_detectors.burst_rounds as burst_rounds
 def test_the_row_none_takes_no_keys():
     section = {"kind": "none", "patch_window_rounds": 4}
     with pytest.raises(ValueError, match="burst_detector does not know"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
 def test_the_row_none_takes_no_catch_deadline():
     section = {"kind": "none", "catch_deadline_rounds": 300}
     with pytest.raises(ValueError, match="burst_detector does not know"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
 def test_the_catch_deadline_is_a_whole_number_of_rounds():
     section = {"kind": "event_count", "catch_deadline_rounds": -1}
     with pytest.raises(ValueError, match="catch_deadline_rounds must be"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.catch_deadline_rounds_from_yaml(section)
 
 
 def test_the_catch_deadline_reaches_the_section():
     default_section = {"kind": "event_count"}
     written_section = {"kind": "event_count", "catch_deadline_rounds": 0}
 
-    default = burst_detector_settings.BurstDetectorSettings.from_yaml(
-        default_section, burst_rounds.CLOCKS
+    default = burst_detector_settings.catch_deadline_rounds_from_yaml(
+        default_section
     )
-    written = burst_detector_settings.BurstDetectorSettings.from_yaml(
-        written_section, burst_rounds.CLOCKS
+    written = burst_detector_settings.catch_deadline_rounds_from_yaml(
+        written_section
     )
 
-    assert default.catch_deadline_rounds == 300
-    assert written.catch_deadline_rounds == 0
+    assert default == 300
+    assert written == 0
+
+
+def test_the_row_none_reads_as_no_detector():
+    detector = burst_detector_settings.detector_from_yaml(
+        {}, burst_rounds.CLOCKS
+    )
+
+    assert detector is None
+
+
+def test_a_detector_beside_a_run_with_no_switching_is_refused():
+    """A flagged window goes to the strong tier, which weak_baseline lacks."""
+    section = {"kind": "event_count"}
+
+    with pytest.raises(ValueError, match="only escalation.kind switching"):
+        burst_detector_settings.refuse_a_detector_without_switching(
+            section, None
+        )
 
 
 @pytest.mark.parametrize(

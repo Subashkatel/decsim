@@ -22,7 +22,6 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -122,7 +121,6 @@ def _manager(engine, unit_count):
     """The manager these tests dispatch on, at that many units."""
     decoder = decoders.PresetLatencyDecoder(DECODE_MICROSECONDS)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=unit_count
     )
@@ -133,7 +131,6 @@ def _manager(engine, unit_count):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = decoder
-    manager.escalation_policy = policy
     return manager
 
 

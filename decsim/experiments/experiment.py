@@ -20,6 +20,7 @@ from typing import Optional
 
 import yaml
 
+import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.experiments.collection as collection_module
@@ -299,13 +300,13 @@ def _point_task_of(
     distance or error rate still finds them.
     """
     workload = settings.workload.made()
-    threshold_nats = settings.escalation.threshold_nats_for(resolved)
-    escalation = dataclasses.replace(
-        settings.escalation, gap_threshold_nats=threshold_nats
-    )
-    online_threshold = escalation.online_threshold_for(resolved)
+    switching = settings.switching
+    online_threshold = None
+    if switching is not None:
+        switching = switching.at_sweep_point(resolved)
+        online_threshold = switching.online_threshold_for(resolved)
     point_settings = dataclasses.replace(
-        settings, workload=workload, escalation=escalation
+        settings, workload=workload, switching=switching
     )
     metadata = copy.deepcopy(dict(values))
     return collect.Task(point_settings, metadata, online_threshold)
@@ -408,9 +409,20 @@ def _files_line(config: ExperimentConfig) -> str:
 
 
 def _section_lines(settings: machine_settings.MachineSettings) -> list:
-    """One line per section, its kind named where the section has one."""
+    """One line per section, its kind named where the section has one.
+
+    The escalation section's kind is the word for the filled decode slots,
+    and the burst detector's the word for the switching slot's detector.
+    """
     lines = []
     for field in dataclasses.fields(settings):
+        if field.name == "switching":
+            lines.append(f"escalation: kind {settings.escalation_kind}")
+            detector_kind = burst_detector_settings.detector_kind(
+                settings.switching
+            )
+            lines.append(f"burst_detector: kind {detector_kind}")
+            continue
         section = getattr(settings, field.name)
         kind = getattr(section, "kind", None)
         if kind is None:

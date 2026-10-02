@@ -22,6 +22,7 @@ import functools
 import importlib.util
 import pathlib
 import re
+from typing import Any
 
 import ldpc
 import ldpc.ckt_noise.dem_matrices as dem_matrices
@@ -38,6 +39,7 @@ import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
 import decsim.collect as collect
+import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
@@ -117,16 +119,6 @@ ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 RUN_SEED = 17
 
 
-def tier_rows() -> str:
-    """The decoder table's rows as a refusal prints them, as a pattern.
-
-    Read from the table, so a row added to it breaks no test here:
-    that is what the plug-in page promises a new decoder costs.
-    """
-    rows = sorted(decoder_settings.DECODERS)
-    return re.escape(repr(rows))
-
-
 class RecordingReceiver:
     """A readout receiver that keeps every readout with its arrival tick."""
 
@@ -161,10 +153,16 @@ class FinishingRuntime:
 
 
 class FakeWeakDecoder(decoder_module.DecoderBase):
-    """A table row for the plug-in test: fixed latency, no correction."""
+    """A new decoder for the plug-in test: fixed latency, no correction."""
 
-    def __init__(self, latency_model=None):
-        del latency_model
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The record a tier builds the decoder from."""
+
+        name = "fake"
+
+        def build(self) -> "FakeWeakDecoder":
+            return FakeWeakDecoder()
 
     def latency(self, job: decoding_records.DecodeJob) -> int:
         del job
@@ -206,8 +204,8 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
     ]
 
 
-def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
-    """Gate point 1's settings run to completion on a decoder added as a row."""
+def test_a_new_decoder_is_one_class_and_its_settings_record():
+    """Gate point 1's settings run to completion on a decoder added here."""
     config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
@@ -218,9 +216,9 @@ def test_a_new_decoder_is_one_class_and_one_table_row(monkeypatch):
         },
     )
     settings = point.settings
-    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="fake")
+    fake = FakeWeakDecoder.Settings()
+    weak_decoder = dataclasses.replace(settings.weak_decoder, algorithm=fake)
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
-    monkeypatch.setitem(decoder_settings.DECODERS, "fake", FakeWeakDecoder)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -243,7 +241,10 @@ def test_a_second_table_row_runs_gate_point_one():
         },
     )
     settings = point.settings
-    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
+    union_find_settings = union_find_decoder.UnionFindDecoder.Settings()
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, algorithm=union_find_settings
+    )
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -280,17 +281,6 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     machine.start()
 
     assert machine.engine.idle is False
-
-
-def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
-    weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
-    settings = machine_settings.MachineSettings(weak_decoder=weak_decoder)
-    sentence = (
-        "weak_decoder.kind 'lookup_table' is not a row of its table; "
-        "the rows are " + tier_rows()
-    )
-    with pytest.raises(ValueError, match=sentence):
-        machine_module.Machine.build(settings)
 
 
 def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
@@ -371,15 +361,15 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     point = config.first_point_task()
     settings = point.shot_settings()
     engine = engine_module.Engine()
-    escalation_policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
+    switching = escalation_build.build_switching(
+        settings.switching, settings.weak_decoder, engine
     )
-    plan = plan_build.build_plan(settings, escalation_policy)
+    plan = plan_build.build_plan(settings, switching)
     burst_detector = escalation_build.build_burst_detector(
-        settings, engine, plan, escalation_policy
+        settings, engine, plan
     )
-    window_tier = escalation_policy.primary_tier
-    escalates = escalation_policy.requires_strong_context
+    window_tier = settings.window_tier
+    escalates = settings.switching is not None
     detection_events = readout_part.build_detection_events(
         settings.detection_events,
         settings.clock,
@@ -388,8 +378,9 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         escalates,
         burst_detector,
     )
+    signal = switching.confidence_signal
     pool = decoders_part.build_decoder_pool(
-        settings, plan, escalation_policy, detection_events
+        settings, plan, detection_events, signal
     )
     weak_store_slot, strong_store_slot = machine_module.store_slots(
         settings, window_tier, pool
@@ -415,22 +406,31 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         links,
     )
     windows = windows_part.Windows.build(
-        settings, engine, plan, escalation_policy, burst_detector, links
+        settings, engine, plan, burst_detector, links, switching
     )
     decoders = decoders_part.Decoders.build(
-        settings.decoder_manager, engine, pool, escalation_policy
+        settings.decoder_manager, engine, pool
     )
     sender = readout.syndrome_round_sender
     unbound = "SyndromeRoundSender.windows was read before it was bound"
 
-    assert isinstance(escalation_policy, escalation_policies.Switching)
+    assert isinstance(switching.policy, escalation_policies.Switching)
     assert plan.round_ticks == 1_000_000
     assert readout.controller.assembler is readout.assembler
     with pytest.raises(RuntimeError, match=unbound):
         assert sender.windows is None
 
     machine = machine_module.Machine.assemble(
-        settings, engine, plan, links, qpu, control, readout, windows, decoders
+        settings,
+        engine,
+        plan,
+        links,
+        qpu,
+        control,
+        readout,
+        windows,
+        decoders,
+        switching,
     )
     result = machine.run()
     whole_machine = machine_module.Machine.build(settings, 0)
@@ -655,7 +655,7 @@ def test_an_unbuffered_live_reader_forms_each_window_from_its_own_ring(
     """
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "decoder")
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=commit_rounds, buffer_rounds=0
     )
     settings = dataclasses.replace(settings, windows=windows)
@@ -686,25 +686,22 @@ def test_an_unbuffered_live_region_finds_the_round_before_it_held(
     """
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "controller")
-    weak = declared_run.DeclaredConfidenceDecoder(0.1, _escalate_window_one)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.1, _escalate_window_one
     )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(
-        settings.escalation, kind="switching", policy=policy
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
+    switching = declared_run.declared_switching()
     seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
-        escalation=escalation,
+        switching=switching,
         detection_events=seats,
         windows=windows,
     )
@@ -755,27 +752,22 @@ def test_a_live_region_reads_a_round_an_earlier_region_landed(
     program = _two_round_lookback_program()
     settings = _settings(program, "live", "controller")
     is_escalated = functools.partial(_escalates_one_of, escalated)
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, is_escalated)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak, units=3)
-    strong_decoder = dataclasses.replace(settings.strong_decoder, units=3)
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, is_escalated)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE, unit_count=3
     )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(
-        settings.escalation, kind="switching", policy=policy
-    )
+    strong_decoder = dataclasses.replace(settings.strong_decoder, unit_count=3)
+    switching = declared_run.declared_switching()
     seats = dataclasses.replace(settings.detection_events, formed_at=formed_at)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
         detection_events=seats,
         windows=windows,
     )
@@ -808,28 +800,25 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     """
     program = _readout_only_program()
     settings = _settings(program, "live", "controller")
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _escalates_none)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.028, _escalates_none
     )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(
-        settings.escalation, kind="switching", policy=policy
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
+    switching = declared_run.declared_switching()
     seats = dataclasses.replace(
         settings.detection_events, formed_at=("weak_decoder", "strong_decoder")
     )
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     one_round = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
     settings = dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
-        escalation=escalation,
+        switching=switching,
         detection_events=seats,
         windows=windows,
         weak_syndrome_buffer=one_round,
@@ -886,27 +875,22 @@ def _switching_live_settings(
     """Windows of one round, both decoders forming, these windows escalated."""
     settings = _settings(program, "live", "controller")
     is_escalated = functools.partial(_escalates_one_of, escalated)
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, is_escalated)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, is_escalated)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(
-        settings.escalation, kind="switching", policy=policy
-    )
+    switching = declared_run.declared_switching()
     seats = dataclasses.replace(
         settings.detection_events, formed_at=("weak_decoder", "strong_decoder")
     )
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
+    windows = declared_run.switching_windows(windows, switching)
     return dataclasses.replace(
         settings,
         weak_decoder=weak_decoder,
-        escalation=escalation,
+        switching=switching,
         detection_events=seats,
         windows=windows,
     )
@@ -1039,8 +1023,11 @@ def test_full_strong_storage_retries_held_live_rounds_without_loss() -> None:
     window_bits = SIX_ROUND_WINDOW_BITS["controller"]
     buffer = syndrome_buffer_module.SyndromeBufferSettings(bits=window_bits)
     memory = decoder_settings.UnitMemorySettings(bits=window_bits)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=5.0)
     decoder = dataclasses.replace(
-        settings.strong_decoder, kind=5.0, unit_memory=memory
+        settings.strong_decoder,
+        algorithm=matching,
+        unit_memory=memory,
     )
     links = _price_path(
         settings.links, "strong_buffer_to_strong_decoder", 1_000_000
@@ -1390,7 +1377,11 @@ def _circuit_less_terminal_run(
     qpu = qpu_settings.QpuSettings(distance=distance, device=source)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
+        engine=engine,
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -1472,9 +1463,8 @@ def test_joint_live_memory_can_use_the_weak_primary_tier(
 ) -> None:
     program = memory_programs.joint_repetition_program(True)
     settings = _joint_settings(program, placement)
-    escalation = escalation_settings.EscalationSettings(kind="weak_baseline")
     settings = dataclasses.replace(
-        settings, escalation=escalation, weak_decoder=settings.strong_decoder
+        settings, weak_decoder=settings.strong_decoder, strong_decoder=None
     )
 
     run = _run(settings)
@@ -1534,8 +1524,9 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     The unit's algorithm stage is zero ticks for it, while every window
     with a model holds the unit for its measured time.
     """
-    weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=FAST_ENGINE_CARD,
     )
     settings = _two_patch_memory(weak_decoder)
@@ -1562,21 +1553,24 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
 
 
 def _switching_memory(weak_kind: str, confidence: str):
-    """A d=3 memory whose weak tier reports the named confidence signal."""
+    """A d=3 memory whose weak tier, the named row, reports the signal."""
     decibels = 20.0
-    nats = escalation_settings.decibels_to_nats(decibels)
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        confidence=confidence,
-        gap_threshold_db=decibels,
-        gap_threshold_nats=nats,
+    nats = threshold_sources.decibels_to_nats(decibels)
+    signal_row = confidence_signals.CONFIDENCE_SIGNALS[confidence]
+    signal_settings = signal_row.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=nats)
+    switching = escalation_settings.SwitchingSettings(
+        confidence=signal_settings, threshold=threshold
     )
-    weak_decoder = decoder_settings.DecoderSettings(
-        kind=weak_kind,
+    row = decoder_settings.DECODERS[weak_kind]
+    weak_algorithm = row.Settings()
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak_algorithm,
         engine=ENGINE_CARD,
     )
-    strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    matching = mwpm.PyMatchingDecoder.Settings()
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
     operation = program_records.Operation(
@@ -1586,11 +1580,13 @@ def _switching_memory(weak_kind: str, confidence: str):
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True
     )
+    windows = declared_run.switching_windows(settings.windows, switching)
     return dataclasses.replace(
         settings,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
         observation=observation,
+        windows=windows,
     )
 
 
@@ -1728,56 +1724,6 @@ def test_a_weak_tier_that_serves_the_confidence_is_accepted():
     assert machine_module.Machine.build(settings, 0) is not None
 
 
-@pytest.mark.parametrize(
-    "escalation_kind, tier",
-    [
-        ("weak_baseline", "weak"),
-        ("strong_only", "strong"),
-        ("switching", "weak"),
-        ("switching", "strong"),
-    ],
-)
-def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
-    escalation_kind, tier
-):
-    """The cluster gap is a confidence row, not a decoder row.
-
-    escalation.confidence names it (confidence/signals.py) and
-    it reads the growth of whatever weak decoder the tier table names,
-    so it is not a kind of that table under any escalation kind.
-    """
-    tiers = {
-        "weak": decoder_settings.DecoderSettings(
-            kind="pymatching",
-            engine=ENGINE_CARD,
-        ),
-        "strong": decoder_settings.DecoderSettings(
-            kind="belief_matching",
-            engine=ENGINE_CARD,
-        ),
-    }
-    tiers[tier] = decoder_settings.DecoderSettings(
-        kind="union_find_cluster_gap",
-        engine=ENGINE_CARD,
-    )
-    escalation = escalation_settings.EscalationSettings(kind=escalation_kind)
-    if escalation_kind == "switching":
-        escalation = escalation_settings.EscalationSettings(
-            kind="switching", gap_threshold_nats=1.0
-        )
-    settings = machine_settings.MachineSettings(
-        weak_decoder=tiers["weak"],
-        strong_decoder=tiers["strong"],
-        escalation=escalation,
-    )
-    sentence = (
-        f"{tier}_decoder.kind 'union_find_cluster_gap' is not a row of its "
-        "table; the rows are " + tier_rows()
-    )
-    with pytest.raises(ValueError, match=sentence):
-        machine_module.Machine.build(settings, 0)
-
-
 class CountingSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
     """A store for the plug-in test: the plain store, counting its writes."""
 
@@ -1831,46 +1777,6 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     ]
     assert machine.readout.weak_syndrome_buffer.stored_count == len(fired)
     assert fired
-
-
-class AlwaysStrongEscalation(escalation_policies.EscalationPolicyBase):
-    """An escalation row written outside decsim: the strong tier decodes."""
-
-    requires_strong_context = False
-    primary_tier = window_records.DecoderTier.STRONG
-
-    def verdict_for_weak_result(self, job, result):
-        """The strong result is final."""
-        del job
-        del result
-        return decoding_records.Verdict.KEEP
-
-
-def test_a_new_escalation_kind_is_one_class_and_one_table_row(monkeypatch):
-    """The row declares its tier, so no second table names the kind."""
-    config_path = CONFIGS / "bases/strong_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    escalation = dataclasses.replace(settings.escalation, kind="always_strong")
-    settings = dataclasses.replace(settings, escalation=escalation)
-    monkeypatch.setitem(
-        escalation_settings.ESCALATIONS, "always_strong", AlwaysStrongEscalation
-    )
-    assert escalation_build.primary_tier(escalation) == "strong"
-    machine = machine_module.Machine.build(settings, 0)
-    result = machine.run()
-    assert result.terminal_status == "complete"
-    snapshot = machine.control.pauli_frame.snapshot()
-    tiers = [record.tier for record in snapshot.records]
-    assert tiers
-    assert set(tiers) == {"strong"}
 
 
 class _SilentFactoryTrace:
@@ -1954,8 +1860,10 @@ def test_the_run_result_carries_the_factorys_supply_stall():
         return_ticks=return_ticks,
     )
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
-    decoder = decoders.PresetLatencyDecoder(weak_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -1974,6 +1882,16 @@ def test_the_run_result_carries_the_factorys_supply_stall():
     assert result.magic_state_stall_ticks == attempt_ticks + return_ticks
     built_factory = machine.qpu.factory
     assert result.magic_state_stall_ticks == built_factory.total_stall_ticks
+
+
+@dataclasses.dataclass(frozen=True)
+class _BuiltPolicy:
+    """A boundary record whose build hands back the policy the test holds."""
+
+    policy: Any
+
+    def build(self):
+        return self.policy
 
 
 class RecordingBoundaryPolicy:
@@ -2023,7 +1941,8 @@ def test_the_default_policies_are_eager_boundaries_and_charged_idle_rounds():
 def test_a_policy_written_outside_decsim_is_used_on_its_own_axis():
     """The two policy axes are independent: one given, the other default."""
     boundary_policy = RecordingBoundaryPolicy()
-    windows = window_settings.WindowSettings(boundary_policy=boundary_policy)
+    boundary_record = _BuiltPolicy(boundary_policy)
+    windows = window_settings.WindowSettings(boundary_policy=boundary_record)
     boundary_settings = machine_settings.MachineSettings(windows=windows)
     with_boundary = machine_module.Machine.build(boundary_settings)
     idle_row = RecordingIdlePolicySettings()
@@ -2068,7 +1987,8 @@ class SeedRecordingPolicy:
 
 
 def _machine_with_seed(policy, seed):
-    windows = window_settings.WindowSettings(boundary_policy=policy)
+    boundary_record = _BuiltPolicy(policy)
+    windows = window_settings.WindowSettings(boundary_policy=boundary_record)
     settings = machine_settings.MachineSettings(windows=windows)
     return machine_module.Machine.build(settings, seed)
 
@@ -2160,8 +2080,10 @@ def _one_memory_operation_on(card) -> machine_settings.MachineSettings:
     operation = program_records.Operation(id=1, name="memory", qubits=(0,))
     workload = workload_settings.WorkloadSettings(operations=[operation])
     qpu = qpu_settings.QpuSettings(code=card)
-    decoder = decoders.PresetLatencyDecoder(0.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(0.0)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
@@ -2242,9 +2164,10 @@ def replayed_run(circuit, measurements, shot):
     )
     device = stim_device.RecordedStimDevice(measurements, shot)
     qpu = qpu_settings.QpuSettings(distance=RECORDED_DISTANCE, device=device)
-    inner = decoders.PresetLatencyDecoder(0.028)
-    decoder = mwpm.PyMatchingDecoder(inner)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.028)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
@@ -2532,8 +2455,10 @@ def twelve_rounds_with_packing_bound(bound):
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 12)
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
-    decoder = decoders.PresetLatencyDecoder(weak_microseconds)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     links = declared_run.declared_profile()
     qpu = declared_run.declared_qpu()
     frame = declared_run.declared_frame()
@@ -2607,9 +2532,20 @@ def link_totals(machine, path):
     return transfers, payload_bits
 
 
-def reference_run(escalation_kind):
-    """One shot of reference.yaml at d=3, p=0.001, on one escalation kind."""
-    config_path = CONFIGS / "reference.yaml"
+def reference_run(escalation_kind, folder):
+    """One shot of reference.yaml at d=3, p=0.001, on one escalation kind.
+
+    The kind decides which decoder sections fill the machine's slots, so
+    the yaml is read again under that kind, from a copy in the folder.
+    """
+    reference = CONFIGS / "reference.yaml"
+    text = reference.read_text()
+    shipped_kind = "  kind: weak_baseline "
+    assert text.count(shipped_kind) == 1
+    named_kind = f"  kind: {escalation_kind} "
+    config_path = folder / "reference.yaml"
+    named_text = text.replace(shipped_kind, named_kind)
+    config_path.write_text(named_text)
     config = experiment.load_experiment(config_path)
     point = config.point_task(
         {
@@ -2618,15 +2554,14 @@ def reference_run(escalation_kind):
             "qpu.round_period_microseconds": 1.0,
         },
     )
-    settings = point.settings
-    escalation = dataclasses.replace(settings.escalation, kind=escalation_kind)
-    settings = dataclasses.replace(settings, escalation=escalation)
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(point.settings, 0)
     machine.run()
     return machine
 
 
-def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
+def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop(
+    tmp_path,
+):
     """Fifteen rounds are fifteen transfers carrying the round's own bits.
 
     Toshio et al. 2510.25222 price the syndrome data of each round
@@ -2639,7 +2574,7 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     outcomes, and the store hop the 120 events they formed, eight per
     round.
     """
-    machine = reference_run("weak_baseline")
+    machine = reference_run("weak_baseline", tmp_path)
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
@@ -2649,7 +2584,9 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     assert link_totals(machine, room_hop) == (0, 0)
 
 
-def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
+def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop(
+    tmp_path,
+):
     """The same law on the strong syndrome buffer, the only one it fills.
 
     T_comm^strong is Toshio's symbol for the same transport to the
@@ -2658,7 +2595,7 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     once, at the width it leaves the controller, and the weak syndrome buffer
     sees none of them.
     """
-    machine = reference_run("strong_only")
+    machine = reference_run("strong_only", tmp_path)
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
@@ -2668,13 +2605,15 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     assert link_totals(machine, store_hop) == (0, 0)
 
 
-def strong_primary_settings(escalation):
-    """The declared strong-primary run, escalated by that section."""
+def strong_primary_settings():
+    """The declared strong-primary run: the strong slot alone is filled."""
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
     latency = declared_run.DECLARED_MICROSECONDS["strong"]
-    decoder = decoders.PresetLatencyDecoder(latency)
-    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(latency)
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -2683,53 +2622,28 @@ def strong_primary_settings(escalation):
         workload=workload,
         qpu=qpu,
         strong_decoder=strong_decoder,
-        escalation=escalation,
         links=links,
         controller=controller,
         pauli_frame=frame,
     )
 
 
-def test_a_policy_object_decodes_where_its_name_decodes():
-    """The built policy is the authority, so both forms are one run.
-
-    sinter resolves the caller's own decoders before its built-in table
-    (sinter/_collection/_mux_sampler.py:33-40), and a run named
-    strong_only and a run given StrongOnly() are the same machine: the
-    same decoder, the same bits, the same ticks.
-    """
-    named = escalation_settings.EscalationSettings(kind="strong_only")
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    by_object = escalation_settings.EscalationSettings(policy=policy)
-    named_settings = strong_primary_settings(named)
-    named_machine = machine_module.Machine.build(named_settings, 0)
-    named_result = named_machine.run()
-    object_settings = strong_primary_settings(by_object)
-    object_machine = machine_module.Machine.build(object_settings, 0)
-    object_result = object_machine.run()
-    assert object_machine.decoders.primary_decoder is not None
-    assert type(object_machine.decoders.primary_decoder) is type(
-        named_machine.decoders.primary_decoder
-    )
-    assert object_result.fully_done_ticks == named_result.fully_done_ticks
-    named_observables = named_result.operation_results[0].logical_observables
-    object_observables = object_result.operation_results[0].logical_observables
-    assert object_observables == named_observables
-    assert declared_run.frame_tiers(object_machine) == declared_run.frame_tiers(
-        named_machine
-    )
+def test_a_strong_primary_run_reads_its_windows_on_the_strong_tier():
+    settings = strong_primary_settings()
+    machine = machine_module.Machine.build(settings, 0)
+    machine.run()
+    tiers = {tier for _window, tier in declared_run.frame_tiers(machine)}
+    assert settings.window_tier is window_records.DecoderTier.STRONG
+    assert tiers == {"strong"}
 
 
-def test_a_policy_object_whose_tier_names_no_decoder_is_refused():
-    """The refusal reads the policy's tier, not the section's name."""
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    escalation = escalation_settings.EscalationSettings(policy=policy)
-    settings = strong_primary_settings(escalation)
-    no_decoder = decoder_settings.DecoderSettings()
-    settings = dataclasses.replace(settings, strong_decoder=no_decoder)
+def test_a_plan_with_windows_and_no_decoder_is_refused():
+    """A run with every decode slot empty plans no decoding."""
+    settings = strong_primary_settings()
+    settings = dataclasses.replace(settings, strong_decoder=None)
     with pytest.raises(ValueError) as refusal:
         machine_module.Machine.build(settings, 0)
-    assert "decodes windows on the strong tier" in str(refusal.value)
+    assert "names no decoder" in str(refusal.value)
 
 
 # ---- a room-side landing that arrives after its operation closed
@@ -3217,10 +3131,12 @@ def test_an_operation_claims_every_idle_cycle_before_it_starts():
         blocked_by=1,
     )
     workload = declared_run.declared_workload([first, second, both], 3)
-    scheme = naive_online.NaiveOnlineScheme()
+    scheme = naive_online.NaiveOnlineScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
-    decoder = decoders.PresetLatencyDecoder(10.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(10.0)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     idle = idle_policies.IgnoreSettings()
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
@@ -3303,7 +3219,11 @@ def _protected_memory_settings(circuit, source):
         rounds_policy=policy,
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=ENGINE_CARD)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
+        engine=ENGINE_CARD,
+    )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -3347,9 +3267,11 @@ def _settings(
     period_microseconds: float = 1.1,
 ) -> machine_settings.MachineSettings:
     base = _physical_settings(program, history, period_microseconds)
-    strong = dataclasses.replace(base.weak_decoder, kind=0.2)
-    weak = decoder_settings.DecoderSettings()
-    escalation = escalation_settings.EscalationSettings(kind="strong_only")
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    strong = dataclasses.replace(
+        base.weak_decoder,
+        algorithm=matching,
+    )
     seats = SEATS_BY_PLACEMENT[placement]
     detection_events = dataclasses.replace(
         base.detection_events, formed_at=seats
@@ -3359,9 +3281,8 @@ def _settings(
     )
     return dataclasses.replace(
         base,
-        weak_decoder=weak,
+        weak_decoder=None,
         strong_decoder=strong,
-        escalation=escalation,
         detection_events=detection_events,
         observation=observation,
     )
@@ -3641,13 +3562,15 @@ def _static_idle_settings(idle_policy) -> machine_settings.MachineSettings:
     qpu = qpu_settings.QpuSettings(distance=3, device=source)
     clock = config.Clock(4000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    strong = decoder_settings.DecoderSettings(kind=0.2, engine=engine)
-    escalation = escalation_settings.EscalationSettings(kind="strong_only")
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    strong = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
+        engine=engine,
+    )
     settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         strong_decoder=strong,
-        escalation=escalation,
         idle_policy=idle_policy,
     )
     observation = dataclasses.replace(
@@ -3903,9 +3826,8 @@ def _bb_settings(
     qpu = dataclasses.replace(settings.qpu, distance=None, code=code)
     price = decoders.PresetLatencyDecoder(0.2)
     backend = belief_propagation_osd.BeliefPropagationOsdDecoder(price)
-    decoder = dataclasses.replace(
-        settings.strong_decoder, kind=None, decoder=backend
-    )
+    algorithm = declared_run.OneDecoder(backend)
+    decoder = dataclasses.replace(settings.strong_decoder, algorithm=algorithm)
     workload = _bb_logical_qubits(settings.workload)
     return dataclasses.replace(
         settings, qpu=qpu, strong_decoder=decoder, workload=workload

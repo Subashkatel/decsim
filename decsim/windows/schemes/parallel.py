@@ -6,6 +6,9 @@ seams between them, so the depth is two rather than the length of the
 chain. The published construction fixes ncom = nbuf = d.
 """
 
+import dataclasses
+from typing import Optional
+
 import decsim.records.windows as window_records
 import decsim.windows.schemes.window_data as window_data
 
@@ -21,14 +24,19 @@ class ParallelWindowScheme:
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
 
-    def __init__(
-        self,
-        card: window_records.WindowingSchemeCard = (
-            window_records.DEFAULT_SCHEME_CARD
-        ),
-    ) -> None:
-        """This row lays its own tail, so it reads no key of the card."""
-        del card
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The parallel row's window sizes; None is the code distance."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        # the word the yaml and the reports name this row by
+        name = "parallel"
+
+        def build(self, terminal_policy: str) -> "ParallelWindowScheme":
+            """The scheme; it lays its own tail and reads no other."""
+            del terminal_policy
+            return ParallelWindowScheme()
 
     def plan_operation(
         self,

@@ -79,13 +79,13 @@ study most often extends:
 | Table | The root builds your row as | Where |
 | --- | --- | --- |
 | `DECODERS` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/decoders.py`, `_algorithm` |
-| `WINDOWING_SCHEMES` | `row(card)`, a `WindowingSchemeCard`, or `row(card, settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_chosen_scheme` |
+| `WINDOWING_SCHEMES` | `row.Settings(...).build(terminal_policy)`; the row's `Settings` holds `commit_rounds` and `buffer_rounds` and any key of its own | `decsim/build/plan.py`, `_scheme` |
 | `SYNDROME_SOURCES` | `row()`, with `code=card` when `takes_code_card` and `settings=...` for a row with a `Settings` | `decsim/build/plan.py`, `_syndrome_source` |
 | `CODE_CARDS` (the `CodeModel` port) | `row(commit_rounds_override=..., buffer_rounds_override=...)`, the windows section's sizes, with `distance=` when the sweep sets one and `settings=...` for a row with a `Settings` | `decsim/qpu/settings.py`, `QpuSettings._named_card` |
 | `WORKLOADS` | not built (the `WorkloadRow` port): the workload section calls `row.workload(settings.row_settings)` once per sweep point for the records.workload `Workload` it lowers | `decsim/frontends/settings.py`, `WorkloadSettings.made` |
 | `SYNDROME_BUFFERS` | `row(settings)`, the section's record, whose `row_settings` holds the row's own `Settings` | `decsim/build/readout.py`, `_store` |
 | `IDLE_POLICIES` | `row()`, or `row(settings=...)` for a row with a `Settings` | `decsim/build/plan.py`, `_idle_policy` |
-| `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row()` | `decsim/build/plan.py` |
+| `BOUNDARY_POLICIES`, `BOUNDARY_PAYLOADS` | `row.Settings().build()` | `decsim/build/plan.py` |
 | `LINK_FABRICS` | not built: the yaml load calls `row.base_card()` for the numbers the section's per-path cards override, and the root calls `row.build(card, engine)` for the `Link` the run sends on, which also carries `trace.transfer_delivered` for the traffic ledger; a row that keeps the fabric and changes how a wire times its bits hands `LinkFabric` its own `Channel` class instead | `decsim/links/link_profiles.py`, `from_yaml`; `decsim/machine.py`, `build_links` |
 
 A syndrome source also says where the run's window models come from,

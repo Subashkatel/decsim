@@ -36,16 +36,15 @@ noiseless model leaves behind. Thresholds are calibrated per weight
 step.
 """
 
+import dataclasses
 import fractions
 import math
 import time
 from typing import Optional, Union
 
 import decsim.config as config
-import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.escalation.settings as escalation_settings
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -93,26 +92,32 @@ class ClusterGap:
         # number, or None to measure the call as a measured decoder is
         self.walk_microseconds = walk_microseconds
 
-    @classmethod
-    def from_settings(
-        cls,
-        escalation: escalation_settings.EscalationSettings,
-        weak_decoder: decoder_settings.DecoderSettings,
-    ) -> "ClusterGap":
-        """The row at the weak decoder's weight step, priced by the card.
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row as a run names it: the card that prices its walk.
 
-        A weak row with no Settings keeps no weight step and grows no
-        clusters, so the row takes the shipped step and the build refuses
-        the pairing by name (build/decoders.py).
+        walk_microseconds is escalation.confidence_walk_microseconds.
         """
-        walk_microseconds = escalation.confidence_walk_microseconds
-        row_settings = weak_decoder.row_settings
-        if row_settings is None:
-            return cls(walk_microseconds=walk_microseconds)
-        return cls(
-            weight_step=row_settings.weight_step,
-            walk_microseconds=walk_microseconds,
-        )
+
+        walk_microseconds: Optional[float] = None
+        # the word the yaml and the reports name this row by
+        name = "cluster_gap"
+
+        def build(self, weak_algorithm, threshold_nats) -> "ClusterGap":
+            """The row at the weak decoder's weight step, priced by the card.
+
+            A weak row that keeps no weight step grows no clusters, so the
+            row takes the shipped step and the build refuses the pairing
+            by name (build/decoders.py).
+            """
+            del threshold_nats
+            walk_microseconds = self.walk_microseconds
+            weight_step = getattr(weak_algorithm, "weight_step", None)
+            if weight_step is None:
+                return ClusterGap(walk_microseconds=walk_microseconds)
+            return ClusterGap(
+                weight_step=weight_step, walk_microseconds=walk_microseconds
+            )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
         """The gap of the window's one decode, and what the walk cost.
@@ -176,8 +181,8 @@ def gap_half_ticks_to_natural_log_weight(
 
     Every signal reports its gap in the units the switching threshold is
     held in (escalation.gap_threshold_db is converted once, at the yaml
-    boundary, by escalation/settings.py decibels_to_nats), so a threshold
-    means the same thing whichever signal a run names.
+    boundary, by escalation/threshold_sources.py decibels_to_nats), so a
+    threshold means the same thing whichever signal a run names.
     """
     if gap_half_ticks == math.inf:
         return math.inf

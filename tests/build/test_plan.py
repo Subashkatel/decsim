@@ -1,24 +1,28 @@
-"""The run plan: the rows the yaml names and the defaults the plan derives.
+"""The run plan: the rows the yaml names and the defaults it is given.
 
-Two window keys carry a null default whose meaning the plan derives
-from the escalation row's declared facts, and the plan branches on a
-declared fact, never on a kind string.
-Both are pinned here through build_plan, on settings shaped as a yaml
-would leave them.
+Two window keys carry a null yaml default whose meaning the yaml reader
+derives from whether the switching slot is filled and from its strong
+window row's declared facts, never from a kind string. Both are pinned
+here through build_plan, on settings read as a yaml would leave them.
 """
 
 import dataclasses
+from typing import Optional
 
 import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.confidence.complementary as complementary
+import decsim.config as config
 import decsim.controller.policies as policies
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
-import decsim.escalation.policies as escalation_policies
+import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
@@ -26,7 +30,6 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
@@ -39,11 +42,26 @@ import tests.declared_run as declared_run
 NO_BULK_STRONG = decoder_settings.DecoderManagerSettings()
 # the detection events section a run gets when the test names none
 CONTROLLER_FORMS = event_settings.DetectionEventSettings()
+# the windows section a yaml writes when it names the scheme alone
+WINDOWS_SECTION = {
+    "kind": "sliding",
+    "commit_rounds": None,
+    "buffer_rounds": None,
+}
+NO_CLOCKS = config.ClockSettings({})
+
+
+def _windows(switching=None, **keys):
+    """The windows a yaml section with these keys reads as, beside switching."""
+    section = {**WINDOWS_SECTION, **keys}
+    return window_settings.WindowSettings.from_yaml(
+        section, NO_CLOCKS, switching
+    )
 
 
 def _plan(
     *,
-    escalation=None,
+    switching=None,
     windows=None,
     qpu=None,
     idle_policy=None,
@@ -54,10 +72,8 @@ def _plan(
     """The plan of a six-round memory run with the given sections."""
     if idle_policy is None:
         idle_policy = policies.SeparateDecodeJobsSettings()
-    if escalation is None:
-        escalation = escalation_settings.EscalationSettings()
     if windows is None:
-        windows = window_settings.WindowSettings()
+        windows = _windows(switching)
     if qpu is None:
         qpu = declared_run.declared_qpu()
     if workload is None:
@@ -71,36 +87,49 @@ def _plan(
         links=links,
         controller=controller,
         pauli_frame=frame,
-        escalation=escalation,
         windows=windows,
         idle_policy=idle_policy,
         decoder_manager=decoder_manager,
         detection_events=detection_events,
     )
-    policy = escalation_build.build_escalation_policy(
-        escalation, settings.weak_decoder
+    if switching is not None:
+        settings = _with_switching(settings, switching)
+    engine = engine_module.Engine()
+    switching_part = escalation_build.build_switching(
+        settings.switching, settings.weak_decoder, engine
     )
-    return plan_build.build_plan(settings, policy)
+    return plan_build.build_plan(settings, switching_part)
 
 
-def _switching():
-    """A switching section with a fixed threshold and a gap signal."""
-    return escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+def _with_switching(settings, switching):
+    """The settings with both decoders and the switching slot filled."""
+    matching = mwpm.PyMatchingDecoder.Settings()
+    decoder = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    return dataclasses.replace(
+        settings,
+        weak_decoder=decoder,
+        strong_decoder=decoder,
+        switching=switching,
+    )
+
+
+def _switching(**changes):
+    """A switching slot with a fixed threshold and a gap signal."""
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    return escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold, **changes
     )
 
 
 def test_bulk_strong_is_refused_when_the_rounds_carry_bits():
     """A merged strong decode carries timing alone; bits would be dropped."""
     bits = qpu_settings.QpuSettings(kind="syndrome_bits", distance=3)
-    escalation = _switching()
+    switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
     with pytest.raises(ValueError, match="qpu.kind syndrome_bits"):
-        _plan(qpu=bits, escalation=escalation, decoder_manager=bulk)
+        _plan(qpu=bits, switching=switching, decoder_manager=bulk)
 
 
 def test_bulk_strong_is_refused_where_no_strong_pool_merges():
@@ -113,19 +142,19 @@ def test_bulk_strong_is_refused_where_no_strong_pool_merges():
 def test_bulk_strong_is_built_beside_an_explicitly_empty_model_source():
     empty_models = syndrome_devices.NO_WINDOW_MODELS
     timing = qpu_settings.QpuSettings(error_model_provider=empty_models)
-    escalation = _switching()
+    switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    plan = _plan(qpu=timing, escalation=escalation, decoder_manager=bulk)
+    plan = _plan(qpu=timing, switching=switching, decoder_manager=bulk)
 
     assert plan.error_model_provider is empty_models
 
 
 def test_bulk_strong_is_built_when_the_rounds_carry_timing_alone():
-    escalation = _switching()
+    switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    plan = _plan(escalation=escalation, decoder_manager=bulk)
+    plan = _plan(switching=switching, decoder_manager=bulk)
 
     assert not plan.device.emits_bit_values
 
@@ -220,13 +249,7 @@ def _second_window_strong_hold(plan) -> tuple:
     return holds[potential]
 
 
-FIXED_THRESHOLD = threshold_sources.FixedThreshold(0.5)
-DECLARED_COLLABORATORS = escalation_policies.EscalationCollaborators(
-    threshold=FIXED_THRESHOLD,
-    expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
-)
-SWITCHING_POLICY = escalation_policies.Switching(DECLARED_COLLABORATORS)
-SWITCHING = escalation_settings.EscalationSettings(policy=SWITCHING_POLICY)
+SWITCHING = declared_run.declared_switching()
 STRONG_SIDE_FORMS = event_settings.DetectionEventSettings(
     formed_at=("weak_decoder", "strong_decoder")
 )
@@ -240,7 +263,7 @@ def test_a_forming_strong_read_holds_what_its_circuit_reads_before_it():
     plan = _plan(
         qpu=source,
         workload=workload,
-        escalation=SWITCHING,
+        switching=SWITCHING,
         detection_events=STRONG_SIDE_FORMS,
     )
 
@@ -255,7 +278,7 @@ def test_a_source_with_no_recipes_holds_nothing_before_a_read():
     plan = _plan(
         qpu=source,
         workload=workload,
-        escalation=SWITCHING,
+        switching=SWITCHING,
         detection_events=STRONG_SIDE_FORMS,
     )
 
@@ -272,9 +295,8 @@ def test_a_restart_read_holds_no_round_before_its_restart_start():
     """
     source = qpu_settings.QpuSettings(kind="stim_device", distance=3)
     workload = _lookback_workload()
-    escalation = escalation_settings.EscalationSettings(
-        policy=SWITCHING_POLICY, strong_window="double_window"
-    )
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    switching = declared_run.declared_switching(strong_window=double_window)
     weak_decoder_forms = event_settings.DetectionEventSettings(
         formed_at=("weak_decoder", "strong_decoder")
     )
@@ -282,7 +304,7 @@ def test_a_restart_read_holds_no_round_before_its_restart_start():
     plan = _plan(
         qpu=source,
         workload=workload,
-        escalation=escalation,
+        switching=switching,
         detection_events=weak_decoder_forms,
     )
 
@@ -302,14 +324,14 @@ def test_a_run_that_may_escalate_gets_the_lookahead_tail():
     """A strong recovery reads past the last window's commit."""
     switching = _switching()
 
-    plan = _plan(escalation=switching)
+    plan = _plan(switching=switching)
 
     assert plan.scheme.terminal_policy == "lookahead"
     assert plan.scheme.has_trailing_tail_context is True
 
 
 def test_a_terminal_policy_written_in_the_section_wins_over_the_default():
-    windows = window_settings.WindowSettings(terminal_policy="lookahead")
+    windows = _windows(terminal_policy="lookahead")
 
     plan = _plan(windows=windows)
 
@@ -326,13 +348,13 @@ def test_a_serial_escalation_holds_its_boundaries():
     """Descendants wait out an escalation, so nothing ships until final."""
     switching = _switching()
 
-    plan = _plan(escalation=switching)
+    plan = _plan(switching=switching)
 
     assert isinstance(plan.boundary_policy, boundary_policies.Held)
 
 
 def test_a_boundaries_row_written_in_the_section_wins_over_the_default():
-    windows = window_settings.WindowSettings(boundaries="held")
+    windows = _windows(boundaries="held")
 
     plan = _plan(windows=windows)
 
@@ -340,10 +362,8 @@ def test_a_boundaries_row_written_in_the_section_wins_over_the_default():
 
 
 def test_a_windows_kind_that_names_no_row_is_refused():
-    windows = window_settings.WindowSettings(kind="diagonal")
-
     with pytest.raises(ValueError) as refusal:
-        _plan(windows=windows)
+        _windows(kind="diagonal")
 
     assert "windows.kind" in str(refusal.value)
 
@@ -353,21 +373,23 @@ class _SettingsRecordingScheme(sliding_scheme.SlidingWindowScheme):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
         stride_rounds: int = 1
+        name = "recording"
 
-    def __init__(self, card, settings) -> None:
-        sliding_scheme.SlidingWindowScheme.__init__(self, card)
+        def build(self, terminal_policy) -> "_SettingsRecordingScheme":
+            del terminal_policy
+            return _SettingsRecordingScheme(self)
+
+    def __init__(self, settings) -> None:
+        sliding_scheme.SlidingWindowScheme.__init__(self)
         self.settings = settings
 
 
-def test_a_scheme_row_with_settings_is_built_with_its_record(monkeypatch):
-    monkeypatch.setitem(
-        window_settings.WINDOWING_SCHEMES, "recording", _SettingsRecordingScheme
-    )
+def test_a_scheme_row_with_settings_is_built_with_its_record():
     own_settings = _SettingsRecordingScheme.Settings(stride_rounds=2)
-    windows = window_settings.WindowSettings(
-        kind="recording", row_settings=own_settings
-    )
+    windows = window_settings.WindowSettings(scheme=own_settings)
 
     plan = _plan(windows=windows)
 
@@ -399,7 +421,7 @@ def test_the_idle_policy_record_builds_the_plans_policy():
 
 def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():
     """Every row answers what the plan and the policy read off it."""
-    silent = _SilentScheme()
+    silent = _SilentScheme.Settings()
     windows = window_settings.WindowSettings(scheme=silent)
 
     with pytest.raises(ValueError) as refusal:
@@ -410,6 +432,16 @@ def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():
 
 class _SilentScheme:
     """A scheme row that declares nothing the plan reads."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        name = "silent"
+
+        def build(self, terminal_policy) -> "_SilentScheme":
+            del terminal_policy
+            return _SilentScheme()
 
     def plan_operation(self, *arguments, **sizes):
         """Never reached: the plan refuses this row first."""
@@ -425,39 +457,17 @@ class _OutsideBoundaryPolicy:
 
     ships_provisional_boundaries = False
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The outside row's record, which takes no setting."""
+
+        def build(self) -> "_OutsideBoundaryPolicy":
+            return _OutsideBoundaryPolicy()
+
     def on_commit(self, window, *, final: bool) -> bool:
         """Ship when the committing result is final."""
         del window
         return final
-
-
-class _OutsideEscalation:
-    """An escalation row written outside decsim that never escalates."""
-
-    decides_on_a_confidence = False
-    requires_strong_context = False
-    primary_tier = window_records.DecoderTier.WEAK
-    default_boundary_policy = "outside_boundaries"
-
-    def check_plan(self, plan) -> None:
-        """Every run shape is served."""
-        del plan
-
-    def tiers_for_ready_window(self, window) -> tuple:
-        """The weak tier alone."""
-        del window
-        return (window_records.DecoderTier.WEAK,)
-
-    def verdict_for_weak_result(self, job, result):
-        """Every result is final."""
-        del job
-        del result
-        return decoding_records.Verdict.KEEP
-
-    def learn_from_strong_result(self, window_key, result) -> None:
-        """Nothing is learned."""
-        del window_key
-        del result
 
 
 class _OutsideShape:
@@ -467,8 +477,20 @@ class _OutsideShape:
     default_boundary_policy = "outside_boundaries"
     window_absorbed = trace_source.SILENT
 
-    def __init__(self, collaborators) -> None:
-        del collaborators
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The outside row's record: its two facts and its build."""
+
+        name = "outside_shape"
+        absorbs_weak_windows = False
+        default_boundary_policy = "outside_boundaries"
+        restart_reread_buffer_regions = 1
+
+        def build(self, engine) -> "_OutsideShape":
+            return _OutsideShape(engine)
+
+    def __init__(self, engine) -> None:
+        del engine
 
     def plan(self, weak_job):
         """Never reached: the test builds the plan and runs nothing."""
@@ -478,33 +500,12 @@ class _OutsideShape:
 
 def _outside_shape_switching():
     """A switching section whose strong window is the outside shape."""
-    return escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
-        confidence="complementary_gap",
-        strong_window="outside_shape",
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    outside_shape = _OutsideShape.Settings()
+    return escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold, strong_window=outside_shape
     )
-
-
-def test_an_outside_escalation_row_names_its_own_default_boundary_row(
-    monkeypatch,
-):
-    """A row that never escalates names the default; plan.py holds none.
-
-    So a row of BOUNDARY_POLICIES written outside decsim can be it.
-    """
-    monkeypatch.setitem(
-        window_settings.BOUNDARY_POLICIES,
-        "outside_boundaries",
-        _OutsideBoundaryPolicy,
-    )
-    policy = _OutsideEscalation()
-    escalation = escalation_settings.EscalationSettings(policy=policy)
-
-    plan = _plan(escalation=escalation)
-
-    assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)
 
 
 def test_an_outside_strong_window_row_names_the_escalations_default(
@@ -516,11 +517,8 @@ def test_an_outside_strong_window_row_names_the_escalations_default(
         "outside_boundaries",
         _OutsideBoundaryPolicy,
     )
-    monkeypatch.setitem(
-        escalation_settings.STRONG_WINDOW_SHAPES, "outside_shape", _OutsideShape
-    )
     switching = _outside_shape_switching()
 
-    plan = _plan(escalation=switching)
+    plan = _plan(switching=switching)
 
     assert isinstance(plan.boundary_policy, _OutsideBoundaryPolicy)

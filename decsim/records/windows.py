@@ -39,25 +39,6 @@ TERMINAL_POLICIES = ("flush", "lookahead")
 
 
 @dataclass(frozen=True)
-class WindowingSchemeCard:
-    """The windows section's keys a windowing scheme row reads.
-
-    One record so every row of WINDOWING_SCHEMES has one constructor
-    signature and the root builds a row without asking which geometry it
-    lays; a row reads the keys its own layout needs and ignores the
-    rest. This is the shape the rows of STRONG_WINDOW_SHAPES have, and
-    gem5's params object
-    (gem5 src/python/m5/SimObject.py:204-205).
-    """
-
-    terminal_policy: str = "flush"
-
-
-# The card a row is built on when the section names no key of its own.
-DEFAULT_SCHEME_CARD = WindowingSchemeCard()
-
-
-@dataclass(frozen=True)
 class DecoderRequestKey:
     """Identity of one decode request: its window, its tier, its ordinal.
 

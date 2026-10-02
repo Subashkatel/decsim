@@ -85,10 +85,10 @@ class Task:
         """The settings one shot runs: the point's threshold and models."""
         settings = self.settings
         if self.online_threshold is not None:
-            escalation = dataclasses.replace(
-                settings.escalation, online_threshold=self.online_threshold
+            switching = dataclasses.replace(
+                settings.switching, online_threshold=self.online_threshold
             )
-            settings = dataclasses.replace(settings, escalation=escalation)
+            settings = dataclasses.replace(settings, switching=switching)
         if built_models is not None:
             workload = dataclasses.replace(
                 settings.workload, built_models=built_models

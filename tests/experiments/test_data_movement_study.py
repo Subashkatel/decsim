@@ -41,28 +41,29 @@ def test_the_control_block_copies_at_both_settings():
     """The reference defaults: input copy, boundary_fold copy."""
     settings = block_settings(CONTROL)
 
-    assert settings.weak_decoder.input == "copy"
-    assert settings.weak_decoder.boundary_fold == "copy"
+    assert settings.weak_decoder.copies_input
+    assert settings.weak_decoder.copies_boundary_fold
 
 
 def test_the_input_block_changes_the_input_and_nothing_else():
     base = block_settings(CONTROL)
     variant = block_settings(INPUT_IN_PLACE)
 
-    assert variant.weak_decoder.input == "in_place"
-    assert variant.weak_decoder.boundary_fold == base.weak_decoder.boundary_fold
-    assert variant.weak_decoder.kind == base.weak_decoder.kind
-    assert variant.escalation.kind == base.escalation.kind
+    assert not variant.weak_decoder.copies_input
+    weak_fold = variant.weak_decoder.copies_boundary_fold
+    assert weak_fold == base.weak_decoder.copies_boundary_fold
+    assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
+    assert variant.escalation_kind == base.escalation_kind
 
 
 def test_the_fold_block_changes_the_fold_and_nothing_else():
     base = block_settings(CONTROL)
     variant = block_settings(FOLD_IN_PLACE)
 
-    assert variant.weak_decoder.boundary_fold == "in_place"
-    assert variant.weak_decoder.input == base.weak_decoder.input
-    assert variant.weak_decoder.kind == base.weak_decoder.kind
-    assert variant.escalation.kind == base.escalation.kind
+    assert not variant.weak_decoder.copies_boundary_fold
+    assert variant.weak_decoder.copies_input == base.weak_decoder.copies_input
+    assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
+    assert variant.escalation_kind == base.escalation_kind
 
 
 def test_the_switching_block_opens_the_last_two_hops():
@@ -70,9 +71,9 @@ def test_the_switching_block_opens_the_last_two_hops():
     variant = block_settings(SWITCHING)
     fabric = variant.links
 
-    assert variant.escalation.kind == "switching"
-    assert variant.strong_decoder.kind == 10.0
-    assert variant.strong_decoder.input == "copy"
+    assert variant.escalation_kind == "switching"
+    assert variant.strong_decoder.algorithm.name == 10.0
+    assert variant.strong_decoder.copies_input
     assert fabric.weak_decoder_to_strong_decoder is not None
     assert fabric.strong_buffer_to_strong_decoder is not None
 
@@ -102,7 +103,7 @@ def test_every_study_block_sweeps_the_same_points_on_priced_cards(
     """A priced card decodes on no host clock, so the counts repeat."""
     settings = block_settings(block_index)
     distances = swept_distances(block_index)
-    assert settings.weak_decoder.kind == 1.0
+    assert settings.weak_decoder.algorithm.name == 1.0
     assert distances == [3, 5, 7]
 
 
@@ -125,9 +126,7 @@ def test_reading_the_input_in_place_and_folding_in_place_is_refused(tmp_path):
     """
     both_path = _both_in_place_config(tmp_path)
 
-    with pytest.raises(
-        ValueError, match="weak_decoder.boundary_fold in_place needs"
-    ):
+    with pytest.raises(ValueError, match="boundary_fold in_place\\) needs"):
         experiment.load_experiment(both_path)
 
 

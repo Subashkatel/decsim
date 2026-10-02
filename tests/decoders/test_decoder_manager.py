@@ -22,7 +22,6 @@ import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
 import decsim.observe.log_writers as log_writers
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -99,7 +98,6 @@ class TwoRoundSource:
 
 def _manager(engine, row, formation=None, unit_count=1):
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=unit_count, formation=formation
     )
@@ -110,7 +108,6 @@ def _manager(engine, row, formation=None, unit_count=1):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
-    manager.escalation_policy = policy
     return manager
 
 
@@ -344,7 +341,6 @@ def test_every_job_kind_says_how_it_is_settled():
 def _blocking_manager(engine, row, *, blocks_unit: bool):
     """A one-unit manager whose default pool blocks, or does not."""
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=1, blocks_unit=blocks_unit
     )
@@ -355,7 +351,6 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
-    manager.escalation_policy = policy
     return manager
 
 
@@ -524,7 +519,6 @@ def _enqueue_timed_jobs(manager, decode_microseconds, send_input, on_decoded):
 def _staging_manager(engine, row, *, copies_input: bool):
     """A one-unit manager whose default pool copies its input, or does not."""
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=1, copies_input=copies_input
     )
@@ -535,7 +529,6 @@ def _staging_manager(engine, row, *, copies_input: bool):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
-    manager.escalation_policy = policy
     return manager
 
 

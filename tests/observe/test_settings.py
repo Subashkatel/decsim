@@ -164,7 +164,7 @@ def test_a_list_of_referees_is_refused_with_the_rows_by_name():
     section = _section("observation:\n  check_windows_with: [tesseract]\n")
 
     with pytest.raises(ValueError) as refusal:
-        observe_settings.ObservationSettings.from_yaml(section)
+        observe_settings.window_check_from_yaml(section)
 
     assert "observation.check_windows_with must be one of" in str(refusal.value)
 

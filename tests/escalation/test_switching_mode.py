@@ -91,23 +91,12 @@ def measured_shot(config, seed: int):
 
 
 def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
-    from decsim.machine import Machine
-
     weak_only_card = {
         "escalation": {"kind": "switching", "gap_threshold_db": 20.0}
     }
     weak_only_path = write_config(tmp_path, weak_only_card)
-    weak_only = load_experiment(weak_only_path)
     with pytest.raises(ValueError, match="escalates to the strong_decoder"):
-        point = weak_only.point_task(
-            {
-                ERROR_RATE_PATH: NEAR_THRESHOLD_P,
-                "qpu.distance": 3,
-                "qpu.round_period_microseconds": 1.0,
-            },
-        )
-        weak_only_settings = point.settings
-        Machine.build(weak_only_settings)
+        load_experiment(weak_only_path)
     strong_decoder = strong_unit("belief_matching")
     no_threshold_card = {"escalation": {"kind": "switching"}}
     no_threshold_card.update(strong_decoder)
@@ -153,10 +142,12 @@ def test_both_restart_re_read_widths_load_from_the_escalation_section(
     no_reread_point = no_reread.first_point_task()
     one_region_point = one_region.first_point_task()
 
-    no_reread_escalation = no_reread_point.settings.escalation
-    one_region_escalation = one_region_point.settings.escalation
-    assert no_reread_escalation.restart_reread_buffer_regions == 0
-    assert one_region_escalation.restart_reread_buffer_regions == 1
+    no_reread_escalation = no_reread_point.settings.switching
+    one_region_escalation = one_region_point.settings.switching
+    no_reread_window = no_reread_escalation.strong_window
+    one_region_window = one_region_escalation.strong_window
+    assert no_reread_window.restart_reread_buffer_regions == 0
+    assert one_region_window.restart_reread_buffer_regions == 1
 
 
 def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
@@ -311,10 +302,8 @@ def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     log_of_ten = math.log(10.0)
     expected_nats = 2.0 * log_of_ten
     first_point = config.first_point_task()
-    assert first_point.settings.escalation.gap_threshold_db == 20.0
-    assert math.isclose(
-        first_point.settings.escalation.gap_threshold_nats, expected_nats
-    )
+    threshold = first_point.settings.switching.threshold
+    assert math.isclose(threshold.threshold_nats, expected_nats)
 
 
 def test_every_window_commits_once_across_both_output_links(tmp_path):
@@ -416,7 +405,7 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)
     first_point = config.first_point_task()
-    threshold_nats = first_point.settings.escalation.gap_threshold_nats
+    threshold_nats = first_point.settings.switching.threshold.threshold_nats
     weak_tier = window_records.DecoderTier.WEAK
     strong_tier = window_records.DecoderTier.STRONG
     for seed in range(4):

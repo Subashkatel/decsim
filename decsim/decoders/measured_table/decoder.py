@@ -57,6 +57,12 @@ class MeasuredTableSettings(measurements.RelaySettings):
 
     device: str = "a100"
     partition: str = "whole"
+    # the word the yaml and the reports name this row by
+    name = "measured_table"
+
+    def build(self) -> "MeasuredTableDecoder":
+        """A fresh decoder of these settings."""
+        return MeasuredTableDecoder(settings=self)
 
     @classmethod
     def from_yaml(

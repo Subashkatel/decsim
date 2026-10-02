@@ -367,8 +367,7 @@ def test_a_window_across_two_operations_is_followed_from_each_ones_rounds(
         declared_run.memory_operation(1),
         declared_run.memory_operation(2, decoder_boundary_predecessors=(1,)),
     ]
-    scheme = declared_run.lookahead_sliding_scheme()
-    windows = window_settings.WindowSettings(scheme=scheme)
+    windows = window_settings.WindowSettings(terminal_policy="lookahead")
     observation = observe_settings.ObservationSettings(trace=str(trace_path))
     machine = declared_run.weak_only_run(
         rounds=6,

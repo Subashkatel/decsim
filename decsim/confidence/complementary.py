@@ -15,9 +15,7 @@ import math
 from typing import Optional
 
 import decsim.config as config
-import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.escalation.settings as escalation_settings
 import decsim.records.decoding as decoding_records
 
 COMPLEMENTARY_GAP_SOURCE = decoding_records.SoftOutputSource(
@@ -57,15 +55,22 @@ class ComplementaryGap:
         "cluster_gap, or a matching weak decoder"
     )
 
-    @classmethod
-    def from_settings(
-        cls,
-        escalation: escalation_settings.EscalationSettings,
-        weak_decoder: decoder_settings.DecoderSettings,
-    ) -> "ComplementaryGap":
-        """The row priced by the card; the weak row's settings say nothing."""
-        del weak_decoder
-        return cls(walk_microseconds=escalation.confidence_walk_microseconds)
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row as a run names it: the card that prices its computation.
+
+        walk_microseconds is escalation.confidence_walk_microseconds.
+        """
+
+        walk_microseconds: Optional[float] = None
+        # the word the yaml and the reports name this row by
+        name = "complementary_gap"
+
+        def build(self, weak_algorithm, threshold_nats) -> "ComplementaryGap":
+            """The row priced by the card; the weak row says nothing to it."""
+            del weak_algorithm
+            del threshold_nats
+            return ComplementaryGap(walk_microseconds=self.walk_microseconds)
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
         """The gap between the weights of one window's forced solves.

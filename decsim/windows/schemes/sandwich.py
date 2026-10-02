@@ -8,7 +8,9 @@ The typed detector intervals are the vertex sets whose incident
 correction edges form each core.
 """
 
+import dataclasses
 import math
+from typing import Optional
 
 import decsim.records.windows as window_records
 import decsim.windows.schemes.window_data as window_data
@@ -25,14 +27,19 @@ class TanSandwichScheme:
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
 
-    def __init__(
-        self,
-        card: window_records.WindowingSchemeCard = (
-            window_records.DEFAULT_SCHEME_CARD
-        ),
-    ) -> None:
-        """This row lays Tan's sandwich, so it reads no key of the card."""
-        del card
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The sandwich row's window sizes; None is the code distance."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        # the word the yaml and the reports name this row by
+        name = "sandwich"
+
+        def build(self, terminal_policy: str) -> "TanSandwichScheme":
+            """Tan's sandwich, which lays its own tail."""
+            del terminal_policy
+            return TanSandwichScheme()
 
     def plan_operation(
         self,

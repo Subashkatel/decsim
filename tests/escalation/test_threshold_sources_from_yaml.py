@@ -12,6 +12,7 @@ whole window stream.
 """
 
 import csv
+import dataclasses
 import math
 import random
 import re
@@ -21,7 +22,9 @@ import pytest
 import yaml
 
 import decsim.build.escalation as escalation_build
+import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect_command as collect_command
 import tests.experiments.yaml_configs as yaml_configs
 from decsim.experiments.experiment import load_experiment
@@ -48,7 +51,7 @@ def resolve_gap_threshold_nats(config, *, physical_error_probability, distance):
         physical_error_probability=physical_error_probability,
         distance=distance,
     )
-    return task.settings.escalation.gap_threshold_nats
+    return task.settings.switching.threshold.threshold_nats
 
 
 def online_threshold_calibrator(
@@ -64,7 +67,7 @@ def online_threshold_calibrator(
 
 def first_escalation(config):
     task = config.first_point_task()
-    return task.settings.escalation
+    return task.settings.switching
 
 
 def source_config(tmp_path, switching_card: dict, shots: int = 1):
@@ -94,11 +97,12 @@ def test_fixed_is_the_default_source(tmp_path):
     config_path = switching_config(tmp_path, 20.0)
     config = load_experiment(config_path)
     escalation = first_escalation(config)
-    assert escalation.threshold_source == "fixed"
+    fixed_settings = threshold_sources.FixedThreshold.Settings
+    assert isinstance(escalation.threshold, fixed_settings)
     resolved = resolve_gap_threshold_nats(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
     )
-    assert resolved == escalation.gap_threshold_nats
+    assert resolved == escalation.threshold.threshold_nats
     assert (
         online_threshold_calibrator(
             config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
@@ -113,8 +117,9 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     wilson_path = source_config(tmp_path, wilson_card)
     config = load_experiment(wilson_path)
     escalation = first_escalation(config)
-    assert escalation.gap_threshold_db is None
-    assert escalation.threshold_column == "gth_eq4_wilson"
+    table_settings = threshold_sources.TableThreshold.Settings
+    assert isinstance(escalation.threshold, table_settings)
+    assert escalation.threshold.column == "gth_eq4_wilson"
 
     resolved = resolve_gap_threshold_nats(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3
@@ -171,8 +176,8 @@ def test_a_table_read_from_two_folders_names_its_points_alike(tmp_path):
     first_task = first_config.first_point_task()
     second_task = second_config.first_point_task()
 
-    first_escalation = first_task.settings.escalation
-    assert first_escalation.base_directory == first_folder
+    first_escalation = first_task.settings.switching
+    assert first_escalation.threshold.base_directory == first_folder
     assert first_task.strong_id() == second_task.strong_id()
 
 
@@ -243,8 +248,8 @@ def test_a_window_only_sweep_finds_its_table_row_by_path(tmp_path):
 
     two, three = config.tasks()
 
-    two_nats = two.settings.escalation.gap_threshold_nats
-    three_nats = three.settings.escalation.gap_threshold_nats
+    two_nats = two.settings.switching.threshold.threshold_nats
+    three_nats = three.settings.switching.threshold.threshold_nats
     two_decibels = two_nats * NATS_TO_DB
     three_decibels = three_nats * NATS_TO_DB
     assert math.isclose(two_decibels, 12.0)
@@ -412,7 +417,7 @@ def test_an_online_target_written_in_exponent_form_loads(tmp_path):
     config_path = source_config(tmp_path, card)
     config = load_experiment(config_path)
     escalation = first_escalation(config)
-    assert escalation.online.target_escalation_rate == 0.001
+    assert escalation.threshold.target_escalation_rate == 0.001
 
 
 def test_the_online_seed_reads_its_distance_and_error_rate_by_path(tmp_path):
@@ -546,6 +551,13 @@ class _OutsideCalibratedThreshold:
     reads_a_calibration_table = True
     built_per_sweep_point = False
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings(threshold_sources.TableThreshold.Settings):
+        """The table row's record, building this row once looked up."""
+
+        def build(self) -> "_OutsideCalibratedThreshold":
+            return _OutsideCalibratedThreshold(self.threshold_nats)
+
     def __init__(self, threshold_nats: float) -> None:
         self.threshold_nats = threshold_nats
 
@@ -572,14 +584,14 @@ class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
     reads_a_calibration_table = False
     built_per_sweep_point = True
 
-    @classmethod
-    def for_sweep_point(
-        cls, online, threshold_nats: float, resolved
-    ) -> "_OutsideLearningThreshold":
-        """One instance of this row for the point."""
-        del online
-        del resolved
-        return cls(threshold_nats)
+    @dataclasses.dataclass(frozen=True)
+    class Settings(threshold_sources.OnlineThreshold.Settings):
+        """The online row's record, building this row for a point."""
+
+        def for_sweep_point(self, resolved) -> "_OutsideLearningThreshold":
+            """One instance of this row for the point."""
+            del resolved
+            return _OutsideLearningThreshold(self.threshold_nats)
 
 
 def test_an_outside_row_that_reads_a_table_gets_the_column_and_no_card(
@@ -600,7 +612,7 @@ def test_an_outside_row_that_reads_a_table_gets_the_column_and_no_card(
     table_path = source_config(tmp_path, table_card)
     config = load_experiment(table_path)
     escalation = first_escalation(config)
-    assert escalation.threshold_column == "gth_eq4"
+    assert escalation.threshold.column == "gth_eq4"
     with_card = {
         "threshold_source": "outside_calibrated",
         "threshold_table": table,
@@ -631,7 +643,7 @@ def test_an_outside_row_built_per_point_gets_the_online_card(
     config = load_experiment(config_path)
 
     escalation = first_escalation(config)
-    assert escalation.online.audit_rate == 0.2
+    assert escalation.threshold.audit_rate == 0.2
 
 
 def test_an_outside_row_built_per_point_is_the_installed_source(
@@ -664,10 +676,11 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     installed = task.online_threshold
 
     assert type(installed) is _OutsideLearningThreshold
-    expected_nats = task.settings.escalation.gap_threshold_nats
+    expected_nats = task.settings.switching.threshold.threshold_nats
     assert installed.threshold_nats == expected_nats
     shot_settings = task.shot_settings()
-    policy = escalation_build.build_escalation_policy(
-        shot_settings.escalation, shot_settings.weak_decoder
+    engine = engine_module.Engine()
+    switching = escalation_build.Switching.build(
+        shot_settings.switching, shot_settings.weak_decoder, engine
     )
-    assert policy.threshold is installed
+    assert switching.policy.threshold is installed

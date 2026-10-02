@@ -11,7 +11,6 @@ from typing import Optional
 
 import pytest
 
-import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.build.program as program_build
 import decsim.frontends.settings as workload_settings
@@ -88,10 +87,7 @@ def _plan(device: "_PhysicalDevice", round_count: int) -> plan_build.Plan:
     )
     qpu = qpu_settings.QpuSettings(distance=3, device=device)
     settings = machine_settings.MachineSettings(workload=workload, qpu=qpu)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-    return plan_build.build_plan(settings, policy)
+    return plan_build.build_plan(settings, None)
 
 
 class _PhysicalDevice:

@@ -19,8 +19,6 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
-import decsim.escalation.policies as escalation_policies
-import decsim.escalation.settings as escalation_settings
 import decsim.experiments.experiment as experiment
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
@@ -157,7 +155,8 @@ def test_a_placement_that_names_no_clock_forms_on_the_machines():
 
 def test_the_burst_detector_counts_at_the_primary_tiers_seat():
     """The escalated region's seat forms too, but is not counted twice."""
-    settings = _settings_forming_at(("weak_decoder", "strong_decoder"))
+    seats = ("weak_decoder", "strong_decoder")
+    settings = _settings_forming_at(seats)
     source = _OneRoundSource()
     detector = _CountingDetector()
     placement = readout_part.build_detection_events(
@@ -438,8 +437,10 @@ def _machine_settings(**changes):
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
-    decoder = decoders.PresetLatencyDecoder(1.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
@@ -484,13 +485,11 @@ def test_a_ported_store_beside_an_unrated_link_is_accepted():
 
 def _strong_only(settings):
     """The settings with the strong tier alone decoding the windows."""
-    decoder = decoders.PresetLatencyDecoder(1.0)
-    tier = decoder_settings.DecoderSettings(decoder=decoder)
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    escalation = escalation_settings.EscalationSettings(policy=policy)
-    return dataclasses.replace(
-        settings, strong_decoder=tier, escalation=escalation
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    tier = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
+    return dataclasses.replace(settings, weak_decoder=None, strong_decoder=tier)
 
 
 class _OneRoundSource:

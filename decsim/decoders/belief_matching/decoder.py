@@ -11,6 +11,7 @@ with -log(posterior) weights. The posterior clamp is 1e-15 here and
 accurate decoder invoked on demand.
 """
 
+import dataclasses
 from typing import Optional
 
 import ldpc
@@ -50,6 +51,22 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         )
     }
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The belief propagation that reweights the matching graph."""
+
+        max_iterations: int = 30
+        belief_propagation_method: str = "product_sum"
+        # the word the yaml and the reports name this row by
+        name = "belief_matching"
+
+        def build(self) -> "BeliefMatchingDecoder":
+            """A fresh decoder of these settings."""
+            return BeliefMatchingDecoder(
+                max_iterations=self.max_iterations,
+                belief_propagation_method=self.belief_propagation_method,
+            )
+
     def __init__(
         self,
         latency_model: Optional[decoder_module.DecoderBase] = None,
@@ -59,6 +76,11 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         self.max_iterations = max_iterations
         self.belief_propagation_method = belief_propagation_method
+        self.compile_key = (
+            BeliefMatchingDecoder,
+            max_iterations,
+            belief_propagation_method,
+        )
 
     def compile(self, faults, model) -> tuple:
         """The model's BP decoder and sparse hyperedge-to-edge map, warm.

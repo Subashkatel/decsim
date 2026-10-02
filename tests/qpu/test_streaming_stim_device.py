@@ -11,6 +11,7 @@ import pytest
 import stim
 
 import decsim.config as config
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -369,7 +370,10 @@ def _protected_machine(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     links = link_profiles.logical_reference_profile()
     feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
     channel = dataclasses.replace(

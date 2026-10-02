@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from typing import Optional, Union
 
 import decsim.burst_detectors.settings as burst_detector_settings
+import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
@@ -27,6 +28,7 @@ import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
@@ -80,6 +82,13 @@ class MachineSettings:
     with no decoder at all. links is the fabric card; the reference card
     prices propagation only. clock is the machine's clock, the one every
     part that names none of its own counts its cycles on.
+
+    The decode side is three slots, each None when the run has no such
+    part: weak_decoder alone decodes every window once on the weak
+    decoder, strong_decoder alone on the strong one, and both with
+    switching decode weak first and escalate a window to the strong
+    decoder; none of the three is a run that plans no decoding. Two
+    decoders without switching, or switching without both, is refused.
     """
 
     clocks: config.ClockSettings = config.ClockSettings()
@@ -105,21 +114,12 @@ class MachineSettings:
         syndrome_buffer_module.SyndromeBufferSettings()
     )
     windows: window_settings.WindowSettings = window_settings.WindowSettings()
-    weak_decoder: decoder_settings.DecoderSettings = (
-        decoder_settings.DecoderSettings()
-    )
-    strong_decoder: decoder_settings.DecoderSettings = (
-        decoder_settings.DecoderSettings()
-    )
+    weak_decoder: Optional[decoder_settings.DecoderPoolSettings] = None
+    strong_decoder: Optional[decoder_settings.DecoderPoolSettings] = None
     decoder_manager: decoder_settings.DecoderManagerSettings = (
         decoder_settings.DecoderManagerSettings()
     )
-    escalation: escalation_settings.EscalationSettings = (
-        escalation_settings.EscalationSettings()
-    )
-    burst_detector: burst_detector_settings.BurstDetectorSettings = (
-        burst_detector_settings.BurstDetectorSettings()
-    )
+    switching: Optional[escalation_settings.SwitchingSettings] = None
     pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
     workload: workload_settings.WorkloadSettings = (
         workload_settings.WorkloadSettings()
@@ -131,14 +131,41 @@ class MachineSettings:
         observe_settings.ObservationSettings()
     )
 
+    def __post_init__(self) -> None:
+        _check_decode_slots(self)
+
     def decoder_settings_for(
         self, tier: str
-    ) -> decoder_settings.DecoderSettings:
+    ) -> Optional[decoder_settings.DecoderPoolSettings]:
         """The card of one decoder tier, named the way the yaml names it."""
         if tier == "weak":
             return self.weak_decoder
         assert tier == "strong", f"no decoder tier named {tier!r}"
         return self.strong_decoder
+
+    @property
+    def window_tier(self) -> window_records.DecoderTier:
+        """The tier that decodes the plan's windows: weak if set, else strong.
+
+        A run with no decoder plans no decoding, and its windows, if any,
+        are the weak tier's.
+        """
+        if self.weak_decoder is None and self.strong_decoder is not None:
+            return window_records.DecoderTier.STRONG
+        return window_records.DecoderTier.WEAK
+
+    @property
+    def escalation_kind(self) -> str:
+        """The yaml's escalation.kind for these slots, which a trace prints.
+
+        The trace's process name and the plots that read it name a run
+        by this word (escalation/settings.py ESCALATION_KINDS).
+        """
+        if self.switching is not None:
+            return "switching"
+        if self.window_tier is window_records.DecoderTier.STRONG:
+            return "strong_only"
+        return "weak_baseline"
 
     @classmethod
     def from_mapping(
@@ -185,24 +212,43 @@ class MachineSettings:
         strong_syndrome_buffer = syndrome_buffer_settings.from_yaml(
             strong_section, "strong_syndrome_buffer", clocks
         )
-        windows = window_settings.WindowSettings.from_yaml(
-            sections["windows"], clocks, controller.clock
-        )
         weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
         strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
         decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
             decoder_manager_section, clocks
         )
         escalation_folder = section_folders.get("escalation")
-        escalation = escalation_settings.EscalationSettings.from_yaml(
-            escalation_section, clocks, escalation_folder, controller.clock
+        switching = escalation_settings.SwitchingSettings.from_yaml(
+            escalation_section,
+            clocks,
+            escalation_folder,
+            confidence_signals.confidence_settings,
         )
+        windows = window_settings.WindowSettings.from_yaml(
+            sections["windows"], clocks, switching
+        )
+        kind = escalation_settings.escalation_kind(escalation_section)
+        kept_sections = escalation_settings.ESCALATION_KINDS[kind]
+        if "weak_decoder" not in kept_sections:
+            weak_decoder = None
+        if "strong_decoder" not in kept_sections:
+            strong_decoder = None
         burst_detector_section = sections.get("burst_detector", {})
-        burst_detector = (
-            burst_detector_settings.BurstDetectorSettings.from_yaml(
-                burst_detector_section, clocks
+        burst_detector = burst_detector_settings.detector_from_yaml(
+            burst_detector_section, clocks
+        )
+        catch_deadline_rounds = (
+            burst_detector_settings.catch_deadline_rounds_from_yaml(
+                burst_detector_section
             )
         )
+        burst_detector_settings.refuse_a_detector_without_switching(
+            burst_detector_section, switching
+        )
+        if switching is not None:
+            switching = dataclasses.replace(
+                switching, burst_detector=burst_detector
+            )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks
         )
@@ -214,6 +260,16 @@ class MachineSettings:
         observation = observe_settings.ObservationSettings.from_yaml(
             observation_section
         )
+        observation = dataclasses.replace(
+            observation, catch_deadline_rounds=catch_deadline_rounds
+        )
+        window_check = observe_settings.window_check_from_yaml(
+            observation_section
+        )
+        if weak_decoder is not None:
+            weak_decoder = _checked(weak_decoder, window_check)
+        elif strong_decoder is not None:
+            strong_decoder = _checked(strong_decoder, window_check)
         return cls(
             clocks=clocks,
             clock=controller.clock,
@@ -228,13 +284,26 @@ class MachineSettings:
             weak_decoder=weak_decoder,
             strong_decoder=strong_decoder,
             decoder_manager=decoder_manager,
-            escalation=escalation,
-            burst_detector=burst_detector,
+            switching=switching,
             pauli_frame=pauli_frame,
             workload=workload,
             magic_state_factory=magic_state_factory,
             observation=observation,
         )
+
+
+def _checked(
+    pool: decoder_settings.DecoderPoolSettings, window_check
+) -> decoder_settings.DecoderPoolSettings:
+    """The pool of the tier that decodes the windows, with its referee.
+
+    The referee wraps that tier's decoder only, the one window_tier names;
+    window_check None leaves the pool as it is.
+    """
+    if window_check is None:
+        return pool
+    checked = window_check.Settings(inner=pool.algorithm)
+    return dataclasses.replace(pool, algorithm=checked)
 
 
 def _check_section_shapes(sections: Mapping) -> None:
@@ -269,10 +338,34 @@ def _not_a_mapping_sentence(name: str, section) -> str:
 
 def _tier_settings(
     sections: Mapping, tier: str, clocks: config.ClockSettings
-) -> decoder_settings.DecoderSettings:
+) -> Optional[decoder_settings.DecoderPoolSettings]:
     """A tier's section, or no decoder when the yaml leaves it out."""
     if tier not in sections:
-        return decoder_settings.DecoderSettings()
-    return decoder_settings.DecoderSettings.from_yaml(
+        return None
+    return decoder_settings.DecoderPoolSettings.from_yaml(
         sections[tier], clocks, tier
     )
+
+
+def _check_decode_slots(settings: MachineSettings) -> None:
+    """Switching fills all three slots; without it one decoder at most."""
+    has_weak = settings.weak_decoder is not None
+    has_strong = settings.strong_decoder is not None
+    if settings.switching is None:
+        if has_weak and has_strong:
+            raise ValueError(
+                "weak_decoder and strong_decoder are both set and switching "
+                "is not; a run with no switching decodes its windows on one "
+                "decoder, so set switching or drop one decoder"
+            )
+        return
+    if not has_strong:
+        raise ValueError(
+            "escalation switching escalates to the strong_decoder, which "
+            "this configuration does not define"
+        )
+    if not has_weak:
+        raise ValueError(
+            "escalation switching decodes every window on the "
+            "weak_decoder first, which this configuration does not define"
+        )

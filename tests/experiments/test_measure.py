@@ -44,6 +44,7 @@ import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
@@ -1440,15 +1441,14 @@ def seam_streams_settings(
     )
     engine_clock = config_module.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=engine_clock)
-    weak_decoder = decoder_settings.DecoderSettings(
-        kind=1.0,
-        units=8,
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=1.0)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
+        unit_count=8,
         engine=engine,
     )
     manager = decoder_settings.DecoderManagerSettings(dispatch_cycles=0)
-    windows = window_settings.WindowSettings(
-        kind="sliding", terminal_policy="flush"
-    )
+    windows = window_settings.WindowSettings(terminal_policy="flush")
     # a 1 GHz frame beside the 1 GHz decoder engine, so one write is the
     # 4 ns of Yang et al. 2605.04892 Fig. 1 and every correction reaches
     # the frame on one of its edges

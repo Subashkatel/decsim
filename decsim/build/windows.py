@@ -4,9 +4,9 @@ The window manager is the part's face to the rest of the machine: the
 stores tell it which rounds landed, it closes each window whose rounds
 are in, the requester asks the decoder manager for a decode, the
 verdict keeps the result or escalates it, and the committer writes the
-correction and carries the boundary to the next window. A run that may
-escalate adds the strong re-decode, and a run that decides on a
-confidence adds the signal and the join of a window's solves.
+correction and carries the boundary to the next window. A switching run
+adds the switching part's strong re-decode, and its signal with the
+join of a window's solves.
 """
 
 import dataclasses
@@ -15,16 +15,16 @@ from typing import Any, Optional
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
+import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
-import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
+import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.links.window_transfers as window_transfers_module
 import decsim.ports as ports
 import decsim.settings as machine_settings
-import decsim.tables as tables
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
@@ -41,17 +41,17 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    confidence_signal and gap_join are None on a run that decides on no
-    confidence. The four strong fields are None on a run that never
-    escalates: regions says which rounds an escalated window covers,
-    shape lays the strong window over them, pending_strong_windows holds
-    one until the conditions its row named are met, and strong_redecode
-    submits it and takes its result back.
+    confidence_signal, gap_join and the four strong fields are None on a
+    run with no switching; the switching part builds the signal and the
+    strong fields (build/escalation.py Switching): regions says which
+    rounds an escalated window covers, shape lays the strong window over
+    them, pending_strong_windows holds one until the conditions its row
+    named are met, and strong_redecode submits it and takes its result
+    back.
     """
 
-    # the policy and the detector are built before the parts, since the
-    # plan and the decoder units are compiled for them
-    escalation_policy: ports.EscalationPolicy
+    # the detector is built before the parts, since the decoder units
+    # are compiled for it
     burst_detector: Optional[ports.BurstDetector]
     models: window_planner_module.WindowModels
     planner: window_planner_module.WindowPlanner
@@ -84,9 +84,9 @@ class Windows:
         settings: machine_settings.MachineSettings,
         engine: engine_module.Engine,
         plan: plan_build.Plan,
-        escalation_policy: ports.EscalationPolicy,
         burst_detector: Optional[ports.BurstDetector],
         links: ports.Link,
+        switching: Optional[escalation_build.Switching],
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
@@ -104,31 +104,33 @@ class Windows:
             plan.planned_operations,
         )
         tracker = round_tracker_module.RoundTracker()
-        retention = _retention(plan, escalation_policy)
+        retention = _retention(plan, settings)
         window_transfers = window_transfers_module.WindowTransfers(engine)
         decoder_output = decoder_output_module.DecoderOutput(engine)
-        copies_the_fold = _copies_the_boundary_fold(settings, escalation_policy)
+        copies_the_fold = _copies_the_boundary_fold(settings)
         gate = decode_requests.WindowInputGate(copies_the_fold)
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
         courier = window_boundaries.BoundaryCourier()
         committer = window_commits.WindowCommitter(engine)
-        verdict = _verdict(settings, engine)
+        verdict = _verdict(settings.switching, settings.clock, engine)
+        clocked_windows = config.with_machine_clock(
+            settings.windows, settings.clock
+        )
         requester = decode_requests.DecodeRequester(
-            clock=settings.windows.clock,
-            decision_cycles=settings.windows.decision_cycles,
+            clock=clocked_windows.clock,
+            decision_cycles=clocked_windows.decision_cycles,
         )
-        confidence_signal, gap_join = _confidence(settings, engine)
-        regions, shape, pending, strong_redecode = _strong_redecode(
-            settings, engine, escalation_policy
+        confidence_signal, regions, shape, pending, strong_redecode = (
+            _switching_side(switching)
         )
+        gap_join = _gap_join(confidence_signal, engine)
         feedback_boundary_mode = settings.workload.feedback_boundary_mode
         window_manager = window_manager_module.WindowManager(
             engine, feedback_boundary_mode=feedback_boundary_mode
         )
         windows = cls(
-            escalation_policy=escalation_policy,
             burst_detector=burst_detector,
             models=models,
             planner=planner,
@@ -212,10 +214,6 @@ class Windows:
             )
         self.window_manager.check_settled()
 
-    def seed_roots(self) -> tuple:
-        """This part's stochastic owners, each by the name its seed hashes."""
-        return (("escalation_policy", self.escalation_policy),)
-
     def _wire_the_plan(self, plan: plan_build.Plan) -> None:
         interaction = plan.window_interaction
         self.models.provider = plan.error_model_provider
@@ -269,16 +267,12 @@ class Windows:
         requester = self.requester
         verdict.planner = self.planner
         verdict.tracker = self.tracker
-        verdict.escalation_policy = self.escalation_policy
         verdict.committer = self.committer
         requester.tracker = self.tracker
         requester.retention = self.retention
         requester.builder = self.builder
-        requester.escalation_policy = self.escalation_policy
         requester.verdict = verdict
         requester.gap_join = self.gap_join
-        if self.burst_detector is not None:
-            self.escalation_policy.burst_detector = self.burst_detector
         if self.gap_join is not None:
             self.gap_join.signal = self.confidence_signal
             self.gap_join.verdict = verdict
@@ -310,101 +304,77 @@ class Windows:
         self.window_manager.strong_redecode = strong_redecode
 
 
-def _decides_on_a_confidence(
-    settings: machine_settings.MachineSettings,
-) -> bool:
-    """Whether the run joins the confidence of every solve of a window.
-
-    False when the row decides on no confidence, and false for a
-    Python-built policy, which brings its own decoder and reports its
-    own soft output from one decode.
-    """
-    if settings.escalation.policy is not None:
-        return False
-    row = escalation_build.escalation_row(settings.escalation)
-    return row.decides_on_a_confidence
-
-
 def _retention(
-    plan: plan_build.Plan, escalation_policy: ports.EscalationPolicy
+    plan: plan_build.Plan, settings: machine_settings.MachineSettings
 ) -> round_retention_module.RoundRetention:
     """Which store holds a window's rounds, and for how long.
 
-    The reads the run places while it goes hold the rounds before their
+    A switching run keeps every round a strong redo would read. The
+    reads the run places while it goes hold the rounds before their
     first by the same rule as the reads the plan placed.
     """
     formation_reads = plan.formation_reads
+    is_switching = settings.switching is not None
     return round_retention_module.RoundRetention(
-        is_strong_context_retained=escalation_policy.requires_strong_context,
-        primary_tier=escalation_policy.primary_tier,
+        is_strong_context_retained=is_switching,
+        primary_tier=settings.window_tier,
         strong_side_seat=formation_reads.strong_side_seat,
     )
 
 
-def _confidence(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
-) -> tuple:
-    """The signal a window's confidence is read from, and the join of solves.
-
-    Two Nones on a run that decides on no confidence.
-    """
-    if not _decides_on_a_confidence(settings):
-        return None, None
-    signal = escalation_build.confidence_signal(
-        settings.escalation, settings.weak_decoder
+def _switching_side(switching: Optional[escalation_build.Switching]) -> tuple:
+    """The signal and the four strong components; five Nones without one."""
+    if switching is None:
+        return None, None, None, None, None
+    return (
+        switching.confidence_signal,
+        switching.regions,
+        switching.shape,
+        switching.pending_strong_windows,
+        switching.strong_redecode,
     )
-    gap_join = gap_join_module.WindowGapJoin(engine)
-    return signal, gap_join
+
+
+def _gap_join(
+    confidence_signal: Optional[ports.ConfidenceSignal],
+    engine: engine_module.Engine,
+) -> Optional[gap_join_module.WindowGapJoin]:
+    """The join of a window's solves; None on a run with no signal."""
+    if confidence_signal is None:
+        return None
+    return gap_join_module.WindowGapJoin(engine)
 
 
 def _verdict(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
+    switching: Optional[escalation_settings.SwitchingSettings],
+    machine_clock: Optional[config.Clock],
+    engine: engine_module.Engine,
 ) -> window_commits.WindowVerdict:
-    """Whether a decoded window is kept, priced on the escalation's clock."""
-    escalation = settings.escalation
+    """Whether a decoded window is kept, priced on the switching clock.
+
+    A run with no switching keeps every result at once; a switching slot
+    that names no clock prices its verdict on machine_clock.
+    """
+    if switching is None:
+        return window_commits.WindowVerdict(engine)
+    clocked_switching = config.with_machine_clock(switching, machine_clock)
     return window_commits.WindowVerdict(
         engine,
-        clock=escalation.clock,
-        threshold_cycles=escalation.threshold_cycles,
-        switch_cycles=escalation.switch_cycles,
+        clock=clocked_switching.clock,
+        threshold_cycles=clocked_switching.threshold_cycles,
+        switch_cycles=clocked_switching.switch_cycles,
     )
-
-
-def _strong_redecode(
-    settings: machine_settings.MachineSettings,
-    engine: engine_module.Engine,
-    escalation_policy: ports.EscalationPolicy,
-) -> tuple:
-    """The strong tier's four components; four Nones if it never escalates.
-
-    They are the strong regions, the strong window's shape, the ledger
-    of pending strong windows and the strong re-decode. The shape is the
-    row escalation.strong_window names: the redo window, or the double
-    window of Toshio Sec. III C.
-    """
-    if not escalation_policy.requires_strong_context:
-        return None, None, None, None
-    shape_row = escalation_build.strong_window_row(settings.escalation)
-    regions = strong_regions.StrongRegions()
-    shape = shape_row(engine)
-    pending = pending_strong_windows.PendingStrongWindows()
-    strong_redecode = strong_redecode_module.StrongRedecode(engine)
-    return regions, shape, pending, strong_redecode
 
 
 def _copies_the_boundary_fold(
     settings: machine_settings.MachineSettings,
-    escalation_policy: ports.EscalationPolicy,
 ) -> bool:
     """Whether the tier that decodes the plan's windows folds into a copy.
 
-    <tier>.boundary_fold names the row; a value that is not one is
-    refused here, where the tier is named.
+    A run with no decoder decodes no window, so the default is moot.
     """
-    tier = escalation_policy.primary_tier.value
+    tier = settings.window_tier.value
     tier_settings = settings.decoder_settings_for(tier)
-    return tables.row(
-        decoder_settings.DECODER_BOUNDARY_FOLDS,
-        f"{tier}_decoder.boundary_fold",
-        tier_settings.boundary_fold,
-    )
+    if tier_settings is None:
+        return True
+    return tier_settings.copies_boundary_fold

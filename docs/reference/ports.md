@@ -563,12 +563,6 @@ When a committed window ships its boundary to the windows after it.
 
 Whether and when a window is decoded again by the strong tier.
 
-| Member | Type |
-| --- | --- |
-| `primary_tier` | `window_records.DecoderTier` |
-| `requires_strong_context` | `bool` |
-| `decides_on_a_confidence` | `bool` |
-
 | Method | What it does |
 | --- | --- |
 | `check_plan` | Refuse, with a sentence, a run shape the policy cannot serve. |

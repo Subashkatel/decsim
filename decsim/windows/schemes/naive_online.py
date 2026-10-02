@@ -5,6 +5,9 @@ once they have arrived, which is the baseline every windowed scheme is
 measured against.
 """
 
+import dataclasses
+from typing import Optional
+
 import decsim.records.windows as window_records
 import decsim.windows.schemes.window_data as window_data
 
@@ -18,14 +21,19 @@ class NaiveOnlineScheme:
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
 
-    def __init__(
-        self,
-        card: window_records.WindowingSchemeCard = (
-            window_records.DEFAULT_SCHEME_CARD
-        ),
-    ) -> None:
-        """This row lays one window per operation, so it reads no key."""
-        del card
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The naive_online row's window sizes; None is the code distance."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        # the word the yaml and the reports name this row by
+        name = "naive_online"
+
+        def build(self, terminal_policy: str) -> "NaiveOnlineScheme":
+            """One window per operation, which reads no terminal tail."""
+            del terminal_policy
+            return NaiveOnlineScheme()
 
     def plan_operation(
         self,

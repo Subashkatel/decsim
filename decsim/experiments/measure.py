@@ -7,9 +7,8 @@ window ledger, the stage ledger, the frame's corrections, the queue
 depth log, the referee's audit, the sampled shot and the link traffic
 of the result. The input and output transfers are
 named by role, not by wire, and which wire carries each role follows
-from the escalation row's declared primary_tier (ports.py
-EscalationPolicy), so a row written outside decsim is measured like any
-other.
+from the tier that decodes the plan's windows (settings.py
+MachineSettings.window_tier).
 """
 
 import collections
@@ -21,7 +20,6 @@ import pathlib
 import statistics
 from typing import Optional
 
-import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
@@ -767,9 +765,11 @@ def chain_load(samples: dict, window_period_us: float) -> float:
 
 def active_decoder_kind(settings: machine_settings.MachineSettings):
     """The kind of the tier that decodes the plan's windows."""
-    tier = escalation_build.primary_tier(settings.escalation)
+    tier = settings.window_tier.value
     tier_settings = settings.decoder_settings_for(tier)
-    return tier_settings.kind
+    if tier_settings is None:
+        return None
+    return tier_settings.algorithm.name
 
 
 def trace_path_for_shot(path: str, label: str) -> str:
@@ -840,7 +840,7 @@ def _measurement(
     load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
-    primary_tier = escalation_build.primary_tier(settings.escalation)
+    primary_tier = settings.window_tier.value
     pools = _pool_measures(observation, primary_tier)
     strong = _strong_decodes(observation)
     tiers = _tier_records(observation)
@@ -921,7 +921,7 @@ def _shot_confidence(
         return None
     windows = ledger.windows()
     is_sampled = settings.observation.samples_confidence_of(seed)
-    signal = settings.escalation.confidence
+    signal = settings.switching.confidence.name
     sampled_shot_count = settings.observation.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 
@@ -950,7 +950,7 @@ def _burst_catch(
         return first_flag_round, None
     first_flag_round = flags.first_flag_from(onset_round)
     delay = first_flag_round - onset_round
-    deadline = settings.burst_detector.catch_deadline_rounds
+    deadline = settings.observation.catch_deadline_rounds
     is_caught = first_flag_round > 0 and delay <= deadline
     return first_flag_round, is_caught
 

@@ -4,12 +4,13 @@ A burst of errors raises the detection rate of the stabilisers it
 covers for hundreds of rounds (Google 2408.13687 lines 386-391 and
 2101-2119). A row of BURST_DETECTORS reads each round's bulk detection
 events as they are formed; its class is the only place its keys are
-written (sinter's BUILT_IN_DECODERS shape).
+written (sinter's BUILT_IN_DECODERS shape). The row's record rides on
+the switching slot (escalation/settings.py), the only slot that sends
+a flagged window to the strong tier, and the catch deadline on the
+observation settings, since only the shot's measurement reads it.
 """
 
-import dataclasses
 from collections.abc import Mapping
-from typing import Optional
 
 import decsim.burst_detectors.event_count.detector as event_count
 import decsim.config as config
@@ -30,40 +31,51 @@ BURST_DETECTORS = {
 }
 
 
-@dataclasses.dataclass(frozen=True)
-class BurstDetectorSettings:
-    """The yaml's `burst_detector` section, which names one row.
+def detector_from_yaml(section: Mapping, clocks: config.ClockSettings):
+    """The detector row's record the section names; None for the row none.
 
-    The row none, the default, builds no detector and takes no keys, so
-    a run without the section is the machine without a detector.
-    catch_deadline_rounds is how many rounds after a burst's onset a
-    flag may come and still catch it in time. 300 is half the 600-round
-    decay of the comparison folder's burst, so a caught burst still has
-    most of its raised rounds ahead. The shot columns read it.
+    The row none, the default, takes no keys, so a run without the
+    section is the machine without a detector.
     """
+    kind = section.get("kind", "none")
+    row = tables.row(BURST_DETECTORS, "burst_detector.kind", kind)
+    section_keys = ("kind",)
+    if row is not None:
+        section_keys = ("kind", "catch_deadline_rounds")
+    return tables.row_settings(
+        row, "burst_detector", section, section_keys, clocks
+    )
 
-    kind: str = "none"
-    row_settings: Optional[object] = None
-    catch_deadline_rounds: int = 300
 
-    @classmethod
-    def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
-    ) -> "BurstDetectorSettings":
-        """The kind, the catch deadline, and the keys its row declares."""
-        kind = section.get("kind", "none")
-        row = tables.row(BURST_DETECTORS, "burst_detector.kind", kind)
-        section_keys = ("kind",)
-        if row is not None:
-            section_keys = ("kind", "catch_deadline_rounds")
-        row_settings = tables.row_settings(
-            row, "burst_detector", section, section_keys, clocks
-        )
-        deadline = config.whole_count(
-            section, "burst_detector", "catch_deadline_rounds", 300, "rounds", 0
-        )
-        return cls(
-            kind=kind,
-            row_settings=row_settings,
-            catch_deadline_rounds=deadline,
-        )
+def catch_deadline_rounds_from_yaml(section: Mapping) -> int:
+    """How many rounds after a burst's onset a flag may come and catch it.
+
+    300 is half the 600-round decay of the comparison folder's burst, so
+    a caught burst still has most of its raised rounds ahead.
+    """
+    return config.whole_count(
+        section, "burst_detector", "catch_deadline_rounds", 300, "rounds", 0
+    )
+
+
+def detector_kind(switching) -> str:
+    """The burst_detector.kind word for the switching slot's detector."""
+    if switching is None or switching.burst_detector is None:
+        return "none"
+    record_class = type(switching.burst_detector)
+    for kind, row in BURST_DETECTORS.items():
+        if row is not None and row.Settings is record_class:
+            return kind
+    return record_class.__qualname__
+
+
+def refuse_a_detector_without_switching(section: Mapping, switching) -> None:
+    """A flagged window goes to the strong tier, which only switching has."""
+    kind = section.get("kind", "none")
+    if kind == "none" or switching is not None:
+        return
+    raise ValueError(
+        f"burst_detector.kind {kind} sends a burst's windows to the "
+        "strong decoder, which only escalation.kind switching does; "
+        "write burst_detector: {kind: none}, or escalate with switching"
+    )

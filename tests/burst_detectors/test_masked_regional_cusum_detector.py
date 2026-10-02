@@ -167,9 +167,7 @@ def test_a_wrong_cusum_key_is_refused_by_a_sentence(key, value, sentence):
     section = {"kind": "masked_regional_cusum", key: value}
 
     with pytest.raises(ValueError, match=sentence):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
 def test_the_cusum_keys_reach_the_rows_settings():
@@ -182,11 +180,10 @@ def test_the_cusum_keys_reach_the_rows_settings():
         "datapath_count": 2,
     }
 
-    detector_section = burst_detector_settings.BurstDetectorSettings.from_yaml(
+    settings = burst_detector_settings.detector_from_yaml(
         section, burst_rounds.CLOCKS
     )
 
-    settings = detector_section.row_settings
     assert settings.mask_count is None
     assert settings.region_radii == ()
     assert settings.fault_rate_multipliers == (3.0,)

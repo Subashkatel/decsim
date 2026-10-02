@@ -27,6 +27,7 @@ import decsim.qpu.layouts as layouts
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 
 
 class RecordingLayout:
@@ -80,8 +81,10 @@ def settings_with(layout=None, code=None):
     operation = one_operation()
     workload = workload_settings.WorkloadSettings(operations=[operation])
     qpu = qpu_settings.QpuSettings(code=code, layout=layout)
-    decoder = decoders.PresetLatencyDecoder(latency_us=1.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )

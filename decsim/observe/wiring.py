@@ -87,7 +87,7 @@ def observe(
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
     confidence = _connect_confidence(
-        windows.escalation_policy, decoder_managers
+        windows.confidence_signal, decoder_managers
     )
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
@@ -436,10 +436,10 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    escalation_policy, decoder_managers: tuple
+    confidence_signal, decoder_managers: tuple
 ) -> Optional[decode_records_module.ConfidenceLedger]:
     """The confidence ledger, only when a confidence decides the verdict."""
-    if not escalation_policy.decides_on_a_confidence:
+    if confidence_signal is None:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:

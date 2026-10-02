@@ -13,6 +13,7 @@ import pathlib
 
 import decsim.collect as collect
 import decsim.config as config
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
@@ -120,9 +121,11 @@ def live_settings(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(
-        kind=decoder_microseconds,
-        engine=engine,
+    matching = mwpm.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=decoder_microseconds
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
     )
     reference = link_profiles.logical_reference_profile()
     feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)

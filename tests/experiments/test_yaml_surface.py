@@ -13,7 +13,6 @@ import re
 import pytest
 import yaml
 
-import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
@@ -31,16 +30,17 @@ import tests.experiments.yaml_configs as yaml_configs
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
+    """weak_baseline keeps the weak tier; the strong section is read, unused."""
     reference_path = yaml_configs.CONFIGS_DIR / "reference.yaml"
     config = experiment.load_experiment(reference_path)
     point = config.first_point_task()
     settings = point.settings
-    assert settings.weak_decoder.kind == "pymatching"
-    assert settings.strong_decoder.kind == "belief_matching"
-    assert escalation_build.primary_tier(settings.escalation) == "weak"
+    assert settings.weak_decoder.algorithm.name == "pymatching"
+    assert settings.strong_decoder is None
+    assert settings.switching is None
+    assert settings.window_tier.value == "weak"
     # engine cycles price on a named domain, resolved once like the links
     assert settings.weak_decoder.engine.clock == settings.clocks.clock("fridge")
-    assert settings.strong_decoder.engine.clock == settings.clocks.clock("room")
 
 
 def test_the_reference_controller_charges_the_traced_issue_pipeline():
@@ -478,7 +478,7 @@ def test_every_axis_kind_resolves_to_the_settings_a_written_file_gives(
     swept_settings = collect.json_value(swept_task.settings)
     written_settings = collect.json_value(written_task.settings)
     assert swept_settings == written_settings
-    assert swept_task.settings.weak_decoder.units == 2
+    assert swept_task.settings.weak_decoder.unit_count == 2
     assert written_task.metadata == {}
 
 
@@ -519,7 +519,7 @@ def test_a_sweep_block_is_every_combination_of_its_axes_in_written_order(
             "workload.arguments.code_task": MEMORY_Z,
         },
     ]
-    kinds = [task.settings.weak_decoder.kind for task in tasks]
+    kinds = [task.settings.weak_decoder.algorithm.name for task in tasks]
     assert kinds == [0.028, 0.028, "pymatching", "pymatching"]
     z_arguments = tasks[1].settings.workload.row_settings.arguments
     assert z_arguments["code_task"] == MEMORY_Z
@@ -771,7 +771,7 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
         },
     )
     settings = point.settings
-    with pytest.raises(ValueError, match="strong tier, which names no decoder"):
+    with pytest.raises(ValueError, match="the run names no decoder"):
         machine_module.Machine.build(settings)
 
 

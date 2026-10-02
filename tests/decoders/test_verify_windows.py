@@ -89,3 +89,39 @@ def test_a_cancelled_job_delivers_nothing_and_is_not_checked():
 
     assert delivered == [None]
     assert verdicts == []
+
+
+def test_the_referee_record_reads_as_the_decoder_it_checks():
+    """The results name the tier by the inner decoder's word."""
+    inner = decoders.PresetLatencyDecoder.Settings(2.0)
+    checked = verify_windows.TesseractCheckedDecoder.Settings(inner=inner)
+
+    assert checked.name == inner.name
+    assert checked.weight_step is None
+
+
+def test_the_referee_record_builds_the_referee_around_its_decoder():
+    pytest.importorskip("tesseract_decoder")
+    inner = decoders.PresetLatencyDecoder.Settings(2.0)
+    checked = verify_windows.TesseractCheckedDecoder.Settings(inner=inner)
+
+    referee = checked.build()
+
+    assert isinstance(referee, verify_windows.TesseractCheckedDecoder)
+    assert isinstance(referee.inner, decoders.PresetLatencyDecoder)
+
+
+def test_the_yaml_check_wraps_the_decoder_of_the_window_tier(tmp_path):
+    """observation.check_windows_with wraps that tier's record, as today."""
+    observation = {"check_windows_with": "tesseract"}
+    config_path = yaml_configs.write_config(
+        tmp_path, {"observation": observation}
+    )
+    config = experiment.load_experiment(config_path)
+
+    point = config.first_point_task()
+    settings = point.settings
+
+    checked = settings.weak_decoder.algorithm
+    assert isinstance(checked, verify_windows.TesseractCheckedDecoder.Settings)
+    assert settings.strong_decoder is None

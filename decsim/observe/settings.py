@@ -6,10 +6,12 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.verify_windows as verify_windows
+import decsim.tables as tables
 
 LOG_MODES = ("off", "print", "file", "both")
 # observation.check_windows_with names one of these rows: the referee
-# that re-decodes every window, or none.
+# the yaml reader writes around the decoder of the tier that decodes the
+# plan's windows, or none.
 WINDOW_CHECKS = {
     "none": None,
     "tesseract": verify_windows.TesseractCheckedDecoder,
@@ -44,16 +46,18 @@ class ObservationSettings:
     the file next to the results), or a path of its own; the experiments
     layer writes it for the shots trace_shots names. log_component_io adds
     component I/O lines (what each store and unit received, holds and
-    emitted). check_windows_with tesseract re-decodes every window with the
-    Tesseract referee and counts disagreements, never priced.
-    record_switching_windows keeps every request record for the switching
-    study; backlog_trace builds the sampler of the rounds waiting to be
-    decoded (the decoder utilization is always integrated, every run's pool
-    columns read it); data_movement builds the copy, reference and move
+    emitted). record_switching_windows keeps every request record for the
+    switching study; backlog_trace builds the sampler of the rounds waiting
+    to be decoded (the decoder utilization is always integrated, every run's
+    pool columns read it); data_movement builds the copy, reference and move
     counters the RunResult carries. confidence_shot_count is how many shots
     of each point, from seed 0, write their windows' confidence gaps to
     window_confidence.csv when a confidence signal decides the escalation;
-    None writes every scored shot's.
+    None writes every scored shot's. catch_deadline_rounds is how many
+    rounds after a burst's onset a detector's flag may come and still catch
+    it in time; the yaml writes it in the burst_detector section. Both are
+    the run side's measurement values, kept here until the run side holds
+    them.
 
     The keys that only record the run, the log, the trace and
     confidence_shot_count, are labels (compare=False) and no part of a
@@ -61,15 +65,14 @@ class ObservationSettings:
     (sinter/_data/_task.py:167-204): each writer schedules nothing and
     calls no component (observe/trace_writer.py), so the shots'
     rows are the same with them or without. The others stay in the id
-    because they change a shot's row: the referee fills the referee columns,
-    record_switching_windows and backlog_trace add the wait and backlog
-    columns (experiments/measure.py), and data_movement adds the
-    shot_data_movement rows.
+    because they change a shot's row: record_switching_windows and
+    backlog_trace add the wait and backlog columns
+    (experiments/measure.py), data_movement adds the shot_data_movement
+    rows, and catch_deadline_rounds decides the burst catch columns.
     """
 
     log: str = dataclasses.field(compare=False, default="off")
     log_component_io: bool = dataclasses.field(compare=False, default=False)
-    check_windows_with: str = "none"
     record_switching_windows: bool = False
     backlog_trace: bool = False
     trace: str = dataclasses.field(compare=False, default="off")
@@ -78,6 +81,7 @@ class ObservationSettings:
     confidence_shot_count: Optional[int] = dataclasses.field(
         compare=False, default=100
     )
+    catch_deadline_rounds: int = 300
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":
@@ -87,7 +91,6 @@ class ObservationSettings:
         log = _log_mode(section)
         trace = _trace_word_or_path(section)
         trace_shots = _trace_shots(section)
-        check_windows_with = _window_check(section)
         log_component_io = config.boolean(
             section, "observation", "log_component_io"
         )
@@ -102,7 +105,6 @@ class ObservationSettings:
             trace=trace,
             trace_shots=trace_shots,
             log_component_io=log_component_io,
-            check_windows_with=check_windows_with,
             record_switching_windows=record_switching_windows,
             backlog_trace=backlog_trace,
             data_movement=data_movement,
@@ -170,8 +172,12 @@ def _log_mode(section: Mapping) -> str:
     return log
 
 
-def _window_check(section: Mapping) -> str:
-    """The referee that re-decodes every window, or none."""
+def window_check_from_yaml(section: Mapping):
+    """The referee row observation.check_windows_with names; None for none.
+
+    tesseract re-decodes every window with the Tesseract referee and
+    counts disagreements, never priced.
+    """
     check_windows_with = section.get("check_windows_with", "none")
     # a list of names, not the table: a yaml list or block is unhashable
     # and a dictionary lookup would raise TypeError before the sentence
@@ -181,7 +187,9 @@ def _window_check(section: Mapping) -> str:
             "observation.check_windows_with must be one of "
             f"{rows}, got {check_windows_with!r}"
         )
-    return check_windows_with
+    return tables.row(
+        WINDOW_CHECKS, "observation.check_windows_with", check_windows_with
+    )
 
 
 def _trace_word_or_path(section: Mapping) -> str:

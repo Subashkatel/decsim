@@ -84,33 +84,25 @@ def test_an_operation_shorter_than_the_windows_is_refused():
 def test_a_priced_count_needs_a_clock():
     section = {"kind": "event_count", "cycles_per_round": 3}
     with pytest.raises(ValueError, match="cycles_per_round needs a clock"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
 def test_a_false_alarm_rate_is_a_probability():
     section = {"kind": "event_count", "false_alarms_per_round": "1e-6"}
     with pytest.raises(ValueError, match="must be a probability"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
 def test_a_window_is_a_whole_number_of_rounds():
     section = {"kind": "event_count", "patch_window_rounds": 0}
     with pytest.raises(ValueError, match="whole number of rounds"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
 def test_raising_priors_is_true_or_false():
     section = {"kind": "event_count", "raise_strong_priors": "yes"}
     with pytest.raises(ValueError, match="must be true or false"):
-        burst_detector_settings.BurstDetectorSettings.from_yaml(
-            section, burst_rounds.CLOCKS
-        )
+        burst_detector_settings.detector_from_yaml(section, burst_rounds.CLOCKS)
 
 
 def test_without_burst_priors_a_flagged_window_keeps_its_model():

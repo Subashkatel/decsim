@@ -403,7 +403,9 @@ class DecodeRequester:
     # the strong side's manager, which serves the speculative decode a window
     # submits beside its weak job; a run that never escalates has none
     strong_decode_queue = ports.Port(ports.DecodeQueue, optional=True)
-    escalation_policy = ports.Port(ports.EscalationPolicy)
+    # the switching policy; None on a run with no switching, whose
+    # windows are decoded on the primary tier alone
+    escalation_policy = ports.Port(ports.EscalationPolicy, optional=True)
     verdict = ports.Port(window_commits.WindowVerdict)
     # the primary store's outgoing port; it executes the input send
     store_output = ports.Port(ports.SyndromeBufferOutput)
@@ -415,6 +417,8 @@ class DecodeRequester:
         clock: Optional[config.Clock] = None,
         decision_cycles: int = 0,
     ) -> None:
+        if decision_cycles > 0 and clock is None:
+            raise ValueError("windows.decision_cycles needs a clock")
         self.clock = clock
         self.decision_cycles = decision_cycles
         # the windows whose decision has not ended, by window key
@@ -481,7 +485,7 @@ class DecodeRequester:
             window, operation, primary_tier, store, first_class
         )
         window.queued = True
-        tiers = self.escalation_policy.tiers_for_ready_window(window)
+        tiers = self._tiers_for(window, primary_tier)
         primary_jobs = self._primary_jobs(job, forced_classes)
         window_reads = decoding_records.WindowReads(window.key)
         is_input_held = self._bind_input_hold(primary_jobs, window_reads)
@@ -496,6 +500,12 @@ class DecodeRequester:
         delay = edge - engine.now
         decide = functools.partial(self._decide, window.key)
         engine.schedule(delay, decide, label="window decision")
+
+    def _tiers_for(self, window, primary_tier) -> tuple:
+        """The tiers decoding the window now: the policy's, or the primary."""
+        if self.escalation_policy is None:
+            return (primary_tier,)
+        return self.escalation_policy.tiers_for_ready_window(window)
 
     def _decide(self, window_key: tuple) -> None:
         """The window's decision ended: issue its requests, unless withdrawn."""

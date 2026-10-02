@@ -23,7 +23,10 @@ import pytest
 import stim
 
 import decsim.build.decoders as decoder_build
-import decsim.escalation.policies as escalation_policies
+import decsim.confidence.cluster as cluster
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
+import decsim.decoders.union_find.decoder as union_find
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
@@ -144,7 +147,7 @@ def _parallel_machine_formed_at(where: str):
     """The weak baseline on Skoric's A/B blocks, formed there."""
     formed_there = _machine_formed_at(where)
     settings = formed_there.settings
-    windows = dataclasses.replace(settings.windows, kind="parallel")
+    windows = declared_run.windows_on(settings.windows, "parallel")
     settings = dataclasses.replace(settings, windows=windows)
     return machine_module.Machine.build(settings, 0)
 
@@ -172,15 +175,17 @@ def _seated_machine(
         formed_at=formed_at,
         latency_cycles=latency_cycles,
     )
-    windows = dataclasses.replace(settings.windows, kind=windows_kind)
-    escalation = dataclasses.replace(
-        settings.escalation, strong_window=strong_window
-    )
+    windows = declared_run.windows_on(settings.windows, windows_kind)
+    switching = settings.switching
+    if switching is not None:
+        named = declared_run.strong_window_settings(strong_window)
+        switching = dataclasses.replace(switching, strong_window=named)
+        windows = declared_run.switching_windows(windows, switching)
     settings = dataclasses.replace(
         settings,
         detection_events=detection_events,
         windows=windows,
-        escalation=escalation,
+        switching=switching,
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -322,11 +327,16 @@ def _double_window_switching_at_the_decoder():
     )
     settings = point.settings
     detection_events = _formed_at(settings, "decoder")
-    escalation = dataclasses.replace(
-        settings.escalation, strong_window="double_window"
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    switching = dataclasses.replace(
+        settings.switching, strong_window=double_window
     )
+    windows = declared_run.switching_windows(settings.windows, switching)
     settings = dataclasses.replace(
-        settings, detection_events=detection_events, escalation=escalation
+        settings,
+        detection_events=detection_events,
+        switching=switching,
+        windows=windows,
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -529,7 +539,7 @@ def test_the_boundary_fold_default_leaves_the_run_as_it_is():
     """
     copied = _machine()
     copied_result = copied.run()
-    folded = _machine(boundary_fold="copy")
+    folded = _machine(copies_boundary_fold=True)
     folded_result = folded.run()
     windows = len(copied.observation.windows.windows)
     assert _observables(folded_result) == _observables(copied_result)
@@ -541,7 +551,7 @@ def test_an_in_place_input_references_the_rounds_and_moves_nothing():
     """In place: no deposit, no link move, the store's hold kept instead."""
     copied = _machine()
     copied_result = copied.run()
-    in_place = _machine(input="in_place")
+    in_place = _machine(copies_input=False)
     in_place_result = in_place.run()
     assert _unit_input_copies(in_place) == 0
     assert _weak_input_transfers(in_place) == 0
@@ -554,16 +564,14 @@ def test_an_in_place_input_references_the_rounds_and_moves_nothing():
     assert in_place_observables == copied_observables
 
 
-def test_an_input_kind_that_is_not_a_row_is_refused_by_name():
-    with pytest.raises(ValueError, match="weak_decoder.input 'in-place'"):
-        _machine(input="in-place")
+def test_an_input_rule_that_is_not_a_flag_is_refused_by_name():
+    with pytest.raises(ValueError, match="copies_input 'in-place'"):
+        _machine(copies_input="in-place")
 
 
-def test_a_boundary_fold_that_is_not_a_row_is_refused_by_name():
-    with pytest.raises(
-        ValueError, match="weak_decoder.boundary_fold 'in place'"
-    ):
-        _machine(boundary_fold="in place")
+def test_a_boundary_fold_rule_that_is_not_a_flag_is_refused_by_name():
+    with pytest.raises(ValueError, match="copies_boundary_fold 'in place'"):
+        _machine(copies_boundary_fold="in place")
 
 
 def test_the_result_default_frees_the_unit_at_the_decodes_end():
@@ -981,19 +989,21 @@ def _lookback_switching_machine(formed_at, seed):
     )
     settings = machine.settings
     workload = _lookback_workload(settings)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
-    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
-    escalation = dataclasses.replace(
-        settings.escalation, confidence="cluster_gap", gap_threshold_db=15.0
+    union_find_settings = union_find.UnionFindDecoder.Settings()
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, algorithm=union_find_settings
     )
+    confidence = cluster.ClusterGap.Settings()
+    escalation = dataclasses.replace(settings.switching, confidence=confidence)
     settings = dataclasses.replace(
         settings,
         workload=workload,
         windows=windows,
         weak_decoder=weak_decoder,
-        escalation=escalation,
+        switching=escalation,
     )
     return machine_module.Machine.build(settings, seed)
 
@@ -1013,26 +1023,25 @@ def _parallel_lookback_machine(unit_count: int):
     settings = machine.settings
     # a flipped readout alone, so no fault straddles two blocks' commits
     workload = _lookback_workload(settings, "M(0.15) 0\n")
-    windows = dataclasses.replace(
-        settings.windows, kind="parallel", commit_rounds=1, buffer_rounds=1
+    windows = declared_run.windows_on(
+        settings.windows, "parallel", commit_rounds=1, buffer_rounds=1
     )
     # a declared decoder decodes no syndrome, so no fault's ownership is
     # asked of the blocks; the landed events are the check
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_no_window)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(0.028, _is_no_window)
     weak_decoder = dataclasses.replace(
-        settings.weak_decoder, decoder=weak, units=unit_count
+        settings.weak_decoder,
+        algorithm=weak,
+        engine=declared_run.DECLARED_ENGINE,
+        unit_count=unit_count,
     )
-    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
-    collaborators = escalation_policies.EscalationCollaborators()
-    policy = escalation_policies.Baseline(collaborators)
-    escalation = dataclasses.replace(settings.escalation, policy=policy)
     settings = dataclasses.replace(
         settings,
         workload=workload,
         windows=windows,
         weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        escalation=escalation,
+        strong_decoder=None,
+        switching=None,
     )
     return machine_module.Machine.build(settings, 0)
 
@@ -1067,19 +1076,23 @@ def _reach_growing_machine(formed_at):
     physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
     workload = workload_records.Workload((operation,), {1: 10}, physical)
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_window_one)
-    weak_decoder = dataclasses.replace(settings.weak_decoder, decoder=weak)
-    strong_decoder = dataclasses.replace(settings.strong_decoder, kind=0.2)
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.028, _is_window_one
     )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder,
+        algorithm=weak,
+        engine=declared_run.DECLARED_ENGINE,
+    )
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
+    strong_decoder = dataclasses.replace(
+        settings.strong_decoder,
+        algorithm=matching,
+    )
+    switching = _declared_confidence(settings.switching)
     running = settings.workload.running(workload)
     settings = dataclasses.replace(
         settings,
@@ -1087,9 +1100,20 @@ def _reach_growing_machine(formed_at):
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
     )
     return machine_module.Machine.build(settings, 0)
+
+
+def _declared_confidence(switching):
+    """The yaml's switching slot, deciding on the weak tier's declared gap."""
+    confidence = declared_run.DeclaredConfidence.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_nats=declared_run.ESCALATION_THRESHOLD
+    )
+    return dataclasses.replace(
+        switching, confidence=confidence, threshold=threshold
+    )
 
 
 def _is_window_one(job) -> bool:
@@ -1124,23 +1148,25 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
     workload = workload_records.Workload(
         (operation,), {1: round_count}, physical
     )
-    windows = dataclasses.replace(
+    windows = declared_run.windows_on(
         settings.windows, commit_rounds=1, buffer_rounds=0
     )
-    weak = declared_run.DeclaredConfidenceDecoder(0.028, _is_every_third)
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
+        0.028, _is_every_third
+    )
     weak_decoder = dataclasses.replace(
-        settings.weak_decoder, decoder=weak, units=3
+        settings.weak_decoder,
+        algorithm=weak,
+        engine=declared_run.DECLARED_ENGINE,
+        unit_count=3,
     )
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.2)
     strong_decoder = dataclasses.replace(
-        settings.strong_decoder, kind=0.2, units=3
+        settings.strong_decoder,
+        algorithm=matching,
+        unit_count=3,
     )
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
-    )
-    policy = escalation_policies.Switching(collaborators)
-    escalation = dataclasses.replace(settings.escalation, policy=policy)
+    switching = _declared_confidence(settings.switching)
     running = settings.workload.running(workload)
     settings = dataclasses.replace(
         settings,
@@ -1148,7 +1174,7 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
     )
     return machine_module.Machine.build(settings, 0)
 

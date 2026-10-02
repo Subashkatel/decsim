@@ -12,6 +12,7 @@ import pytest
 
 import decsim.config as config
 import decsim.controller.policies as idle_policies
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.settings as workload_settings
@@ -592,7 +593,10 @@ def _committed_windows(
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -749,7 +753,10 @@ def _stim_machine(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -785,7 +792,10 @@ def _shrunk_group_run(blocked_by, idle_policy: IdlePolicySettings) -> dict:
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, weak_decoder=decoder, idle_policy=idle_policy
     )
@@ -849,7 +859,10 @@ def _prefix_run(operations: tuple, mode: str) -> tuple:
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, weak_decoder=decoder
     )
@@ -943,7 +956,10 @@ def _feedback_run(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     qpu = qpu_settings.QpuSettings(distance=distance)
     settings = machine_settings.MachineSettings(
         workload=workload,
@@ -1009,7 +1025,10 @@ def _machine(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = mwpm.PyMatchingDecoder.Settings(preset_latency_microseconds=0.1)
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     links = _zero_delay_links(data_hop_ticks)
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True

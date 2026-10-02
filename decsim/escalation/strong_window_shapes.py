@@ -210,6 +210,30 @@ class RedoWindow(StrongWindowPorts):
     default_boundary_policy = "held"
     window_absorbed = trace_source.SILENT
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The redo window, as the switching slot names it."""
+
+        # the word the yaml and the refusals name this row by
+        name = "redo_window"
+        # it restarts no weak window, so the width the window interaction
+        # is handed is the double window's default, read by nothing
+        restart_reread_buffer_regions = 1
+
+        @property
+        def absorbs_weak_windows(self) -> bool:
+            """The row's own declaration."""
+            return RedoWindow.absorbs_weak_windows
+
+        @property
+        def default_boundary_policy(self) -> str:
+            """The row's own declaration."""
+            return RedoWindow.default_boundary_policy
+
+        def build(self, engine: engine_module.Engine) -> "RedoWindow":
+            """A fresh redo window on the run's engine."""
+            return RedoWindow(engine)
+
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """The near-pinned job, built now or held for its own rounds."""
         key = (weak_job.operation_id, weak_job.window_id)
@@ -303,6 +327,42 @@ class DoubleWindow(StrongWindowPorts):
 
     absorbs_weak_windows = True
     default_boundary_policy = "eager"
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The double window and how far its restart window re-reads.
+
+        restart_reread_buffer_regions is how many of the strong region's
+        buffer regions the restarted weak window re-reads (Toshio
+        2510.25222 Sec. III C). The text has the weak decoder resume once
+        r_com + r_buf rounds are stored after the strong region (lines
+        1229-1235), which both values meet. 1, the default, reads its last
+        buffer region as the restart window's past context, which is how
+        Fig. 12 step 5 draws the restart window: that block is half
+        assigned to the strong decoder and half the weak decoder's
+        buffer. 0 reads nothing inside the region.
+        """
+
+        restart_reread_buffer_regions: int = 1
+        # the word the yaml and the refusals name this row by
+        name = "double_window"
+
+        def __post_init__(self) -> None:
+            _check_restart_reread(self.restart_reread_buffer_regions)
+
+        @property
+        def absorbs_weak_windows(self) -> bool:
+            """The row's own declaration."""
+            return DoubleWindow.absorbs_weak_windows
+
+        @property
+        def default_boundary_policy(self) -> str:
+            """The row's own declaration."""
+            return DoubleWindow.default_boundary_policy
+
+        def build(self, engine: engine_module.Engine) -> "DoubleWindow":
+            """A fresh double window on the run's engine."""
+            return DoubleWindow(engine)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -859,3 +919,16 @@ class _HeldDoubleWindow:
     strong_request_key: window_records.DecoderRequestKey
     strong_request_created_ticks: int
     folded_boundaries: tuple
+
+
+def _check_restart_reread(regions) -> None:
+    """The re-read width is 0 or 1 buffer regions, a whole count."""
+    is_a_count = type(regions) is int
+    if is_a_count and regions in (0, 1):
+        return
+    raise ValueError(
+        "escalation.restart_reread_buffer_regions must be 0, a "
+        "restart on the rounds stored after the strong region, or 1, "
+        "a re-read of the region's last buffer region as Toshio "
+        f"2510.25222 Fig. 12 step 5 draws it; got {regions!r}"
+    )

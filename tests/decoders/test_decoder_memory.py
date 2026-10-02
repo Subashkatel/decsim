@@ -30,7 +30,6 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.round_policies as round_policies
@@ -259,10 +258,13 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     )
     qpu = qpu_settings.QpuSettings(distance=3)
     # one microsecond a round, over each operation's three rounds
-    decoder = decoders.PresetLatencyDecoder(3.0)
+    decoder = decoders.PresetLatencyDecoder.Settings(3.0)
     unit_memory = decoder_settings.UnitMemorySettings(bits=bits_per_unit)
-    weak_decoder = decoder_settings.DecoderSettings(
-        decoder=decoder, units=unit_count, unit_memory=unit_memory
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder,
+        unit_count=unit_count,
+        unit_memory=unit_memory,
+        engine=declared_run.DECLARED_ENGINE,
     )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
@@ -317,7 +319,6 @@ def window_completion_ticks(
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(compute_microseconds)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=1, capacity_bits=capacity_bits
     )
@@ -328,7 +329,6 @@ def window_completion_ticks(
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = decoder
-    manager.escalation_policy = policy
     transfer_ticks = config.microseconds_to_ticks(transfer_microseconds)
     send_input = landing_after(engine, transfer_ticks)
     completion_ticks = {}

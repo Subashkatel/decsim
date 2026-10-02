@@ -264,7 +264,7 @@ def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():
         escalates=True,
         weak_units=4,
         bulk_strong=True,
-        strong_input="in_place",
+        strong_copies_input=False,
         probes=(deposits,),
     )
     every_batch = declared_run.log_lines_containing(

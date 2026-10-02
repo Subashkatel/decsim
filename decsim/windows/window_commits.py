@@ -222,7 +222,9 @@ class WindowVerdict:
 
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker_module.RoundTracker)
-    escalation_policy = ports.Port(ports.EscalationPolicy)
+    # the switching policy; None on a run with no switching, which keeps
+    # every result
+    escalation_policy = ports.Port(ports.EscalationPolicy, optional=True)
     # the strong tier's window side; None when the run never escalates
     strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
     decode_queue = ports.Port(ports.DecodeQueue)
@@ -235,6 +237,9 @@ class WindowVerdict:
         threshold_cycles: int = 0,
         switch_cycles: int = 0,
     ) -> None:
+        charged = threshold_cycles + switch_cycles
+        if charged > 0 and clock is None:
+            raise ValueError("charged escalation costs need a clock")
         self.engine = engine
         self.clock = clock
         self.threshold_cycles = threshold_cycles
@@ -261,7 +266,7 @@ class WindowVerdict:
         if cycles == 0 or result.soft_output is None:
             self._form_verdict(job, result)
             return
-        if not self.escalation_policy.decides_on_a_confidence:
+        if self.escalation_policy is None:
             self._form_verdict(job, result)
             return
         edge = self.clock.edge(cycles, self.engine.now)
@@ -287,7 +292,7 @@ class WindowVerdict:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        verdict = self.escalation_policy.verdict_for_weak_result(job, result)
+        verdict = self._verdict_for(job, result)
         if verdict is decoding_records.Verdict.KEEP or self.switch_cycles == 0:
             self._apply_verdict(job, result, verdict)
             return
@@ -295,6 +300,16 @@ class WindowVerdict:
         delay = edge - self.engine.now
         apply = functools.partial(self._apply_verdict, job, result, verdict)
         self.engine.schedule(delay, apply, label="escalation switch")
+
+    def _verdict_for(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
+        """The policy's verdict; a run with no switching keeps every result."""
+        if self.escalation_policy is None:
+            return decoding_records.Verdict.KEEP
+        return self.escalation_policy.verdict_for_weak_result(job, result)
 
     def _apply_verdict(
         self,

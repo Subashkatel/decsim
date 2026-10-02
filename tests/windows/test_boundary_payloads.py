@@ -238,7 +238,7 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
     """One shot of the redo window switching experiment's switching point.
 
     The yaml names redo_window; the row under test replaces it in
-    the escalation card, which is where the build reads it from.
+    the switching slot, which is where the build reads it from.
     """
     config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
     config = experiment.load_experiment(config_path)
@@ -250,10 +250,14 @@ def _pinned_run(strong_window: str, distance: int, seed: int = 0):
         },
     )
     settings = point.settings
-    escalation = dataclasses.replace(
-        settings.escalation, strong_window=strong_window
+    strong_window_settings = declared_run.strong_window_settings(strong_window)
+    switching = dataclasses.replace(
+        settings.switching, strong_window=strong_window_settings
     )
-    settings = dataclasses.replace(settings, escalation=escalation)
+    windows = declared_run.switching_windows(settings.windows, switching)
+    settings = dataclasses.replace(
+        settings, switching=switching, windows=windows
+    )
     machine = machine_module.Machine.build(settings, seed)
     return machine.run()
 
@@ -407,9 +411,9 @@ def _parallel_run(distance: int, seed: int):
         },
     )
     settings = point.settings
-    windows = dataclasses.replace(
-        settings.windows, kind="parallel", boundary_payload="sparse_seam_list"
-    )
+    windows = declared_run.windows_on(settings.windows, "parallel")
+    sparse = boundary_payloads.SparseSeamList.Settings()
+    windows = dataclasses.replace(windows, boundary_payload=sparse)
     settings = dataclasses.replace(settings, windows=windows)
     machine = machine_module.Machine.build(settings, seed)
     return machine.run()

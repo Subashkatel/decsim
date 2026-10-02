@@ -108,6 +108,8 @@ class Machine:
     readout: readout_part.Readout
     windows: windows_part.Windows
     decoders: decoders_part.Decoders
+    # None on a run whose switching slot is empty
+    switching: Optional[escalation_build.Switching]
     observation: observation_module.Observation
 
     @classmethod
@@ -117,22 +119,22 @@ class Machine:
         """Build every part from the run's settings, then assemble them.
 
         These are the steps a script that replaces one part repeats: the
-        escalation policy, the plan and the decoder units are compiled
+        switching part, the plan and the decoder units are compiled
         first, since the parts are built for them; then each part is
         built on its own, and assemble connects them. The seed is the
         run's root; every stochastic component derives its own from it
         and its path.
         """
         engine = engine_module.Engine()
-        escalation_policy = escalation_build.build_escalation_policy(
-            settings.escalation, settings.weak_decoder
+        switching = escalation_build.build_switching(
+            settings.switching, settings.weak_decoder, engine
         )
-        plan = plan_build.build_plan(settings, escalation_policy)
+        plan = plan_build.build_plan(settings, switching)
         burst_detector = escalation_build.build_burst_detector(
-            settings, engine, plan, escalation_policy
+            settings, engine, plan
         )
-        window_tier = escalation_policy.primary_tier
-        escalates = escalation_policy.requires_strong_context
+        window_tier = settings.window_tier
+        escalates = settings.switching is not None
         detection_events = readout_part.build_detection_events(
             settings.detection_events,
             settings.clock,
@@ -141,8 +143,11 @@ class Machine:
             escalates,
             burst_detector,
         )
+        confidence_signal = None
+        if switching is not None:
+            confidence_signal = switching.confidence_signal
         pool = decoders_part.build_decoder_pool(
-            settings, plan, escalation_policy, detection_events
+            settings, plan, detection_events, confidence_signal
         )
         weak_store_slot, strong_store_slot = store_slots(
             settings, window_tier, pool
@@ -168,10 +173,10 @@ class Machine:
             links,
         )
         windows = windows_part.Windows.build(
-            settings, engine, plan, escalation_policy, burst_detector, links
+            settings, engine, plan, burst_detector, links, switching
         )
         decoders = decoders_part.Decoders.build(
-            settings.decoder_manager, engine, pool, escalation_policy
+            settings.decoder_manager, engine, pool
         )
         return cls.assemble(
             settings,
@@ -183,6 +188,7 @@ class Machine:
             readout,
             windows,
             decoders,
+            switching,
             seed,
         )
 
@@ -198,13 +204,15 @@ class Machine:
         readout: readout_part.Readout,
         windows: windows_part.Windows,
         decoders: decoders_part.Decoders,
+        switching: Optional[escalation_build.Switching] = None,
         seed: Optional[int] = 0,
     ) -> "Machine":
         """Connect the parts, start them, seed them, and load the program.
 
         The connections are every wire that crosses from one part to
         another, in the order a readout travels; each part wired its own
-        inside when it was built. Nothing is scheduled until the machine
+        inside when it was built, and a switching part binds its policy
+        last. Nothing is scheduled until the machine
         runs, so the order the parts were built in cannot move a tick
         (gem5 src/sim/sim_object.hh lines 194 and 280).
         """
@@ -242,13 +250,16 @@ class Machine:
             windows=windows.window_manager,
             decode_queue=decoders.decoder_manager,
         )
+        if switching is not None:
+            switching.connect(windows, decoders)
         # the managers hear their rows before the planner compiles a
         # model, and the sender asks the wired window side where it reads
         decoders.start()
         windows.start()
         readout.start()
-        parts = (qpu, control, readout, windows, decoders)
-        seed_roots = _seed_roots(plan, links, parts)
+        # the window side's one stochastic owner is the switching policy
+        parts = (qpu, control, readout, decoders)
+        seed_roots = _seed_roots(plan, links, parts, switching)
         seeding.bind_run_seed(root_seed, seed_roots)
         observation = _observe(
             settings,
@@ -272,6 +283,7 @@ class Machine:
             readout=readout,
             windows=windows,
             decoders=decoders,
+            switching=switching,
             observation=observation,
         )
 
@@ -335,13 +347,20 @@ def store_slots(
 
 
 def _seed_roots(
-    plan: plan_build.Plan, links: ports.Link, parts: tuple
+    plan: plan_build.Plan,
+    links: ports.Link,
+    parts: tuple,
+    switching: Optional[escalation_build.Switching],
 ) -> tuple:
     """The seed path of every stochastic owner; the names are results.
 
-    The plan's own rows first, then each part's. The seeding sorts the
-    roots by path, so the order they are listed in moves nothing.
+    The plan's own rows first, then each part's, then the switching
+    policy, None on a run with no switching. The seeding sorts the roots
+    by path, so the order they are listed in moves nothing.
     """
+    escalation_policy = None
+    if switching is not None:
+        escalation_policy = switching.policy
     owners = [
         ("code", plan.code),
         ("scheme", plan.scheme),
@@ -355,6 +374,7 @@ def _seed_roots(
     for part in parts:
         part_roots = part.seed_roots()
         owners.extend(part_roots)
+    owners.append(("escalation_policy", escalation_policy))
     roots = []
     for name, owner in owners:
         path = (seed_records.RunSeedPathSegment("field", name),)
@@ -396,10 +416,12 @@ def _process_name(
 ) -> str:
     """The machine the trace is of: its escalation, code distance and seed.
 
-    The machine knows no sweep, so the point's other values name the
-    trace's file (experiments/measure.py shot_label) and not this line.
+    The escalation is the yaml's word for the filled decode slots
+    (MachineSettings.escalation_kind). The machine knows no sweep, so the
+    point's other values name the trace's file (experiments/measure.py
+    shot_label) and not this line.
     """
-    kind = settings.escalation.kind
+    kind = settings.escalation_kind
     distance = settings.qpu.distance
     return f"decsim {kind} d{distance} seed{seed}"
 

@@ -47,9 +47,12 @@ import dataclasses
 
 import pytest
 
+import decsim.confidence.complementary as complementary
 import decsim.config as config
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
@@ -59,6 +62,8 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings_module
+import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 
 ROUNDS = 15
 NAME_BITS = window_records.REQUEST_KEY_WIRE_BITS
@@ -227,47 +232,39 @@ def machine_settings(shape: str, distance: int):
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
     links = link_profiles.logical_reference_profile()
-    weak = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
-    strong = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    matching = mwpm.PyMatchingDecoder.Settings()
+    strong = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
     if shape == "weak":
-        escalation = escalation_settings.EscalationSettings(
-            kind="weak_baseline"
-        )
         return machine_settings_module.MachineSettings(
-            workload=workload,
-            qpu=qpu,
-            weak_decoder=weak,
-            escalation=escalation,
-            links=links,
+            workload=workload, qpu=qpu, weak_decoder=weak, links=links
         )
     if shape == "strong":
-        escalation = escalation_settings.EscalationSettings(kind="strong_only")
         return machine_settings_module.MachineSettings(
-            workload=workload,
-            qpu=qpu,
-            strong_decoder=strong,
-            escalation=escalation,
-            links=links,
+            workload=workload, qpu=qpu, strong_decoder=strong, links=links
         )
-    nats = escalation_settings.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        confidence="complementary_gap",
-        gap_threshold_db=UNREACHABLE_GAP_DECIBELS,
-        gap_threshold_nats=nats,
+    nats = threshold_sources.decibels_to_nats(UNREACHABLE_GAP_DECIBELS)
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=nats)
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
     )
+    plain_windows = window_settings.WindowSettings()
+    windows = declared_run.switching_windows(plain_windows, switching)
     return machine_settings_module.MachineSettings(
         workload=workload,
         qpu=qpu,
         weak_decoder=weak,
         strong_decoder=strong,
-        escalation=escalation,
+        switching=switching,
+        windows=windows,
         links=links,
     )
 
@@ -606,8 +603,9 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
     )
     device = stim_device.StimDevice()
     qpu = qpu_settings.QpuSettings(distance=distance, device=device)
-    weak = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
     links = link_profiles.logical_reference_profile()

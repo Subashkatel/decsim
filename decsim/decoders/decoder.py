@@ -163,8 +163,9 @@ class WindowDecoderBase(DecoderBase):
     def __init__(self, latency_model: Optional[DecoderBase] = None):
         self.latency_model = latency_model
         self.compiled_by_model: dict = {}
-        # the row's kind and settings, set where the machine builds it;
-        # with the model they fix the backend
+        # the row's class and the settings its backend is compiled
+        # from, which each row declares; with the model they fix the
+        # backend, and None keeps the backend to this decoder alone
         self.compile_key = None
 
     def run_seed_children(self) -> tuple:

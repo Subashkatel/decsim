@@ -64,6 +64,12 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         gamma_interval: tuple[float, float] = (-0.24, 0.66)
         converged_solution_count: int = 1
         bases: str = "together"
+        # the word the yaml and the reports name this row by
+        name = "relay_bp"
+
+        def build(self) -> "RelayBeliefPropagationDecoder":
+            """A fresh decoder of these settings."""
+            return RelayBeliefPropagationDecoder(settings=self)
 
         @classmethod
         def from_yaml(
@@ -106,6 +112,7 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         if settings is None:
             settings = RelayBeliefPropagationDecoder.Settings()
+        self.compile_key = (RelayBeliefPropagationDecoder, settings)
         self.window_decoder = (
             window_decoder.RelayBeliefPropagationWindowDecoder(settings)
         )

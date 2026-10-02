@@ -251,11 +251,11 @@ def test_the_tier_sections_keys_reach_the_rows_settings():
         "merge_errors": True,
     }
     clocks = config.ClockSettings({"decoder": 250.0})
-    tier = decoder_settings.DecoderSettings.from_yaml(
+    tier = decoder_settings.DecoderPoolSettings.from_yaml(
         section, clocks, "strong_decoder"
     )
     expected = dataclasses.replace(SETTINGS, detector_order_seed=2384753)
-    assert tier.row_settings == expected
+    assert tier.algorithm == expected
 
 
 def test_a_section_with_no_keys_keeps_the_short_beam_profile():

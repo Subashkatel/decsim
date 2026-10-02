@@ -9,7 +9,7 @@ system before it wires a single port.
 import copy
 import dataclasses
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Optional
 
 import stim
 
@@ -69,16 +69,20 @@ class Plan:
 
 
 def build_plan(
-    settings: machine_settings.MachineSettings, escalation_policy
+    settings: machine_settings.MachineSettings,
+    switching: Optional[escalation_build.Switching],
 ) -> Plan:
     """The code, the workload's operations and the window plan.
 
     Keep the root's run-shape and plan records together so their shared
     inputs remain visible; named helpers resolve individual collaborators.
+    A switching run's policy refuses a run shape it cannot serve.
     """
+    is_switching = settings.switching is not None
+    window_sizes = settings.windows.scheme
     code, layout = settings.qpu.build_code(
-        commit_rounds_override=settings.windows.commit_rounds,
-        buffer_rounds_override=settings.windows.buffer_rounds,
+        commit_rounds_override=window_sizes.commit_rounds,
+        buffer_rounds_override=window_sizes.buffer_rounds,
     )
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
         settings.workload
@@ -95,14 +99,12 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
-    scheme = _scheme(settings.windows, escalation_policy)
-    boundary_policy = _boundary_policy(
-        settings.windows, settings.escalation, escalation_policy
-    )
+    scheme = _scheme(settings.windows)
+    boundary_policy = _boundary_policy(settings.windows)
     absorbs_weak_windows = escalation_build.absorbs_weak_windows(
-        settings.escalation
+        settings.switching
     )
-    reread_regions = settings.escalation.restart_reread_buffer_regions
+    reread_regions = _restart_reread_buffer_regions(settings.switching)
     window_interaction = _window_interaction(settings.windows, reread_regions)
     if dynamic_streams and not scheme.supports_dynamic_streams:
         raise ValueError(
@@ -117,13 +119,14 @@ def build_plan(
         operations=views,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        strong_window=settings.escalation.strong_window,
+        strong_window=_strong_window(settings.switching),
         is_absorbing_strong_window=absorbs_weak_windows,
         is_bulk_strong=settings.decoder_manager.bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
     )
-    escalation_policy.check_plan(run_shape)
+    if switching is not None:
+        switching.policy.check_plan(run_shape)
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,
@@ -150,7 +153,7 @@ def build_plan(
         scheme=scheme,
         rounds_policy=rounds_policy,
         fallback_round_microseconds=settings.qpu.round_period_microseconds,
-        retain_strong_context=escalation_policy.requires_strong_context,
+        retain_strong_context=is_switching,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
         has_open_ended_dynamic_streams=bool(dynamic_streams),
@@ -160,9 +163,7 @@ def build_plan(
     error_model_provider = settings.qpu.error_model_provider
     if error_model_provider is None:
         error_model_provider = device.window_model_source()
-    _refuse_bulk_strong_without_a_merge(
-        settings, escalation_policy, device, error_model_provider
-    )
+    _refuse_bulk_strong_without_a_merge(settings, device, error_model_provider)
     _install_operation_circuits(device, error_model_provider, all_operations)
     idle_policy = settings.idle_policy.build()
     return Plan(
@@ -206,12 +207,7 @@ def _resource_claims(operations, view_by_id, layout):
 
 
 def _window_interaction(settings, reread_regions):
-    payload_row = tables.row(
-        window_settings.BOUNDARY_PAYLOADS,
-        "windows.boundary_payload",
-        settings.boundary_payload,
-    )
-    boundary_payload = payload_row()
+    boundary_payload = settings.boundary_payload.build()
     return window_interactions.DefaultWindowInteraction(
         reread_regions, boundary_payload
     )
@@ -282,50 +278,44 @@ def _decode_plan_operations(
     return tuple(planned)
 
 
-def _scheme(windows: window_settings.WindowSettings, escalation_policy):
-    """The windowing scheme of the kind, or the Python-built one.
+def _restart_reread_buffer_regions(
+    switching: Optional[escalation_settings.SwitchingSettings],
+) -> int:
+    """How far a restarted weak window re-reads; the default without one.
 
-    A policy that may escalate needs the lookahead terminal policy on
-    sliding windows: the literature-exact flush has no trailing tail
-    context, which is the fact the policy's own refusal reads.
+    Only a strong window that absorbs the weak windows restarts any, so
+    a run with no switching carries the section's default unread.
     """
-    scheme = _chosen_scheme(windows, escalation_policy)
+    strong_window = _strong_window_settings(switching)
+    return strong_window.restart_reread_buffer_regions
+
+
+def _strong_window_settings(
+    switching: Optional[escalation_settings.SwitchingSettings],
+):
+    """The strong window's record; the default on a run with no switching."""
+    if switching is None:
+        return escalation_settings.SwitchingSettings.strong_window
+    return switching.strong_window
+
+
+def _strong_window(
+    switching: Optional[escalation_settings.SwitchingSettings],
+) -> str:
+    """The strong window's row name, which a refusal prints."""
+    strong_window = _strong_window_settings(switching)
+    return strong_window.name
+
+
+def _scheme(windows: window_settings.WindowSettings):
+    """The windowing scheme the section's record builds, with its tail.
+
+    A switching run's policy refuses a scheme whose last window has no
+    trailing tail context, the fact the terminal tail sets.
+    """
+    scheme = windows.scheme.build(windows.terminal_policy)
     _refuse_undeclared_scheme(scheme)
     return scheme
-
-
-def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
-    """The Python-built scheme, or the kind's row on the section's card.
-
-    A row with keys of its own is built with its Settings record too.
-    """
-    if windows.scheme is not None:
-        return windows.scheme
-    row = tables.row(
-        window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind
-    )
-    terminal_policy = _terminal_policy(windows, escalation_policy)
-    card = window_records.WindowingSchemeCard(terminal_policy=terminal_policy)
-    if windows.row_settings is None:
-        return row(card)
-    return row(card, settings=windows.row_settings)
-
-
-def _terminal_policy(
-    windows: window_settings.WindowSettings, escalation_policy
-) -> str:
-    """The section's terminal policy, or the one the escalation needs.
-
-    A policy that may escalate reads context past the last window's
-    commit, so a silent section gets the lookahead tail; the policy's own
-    refusal (escalation/policies.py) is what stops a scheme whose last
-    window carries no trailing tail.
-    """
-    if windows.terminal_policy is not None:
-        return windows.terminal_policy
-    if escalation_policy.requires_strong_context:
-        return "lookahead"
-    return "flush"
 
 
 def _refuse_undeclared_scheme(scheme) -> None:
@@ -356,50 +346,15 @@ def _refuse_undeclared_boundary_policy(boundary_policy) -> None:
     )
 
 
-def _boundary_policy(
-    windows: window_settings.WindowSettings,
-    escalation: escalation_settings.EscalationSettings,
-    escalation_policy,
-):
-    """The row windows.boundaries names, or the one the escalation needs.
+def _boundary_policy(windows: window_settings.WindowSettings):
+    """The section's boundary policy, once it declares what it ships.
 
-    A policy that may escalate holds boundaries until results are final
-    (descendants wait out an escalation); a strong window that absorbs
-    the weak windows it covers keeps the weak chain committing eagerly.
-    The boundary policy's own check_plan refuses the wrong pairing when a
-    yaml names it against the escalation.
+    A switching run's policy refuses the row its strong window cannot
+    serve (escalation/policies.py check_plan).
     """
-    if windows.boundary_policy is not None:
-        _refuse_undeclared_boundary_policy(windows.boundary_policy)
-        return windows.boundary_policy
-    boundaries = _boundaries_name(windows, escalation, escalation_policy)
-    row = tables.row(
-        window_settings.BOUNDARY_POLICIES, "windows.boundaries", boundaries
-    )
-    return row()
-
-
-def _boundaries_name(
-    windows: window_settings.WindowSettings,
-    escalation: escalation_settings.EscalationSettings,
-    escalation_policy,
-) -> str:
-    """The section's boundaries row, or the one the rows declare.
-
-    A default lives on the class that owns the parameter, gem5's rule for
-    a SimObject's params (gem5 src/python/m5/SimObject.py
-    :313-318, _new_param setting the ParamDesc's default on the class it
-    is declared in, inherited through the _values parent chain set at
-    :240-254). The escalation policy row owns this one, and a row that
-    may escalate hands it to its strong window shape, whose absorption is
-    what decides.
-    """
-    if windows.boundaries is not None:
-        return windows.boundaries
-    if not escalation_policy.requires_strong_context:
-        return escalation_policy.default_boundary_policy
-    shape = escalation_build.strong_window_row(escalation)
-    return shape.default_boundary_policy
+    boundary_policy = windows.boundary_policy.build()
+    _refuse_undeclared_boundary_policy(boundary_policy)
+    return boundary_policy
 
 
 def _syndrome_source(
@@ -536,10 +491,7 @@ def _formation_reads(
 
 
 def _refuse_bulk_strong_without_a_merge(
-    settings: machine_settings.MachineSettings,
-    escalation_policy,
-    device,
-    error_model_provider,
+    settings: machine_settings.MachineSettings, device, error_model_provider
 ) -> None:
     """bulk_strong merges strong re-decodes that carry timing alone.
 
@@ -552,10 +504,10 @@ def _refuse_bulk_strong_without_a_merge(
     """
     if not settings.decoder_manager.bulk_strong:
         return
-    if not escalation_policy.requires_strong_context:
+    if settings.switching is None:
         raise ValueError(
             "decoder_manager.bulk_strong merges the strong pool's queued "
-            f"re-decodes, and escalation.kind {settings.escalation.kind} "
+            f"re-decodes, and escalation.kind {settings.escalation_kind} "
             "has no strong pool; remove the key or run switching"
         )
     own_models = device.window_model_source()

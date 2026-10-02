@@ -2,10 +2,10 @@
 
 A tier's kind names a row of decoders/settings.py's DECODERS and the
 unit is that algorithm between its fetch and release stages. Which pools
-the managers get is the escalation policy's declared fact, not its name:
-a policy that may escalate gives the strong tier a unit and the host's
-manager a pool of its own, and the chip's manager always has one pool,
-of the tier that decodes the plan's windows. Each manager has its own
+the managers get is which slots are filled: a switching run gives the
+strong tier a unit and the host's manager a pool of its own, and the
+chip's manager always has one pool, of the tier that decodes the plan's
+windows. Each manager has its own
 queue, scheduler and staging, and the two share one ledger of strong
 requests.
 """
@@ -17,64 +17,79 @@ import pytest
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
+import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
-import decsim.decoders.decoders as decoders
+import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.settings as event_settings
+import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.settings as machine_settings
+import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 
-def _settings(*, escalation=None, weak=None, strong=None):
-    if escalation is None:
-        escalation = escalation_settings.EscalationSettings()
-    if weak is None:
-        weak = decoder_settings.DecoderSettings()
-    if strong is None:
-        strong = decoder_settings.DecoderSettings()
+def _settings(*, switching=None, weak=None, strong=None):
     workload = declared_run.declared_workload(None, 6)
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
+    windows = window_settings.WindowSettings()
+    if switching is not None:
+        windows = declared_run.switching_windows(windows, switching)
     return machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
         links=links,
         controller=controller,
         pauli_frame=frame,
-        escalation=escalation,
+        windows=windows,
+        switching=switching,
         weak_decoder=weak,
         strong_decoder=strong,
     )
 
 
+def _signal(switching_part):
+    """The run's confidence signal; None on a run with no switching."""
+    if switching_part is None:
+        return None
+    return switching_part.confidence_signal
+
+
 def _pool(settings, detection_events=None):
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
+    engine = engine_module.Engine()
+    switching_part = escalation_build.build_switching(
+        settings.switching, settings.weak_decoder, engine
     )
-    plan = plan_build.build_plan(settings, policy)
+    signal = _signal(switching_part)
+    plan = plan_build.build_plan(settings, switching_part)
     if detection_events is None:
         at_the_controller = event_settings.DetectionEventSettings()
         detection_events = event_formation.SeatedFormation(
             None, at_the_controller
         )
     return decoder_build.build_decoder_pool(
-        settings, plan, policy, detection_events
+        settings, plan, detection_events, signal
     )
 
 
 def _preset(microseconds: float):
-    preset = decoders.PresetLatencyDecoder(microseconds)
-    return decoder_settings.DecoderSettings(decoder=preset)
+    preset = mwpm.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=microseconds
+    )
+    return decoder_settings.DecoderPoolSettings(
+        algorithm=preset, engine=declared_run.DECLARED_ENGINE
+    )
 
 
 def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
@@ -93,12 +108,12 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
         release_cycles_per_job=5,
         release_cycles_per_round=7,
     )
-    weak = decoder_settings.DecoderSettings(kind="pymatching", engine=engine)
-    settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
+    matching = mwpm.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
     )
-    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+    settings = _settings(weak=weak)
+    unit = decoder_build.build_decoder_unit(settings, "weak", None, None)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=4)
 
     ticks = unit.timing.stage_ticks(job)
@@ -115,41 +130,20 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     clock = config.Clock(period_ticks)
     engine = decoder_settings.EngineSettings(clock=clock)
     union_find_settings = union_find.UnionFindDecoder.Settings(weight_step=0.25)
-    weak = decoder_settings.DecoderSettings(
-        kind="union_find",
-        engine=engine,
-        row_settings=union_find_settings,
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=union_find_settings, engine=engine
     )
     settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
 
-    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
+    unit = decoder_build.build_decoder_unit(settings, "weak", None, None)
 
     assert unit.decoder.weight_step == 0.25
 
 
-def test_a_python_built_decoder_is_returned_as_it_is():
-    built = decoders.PresetLatencyDecoder(10.0)
-    weak = decoder_settings.DecoderSettings(decoder=built)
-    settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-
-    unit = decoder_build.build_decoder_unit(settings, "weak", policy)
-
-    assert unit is built
-
-
-def test_a_tier_that_names_no_decoder_builds_none():
+def test_a_tier_whose_slot_is_empty_builds_none():
     settings = _settings()
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
 
-    unit = decoder_build.build_decoder_unit(settings, "strong", policy)
+    unit = decoder_build.build_decoder_unit(settings, "strong", None, None)
 
     assert unit is None
 
@@ -166,15 +160,14 @@ def test_a_weak_only_run_has_one_pool_and_no_strong_unit():
 
 
 def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
     )
     weak = _preset(10.0)
     strong = _preset(30.0)
-    settings = _settings(escalation=escalation, weak=weak, strong=strong)
+    settings = _settings(switching=switching, weak=weak, strong=strong)
 
     pool = _pool(settings)
 
@@ -184,11 +177,10 @@ def test_a_run_that_may_escalate_gets_a_strong_unit_and_its_own_pool():
 
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
     )
     weak_memory = decoder_settings.UnitMemorySettings(bits=12)
     strong_memory = decoder_settings.UnitMemorySettings(bits=30)
@@ -196,7 +188,7 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     strong_preset = _preset(30.0)
     weak = dataclasses.replace(weak_preset, unit_memory=weak_memory)
     strong = dataclasses.replace(strong_preset, unit_memory=strong_memory)
-    settings = _settings(escalation=escalation, weak=weak, strong=strong)
+    settings = _settings(switching=switching, weak=weak, strong=strong)
 
     pool = _pool(settings)
 
@@ -206,16 +198,15 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
 
 def test_only_the_pool_that_decodes_the_windows_blocks_on_its_result():
     """A strong decode frees its unit at its end and waits in its output."""
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
-        confidence="complementary_gap",
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(threshold_nats=2.0)
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
     )
     weak_preset = _preset(10.0)
     weak = dataclasses.replace(weak_preset, result_blocks_unit=True)
     strong = _preset(30.0)
-    settings = _settings(escalation=escalation, weak=weak, strong=strong)
+    settings = _settings(switching=switching, weak=weak, strong=strong)
 
     pool = _pool(settings)
 
@@ -253,19 +244,6 @@ def test_a_decoder_seat_gives_each_pool_its_stage_whatever_the_source():
     assert formed_at_the_controller.chip.formation is None
 
 
-def test_a_decoder_kind_that_names_no_row_is_refused():
-    weak = decoder_settings.DecoderSettings(kind="oracle")
-    settings = _settings(weak=weak)
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-
-    with pytest.raises(ValueError) as refusal:
-        decoder_build.build_decoder_unit(settings, "weak", policy)
-
-    assert "oracle" in str(refusal.value)
-
-
 def test_a_weak_only_run_has_no_host_manager():
     machine = declared_run.weak_only_run()
 
@@ -284,7 +262,8 @@ def test_each_side_has_its_own_manager_pool_and_one_ledger():
     assert host.pool.name == decode_queue.STRONG_POOL
     assert chip.strong_requests is decode_side.strong_requests
     assert host.strong_requests is decode_side.strong_requests
-    assert host.escalation_policy is machine.windows.escalation_policy
+    assert chip.escalation_policy is machine.switching.policy
+    assert host.escalation_policy is machine.switching.policy
     assert chip.decoder is decode_side.primary_decoder
     assert host.decoder is strong_decoder
     assert machine.windows.models.strong_decoder is strong_decoder
@@ -312,8 +291,13 @@ class _SeedRecordingScheduler(schedulers.FifoScheduler):
 
 def test_each_managers_scheduler_is_seeded_on_its_own_path():
     weak, strong = declared_run.switching_decoders(False)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
-    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
+    engine = declared_run.DECLARED_ENGINE
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=engine
+    )
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=strong, engine=engine
+    )
     manager_settings = decoder_settings.DecoderManagerSettings(
         scheduler=_SeedRecordingScheduler
     )

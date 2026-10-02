@@ -120,6 +120,17 @@ class MaskedRegionalCusumBurstDetector:
                 **method,
             )
 
+        def build(
+            self,
+            engine: engine_module.Engine,
+            circuits: Mapping,
+            round_period_microseconds: float,
+        ) -> "MaskedRegionalCusumBurstDetector":
+            """The chart banks, calibrated from each operation's circuit."""
+            return MaskedRegionalCusumBurstDetector(
+                self, engine, circuits, round_period_microseconds
+            )
+
     def __init__(
         self,
         settings: "MaskedRegionalCusumBurstDetector.Settings",

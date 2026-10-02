@@ -663,8 +663,8 @@ def test_a_strong_primary_round_crosses_one_path_and_only_that_one():
 
     A single-tier system streams its readout to its decoder over one
     path (LILLIPUT's readout-to-decoder FIFO, Das et al. 2108.06569;
-    Google's streaming decoder, 2408.13687), and under StrongOnly
-    (decsim/escalation/policies.py) readiness listens to the strong
+    Google's streaming decoder, 2408.13687), and with the strong decoder
+    slot alone filled readiness listens to the strong
     store, so the weak store's path is wired by the card and never
     used while each of the six rounds crosses
     controller_to_strong_buffer once.

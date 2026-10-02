@@ -58,7 +58,9 @@ def protocol_channel(
     return protocol.build(channel_settings, engine)
 
 
-def protocol_settings_from_yaml(section, clock: config.Clock, path_name: str):
+def protocol_settings_from_yaml(
+    section: object, clock: config.Clock, path_name: str
+) -> Optional[link_settings.PacketProtocolSettings]:
     """A card's protocol mapping: its kind's record, None for ideal.
 
     Every field but the clock is written in the mapping; the clock is

@@ -321,7 +321,9 @@ FramingSettings = Union[
 ]
 
 
-def framing_settings_from_yaml(section, path_name: str) -> FramingSettings:
+def framing_settings_from_yaml(
+    section: object, path_name: str
+) -> FramingSettings:
     """A card's framing mapping: its kind's record, every field written."""
     section_name = f"links.{path_name}.protocol.framing"
     if not isinstance(section, Mapping):

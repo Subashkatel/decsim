@@ -19,9 +19,11 @@ import dataclasses
 import fractions
 import math
 from collections.abc import Mapping
-from typing import Any, Optional, Union
+from typing import Optional, Protocol, Union
 
 import decsim.config as config
+import decsim.engine
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 
@@ -75,6 +77,21 @@ class PayloadSettings:
             raise ValueError("input_bits must be nonnegative")
 
 
+class PacketProtocolSettings(Protocol):
+    """A packet protocol's settings record, which builds its channel.
+
+    CreditChannel.Settings and ReliableChannel.Settings
+    (credit_channel.py, reliable_channel.py) are the two.
+    """
+
+    def build(
+        self,
+        channel_settings: "ChannelSettings",
+        engine: decsim.engine.Engine,
+    ) -> ports.Channel:
+        """A fresh channel whose protocol is these settings."""
+
+
 @dataclasses.dataclass(frozen=True)
 class ChannelSettings:
     """One physical channel: its name, a propagation latency, a bandwidth.
@@ -94,7 +111,7 @@ class ChannelSettings:
     capacity: Optional[CapacitySettings]
     # where the card was written, a label: no part of a point's id
     configuration_source: str = dataclasses.field(compare=False)
-    protocol: Optional[Any] = None
+    protocol: Optional["PacketProtocolSettings"] = None
 
     def __post_init__(self) -> None:
         propagation_latency_ticks = _as_whole_number(

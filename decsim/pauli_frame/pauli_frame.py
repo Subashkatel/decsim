@@ -27,6 +27,7 @@ from collections.abc import Callable, Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.tables as tables
@@ -75,7 +76,7 @@ class PauliFrameConfig:
         write_cycles = section["write_cycles"]
         return record(write_cycles=write_cycles, clock=clock)
 
-    def build(self, engine) -> "PauliFrame":
+    def build(self, engine: engine_module.Engine) -> "PauliFrame":
         """A fresh frame on these settings, on the run's engine."""
         return PauliFrame(
             engine, clock=self.clock, write_cycles=self.write_cycles

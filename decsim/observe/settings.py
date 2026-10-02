@@ -69,22 +69,43 @@ class ObservationSettings:
     trace_shots: tuple = dataclasses.field(compare=False, default=(0,))
     data_movement: bool = False
 
+    def __post_init__(self) -> None:
+        """Every value checked, with the sentence a yaml user reads."""
+        _check_log(self.log)
+        _check_trace(self.trace)
+        _check_trace_shots(self.trace_shots)
+        config.check_boolean(
+            "observation.log_component_io", self.log_component_io
+        )
+        config.check_boolean(
+            "observation.record_switching_windows",
+            self.record_switching_windows,
+        )
+        config.check_boolean("observation.backlog_trace", self.backlog_trace)
+        config.check_boolean("observation.data_movement", self.data_movement)
+
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":
-        """The `observation` section, every key optional."""
+        """The `observation` section, every key optional.
+
+        yaml 1.1 reads a bare `off` as False, so False is the word off
+        for the log and the trace, and a yaml list of shots is the
+        record's tuple; the record checks every value.
+        """
         _refuse_a_section_that_is_not_a_block(section)
         _refuse_an_unknown_key(section)
-        log = _log_mode(section)
-        trace = _trace_word_or_path(section)
-        trace_shots = _trace_shots(section)
-        log_component_io = config.boolean(
-            section, "observation", "log_component_io"
+        log_word = section.get("log", "off")
+        log = _off_word(log_word)
+        trace_word = section.get("trace", "off")
+        trace = _off_word(trace_word)
+        shot_list = section.get("trace_shots", (0,))
+        trace_shots = _shot_tuple(shot_list)
+        log_component_io = section.get("log_component_io", False)
+        record_switching_windows = section.get(
+            "record_switching_windows", False
         )
-        record_switching_windows = config.boolean(
-            section, "observation", "record_switching_windows"
-        )
-        backlog_trace = config.boolean(section, "observation", "backlog_trace")
-        data_movement = config.boolean(section, "observation", "data_movement")
+        backlog_trace = section.get("backlog_trace", False)
+        data_movement = section.get("data_movement", False)
         return cls(
             log=log,
             trace=trace,
@@ -138,16 +159,26 @@ def _refuse_an_unknown_key(section: Mapping) -> None:
             )
 
 
-def _log_mode(section: Mapping) -> str:
-    """The engine narrator's word."""
-    log = section.get("log", "off")
-    if log is False:
-        log = "off"  # yaml 1.1 reads a bare `off` as boolean False
-    if log not in LOG_MODES:
-        raise ValueError(
-            f"observation.log must be one of {LOG_MODES}, got {log!r}"
-        )
-    return log
+def _off_word(value):
+    """The word off for yaml's False; any other value as written."""
+    if value is False:
+        return "off"
+    return value
+
+
+def _shot_tuple(shots):
+    """A yaml list of shots as the record's tuple; any other as written."""
+    if isinstance(shots, list):
+        return tuple(shots)
+    return shots
+
+
+def _check_log(log) -> None:
+    """The engine narrator's word is one of LOG_MODES."""
+    # a tuple of words, not a set: a yaml list or block is unhashable
+    if log in LOG_MODES:
+        return
+    raise ValueError(f"observation.log must be one of {LOG_MODES}, got {log!r}")
 
 
 def window_check_from_yaml(section: Mapping):
@@ -170,11 +201,8 @@ def window_check_from_yaml(section: Mapping):
     )
 
 
-def _trace_word_or_path(section: Mapping) -> str:
-    """off, chrome, or the path the Chrome trace is written to."""
-    trace = section.get("trace", "off")
-    if trace is False:
-        trace = "off"  # yaml 1.1 reads a bare `off` as boolean False
+def _check_trace(trace) -> None:
+    """The trace is off, chrome, or the path the Chrome trace is written to."""
     if not isinstance(trace, str):
         raise ValueError(
             "observation.trace must be off, chrome, or a path, got "
@@ -192,20 +220,17 @@ def _trace_word_or_path(section: Mapping) -> str:
             f"write `log: {trace}` for that, and leave `trace: off` or "
             "name a Chrome trace with chrome or a path"
         )
-    return trace
 
 
-def _trace_shots(section: Mapping) -> tuple:
+def _check_trace_shots(shots) -> None:
     """The shots of a sweep point the trace is written for."""
-    shots = section.get("trace_shots", (0,))
-    if not isinstance(shots, (list, tuple)):
+    if not isinstance(shots, tuple):
         raise ValueError(
-            "observation.trace_shots must be a list of shot numbers, got "
-            f"{shots!r}"
+            "observation.trace_shots must be a list of shot numbers, a "
+            f"tuple in Python, got {shots!r}"
         )
     for shot in shots:
         _refuse_a_shot_that_is_not_a_count(shot)
-    return tuple(shots)
 
 
 def _refuse_a_shot_that_is_not_a_count(shot) -> None:

@@ -124,17 +124,21 @@ def is_whole_count(value: object, minimum: int = 1) -> bool:
 def boolean(
     section: Mapping, section_name: str, key: str, default: bool = False
 ) -> bool:
-    """An on-or-off knob, the default when the yaml is silent.
+    """An on-or-off knob, the default when the yaml is silent."""
+    value = section.get(key, default)
+    check_boolean(f"{section_name}.{key}", value)
+    return value
+
+
+def check_boolean(name: str, value: object) -> None:
+    """An on-or-off knob is True or False.
 
     The test is the type, because 1 == True and 0 == False would let a
     count stand in for a knob (bool is a subtype of int).
     """
-    value = section.get(key, default)
     if isinstance(value, bool):
-        return value
-    raise ValueError(
-        f"{section_name}.{key} must be true or false, got {value!r}"
-    )
+        return
+    raise ValueError(f"{name} must be true or false, got {value!r}")
 
 
 def finite_number(

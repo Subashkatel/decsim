@@ -18,6 +18,22 @@ STUDY_KNOBS = (
     "backlog_trace",
     "data_movement",
 )
+# a value written in Python, and the sentence that refuses it
+PYTHON_REFUSALS = [
+    ({"log": "loud"}, "observation.log must be one of"),
+    ({"trace": True}, "observation.trace must be off, chrome, or a path"),
+    ({"trace": ""}, "observation.trace is empty, which names no file"),
+    ({"trace": "print"}, "observation.trace no longer names the engine"),
+    ({"trace_shots": [0, 1]}, "observation.trace_shots must be a list of"),
+    ({"trace_shots": (0, -1)}, "non-negative whole numbers, got -1"),
+    ({"log_component_io": 1}, "observation.log_component_io must be true"),
+    (
+        {"record_switching_windows": "yes"},
+        "observation.record_switching_windows must be true or false",
+    ),
+    ({"backlog_trace": None}, "observation.backlog_trace must be true"),
+    ({"data_movement": 0}, "observation.data_movement must be true or false"),
+]
 
 
 def _section(text: str):
@@ -131,6 +147,25 @@ def test_a_study_knob_written_as_one_is_refused_as_not_true_or_false():
     assert "observation.data_movement must be true or false, got 1" in str(
         refusal.value
     )
+
+
+def test_a_yaml_shot_list_is_the_records_tuple():
+    section = _section("observation:\n  trace_shots: [0, 3]\n")
+
+    settings = observe_settings.ObservationSettings.from_yaml(section)
+
+    assert settings.trace_shots == (0, 3)
+
+
+@pytest.mark.parametrize("values, sentence", PYTHON_REFUSALS)
+def test_a_python_record_refuses_a_value_with_the_yaml_sentence(
+    values, sentence
+):
+    """The record checks its own values; the yaml reader only translates."""
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings(**values)
+
+    assert sentence in str(refusal.value)
 
 
 def test_a_list_of_referees_is_refused_with_the_rows_by_name():

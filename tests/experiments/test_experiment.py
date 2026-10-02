@@ -158,3 +158,42 @@ def test_a_run_file_that_defines_no_experiment_is_refused(tmp_path):
         "defines no experiment; a run file sets experiment = "
         "Experiment(...) at module level"
     )
+
+
+def test_one_point_reads_no_point_past_the_one_it_chooses(
+    tmp_path, monkeypatch
+):
+    """A point's read runs its maker, so a narrated shot reads no other.
+
+    Without a name only the first point is read; with one, the points up
+    to the named one, since a yaml point is named by its id.
+    """
+    axes = {
+        "qpu.distance": [3, 5, 7],
+        "workload.arguments.physical_error_probability": [0.001],
+        "qpu.round_period_microseconds": [1.0],
+    }
+    card = {"sweep": [{"axes": axes, "collection": {"max_shots": 2}}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    study = config.experiment()
+    second_name = study.points[1].name
+    read_distances = []
+    point_task = experiment.ExperimentConfig.point_task
+
+    def counted_point_task(self, values):
+        distance = values["qpu.distance"]
+        read_distances.append(distance)
+        return point_task(self, values)
+
+    monkeypatch.setattr(
+        experiment.ExperimentConfig, "point_task", counted_point_task
+    )
+
+    config.one_point()
+    first_reads = list(read_distances)
+    read_distances.clear()
+    config.one_point(second_name)
+
+    assert first_reads == [3]
+    assert read_distances == [3, 5]

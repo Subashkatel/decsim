@@ -27,7 +27,7 @@ import os
 import pathlib
 import re
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Optional
 
 import yaml
@@ -309,12 +309,8 @@ class ExperimentConfig:
 
     def point_tasks(self) -> list:
         """Each point's task with its block's collection, blocks in order."""
-        pairs = []
-        for block in self.sweep:
-            for values in block.points():
-                task = self.point_task(values)
-                pairs.append((task, block.collection))
-        return pairs
+        pairs = self._each_point_task()
+        return list(pairs)
 
     def point_task(self, values: Mapping) -> collect.Task:
         """The task of one sweep point: its settings and metadata.
@@ -363,23 +359,21 @@ class ExperimentConfig:
 
         A narrated shot needs one point, so the points are not checked
         against each other: a base whose blocks collect a point two ways
-        still runs a shot, and without a name only the first point is
-        read.
+        still runs a shot. Without a name only the first point is read;
+        with one, points are read in order until the one whose id it
+        names, since a yaml point's name is its id's start.
         """
-        pairs = self.point_tasks()
         if name is None:
             first_block = self.sweep[0]
             first_task = self.first_point_task()
-            pairs = [(first_task, first_block.collection)]
+            return self._only(first_task, first_block.collection)
         names = []
-        for task, collection in pairs:
+        for task, collection in self._each_point_task():
             point_id = task.strong_id()
             point_name = point_id[:YAML_POINT_NAME_LENGTH]
+            if point_name == name:
+                return self._only(task, collection)
             names.append(point_name)
-            if name in (None, point_name):
-                sections = self.resolved_sections(task.metadata)
-                point = _point_of(task, collection, sections)
-                return Experiment(self.name, (point,))
         _refuse_an_unknown_point(self.name, name, names)
 
     def first_point_task(self) -> collect.Task:
@@ -409,6 +403,23 @@ class ExperimentConfig:
         path = self.config_files[0]
         with _refused_in(path):
             return machine_module.Machine.build(settings, seed)
+
+    def _each_point_task(self) -> Iterator[tuple]:
+        """Each point's task and its block's collection, read as asked."""
+        for block in self.sweep:
+            for values in block.points():
+                task = self.point_task(values)
+                yield task, block.collection
+
+    def _only(
+        self,
+        task: collect.Task,
+        collection: collection_module.CollectionSettings,
+    ) -> Experiment:
+        """The experiment of one point: the task with its sections."""
+        sections = self.resolved_sections(task.metadata)
+        point = _point_of(task, collection, sections)
+        return Experiment(self.name, (point,))
 
     def _read_point(self, values: Mapping) -> tuple:
         """A point's resolved sections, and the settings read from them."""

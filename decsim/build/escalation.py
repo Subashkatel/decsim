@@ -14,6 +14,7 @@ cache with no prefetcher holds a NULL one
 import dataclasses
 from typing import TYPE_CHECKING, Any, Optional
 
+import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -22,7 +23,6 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.ports as ports
-import decsim.settings as machine_settings
 
 if TYPE_CHECKING:
     import decsim.build.decoders as decoders_part
@@ -129,7 +129,9 @@ def absorbs_weak_windows(
 
 
 def build_burst_detector(
-    settings: machine_settings.MachineSettings,
+    settings: Optional[escalation_settings.SwitchingSettings],
+    round_period_microseconds: float,
+    machine_clock: Optional[config.Clock],
     engine: engine_module.Engine,
     plan: "plan_build.Plan",
 ) -> Optional[ports.BurstDetector]:
@@ -137,17 +139,18 @@ def build_burst_detector(
 
     It scores detection events, so every operation it scores brings the
     circuit they are formed from, and it is calibrated from that
-    circuit, its round count and the round period. The row reads the
-    machine's clock when its own record names none.
+    circuit, its round count and the round period. The row reads
+    machine_clock when its own record names none.
     """
-    if settings.switching is None:
+    if settings is None:
         return None
-    record = settings.switching.burst_detector
+    record = settings.burst_detector
     if record is None:
         return None
     circuits = _counted_circuits(plan)
-    round_period = settings.qpu.round_period_microseconds
-    return record.build(engine, circuits, round_period, settings.clock)
+    return record.build(
+        engine, circuits, round_period_microseconds, machine_clock
+    )
 
 
 def _threshold_source(settings: escalation_settings.SwitchingSettings):

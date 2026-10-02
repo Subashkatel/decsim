@@ -78,8 +78,18 @@ def _pool(settings, detection_events=None):
         detection_events = event_formation.SeatedFormation(
             None, at_the_controller
         )
+    window_tier = settings.window_tier
+    window_decoder = settings.decoder_settings_for(window_tier.value)
+    escalates = settings.switching is not None
     return decoder_build.build_decoder_pool(
-        settings, plan, detection_events, signal
+        window_decoder,
+        settings.strong_decoder,
+        window_tier,
+        escalates,
+        settings.clock,
+        plan,
+        detection_events,
+        signal,
     )
 
 
@@ -112,8 +122,7 @@ def test_the_units_two_stages_carry_all_four_of_the_engines_cycle_keys():
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = _settings(weak=weak)
-    unit = decoder_build.build_decoder_unit(settings, "weak", None, None)
+    unit = decoder_build.build_decoder_unit(weak, "weak", None, None, None)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=4)
 
     ticks = unit.timing.stage_ticks(job)
@@ -133,9 +142,8 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=union_find_settings, engine=engine
     )
-    settings = _settings(weak=weak)
 
-    unit = decoder_build.build_decoder_unit(settings, "weak", None, None)
+    unit = decoder_build.build_decoder_unit(weak, "weak", None, None, None)
 
     assert unit.decoder.weight_step == 0.25
 
@@ -147,18 +155,16 @@ def test_an_engine_that_names_no_clock_counts_on_the_machines():
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = _settings(weak=weak)
-    settings = dataclasses.replace(settings, clock=machine_clock)
 
-    unit = decoder_build.build_decoder_unit(settings, "weak", None, None)
+    unit = decoder_build.build_decoder_unit(
+        weak, "weak", machine_clock, None, None
+    )
 
     assert unit.timing.clock == machine_clock
 
 
 def test_a_tier_whose_slot_is_empty_builds_none():
-    settings = _settings()
-
-    unit = decoder_build.build_decoder_unit(settings, "strong", None, None)
+    unit = decoder_build.build_decoder_unit(None, "strong", None, None, None)
 
     assert unit is None
 

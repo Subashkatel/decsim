@@ -20,10 +20,12 @@ import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.settings as machine_settings
 from decsim.burst_detectors.masked_regional_cusum import (
     detector as masked_regional_cusum,
 )
+
+# The round period the qpu card names by default.
+ROUND_PERIOD_MICROSECONDS = 1.1
 
 
 def _switching(**changes) -> escalation_settings.SwitchingSettings:
@@ -144,14 +146,12 @@ def test_the_confidence_row_is_built_with_the_sections_walk_card():
 def test_the_switching_slots_detector_is_the_one_built():
     detector = event_count.EventCountBurstDetector.Settings()
     switching = _switching(burst_detector=detector)
-    weak = _weak()
-    settings = machine_settings.MachineSettings(
-        weak_decoder=weak, strong_decoder=weak, switching=switching
-    )
     plan = _plan_that_scores_nothing()
     engine = engine_module.Engine()
 
-    built = escalation_build.build_burst_detector(settings, engine, plan)
+    built = escalation_build.build_burst_detector(
+        switching, ROUND_PERIOD_MICROSECONDS, None, engine, plan
+    )
 
     assert isinstance(built, event_count.EventCountBurstDetector)
 
@@ -160,17 +160,12 @@ def test_a_count_that_names_no_clock_counts_on_the_machines():
     machine_clock = config.Clock(4000)
     detector = event_count.EventCountBurstDetector.Settings(cycles_per_round=1)
     switching = _switching(burst_detector=detector)
-    weak = _weak()
-    settings = machine_settings.MachineSettings(
-        clock=machine_clock,
-        weak_decoder=weak,
-        strong_decoder=weak,
-        switching=switching,
-    )
     plan = _plan_that_scores_nothing()
     engine = engine_module.Engine()
 
-    built = escalation_build.build_burst_detector(settings, engine, plan)
+    built = escalation_build.build_burst_detector(
+        switching, ROUND_PERIOD_MICROSECONDS, machine_clock, engine, plan
+    )
 
     assert built.settings.clock == machine_clock
 
@@ -179,26 +174,22 @@ def test_a_chart_bank_that_names_no_clock_stays_unpriced():
     """With no clock the bank publishes a verdict as its round is formed."""
     detector = masked_regional_cusum.MaskedRegionalCusumBurstDetector.Settings()
     switching = _switching(burst_detector=detector)
-    weak = _weak()
     machine_clock = config.Clock(4000)
-    settings = machine_settings.MachineSettings(
-        clock=machine_clock,
-        weak_decoder=weak,
-        strong_decoder=weak,
-        switching=switching,
-    )
     plan = _plan_that_scores_nothing()
     engine = engine_module.Engine()
 
-    built = escalation_build.build_burst_detector(settings, engine, plan)
+    built = escalation_build.build_burst_detector(
+        switching, ROUND_PERIOD_MICROSECONDS, machine_clock, engine, plan
+    )
 
     assert built.settings.clock is None
 
 
 def test_a_run_with_no_switching_builds_no_detector():
-    settings = machine_settings.MachineSettings()
     engine = engine_module.Engine()
 
-    built = escalation_build.build_burst_detector(settings, engine, None)
+    built = escalation_build.build_burst_detector(
+        None, ROUND_PERIOD_MICROSECONDS, None, engine, None
+    )
 
     assert built is None

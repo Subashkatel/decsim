@@ -17,20 +17,23 @@ import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
 import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
+import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
+import decsim.frontends.settings as workload_settings
 import decsim.links.window_transfers as window_transfers_module
 import decsim.ports as ports
-import decsim.settings as machine_settings
+import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_commits as window_commits
 import decsim.windows.window_manager as window_manager_module
@@ -81,7 +84,12 @@ class Windows:
     @classmethod
     def build(
         cls,
-        settings: machine_settings.MachineSettings,
+        windows_settings: window_settings.WindowSettings,
+        workload: workload_settings.WorkloadSettings,
+        switching_settings: Optional[escalation_settings.SwitchingSettings],
+        window_decoder: Optional[decoder_settings.DecoderPoolSettings],
+        window_tier: window_records.DecoderTier,
+        machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         plan: plan_build.Plan,
         burst_detector: Optional[ports.BurstDetector],
@@ -91,10 +99,12 @@ class Windows:
         """Every component of the window side, wired to one another.
 
         One line per component, in the order a window meets them, then
-        the wires inside the part.
+        the wires inside the part. window_decoder is the settings of
+        window_tier, the tier that decodes the plan's windows; a card
+        that names no clock runs on machine_clock.
         """
         run_plan = plan.run_plan
-        built_models = settings.workload.built_models
+        built_models = workload.built_models
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
         models = window_planner_module.WindowModels(built_models)
@@ -104,19 +114,20 @@ class Windows:
             plan.planned_operations,
         )
         tracker = round_tracker_module.RoundTracker()
-        retention = _retention(plan, settings)
+        is_switching = switching_settings is not None
+        retention = _retention(plan, window_tier, is_switching)
         window_transfers = window_transfers_module.WindowTransfers(engine)
         decoder_output = decoder_output_module.DecoderOutput(engine)
-        copies_the_fold = _copies_the_boundary_fold(settings)
+        copies_the_fold = _copies_the_boundary_fold(window_decoder)
         gate = decode_requests.WindowInputGate(copies_the_fold)
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
         courier = window_boundaries.BoundaryCourier()
         committer = window_commits.WindowCommitter(engine)
-        verdict = _verdict(settings.switching, settings.clock, engine)
+        verdict = _verdict(switching_settings, machine_clock, engine)
         clocked_windows = config.with_machine_clock(
-            settings.windows, settings.clock
+            windows_settings, machine_clock
         )
         requester = decode_requests.DecodeRequester(
             clock=clocked_windows.clock,
@@ -126,7 +137,7 @@ class Windows:
             _switching_side(switching)
         )
         gap_join = _gap_join(confidence_signal, engine)
-        feedback_boundary_mode = settings.workload.feedback_boundary_mode
+        feedback_boundary_mode = workload.feedback_boundary_mode
         window_manager = window_manager_module.WindowManager(
             engine, feedback_boundary_mode=feedback_boundary_mode
         )
@@ -305,7 +316,9 @@ class Windows:
 
 
 def _retention(
-    plan: plan_build.Plan, settings: machine_settings.MachineSettings
+    plan: plan_build.Plan,
+    window_tier: window_records.DecoderTier,
+    is_switching: bool,
 ) -> round_retention_module.RoundRetention:
     """Which store holds a window's rounds, and for how long.
 
@@ -314,10 +327,9 @@ def _retention(
     first by the same rule as the reads the plan placed.
     """
     formation_reads = plan.formation_reads
-    is_switching = settings.switching is not None
     return round_retention_module.RoundRetention(
         is_strong_context_retained=is_switching,
-        primary_tier=settings.window_tier,
+        primary_tier=window_tier,
         strong_side_seat=formation_reads.strong_side_seat,
     )
 
@@ -367,14 +379,12 @@ def _verdict(
 
 
 def _copies_the_boundary_fold(
-    settings: machine_settings.MachineSettings,
+    window_decoder: Optional[decoder_settings.DecoderPoolSettings],
 ) -> bool:
     """Whether the tier that decodes the plan's windows folds into a copy.
 
     A run with no decoder decodes no window, so the default is moot.
     """
-    tier = settings.window_tier.value
-    tier_settings = settings.decoder_settings_for(tier)
-    if tier_settings is None:
+    if window_decoder is None:
         return True
-    return tier_settings.copies_boundary_fold
+    return window_decoder.copies_boundary_fold

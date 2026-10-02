@@ -130,10 +130,12 @@ class Machine:
             settings.switching, settings.weak_decoder, engine
         )
         plan = plan_build.build_plan(settings, switching)
+        round_period = settings.qpu.round_period_microseconds
         burst_detector = escalation_build.build_burst_detector(
-            settings, engine, plan
+            settings.switching, round_period, settings.clock, engine, plan
         )
         window_tier = settings.window_tier
+        window_decoder = settings.decoder_settings_for(window_tier.value)
         escalates = settings.switching is not None
         detection_events = readout_part.build_detection_events(
             settings.detection_events,
@@ -147,7 +149,14 @@ class Machine:
         if switching is not None:
             confidence_signal = switching.confidence_signal
         pool = decoders_part.build_decoder_pool(
-            settings, plan, detection_events, confidence_signal
+            window_decoder,
+            settings.strong_decoder,
+            window_tier,
+            escalates,
+            settings.clock,
+            plan,
+            detection_events,
+            confidence_signal,
         )
         weak_store_slot, strong_store_slot = store_slots(
             settings, window_tier, pool
@@ -173,7 +182,17 @@ class Machine:
             links,
         )
         windows = windows_part.Windows.build(
-            settings, engine, plan, burst_detector, links, switching
+            settings.windows,
+            settings.workload,
+            settings.switching,
+            window_decoder,
+            window_tier,
+            settings.clock,
+            engine,
+            plan,
+            burst_detector,
+            links,
+            switching,
         )
         decoders = decoders_part.Decoders.build(
             settings.decoder_manager, settings.clock, engine, pool

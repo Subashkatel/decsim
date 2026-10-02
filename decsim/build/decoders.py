@@ -21,7 +21,7 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.ports as ports
-import decsim.settings as machine_settings
+import decsim.records.windows as window_records
 
 # The name the tier's event-detection stage carries in the trace, the
 # stage ledger and the narrator log.
@@ -123,8 +123,9 @@ class Decoders:
 
 
 def build_decoder_unit(
-    settings: machine_settings.MachineSettings,
+    tier_settings: Optional[decoder_settings.DecoderPoolSettings],
     tier: str,
+    machine_clock: Optional[config.Clock],
     formation: Optional[detection_events_module.TierFormation],
     signal: Optional[ports.ConfidenceSignal],
 ):
@@ -133,62 +134,58 @@ def build_decoder_unit(
     The tier's algorithm decodes inside a StagedDecoder whose fetch and
     release stages are cycles of the tier's clock, with this tier's
     event-detection logic in front of them when the tier's decoder is a
-    seat of the run's detection event placement (formation). The tier
-    that decodes the plan's windows must produce the evidence the run's
-    confidence signal reads when the run has one. None when the tier's
-    slot is empty.
+    seat of the run's detection event placement (formation). A tier
+    handed a confidence signal must produce the evidence it reads. None
+    when the tier's slot is empty.
     """
-    tier_settings = settings.decoder_settings_for(tier)
     if tier_settings is None:
         return None
     algorithm_settings = tier_settings.algorithm
     algorithm = algorithm_settings.build()
-    is_active = tier == settings.window_tier.value
-    if is_active and signal is not None:
-        signal_name = settings.switching.confidence.name
+    if signal is not None:
         _check_serves_the_confidence(
-            algorithm, algorithm_settings.name, tier, signal, signal_name
+            algorithm, algorithm_settings.name, tier, signal
         )
-    return _staged_unit(tier_settings, algorithm, formation, settings.clock)
+    return _staged_unit(tier_settings, algorithm, formation, machine_clock)
 
 
 def build_decoder_pool(
-    settings: machine_settings.MachineSettings,
+    window_decoder: Optional[decoder_settings.DecoderPoolSettings],
+    strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
+    window_tier: window_records.DecoderTier,
+    escalates: bool,
+    machine_clock: Optional[config.Clock],
     plan: plan_build.Plan,
     detection_events: ports.DetectionEventPlacement,
     signal: Optional[ports.ConfidenceSignal],
 ) -> DecoderPool:
     """The tiers' units and the managers' pools.
 
-    Switching gives the strong tier a pool of its own, which serves
-    escalated jobs. A run with no switching has one pool, of the tier
-    that decodes the plan's windows. Each tier whose decoder is a seat of
-    the run's detection event placement gets its own event-detection
+    The chip's pool holds units of window_tier, whose settings are
+    window_decoder and whose unit serves the run's confidence signal; a
+    run that escalates gives the strong tier a pool of its own. Each tier
+    seated by the detection event placement gets its own event-detection
     logic, so a round both tiers read is formed and charged by each.
     """
-    weak_formation = _tier_formation(detection_events, "weak_decoder")
-    strong_formation = _tier_formation(detection_events, "strong_decoder")
-    weak = build_decoder_unit(settings, "weak", weak_formation, signal)
-    strong = build_decoder_unit(settings, "strong", strong_formation, signal)
-    active_tier = settings.window_tier.value
-    active = weak
-    active_formation = weak_formation
-    if active_tier == "strong":
-        active = strong
-        active_formation = strong_formation
-    _check_the_active_tier_decodes(active, active_tier, plan)
-    blocks_unit = _blocks_unit(settings, active_tier)
-    chip = _pool(
-        settings,
-        decode_queue.DEFAULT_POOL,
-        active_tier,
-        active_formation,
-        blocks_unit,
+    active_tier = window_tier.value
+    active_seat = f"{active_tier}_decoder"
+    active_formation = _tier_formation(detection_events, active_seat)
+    active = build_decoder_unit(
+        window_decoder, active_tier, machine_clock, active_formation, signal
     )
-    if settings.switching is None:
+    _check_the_active_tier_decodes(active, active_tier, plan)
+    blocks_unit = _blocks_unit(window_decoder)
+    chip = _pool(
+        window_decoder, decode_queue.DEFAULT_POOL, active_formation, blocks_unit
+    )
+    if not escalates:
         return DecoderPool(active=active, strong=None, chip=chip, host=None)
+    strong_formation = _tier_formation(detection_events, "strong_decoder")
+    strong = build_decoder_unit(
+        strong_decoder, "strong", machine_clock, strong_formation, None
+    )
     host = _pool(
-        settings, decode_queue.STRONG_POOL, "strong", strong_formation, False
+        strong_decoder, decode_queue.STRONG_POOL, strong_formation, False
     )
     return DecoderPool(active=active, strong=strong, chip=chip, host=host)
 
@@ -210,9 +207,8 @@ def _check_the_active_tier_decodes(
 
 
 def _pool(
-    settings: machine_settings.MachineSettings,
+    tier_settings: Optional[decoder_settings.DecoderPoolSettings],
     name: str,
-    tier: str,
     formation: Optional[detection_events_module.TierFormation],
     blocks_unit: bool,
 ) -> decoder_pool_module.PoolSettings:
@@ -221,7 +217,6 @@ def _pool(
     A run with no decoder holds one unit of a tier's defaults, which
     nothing is sent to.
     """
-    tier_settings = settings.decoder_settings_for(tier)
     if tier_settings is None:
         return decoder_pool_module.PoolSettings(
             name=name,
@@ -240,7 +235,7 @@ def _pool(
 
 
 def _blocks_unit(
-    settings: machine_settings.MachineSettings, active_tier: str
+    tier_settings: Optional[decoder_settings.DecoderPoolSettings],
 ) -> bool:
     """The blocking rule of the pool that decodes the windows.
 
@@ -250,7 +245,6 @@ def _blocks_unit(
     hold_output), so <tier>.result_blocks_unit is read on the primary
     tier alone.
     """
-    tier_settings = settings.decoder_settings_for(active_tier)
     if tier_settings is None:
         return False
     return tier_settings.result_blocks_unit
@@ -271,11 +265,7 @@ def _tier_formation(
 
 
 def _check_serves_the_confidence(
-    algorithm,
-    kind,
-    tier: str,
-    signal: ports.ConfidenceSignal,
-    signal_name: str,
+    algorithm, kind, tier: str, signal: ports.ConfidenceSignal
 ) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
@@ -289,6 +279,7 @@ def _check_serves_the_confidence(
     if not missing:
         return
     reason = _missing_evidence_reason(algorithm, missing, signal)
+    signal_name = signal.source.method
     raise ValueError(
         f"{tier}_decoder.kind {kind!r} cannot serve the confidence "
         f"{signal_name}: {reason}"

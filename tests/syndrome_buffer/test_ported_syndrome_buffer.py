@@ -262,6 +262,16 @@ def test_the_default_shape_is_the_sky130_byte_fifo_one_port_each_way():
     assert fifo.access_latency_cycles == 0
 
 
+def test_afs_word_memory_reads_32_bits_in_one_nanosecond():
+    """Four cycles a 32-bit read at 4 GHz, 2001.06598 lines 531 and 1102."""
+    engine = engine_module.Engine()
+    afs = ported_syndrome_buffer.AFS_WORD_MEMORY
+    store = ported_syndrome_buffer.PortedSyndromeBuffer(afs, engine)
+    window = _stored_window(store, (32,))
+
+    assert store.book_read(window) == config.microseconds_to_ticks(0.001)
+
+
 def _section_settings(section):
     clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
     return syndrome_buffer_settings.from_yaml(

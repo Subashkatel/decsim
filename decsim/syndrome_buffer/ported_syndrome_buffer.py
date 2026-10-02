@@ -258,10 +258,12 @@ SKY130_BYTE_FIFO = PortedSyndromeBufferSettings(
     access_latency_cycles=0,
 )
 # AFS's on-chip memory: four cycles to read 32 bits (2001.06598 lines
-# 530-531), an occupancy of the port. AFS counts them on a 4 GHz clock
-# (lines 1101-1102); the preset counts them on the buffer's own clock.
-# AFS states no port count, so the ports are the byte FIFO's, an estimate.
+# 530-531), an occupancy of the port, on AFS's own 4 GHz clock (lines
+# 1101-1102), so a read holds its port 1 ns. AFS states no port count,
+# so the ports are the byte FIFO's, an estimate.
+_AFS_CLOCK = config.Clock(period_ticks=250)
 AFS_WORD_MEMORY = PortedSyndromeBufferSettings(
+    clock=_AFS_CLOCK,  # 4 GHz, line 1102
     read_ports=1,  # estimate
     write_ports=1,  # estimate
     read_write_ports=0,  # estimate

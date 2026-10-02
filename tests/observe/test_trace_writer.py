@@ -360,7 +360,7 @@ def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
     that ran it, as each LLVM XRay record carries its thread, and each
     decode's stages sit on its own service's lane.
     """
-    factory = qpu_settings.FactorySettings.from_yaml(
+    factory = qpu_settings.factory_from_yaml(
         {
             "kind": "distillation",
             "unit_count": 1,

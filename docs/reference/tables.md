@@ -135,9 +135,9 @@ In `decsim/qpu/settings.py`. A row of it is named under `magic_state_factory.kin
 
 | Row | Class | What it is |
 | --- | --- | --- |
-| `infinite` | `InfiniteFactory` in `decsim/qpu/magic_state_factories.py` | The idealized factory: a magic state is always in stock. |
-| `distillation` | `DistillationFactory` in `decsim/qpu/magic_state_factories.py` | One 15-to-1 distillation stage with optional continuous production. |
-| `multi_level` | `MultiLevelDistillationFactory` in `decsim/qpu/magic_state_factories.py` | A pull-driven chain of distillation levels feeding one store. |
+| `infinite` | | |
+| `distillation` | | |
+| `multi_level` | | |
 
 ## `PROTOCOLS`
 

@@ -2171,9 +2171,8 @@ class RoundsPolicy(Protocol):
 class MagicStateFactory(Protocol):
     """Where a non-Clifford operation gets its magic state.
 
-    Table rows: infinite, distillation, multi_level
-    (MAGIC_STATE_FACTORIES, qpu/settings.py), each built from one
-    FactoryCollaborators record. The runtime asks and is called back; a
+    Built by its settings record (qpu/magic_state_factories.py) from the
+    run's engine and round. The runtime asks and is called back; a
     factory that produces on demand answers at once. A row that produces
     ahead of demand queues its first attempt in start, never in its
     constructor, so the order the machine builds its components in

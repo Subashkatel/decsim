@@ -23,6 +23,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -312,7 +313,8 @@ def test_a_yaml_without_a_factory_section_runs_the_infinite_row(tmp_path):
     config_path = yaml_configs.write_config(tmp_path, {})
     config = experiment.load_experiment(config_path)
     first_point = config.first_point_task()
-    assert first_point.settings.magic_state_factory.kind == "infinite"
+    infinite = magic_state_factories.InfiniteFactory.Settings()
+    assert first_point.settings.magic_state_factory == infinite
 
 
 def test_the_bulk_strong_key_reaches_the_decoder_manager(tmp_path):

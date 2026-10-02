@@ -25,6 +25,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
@@ -124,7 +125,7 @@ class MachineSettings:
         workload_settings.WorkloadSettings()
     )
     magic_state_factory: qpu_settings.FactorySettings = (
-        qpu_settings.FactorySettings()
+        magic_state_factories.InfiniteFactory.Settings()
     )
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
@@ -212,9 +213,7 @@ class MachineSettings:
         workload = workload_settings.WorkloadSettings.from_yaml(
             sections["workload"], workload_folder
         )
-        magic_state_factory = qpu_settings.FactorySettings.from_yaml(
-            factory_section
-        )
+        magic_state_factory = qpu_settings.factory_from_yaml(factory_section)
         observation = observe_settings.ObservationSettings.from_yaml(
             observation_section
         )

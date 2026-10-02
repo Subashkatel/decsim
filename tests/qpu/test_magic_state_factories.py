@@ -36,10 +36,7 @@ class DecodeLog:
 
 def infinite(engine):
     """The idealized row, built and started the way the root does."""
-    collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine, round_ticks=0
-    )
-    factory = magic_state_factories.InfiniteFactory(collaborators)
+    factory = magic_state_factories.InfiniteFactory(engine)
     factory.start()
     return factory
 
@@ -57,10 +54,7 @@ def unstarted_distillation(engine, *, decode_queue=None, **arguments):
     """The same row, built and bound and not started."""
     row = magic_state_factories.DistillationFactory
     settings = row.Settings(**arguments)
-    collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine, round_ticks=0, settings=settings
-    )
-    factory = row(collaborators)
+    factory = settings.build(engine, 0)
     if decode_queue is not None:
         factory.decode_queue = decode_queue
     return factory
@@ -70,10 +64,7 @@ def multi_level(engine, *, round_ticks, decode_queue=None, **arguments):
     """One level chain, built, bound and started the way the root does."""
     row = magic_state_factories.MultiLevelDistillationFactory
     settings = row.Settings(**arguments)
-    collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine, round_ticks=round_ticks, settings=settings
-    )
-    factory = row(collaborators)
+    factory = settings.build(engine, round_ticks)
     if decode_queue is not None:
         factory.decode_queue = decode_queue
     factory.start()
@@ -279,10 +270,7 @@ def test_a_yaml_success_probability_in_e_notation_is_a_number():
     row = magic_state_factories.DistillationFactory
     settings = row.Settings.from_yaml(section)
     engine = decsim.engine.Engine()
-    collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine, round_ticks=0, settings=settings
-    )
-    factory = row(collaborators)
+    factory = settings.build(engine, 0)
     factory.start()
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
@@ -536,10 +524,7 @@ def test_a_chains_yaml_probabilities_in_e_notation_are_numbers():
     row = magic_state_factories.MultiLevelDistillationFactory
     settings = row.Settings.from_yaml(section)
     engine = decsim.engine.Engine()
-    collaborators = magic_state_factories.FactoryCollaborators(
-        engine=engine, round_ticks=10, settings=settings
-    )
-    factory = row(collaborators)
+    factory = settings.build(engine, 10)
     factory.start()
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))

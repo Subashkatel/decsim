@@ -1880,18 +1880,17 @@ class _SilentFactoryTrace:
 
 
 class AlwaysReadyFactory:
-    """A factory row written outside decsim: the collaborators alone.
+    """A factory written outside decsim, built from the engine alone.
 
-    Its constructor is InfiniteFactory's own shape, one parameter: the
-    collaborators record every row is built from. It declares the decode
-    queue port the root binds on every factory row, and the trace source
-    the port declares, silent because no request waits.
+    It declares the decode queue port the part binds on every factory,
+    and the trace source the port declares, silent because no request
+    waits.
     """
 
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators):
-        self.engine = collaborators.engine
+    def __init__(self, engine):
+        self.engine = engine
         self.requests = []
         self.trace = _SilentFactoryTrace()
 
@@ -1907,10 +1906,17 @@ class AlwaysReadyFactory:
         """Nothing runs, so nothing stops."""
 
 
-def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
-    monkeypatch,
-):
-    """One constructor call, so a row that reads only the engine builds."""
+@dataclasses.dataclass(frozen=True)
+class AlwaysReadyFactorySettings:
+    """The record that builds an AlwaysReadyFactory."""
+
+    def build(self, engine, round_ticks):
+        del round_ticks
+        return AlwaysReadyFactory(engine)
+
+
+def test_a_factory_written_outside_decsim_is_built_by_its_record():
+    """The part calls the record's build, whatever factory it is."""
     config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
     config = experiment.load_experiment(config_path)
     point = config.point_task(
@@ -1921,13 +1927,8 @@ def test_a_factory_row_written_outside_decsim_builds_by_its_own_name(
         },
     )
     settings = point.settings
-    factory_settings = qpu_settings.FactorySettings(kind="always_ready")
-    settings = dataclasses.replace(
-        settings, magic_state_factory=factory_settings
-    )
-    monkeypatch.setitem(
-        qpu_settings.MAGIC_STATE_FACTORIES, "always_ready", AlwaysReadyFactory
-    )
+    always_ready = AlwaysReadyFactorySettings()
+    settings = dataclasses.replace(settings, magic_state_factory=always_ready)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert isinstance(machine.qpu.factory, AlwaysReadyFactory)
@@ -1952,9 +1953,6 @@ def test_the_run_result_carries_the_factorys_supply_stall():
         correction_decode_count=0,
         return_ticks=return_ticks,
     )
-    factory = qpu_settings.FactorySettings(
-        kind="distillation", row_settings=card
-    )
     weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
     decoder = decoders.PresetLatencyDecoder(weak_microseconds)
     weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
@@ -1967,7 +1965,7 @@ def test_the_run_result_carries_the_factorys_supply_stall():
         weak_decoder=weak_decoder,
         links=links,
         controller=controller,
-        magic_state_factory=factory,
+        magic_state_factory=card,
     )
 
     machine = machine_module.Machine.build(settings, 0)

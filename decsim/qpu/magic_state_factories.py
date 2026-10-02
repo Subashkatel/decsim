@@ -32,7 +32,7 @@ import dataclasses
 import functools
 import math
 from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.config as config
 import decsim.engine
@@ -43,37 +43,30 @@ import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 
-@dataclasses.dataclass(frozen=True)
-class FactoryCollaborators:
-    """What the root supplies every magic state factory row.
-
-    One record so every row of MAGIC_STATE_FACTORIES has one constructor
-    signature and the root builds a row without asking which supply
-    model it is; a row reads the collaborators its own model needs,
-    ignores the rest, and reads its own card out of settings, its own
-    Settings record of the magic_state_factory section's keys (decsim/
-    tables.py row_settings), None for a row with no keys. This is gem5's params
-    object, where a SimObject's collaborators arrive as one structure
-    rather than as a signature per subclass
-    (gem5 src/python/m5/SimObject.py:204-205). The decode
-    queue a row submits its correction decodes to is not here: it is a
-    port, decode_queue, which the machine binds once every part exists.
-    """
-
-    engine: decsim.engine.Engine
-    round_ticks: int
-    # the row's own Settings record, opaque to the root
-    settings: Optional[Any] = None
-
-
 class InfiniteFactory:
     """The idealized factory: a magic state is always in stock."""
 
-    # bound by the root as on every row; this row corrects nothing
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The infinite factory has no keys of its own."""
+
+        @classmethod
+        def from_yaml(cls, section: Mapping) -> "InfiniteFactory.Settings":
+            """The section holds no key of this record's, so it is empty."""
+            return cls(**section)
+
+        def build(
+            self, engine: decsim.engine.Engine, round_ticks: int
+        ) -> "InfiniteFactory":
+            """A fresh factory; it paces nothing on the round."""
+            del round_ticks
+            return InfiniteFactory(engine)
+
+    # bound by the part as on every factory; this one corrects nothing
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators: FactoryCollaborators):
-        self.engine = collaborators.engine
+    def __init__(self, engine: decsim.engine.Engine):
+        self.engine = engine
         # a state is always in stock, so no request waits and none fires
         self.trace = _TraceSources()
 
@@ -100,7 +93,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own magic_state_factory keys, checked where they enter.
+        """The 15-to-1 stage's card, checked where it enters.
 
         attempt_ticks and return_ticks are engine ticks. The eleven
         correction decodes are Litinski's multi-qubit rotations (module
@@ -146,13 +139,24 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             )
             return cls(**fields)
 
+        def build(
+            self, engine: decsim.engine.Engine, round_ticks: int
+        ) -> "DistillationFactory":
+            """A fresh factory; its attempts are priced in ticks, not rounds."""
+            del round_ticks
+            return DistillationFactory(engine, self)
+
     # the run's decoder manager, where the correction decodes compete
     # with the core's windows
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators: FactoryCollaborators):
-        self.engine = collaborators.engine
-        self.card = collaborators.settings
+    def __init__(
+        self,
+        engine: decsim.engine.Engine,
+        card: "DistillationFactory.Settings",
+    ):
+        self.engine = engine
+        self.card = card
         self.trace = _TraceSources()
         self._initialize_run_seed_state(self.card.seed)
         self._reset_state(self.card.initial_store)
@@ -321,7 +325,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own magic_state_factory keys, checked where they enter.
+        """The level chain's card, checked where it enters.
 
         levels runs from the first level up. The preparation_logical_cycles
         of two and preparation_distance of three are project coefficients:
@@ -389,19 +393,28 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             fields["levels"] = levels
             return cls(**fields)
 
+        def build(
+            self, engine: decsim.engine.Engine, round_ticks: int
+        ) -> "MultiLevelDistillationFactory":
+            """A fresh factory whose levels run on the run's round."""
+            return MultiLevelDistillationFactory(engine, self, round_ticks)
+
     # the run's decoder manager, where a card's correction decodes go
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators: FactoryCollaborators):
-        self.engine = collaborators.engine
-        self.card = collaborators.settings
+    def __init__(
+        self,
+        engine: decsim.engine.Engine,
+        card: "MultiLevelDistillationFactory.Settings",
+        round_ticks: int,
+    ):
+        self.engine = engine
+        self.card = card
         self.levels = _with_the_papers_cycles(self.card.levels)
-        self.preparation_ticks = _preparation_ticks(
-            self.card, collaborators.round_ticks
-        )
+        self.preparation_ticks = _preparation_ticks(self.card, round_ticks)
         self.trace = _TraceSources()
         self._initialize_run_seed_state(self.card.seed)
-        self._reset_state(collaborators.round_ticks)
+        self._reset_state(round_ticks)
 
     def start(self) -> None:
         """Continuous production fills the top buffer before any request."""

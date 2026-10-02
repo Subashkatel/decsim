@@ -43,7 +43,6 @@ TABLES_WITH_ROW_KEYS = (
     workload_settings.WORKLOADS,
     qpu_settings.SYNDROME_SOURCES,
     qpu_settings.CODE_CARDS,
-    qpu_settings.MAGIC_STATE_FACTORIES,
 )
 
 

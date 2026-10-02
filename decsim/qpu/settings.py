@@ -6,7 +6,7 @@ supplies its non-Clifford operations with states.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import decsim.config as config
 import decsim.ports as ports
@@ -35,7 +35,7 @@ CODE_CARDS = {
     "bivariate_bicycle": code_geometry.BivariateBicycleCodeModel,
 }
 # The key the magic_state_factory section reads for itself; any other key
-# is the row's own (its Settings).
+# is a field of the record its kind names.
 FACTORY_KEYS = ("kind",)
 # The keys the qpu section reads for itself; any other key is the source
 # row's or the code card row's own (its Settings, decsim/tables.py
@@ -44,13 +44,24 @@ QPU_KEYS = ("kind", "code_card", "distance", "round_period_microseconds")
 # The keys above that are the section's fields, each left at the field's
 # default when the yaml does not write it.
 QPU_VALUE_KEYS = ("distance", "round_period_microseconds")
-# magic_state_factory.kind names one of these rows: what supplies the T
-# states an operation consumes.
+# magic_state_factory.kind names one of these records, each of which
+# builds what supplies the T states an operation consumes: infinite (a
+# state is always in stock), distillation (Litinski's 15-to-1 stage,
+# 1905.06903), multi_level (Silva's chain of levels, 2411.04270).
 MAGIC_STATE_FACTORIES = {
-    "infinite": magic_state_factories.InfiniteFactory,
-    "distillation": magic_state_factories.DistillationFactory,
-    "multi_level": magic_state_factories.MultiLevelDistillationFactory,
+    "infinite": magic_state_factories.InfiniteFactory.Settings,
+    "distillation": magic_state_factories.DistillationFactory.Settings,
+    "multi_level": (
+        magic_state_factories.MultiLevelDistillationFactory.Settings
+    ),
 }
+
+# the settings record of whichever factory the run has
+FactorySettings = Union[
+    magic_state_factories.InfiniteFactory.Settings,
+    magic_state_factories.DistillationFactory.Settings,
+    magic_state_factories.MultiLevelDistillationFactory.Settings,
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -190,35 +201,14 @@ class QpuSettings:
             raise ValueError(f"multiple code sources supplied: {listed}")
 
 
-@dataclasses.dataclass(frozen=True)
-class FactorySettings:
-    """The magic state factory: where non-Clifford operations get states.
-
-    Table rows (MAGIC_STATE_FACTORIES, above): infinite (a state is
-    always in stock), distillation (Litinski's 15-to-1 stage,
-    1905.06903),
-    multi_level (Silva's chain of levels, 2411.04270). row_settings is
-    the row's own Settings, read from the section's keys beside kind, or
-    None for a row that declares none; it rides to the row inside the
-    one FactoryCollaborators record, beside the engine and the round
-    ticks the root supplies (magic_state_factories.py).
-    """
-
-    kind: str = "infinite"
-    # the row's own Settings record, opaque to the section
-    row_settings: Optional[Any] = None
-
-    @classmethod
-    def from_yaml(cls, section: Mapping) -> "FactorySettings":
-        """The `magic_state_factory` section: a kind and the row's keys."""
-        kind = section.get("kind", "infinite")
-        row = tables.row(
-            MAGIC_STATE_FACTORIES, "magic_state_factory.kind", kind
-        )
-        row_settings = tables.row_settings(
-            row, "magic_state_factory", section, FACTORY_KEYS
-        )
-        return cls(kind=kind, row_settings=row_settings)
+def factory_from_yaml(section: Mapping) -> FactorySettings:
+    """The `magic_state_factory` section: its kind's record, from its keys."""
+    kind = section.get("kind", "infinite")
+    record = tables.row(MAGIC_STATE_FACTORIES, "magic_state_factory.kind", kind)
+    own_section = tables.record_fields(
+        record, "magic_state_factory", section, FACTORY_KEYS
+    )
+    return record.from_yaml(own_section)
 
 
 def _the_layouts_one_code(layout: layouts.LayoutModel):

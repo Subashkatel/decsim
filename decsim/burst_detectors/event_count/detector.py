@@ -81,6 +81,8 @@ class EventCountBurstDetector:
         clock: Optional[config.Clock] = None
         cycles_per_round: int = 0
         raise_strong_priors: bool = False
+        # the word the yaml and the reports name this row by
+        name = "event_count"
 
         def __post_init__(self) -> None:
             for key in _ROUND_COUNT_KEYS:

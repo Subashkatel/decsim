@@ -26,6 +26,18 @@ def test_the_row_none_reads_as_no_detector():
     assert detector is None
 
 
+@pytest.mark.parametrize("kind", ["event_count", "masked_regional_cusum"])
+def test_a_detectors_record_names_the_row_the_yaml_names(kind):
+    """The reports print the record's own name, never a class lookup."""
+    section = {"kind": kind}
+
+    detector = burst_detector_settings.detector_from_yaml(
+        section, burst_rounds.CLOCKS
+    )
+
+    assert detector.name == kind
+
+
 def test_a_detector_beside_a_run_with_no_switching_is_refused():
     """A flagged window goes to the strong tier, which weak_baseline lacks."""
     section = {"kind": "event_count"}

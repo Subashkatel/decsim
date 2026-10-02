@@ -44,17 +44,6 @@ def detector_from_yaml(section: Mapping, clocks: config.ClockSettings):
     )
 
 
-def detector_kind(switching) -> str:
-    """The burst_detector.kind word for the switching slot's detector."""
-    if switching is None or switching.burst_detector is None:
-        return "none"
-    record_class = type(switching.burst_detector)
-    for kind, row in BURST_DETECTORS.items():
-        if row is not None and row.Settings is record_class:
-            return kind
-    return record_class.__qualname__
-
-
 def refuse_a_detector_without_switching(section: Mapping, switching) -> None:
     """A flagged window goes to the strong tier, which only switching has."""
     kind = section.get("kind", "none")

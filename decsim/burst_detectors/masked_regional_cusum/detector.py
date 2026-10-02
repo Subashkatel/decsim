@@ -95,6 +95,8 @@ class MaskedRegionalCusumBurstDetector:
         datapath_count: int = 1
         pipeline_cycles: int = 30
         raise_strong_priors: bool = False
+        # the word the yaml and the reports name this row by
+        name = "masked_regional_cusum"
 
         def __post_init__(self) -> None:
             """Every value checked, each number of the method a float."""

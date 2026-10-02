@@ -32,7 +32,6 @@ from typing import Any, Optional, Union
 
 import yaml
 
-import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.experiments.collection as collection_module
@@ -882,10 +881,8 @@ def _section_lines(settings: machine_settings.MachineSettings) -> list:
     for field in dataclasses.fields(settings):
         if field.name == "switching":
             lines.append(f"escalation: kind {settings.escalation_kind}")
-            detector_kind = burst_detector_settings.detector_kind(
-                settings.switching
-            )
-            lines.append(f"burst_detector: kind {detector_kind}")
+            detector_name = _burst_detector_name(settings.switching)
+            lines.append(f"burst_detector: kind {detector_name}")
             continue
         section = getattr(settings, field.name)
         kind = getattr(section, "kind", None)
@@ -893,6 +890,13 @@ def _section_lines(settings: machine_settings.MachineSettings) -> list:
             continue
         lines.append(f"{field.name}: kind {kind}")
     return lines
+
+
+def _burst_detector_name(switching) -> str:
+    """The switching slot's detector's name; none for a run with none."""
+    if switching is None or switching.burst_detector is None:
+        return "none"
+    return switching.burst_detector.name
 
 
 def _links_line(links) -> str:

@@ -343,3 +343,12 @@ def _with_pinned_observable(syndrome, observable_bit: int):
     """The syndrome with the pinned graph's observable detector appended."""
     extended = numpy.concatenate([syndrome, [observable_bit]])
     return extended.astype(numpy.uint8)
+
+
+# The weak decoder baseline's card: matching's answer at the latency of
+# LILLIPUT's [d=3, m=2] core, 7 cycles at 250 MHz (2108.06569 line 1070
+# and Table 4, text lines 1088-1100). LILLIPUT is a lookup table, so the
+# card borrows its time, not its answer.
+LILLIPUT_TIMED = PyMatchingDecoder.Settings(
+    preset_latency_microseconds=0.028,  # 28 ns, 2108.06569 line 1100
+)

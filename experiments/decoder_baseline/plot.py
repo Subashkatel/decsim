@@ -7,13 +7,12 @@ decoders compared, a panel per distance. The rate per round is the one
 the Tesseract paper reports (Beni et al. 2503.10988, eq. 8).
 
 The decoders, bases, distances, rates and rounds are the ones in the
-folder's own run.py, the script that made its stats: the runner copies
-it there and refuses another text beside it (decsim/experiment_runner.py
-_record_the_run), and this directory's run.py is today's recipe, which
-may name other decoders.
+folder's own run.py, the script that made its stats: the run copies it
+there (decsim/experiments/run_folder.py, start_run), and this
+directory's run.py is today's recipe, which may name other decoders.
 """
 
-import importlib.util
+import ast
 import pathlib
 import sys
 import types
@@ -49,17 +48,40 @@ def main(folder: pathlib.Path) -> None:
         plots.save(figure, path)
 
 
-def recipe_of(folder: pathlib.Path) -> types.ModuleType:
-    """The run.py the folder's stats were made by, loaded as a module.
+def recipe_of(folder: pathlib.Path) -> types.SimpleNamespace:
+    """The constants of the run.py the folder's stats were made by.
 
-    It is loaded under another name than __main__, so its points are
-    not built and nothing runs.
+    The script is read, not run: each module-level assignment is
+    evaluated in order from the names before it, and one that needs an
+    import (a decoder object) is left out. A recipe whose imports have
+    since moved on still names its grid, and nothing runs.
     """
     path = folder / "run.py"
-    specification = importlib.util.spec_from_file_location("recipe", path)
-    recipe = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(recipe)
-    return recipe
+    source = path.read_text()
+    module = ast.parse(source)
+    constants = {}
+    for statement in module.body:
+        _add_the_constant(statement, constants)
+    return types.SimpleNamespace(**constants)
+
+
+def _add_the_constant(statement: ast.stmt, constants: dict) -> None:
+    """One `NAME = value` the names before it can evaluate, into constants."""
+    if not isinstance(statement, ast.Assign):
+        return
+    (target,) = statement.targets
+    if not isinstance(target, ast.Name):
+        return
+    expression = ast.Expression(statement.value)
+    code = compile(expression, "<recipe>", "eval")
+    # No builtins: a constant is a literal or is built from the names
+    # before it, and anything else needs the script's imports.
+    namespace = {"__builtins__": {}, **constants}
+    try:
+        value = eval(code, namespace)
+    except (NameError, AttributeError, TypeError):
+        return
+    constants[target.id] = value
 
 
 def draw(
@@ -67,7 +89,7 @@ def draw(
     points: list,
     curve: str,
     order: list,
-    recipe: types.ModuleType,
+    recipe: types.SimpleNamespace,
 ) -> None:
     """One panel: the rate per round against p, on the swept rates.
 

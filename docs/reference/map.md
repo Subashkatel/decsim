@@ -363,15 +363,11 @@ docstring.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.
 - `decsim/experiments/trace_follow.py`: `decsim trace follow`: one round's or one window's path, hop by hop.
 
-## Level 10: __main__, experiment_runner, results
+## Level 10: __main__, results
 
 ### __main__
 
 - `decsim/__main__.py`: `python -m decsim <verb>`: the same command set as the console script.
-
-### experiment_runner
-
-- `decsim/experiment_runner.py`: One experiment script's points, its command line and its results folder.
 
 ### results
 

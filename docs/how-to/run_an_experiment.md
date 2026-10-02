@@ -2,16 +2,20 @@
 
 # How to run an experiment
 
-An experiment is one Python script, `experiments/<name>/run.py`. It
-lists its points, and each point runs until it has enough errors, reaches
-its shot limit, or its job's time runs out. The commands below use the decoder baseline,
-`experiments/decoder_baseline/run.py`.
+An offline experiment is one Python script, `experiments/<name>/run.py`,
+that decodes with sinter or runs a function at each of its points,
+without the machine. Each point runs until it has enough errors, reaches
+its shot limit, or its job's time runs out. The commands below use the
+decoder baseline, `experiments/decoder_baseline/run.py`. An experiment
+on the machine runs with `decsim run` instead
+([How to run a sweep on Slurm](run_a_sweep_on_slurm.md)).
 
 ## Before you start
 
 - A python environment with decsim's dependencies and sinter,
   relay-bp and tesseract-decoder, the packages the baseline's decoders
-  come from. The `run` extra does not install the last three.
+  come from. The `run` extra installs sinter; it does not install the
+  other two.
 - The Union-Find library, built once in each checkout:
   `tools/build_union_find.sh`.
 - Every command runs from the checkout's root with `PYTHONPATH=.`, so
@@ -25,7 +29,7 @@ PYTHONPATH=. python experiments/decoder_baseline/run.py --list
 
 Each line is a point's id, its decoder and its labels, for example
 `0 decoder=union-find basis=x d=5 p=0.0005`. The ids are 0, 1, 2 and on,
-in the order the script adds the points.
+in the order the script builds the points.
 
 ## Run one point
 
@@ -33,29 +37,24 @@ in the order the script adds the points.
 PYTHONPATH=. python experiments/decoder_baseline/run.py 7 --workers 4 --out results/baseline_test
 ```
 
-This runs point 7 with 4 worker processes. Without `--out`, the results
-go in `results/<today>_decoder_baseline/`, or under the folder the
-DECSIM_RESULTS environment variable names. With no id, the script
-runs every point, one after another.
+This runs point 7 with 4 worker processes. One point names its folder
+with `--out`, since every task of an array writes the one folder the
+points share. With no id the script runs every point, one after
+another, then combines; without `--out` that run goes to a new
+`results/<today>_decoder_baseline/`, and a second one the same day to
+`_2`.
 
 The folder holds:
 
 - `points/<id>.csv`, each point's counts in sinter's CSV format;
 - `stats.csv`, every point's counts in one file, once you combine;
-- a copy of `run.py` and `commit.txt`, the commit that ran and
-  whether the tree had uncommitted changes.
+- a copy of `run.py`, `run.json` (the commit that ran, whether the tree
+  had uncommitted changes, the host and the package versions) and
+  `code_state.patch` when the tree had changes, as every decsim results
+  folder holds ([The run folder](../reference/run_folder.md)).
 
-On a node whose python has no git, as in the container, export
-DECSIM_TREE_DIRTY (1 for uncommitted changes, 0 for none) before
-running; without it `commit.txt` says `dirty None`. A folder compares
-the commit always and the dirty flag only where both sides could read
-it, so a gitless task and a git host agree on the same commit. With no
-git program, the commit is read from the checkout's `.git` folder; a
-tree with no readable commit at all, such as a copy without `.git`, is
-refused.
-
-A folder belongs to one script and one commit. Running a different
-script or commit into it is refused; give `--out` a new folder.
+A folder belongs to one commit. Running another commit into it is
+refused; give `--out` a new folder.
 
 ## Run every point on Slurm
 
@@ -63,19 +62,15 @@ One array task runs one point. Pass the folder, so every task writes
 into the same one:
 
 ```bash
-sbatch --array 0-$(( $(PYTHONPATH=. python experiments/decoder_baseline/run.py --list | wc -l) - 1 )) \
-  slurm/run.sbatch experiments/decoder_baseline/run.py results/2026-09-27_decoder_baseline
+sbatch --array 0-287 --cpus-per-task 16 --mem 32G --time 24:00:00 \
+  --wrap "PYTHONPATH=$PWD python experiments/decoder_baseline/run.py \$SLURM_ARRAY_TASK_ID --workers \$SLURM_CPUS_PER_TASK --out results/2026-09-27_decoder_baseline"
 ```
 
-Each task imports the checkout the script sits in, two folders above
-`experiments/<name>/run.py`, ahead of any PYTHONPATH the job already
-has, so the job may be submitted from anywhere. A script outside a
-decsim checkout is refused.
-
-Each task has 16 cores and 24 hours (`slurm/run.sbatch`). The time
-limit is the budget: `-t 3:00:00` on the `sbatch` line gives each point
-3 hours, 48 core-hours. Add the account, partition or QOS your cluster
-needs on the `sbatch` line too.
+The array's range is 0 to the last id `--list` prints. The time limit
+is the budget: `--time 3:00:00` gives each point 3 hours, 48
+core-hours. Add the account, partition or QOS your cluster needs on the
+`sbatch` line too, or set them in SBATCH_ACCOUNT, SBATCH_PARTITION and
+SBATCH_QOS.
 
 ## Resume
 
@@ -87,8 +82,7 @@ often (`worker_flush_period`, sinter/_collection/_collection.py), and
 sinter's collect is made to be killed and restarted
 (sinter/_command/_main_collect.py, `--save_resume_filepath`). To spend
 more on the points that have not reached their errors, submit again
-with those ids. On a later day, `--out` or the sbatch folder must name the
-original folder: the dated default would be a new, empty one.
+with those ids.
 
 ## Combine
 
@@ -104,20 +98,16 @@ labels. A run of every point in one process writes it at the end.
 
 A point can be a Python function instead of a sinter task, for an
 experiment that is not a decode, such as
-`experiments/burst_detection/run.py`. The script adds it with
-`experiment.add_point(function, labels, "trials.csv")`. The runner
-calls `function(labels, seed, folder)`, the seed a hash of the labels
-so a point draws the same shots in any grid, and writes the rows it
-returns, a list of dicts, after the labels' columns into
-`points/<id>.csv`. The CSV is written once the function returns, so a
-point with a CSV is done and a resubmitted job runs only the rest. A
-point that needs another's rows reads them from the results folder at
-`experiment_runner.point_path(folder, id)`, and fails when they are not
-there yet; on Slurm, submit that point with
-`--dependency=afterok:<job>` on the job that runs the other. `combine` writes each
-results file from the rows of the points that name it. A function
-point runs in one process and ignores `--workers`. An experiment's
-points are all sinter tasks or all function points.
+`experiments/burst_detection/run.py`. Its script calls
+`function(labels, seed, folder)`, the seed a hash of the labels so a
+point draws the same shots in any grid, and writes the rows it returns,
+a list of dicts, after the labels' columns into `points/<id>.csv`. The
+CSV is written once the function returns, so a point with a CSV is done
+and a resubmitted job runs only the rest. A point that needs another's
+rows reads them from the results folder at `point_path(folder, id)`,
+and fails when they are not there yet; on Slurm, submit that point with
+`--dependency=afterok:<job>` on the job that runs the other. `combine`
+writes each results file from the rows of the points that name it.
 
 ## Plot and keep the results
 
@@ -129,11 +119,11 @@ This draws the folder's `plots/` from its `stats.csv`: the logical
 error rate per round against the physical error rate, a figure per
 decoder and one comparing the decoders for each basis. Its decoders,
 distances, rates and rounds come from the folder's own `run.py`, the
-script that made its `stats.csv`, so an older folder is drawn by the
-recipe that made it and not today's. The script is a
+script that made its `stats.csv`, read and not run, so an older folder
+is drawn by the recipe that made it and not today's. The script is a
 few lines because `decsim/plots.py` holds the figure kinds (an error
-rate and plain values) and their one axis style; another experiment's plot.py draws with the
-same calls. The repository
-tracks a results folder's `stats.csv`, `commit.txt`, script copy and
-`plots/`, so every experiment's results live beside the code that made
-them; `points/` and `logs/` stay with the run (`.gitignore`).
+rate and plain values) and their one axis style; another experiment's
+plot.py draws with the same calls. The repository tracks a results
+folder's `stats.csv`, `run.json`, script copy and `plots/`, so every
+experiment's results live beside the code that made them; `points/` and
+`logs/` stay with the run (`.gitignore`).

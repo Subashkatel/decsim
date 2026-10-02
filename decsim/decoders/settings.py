@@ -573,3 +573,42 @@ def _latency_settings(kind, section_name: str):
             f"name one of {rows}, or write a finite nonnegative number of "
             "microseconds"
         ) from None
+
+
+def toshio_decoder_pool(
+    decode_microseconds_per_round: float, clock: config.Clock
+) -> DecoderPoolSettings:
+    """One unit of Toshio et al.'s linear decoder: T_dec(r) = tau_dec r.
+
+    Toshio et al. charge a decode of r rounds tau_dec r (2510.25222
+    lines 968-971), and the double window's weak decoder
+    tau_dec (r_com + r_buf) for one window (lines 1303-1306). The fetch
+    stage's per-round cycles carry all of it, since a stage's cycles
+    scale with the job's rounds (staged_decoder.py
+    DecoderStage.cycles_for); every other stage costs nothing, and the
+    matching row answers in no time of its own. tau_dec is a whole
+    number of the clock's cycles. The paper sets T_weak_comm = tau_gen
+    and T_strong_comm = tau_strong_dec = 10 tau_gen and sweeps
+    tau_weak_dec over 0, 0.1, 0.4, 0.7 and 0.9 tau_gen (lines
+    1109-1114, 1125-1133). T_comm, a round's latency to the decoder
+    (lines 1035-1036), is a link's, not the unit's: the weak decoder's
+    sits on controller_to_weak_buffer.
+    """
+    decode_ticks = config.microseconds_to_ticks(decode_microseconds_per_round)
+    cycles, remainder_ticks = divmod(decode_ticks, clock.period_ticks)
+    if remainder_ticks:
+        raise ValueError(
+            f"Toshio's per-round decode time of "
+            f"{decode_microseconds_per_round} us is not a whole number of "
+            f"cycles of a {clock.period_ticks}-tick clock"
+        )
+    engine = EngineSettings(
+        clock=clock,
+        fetch_cycles_per_round=cycles,
+        fetch_cycles_per_job=0,
+        release_cycles_per_job=0,
+        release_cycles_per_round=0,
+    )
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder
+    algorithm = matching.Settings(preset_latency_microseconds=0.0)
+    return DecoderPoolSettings(algorithm=algorithm, engine=engine)

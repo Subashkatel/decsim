@@ -130,22 +130,15 @@ class Task:
         digest = hashlib.sha256(encoded)
         return digest.hexdigest()
 
-    def shot_settings(
-        self, built_models=None
-    ) -> machine_settings.MachineSettings:
-        """The settings one shot runs: the point's threshold and models."""
+    def shot_settings(self) -> machine_settings.MachineSettings:
+        """The settings one shot runs: the point's threshold source."""
         settings = self.settings
-        if self.online_threshold is not None:
-            switching = dataclasses.replace(
-                settings.switching, online_threshold=self.online_threshold
-            )
-            settings = dataclasses.replace(settings, switching=switching)
-        if built_models is not None:
-            workload = dataclasses.replace(
-                settings.workload, built_models=built_models
-            )
-            settings = dataclasses.replace(settings, workload=workload)
-        return settings
+        if self.online_threshold is None:
+            return settings
+        switching = dataclasses.replace(
+            settings.switching, online_threshold=self.online_threshold
+        )
+        return dataclasses.replace(settings, switching=switching)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -260,9 +253,9 @@ def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
     at a large distance. A shot run on its own passes none and builds
     its own models.
     """
-    settings = task.shot_settings(built_models)
+    settings = task.shot_settings()
     wall_start = time.perf_counter()
-    machine = machine_module.Machine.build(settings, seed)
+    machine = machine_module.Machine.build(settings, seed, built_models)
     result = machine.run()
     wall_end = time.perf_counter()
     wall_seconds = wall_end - wall_start

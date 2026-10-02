@@ -425,6 +425,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         detection_events,
         links,
     )
+    built_models = built_window_models.BuiltWindowModels()
     windows = windows_part.Windows.build(
         settings.windows,
         settings.workload,
@@ -436,6 +437,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         plan,
         burst_detector,
         links,
+        built_models,
     )
     decoders = decoders_part.Decoders.build(
         settings.decoder_manager, settings.clock, engine, pool
@@ -2871,9 +2873,9 @@ def timed_and_untimed_decodes(folder, arrangement):
     models = built_window_models.BuiltWindowModels()
     decodes = []
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.shot_settings(models)
-        machine = machine_module.Machine.build(settings, seed)
-        untimed = machine_module.Machine.build(settings, seed)
+        settings = task.shot_settings()
+        machine = machine_module.Machine.build(settings, seed, models)
+        untimed = machine_module.Machine.build(settings, seed, models)
         reference = untimed.decoders.primary_decoder.decoder
         listener = functools.partial(record_one_decode, decodes, reference)
         outcomes = machine.decoders.decoder_manager.outcomes
@@ -2995,8 +2997,8 @@ def arrangement_predictions_and_events(folder, arrangement):
     shot_events = []
     sampled = None
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.shot_settings(models)
-        machine = machine_module.Machine.build(settings, seed)
+        settings = task.shot_settings()
+        machine = machine_module.Machine.build(settings, seed, models)
         result = machine.run()
         sampled = machine.observation.sampled_shots.shots_by_operation[1]
         shot_events.append(sampled.detection_events)

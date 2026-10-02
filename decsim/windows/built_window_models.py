@@ -10,9 +10,10 @@ build_window_error_models.
 sinter does the same thing one level down: it compiles the decoder once
 per task and decodes every shot of the task with it
 (sinter/_decoding/_decoding_decoder_class.py, compile_decoder_for_dem).
-decsim's `collect` builds one of these per task and hands it to every
-shot through the workload settings (a Python-only field, no yaml key);
-a Machine built alone gets an empty one and fills it for itself.
+decsim's `collect` builds one of these per work unit and hands it to
+every shot's Machine.build, beside the settings, since it is run state
+and no setting; a Machine built alone gets an empty one and fills it
+for itself.
 """
 
 

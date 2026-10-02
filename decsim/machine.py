@@ -88,6 +88,7 @@ import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
+import decsim.windows.built_window_models as built_window_models
 
 
 @dataclasses.dataclass(frozen=True)
@@ -114,7 +115,10 @@ class Machine:
 
     @classmethod
     def build(
-        cls, settings: machine_settings.MachineSettings, seed: Optional[int] = 0
+        cls,
+        settings: machine_settings.MachineSettings,
+        seed: Optional[int] = 0,
+        built_models: Optional[built_window_models.BuiltWindowModels] = None,
     ) -> "Machine":
         """Build every part from the run's settings, then assemble them.
 
@@ -123,8 +127,12 @@ class Machine:
         first, since the parts are built for them; then each part is
         built on its own, and assemble connects them. The seed is the
         run's root; every stochastic component derives its own from it
-        and its path.
+        and its path. built_models is the window error model cache the
+        shots of one unit share (collect.run_unit); a machine built
+        without one builds its own models.
         """
+        if built_models is None:
+            built_models = built_window_models.BuiltWindowModels()
         engine = engine_module.Engine()
         switching = escalation_build.build_switching(
             settings.switching, settings.weak_decoder, engine
@@ -201,6 +209,7 @@ class Machine:
             plan,
             burst_detector,
             links,
+            built_models,
         )
         decoders = decoders_part.Decoders.build(
             settings.decoder_manager, settings.clock, engine, pool

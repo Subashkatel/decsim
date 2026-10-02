@@ -79,18 +79,17 @@ class Windows:
         plan: plan_build.Plan,
         burst_detector: Optional[ports.BurstDetector],
         links: ports.Link,
+        built_models: built_window_models.BuiltWindowModels,
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
         One line per component, in the order a window meets them, then
         the wires inside the part. window_decoder is the settings of
         window_tier, the tier that decodes the plan's windows; a card
-        that names no clock runs on machine_clock.
+        that names no clock runs on machine_clock. built_models is the
+        window error model cache the shot reads and fills.
         """
         run_plan = plan.run_plan
-        built_models = workload.built_models
-        if built_models is None:
-            built_models = built_window_models.BuiltWindowModels()
         models = window_planner_module.WindowModels(built_models)
         planner = window_planner_module.WindowPlanner(
             run_plan.resolved_operations,

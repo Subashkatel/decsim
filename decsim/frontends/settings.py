@@ -22,7 +22,6 @@ import decsim.frontends.workload_files as workload_files
 import decsim.ports as ports
 import decsim.records.workload as workload_records
 import decsim.tables as tables
-import decsim.windows.built_window_models as built_window_models
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
 # The keys every row of the workload section shares; any other key is the
@@ -73,8 +72,7 @@ class WorkloadSettings:
     kind names the row that makes the workload (WORKLOADS, below); None
     is a Python-built workload, its fields handed in directly. A row's
     workload is made at each sweep point and lowered into the fields
-    below. decode_operations, feedback_boundary_mode and built_models
-    are Python-only; a Machine built alone builds its own window models.
+    below. decode_operations and feedback_boundary_mode are Python-only.
     """
 
     kind: Optional[str] = None
@@ -85,7 +83,6 @@ class WorkloadSettings:
     rounds_policy: Optional[ports.RoundsPolicy] = None
     physical_circuits: Mapping = dataclasses.field(default_factory=dict)
     feedback_boundary_mode: str = "trailing_buffer"
-    built_models: Optional[built_window_models.BuiltWindowModels] = None
     # the record the fields above were lowered from, which a run folder
     # writes to its inputs (experiments/run_folder.py record_point)
     workload_record: Optional[workload_records.Workload] = None

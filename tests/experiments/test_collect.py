@@ -65,6 +65,7 @@ import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
+import decsim.machine as machine_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -333,7 +334,12 @@ def test_a_machine_built_alone_builds_its_own_models():
     )
     settings = task.shot_settings()
 
-    assert settings.workload.built_models is None
+    first = machine_module.Machine.build(settings, 0)
+    second = machine_module.Machine.build(settings, 1)
+
+    first_models = first.windows.models.built_models
+    second_models = second.windows.models.built_models
+    assert first_models is not second_models
 
 
 def test_two_points_under_one_cache_do_not_share_models():

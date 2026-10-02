@@ -1825,8 +1825,8 @@ def test_the_strong_decodes_held_in_units_are_the_units_own_residents(
     samplers = []
     build = machine_module.Machine.build
 
-    def build_and_sample(settings, seed):
-        machine = build(settings, seed)
+    def build_and_sample(settings, seed, built_models=None):
+        machine = build(settings, seed, built_models)
         sampler = StrongResidentsWaitingOnCompute(machine)
         machine.engine.action_done.connect(sampler.sample)
         samplers.append(sampler)

@@ -6,11 +6,12 @@ threshold, and the strong window side; a run with none gets nothing,
 and the escalation ports stay unbound.
 """
 
+import types
+
 import pytest
 
 import decsim.build.escalation as escalation_build
 import decsim.burst_detectors.event_count.detector as event_count
-import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.confidence.complementary as complementary
 import decsim.decoders.minimum_weight_perfect_matching.decoder as mwpm
 import decsim.decoders.settings as decoder_settings
@@ -130,14 +131,27 @@ def test_the_confidence_row_is_built_with_the_sections_walk_card():
     assert switching.confidence_signal.walk_microseconds == 0.25
 
 
-def test_a_burst_detector_beside_a_run_with_no_switching_is_refused():
-    """A flagged window goes to the strong tier, which weak_baseline lacks."""
-    row_settings = event_count.EventCountBurstDetector.Settings()
-    section = burst_detector_settings.BurstDetectorSettings(
-        kind="event_count", row_settings=row_settings
+def test_the_switching_slots_detector_is_the_one_built():
+    detector = event_count.EventCountBurstDetector.Settings()
+    switching = _switching(burst_detector=detector)
+    weak = _weak()
+    settings = machine_settings.MachineSettings(
+        weak_decoder=weak, strong_decoder=weak, switching=switching
     )
-    settings = machine_settings.MachineSettings(burst_detector=section)
+    # a plan that scores no operation calibrates the detector on nothing
+    run_plan = types.SimpleNamespace(resolved_operations=())
+    plan = types.SimpleNamespace(run_plan=run_plan, planned_operations=())
     engine = engine_module.Engine()
 
-    with pytest.raises(ValueError, match="only escalation.kind switching"):
-        escalation_build.build_burst_detector(settings, engine, None)
+    built = escalation_build.build_burst_detector(settings, engine, plan)
+
+    assert isinstance(built, event_count.EventCountBurstDetector)
+
+
+def test_a_run_with_no_switching_builds_no_detector():
+    settings = machine_settings.MachineSettings()
+    engine = engine_module.Engine()
+
+    built = escalation_build.build_burst_detector(settings, engine, None)
+
+    assert built is None

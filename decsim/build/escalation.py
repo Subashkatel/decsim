@@ -14,7 +14,6 @@ cache with no prefetcher holds a NULL one
 import dataclasses
 from typing import TYPE_CHECKING, Any, Optional
 
-import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -24,7 +23,6 @@ import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.ports as ports
 import decsim.settings as machine_settings
-import decsim.tables as tables
 
 if TYPE_CHECKING:
     import decsim.build.decoders as decoders_part
@@ -135,25 +133,20 @@ def build_burst_detector(
     engine: engine_module.Engine,
     plan: "plan_build.Plan",
 ) -> Optional[ports.BurstDetector]:
-    """The detector burst_detector.kind names; None for the row none.
+    """The detector the switching slot names; None when it names none.
 
-    The detector feeds escalation, so a run with no switching is refused
-    beside it; it scores detection events, so every operation it scores
-    brings the circuit they are formed from, and it is calibrated from
-    that circuit, its round count and the round period.
+    It scores detection events, so every operation it scores brings the
+    circuit they are formed from, and it is calibrated from that
+    circuit, its round count and the round period.
     """
-    section = settings.burst_detector
-    row = tables.row(
-        burst_detector_settings.BURST_DETECTORS,
-        "burst_detector.kind",
-        section.kind,
-    )
-    if row is None:
+    if settings.switching is None:
         return None
-    _refuse_a_run_that_cannot_escalate(section.kind, settings.switching)
+    record = settings.switching.burst_detector
+    if record is None:
+        return None
     circuits = _counted_circuits(plan)
     round_period = settings.qpu.round_period_microseconds
-    return row(section.row_settings, engine, circuits, round_period)
+    return record.build(engine, circuits, round_period)
 
 
 def _threshold_source(settings: escalation_settings.SwitchingSettings):
@@ -168,18 +161,6 @@ def _threshold_source(settings: escalation_settings.SwitchingSettings):
     if settings.online_threshold is not None:
         return settings.online_threshold
     return settings.threshold.build()
-
-
-def _refuse_a_run_that_cannot_escalate(
-    kind: str, switching: Optional[escalation_settings.SwitchingSettings]
-) -> None:
-    if switching is not None:
-        return
-    raise ValueError(
-        f"burst_detector.kind {kind} sends a burst's windows to the "
-        "strong decoder, which only escalation.kind switching does; "
-        "write burst_detector: {kind: none}, or escalate with switching"
-    )
 
 
 def _counted_circuits(plan) -> dict:

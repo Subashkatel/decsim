@@ -116,9 +116,6 @@ class MachineSettings:
         decoder_settings.DecoderManagerSettings()
     )
     switching: Optional[escalation_settings.SwitchingSettings] = None
-    burst_detector: burst_detector_settings.BurstDetectorSettings = (
-        burst_detector_settings.BurstDetectorSettings()
-    )
     pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
     workload: workload_settings.WorkloadSettings = (
         workload_settings.WorkloadSettings()
@@ -242,11 +239,21 @@ class MachineSettings:
         if "strong_decoder" not in kept_sections:
             strong_decoder = None
         burst_detector_section = sections.get("burst_detector", {})
-        burst_detector = (
-            burst_detector_settings.BurstDetectorSettings.from_yaml(
-                burst_detector_section, clocks
+        burst_detector = burst_detector_settings.detector_from_yaml(
+            burst_detector_section, clocks
+        )
+        catch_deadline_rounds = (
+            burst_detector_settings.catch_deadline_rounds_from_yaml(
+                burst_detector_section
             )
         )
+        burst_detector_settings.refuse_a_detector_without_switching(
+            burst_detector_section, switching
+        )
+        if switching is not None:
+            switching = dataclasses.replace(
+                switching, burst_detector=burst_detector
+            )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks
         )
@@ -259,6 +266,9 @@ class MachineSettings:
         )
         observation = observe_settings.ObservationSettings.from_yaml(
             observation_section
+        )
+        observation = dataclasses.replace(
+            observation, catch_deadline_rounds=catch_deadline_rounds
         )
         return cls(
             clocks=clocks,
@@ -275,7 +285,6 @@ class MachineSettings:
             strong_decoder=strong_decoder,
             decoder_manager=decoder_manager,
             switching=switching,
-            burst_detector=burst_detector,
             pauli_frame=pauli_frame,
             workload=workload,
             magic_state_factory=magic_state_factory,

@@ -53,7 +53,11 @@ class ObservationSettings:
     counters the RunResult carries. confidence_shot_count is how many shots
     of each point, from seed 0, write their windows' confidence gaps to
     window_confidence.csv when a confidence signal decides the escalation;
-    None writes every scored shot's.
+    None writes every scored shot's. catch_deadline_rounds is how many
+    rounds after a burst's onset a detector's flag may come and still
+    catch it in time; the yaml writes it in the burst_detector section.
+    Both are the run side's measurement values, kept here until the run
+    side holds them.
 
     The keys that only record the run, the log, the trace and
     confidence_shot_count, are labels (compare=False) and no part of a
@@ -63,8 +67,9 @@ class ObservationSettings:
     rows are the same with them or without. The others stay in the id
     because they change a shot's row: the referee fills the referee columns,
     record_switching_windows and backlog_trace add the wait and backlog
-    columns (experiments/measure.py), and data_movement adds the
-    shot_data_movement rows.
+    columns (experiments/measure.py), data_movement adds the
+    shot_data_movement rows, and catch_deadline_rounds decides the burst
+    catch columns.
     """
 
     log: str = dataclasses.field(compare=False, default="off")
@@ -78,6 +83,7 @@ class ObservationSettings:
     confidence_shot_count: Optional[int] = dataclasses.field(
         compare=False, default=100
     )
+    catch_deadline_rounds: int = 300
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "ObservationSettings":

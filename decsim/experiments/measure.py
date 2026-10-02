@@ -950,7 +950,7 @@ def _burst_catch(
         return first_flag_round, None
     first_flag_round = flags.first_flag_from(onset_round)
     delay = first_flag_round - onset_round
-    deadline = settings.burst_detector.catch_deadline_rounds
+    deadline = settings.observation.catch_deadline_rounds
     is_caught = first_flag_round > 0 and delay <= deadline
     return first_flag_round, is_caught
 

@@ -114,6 +114,17 @@ class EventCountBurstDetector:
                 raise_strong_priors=raise_priors,
             )
 
+        def build(
+            self,
+            engine: engine_module.Engine,
+            circuits: Mapping,
+            round_period_microseconds: float,
+        ) -> "EventCountBurstDetector":
+            """The detector, calibrated from each scored operation's circuit."""
+            return EventCountBurstDetector(
+                self, engine, circuits, round_period_microseconds
+            )
+
     def __init__(
         self,
         settings: "EventCountBurstDetector.Settings",

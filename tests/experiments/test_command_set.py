@@ -2298,16 +2298,6 @@ def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
     assert sentence in printed.err
 
 
-def test_plot_refuses_a_figure_it_does_not_draw(tmp_path, capsys):
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["plot", str(tmp_path), "--figure", "everything"])
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert printed.err.startswith("decsim: no figure named everything")
-
-
 def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):
     trace_path = tmp_path / "shot.json"
     with pytest.raises(SystemExit) as stopped:

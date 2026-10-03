@@ -8,10 +8,11 @@ its law; Caune et al. 2410.05202 (a 32-bit bus word) and Fruitwala et al.
 provisioning rule of the bandwidth card (each path carries its nominal
 traffic in one commit region, ns-3's per-device DataRate); Backline
 2609.09270 Table III, the CPU and GPU echo rows, for the two measured
-RoCE v2 rows.
+RoCE v2 rows; Liu et al. 2603.16203 for the RISC-Q weak loop.
 """
 
 import ast
+import dataclasses
 import fractions
 import math
 import pathlib
@@ -886,6 +887,41 @@ def test_a_path_latency_that_rounds_to_no_ticks_is_refused():
 
     with pytest.raises(ValueError, match=sentence):
         link_profiles.with_path_latency(reference, "frame_to_controller", 1e-7)
+
+
+def test_the_risc_q_weak_loop_is_liu_et_als_fiber_network():
+    """Liu 2603.16203 lines 895-904 and 971-975.
+
+    The round goes up in 157 ns, 40 cycles of 250 MHz once rounded up,
+    and the correction comes back in 155 + 9 ns, 41 cycles, both at the
+    four transceivers' 38.788 Gb/s, held at 38.79 bits a lane a cycle.
+    The decoder reads its whole frame in one cycle with no rate.
+    """
+    reference = link_profiles.logical_reference_profile()
+    card = link_profiles.with_risc_q_weak_loop(reference)
+    uplink = card.controller_to_weak_buffer.channel
+    downlink = card.weak_decoder_to_frame.channel
+    frame_read = card.weak_buffer_to_weak_decoder.channel
+    uplink_rate = uplink.capacity.exact_aggregate_bits_per_microsecond()
+    downlink_rate = downlink.capacity.exact_aggregate_bits_per_microsecond()
+
+    assert uplink.propagation_latency_ticks == 40 * 4_000
+    assert downlink.propagation_latency_ticks == 41 * 4_000
+    assert (uplink_rate, downlink_rate) == (38_790, 38_790)
+    assert frame_read.propagation_latency_ticks == 4_000
+    assert frame_read.capacity is None
+
+
+def test_the_risc_q_weak_loop_keeps_every_other_hop_of_its_card():
+    measured = link_profiles.roce_v2_measured_profile("cpu")
+    card = link_profiles.with_risc_q_weak_loop(measured)
+    restored = dataclasses.replace(
+        card,
+        controller_to_weak_buffer=measured.controller_to_weak_buffer,
+        weak_buffer_to_weak_decoder=measured.weak_buffer_to_weak_decoder,
+        weak_decoder_to_frame=measured.weak_decoder_to_frame,
+    )
+    assert restored == measured
 
 
 def _cites_nvqlink(source: str) -> bool:

@@ -41,17 +41,25 @@
 # note's default on this row; in_place there is the GPU-visible buffer,
 # which no decoder row models yet.
 #
-# Both tiers are priced cards so the study is deterministic: a card
-# prices the algorithm stage and nothing is measured on the host clock,
-# so the same yaml gives the same counts on any machine. The numbers are
-# Toshio 2510.25222 lines 1109-1114, tau_gen and ten tau_gen, with
-# tau_gen the 1.0 us round period swept here. Every key is documented in
-# reference.yaml.
+# Both tiers are priced cards so the study is deterministic: nothing is
+# measured on the host clock, so the same yaml gives the same counts on
+# any machine. Both are Toshio et al.'s linear decoder (2510.25222 lines
+# 968-971): a decode of r rounds costs tau_dec r on the unit, and a round
+# reaches the decoder T_comm after it is measured, with T_weak_comm =
+# tau_gen and T_strong_comm = tau_strong_dec = 10 tau_gen (lines
+# 1109-1114), tau_gen the 1.0 us round period swept here, 250 cycles.
+# tau_weak_dec is 0.4 tau_gen, one of the paper's swept values (lines
+# 1125-1126). Blocks 1 to 3 compute no confidence, so the weak tier
+# decodes a window once at 0.4 tau_gen a round; block 4's complementary
+# gap decodes it twice, which costs 0.8 tau_gen a round there. Every
+# block carries T_weak_comm on controller_to_weak_buffer, and block 4
+# T_strong_comm on weak_decoder_to_strong_decoder, the hop that takes
+# the escalated rounds up. Every key is documented in reference.yaml.
 
 extends: ../../bases/weak_decoder_baseline.yaml
 
 weak_decoder:
-  kind: 1.0                         # tau_gen, Toshio 2510.25222 lines 1109-1114
+  kind: 0.0                         # the matching answers; the engine times it
   units: 1
   input: copy
   boundary_fold: copy
@@ -59,9 +67,9 @@ weak_decoder:
     bits: null
   engine:
     clock: fridge
-    fetch_cycles_per_round: 1
+    fetch_cycles_per_round: 100     # tau_weak_dec, 0.4 tau_gen
     fetch_cycles_per_job: 0
-    release_cycles_per_job: 10
+    release_cycles_per_job: 0
     release_cycles_per_round: 0
 
 observation:
@@ -76,40 +84,48 @@ collection: {max_shots: 100}
 
 sweep:
   - axes:                           # 1: every hop copies
+      links.controller_to_weak_buffer:  # T_weak_comm, tau_gen
+        - {latency_cycles: 250, clock: fridge, bits_per_cycle: null}
       workload.arguments.physical_error_probability: [0.003]
       qpu.distance: [3, 5, 7]
       qpu.round_period_microseconds: [1.0]
   - axes:                           # 2: the weak input read in place
+      links.controller_to_weak_buffer:  # T_weak_comm, tau_gen
+        - {latency_cycles: 250, clock: fridge, bits_per_cycle: null}
       weak_decoder.input: [in_place]
       workload.arguments.physical_error_probability: [0.003]
       qpu.distance: [3, 5, 7]
       qpu.round_period_microseconds: [1.0]
   - axes:                           # 3: the boundary folded in place
+      links.controller_to_weak_buffer:  # T_weak_comm, tau_gen
+        - {latency_cycles: 250, clock: fridge, bits_per_cycle: null}
       weak_decoder.boundary_fold: [in_place]
       workload.arguments.physical_error_probability: [0.003]
       qpu.distance: [3, 5, 7]
       qpu.round_period_microseconds: [1.0]
   - axes:                           # 4: the strong tier and its links
+      links.controller_to_weak_buffer:  # T_weak_comm, tau_gen
+        - {latency_cycles: 250, clock: fridge, bits_per_cycle: null}
       escalation:
         - kind: switching
           gap_threshold_db: 20.0    # the paper's threshold, Sec. IV
           strong_window: redo_window
       strong_decoder:
-        - kind: 10.0                # ten tau_gen, Toshio 2510.25222
+        - kind: 0.0
           units: 1
           input: copy
           unit_memory:
             bits: null
           engine:
             clock: room
-            fetch_cycles_per_round: 1
+            fetch_cycles_per_round: 2500  # tau_strong_dec, ten tau_gen
             fetch_cycles_per_job: 0
-            release_cycles_per_job: 10
+            release_cycles_per_job: 0
             release_cycles_per_round: 0
       links.controller_to_strong_buffer:
         - {latency_cycles: 1, clock: room, bits_per_cycle: null}
-      links.weak_decoder_to_strong_decoder:
-        - {latency_cycles: 1, clock: room, bits_per_cycle: null}
+      links.weak_decoder_to_strong_decoder:   # T_strong_comm
+        - {latency_cycles: 2500, clock: room, bits_per_cycle: null}
       links.strong_buffer_to_strong_decoder:
         - {latency_cycles: 1, clock: room, bits_per_cycle: null}
       links.strong_decoder_to_frame:

@@ -18,6 +18,7 @@ import decsim.decoders.dispatch_steps.decoder as dispatch_steps
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.tesseract.decoder as tesseract
+import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
 import decsim.tables as tables
@@ -181,6 +182,40 @@ class EngineSettings:
         for key in ENGINE_CYCLE_KEYS:
             cycles = getattr(self, key)
             config.check_cycles(f"engine.{key}", cycles)
+
+
+_CLOCK_250_MEGAHERTZ = config.Clock(period_ticks=4_000)
+# The shipped baselines' engine: one round a cycle in and ten cycles to
+# write the correction out. No source states either count.
+ESTIMATED_ENGINE = EngineSettings(
+    clock=_CLOCK_250_MEGAHERTZ,  # 2108.06569 Table 4
+    fetch_cycles_per_round=1,  # estimate
+    fetch_cycles_per_job=0,
+    release_cycles_per_job=10,  # estimate
+    release_cycles_per_round=0,
+)
+# Helios inside RISC-Q's root node: Helios's controller takes a header
+# byte and then a loading cycle a round (control_node_single_FPGA.v at
+# 2dda998), the aggregator having assembled the whole frame (Liu et al.
+# 2603.16203 lines 668-670), and the root's error distributor sends the
+# correction on in one message.
+RISC_Q_HELIOS_ENGINE = EngineSettings(
+    clock=cycle_count.HELIOS.clock,
+    fetch_cycles_per_round=1,  # control_node_single_FPGA.v:170-182
+    fetch_cycles_per_job=1,  # header byte, control_node_single_FPGA.v:137
+    release_cycles_per_job=3,  # 25 ns, 2603.16203 line 902, rounded up
+    release_cycles_per_round=0,  # one message a job, 2603.16203 line 902
+)
+# A decoder priced by a measured time that already holds the syndrome's
+# copies to and from the device (measured_table/measurements.py) pays no
+# stage of its own, so its clock times nothing.
+MEASURED_TIME_ENGINE = EngineSettings(
+    clock=_CLOCK_250_MEGAHERTZ,  # estimate
+    fetch_cycles_per_round=0,
+    fetch_cycles_per_job=0,
+    release_cycles_per_job=0,
+    release_cycles_per_round=0,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -538,3 +573,45 @@ def _latency_settings(kind, section_name: str):
             f"name one of {rows}, or write a finite nonnegative number of "
             "microseconds"
         ) from None
+
+
+def toshio_decoder_pool(
+    decode_microseconds_per_round: float, clock: config.Clock
+) -> DecoderPoolSettings:
+    """One unit of Toshio et al.'s linear decoder: T_dec(r) = tau_dec r.
+
+    Toshio et al. charge a decode of r rounds tau_dec r (2510.25222
+    lines 968-971), and the double window's weak decoder
+    tau_dec (r_com + r_buf) for one window (lines 1309-1311). The fetch
+    stage's per-round cycles carry all of it, since a stage's cycles
+    scale with the job's rounds (staged_decoder.py
+    DecoderStage.cycles_for); every other stage costs nothing, and the
+    matching row answers in no time of its own. tau_dec is a whole
+    number of the clock's cycles, paid once a decode, so a confidence
+    that decodes a window twice, the complementary gap, pays it twice.
+    The paper sets T_weak_comm = tau_gen and T_strong_comm =
+    tau_strong_dec = 10 tau_gen and sweeps tau_weak_dec over 0, 0.1,
+    0.4, 0.7 and 0.9 tau_gen (lines 1109-1114, 1125-1133). T_comm, a
+    round's latency to the decoder (lines 1035-1036), is a link's, not
+    the unit's: the weak decoder's sits on controller_to_weak_buffer,
+    and the strong decoder's on weak_decoder_to_strong_decoder, which
+    carries a switching run's escalated rounds up.
+    """
+    decode_ticks = config.microseconds_to_ticks(decode_microseconds_per_round)
+    cycles, remainder_ticks = divmod(decode_ticks, clock.period_ticks)
+    if remainder_ticks:
+        raise ValueError(
+            f"Toshio's per-round decode time of "
+            f"{decode_microseconds_per_round} us is not a whole number of "
+            f"cycles of a {clock.period_ticks}-tick clock"
+        )
+    engine = EngineSettings(
+        clock=clock,
+        fetch_cycles_per_round=cycles,
+        fetch_cycles_per_job=0,
+        release_cycles_per_job=0,
+        release_cycles_per_round=0,
+    )
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder
+    algorithm = matching.Settings(preset_latency_microseconds=0.0)
+    return DecoderPoolSettings(algorithm=algorithm, engine=engine)

@@ -52,11 +52,11 @@ processes time-slice the GPU and a decode's time follows the others'
 work, not its own iterations (their lines explain r2 0.11 to 0.96), so
 no line prices them.
 
-The rows that name RELAY_BP_5 were measured at the Relay-BP paper's
-surface code Relay-BP-5 (Mueller et al. 2506.01779 lines 307, 332 and
-343), the decoder baseline's strong decoder: gamma0 0.35, the interval
-[-0.254, 0.985], 600 relay sets of 60 after 80 pre-iterations, stop
-after 5 converged solutions (nv-qldpc-decoder's NConv criterion), and
+The rows that name SURFACE_CODE_RELAY_BP_5 were measured at the Relay-BP
+paper's surface code Relay-BP-5 (Mueller et al. 2506.01779 lines 307,
+332 and 343), the decoder baseline's strong decoder: gamma0 0.35, the
+interval [-0.254, 0.985], 600 relay sets of 60 after 80 pre-iterations,
+stop after 5 converged solutions (nv-qldpc-decoder's NConv criterion), and
 the rest as above, with decsim's gamma table drawn at these keys. They
 are one decode at a time on the whole A100-SXM4-80GB, X and Z
 together, the same regions and shots, Slurm job 14676845 on 2026-09-29
@@ -74,13 +74,6 @@ from decsim.decoders.relay_belief_propagation import (
 )
 
 RelaySettings = relay_belief_propagation.RelayBeliefPropagationDecoder.Settings
-
-RELAY_BP_5 = RelaySettings(
-    gamma0=0.35,
-    gamma_interval=(-0.254, 0.985),
-    relay_set_count=600,
-    converged_solution_count=5,
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -161,7 +154,7 @@ RELAY_BP_TIMES = (
         110.852,
         9.827,
         147.187,
-        relay_settings=RELAY_BP_5,
+        relay_settings=relay_belief_propagation.SURFACE_CODE_RELAY_BP_5,
     ),
     # d 7, Relay-BP-5, 0.9897
     MeasuredTime(
@@ -173,7 +166,7 @@ RELAY_BP_TIMES = (
         178.551,
         19.533,
         259.108,
-        relay_settings=RELAY_BP_5,
+        relay_settings=relay_belief_propagation.SURFACE_CODE_RELAY_BP_5,
     ),
     # d 9, Relay-BP-5, 0.9940
     MeasuredTime(
@@ -185,7 +178,7 @@ RELAY_BP_TIMES = (
         218.469,
         26.372,
         640.656,
-        relay_settings=RELAY_BP_5,
+        relay_settings=relay_belief_propagation.SURFACE_CODE_RELAY_BP_5,
     ),
     # d 11, Relay-BP-5, 0.9993
     MeasuredTime(
@@ -197,7 +190,7 @@ RELAY_BP_TIMES = (
         276.795,
         36.079,
         1092.257,
-        relay_settings=RELAY_BP_5,
+        relay_settings=relay_belief_propagation.SURFACE_CODE_RELAY_BP_5,
     ),
     # d 13, Relay-BP-5, 0.9985
     MeasuredTime(
@@ -209,7 +202,7 @@ RELAY_BP_TIMES = (
         417.132,
         48.252,
         1748.302,
-        relay_settings=RELAY_BP_5,
+        relay_settings=relay_belief_propagation.SURFACE_CODE_RELAY_BP_5,
     ),
     # d 5, X part, 0.8641
     MeasuredTime("a100", "whole", "apart", 1, 168, 59.437, 7.752, 64.058),

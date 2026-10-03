@@ -11,6 +11,8 @@ refuses, both in place, must not be among them.
 
 import pytest
 
+import decsim.config as config
+import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
 import tests.experiments.yaml_configs as yaml_configs
 
@@ -26,6 +28,11 @@ INPUT_IN_PLACE = 1
 FOLD_IN_PLACE = 2
 SWITCHING = 3
 STUDY_BLOCKS = (CONTROL, INPUT_IN_PLACE, FOLD_IN_PLACE, SWITCHING)
+# Toshio et al.'s linear decoders on the grid's 250 MHz clocks: 0.4 and
+# 10 tau_gen a round at tau_gen = 1 us (2510.25222 lines 1109-1114)
+_CLOCK_250_MEGAHERTZ = config.Clock(period_ticks=4_000)
+WEAK_TOSHIO = decoder_settings.toshio_decoder_pool(0.4, _CLOCK_250_MEGAHERTZ)
+STRONG_TOSHIO = decoder_settings.toshio_decoder_pool(10.0, _CLOCK_250_MEGAHERTZ)
 
 
 def block_settings(block_index):
@@ -72,7 +79,7 @@ def test_the_switching_block_opens_the_last_two_hops():
     fabric = variant.links
 
     assert variant.escalation_kind == "switching"
-    assert variant.strong_decoder.algorithm.name == 10.0
+    assert variant.strong_decoder == STRONG_TOSHIO
     assert variant.strong_decoder.copies_input
     assert fabric.weak_decoder_to_strong_decoder is not None
     assert fabric.strong_buffer_to_strong_decoder is not None
@@ -103,7 +110,8 @@ def test_every_study_block_sweeps_the_same_points_on_priced_cards(
     """A priced card decodes on no host clock, so the counts repeat."""
     settings = block_settings(block_index)
     distances = swept_distances(block_index)
-    assert settings.weak_decoder.algorithm.name == 1.0
+    assert settings.weak_decoder.algorithm == WEAK_TOSHIO.algorithm
+    assert settings.weak_decoder.engine == WEAK_TOSHIO.engine
     assert distances == [3, 5, 7]
 
 

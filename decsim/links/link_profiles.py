@@ -10,9 +10,11 @@ those latencies and provisions finite rates from the run's geometry so
 contention becomes measurable; capacity_scale sweeps the whole fabric.
 roce_v2_measured_profile is the reference card with the strong tier's
 off-board path priced by Backline's measured RoCE v2 round trip; it is
-the roce_v2_cpu and roce_v2_gpu rows. path_card prices one path in
-cycles of a clock, a per-transfer setup cost (setup_cycles_per_transfer)
-included, and from_yaml puts each of the yaml's own cards through it.
+the roce_v2_cpu and roce_v2_gpu rows. with_risc_q_weak_loop puts any
+card's weak loop on Liu et al.'s measured fiber network. path_card
+prices one path in cycles of a clock, a per-transfer setup cost
+(setup_cycles_per_transfer) included, and from_yaml puts each of the
+yaml's own cards through it.
 
 Every number carries a source string on the settings record it sets,
 and a payload's source also travels into the traffic report with every
@@ -54,11 +56,11 @@ STRONG_RESULT_PAYLOAD_SOURCE = (
 # Methods). A command to the pulse controller is one instruction word:
 # QubiC's distributed processor implements every instruction as a 128-bit
 # word (Fruitwala et al., arXiv 2404.15260, Sec. III and IV).
-BUS_WORD_BITS = 32
+BUS_WORD_BITS = 32  # 2410.05202 line 999
 BUS_WORD_SOURCE = (
     "one 32-bit control bus word (Caune et al. 2410.05202, WISHBONE)"
 )
-INSTRUCTION_WORD_BITS = 128
+INSTRUCTION_WORD_BITS = 128  # 2404.15260 line 177
 INSTRUCTION_WORD_SOURCE = (
     "one 128-bit control-processor instruction word "
     "(QubiC distributed processor, Fruitwala et al. 2404.15260)"
@@ -102,7 +104,7 @@ BOUNDARY_PAYLOAD_SOURCE = "DependencyResidual seam-layer detectors"
 # Yang et al. break their closed loop down at (arXiv 2605.04892 Table I,
 # text lines 1047-1063) and the cycle of IBM's decoder FPGA (Maurer et
 # al., arXiv 2510.21600, line 404). A card's rate is bits per cycle of it.
-_REFERENCE_CLOCK_MEGAHERTZ = 250
+_REFERENCE_CLOCK_MEGAHERTZ = 250  # 2605.04892 line 1063
 _REFERENCE_CYCLE_MICROSECONDS = 1 / _REFERENCE_CLOCK_MEGAHERTZ
 
 # Yang et al., arXiv 2605.04892, Table I, is the one loop of decsim's scale
@@ -115,7 +117,7 @@ _REFERENCE_CYCLE_MICROSECONDS = 1 / _REFERENCE_CLOCK_MEGAHERTZ
 # readout cost must not repeat. Each qubit has its own demodulation
 # channel (QubiC, Fruitwala et al. 2404.15260, lines 709-715), so a
 # round's bits arrive in parallel and the hop serializes nothing.
-_READOUT_LATENCY_MICROSECONDS = 0.048
+_READOUT_LATENCY_MICROSECONDS = 0.048  # 2605.04892 lines 1053-1055
 _READOUT_SOURCE = (
     "Yang 2605.04892 Table I lines 1053-1055: ADC chip 12 ns, IQ "
     "demodulation 32 ns, qubit-state classification 4 ns"
@@ -127,7 +129,7 @@ _READOUT_SOURCE = (
 # split a round trip. The weak syndrome buffer sits on the decoder chip,
 # so the controller's write into it is the first link; a weak result
 # reaches the frame in the controller over the second.
-WEAK_STORE_LATENCY_MICROSECONDS = 0.018
+WEAK_STORE_LATENCY_MICROSECONDS = 0.018  # half 36 ns, 2605.04892 line 1056
 WEAK_STORE_SOURCE = (
     "Yang 2605.04892 Table I line 1056, digital communication 36 ns over "
     "the loop's two links; half, readout module to decoder FPGA"
@@ -143,7 +145,7 @@ _WEAK_RESULT_SOURCE = (
 # time for broadcasting between control system chassis" (240 to 260 ns,
 # lines 176-177), taken at the stated worst case for every hop that
 # crosses to or from the strong node.
-STRONG_STORE_LATENCY_MICROSECONDS = 0.26
+STRONG_STORE_LATENCY_MICROSECONDS = 0.26  # 2410.05202 line 177
 STRONG_STORE_SOURCE = (
     "Caune 2410.05202 Fig. 1a F, inter-node broadcast between control "
     "system chassis, 240 to 260 ns at the stated worst case"
@@ -175,7 +177,7 @@ _DECISION_SOURCE = (
 # From the pulse trigger to the pulse leaving the rack. The coax down to
 # the QPU is outside Yang's measurement, which ends at the pulse
 # generator's output port (lines 1699-1702), and no source gives it.
-_PULSE_LATENCY_MICROSECONDS = 0.088
+_PULSE_LATENCY_MICROSECONDS = 0.088  # 2605.04892 lines 1058-1060
 _PULSE_SOURCE = (
     "Yang 2605.04892 Table I lines 1058-1060: trigger propagation to the "
     "pulse generator 16 ns, waveform generation 32 ns, DAC chip 40 ns; "
@@ -183,25 +185,31 @@ _PULSE_SOURCE = (
 )
 
 # The rates. A word per cycle on the 32-bit bus the decoder is written
-# and read over (Caune 2410.05202 lines 998-1008 and 1252-1254; the paper
-# gives the width, not a transaction rate) and on the on-chip memory
-# word above; one 128-bit instruction word per cycle into the pulse
-# generator; and off board, the 100 Gb direct-attach cable from an FPGA
-# controller to its coprocessor host (Backline, arXiv 2609.09270, lines
-# 1229-1230), the one off-board line rate a referent of this scale gives.
+# and read over (Caune 2410.05202 lines 998-1008 and 1252-1254) and on
+# the on-chip memory word above: the width is Caune's, and one word a
+# 250 MHz cycle is an estimate, since Caune clock that bus at 156.25 MHz
+# (lines 1021-1027) and give no transaction rate. One 128-bit
+# instruction word per cycle into the pulse generator: the width is
+# QubiC's, and decsim runs it on its 250 MHz controller clock, while
+# QubiC's processors run at 500 MHz (2404.15260 lines 716-717). Off
+# board, the 100 Gb direct-attach cable from an FPGA controller to its
+# coprocessor host (Backline, arXiv 2609.09270, lines 1229-1230), the
+# one off-board line rate a referent of this scale gives.
 _WORD_BITS_PER_MICROSECOND = BUS_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
 _WORD_RATE_SOURCE = (
-    "one 32-bit word per 250 MHz cycle (Caune 2410.05202 lines 998-1008, "
-    "the decoder's 32-bit bus)"
+    "one 32-bit word per 250 MHz cycle, an estimate: the width is Caune "
+    "2410.05202 line 999's bus, which Caune clock at 156.25 MHz (lines "
+    "1021-1027)"
 )
 _INSTRUCTION_BITS_PER_MICROSECOND = (
     INSTRUCTION_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
 )
 _INSTRUCTION_RATE_SOURCE = (
-    "one 128-bit instruction word per 250 MHz cycle (QubiC 2404.15260 "
-    "lines 176-179)"
+    "one 128-bit instruction word per 250 MHz controller cycle, an "
+    "estimate: the width is QubiC 2404.15260 lines 176-179's, whose "
+    "processors run at 500 MHz (lines 716-717)"
 )
-_OFF_BOARD_BITS_PER_MICROSECOND = 100_000
+_OFF_BOARD_BITS_PER_MICROSECOND = 100_000  # 2609.09270 lines 1229-1230
 _OFF_BOARD_RATE_SOURCE = (
     "100 Gb/s, Backline 2609.09270 lines 1229-1230, the FPGA "
     "controller's direct-attach cable to its coprocessor host"
@@ -216,8 +224,8 @@ _OFF_BOARD_RATE_SOURCE = (
 # measurement is one number per round trip and the paper states no
 # per-direction split. These are the medians of the echo rows, which
 # carry no decoding work and price the fabric alone.
-ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS = 2.305
-ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS = 4.5
+ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS = 2.305  # 2609.09270 line 1627
+ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS = 4.5  # 2609.09270 line 1632
 ROCE_V2_CPU_SOURCE = (
     "Backline 2609.09270 Table III CPU echo, 2.305 us median round trip, "
     "FPGA controller to CPU coprocessor over RoCE v2"
@@ -238,7 +246,7 @@ ROCE_V2_ECHO_PAYLOAD_BITS = 128
 # and the FPGA times the round trip (line 400). The connection is
 # unreliable by choice: a dropped packet is not retransmitted (lines
 # 376-388). The steady-state mean and median are 3.839 us (line 485).
-NVQLINK_ROUND_TRIP_MICROSECONDS = 3.839
+NVQLINK_ROUND_TRIP_MICROSECONDS = 3.839  # 2510.25213 line 485
 # 32 bytes (2510.25213 lines 402-403)
 NVQLINK_ECHO_PAYLOAD_BITS = 256
 NVQLINK_SOURCE = (
@@ -248,6 +256,36 @@ NVQLINK_SOURCE = (
 _NVQLINK_RATE_SOURCE = (
     "100 Gb/s, NVQLink 2510.25213 line 382 and Fig. 2 (lines 438-439), "
     "the FPGA's Ethernet link to the GPU host's NIC"
+)
+
+# Liu et al., arXiv 2603.16203, a QEC system built on RISC-Q: a leaf
+# node's syndrome aggregator sends a round to the root node's decoder
+# over fiber and the root's error distributor sends the correction back
+# (lines 892-904). Each latency is rounded up to whole cycles of the
+# 250 MHz reference clock.
+_RISC_Q_UPLINK_MICROSECONDS = 0.16  # 157 ns, 2603.16203 lines 895-897
+_RISC_Q_DOWNLINK_MICROSECONDS = 0.164  # 155 + 9 ns, 2603.16203 lines 903-904
+# four 10 Gb/s transceivers after 64b/66b coding, 38.788 Gb/s (lines
+# 971-975), at the 38.79 bits a 250 MHz cycle per lane a card writes
+_RISC_Q_FIBER_BITS_PER_MICROSECOND = 38_790
+_RISC_Q_UPLINK_SOURCE = (
+    "RISC-Q leaf to root over fiber, 157 ns (Liu 2603.16203 lines "
+    "895-897), up to 40 cycles of 250 MHz"
+)
+_RISC_Q_DOWNLINK_SOURCE = (
+    "RISC-Q root to leaf over fiber, 155 ns, and the leaf's error "
+    "distribution, 9 ns (Liu 2603.16203 lines 903-904)"
+)
+_RISC_Q_FIBER_RATE_SOURCE = (
+    "four 10 Gb/s transceivers after 64b/66b coding, 38.788 Gb/s "
+    "(Liu 2603.16203 lines 971-975)"
+)
+# The aggregator hands the decoder a whole input frame (lines 668-670),
+# so the decoder's read of the store is one on-chip cycle with no rate,
+# an estimate.
+_RISC_Q_FRAME_SOURCE = (
+    "one 250 MHz cycle on chip, an estimate: the aggregator hands the "
+    "decoder a whole frame (Liu 2603.16203 lines 668-670)"
 )
 
 # decsim prices one number per hop, so each leg of the round trip is
@@ -662,6 +700,51 @@ def nvqlink_measured_profile() -> settings.FabricSettings:
     reference = logical_reference_profile()
     row_name = "nvqlink_gpu"
     return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
+
+
+def with_risc_q_weak_loop(
+    links: settings.FabricSettings,
+) -> settings.FabricSettings:
+    """The card with its weak loop on Liu et al.'s measured fiber network.
+
+    The root's 20 ns of pre-decode work (arXiv 2603.16203 lines 897-899)
+    is the receiver's own, so the uplink leaves it out. Every other hop
+    keeps the given card's number.
+    """
+    fiber_rate = settings.CapacitySettings(
+        _RISC_Q_FIBER_BITS_PER_MICROSECOND, _RISC_Q_FIBER_RATE_SOURCE
+    )
+    uplink = _actual_path(
+        "controller_to_weak_buffer",
+        _RISC_Q_UPLINK_MICROSECONDS,
+        _RISC_Q_UPLINK_SOURCE,
+        ROUND_PAYLOAD_SOURCE,
+        fiber_rate,
+    )
+    controller_to_weak_buffer = dataclasses.replace(
+        uplink, excludes_receiver_processing=True
+    )
+    weak_buffer_to_weak_decoder = _actual_path(
+        "weak_buffer_to_weak_decoder",
+        _REFERENCE_CYCLE_MICROSECONDS,
+        _RISC_Q_FRAME_SOURCE,
+        DECODER_INPUT_PAYLOAD_SOURCE,
+    )
+    weak_decoder_to_frame = _actual_path(
+        "weak_decoder_to_frame",
+        _RISC_Q_DOWNLINK_MICROSECONDS,
+        _RISC_Q_DOWNLINK_SOURCE,
+        RESULT_PAYLOAD_SOURCE,
+        fiber_rate,
+    )
+    profile_name = f"{links.profile_name} with the risc_q weak loop"
+    return dataclasses.replace(
+        links,
+        controller_to_weak_buffer=controller_to_weak_buffer,
+        weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
+        weak_decoder_to_frame=weak_decoder_to_frame,
+        profile_name=profile_name,
+    )
 
 
 class LogicalReferenceFabric:

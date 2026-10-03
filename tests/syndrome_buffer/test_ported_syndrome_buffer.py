@@ -249,15 +249,27 @@ def test_each_access_is_reported_with_its_port_and_its_three_ticks():
     ]
 
 
-def test_the_default_shape_is_one_byte_fifo_port_each_way():
-    """sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 15-16."""
+def test_the_default_shape_is_the_sky130_byte_fifo_one_port_each_way():
+    """sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 14-16."""
     defaults = ported_syndrome_buffer.PortedSyndromeBufferSettings()
+    fifo = ported_syndrome_buffer.SKY130_BYTE_FIFO
 
-    assert (defaults.read_ports, defaults.write_ports) == (1, 1)
-    assert defaults.read_write_ports == 0
-    assert defaults.word_bits == 8
-    assert defaults.cycles_per_access == 1
-    assert defaults.access_latency_cycles == 0
+    assert defaults == fifo
+    assert (fifo.read_ports, fifo.write_ports) == (1, 1)
+    assert fifo.read_write_ports == 0
+    assert fifo.word_bits == 8
+    assert fifo.cycles_per_access == 1
+    assert fifo.access_latency_cycles == 0
+
+
+def test_afs_word_memory_reads_32_bits_in_one_nanosecond():
+    """Four cycles a 32-bit read at 4 GHz, 2001.06598 lines 531 and 1102."""
+    engine = engine_module.Engine()
+    afs = ported_syndrome_buffer.AFS_WORD_MEMORY
+    store = ported_syndrome_buffer.PortedSyndromeBuffer(afs, engine)
+    window = _stored_window(store, (32,))
+
+    assert store.book_read(window) == config.microseconds_to_ticks(0.001)
 
 
 def _section_settings(section):

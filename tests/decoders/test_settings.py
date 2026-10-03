@@ -4,7 +4,9 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.staged_decoder as staged_decoder
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.decoding as decoding_records
 
 
 def _tier_section(unit_memory: dict) -> dict:
@@ -555,3 +557,31 @@ def test_a_unit_memory_of_no_bits_is_refused_by_its_record():
 
     with pytest.raises(ValueError, match=sentence):
         decoder_settings.UnitMemorySettings(bits=0)
+
+
+def test_toshios_pool_charges_tau_dec_for_every_round_of_the_job():
+    """T_dec(r) = tau_dec r, 2510.25222 lines 968-971: 0.4 us x 10 rounds."""
+    clock = config.Clock(period_ticks=4_000)
+    pool = decoder_settings.toshio_decoder_pool(0.4, clock)
+    engine = pool.engine
+    fetch = staged_decoder.MemoryFetchStage(
+        "fetch",
+        cycles_per_job=engine.fetch_cycles_per_job,
+        cycles_per_round=engine.fetch_cycles_per_round,
+    )
+    job = decoding_records.DecodeJob(
+        operation_id=0, window_id=0, round_count=10
+    )
+
+    fetch_ticks = fetch.cycles_for(job) * clock.period_ticks
+    assert fetch_ticks == config.microseconds_to_ticks(4.0)
+    assert engine.release_cycles_per_job == 0
+    assert engine.release_cycles_per_round == 0
+    assert pool.algorithm.preset_latency_microseconds == 0.0
+
+
+def test_a_toshio_decode_time_off_the_clock_is_refused():
+    """1 ns a round is a quarter of a 4 ns cycle."""
+    clock = config.Clock(period_ticks=4_000)
+    with pytest.raises(ValueError, match="not a whole number of cycles"):
+        decoder_settings.toshio_decoder_pool(0.001, clock)

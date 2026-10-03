@@ -130,7 +130,7 @@ def weak_alone(
     return decsim.MachineSettings(
         clock=machine_settings.FRIDGE_CLOCK,
         qpu=qpu,
-        controller=controller_settings.RISC_Q_LEAF,
+        controller=controller(),
         detection_events=detection_event_settings.YANG_PREPROCESSING,
         links=links,
         weak_syndrome_buffer=weak_syndrome_buffer,
@@ -140,6 +140,23 @@ def weak_alone(
         pauli_frame=pauli_frame_module.YANG_FRAME_UPDATE,
         workload=workload,
         observation=observation,
+    )
+
+
+def controller() -> controller_settings.ControllerSettings:
+    """A leaf controller that packs a round in 8 cycles and issues in 8.
+
+    The syndrome aggregator packs a round in 29 ns (2603.16203 lines
+    894-895), rounded up to cycles of the 250 MHz machine clock. That
+    paper gives no issue count, so the issue is QubiC's pipeline from
+    the decision to the pulse trigger (2404.15260 lines 173-191), 8
+    cycles counted with gem5's MinorCPU stage delays, an estimate.
+    Readout to bits sits in the readout hop (2605.04892 lines 1053-1055).
+    """
+    return controller_settings.ControllerSettings(
+        readout_to_bits_cycles=0,
+        packing_cycles_per_round=8,
+        decision_to_pulse_cycles=8,
     )
 
 

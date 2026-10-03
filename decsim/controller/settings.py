@@ -131,38 +131,6 @@ class ControllerSettings:
         )
 
 
-# QubiC's issue pipeline from the decision to the pulse trigger
-# (2404.15260 lines 173-191), counted with gem5's MinorCPU stage delays
-# where the paper gives none. The count is QubiC's; decsim runs it on the
-# machine's clock, while QubiC's cores run at 500 MHz (lines 716-717).
-# Readout and packing sit inside the round.
-QUBIC_ISSUE = ControllerSettings(
-    readout_to_bits_cycles=0,
-    packing_cycles_per_round=0,
-    decision_to_pulse_cycles=8,  # estimate traced from the paper
-)
-# QICK's tProcessor: 16 clocks for the conditional and the jump and 20
-# for the next pulse (2110.00557 lines 896-900), on its 384 MHz clock
-# (line 624).
-_QICK_CLOCK = config.Clock.from_megahertz(384.0)
-QICK_ISSUE = ControllerSettings(
-    clock=_QICK_CLOCK,
-    readout_to_bits_cycles=0,
-    packing_cycles_per_round=0,
-    decision_to_pulse_cycles=36,
-)
-# A RISC-Q leaf (Liu et al. 2603.16203) issuing on QubiC's pipeline: the
-# syndrome aggregator packs a round in 29 ns (lines 894-895), rounded up
-# to cycles of the machine's 250 MHz clock; RISC-Q gives no issue count.
-# decsim runs the leaf on the machine's clock, while RISC-Q's leaves run
-# at 500 MHz (line 143).
-RISC_Q_LEAF = ControllerSettings(
-    readout_to_bits_cycles=0,  # in the readout hop, 2605.04892 lines 1053-1055
-    packing_cycles_per_round=8,  # 29 ns, 2603.16203 lines 894-895
-    decision_to_pulse_cycles=QUBIC_ISSUE.decision_to_pulse_cycles,
-)
-
-
 def idle_policy_from_yaml(
     section: Mapping,
 ) -> Union[policies.IgnoreSettings, policies.SeparateDecodeJobsSettings]:

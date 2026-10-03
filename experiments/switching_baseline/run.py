@@ -121,9 +121,7 @@ def weak_alone(
         distance, physical_error_probability, ROUNDS_PER_SHOT
     )
     # both machines lay out the same last window, the lookahead tail
-    windows = dataclasses.replace(
-        window_settings.RISC_Q_WINDOWS, terminal_policy="lookahead"
-    )
+    windows = dataclasses.replace(window_plan(), terminal_policy="lookahead")
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True, backlog_trace=True
     )
@@ -157,6 +155,18 @@ def controller() -> controller_settings.ControllerSettings:
         readout_to_bits_cycles=0,
         packing_cycles_per_round=8,
         decision_to_pulse_cycles=8,
+    )
+
+
+def window_plan() -> window_settings.WindowSettings:
+    """Sliding windows of the code distance, issued in 20 ns.
+
+    A root controller issues each decode request in 20 ns (2603.16203
+    lines 897-899), 5 cycles of the 250 MHz chip clock (2605.04892 line
+    1063).
+    """
+    return window_settings.WindowSettings(
+        clock=machine_settings.FRIDGE_CLOCK, decision_cycles=5
     )
 
 

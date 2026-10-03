@@ -299,7 +299,7 @@ def test_the_tutorial_check_runs_the_pages_own_commands():
     "shown_line, moved_line",
     [
         (r"^(queue wait, mean: )[0-9.]+", r"\g<1>999.000"),
-        (r"^27\.224 ", "27.225 "),
+        (r"^88\.424 ", "88.425 "),
     ],
     ids=["summary timing", "trace tick"],
 )

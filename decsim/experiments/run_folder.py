@@ -702,12 +702,6 @@ def _how_it_ran() -> dict:
     }
 
 
-def rounds_per_shot(task: collect.Task) -> int:
-    """A shot's QEC rounds as the point's plan gives them (_rounds_per_shot)."""
-    plan = _plan(task)
-    return _rounds_per_shot(plan)
-
-
 def _plan(task: collect.Task) -> plan_build.Plan:
     """The plan the build derives from the task, before it wires."""
     settings = task.settings

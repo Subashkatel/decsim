@@ -703,7 +703,7 @@ def nvqlink_measured_profile() -> settings.FabricSettings:
 
 
 def with_risc_q_weak_loop(
-    links: settings.FabricSettings,
+    card: settings.FabricSettings,
 ) -> settings.FabricSettings:
     """The card with its weak loop on Liu et al.'s measured fiber network.
 
@@ -737,9 +737,9 @@ def with_risc_q_weak_loop(
         RESULT_PAYLOAD_SOURCE,
         fiber_rate,
     )
-    profile_name = f"{links.profile_name} with the risc_q weak loop"
+    profile_name = f"{card.profile_name} with the risc_q weak loop"
     return dataclasses.replace(
-        links,
+        card,
         controller_to_weak_buffer=controller_to_weak_buffer,
         weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
         weak_decoder_to_frame=weak_decoder_to_frame,

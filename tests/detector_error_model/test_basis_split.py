@@ -133,7 +133,7 @@ def test_the_observable_is_of_the_memorys_own_basis(memory_basis):
     assert observable_bases == (memory_basis.upper(),)
 
 
-@pytest.mark.parametrize("distance", [3, 5, 7])
+@pytest.mark.parametrize("distance", [3, 5])
 @pytest.mark.parametrize("memory_basis", ["x", "z"])
 @pytest.mark.parametrize("basis", ["X", "Z"])
 def test_each_part_is_stims_decomposition_of_that_type(

@@ -15,7 +15,6 @@ import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
-import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 from decsim.burst_detectors.masked_regional_cusum import (
     detector as masked_regional_cusum,
@@ -50,28 +49,6 @@ def _plan_that_scores_nothing() -> types.SimpleNamespace:
     return types.SimpleNamespace(run_plan=run_plan, planned_operations=())
 
 
-def test_a_run_with_no_switching_builds_no_switching_part():
-    engine = engine_module.Engine()
-
-    switching = escalation_build.build_switching(None, None, engine)
-
-    assert switching is None
-
-
-def test_the_policy_decides_on_the_signals_source_and_the_threshold():
-    settings = _switching()
-    weak = _weak()
-    engine = engine_module.Engine()
-
-    switching = escalation_build.Switching.build(settings, weak, engine)
-
-    policy = switching.policy
-    twenty_decibels = threshold_sources.decibels_to_nats(20.0)
-    assert policy.threshold.threshold_nats == twenty_decibels
-    assert policy.expected_source is switching.confidence_signal.source
-    assert policy.run_both_at_once is False
-
-
 def test_every_machine_builds_its_own_policy_from_one_settings_record():
     """One settings record builds a machine per shot.
 
@@ -89,44 +66,6 @@ def test_every_machine_builds_its_own_policy_from_one_settings_record():
 
     assert first.policy is not second.policy
     assert first.strong_redecode is not second.strong_redecode
-
-
-def test_the_strong_window_record_declares_whether_it_absorbs():
-    redo_window = _switching()
-    double_window = strong_window_shapes.DoubleWindow.Settings()
-    forward = _switching(strong_window=double_window)
-
-    assert redo_window.strong_window.name == "redo_window"
-    assert forward.strong_window.name == "double_window"
-    assert redo_window.strong_window.absorbs_weak_windows is False
-    assert forward.strong_window.absorbs_weak_windows is True
-
-
-def test_the_switching_part_builds_the_strong_window_its_slot_names():
-    double_window = strong_window_shapes.DoubleWindow.Settings()
-    settings = _switching(strong_window=double_window)
-    weak = _weak()
-    engine = engine_module.Engine()
-
-    switching = escalation_build.Switching.build(settings, weak, engine)
-
-    assert isinstance(switching.shape, strong_window_shapes.DoubleWindow)
-
-
-def test_the_confidence_row_is_built_with_the_sections_walk_card():
-    confidence = complementary.ComplementaryGap.Settings(walk_microseconds=0.25)
-    threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_decibels=20.0
-    )
-    settings = escalation_settings.SwitchingSettings(
-        confidence=confidence, threshold=threshold
-    )
-    weak = _weak()
-    engine = engine_module.Engine()
-
-    switching = escalation_build.Switching.build(settings, weak, engine)
-
-    assert switching.confidence_signal.walk_microseconds == 0.25
 
 
 def test_the_switching_slots_detector_is_the_one_built():

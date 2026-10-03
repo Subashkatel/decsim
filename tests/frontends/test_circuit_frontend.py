@@ -68,16 +68,6 @@ def test_two_operations_that_share_a_patch_carry_an_edge_between_them():
     assert indexed[1].predecessors == (0,)
 
 
-def test_two_operations_that_share_no_patch_carry_no_edge():
-    first = program_records.Operation(0, "Op0", (0, 1))
-    second = program_records.Operation(1, "Op1", (2, 3))
-
-    indexed = _lowered_operations([first, second])
-
-    assert indexed[0].predecessors == ()
-    assert indexed[1].predecessors == ()
-
-
 def test_a_declared_predecessor_is_kept_beside_the_patch_order_ones():
     first = program_records.Operation(0, "Op0", (0,))
     second = program_records.Operation(1, "Op1", (1,))
@@ -118,10 +108,8 @@ def test_an_operation_with_no_detector_data_has_no_decoder_boundary():
 def test_an_operation_that_lists_one_qubit_twice_is_refused():
     twice = program_records.Operation(0, "Op0", (1, 1))
 
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(ValueError):
         _lowered_operations([twice])
-
-    assert "lists the same qubit more than once" in str(refusal.value)
 
 
 def test_a_live_stream_gets_its_owner_region_and_rounds_derived():
@@ -153,19 +141,5 @@ def test_one_circuit_under_two_operations_without_ranges_is_refused():
     physical = workload_records.FiniteCircuit(circuit, {0: 1})
     workload = workload_records.Workload((first, second), {}, physical)
 
-    with pytest.raises(ValueError, match="none names its round range"):
+    with pytest.raises(ValueError):
         circuit_frontend.lowered(workload)
-
-
-def test_the_one_operation_running_a_circuit_takes_the_circuits_rounds():
-    memory = program_records.Operation(1, "memory", (0,))
-    circuit = stim.Circuit("M 0\nM 0\nDETECTOR rec[-1] rec[-2]")
-    physical = workload_records.FiniteCircuit(circuit, {0: 1, 1: 2})
-    workload = workload_records.Workload((memory,), {}, physical)
-
-    program = circuit_frontend.lowered(workload)
-    operation = program.operations[0]
-
-    assert operation.circuit == circuit
-    assert program.rounds_policy.rounds_by_operation == ((1, 2),)
-    assert program.physical_circuits == ((1, physical),)

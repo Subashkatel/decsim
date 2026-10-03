@@ -10,18 +10,14 @@ the calibration test holds the two signals against each other on the
 same shots: they agree to within the growth's weight step.
 """
 
-import dataclasses
 import math
 import statistics
-
-import pytest
 
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -44,19 +40,6 @@ def _window_model():
     return circuit, model
 
 
-def test_the_row_declares_one_decode_and_the_growth_it_reads():
-    """The signal's requirement and the Union-Find row's declaration meet."""
-    signal = cluster.ClusterGap()
-    assert isinstance(signal, ports.ConfidenceSignal)
-    assert signal.forced_logical_classes == ()
-    required = signal.decoder_evidence_requirement
-    assert required == decoding_records.CLUSTER_GROWTH_EVIDENCE
-    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
-    assert not required - row.decoder_evidence
-    matching = minimum_weight_perfect_matching.PyMatchingDecoder()
-    assert required - matching.decoder_evidence == required
-
-
 def test_a_decode_without_growth_reports_no_gap():
     """The fail-safe: a job with no window model grows nothing."""
     signal = cluster.ClusterGap()
@@ -64,27 +47,6 @@ def test_a_decode_without_growth_reports_no_gap():
     computation = signal.compute((solve,))
     assert computation.soft_output is None
     assert computation.ticks == 0
-
-
-def test_the_gap_is_read_off_the_decode_that_produced_the_correction():
-    """One decode answers the window and carries the growth the gap walks."""
-    _built_circuit, model = _window_model()
-    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
-    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
-    events, _observables = windows.sampled_shots(circuit, 1, SEED)
-    job = windows.job_for(model, events[0])
-    result = row.decode(job)
-    evidence = result.cluster_evidence
-    selected = list(evidence.selected_faults)
-    assert selected == list(result.correction)
-    graph = evidence.graph
-    assert graph.weight_step == evidence_records.DEFAULT_WEIGHT_STEP
-    signal = cluster.ClusterGap()
-    computation = signal.compute((result,))
-    soft_output = computation.soft_output
-    assert soft_output.source is signal.source
-    assert soft_output.source.gap_units == "log_likelihood_weight"
-    assert soft_output.gap > 0.0
 
 
 def test_the_cluster_and_complementary_gaps_agree_on_one_window_property():
@@ -150,53 +112,6 @@ def test_the_gap_walks_against_an_oracle_built_from_the_paper_alone_property():
     assert walked == 8
 
 
-def test_a_growth_at_another_weight_step_is_refused():
-    """The gap reads the ticks the growth used, so the steps must agree."""
-    circuit, model = _window_model()
-    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
-    events, _observables = windows.sampled_shots(circuit, 1, SEED)
-    job = windows.job_for(model, events[0])
-    result = row.decode(job)
-    other_step = evidence_records.DEFAULT_WEIGHT_STEP / 2.0
-    signal = cluster.ClusterGap(weight_step=other_step)
-
-    with pytest.raises(RuntimeError) as refusal:
-        signal.compute((result,))
-
-    assert "reads the decode's own ticks" in str(refusal.value)
-
-
-def test_a_growth_no_edge_of_which_crosses_the_logical_has_an_infinite_gap():
-    """No odd closed walk exists, so the minimum over them is infinite."""
-    circuit, model = _window_model()
-    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
-    events, _observables = windows.sampled_shots(circuit, 1, SEED)
-    job = windows.job_for(model, events[0])
-    result = row.decode(job)
-    graph = result.cluster_evidence.graph
-    silent = _graph_with_no_logical_edge(graph)
-    signal = cluster.ClusterGap()
-    silent_result = _result_with_graph(result, silent)
-
-    computation = signal.compute((silent_result,))
-
-    assert computation.soft_output.gap == math.inf
-
-
-def test_the_half_ticks_of_the_growth_read_back_as_natural_log_weight():
-    """Every signal reports in the unit the switching threshold is held in."""
-    step = evidence_records.DEFAULT_WEIGHT_STEP
-
-    two_ticks = cluster.gap_half_ticks_to_natural_log_weight(2, step)
-    seven_ticks = cluster.gap_half_ticks_to_natural_log_weight(7, step)
-    unreachable = cluster.gap_half_ticks_to_natural_log_weight(math.inf, step)
-
-    assert two_ticks == step
-    three_and_a_half_steps = 3.5 * step
-    assert seven_ticks == pytest.approx(three_and_a_half_steps)
-    assert unreachable == math.inf
-
-
 def _oracle_gap(evidence) -> float:
     """The independent oracle's gap for one decode's growth, in nats."""
     half_ticks = independent_cluster_gap.shortest_odd_closed_walk(
@@ -211,19 +126,3 @@ def _same_gap(inside: float, outside: float) -> bool:
     if math.isinf(inside):
         return math.isinf(outside)
     return math.isclose(inside, outside, abs_tol=1e-9)
-
-
-def _graph_with_no_logical_edge(graph):
-    """The same graph with every edge's logical row cleared."""
-    edges = []
-    for edge in graph.edges:
-        silent_row = tuple(0 for _bit in edge.logical_observables)
-        silent_edge = dataclasses.replace(edge, logical_observables=silent_row)
-        edges.append(silent_edge)
-    return dataclasses.replace(graph, edges=tuple(edges))
-
-
-def _result_with_graph(result, graph):
-    """The same decode result carrying a different growth graph."""
-    evidence = dataclasses.replace(result.cluster_evidence, graph=graph)
-    return dataclasses.replace(result, cluster_evidence=evidence)

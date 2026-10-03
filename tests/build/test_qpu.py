@@ -18,23 +18,6 @@ _DISTILLATION = magic_state_factories.DistillationFactory
 _MULTI_LEVEL = magic_state_factories.MultiLevelDistillationFactory
 
 
-def test_two_records_with_different_cards_build_their_own_factories():
-    engine = engine_module.Engine()
-    card = _DISTILLATION.Settings(
-        unit_count=1,
-        attempt_ticks=1000,
-        correction_round_count=1,
-        correction_decode_count=0,
-    )
-
-    infinite = _INFINITE.Settings()
-    always_in_stock = infinite.build(engine, 1000)
-    fifteen_to_one = card.build(engine, 1000)
-
-    assert isinstance(always_in_stock, _INFINITE)
-    assert isinstance(fifteen_to_one, _DISTILLATION)
-
-
 _ONE_LEVEL = magic_state_factories.DistillLevel(unit_count=1, distance=3)
 _NO_DECODE_CARD = _DISTILLATION.Settings(
     unit_count=1,

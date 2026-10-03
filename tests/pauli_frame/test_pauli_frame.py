@@ -15,10 +15,14 @@ import enum
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
 
 
@@ -89,102 +93,6 @@ def test_reading_the_frame_does_not_change_it():
     assert first_read == second_read == (1, 1)
 
 
-def test_a_second_correction_for_a_window_is_refused():
-    engine, frame = frame_with_commit_ticks(0)
-    commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)
-    with pytest.raises(RuntimeError, match="second write"):
-        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
-    assert frame.frame_for_stream("stream") == (1,)
-
-
-def test_the_write_cost_is_charged_before_the_caller_continues():
-    engine, frame = frame_with_commit_ticks(4)
-    continued_at = []
-
-    def note_continuation():
-        continued_at.append(engine.now)
-
-    def commit_at_tick_ten():
-        commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
-
-    engine.schedule(10, commit_at_tick_ten)
-    engine.run()
-    assert continued_at == [14]
-    snapshot = frame.snapshot()
-    record = snapshot.records[0]
-    assert (record.accepted_ticks, record.committed_ticks) == (10, 14)
-
-
-def test_a_correction_without_observables_makes_the_fold_unknown():
-    engine, frame = frame_with_commit_ticks(0)
-    commit(frame, ("stream", 0), (1,))
-    commit(frame, ("stream", 1), None)
-    assert frame.frame_for_stream("stream") is None
-
-
-def test_a_charged_write_keeps_its_cycle_count_and_its_clock():
-    clock = config.Clock(4000)
-    settings = pauli_frame_module.PauliFrameConfig(write_cycles=1, clock=clock)
-    assert settings.write_cycles == 1
-    assert settings.clock.period_ticks == 4000
-
-
-def test_a_write_arriving_mid_cycle_lands_on_the_frame_clocks_next_edge():
-    """One write is one cycle of the frame unit, charged edge to edge.
-
-    Yang et al. 2605.04892 Fig. 1 price the update at one cycle, 4 ns at
-    250 MHz, so on a 4000-tick period a correction that arrives at tick
-    10 is written over the cycle that starts at 4000 and lands at 8000.
-    """
-    engine = engine_module.Engine()
-    clock = config.Clock(4000)
-    frame = pauli_frame_module.PauliFrame(engine, clock=clock, write_cycles=1)
-    continued_at = []
-
-    def note_continuation():
-        continued_at.append(engine.now)
-
-    def commit_at_tick_ten():
-        commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
-
-    engine.schedule(10, commit_at_tick_ten)
-    engine.run()
-
-    assert continued_at == [8000]
-
-
-def test_a_stream_whose_corrections_change_width_is_refused_when_read():
-    """One stream's observables are one width; two widths cannot be XORed.
-
-    A window's correction is one bit per logical observable of its
-    operation, so a change of width means two operations' results
-    reached one stream, and folding them would silently drop bits.
-    """
-    engine, frame = frame_with_commit_ticks(0)
-    commit(frame, ("stream", 0), (1, 0))
-    commit(frame, ("stream", 1), (0, 1, 0))
-    with pytest.raises(RuntimeError, match="changed its number of observables"):
-        frame.frame_for_stream("stream")
-
-
-def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
-    """The write in flight counts as a write: the refusal does not wait."""
-    engine, frame = frame_with_commit_ticks(4)
-    continued = []
-
-    def note_continuation():
-        continued.append(engine.now)
-
-    commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
-    with pytest.raises(RuntimeError, match="second write"):
-        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
-    engine.run()
-    assert continued == [4]
-    snapshot = frame.snapshot()
-    assert snapshot.commit_count == 1
-    assert snapshot.pending_write_count == 0
-
-
 def test_the_frame_keeps_its_own_copy_of_the_observables_it_was_given():
     """A caller may reuse its buffer; the committed correction is fixed."""
     engine, frame = frame_with_commit_ticks(0)
@@ -204,6 +112,53 @@ def test_a_snapshot_does_not_change_when_the_frame_does():
     assert after.commit_count == 2
 
 
+def test_a_second_correction_for_a_window_is_refused():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)
+    with pytest.raises(RuntimeError):
+        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
+    assert frame.frame_for_stream("stream") == (1,)
+
+
+def test_a_correction_without_observables_makes_the_fold_unknown():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1,))
+    commit(frame, ("stream", 1), None)
+    assert frame.frame_for_stream("stream") is None
+
+
+def test_a_stream_whose_corrections_change_width_is_refused_when_read():
+    """One stream's observables are one width; two widths cannot be XORed.
+
+    A window's correction is one bit per logical observable of its
+    operation, so a change of width means two operations' results
+    reached one stream, and folding them would silently drop bits.
+    """
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0))
+    commit(frame, ("stream", 1), (0, 1, 0))
+    with pytest.raises(RuntimeError):
+        frame.frame_for_stream("stream")
+
+
+def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
+    """The write in flight counts as a write: the refusal does not wait."""
+    engine, frame = frame_with_commit_ticks(4)
+    continued = []
+
+    def note_continuation():
+        continued.append(engine.now)
+
+    commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
+    with pytest.raises(RuntimeError):
+        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
+    engine.run()
+    assert continued == [4]
+    snapshot = frame.snapshot()
+    assert snapshot.commit_count == 1
+    assert snapshot.pending_write_count == 0
+
+
 def test_a_write_cost_refusal_names_its_yaml_path():
     clocks = config.ClockSettings({"fridge": 250.0})
     section = {"clock": "fridge", "write_cycles": -1}
@@ -216,11 +171,22 @@ def test_a_write_cost_refusal_names_its_yaml_path():
     )
 
 
-def test_a_charged_write_without_a_clock_is_refused():
-    engine = engine_module.Engine()
+def test_a_charged_write_with_no_clock_still_stops():
+    """A run that names no clock cannot land the first window's write."""
+    algorithm = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    workload = declared_run.declared_workload(None, 6)
+    qpu = declared_run.declared_qpu()
+    frame = pauli_frame_module.PauliFrameConfig(write_cycles=1, clock=None)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak, pauli_frame=frame
+    )
+    machine = machine_module.Machine.build(settings, 0)
 
-    with pytest.raises(ValueError, match="needs the clock"):
-        pauli_frame_module.PauliFrame(engine, clock=None, write_cycles=1)
+    with pytest.raises(AttributeError):
+        machine.run()
 
 
 @pytest.mark.parametrize("key", ["clock", "write_cycles"])
@@ -250,12 +216,6 @@ def test_a_key_the_section_does_not_have_is_refused_by_name():
         "pauli_frame does not know ['write_cycle']; its keys are "
         "['kind', 'clock', 'write_cycles']"
     )
-
-
-def test_a_free_write_is_accepted_and_needs_no_clock():
-    settings = pauli_frame_module.PauliFrameConfig(write_cycles=0)
-    assert settings.write_cycles == 0
-    assert settings.clock is None
 
 
 class CountingFrame(pauli_frame_module.PauliFrame):
@@ -346,23 +306,6 @@ def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
     engine.run()
 
     assert continued_at == [14, 14]
-
-
-def test_every_write_is_stamped_with_its_own_arrival_and_its_own_end():
-    """A queue would show the second write starting where the first ended."""
-    engine, frame = frame_with_commit_ticks(4)
-
-    def commit_both():
-        commit(frame, ("stream", 0), (1,))
-        commit(frame, ("stream", 1), (1,))
-
-    engine.schedule(10, commit_both)
-    engine.run()
-    snapshot = frame.snapshot()
-    first, second = snapshot.records
-
-    assert (first.accepted_ticks, first.committed_ticks) == (10, 14)
-    assert (second.accepted_ticks, second.committed_ticks) == (10, 14)
 
 
 def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():

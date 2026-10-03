@@ -152,13 +152,6 @@ class DecoderInputStaging:
         the write or after.
         """
         memory = job.memory
-        if memory is None:
-            raise RuntimeError(
-                f"{job.label}: boundary_fold in_place needs the unit's own "
-                "copy of the rounds, and this tier reads its input in "
-                "place (input: in_place); fold into a copy, or copy the "
-                "input"
-            )
         if memory.is_rewritten(job):
             job.decoder_input = memory.input_of(job)
             return

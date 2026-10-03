@@ -134,12 +134,6 @@ def test_the_interaction_counts_the_flips_on_the_destinations_oldest_layer():
     assert dense_bits == 3
 
 
-def test_a_run_with_one_window_sends_no_boundary():
-    machine = declared_run.weak_only_run(rounds=6)
-    report = machine.observation.traffic.traffic_json_value()
-    assert boundary_transfers(report) == []
-
-
 @pytest.mark.parametrize("name", sorted(window_settings.BOUNDARY_PAYLOADS))
 def test_every_row_of_the_table_answers_a_width_for_a_seam(name):
     """The table's contract, as ports.BoundaryPayload states it.

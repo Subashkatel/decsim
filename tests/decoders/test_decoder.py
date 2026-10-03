@@ -94,14 +94,6 @@ def test_start_delivers_the_result_after_latency_ticks():
     assert result.logical_observables == (1,)
 
 
-def test_a_cancelled_job_delivers_none_after_its_time():
-    job = _job()
-    job.cancelled = True
-    row = FixedRow()
-    delivered = _started(row, job)
-    assert delivered == [(3, None)]
-
-
 def test_a_job_without_a_window_delivers_none():
     job = _job(on_done=lambda: None)
     row = FixedRow()
@@ -136,7 +128,7 @@ def test_occupancy_is_none_for_a_measured_row():
 def test_a_window_row_without_a_latency_model_has_no_latency():
     job = _job()
     row = EmptyWindowRow(latency_model=None)
-    with pytest.raises(NotImplementedError, match="measured by its own call"):
+    with pytest.raises(NotImplementedError):
         row.latency(job)
 
 

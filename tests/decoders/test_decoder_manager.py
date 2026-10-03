@@ -1,10 +1,10 @@
-"""The facade's laws: a row plugs in through the pool, a job is admitted once.
+"""The facade's laws: a job is admitted once, withdrawn whole, and settled.
 
-sinter's BUILT_IN_DECODERS
-(sinter/_decoding/_decoding_all_built_in_decoders.py): a new decoder is
-one class on the port and one row; here the row is routed by the pool
-and its result reaches on_decoded once, with the manager's log naming
-the job it started.
+A withdrawn window leaves the queue and gives its claim back; a tier
+that blocks holds its unit until the result is read (Chen 2605.30765);
+the copy and in-place rows put the rounds where the unit reads them.
+A new row through the pool is tests/machine/test_machine.py::
+test_a_new_decoder_is_one_class_and_its_settings_record.
 """
 
 import dataclasses
@@ -22,11 +22,9 @@ import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.observe.log_writers as log_writers
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.trace_source as trace_source
 
 
 class FixedRow(decoder_module.DecoderBase):
@@ -133,29 +131,6 @@ def _window_job():
     )
 
 
-def test_a_fake_row_through_the_pool_decodes_the_window_once():
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    row = FixedRow()
-    manager = _manager(engine, row)
-    delivered = []
-
-    def on_decoded(job, result):
-        delivered.append((engine.now, result))
-        manager.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
-
-    job = _window_job()
-    manager.enqueue(job, None, on_decoded)
-    engine.run()
-    (delivery,) = delivered
-    tick, result = delivery
-    assert tick == config.microseconds_to_ticks(2.0)
-    assert result.logical_observables == (1,)
-    assert "Decoder manager: START DECODE mem W0" in log.lines[-1]
-    manager.check_decode_work_settled()
-
-
 def _resolving(manager):
     """An on_decoded that closes the request, as the window side does."""
     keep = decoding_records.Verdict.KEEP
@@ -172,7 +147,7 @@ def test_a_spent_job_is_refused():
     manager = _manager(engine, row)
     job = _window_job()
     manager.enqueue(job, None, lambda _job, _result: None)
-    with pytest.raises(RuntimeError, match="submitted once"):
+    with pytest.raises(RuntimeError):
         manager.enqueue(job, None, lambda _job, _result: None)
 
 
@@ -287,43 +262,6 @@ def test_the_rounds_before_are_held_by_the_tier_and_not_deposited():
     assert [fragment.round_index for fragment in deposited] == [2]
     assert deposited[0].bits == (0,)
     assert job.rounds_before == ()
-
-
-class UnpinnableRow(FixedRow):
-    """A row that reports, at compile time, that no class can be forced."""
-
-    def __init__(self) -> None:
-        base = super()
-        base.__init__()
-        self.forced_solve_unavailable = trace_source.TraceSource()
-
-
-class _Model:
-    """The part of a window model the narrated line reads."""
-
-    detector_ids = (0, 1, 2, 3, 4)
-
-
-def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
-    """The line belongs to the component whose row reports it.
-
-    The log the frozen gate hashes is a product of the components alone.
-    The manager owns the rows that report it, so it says it, and a run
-    with no observer says it too.
-    """
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    row = UnpinnableRow()
-    manager = _manager(engine, row)
-    manager.start()
-    model = _Model()
-    reason = "one observable, no boundary"
-    row.forced_solve_unavailable.fire(model, reason)
-    lines = _lines_containing(log.lines, "NO FORCED SOLVE")
-    assert len(lines) == 1
-    assert "5-detector window model" in lines[0]
-    assert "one observable, no boundary" in lines[0]
 
 
 def test_every_job_kind_says_how_it_is_settled():

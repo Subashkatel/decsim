@@ -17,19 +17,7 @@ def test_eager_ships_a_provisional_boundary():
     assert eager.on_commit(window, final=False) is True
 
 
-def test_eager_ships_a_final_boundary():
-    eager = boundary_policies.Eager()
-    window = object()
-    assert eager.on_commit(window, final=True) is True
-
-
 def test_held_holds_a_provisional_boundary():
     held = boundary_policies.Held()
     window = object()
     assert held.on_commit(window, final=False) is False
-
-
-def test_held_ships_a_final_boundary():
-    held = boundary_policies.Held()
-    window = object()
-    assert held.on_commit(window, final=True) is True

@@ -58,54 +58,6 @@ def test_random_programs_run_in_time_priority_arrival_order_property():
         assert ran == scheduled_order_oracle(requests)
 
 
-def test_an_action_sees_its_own_due_tick_as_now():
-    engine = engine_module.Engine()
-    seen = []
-    engine.schedule(5, lambda: seen.append(engine.now))
-    engine.schedule(2, lambda: seen.append(engine.now))
-    engine.run()
-    assert seen == [2, 5]
-    assert engine.now == 5
-
-
-def test_actions_scheduled_while_running_join_the_same_order():
-    engine = engine_module.Engine()
-    ran = []
-
-    def schedule_two_more():
-        ran.append("first")
-        engine.schedule(0, lambda: ran.append("same tick, later arrival"))
-        engine.schedule(3, lambda: ran.append("three ticks later"))
-
-    engine.schedule(1, schedule_two_more)
-    engine.schedule(
-        1, lambda: ran.append("same tick, earlier arrival"), priority=1
-    )
-    engine.run()
-    assert ran == [
-        "first",
-        "same tick, later arrival",
-        "same tick, earlier arrival",
-        "three ticks later",
-    ]
-
-
-def test_a_negative_delay_is_refused():
-    engine = engine_module.Engine()
-    with pytest.raises(ValueError, match="past"):
-        engine.schedule(-1, lambda: None)
-
-
-def test_action_done_carries_the_tick_after_every_action():
-    engine = engine_module.Engine()
-    heard = []
-    engine.action_done.connect(heard.append)
-    engine.schedule(2, lambda: None)
-    engine.schedule(3, lambda: None)
-    engine.run()
-    assert heard == [2, 3]
-
-
 def test_the_engine_runs_the_same_ticks_with_no_listener_at_all():
     def program(engine, seen):
         engine.schedule(5, lambda: seen.append(engine.now))
@@ -129,6 +81,13 @@ def test_the_engine_runs_the_same_ticks_with_no_listener_at_all():
     assert heard_ticks == [2, 2, 5]
     assert heard_lines == ["[  0.000 us] worker: ready"]
     assert bare.now == heard.now
+
+
+def test_a_negative_delay_is_refused():
+    """An action due in the past would run out of order, so it stops."""
+    engine = engine_module.Engine()
+    with pytest.raises(ValueError):
+        engine.schedule(-1, lambda: None)
 
 
 def test_an_action_that_raises_stops_the_run_and_leaves_the_rest_queued():

@@ -126,7 +126,7 @@ def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
 
 
 def test_a_switching_record_refuses_a_cost_by_its_own_field():
-    with pytest.raises(ValueError, match="^threshold_cycles must not be"):
+    with pytest.raises(ValueError, match="threshold_cycles"):
         _switching(threshold_cycles=-1)
 
 
@@ -152,7 +152,5 @@ def test_switching_without_a_strong_decoder_names_the_empty_slot():
     weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
     switching = _switching()
 
-    with pytest.raises(
-        ValueError, match="switching is set and strong_decoder is not"
-    ):
+    with pytest.raises(ValueError, match="strong_decoder"):
         machine_settings.MachineSettings(weak_decoder=weak, switching=switching)

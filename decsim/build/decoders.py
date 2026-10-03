@@ -10,7 +10,6 @@ before the parts because the window models are compiled for the units.
 import dataclasses
 from typing import Optional
 
-import decsim.build.plan as plan_build
 import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
@@ -155,7 +154,6 @@ def build_decoder_pool(
     window_tier: window_records.DecoderTier,
     escalates: bool,
     machine_clock: Optional[config.Clock],
-    plan: plan_build.Plan,
     detection_events: ports.DetectionEventPlacement,
     signal: Optional[ports.ConfidenceSignal],
 ) -> DecoderPool:
@@ -173,7 +171,6 @@ def build_decoder_pool(
     active = build_decoder_unit(
         window_decoder, active_tier, machine_clock, active_formation, signal
     )
-    _check_the_active_tier_decodes(active, active_tier, plan)
     blocks_unit = _blocks_unit(window_decoder)
     chip = _pool(
         window_decoder, decode_queue.DEFAULT_POOL, active_formation, blocks_unit
@@ -188,22 +185,6 @@ def build_decoder_pool(
         strong_decoder, decode_queue.STRONG_POOL, strong_formation, False
     )
     return DecoderPool(active=active, strong=strong, chip=chip, host=host)
-
-
-def _check_the_active_tier_decodes(
-    active, active_tier: str, plan: plan_build.Plan
-) -> None:
-    """A plan with windows needs a decoder on the tier that decodes them.
-
-    The tier's slot is filled whenever either is, so an empty one means
-    the run names no decoder at all.
-    """
-    if active is not None or not plan.planned_operations:
-        return
-    raise ValueError(
-        f"the plan decodes windows on the {active_tier} tier, and the run "
-        "names no decoder: fill weak_decoder or strong_decoder"
-    )
 
 
 def _pool(

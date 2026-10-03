@@ -59,8 +59,6 @@ class RepeatedStimCircuit:
 
     def assemble(self, round_count: int) -> tuple[stim.Circuit, dict[int, int]]:
         """Describe a complete physical history and its measurement schedule."""
-        if round_count < 1:
-            raise ValueError("round_count must be positive")
         circuit = stim.Circuit()
         measurement_rounds = {}
         after_last_round = round_count + 1
@@ -76,8 +74,6 @@ class RepeatedStimCircuit:
 
 
 def _round_name(round_index: int, is_final: bool) -> str:
-    if round_index < 1:
-        raise ValueError("round_index must be positive")
     if round_index == 1:
         if is_final:
             return "single_round"

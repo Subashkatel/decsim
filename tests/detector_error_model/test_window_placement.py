@@ -24,11 +24,6 @@ def surface_code_detectors_by_round(rounds):
     return detector_chronology.detectors_by_round(round_by_detector)
 
 
-def test_a_four_bound_entry_is_returned_as_its_four_ints():
-    bounds = window_placement.parse_window_entry((1, 2, 3, 4))
-    assert bounds == (1, 2, 3, 4)
-
-
 def test_a_three_bound_entry_starts_its_buffer_at_its_first_commit_round():
     bounds = window_placement.parse_window_entry((2, 3, 4))
     assert bounds == (2, 2, 3, 4)

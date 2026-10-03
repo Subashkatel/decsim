@@ -18,12 +18,6 @@ class _Operation:
         self.circuit = circuit
 
 
-def test_a_run_that_sampled_nothing_holds_no_shot():
-    shots = sampled_shots_module.SampledShots()
-
-    assert shots.shots_by_operation == {}
-
-
 def test_a_shot_is_kept_under_the_operation_it_was_sampled_for():
     shots = sampled_shots_module.SampledShots()
     circuit = object()

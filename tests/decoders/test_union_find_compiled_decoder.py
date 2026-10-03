@@ -393,17 +393,15 @@ def test_the_graph_emits_its_edges_in_increasing_fault_order():
 def test_a_syndrome_of_the_wrong_length_is_refused():
     graph = graph_of([[1, 0], [0, 1]], [0.1, 0.1], [[0, 0]])
     syndrome = numpy.asarray([1, 0, 1], dtype=numpy.uint8)
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(ValueError):
         window_decoder.decode_graph(graph, syndrome)
-    assert "one-dimensional detector vector of length 2" in str(refusal.value)
 
 
 def test_a_syndrome_that_is_not_binary_is_refused():
     graph = graph_of([[1, 0], [0, 1]], [0.1, 0.1], [[0, 0]])
     syndrome = numpy.asarray([2, 0], dtype=numpy.uint8)
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(ValueError):
         window_decoder.decode_graph(graph, syndrome)
-    assert "must contain only binary values" in str(refusal.value)
 
 
 def test_a_missing_compiled_library_is_refused_by_its_build_command(

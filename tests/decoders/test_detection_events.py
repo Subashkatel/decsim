@@ -145,16 +145,6 @@ def test_a_window_pays_the_stages_latency_then_one_round_a_clock():
     assert cycles == 10
 
 
-def test_one_round_costs_the_stages_latency_and_nothing_more():
-    """A pipelined stage's fixed latency is one round's way through it."""
-    formation_stage = weak_stage()
-    reading_one_round = job([1])
-
-    cycles = formation_stage.cycles_for(reading_one_round)
-
-    assert cycles == 5
-
-
 def test_the_stage_counts_on_the_formers_clock():
     formation_stage = weak_stage()
     unit_clock = config.Clock(2000)

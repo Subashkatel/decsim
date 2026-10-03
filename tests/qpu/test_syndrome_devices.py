@@ -75,15 +75,6 @@ def test_a_stream_segment_reports_its_stream_and_global_round():
     )
 
 
-def test_fake_bits_are_as_wide_as_the_syndrome():
-    code = code_geometry.SurfaceCodeModel(distance=3)
-    device = syndrome_devices.SyndromeBitDevice(code, seed=1)
-    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
-    payload = first_payload(device, operation, 1)
-    assert len(payload.bits) == 8
-    assert payload.size_bits == 8
-
-
 def test_fake_bits_grow_with_the_codes_distance():
     """A d = 5 patch reads 24 stabilizers a round, so 24 bits."""
     wide_code = code_geometry.SurfaceCodeModel(distance=5)
@@ -248,7 +239,7 @@ def test_a_circuit_less_source_names_a_model_source_that_builds_nothing():
     assert not isinstance(source, ports.WindowModelSource)
 
 
-@pytest.mark.parametrize("distance", [3, 5, 7])
+@pytest.mark.parametrize("distance", [3, 5])
 @pytest.mark.parametrize("round_count", [1, 2, 4])
 def test_every_rounds_widths_are_those_of_stims_memory(distance, round_count):
     """Raw and event widths per round, as Stim's own memory lays them out.

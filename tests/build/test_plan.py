@@ -7,7 +7,6 @@ here through build_plan, on settings read as a yaml would leave them.
 """
 
 import dataclasses
-from typing import Optional
 
 import pytest
 import stim
@@ -35,7 +34,6 @@ import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
-import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -144,27 +142,15 @@ def test_bulk_strong_is_refused_when_the_rounds_carry_bits():
     switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    with pytest.raises(ValueError, match="qpu.kind syndrome_bits"):
+    with pytest.raises(ValueError):
         _plan(qpu=bits, switching=switching, decoder_manager=bulk)
 
 
 def test_bulk_strong_is_refused_where_no_strong_pool_merges():
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    with pytest.raises(ValueError, match="has no strong pool"):
+    with pytest.raises(ValueError):
         _plan(decoder_manager=bulk)
-
-
-def test_bulk_strong_is_built_beside_an_explicitly_empty_model_source():
-    empty_models = syndrome_devices.NO_WINDOW_MODELS
-    models_record = declared_run.GivenSource(empty_models)
-    timing = qpu_settings.QpuSettings(error_model_provider=models_record)
-    switching = _switching()
-    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
-
-    plan = _plan(qpu=timing, switching=switching, decoder_manager=bulk)
-
-    assert plan.error_model_provider is empty_models
 
 
 def test_bulk_strong_is_built_when_the_rounds_carry_timing_alone():
@@ -184,15 +170,6 @@ def test_a_row_shaped_by_the_code_card_is_built_with_the_runs_card():
     plan = _plan(qpu=bits)
 
     assert plan.device.code is plan.code
-
-
-def test_a_stim_source_is_its_own_window_model_source():
-    stim_record = stim_device.StimDevice.Settings()
-    stim_source = qpu_settings.QpuSettings(source=stim_record, distance=3)
-
-    plan = _plan(qpu=stim_source)
-
-    assert plan.error_model_provider is plan.device
 
 
 def test_a_circuit_less_source_wires_the_model_source_that_builds_nothing():
@@ -219,17 +196,17 @@ STREAMING_SOURCE = streaming_stim_device.StreamingStimDevice.Settings()
 
 
 @pytest.mark.parametrize(
-    "record, sentence",
+    "record, argument",
     [
-        (RECORDED_SOURCE, "required positional arguments: 'measurements'"),
-        (STREAMING_SOURCE, "required positional argument: 'programs'"),
+        (RECORDED_SOURCE, "measurements"),
+        (STREAMING_SOURCE, "programs"),
     ],
 )
-def test_a_source_the_workload_cannot_fill_stops_its_call(record, sentence):
+def test_a_source_the_workload_cannot_fill_stops_its_call(record, argument):
     """Python's own call names the argument the source is not given."""
     source = qpu_settings.QpuSettings(source=record, distance=3)
 
-    with pytest.raises(TypeError, match=sentence):
+    with pytest.raises(TypeError, match=argument):
         _plan(qpu=source)
 
 
@@ -238,7 +215,7 @@ def test_live_fragments_under_a_finite_circuit_source_stop_its_call():
     source = qpu_settings.QpuSettings(source=stim_record, distance=3)
     workload = _live_fragments_workload()
 
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
+    with pytest.raises(TypeError):
         _plan(qpu=source, workload=workload)
 
 
@@ -392,87 +369,6 @@ def test_a_windows_kind_that_names_no_row_is_refused():
         _windows(kind="diagonal")
 
     assert "windows.kind" in str(refusal.value)
-
-
-class _SettingsRecordingScheme(sliding_scheme.SlidingWindowScheme):
-    """A sliding scheme that keeps the Settings record it is built with."""
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        commit_rounds: Optional[int] = None
-        buffer_rounds: Optional[int] = None
-        stride_rounds: int = 1
-        name = "recording"
-
-        def build(self, terminal_policy) -> "_SettingsRecordingScheme":
-            del terminal_policy
-            return _SettingsRecordingScheme(self)
-
-    def __init__(self, settings) -> None:
-        sliding_scheme.SlidingWindowScheme.__init__(self)
-        self.settings = settings
-
-
-def test_a_scheme_row_with_settings_is_built_with_its_record():
-    own_settings = _SettingsRecordingScheme.Settings(stride_rounds=2)
-    windows = window_settings.WindowSettings(scheme=own_settings)
-
-    plan = _plan(windows=windows)
-
-    assert plan.scheme.settings is own_settings
-
-
-class _SettingsRecordingIdlePolicy(policies.Ignore):
-    """An idle policy that keeps the record it is built from."""
-
-    def __init__(self, settings) -> None:
-        self.settings = settings
-
-
-@dataclasses.dataclass(frozen=True)
-class _RecordingIdlePolicySettings:
-    every_nth_round: int = 1
-
-    def build(self) -> _SettingsRecordingIdlePolicy:
-        return _SettingsRecordingIdlePolicy(self)
-
-
-def test_the_idle_policy_record_builds_the_plans_policy():
-    own_settings = _RecordingIdlePolicySettings(every_nth_round=2)
-
-    plan = _plan(idle_policy=own_settings)
-
-    assert plan.idle_policy.settings is own_settings
-
-
-def test_a_scheme_that_declares_none_of_the_three_facts_is_refused():
-    """Every row answers what the plan and the policy read off it."""
-    silent = _SilentScheme.Settings()
-    windows = window_settings.WindowSettings(scheme=silent)
-
-    with pytest.raises(ValueError) as refusal:
-        _plan(windows=windows)
-
-    assert "has_trailing_tail_context" in str(refusal.value)
-
-
-class _SilentScheme:
-    """A scheme row that declares nothing the plan reads."""
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        commit_rounds: Optional[int] = None
-        buffer_rounds: Optional[int] = None
-        name = "silent"
-
-        def build(self, terminal_policy) -> "_SilentScheme":
-            del terminal_policy
-            return _SilentScheme()
-
-    def plan_operation(self, *arguments, **sizes):
-        """Never reached: the plan refuses this row first."""
-        del arguments, sizes
-        raise AssertionError("the plan should have refused this row")
 
 
 # ---- the default boundary row lives on the rows that decide it

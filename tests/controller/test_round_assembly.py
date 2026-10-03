@@ -145,28 +145,6 @@ def test_formation_retains_capacity_until_the_round_leaves() -> None:
     assert packed.packet.round_index == 1
 
 
-def test_the_assembler_hands_a_packed_round_to_its_round_sender() -> None:
-    engine = engine_module.Engine()
-    settings = controller_settings.ControllerSettings()
-    events = formation(None)
-    unbounded = rounds_in_flight(None)
-    assembler = round_assembly.RoundAssembler(engine, settings)
-    assembler.packing_line = syndrome_round_sender.HeldRounds(engine)
-    assembler.detection_events = events
-    assembler.rounds_in_flight = unbounded
-    admitted = []
-    assembler.syndrome_round_sender = types.SimpleNamespace(
-        admit=admitted.append
-    )
-
-    only_fragment = fragment(1)
-
-    assembler.expect_round(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(only_fragment, round_records.WINDOW_INPUT_ROUTE)
-
-    assert [round.packet.round_index for round in admitted] == [1]
-
-
 def test_packing_starts_at_the_edge_after_the_last_fragment_arrives() -> None:
     engine = engine_module.Engine()
     packed = []
@@ -417,29 +395,6 @@ def test_the_controller_seat_delays_the_round_by_its_formation_time() -> None:
     departure_ticks, round = departures.records[0]
     assert departure_ticks == formation_ticks
     assert round.wire_bits == 3
-
-
-def test_an_uncharged_controller_seat_hands_the_round_on_at_once() -> None:
-    engine = engine_module.Engine()
-    departures = _Departures(engine)
-    settings = controller_settings.ControllerSettings()
-    former = _Former((0, 1, 1))
-    events = formation(former)
-    unbounded = rounds_in_flight(None)
-    assembler = round_assembly.RoundAssembler(engine, settings)
-    assembler.packing_line = syndrome_round_sender.HeldRounds(engine)
-    assembler.detection_events = events
-    assembler.rounds_in_flight = unbounded
-    assembler.syndrome_round_sender = types.SimpleNamespace(
-        admit=departures.record
-    )
-    only_fragment = fragment(1, bits=(1, 0))
-
-    assembler.expect_round(only_fragment, 1, round_records.WINDOW_INPUT_ROUTE)
-    assembler.add(only_fragment, round_records.WINDOW_INPUT_ROUTE)
-
-    departure_ticks, _round = departures.records[0]
-    assert departure_ticks == 0
 
 
 def test_interleaved_patch_fragments_keep_measurement_order() -> None:

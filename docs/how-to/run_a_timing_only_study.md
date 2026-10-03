@@ -47,9 +47,8 @@ had them. Leaving `engine` out raises `KeyError: 'engine'` at load.
 
 **The links must be able to price what crosses them.** A bounded channel
 needs a payload size, so a run whose device emits payloads that state
-no size is refused on the first bounded hop:
-`controller_to_weak_buffer has no payload size and its channel is
-bounded; a bounded wire needs a size to serialize`. A syndrome buffer
+no size stops on the first bounded hop with a `TypeError`: the wire
+cannot add a missing size to the header's size. A syndrome buffer
 or a unit memory sized in bits refuses such a round for the same reason.
 Every `qpu.kind` row states its rounds' size, so this bites only a
 device you build in Python.

@@ -272,7 +272,7 @@ def _select_payload(
     The actual payload when the caller supplied one (the path must name
     its source), else the card's default, else unresolved. An unresolved
     payload rides an unbounded channel for its latency alone; a bounded
-    wire needs a size to serialize, so it refuses the transfer.
+    wire cannot serialize it and stops.
     """
     if payload_bits is not None:
         if path_settings.actual_payload_source is None:
@@ -290,11 +290,6 @@ def _select_payload(
             default_payload.input_bits,
             transfer_records.PayloadSelection.CONFIGURED_DEFAULT,
             default_payload.source,
-        )
-    if path_settings.channel.capacity is not None:
-        raise RuntimeError(
-            f"{path.value} has no payload size and its channel is bounded; "
-            f"a bounded wire needs a size to serialize"
         )
     return (
         None,

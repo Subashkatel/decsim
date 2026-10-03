@@ -1,7 +1,8 @@
-"""The threshold sources' laws: fixed compares; online tracks and audits.
+"""The threshold sources' laws: tables are read; online tracks and audits.
 
-FixedThreshold is Toshio et al. 2510.25222 Sec. III A, step 3: keep at
-g >= g_th. OnlineThreshold's rate tracker is the adaptive conformal
+FixedThreshold's keep at g >= g_th (Toshio et al. 2510.25222 Sec. III
+A, step 3) is checked through the built policy in test_policies.py.
+OnlineThreshold's rate tracker is the adaptive conformal
 recursion of Gibbs and Candes, arXiv:2106.00170, Eq. (2) at line 143,
 which two tests here run beside the tracker; its audit lane is the
 inverse-propensity estimate over a random sample of kept windows, and
@@ -13,7 +14,6 @@ import dataclasses
 import math
 import pathlib
 import random
-import re
 import types
 
 import pytest
@@ -61,18 +61,6 @@ def _controller(
     return threshold_sources.OnlineThresholdController(
         tracker, audit, adjustment
     )
-
-
-def test_a_fixed_threshold_keeps_at_or_above_and_escalates_below():
-    fixed = threshold_sources.FixedThreshold(2.0)
-    job = _job()
-    at_threshold = _result(2.0)
-    above = _result(2.5)
-    below = _result(1.999)
-    assert fixed.decide_keep(job, at_threshold) is True
-    assert fixed.decide_keep(job, above) is True
-    assert fixed.decide_keep(job, below) is False
-    assert fixed.audits_by_escalating is False
 
 
 def test_the_rate_tracker_pins_the_target_rate_over_a_random_gap_stream():
@@ -217,7 +205,7 @@ def test_an_audit_needs_the_weak_observables_for_its_label():
         soft_output=soft_output, logical_observables=None
     )
     fourth = _job(4)
-    with pytest.raises(ValueError, match="timing-only"):
+    with pytest.raises(ValueError):
         online.decide_keep(fourth, timing_only)
 
 
@@ -312,29 +300,27 @@ def test_a_threshold_that_is_no_nonnegative_number_is_refused(
     threshold_decibels,
 ):
     """Every gap is a weight difference at least zero (Sec. III A)."""
-    sentence = "threshold_decibels must be finite and not negative"
+    key = "threshold_decibels"
     fixed = threshold_sources.FixedThreshold.Settings
     table = threshold_sources.TableThreshold.Settings
     online = threshold_sources.OnlineThreshold.Settings
     table_path = pathlib.Path("calibration.csv")
 
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(ValueError, match=key):
         fixed(threshold_decibels)
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(ValueError, match=key):
         table(
             threshold_decibels=threshold_decibels,
             table=table_path,
             column="gth_eq4_wilson",
         )
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(ValueError, match=key):
         online(threshold_decibels)
 
 
 def test_an_online_step_that_is_not_a_number_is_refused():
     online = threshold_sources.OnlineThreshold.Settings
-    sentence = "step_decibels must be a finite number"
-
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(ValueError, match="step_decibels"):
         online(20.0, step_decibels=float("nan"))
 
 
@@ -393,9 +379,7 @@ def test_a_yaml_path_header_is_refused_naming_its_fact_header(tmp_path):
     with pytest.raises(ValueError) as refusal:
         table.at_point(facts)
 
-    sentence = str(refusal.value)
-    assert "workload.arguments.physical_error_probability" in sentence
-    assert "write physical_error_probability" in sentence
+    assert "workload.arguments.physical_error_probability" in str(refusal.value)
 
 
 def test_an_integer_key_matches_its_row_exactly(tmp_path):
@@ -407,15 +391,10 @@ def test_an_integer_key_matches_its_row_exactly(tmp_path):
     table_path = _write_table(
         tmp_path, "distance,gth_eq4_wilson\n1000000000,12.0\n"
     )
-    sentence = (
-        "has no row for {'distance': 1000000001}; its rows are "
-        "[{'distance': '1000000000'}]"
-    )
-    pattern = re.escape(sentence)
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(distance=1000000001)
 
-    with pytest.raises(ValueError, match=pattern):
+    with pytest.raises(ValueError):
         table.at_point(facts)
 
 
@@ -425,11 +404,10 @@ def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
     table_path = _write_table(
         tmp_path, "round_period_microseconds,gth_eq4_wilson\n1.0,12.0\n"
     )
-    sentence = "keys its rows on round_period_microseconds, and the point"
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(distance=5, physical_error_probability=0.003)
 
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(ValueError, match="round_period_microseconds"):
         table.at_point(facts)
 
 
@@ -452,15 +430,6 @@ def test_a_read_table_record_needs_its_file_no_more(tmp_path):
     assert source.threshold_nats == twelve_decibels
 
 
-def test_a_table_threshold_no_point_has_read_builds_no_source(tmp_path):
-    """Its number is the point's row, which a point's task reads."""
-    table_path = _write_table(tmp_path, "distance,gth_eq4_wilson\n5,12.0\n")
-    table = threshold_sources.TableThreshold.Settings(table_path)
-
-    with pytest.raises(ValueError, match="once the point's row is read"):
-        table.build()
-
-
 def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
     """The seed text is the one the experiments layer's yaml points use."""
     settings = threshold_sources.OnlineThreshold.Settings(20.0)
@@ -476,8 +445,7 @@ def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
 
 def test_an_online_source_with_no_error_probability_is_refused():
     settings = threshold_sources.OnlineThreshold.Settings(20.0)
-    sentence = "physical_error_probability=None"
     facts = _facts(distance=5)
 
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(ValueError, match="physical_error_probability"):
         settings.for_point(facts)

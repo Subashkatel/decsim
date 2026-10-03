@@ -541,15 +541,6 @@ def read_rows(path: Path) -> list:
     return rows
 
 
-def rows_by_point(run_dir: Path) -> dict:
-    """sweep.csv's rows, keyed by their point id."""
-    sweep_path = run_dir / "sweep.csv"
-    rows = {}
-    for row in read_rows(sweep_path):
-        rows[row["point_id"]] = row
-    return rows
-
-
 def fold_pieces(
     run_dir: Path,
     folders: list,

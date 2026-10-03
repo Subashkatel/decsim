@@ -82,10 +82,7 @@ def switching(
     (lines 632-640).
     """
     machine = weak_alone(distance, physical_error_probability)
-    strong_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=measured_table.A100_RELAY_BP_5,
-        engine=decoder_settings.MEASURED_TIME_ENGINE,
-    )
+    strong_decoder = strong_decoder_pool()
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=THRESHOLD_DECIBELS
     )
@@ -161,6 +158,37 @@ def weak_alone(
         pauli_frame=pauli_frame,
         workload=workload,
         observation=observation,
+    )
+
+
+def strong_decoder_pool() -> decoder_settings.DecoderPoolSettings:
+    """Relay-BP-5 priced on the line measured on a whole A100.
+
+    The keys are the Relay-BP paper's surface code Relay-BP-5 (Mueller
+    et al. 2506.01779 lines 307, 332, 343), X and Z together, and the
+    time is the line measured at those keys on the whole A100-SXM4-80GB
+    (decsim/decoders/measured_table/measurements.py, Slurm job
+    14676845). The measured time holds the syndrome's copies to and
+    from the device, so the engine charges no stage, on the chip clock.
+    """
+    algorithm = measured_table.MeasuredTableSettings(
+        gamma0=0.35,
+        gamma_interval=(-0.254, 0.985),
+        relay_set_count=600,
+        converged_solution_count=5,
+        device="a100",
+        partition="whole",
+        bases="together",
+    )
+    engine = decoder_settings.EngineSettings(
+        clock=machine_settings.FRIDGE_CLOCK,
+        fetch_cycles_per_round=0,
+        fetch_cycles_per_job=0,
+        release_cycles_per_job=0,
+        release_cycles_per_round=0,
+    )
+    return decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=engine
     )
 
 

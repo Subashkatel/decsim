@@ -275,19 +275,3 @@ def _cells_running(cells: tuple, decodes_running: int) -> tuple:
             running.append(cell)
     assert running, f"no measured cell runs {decodes_running} decodes at once"
     return tuple(running)
-
-
-# The switching baseline's strong decoder: decsim's Relay-BP decode at the
-# Relay-BP paper's surface code Relay-BP-5, priced on the line measured at
-# those keys on the whole A100-SXM4-80GB (measurements.py, Slurm job
-# 14676845).
-_RELAY_BP_5 = relay_belief_propagation.SURFACE_CODE_RELAY_BP_5
-A100_RELAY_BP_5 = MeasuredTableSettings(
-    gamma0=_RELAY_BP_5.gamma0,
-    gamma_interval=_RELAY_BP_5.gamma_interval,
-    relay_set_count=_RELAY_BP_5.relay_set_count,
-    converged_solution_count=_RELAY_BP_5.converged_solution_count,
-    device="a100",
-    partition="whole",
-    bases="together",
-)

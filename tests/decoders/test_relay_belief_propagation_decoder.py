@@ -32,8 +32,14 @@ PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 SPLIT_REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED.joined(
     fault_models.DETECTOR_BASES_REQUIRED
 )
-# the paper's surface code Relay-BP-5 with fewer legs, so the test is quick
-SURFACE = dataclasses.replace(relay.SURFACE_CODE_RELAY_BP_5, relay_set_count=20)
+# the Relay-BP paper's surface code Relay-BP-5 (2506.01779 lines 307,
+# 332, 343) with fewer legs, so the test is quick
+SURFACE = relay.RelayBeliefPropagationDecoder.Settings(
+    gamma0=0.35,
+    gamma_interval=(-0.254, 0.985),
+    relay_set_count=20,
+    converged_solution_count=5,
+)
 SURFACE_APART = dataclasses.replace(SURFACE, bases="apart")
 
 

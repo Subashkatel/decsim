@@ -219,13 +219,3 @@ def _is_finite_number(value) -> bool:
     if not config.is_number(value):
         return False
     return math.isfinite(value)
-
-
-# The Relay-BP paper's surface code Relay-BP-5 (Mueller et al. 2506.01779),
-# T0 80 and Tr 60 as every Relay-BP run there (lines 303-305).
-SURFACE_CODE_RELAY_BP_5 = RelayBeliefPropagationDecoder.Settings(
-    gamma0=0.35,  # line 307
-    gamma_interval=(-0.254, 0.985),  # line 332
-    relay_set_count=600,  # R 601, line 343
-    converged_solution_count=5,  # Relay-BP-5, line 343
-)

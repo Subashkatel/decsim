@@ -193,16 +193,6 @@ ESTIMATED_ENGINE = EngineSettings(
     release_cycles_per_job=10,  # estimate
     release_cycles_per_round=0,
 )
-# A decoder priced by a measured time that already holds the syndrome's
-# copies to and from the device (measured_table/measurements.py) pays no
-# stage of its own, so its clock times nothing.
-MEASURED_TIME_ENGINE = EngineSettings(
-    clock=_CLOCK_250_MEGAHERTZ,  # estimate
-    fetch_cycles_per_round=0,
-    fetch_cycles_per_job=0,
-    release_cycles_per_job=0,
-    release_cycles_per_round=0,
-)
 
 
 @dataclasses.dataclass(frozen=True)

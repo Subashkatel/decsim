@@ -62,7 +62,6 @@ NON_COLUMN_FIELDS = (
     "maxes",
     "link_totals",
     "data_movement",
-    "trace_path",
     "window_statuses",
     "confidence",
 )

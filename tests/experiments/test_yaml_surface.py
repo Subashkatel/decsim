@@ -61,7 +61,23 @@ def test_the_reference_controller_charges_the_traced_issue_pipeline():
     assert controller.decision_to_pulse_cycles == 8
     fridge_megahertz = config.sections["clocks"]["fridge"]
     fridge = config_module.Clock.from_megahertz(fridge_megahertz)
-    assert controller.clock == fridge
+    assert point.settings.clock == fridge
+
+
+def test_the_yaml_states_the_machine_clock_once():
+    """The controller's clock is the machine's, so the record holds it once.
+
+    A part on the machine's clock names none, as a gem5 ClockedObject
+    takes its parent's domain (src/sim/ClockedObject.py:50).
+    """
+    reference_path = yaml_configs.CONFIGS_DIR / "reference.yaml"
+    config = experiment.load_experiment(reference_path)
+
+    task = config.first_point_task()
+
+    settings = task.settings
+    assert settings.clock is not None
+    assert settings.controller.clock is None
 
 
 @pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
@@ -97,7 +113,7 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     controller = first_point.settings.controller
     assert controller.readout_to_bits_cycles == 27
     assert controller.decision_to_pulse_cycles == 8
-    assert controller.clock.period_ticks == 2000
+    assert first_point.settings.clock.period_ticks == 2000
 
     point = config.point_task(
         {

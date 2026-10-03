@@ -356,7 +356,7 @@ def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
     assert (
         "links.qpu_to_controller.channel.propagation_latency_ticks = 28000"
     ) in lines
-    assert "controller.clock.period_ticks = 4000" in lines
+    assert "controller.clock = null" in lines
     assert (
         "weak_decoder.unit_memory.bits = null  "
         f"[preset reference.yaml, {reference_path}:{bits_line}]"

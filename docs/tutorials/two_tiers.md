@@ -158,14 +158,16 @@ clock.period_ticks = 4000
 qpu.round_period_microseconds = [1.0]  [sweep, configs/examples/two_tiers.yaml:58-63]
 qpu.distance = [3, 5]  [sweep, configs/examples/two_tiers.yaml:58-63]
 qpu.error_model_provider = null
-controller.clock.period_ticks = 4000
+controller.clock = null
 ```
 
 Below `values:` the list goes on to every value the machine is built
 with, one per line: the layer that set it (your file, a preset it
 extends, the sweep, or the default) and the yaml lines it came from. A
 line with no source is a value decsim works out from others, such as
-`clock.period_ticks`, a 250 MHz cycle in ticks.
+`clock.period_ticks`, a 250 MHz cycle in ticks. That is the machine's
+clock, the domain the yaml's `controller.clock` names, so the
+controller's own clock is null: it runs on the machine's.
 
 Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the weak tier and
 keeps every round a strong re-decode might still ask for;

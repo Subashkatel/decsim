@@ -72,6 +72,10 @@ _RECORDS_WRITTEN_FLAT = (
     ("qpu", "source"),
     ("qpu", "code_card"),
 )
+# The settings paths no yaml key sets: the yaml's controller clock is
+# the machine's, so the controller's own clock is None, which the yaml
+# reader sets (settings.MachineSettings.from_mapping).
+_PATHS_NO_KEY_SETS = (("controller", "clock"),)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1207,7 +1211,12 @@ def _add_new_values(known: list, values: tuple) -> None:
 
 
 def _yaml_key(path: tuple) -> tuple:
-    """A settings path as the yaml writes it: a row's keys sit beside kind."""
+    """A settings path as the yaml writes it: a row's keys sit beside kind.
+
+    A path no yaml key sets is the empty key, which no line writes.
+    """
+    if path in _PATHS_NO_KEY_SETS:
+        return ()
     section_and_record = path[:2]
     if section_and_record not in _RECORDS_WRITTEN_FLAT:
         return path

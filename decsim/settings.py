@@ -81,7 +81,9 @@ class MachineSettings:
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
     prices propagation only. clock is the machine's clock, the one every
-    part that names none of its own counts its cycles on.
+    part that names none of its own counts its cycles on; it is stated
+    here alone, and a part on it names none (the controller's clock
+    None).
 
     The decode side is three slots, each None when the run has no such
     part: weak_decoder alone decodes every window once on the weak
@@ -230,9 +232,12 @@ class MachineSettings:
         observation_section = sections.get("observation", {})
         factory_section = sections.get("magic_state_factory", {})
         qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
-        controller = controller_settings.ControllerSettings.from_yaml(
+        written_controller = controller_settings.ControllerSettings.from_yaml(
             sections["controller"], clocks
         )
+        # the yaml's controller clock is the machine's, stated once
+        machine_clock = written_controller.clock
+        controller = dataclasses.replace(written_controller, clock=None)
         idle_policy = controller_settings.idle_policy_from_yaml(
             idle_policy_section
         )
@@ -299,7 +304,7 @@ class MachineSettings:
         elif strong_decoder is not None:
             strong_decoder = _checked(strong_decoder, window_check)
         return cls(
-            clock=controller.clock,
+            clock=machine_clock,
             qpu=qpu,
             controller=controller,
             idle_policy=idle_policy,

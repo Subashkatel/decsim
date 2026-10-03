@@ -1801,6 +1801,15 @@ def test_a_machine_built_from_its_record_reads_the_tables_row(tmp_path):
     assert threshold.threshold_nats == twelve_decibels
 
 
+def test_settings_whose_threshold_reads_no_table_are_their_own_reading():
+    """A fixed threshold is the same at every point: nothing is rebuilt."""
+    settings = _switching_memory("pymatching", "complementary_gap")
+
+    read = settings.at_point()
+
+    assert read is settings
+
+
 def test_a_weak_tier_that_serves_the_confidence_is_accepted():
     """Each signal's own row builds; the refusal is about the pairing."""
     settings = _switching_memory("union_find", "cluster_gap")

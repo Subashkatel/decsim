@@ -203,6 +203,8 @@ class MachineSettings:
             return self
         facts = self.point_facts()
         threshold = switching.threshold.at_point(facts)
+        if threshold is switching.threshold:
+            return self
         resolved = dataclasses.replace(switching, threshold=threshold)
         return dataclasses.replace(self, switching=resolved)
 

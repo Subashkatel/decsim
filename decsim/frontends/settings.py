@@ -241,13 +241,11 @@ class FilesWorkload:
         def from_yaml(
             cls, section: Mapping, base_directory: pathlib.Path
         ) -> "FilesWorkload.Settings":
-            """The paths, checked to name one physical circuit at most."""
+            """The paths, each read from the yaml's folder."""
             paths = {}
             for key, value in section.items():
                 paths[key] = pathlib.Path(base_directory, value)
-            settings = cls(**paths)
-            _check_one_physical_circuit(settings)
-            return settings
+            return cls(**paths)
 
     @staticmethod
     def workload(
@@ -326,15 +324,6 @@ def _package_version(module_name: str) -> Optional[str]:
         return importlib.metadata.version(package)
     except importlib.metadata.PackageNotFoundError:
         return None
-
-
-def _check_one_physical_circuit(settings: "FilesWorkload.Settings") -> None:
-    """A finite circuit or the fragments; with both, one would go unread."""
-    if settings.circuit is not None and settings.fragments is not None:
-        raise ValueError(
-            "workload.circuit and workload.fragments are both set; a "
-            "workload carries one physical circuit"
-        )
 
 
 def _is_per_distance_text(value) -> bool:

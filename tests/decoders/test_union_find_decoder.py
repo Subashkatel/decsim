@@ -19,6 +19,7 @@ import numpy
 import pytest
 import scipy.sparse
 
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -46,6 +47,7 @@ CHECK = numpy.asarray(
 )
 DETECTOR_COUNT, FAULT_COUNT = CHECK.shape
 GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
+HOST_TIME = cycle_count_module.HostMeasuredTime()
 
 
 def _model():
@@ -146,7 +148,9 @@ def test_both_decoders_reproduce_every_syndrome_an_error_produces_property():
     """A property test: 200 random errors, both corrections reproduce them."""
     model = _model()
     referee = _referee()
-    settings = union_find.UnionFindDecoder.Settings(weight_step=0.1)
+    settings = union_find.UnionFindDecoder.Settings(
+        weight_step=0.1, timing=HOST_TIME
+    )
     row = union_find.UnionFindDecoder(settings=settings)
     rng = random.Random(11)
     for _ in range(200):
@@ -169,7 +173,9 @@ def test_both_decoders_reproduce_every_syndrome_an_error_produces_property():
 def test_a_single_fault_is_named_by_both_decoders(fault):
     model = _model()
     referee = _referee()
-    settings = union_find.UnionFindDecoder.Settings(weight_step=0.1)
+    settings = union_find.UnionFindDecoder.Settings(
+        weight_step=0.1, timing=HOST_TIME
+    )
     row = union_find.UnionFindDecoder(settings=settings)
     syndrome = CHECK[:, fault]
     ldpc_correction = referee.decode(syndrome)
@@ -195,7 +201,9 @@ def test_an_unsatisfiable_syndrome_is_marked_and_a_satisfiable_one_is_not():
     fault and carries no status at all.
     """
     model = _model()
-    settings = union_find.UnionFindDecoder.Settings(weight_step=0.1)
+    settings = union_find.UnionFindDecoder.Settings(
+        weight_step=0.1, timing=HOST_TIME
+    )
     row = union_find.UnionFindDecoder(settings=settings)
     unsatisfiable = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     unsatisfiable_job = _job(model, unsatisfiable)

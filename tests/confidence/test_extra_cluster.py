@@ -45,6 +45,8 @@ REQUIREMENT = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 # (2602.03336 lines 696-699 and 774-776)
 TWENTY_DECIBELS_NATS = 20.0 / (10.0 * math.log10(math.e))
 SIXTY_DECIBELS_NATS = 3.0 * TWENTY_DECIBELS_NATS
+HOST_TIME = cycle_count_module.HostMeasuredTime()
+HOST_TIMED_UNION_FIND = union_find.UnionFindDecoder.Settings(timing=HOST_TIME)
 CORPUS_SHOTS = 40
 CIRCUIT_SEED = 11
 RANDOM_GRAPHS = 60
@@ -121,12 +123,12 @@ def grown(evidence, growth_limit_ticks: int):
 
 def test_the_row_declares_one_decode_and_the_growth_it_reads():
     """The signal's requirement and the Union-Find row's declaration meet."""
-    signal = extra_cluster.ExtraClusterGap(TWENTY_DECIBELS_NATS)
+    signal = extra_cluster.ExtraClusterGap(TWENTY_DECIBELS_NATS, HOST_TIME)
     assert isinstance(signal, ports.ConfidenceSignal)
     assert signal.forced_logical_classes == ()
     required = signal.decoder_evidence_requirement
     assert required == decoding_records.CLUSTER_GROWTH_EVIDENCE
-    row = union_find.UnionFindDecoder()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     assert not required - row.decoder_evidence
     assert signal.source.method == "extra_cluster_gap"
 
@@ -194,7 +196,7 @@ def test_the_chain_costs_twenty_six_cycles_on_helios_row():
     outcome = grown(evidence, CHAIN_LIMIT_TICKS)
 
     assert count.extra_growth_cycles(outcome.growth_steps) == 26
-    assert count.extra_growth_ticks(outcome.growth_steps) == 260
+    assert count.extra_growth_ticks(outcome.growth_steps, 0) == 260
 
 
 def test_a_growth_of_no_ticks_pays_one_join_test():
@@ -206,7 +208,7 @@ def test_a_growth_of_no_ticks_pays_one_join_test():
 def test_the_chain_gap_is_four_steps_under_the_cluster_gap_of_six():
     """Theorem 1 on the chain: g_ec = w_max(P_c) = 4 < g_c = 6."""
     signal = extra_cluster.ExtraClusterGap(
-        CHAIN_LIMIT_NATS, weight_step=CHAIN_WEIGHT_STEP
+        CHAIN_LIMIT_NATS, HOST_TIME, weight_step=CHAIN_WEIGHT_STEP
     )
     result = chain_result()
 
@@ -223,7 +225,7 @@ def test_the_chain_gap_is_four_steps_under_the_cluster_gap_of_six():
 def test_a_limit_below_the_join_leaves_the_gap_infinite():
     """The confident case: the limit comes first, nothing joins."""
     signal = extra_cluster.ExtraClusterGap(
-        TWO_TICKS_NATS, weight_step=CHAIN_WEIGHT_STEP
+        TWO_TICKS_NATS, HOST_TIME, weight_step=CHAIN_WEIGHT_STEP
     )
     result = chain_result()
 
@@ -250,9 +252,7 @@ def test_the_cycle_count_prices_the_growth_on_the_unit():
         CLOCK, delay_cycles=HELIOS_DELAY_CYCLES
     )
     signal = extra_cluster.ExtraClusterGap(
-        CHAIN_LIMIT_NATS,
-        weight_step=CHAIN_WEIGHT_STEP,
-        cycle_count=count,
+        CHAIN_LIMIT_NATS, count, weight_step=CHAIN_WEIGHT_STEP
     )
     result = chain_result()
 
@@ -264,6 +264,7 @@ def test_the_cycle_count_prices_the_growth_on_the_unit():
 def test_a_card_prices_the_growth_instead():
     signal = extra_cluster.ExtraClusterGap(
         CHAIN_LIMIT_NATS,
+        HOST_TIME,
         weight_step=CHAIN_WEIGHT_STEP,
         walk_microseconds=0.5,
     )
@@ -275,7 +276,7 @@ def test_a_card_prices_the_growth_instead():
 
 
 def test_a_decode_without_growth_reports_no_gap():
-    signal = extra_cluster.ExtraClusterGap(TWENTY_DECIBELS_NATS)
+    signal = extra_cluster.ExtraClusterGap(TWENTY_DECIBELS_NATS, HOST_TIME)
     solve = decoding_records.DecodeResult(1, 0)
 
     computation = signal.compute((solve,))
@@ -288,20 +289,20 @@ def test_the_row_builds_from_the_threshold_and_the_weak_row():
     count = cycle_count_module.CycleCount(CLOCK, delay_cycles=3)
     record = extra_cluster.ExtraClusterGap.Settings()
     union_find_settings = union_find.UnionFindDecoder.Settings(
-        weight_step=0.2, cycle_count=count
+        weight_step=0.2, timing=count
     )
 
     signal = record.build(union_find_settings, TWENTY_DECIBELS_NATS)
 
     assert signal.growth_limit_ticks == 24
     assert signal.weight_step == 0.2
-    assert signal.cycle_count is count
+    assert signal.timing is count
 
 
 def test_a_threshold_with_no_number_at_build_is_refused():
     """A table not yet looked up has no epsilon_max to grow to."""
     record = extra_cluster.ExtraClusterGap.Settings()
-    union_find_settings = union_find.UnionFindDecoder.Settings()
+    union_find_settings = HOST_TIMED_UNION_FIND
 
     with pytest.raises(ValueError) as refusal:
         record.build(union_find_settings, None)
@@ -392,12 +393,14 @@ def test_the_windows_keep_kishi_theorems_against_the_cluster_gap_property(
     """
     circuit = windows.memory_circuit(distance, distance, 0.005)
     model = windows.whole_circuit_window(circuit, distance, REQUIREMENT)
-    row = union_find.UnionFindDecoder()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     sampled, _observables = windows.sampled_shots(
         circuit, CORPUS_SHOTS, CIRCUIT_SEED
     )
     step = evidence_records.DEFAULT_WEIGHT_STEP
-    signal = extra_cluster.ExtraClusterGap(limit_nats, weight_step=step)
+    signal = extra_cluster.ExtraClusterGap(
+        limit_nats, HOST_TIME, weight_step=step
+    )
     for shot in sampled:
         job = windows.job_for(model, shot)
         result = row.decode(job)

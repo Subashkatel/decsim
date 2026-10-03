@@ -1157,7 +1157,7 @@ class DecoderSettings(Protocol):
     Every row of DECODERS (decsim/decoders/settings.py) declares a frozen
     Settings dataclass that checks its own values, names its row and
     builds the decoder. A row that grows clusters also holds a
-    weight_step and a cycle_count, which a cluster confidence reads.
+    weight_step and a timing, which a cluster confidence reads.
     """
 
     name: str

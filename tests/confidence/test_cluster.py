@@ -18,6 +18,7 @@ import pytest
 
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
@@ -32,6 +33,8 @@ from tests.decoders import windows
 ROUNDS = 4
 SHOTS = 30
 SEED = 7
+HOST_TIME = cycle_count_module.HostMeasuredTime()
+HOST_TIMED_UNION_FIND = union_find.UnionFindDecoder.Settings(timing=HOST_TIME)
 
 
 def _window_model():
@@ -48,7 +51,7 @@ def test_the_row_declares_one_decode_and_the_growth_it_reads():
     assert signal.forced_logical_classes == ()
     required = signal.decoder_evidence_requirement
     assert required == decoding_records.CLUSTER_GROWTH_EVIDENCE
-    row = union_find.UnionFindDecoder()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     assert not required - row.decoder_evidence
     matching = minimum_weight_perfect_matching.PyMatchingDecoder()
     assert required - matching.decoder_evidence == required
@@ -66,7 +69,7 @@ def test_a_decode_without_growth_reports_no_gap():
 def test_the_gap_is_read_off_the_decode_that_produced_the_correction():
     """One decode answers the window and carries the growth the gap walks."""
     _built_circuit, model = _window_model()
-    row = union_find.UnionFindDecoder()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
     events, _observables = windows.sampled_shots(circuit, 1, SEED)
     job = windows.job_for(model, events[0])
@@ -93,7 +96,7 @@ def test_the_cluster_and_complementary_gaps_agree_on_one_window_property():
     that is the size of the disagreement.
     """
     circuit, model = _window_model()
-    hard_row = union_find.UnionFindDecoder()
+    hard_row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     matching_row = minimum_weight_perfect_matching.PyMatchingDecoder()
     cluster_signal = cluster.ClusterGap()
     complementary_signal = complementary.ComplementaryGap()
@@ -131,7 +134,7 @@ def test_the_gap_walks_against_an_oracle_built_from_the_paper_alone_property():
     Slow: it decodes and walks a handful of real shots.
     """
     circuit, model = _window_model()
-    row = union_find.UnionFindDecoder()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     signal = cluster.ClusterGap()
     events, _observables = windows.sampled_shots(circuit, 8, SEED)
     walked = 0
@@ -150,7 +153,7 @@ def test_the_gap_walks_against_an_oracle_built_from_the_paper_alone_property():
 def test_a_growth_at_another_weight_step_is_refused():
     """The gap reads the ticks the growth used, so the steps must agree."""
     circuit, model = _window_model()
-    row = union_find.UnionFindDecoder()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     events, _observables = windows.sampled_shots(circuit, 1, SEED)
     job = windows.job_for(model, events[0])
     result = row.decode(job)
@@ -166,7 +169,7 @@ def test_a_growth_at_another_weight_step_is_refused():
 def test_a_growth_no_edge_of_which_crosses_the_logical_has_an_infinite_gap():
     """No odd closed walk exists, so the minimum over them is infinite."""
     circuit, model = _window_model()
-    row = union_find.UnionFindDecoder()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
     events, _observables = windows.sampled_shots(circuit, 1, SEED)
     job = windows.job_for(model, events[0])
     result = row.decode(job)

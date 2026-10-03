@@ -78,10 +78,17 @@ def section_record(section_name: str, record_class, values: Mapping):
 
 
 def row_keys(row_class) -> tuple:
-    """The yaml keys a row declares: its Settings fields, or none."""
+    """The yaml keys a row declares: its Settings fields, or none.
+
+    A Settings whose yaml keys are not its fields names them in
+    yaml_keys.
+    """
     settings_class = getattr(row_class, "Settings", None)
     if settings_class is None:
         return ()
+    yaml_keys = getattr(settings_class, "yaml_keys", None)
+    if yaml_keys is not None:
+        return yaml_keys
     names = []
     for field in dataclasses.fields(settings_class):
         names.append(field.name)

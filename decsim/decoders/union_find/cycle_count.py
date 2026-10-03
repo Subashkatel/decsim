@@ -1,4 +1,4 @@
-"""The Union-Find decoder's cycle count per growth tick, on one clock.
+"""How a Union-Find unit's time is priced: its cycle count, or the host's.
 
 A hardware union-find decoder repeats one iteration, grow then merge,
 until no cluster is odd, and then peels; its time is what that loop and
@@ -15,13 +15,15 @@ grown at its weight). The steps come from the decode itself
 (records/decoder_evidence.py, GrowthStep); the row's constants come
 from the yaml's cycle_count block, one row per chip, and the cycles end
 on the named clock's edge as every stage of the decoder unit does.
+HostMeasuredTime is the other choice: the unit is held for what the
+decode took on the host, which is no hardware's time.
 """
 
 import dataclasses
 import math
 import numbers
 from collections.abc import Mapping
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.config as config
 import decsim.records.decoder_evidence as evidence_records
@@ -161,12 +163,17 @@ class CycleCount:
         counted = iterations + merges + peel
         return COUNTER_START + setup + counted
 
-    def ticks(
+    def decode_ticks(
         self,
         evidence: Optional[evidence_records.UnionFindHardEvidence],
+        elapsed_nanoseconds: int,
         now: int,
     ) -> int:
-        """The ticks from now to the clock edge the decode's cycles end on."""
+        """The ticks from now to the clock edge the decode's cycles end on.
+
+        The host's time is not read: the count is the unit's time.
+        """
+        del elapsed_nanoseconds
         cycles = self.cycles(evidence)
         if cycles == 0:
             return 0
@@ -183,8 +190,9 @@ class CycleCount:
         merges = self._merge_cycles(steps)
         return iteration * growth_ticks + merges
 
-    def extra_growth_ticks(self, steps: tuple) -> int:
+    def extra_growth_ticks(self, steps: tuple, elapsed_nanoseconds: int) -> int:
         """The ticks those cycles span from the edge the decode ended on."""
+        del elapsed_nanoseconds
         cycles = self.extra_growth_cycles(steps)
         return cycles * self.clock.period_ticks
 
@@ -214,6 +222,41 @@ class CycleCount:
         level_cycles = PEEL_CYCLES_PER_LEVEL * forest_depth
         floor = self.delay_cycles + PEEL_BUSY_AND_DECIDE_CYCLES
         return floor + level_cycles
+
+
+@dataclasses.dataclass(frozen=True)
+class HostMeasuredTime:
+    """A union-find unit held for the host's own time, as measured.
+
+    The decode and the extra growth are timed around the call on this
+    machine and that time holds the unit. It is no hardware's time, so
+    a run names it rather than falling back on it.
+    """
+
+    def decode_ticks(
+        self,
+        evidence: Optional[evidence_records.UnionFindHardEvidence],
+        elapsed_nanoseconds: int,
+        now: int,
+    ) -> int:
+        """The decode's measured host time, in ticks."""
+        del evidence
+        del now
+        return _measured_ticks(elapsed_nanoseconds)
+
+    def extra_growth_ticks(self, steps: tuple, elapsed_nanoseconds: int) -> int:
+        """The extra growth's measured host time, in ticks."""
+        del steps
+        return _measured_ticks(elapsed_nanoseconds)
+
+
+# What prices a union-find unit's time: its cycle count or the host's.
+Timing = Union[CycleCount, HostMeasuredTime]
+
+
+def _measured_ticks(elapsed_nanoseconds: int) -> int:
+    elapsed_microseconds = elapsed_nanoseconds / 1000.0
+    return config.microseconds_to_ticks(elapsed_microseconds)
 
 
 def _growth_ticks(steps: tuple) -> int:

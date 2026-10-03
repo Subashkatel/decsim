@@ -43,8 +43,8 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         """The referee written around the record of the decoder it checks.
 
         It reads as that record: the results name the inner decoder, and a
-        confidence signal reads the inner decoder's weight step and cycle
-        count, since the referee changes no result and costs no time.
+        confidence signal reads the inner decoder's weight step and
+        timing, since the referee changes no result and costs no time.
         """
 
         # the checked decoder's own Settings record
@@ -61,9 +61,9 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
             return getattr(self.inner, "weight_step", None)
 
         @property
-        def cycle_count(self) -> Optional[cycle_count_module.CycleCount]:
-            """The inner decoder's cycle count card."""
-            return self.inner.cycle_count
+        def timing(self) -> cycle_count_module.Timing:
+            """The inner decoder's timing: its cycle count or the host's."""
+            return self.inner.timing
 
         def build(self) -> "TesseractCheckedDecoder":
             """The inner decoder, built, with the referee around it."""

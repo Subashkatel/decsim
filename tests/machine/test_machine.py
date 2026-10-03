@@ -48,6 +48,7 @@ import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -243,7 +244,10 @@ def test_a_second_table_row_runs_gate_point_one():
         },
     )
     settings = point.settings
-    union_find_settings = union_find_decoder.UnionFindDecoder.Settings()
+    host_time = cycle_count_module.HostMeasuredTime()
+    union_find_settings = union_find_decoder.UnionFindDecoder.Settings(
+        timing=host_time
+    )
     weak_decoder = dataclasses.replace(
         settings.weak_decoder, algorithm=union_find_settings
     )
@@ -1603,6 +1607,13 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     assert any("algorithm mem(" in line for line in idle_lines)
 
 
+# the settings a weak row needs beyond its defaults: Union-Find names
+# its timing, here the host's measured time
+WEAK_ROW_ARGUMENTS = {
+    "union_find": {"timing": cycle_count_module.HostMeasuredTime()},
+}
+
+
 def _switching_memory(weak_kind: str, confidence: str):
     """A d=3 memory whose weak tier, the named row, reports the signal."""
     signal_row = confidence_signals.CONFIDENCE_SIGNALS[confidence]
@@ -1614,7 +1625,8 @@ def _switching_memory(weak_kind: str, confidence: str):
         confidence=signal_settings, threshold=threshold
     )
     row = decoder_settings.DECODERS[weak_kind]
-    weak_algorithm = row.Settings()
+    row_arguments = WEAK_ROW_ARGUMENTS.get(weak_kind, {})
+    weak_algorithm = row.Settings(**row_arguments)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak_algorithm,
         engine=ENGINE_CARD,

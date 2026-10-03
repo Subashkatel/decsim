@@ -5,6 +5,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -306,10 +307,10 @@ def test_the_cycle_count_block_is_read_and_absent_is_none():
         without, clocks, "weak_decoder"
     )
 
-    cycle_count = settings.algorithm.cycle_count
+    cycle_count = settings.algorithm.timing
     assert cycle_count.setup_cycles == 11
     assert cycle_count.clock == clocks.clock("helios")
-    assert plain.algorithm.cycle_count is None
+    assert plain.algorithm.timing == cycle_count_module.HostMeasuredTime()
 
 
 @pytest.mark.parametrize("key", ["kind", "units", "unit_memory", "engine"])

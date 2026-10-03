@@ -22,6 +22,7 @@ import pathlib
 import pytest
 
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
 import decsim.qpu.settings as qpu_settings
@@ -273,11 +274,28 @@ def test_every_workload_row_is_a_workload_row(kind):
     assert isinstance(row, ports.WorkloadRow)
 
 
-@pytest.mark.parametrize("kind", sorted(decoder_settings.DECODERS))
+# union_find names its timing, so its record has no default of its own
+DECODER_KINDS = set(decoder_settings.DECODERS)
+DEFAULTED_DECODER_KINDS = DECODER_KINDS - {"union_find"}
+DEFAULTED_DECODER_ROWS = sorted(DEFAULTED_DECODER_KINDS)
+
+
+@pytest.mark.parametrize("kind", DEFAULTED_DECODER_ROWS)
 def test_every_decoder_rows_settings_builds_the_row(kind):
     """A tier's algorithm is the row's Settings record, which builds it."""
     row = decoder_settings.DECODERS[kind]
     settings = row.Settings()
+    parameters = settings.__dataclass_params__
+    assert parameters.frozen
+    decoder = settings.build()
+    assert isinstance(decoder, row)
+
+
+def test_the_union_find_rows_settings_builds_the_row_with_its_timing():
+    """The row's record names its timing; then it builds the row as any."""
+    row = decoder_settings.DECODERS["union_find"]
+    host_time = cycle_count_module.HostMeasuredTime()
+    settings = row.Settings(timing=host_time)
     parameters = settings.__dataclass_params__
     assert parameters.frozen
     decoder = settings.build()

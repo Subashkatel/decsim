@@ -22,6 +22,7 @@ import decsim.config as config
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.settings as event_settings
@@ -151,7 +152,10 @@ def test_the_union_find_row_is_built_with_the_tiers_weight_step():
     period_ticks = config.microseconds_to_ticks(0.01)
     clock = config.Clock(period_ticks)
     engine = decoder_settings.EngineSettings(clock=clock)
-    union_find_settings = union_find.UnionFindDecoder.Settings(weight_step=0.25)
+    host_time = cycle_count_module.HostMeasuredTime()
+    union_find_settings = union_find.UnionFindDecoder.Settings(
+        weight_step=0.25, timing=host_time
+    )
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=union_find_settings, engine=engine
     )

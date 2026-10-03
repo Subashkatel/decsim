@@ -73,7 +73,8 @@ REQUIRED_SECTIONS = (
 )
 # Where a point's yaml writes each fact a threshold row reads at the
 # point (threshold_sources.POINT_FACTS): the code distance, the physical
-# error probability the workload's maker takes, and the round period.
+# error probability the workload's maker takes, the round period, and
+# the window's commit and buffer rounds.
 POINT_FACT_PATHS = {
     "distance": ("qpu", "distance"),
     "physical_error_probability": (
@@ -82,6 +83,8 @@ POINT_FACT_PATHS = {
         "physical_error_probability",
     ),
     "round_period_microseconds": ("qpu", "round_period_microseconds"),
+    "commit_rounds": ("windows", "commit_rounds"),
+    "buffer_rounds": ("windows", "buffer_rounds"),
 }
 
 

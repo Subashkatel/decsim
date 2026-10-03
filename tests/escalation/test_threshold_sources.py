@@ -363,6 +363,30 @@ def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
     assert threshold.column == "gth_eq4_wilson"
 
 
+def test_a_yaml_path_header_is_refused_naming_its_fact_header(tmp_path):
+    """Read as a threshold column it would leave its key unmatched.
+
+    Matched on distance alone, the point would take the first row's
+    12 dB instead of its own 20 dB, with no sign of it.
+    """
+    table_path = _write_table(
+        tmp_path,
+        "distance,workload.arguments.physical_error_probability,"
+        "gth_eq4_wilson\n"
+        "3,0.002,12\n"
+        "3,0.001,20\n",
+    )
+
+    with pytest.raises(ValueError) as refusal:
+        threshold_sources.TableThreshold.Settings.from_table(
+            table_path, distance=3, physical_error_probability=0.001
+        )
+
+    sentence = str(refusal.value)
+    assert "workload.arguments.physical_error_probability" in sentence
+    assert "write physical_error_probability" in sentence
+
+
 def test_an_integer_key_matches_its_row_exactly(tmp_path):
     """Only a float key reads back within a relative 1e-9 of its text.
 

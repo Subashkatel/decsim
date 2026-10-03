@@ -250,6 +250,48 @@ def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
     assert half.metadata == {"qpu.round_period_microseconds": 0.5}
 
 
+def test_a_window_only_sweep_finds_its_table_row_by_its_geometry(tmp_path):
+    """A threshold is calibrated for one window geometry.
+
+    The commit and buffer rounds are point facts a table keys on, so a
+    sweep over the window alone finds each point's row.
+    """
+    table_path = tmp_path / "window_table.csv"
+    table_path.write_text(
+        "distance,physical_error_probability,commit_rounds,buffer_rounds,"
+        "gth_eq4_wilson\n"
+        f"3,{NEAR_THRESHOLD_P},2,2,12.0\n"
+        f"3,{NEAR_THRESHOLD_P},3,2,13.0\n"
+    )
+    card = {"threshold_source": "table", "threshold_table": table_path.name}
+    config_path = source_config(tmp_path, card)
+    config_text = config_path.read_text()
+    raw = yaml.safe_load(config_text)
+    raw["qpu"]["distance"] = 3
+    raw["qpu"]["round_period_microseconds"] = 1.0
+    raw["workload"]["arguments"]["physical_error_probability"] = (
+        NEAR_THRESHOLD_P
+    )
+    raw["windows"]["buffer_rounds"] = 2
+    raw["sweep"] = [
+        {
+            "axes": {"windows.commit_rounds": [2, 3]},
+            "collection": {"max_shots": 1},
+        }
+    ]
+    edited_text = yaml.safe_dump(raw)
+    config_path.write_text(edited_text)
+    config = load_experiment(config_path)
+
+    two, three = config.tasks()
+
+    two_threshold = two.settings.switching.threshold
+    three_threshold = three.settings.switching.threshold
+    assert two_threshold.threshold_decibels == 12.0
+    assert three_threshold.threshold_decibels == 13.0
+    assert two.metadata == {"windows.commit_rounds": 2}
+
+
 def test_table_source_key_guards(tmp_path):
     table = calibration_table(tmp_path)
     both_sources_card = {

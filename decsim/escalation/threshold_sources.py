@@ -31,11 +31,14 @@ import decsim.records.decoding as decoding_records
 import decsim.tables as tables
 
 # The point's facts a calibration table keys its rows on, each column
-# headed by the fact's name.
+# headed by the fact's name: the code, the noise, the round clock, and
+# the window geometry a threshold is calibrated for.
 POINT_FACTS = (
     "distance",
     "physical_error_probability",
     "round_period_microseconds",
+    "commit_rounds",
+    "buffer_rounds",
 )
 # Decibels are 10 log10 of the likelihood ratio; matching weights are
 # its natural log: nats = decibels * ln(10) / 10.
@@ -183,6 +186,8 @@ class TableThreshold(FixedThreshold):
             distance: Optional[int] = None,
             physical_error_probability: Optional[float] = None,
             round_period_microseconds: Optional[float] = None,
+            commit_rounds: Optional[int] = None,
+            buffer_rounds: Optional[int] = None,
         ) -> "TableThreshold.Settings":
             """The threshold of the point these facts name, in its column.
 
@@ -202,6 +207,8 @@ class TableThreshold(FixedThreshold):
                 "distance": distance,
                 "physical_error_probability": physical_error_probability,
                 "round_period_microseconds": round_period_microseconds,
+                "commit_rounds": commit_rounds,
+                "buffer_rounds": buffer_rounds,
             }
             columns, rows = _table_rows(table_path, column)
             point = _point_of(columns, facts, table_path)
@@ -709,6 +716,7 @@ def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
         reader = csv.DictReader(table_file)
         rows = list(reader)
         columns = reader.fieldnames or []
+    _refuse_a_yaml_path_header(columns, table_path)
     if column not in columns:
         raise ValueError(
             f"threshold_table {table_path} has no column {column!r}; its "
@@ -721,6 +729,32 @@ def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
             f"is headed by the point fact it matches, one of {POINT_FACTS}"
         )
     return columns, rows
+
+
+def _refuse_a_yaml_path_header(columns: list, table_path) -> None:
+    """A header that is a yaml path is refused, naming the fact to write.
+
+    Read as a threshold column, it would leave its key unmatched, and the
+    point would take another row's threshold with no sign of it.
+    """
+    for column in columns:
+        if "." not in column:
+            continue
+        sentence = _yaml_path_header_sentence(column, table_path)
+        raise ValueError(sentence)
+
+
+def _yaml_path_header_sentence(column: str, table_path) -> str:
+    """The refusal of a yaml path header, with its fact when it names one."""
+    sentence = (
+        f"threshold_table {table_path} heads a column with the yaml path "
+        f"{column}; a key column is headed by the point fact it matches, "
+        f"one of {POINT_FACTS}"
+    )
+    _, _, last_name = column.rpartition(".")
+    if last_name not in POINT_FACTS:
+        return sentence
+    return f"{sentence}, so write {last_name}"
 
 
 def _key_columns(columns: list) -> list:

@@ -62,8 +62,8 @@ SWITCHING_COLLECTION = decsim.CollectionSettings(
 WEAK_ALONE_COLLECTION = decsim.CollectionSettings(
     max_failures=100, max_shots=5_000_000, min_shots=0, piece_rounds=200_000
 )
-# The paths the yaml carded over the roce_v2_cpu row; the presets below
-# give each the yaml's numbers.
+# The paths the yaml carded over the roce_v2_cpu row, whose rates it
+# keeps as exact fractions.
 CARDED_PATHS = (
     "qpu_to_controller",
     "controller_to_weak_buffer",
@@ -173,7 +173,7 @@ def experiment_one_links() -> link_settings.FabricSettings:
     """
     roce = link_profiles.roce_v2_measured_profile("cpu")
     links = link_profiles.with_risc_q_weak_loop(roce)
-    return _as_the_yaml_carded(links)
+    return _with_exact_rates(links)
 
 
 def switching_baseline_points() -> list:
@@ -212,24 +212,15 @@ def switching_baseline_points() -> list:
     return switching_points + weak_alone_points
 
 
-def _as_the_yaml_carded(
+def _with_exact_rates(
     links: link_settings.FabricSettings,
 ) -> link_settings.FabricSettings:
-    """The card as the yaml reader built it from the same numbers.
-
-    The reader marks every path a yaml card writes as timing the wire
-    alone, where the presets mark a measured number as covering the
-    receiver's processing too (all but the RISC-Q uplink); the mark is
-    read only when the controller prices its readout, which it does not
-    here, so no result moves. Each rate is the yaml's exact Fraction.
-    """
+    """The card with each carded path's rate the yaml's exact Fraction."""
     paths = {}
     for path_name in CARDED_PATHS:
         path = getattr(links, path_name)
         channel = _with_an_exact_rate(path.channel)
-        paths[path_name] = dataclasses.replace(
-            path, channel=channel, excludes_receiver_processing=True
-        )
+        paths[path_name] = dataclasses.replace(path, channel=channel)
     return dataclasses.replace(links, **paths)
 
 

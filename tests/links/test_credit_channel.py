@@ -100,6 +100,43 @@ def test_a_credit_latency_below_zero_is_refused():
         credit_channel.CreditChannel.Settings(hundred_bit_flits, 1, -1, clock)
 
 
+def test_a_buffer_of_no_frames_stops_at_its_first_frame():
+    """With no credit to hold, the first frame has none to wait for."""
+    engine = decsim.engine.Engine()
+    hundred_bit_flits = flits(100)
+    settings = credit_settings(0, 2, hundred_bit_flits, 1_000_000, 300, 50)
+    channel = credit_channel.CreditChannel(settings, engine)
+    send_at(engine, channel, 0, 500, 0, [])
+
+    with pytest.raises(IndexError):
+        engine.run()
+
+
+def test_a_buffer_of_fewer_than_no_frames_stops_the_build():
+    engine = decsim.engine.Engine()
+    hundred_bit_flits = flits(100)
+    settings = credit_settings(-1, 2, hundred_bit_flits, 1_000_000, 300, 50)
+
+    with pytest.raises(ValueError, match="maxlen must be non-negative"):
+        credit_channel.CreditChannel(settings, engine)
+
+
+def test_a_credit_protocol_with_no_clock_stops_the_build():
+    """The credit latency is cycles, and cycles need a clock."""
+    engine = decsim.engine.Engine()
+    hundred_bit_flits = flits(100)
+    protocol = credit_channel.CreditChannel.Settings(
+        hundred_bit_flits, 2, 2, None
+    )
+    capacity = link_settings.CapacitySettings(1_000_000, "test")
+    settings = link_settings.ChannelSettings(
+        "test", 300, capacity, "test", protocol
+    )
+
+    with pytest.raises(AttributeError, match="period_ticks"):
+        credit_channel.CreditChannel(settings, engine)
+
+
 def test_a_credit_protocol_on_an_unbounded_wire_stops_at_its_first_frame():
     """A frame has no wire time without a rate, so the first send stops."""
     engine = decsim.engine.Engine()

@@ -8,8 +8,6 @@ it is about.
 """
 
 import dataclasses
-import pathlib
-import shutil
 
 import pytest
 
@@ -18,7 +16,6 @@ import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
-import decsim.experiments.experiment as experiment
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.records.rounds as round_records
@@ -28,11 +25,7 @@ import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
-
-THIS_FILE = pathlib.Path(__file__)
-CONFIGS = THIS_FILE.parents[2] / "configs"
-# the data-movement grid's fourth block, the one with the strong tier
-DATA_MOVEMENT_SWITCHING_BLOCK = 3
+import tests.escalation.test_strong_window_shapes as shape_tests
 
 
 class _DeviceWithNoFormationTable:
@@ -201,66 +194,35 @@ def test_a_strong_store_with_only_a_capacity_is_built():
     assert machine.readout.strong_syndrome_buffer is not None
 
 
-def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
-    tmp_path,
-):
-    """Both routes reach the one check, so they refuse in one sentence."""
-    ported_section = "strong_syndrome_buffer:\n  kind: ported_syndrome_buffer\n"
+def test_a_ported_strong_store_is_refused():
+    """The strong store books no port access, so a ported card is refused."""
     ported_strong = ported_syndrome_buffer.PortedSyndromeBufferSettings()
 
-    yaml_sentence, python_sentence = _yaml_and_python_refusals(
-        tmp_path, ported_section, ported_strong
-    )
+    sentence = _strong_store_refusal(ported_strong)
 
-    assert yaml_sentence == python_sentence
+    assert "not PortedSyndromeBufferSettings" in sentence
 
 
-def test_a_strong_store_cost_is_refused_alike_from_yaml_and_python(tmp_path):
-    cost_section = "strong_syndrome_buffer:\n  write_cycles: 3\n"
+def test_a_strong_store_cost_is_refused():
+    """The strong store charges nothing, so a cost set on it is refused."""
     costed_strong = syndrome_buffer_module.SyndromeBufferSettings(
         write_cycles=3
     )
 
-    yaml_sentence, python_sentence = _yaml_and_python_refusals(
-        tmp_path, cost_section, costed_strong
+    sentence = _strong_store_refusal(costed_strong)
+
+    assert "which only the weak syndrome buffer charges" in sentence
+
+
+def _strong_store_refusal(strong_store) -> str:
+    """The build refusal of a switching point given the strong store."""
+    settings = shape_tests.weak_base_switching(3, 0.001, 1.0)
+    settings = dataclasses.replace(
+        settings, strong_syndrome_buffer=strong_store
     )
-
-    assert yaml_sentence == python_sentence
-
-
-def _yaml_and_python_refusals(tmp_path, strong_section: str, strong_store):
-    """The build refusals of a switching point given the strong store twice.
-
-    Once as a yaml section appended to the shipped config, once as the
-    settings record set in Python on the same point.
-    """
-    configs = tmp_path / "configs"
-    shutil.copytree(CONFIGS, configs)
-    path = configs / "experiments" / "data_movement" / "data_movement.yaml"
-    text = path.read_text()
-    config = experiment.load_experiment(path)
-    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
-    points = switching_block.points()
-    values = dict(points[0])
-    values["workload.arguments.physical_error_probability"] = 0.001
-    point = config.point_task(values)
-    python_built = dataclasses.replace(
-        point.settings, strong_syndrome_buffer=strong_store
-    )
-    changed_text = text + strong_section
-    path.write_text(changed_text)
-    changed_config = experiment.load_experiment(path)
-    changed_point = changed_config.point_task(values)
-    yaml_built = changed_point.settings
-
-    with pytest.raises(ValueError) as yaml_refusal:
-        machine_module.Machine.build(yaml_built)
-    with pytest.raises(ValueError) as python_refusal:
-        machine_module.Machine.build(python_built)
-
-    yaml_sentence = str(yaml_refusal.value)
-    python_sentence = str(python_refusal.value)
-    return yaml_sentence, python_sentence
+    with pytest.raises(ValueError) as refusal:
+        machine_module.Machine.build(settings)
+    return str(refusal.value)
 
 
 def test_a_weak_only_run_reads_nothing_from_the_room_side():

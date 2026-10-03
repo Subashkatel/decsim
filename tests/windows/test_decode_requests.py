@@ -8,23 +8,23 @@ request is priced for the rounds it reads, which the declared run shows
 on its lookahead tail (Skoric et al. 2209.08552, Tan et al. 2209.09219).
 """
 
+import dataclasses
 import types
 
 import pytest
 
-import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
-import decsim.experiments.experiment as experiment
-import decsim.experiments.measure as measure
 import decsim.links.window_transfers as window_transfers
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_payloads as boundary_payloads
@@ -33,8 +33,9 @@ import decsim.windows.round_retention as round_retention
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 import tests.declared_run as declared_run
+import tests.decoders.test_decoder_tiers as decoder_tiers
 import tests.escalation.declared_fabric as declared_fabric
-import tests.experiments.yaml_configs as yaml_configs
+import tests.escalation.test_strong_window_shapes as shape_tests
 
 
 class _RecordingQueue:
@@ -429,30 +430,21 @@ def _companion_solve(job, memory):
 
 
 # one sweep point per noise level, counting the movement each shot made
-FOLD_COUNTING_SWEEP = {
-    "observation": {"data_movement": True},
-    "sweep": [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.001, 0.01],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": 1},
-        }
-    ],
-}
-
-
 FOLD_SEEDS = (0, 1, 2, 3, 4)
+# a shot of fifteen rounds at distance 3 is four sliding windows
+FOLD_ROUNDS = 15
+
+
+def _fifteen_rounds(settings, probability: float):
+    """The settings on a memory shot of fifteen rounds at distance 3."""
+    workload = machine_settings.memory_workload(3, probability, FOLD_ROUNDS)
+    return dataclasses.replace(settings, workload=workload)
 
 
 @pytest.mark.parametrize("seed", FOLD_SEEDS)
 @pytest.mark.parametrize("probability", (0.001, 0.01))
-def test_every_window_with_a_predecessor_folds_its_boundary(
-    tmp_path, probability, seed
-):
-    """The fold's count is the geometry's, not the noise's.
+def test_every_window_with_a_predecessor_folds_its_boundary(probability, seed):
+    """Every window with a predecessor folds its boundary into a copy.
 
     Fifteen rounds at distance 3 are four sliding windows, so three of
     them have a predecessor and three masked views are made, at a noise
@@ -460,67 +452,25 @@ def test_every_window_with_a_predecessor_folds_its_boundary(
     do. The rounds come out of a fold that changed nothing unchanged, so
     every one of five seeds still agrees with whole-circuit PyMatching.
     """
-    config_path = yaml_configs.write_config(tmp_path, FOLD_COUNTING_SWEEP)
-    config = experiment.load_experiment(config_path)
-    shot = yaml_configs.point_shot(
-        config,
-        physical_error_probability=probability,
-        distance=3,
-        round_period_microseconds=1.0,
-        seed=seed,
-    )
-    measurement = measure.measure_shot(shot)
-    by_path = measurement.data_movement["copies_by_path"]
+    base = machine_settings.weak_decoder_baseline(3, probability, 1.0)
+    observation = dataclasses.replace(base.observation, data_movement=True)
+    settings = dataclasses.replace(base, observation=observation)
+    settings = _fifteen_rounds(settings, probability)
+    machine = machine_module.Machine.build(settings, seed)
+    result = machine.run()
+    by_path = result.data_movement["copies_by_path"]
     folds = by_path["unit default#0 memory -> masked view"]
-    loop = yaml_configs.loop_predictions(shot)
-
-    assert measurement.decoded_windows == 4
-    assert folds["events"] == measurement.decoded_windows - 1
+    windows = len(machine.observation.windows.windows)
+    loop = decoder_tiers.loop_predictions(result)
+    whole_circuit = decoder_tiers.whole_circuit_predictions(machine, result)
+    assert windows == 4
+    assert folds["events"] == windows - 1
     assert folds["rounds"] == 18
-    assert loop == yaml_configs.whole_circuit_predictions(shot)
-
-
-# switching, so every window's request runs the two forced-class solves
-# of a complementary gap and they read one landed input (decision D2)
-SWITCHING_FOLD_SWEEP = {
-    "escalation": {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "redo_window",
-        "run_both_at_once": False,
-    },
-    "strong_decoder": {
-        "kind": 1.0,
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "fridge",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 1,
-            "release_cycles_per_round": 0,
-        },
-    },
-    "sweep": [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [
-                    0.0001,
-                    0.008,
-                ],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": len(FOLD_SEEDS)},
-        }
-    ],
-}
+    assert loop == whole_circuit
 
 
 @pytest.mark.parametrize("probability", (0.0001, 0.008))
-def test_two_solves_of_one_request_fold_one_mask_into_one_input(
-    tmp_path, probability
-):
+def test_two_solves_of_one_request_fold_one_mask_into_one_input(probability):
     """The in-place fold under switching answers what the copy fold does.
 
     The two forced-class solves of one window read one landed input
@@ -532,63 +482,57 @@ def test_two_solves_of_one_request_fold_one_mask_into_one_input(
     the shot's logical outcome and its agreement with whole-circuit
     PyMatching are what the copy fold reaches on the same seed.
     """
-    in_place = _fold_run(tmp_path, "in_place", probability)
-    copied = _fold_run(tmp_path, "copy", probability)
+    in_place = _fold_run(False, probability)
+    copied = _fold_run(True, probability)
 
     assert in_place == copied
 
 
-def _fold_run(tmp_path, boundary_fold: str, probability: float) -> list:
-    """Each seed's committed corrections and verdicts under that fold row."""
-    overrides = dict(SWITCHING_FOLD_SWEEP)
-    weak_decoder = dict(yaml_configs.MINIMAL_CONFIG["weak_decoder"])
-    weak_decoder["input"] = "copy"
-    weak_decoder["boundary_fold"] = boundary_fold
-    overrides["weak_decoder"] = weak_decoder
-    directory = tmp_path / boundary_fold
-    directory.mkdir()
-    config_path = yaml_configs.write_config(directory, overrides)
-    config = experiment.load_experiment(config_path)
+def _fold_run(copies_boundary_fold: bool, probability: float) -> list:
+    """Each seed's committed corrections and verdicts under that fold row.
+
+    Switching, so every window's request runs the two forced-class
+    solves of a complementary gap, both tiers on fixed cards.
+    """
+    switching = shape_tests.weak_base_switching(3, probability, 1.0)
+    weak_decoder = shape_tests.priced_pool(switching.weak_decoder, 0.028)
+    weak_decoder = dataclasses.replace(
+        weak_decoder, copies_boundary_fold=copies_boundary_fold
+    )
+    strong_decoder = shape_tests.priced_pool(switching.strong_decoder, 1.0)
+    settings = dataclasses.replace(
+        switching, weak_decoder=weak_decoder, strong_decoder=strong_decoder
+    )
+    settings = _fifteen_rounds(settings, probability)
     outcomes = []
     for seed in FOLD_SEEDS:
-        outcome = _fold_outcome(config, probability, seed)
+        outcome = _fold_outcome(settings, seed)
         outcomes.append(outcome)
     return outcomes
 
 
-def _fold_outcome(config, probability: float, seed: int) -> tuple:
-    """One shot's committed corrections, its outcome and its agreement."""
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": probability,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    shot = collect.run_shot(task, seed)
-    measurement = measure.measure_shot(shot)
+def _fold_outcome(settings, seed: int) -> tuple:
+    """One seed's committed corrections, failure and whole-circuit match."""
+    machine = machine_module.Machine.build(settings, seed)
+    result = machine.run()
     corrections = []
-    for record in shot.machine.observation.frame_corrections.committed:
+    for record in machine.observation.frame_corrections.committed:
         corrections.append((record.window_key, record.logical_observables))
-    loop = yaml_configs.loop_predictions(shot)
-    whole_circuit = yaml_configs.whole_circuit_predictions(shot)
+    (operation_result,) = result.operation_results
+    loop = decoder_tiers.loop_predictions(result)
+    whole_circuit = decoder_tiers.whole_circuit_predictions(machine, result)
     return (
         sorted(corrections),
-        measurement.logical_failure,
+        operation_result.logical_failure,
         loop == whole_circuit,
     )
 
 
 def test_decision_cycles_delay_queue_admission_and_later_reaction_points():
-    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
-    section = {
-        "kind": "sliding",
-        "commit_rounds": None,
-        "buffer_rounds": None,
-        "clock": "decisions",
-        "decision_cycles": 3,
-    }
-    settings = window_settings.WindowSettings.from_yaml(section, clocks)
+    one_megahertz = config.Clock.from_megahertz(1.0)
+    settings = window_settings.WindowSettings(
+        clock=one_megahertz, decision_cycles=3
+    )
     free = declared_run.weak_only_run()
     charged = declared_run.weak_only_run(windows=settings)
     free_ticks = declared_run.reaction_ticks(free)

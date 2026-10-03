@@ -16,10 +16,10 @@ import pytest
 
 import decsim.config as config
 import decsim.engine as engine_module
-import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
-import tests.experiments.yaml_configs as yaml_configs
+import decsim.settings as machine_settings
+import examples.two_tiers as two_tiers
 
 
 class Tier(enum.Enum):
@@ -204,52 +204,11 @@ def test_a_snapshot_does_not_change_when_the_frame_does():
     assert after.commit_count == 2
 
 
-def test_a_write_cost_refusal_names_its_yaml_path():
-    clocks = config.ClockSettings({"fridge": 250.0})
-    section = {"clock": "fridge", "write_cycles": -1}
-
-    with pytest.raises(ValueError) as refusal:
-        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
-    assert str(refusal.value) == (
-        "pauli_frame.write_cycles must not be negative: cycles must be "
-        "nonnegative"
-    )
-
-
 def test_a_charged_write_without_a_clock_is_refused():
     engine = engine_module.Engine()
 
     with pytest.raises(ValueError, match="needs the clock"):
         pauli_frame_module.PauliFrame(engine, clock=None, write_cycles=1)
-
-
-@pytest.mark.parametrize("key", ["clock", "write_cycles"])
-def test_a_section_without_a_required_key_is_refused_by_name(key):
-    """A sweep that leaves a key out reads a sentence, not a KeyError."""
-    clocks = config.ClockSettings({"fridge": 250.0})
-    section = {"kind": "logical_register", "clock": "fridge"}
-    section["write_cycles"] = 1
-    del section[key]
-
-    with pytest.raises(ValueError) as refusal:
-        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
-    assert str(refusal.value) == (
-        f"pauli_frame needs the keys ['{key}']; configs/reference.yaml "
-        "holds every key with its unit"
-    )
-
-
-def test_a_key_the_section_does_not_have_is_refused_by_name():
-    """A misspelt key would otherwise leave its default silently."""
-    clocks = config.ClockSettings({"fridge": 250.0})
-    section = {"clock": "fridge", "write_cycles": 1, "write_cycle": 2}
-
-    with pytest.raises(ValueError) as refusal:
-        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
-    assert str(refusal.value) == (
-        "pauli_frame does not know ['write_cycle']; its keys are "
-        "['kind', 'clock', 'write_cycles']"
-    )
 
 
 def test_a_free_write_is_accepted_and_needs_no_clock():
@@ -289,38 +248,20 @@ class CountingFrameConfig(pauli_frame_module.PauliFrameConfig):
         )
 
 
-def test_a_frame_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
-    """One FRAMES record and one pauli_frame.kind is the whole edit."""
-    monkeypatch.setitem(
-        pauli_frame_module.FRAMES, "counting", CountingFrameConfig
+def test_a_frame_written_outside_decsim_runs_from_its_record():
+    """One record that builds the frame is the whole edit."""
+    base = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    frame = base.pauli_frame
+    counting = CountingFrameConfig(
+        write_cycles=frame.write_cycles, clock=frame.clock
     )
-    section = dict(yaml_configs.MINIMAL_CONFIG["pauli_frame"])
-    section["kind"] = "counting"
-    config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = dataclasses.replace(base, pauli_frame=counting)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
 
     assert isinstance(machine.control.pauli_frame, CountingFrame)
     assert result.terminal_status == "complete"
     assert machine.control.pauli_frame.committed_windows != []
-
-
-def test_a_frame_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
-    """The table's own refusal, at the yaml boundary."""
-    section = dict(yaml_configs.MINIMAL_CONFIG["pauli_frame"])
-    section["kind"] = "not_a_row"
-    config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
-    with pytest.raises(ValueError, match="pauli_frame.kind 'not_a_row' is not"):
-        experiment.load_experiment(config_path)
 
 
 def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
@@ -375,16 +316,9 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     stream's logical correction is the sum of its committed windows'
     effects). Both folds must agree.
     """
-    config_path = yaml_configs.CONFIGS_DIR / "examples/two_tiers.yaml"
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.01,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    distance_three = two_tiers.points[0]
+    workload = machine_settings.memory_workload(3, 0.01, 30)
+    settings = dataclasses.replace(distance_three.machine, workload=workload)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     (operation_result,) = result.operation_results

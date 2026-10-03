@@ -21,12 +21,22 @@ import pathlib
 
 import pytest
 
-import decsim.decoders.settings as decoder_settings
+import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
+import decsim.decoders.dispatch_steps.decoder as dispatch_steps
+import decsim.decoders.measured_table.decoder as measured_table
+import decsim.decoders.relay_belief_propagation.decoder as relay_bp
+import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.cycle_count as cycle_count_module
-import decsim.frontends.settings as workload_settings
+import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
-import decsim.qpu.settings as qpu_settings
-import decsim.tables as tables
+import decsim.qpu.code_geometry as code_geometry
+import decsim.qpu.stim_device as stim_device
+import decsim.qpu.streaming_stim_device as streaming_stim_device
+import decsim.qpu.syndrome_devices as syndrome_devices
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -36,12 +46,30 @@ PORTS_PATH = DECSIM_ROOT / "ports.py"
 # STYLE.md rule 7: a shared module beside ports in the package order, so
 # its two Protocols cannot move into ports without a cycle of levels
 SHARED_PROTOCOL_MODULE = "seeding"
-# The tables whose section reads a row's own keys, so whose rows with
-# keys declare a Settings that reads them (decsim/ports.py RowSettings).
-TABLES_WITH_ROW_KEYS = (
-    workload_settings.WORKLOADS,
-    qpu_settings.SYNDROME_SOURCES,
-    qpu_settings.CODE_CARDS,
+# the code cards decsim ships
+CODE_CARD_ROWS = (
+    code_geometry.SurfaceCodeModel,
+    code_geometry.BivariateBicycleCodeModel,
+)
+# the syndrome sources decsim ships, by the name each record carries
+SOURCE_ROWS = {
+    "stim_device": stim_device.StimDevice,
+    "timing_only": syndrome_devices.TimingOnlyDevice,
+    "syndrome_bits": syndrome_devices.SyndromeBitDevice,
+    "recorded_stim": stim_device.RecordedStimDevice,
+    "streaming_stim": streaming_stim_device.StreamingStimDevice,
+}
+# the decoders decsim ships whose record has defaults of its own;
+# union_find names its timing, so its record has none
+DEFAULTED_DECODER_ROWS = (
+    minimum_weight_perfect_matching.PyMatchingDecoder,
+    minimum_weight_perfect_matching.UnweightedPyMatchingDecoder,
+    belief_matching.BeliefMatchingDecoder,
+    tesseract.TesseractDecoder,
+    relay_bp.RelayBeliefPropagationDecoder,
+    belief_propagation_osd.BeliefPropagationOsdDecoder,
+    measured_table.MeasuredTableDecoder,
+    dispatch_steps.DispatchStepsDecoder,
 )
 
 
@@ -246,10 +274,9 @@ def test_the_code_card_port_declares_what_the_tree_calls_on_a_card():
     assert _undeclared(called, ("CodeModel",)) == {}
 
 
-@pytest.mark.parametrize("kind", sorted(qpu_settings.CODE_CARDS))
-def test_every_code_card_rows_settings_builds_a_code_model(kind):
+@pytest.mark.parametrize("row", CODE_CARD_ROWS)
+def test_every_code_card_rows_settings_builds_a_code_model(row):
     """A distance of None and no window sizes are the card's own."""
-    row = qpu_settings.CODE_CARDS[kind]
     settings = row.Settings()
     parameters = settings.__dataclass_params__
     assert parameters.frozen
@@ -258,32 +285,19 @@ def test_every_code_card_rows_settings_builds_a_code_model(kind):
     assert isinstance(card, ports.CodeModel)
 
 
-@pytest.mark.parametrize("kind", sorted(qpu_settings.SYNDROME_SOURCES))
+@pytest.mark.parametrize("kind", sorted(SOURCE_ROWS))
 def test_every_source_rows_settings_is_a_frozen_record_of_its_name(kind):
-    """The record the yaml's qpu.kind picks names its row by that word."""
-    row = qpu_settings.SYNDROME_SOURCES[kind]
+    """A source's record names its row, the word a run's results carry."""
+    row = SOURCE_ROWS[kind]
     settings = row.Settings()
     parameters = settings.__dataclass_params__
     assert parameters.frozen
     assert settings.name == kind
 
 
-@pytest.mark.parametrize("kind", sorted(workload_settings.WORKLOADS))
-def test_every_workload_row_is_a_workload_row(kind):
-    row = workload_settings.WORKLOADS[kind]
-    assert isinstance(row, ports.WorkloadRow)
-
-
-# union_find names its timing, so its record has no default of its own
-DECODER_KINDS = set(decoder_settings.DECODERS)
-DEFAULTED_DECODER_KINDS = DECODER_KINDS - {"union_find"}
-DEFAULTED_DECODER_ROWS = sorted(DEFAULTED_DECODER_KINDS)
-
-
-@pytest.mark.parametrize("kind", DEFAULTED_DECODER_ROWS)
-def test_every_decoder_rows_settings_builds_the_row(kind):
+@pytest.mark.parametrize("row", DEFAULTED_DECODER_ROWS)
+def test_every_decoder_rows_settings_builds_the_row(row):
     """A tier's algorithm is the row's Settings record, which builds it."""
-    row = decoder_settings.DECODERS[kind]
     settings = row.Settings()
     parameters = settings.__dataclass_params__
     assert parameters.frozen
@@ -293,47 +307,13 @@ def test_every_decoder_rows_settings_builds_the_row(kind):
 
 def test_the_union_find_rows_settings_builds_the_row_with_its_timing():
     """The row's record names its timing; then it builds the row as any."""
-    row = decoder_settings.DECODERS["union_find"]
+    row = union_find.UnionFindDecoder
     host_time = cycle_count_module.HostMeasuredTime()
     settings = row.Settings(timing=host_time)
     parameters = settings.__dataclass_params__
     assert parameters.frozen
     decoder = settings.build()
     assert isinstance(decoder, row)
-
-
-def _declared_row_settings() -> list:
-    """Every shipped row's nested Settings with keys, across those tables."""
-    rows = []
-    for table in TABLES_WITH_ROW_KEYS:
-        table_rows = table.values()
-        rows.extend(table_rows)
-    declared = []
-    for row in rows:
-        keys = tables.row_keys(row)
-        if keys:
-            declared.append(row.Settings)
-    return declared
-
-
-def _qualified_name(settings_class) -> str:
-    """The test id: the row's class and Settings, as Python names them."""
-    return settings_class.__qualname__
-
-
-DECLARED_ROW_SETTINGS = _declared_row_settings()
-
-
-@pytest.mark.parametrize(
-    "settings_class", DECLARED_ROW_SETTINGS, ids=_qualified_name
-)
-def test_every_rows_settings_is_a_frozen_dataclass_with_from_yaml(
-    settings_class,
-):
-    """The contract decsim/tables.py row_settings reads a row's keys by."""
-    parameters = settings_class.__dataclass_params__
-    assert parameters.frozen
-    assert isinstance(settings_class, ports.RowSettings)
 
 
 def _decsim_modules() -> list:

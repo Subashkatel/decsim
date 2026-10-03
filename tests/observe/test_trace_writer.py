@@ -17,7 +17,7 @@ import pytest
 import decsim.decoders.decoders as decoders
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
-import decsim.qpu.settings as qpu_settings
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.declared_run as declared_run
 import tests.experiments.test_measure as measure_tests
@@ -203,7 +203,7 @@ def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
 
 
 def test_a_path_ending_in_gz_holds_the_same_trace_compressed(traced, tmp_path):
-    """The reference yaml's own promise: .gz compresses."""
+    """A trace path ending in .gz is written compressed."""
     machine, _result, document = traced
     path = tmp_path / "point1.trace.json.gz"
 
@@ -359,16 +359,13 @@ def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
     that ran it, as each LLVM XRay record carries its thread, and each
     decode's stages sit on its own service's lane.
     """
-    factory = qpu_settings.factory_from_yaml(
-        {
-            "kind": "distillation",
-            "unit_count": 1,
-            "attempt_ticks": 100,
-            "correction_round_count": 3,
-            "correction_decode_count": 2,
-            "production_mode": "continuous",
-            "buffer_capacity": 1,
-        }
+    factory = magic_state_factories.DistillationFactory.Settings(
+        unit_count=1,
+        attempt_ticks=100,
+        correction_round_count=3,
+        correction_decode_count=2,
+        production_mode="continuous",
+        buffer_capacity=1,
     )
     point = gate_point.settings(trace="chrome")
     weak_decoder = dataclasses.replace(point.weak_decoder, unit_count=2)
@@ -683,7 +680,7 @@ def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):
     A round enters the packing workspace at its first fragment and
     leaves when it is packed; the point prices no packing time, so round
     1 is in and out at 1.004 us. The counter carries the occupancy and
-    the residence carries the bound the yaml sets, unbounded here.
+    the residence carries the bound the record sets, unbounded here.
     """
     _machine, _result, document = traced
     residence = _one(document, "X", "assemble round 1")
@@ -790,36 +787,36 @@ def _one(document, phase, name) -> dict:
     return found
 
 
-def test_the_observation_section_names_the_log_and_the_trace_apart():
+def test_the_observation_record_names_the_log_and_the_trace_apart():
     """The narrator is observation.log; observation.trace is the trace."""
     import decsim.observe.settings as observe_settings
 
-    default = observe_settings.ObservationSettings.from_yaml({})
+    default = observe_settings.ObservationSettings()
     assert default.log == "off"
     assert default.trace == "off"
     assert default.writes_trace is False
     assert default.trace_path is None
     assert default.trace_shots == (0,)
 
-    narrating = observe_settings.ObservationSettings.from_yaml({"log": "both"})
+    narrating = observe_settings.ObservationSettings(log="both")
     assert narrating.prints_log is True
     assert narrating.writes_log is True
     assert narrating.writes_trace is False
 
-    chrome = observe_settings.ObservationSettings.from_yaml(
-        {"trace": "chrome", "trace_shots": [0, 3]}
+    chrome = observe_settings.ObservationSettings(
+        trace="chrome", trace_shots=(0, 3)
     )
     assert chrome.writes_trace is True
     assert chrome.trace_path is None
     assert chrome.trace_shots == (0, 3)
 
-    at_a_path = observe_settings.ObservationSettings.from_yaml(
-        {"trace": "/tmp/run.trace.json"}
+    at_a_path = observe_settings.ObservationSettings(
+        trace="/tmp/run.trace.json"
     )
     assert at_a_path.trace_path == "/tmp/run.trace.json"
 
     with pytest.raises(ValueError, match="observation.log must be one of"):
-        observe_settings.ObservationSettings.from_yaml({"log": "chrome"})
+        observe_settings.ObservationSettings(log="chrome")
 
 
 def _corrections(document) -> list:

@@ -15,9 +15,9 @@ classification), packing is declared free, and from there the
 weak-buffer path publishes it 4 us on while the strong-buffer path
 lands it in the strong syndrome buffer 7 us on.
 
-The window trace walk at the end of the file reads one shot of
-configs/bases/weak_decoder_baseline.yaml as well, because the four
-events a latency claim rests on are read off a shipped config's own run. IBM
+The window trace walk at the end of the file reads one shot of the
+weak base as well, because the four events a latency claim rests on
+are read off a shipped machine's own run. IBM
 arXiv 2510.21600 lines 517-519 name them on the hardware: the decoder
 FPGA's trace observes when the decoders start and stop, when the
 syndromes and codewords arrive, and when the logical Pauli frame is
@@ -29,11 +29,10 @@ import random
 
 import pytest
 
-import decsim.collect as collect
 import decsim.config as config_module
-import decsim.experiments.experiment as experiment
+import decsim.machine as machine_module
+import decsim.settings as machine_settings
 import tests.declared_run as declared_run
-import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.run_ledger as run_ledger
 
 
@@ -607,7 +606,7 @@ def ledger_without(ledger, kind, window_id):
 def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     """The shipped weak baseline, window by window, in pipeline order.
 
-    One shot of configs/bases/weak_decoder_baseline.yaml at p = 0.001,
+    One shot of the weak base at p = 0.001,
     distance 3 and a 10 us round period decodes nine sliding windows, and
     each carries the four events a latency claim is read from, with
     non-decreasing ticks: the window complete in the weak syndrome buffer,
@@ -618,17 +617,10 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     when the logical Pauli frame is produced), each one a named probe point
     a listener reads here (gem5 src/sim/probe/probe.hh lines 122 and 272).
     """
-    config_path = yaml_configs.CONFIGS_DIR / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 10.0,
-        },
-    )
-    shot = collect.run_shot(task, 0)
-    ledger = run_ledger.ledger_of(shot.machine)
+    settings = machine_settings.weak_decoder_baseline(3, 0.001, 10.0)
+    machine = machine_module.Machine.build(settings, 0)
+    machine.run()
+    ledger = run_ledger.ledger_of(machine)
 
     problems = windows_with_a_broken_trace(ledger)
 

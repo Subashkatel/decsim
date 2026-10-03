@@ -20,16 +20,13 @@ import re
 
 import pytest
 
-import decsim.collect as collect
 import decsim.config as config
 import decsim.engine
-import decsim.experiments.experiment as experiment
 import decsim.links.channel as channel_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
-import tests.experiments.yaml_configs as yaml_configs
 
 # the three hops a strong-node card prices as a cable or chassis crossing
 STRONG_NODE_CROSSINGS = (
@@ -397,16 +394,17 @@ def test_a_cards_cycles_cost_its_clocks_period_in_whole_ticks():
     and eight bits at eight bits per cycle take one period, the same
     ticks every other component on the domain charges.
     """
-    clocks = config.ClockSettings({"fridge": 300.0})
-    card = {
-        "latency_cycles": 3,
-        "clock": "fridge",
-        "bits_per_cycle": 8.0,
-        "setup_cycles_per_transfer": 3,
-    }
-    section = {"controller_to_weak_buffer": card}
-    profile = link_profiles.from_yaml(section, clocks, "clocked")
-    path = profile.controller_to_weak_buffer
+    fridge = config.Clock.from_megahertz(300.0)
+    reference = link_profiles.logical_reference_profile()
+    path = link_profiles.path_card(
+        reference,
+        "controller_to_weak_buffer",
+        clock=fridge,
+        latency_cycles=3,
+        bits_per_cycle=8.0,
+        source="three cycles at 300 MHz",
+        setup_cycles_per_transfer=3,
+    )
     engine = decsim.engine.Engine()
     channel = channel_module.Channel(path.channel, engine)
     framed = channel_module.FramedPayload(8)
@@ -466,24 +464,6 @@ def test_a_run_without_a_card_uses_the_reference_card():
     explicit_machine = machine.Machine.build(explicit_settings)
     explicit_result = explicit_machine.run()
     assert default_result == explicit_result
-
-
-def test_a_links_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
-    """The table's own refusal, at the yaml boundary."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "not_a_row"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    with pytest.raises(ValueError, match="links.kind 'not_a_row' is not"):
-        experiment.load_experiment(config_path)
-
-
-def test_the_bandwidth_row_says_what_it_needs_instead_of_a_yaml(tmp_path):
-    """Its channels come from the sweep point's geometry, not the section."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "bandwidth_limited"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    with pytest.raises(ValueError, match="provisions every channel"):
-        experiment.load_experiment(config_path)
 
 
 # an arXiv identifier as the cards write it: four digits, a dot, four or
@@ -742,48 +722,6 @@ def strong_buffer_source_of(built) -> str:
     return ""
 
 
-def test_the_measured_cpu_row_runs_from_a_yaml(tmp_path):
-    """One links.kind is the whole edit, and the run carries the source."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "roce_v2_cpu"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    built = machine.Machine.build(settings, 0)
-    result = built.run()
-
-    assert result.terminal_status == "complete"
-    assert "2609.09270" in strong_buffer_source_of(built)
-
-
-def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
-    """The same, on the row that prices the GPU coprocessor's path."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "roce_v2_gpu"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    built = machine.Machine.build(settings, 0)
-    result = built.run()
-
-    assert result.terminal_status == "complete"
-    assert "2609.09270" in strong_buffer_source_of(built)
-
-
 def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
     """The four strong-side hops read one measurement, 2510.25213."""
     profile = link_profiles.nvqlink_measured_profile()
@@ -827,23 +765,12 @@ def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
     assert paths_outside_the_strong_side(measured) == unchanged
 
 
-def test_a_python_path_card_is_the_yaml_card_of_the_same_numbers():
-    """One way to price a path: the yaml's card goes through path_card.
+def test_a_path_cards_rate_is_the_exact_fraction_of_its_decimal():
+    """The rate stays the exact fraction of the decimal.
 
-    The rate stays the exact fraction of the decimal, so the two cards
-    name one point (collect.json_value, which a point's id hashes).
+    So two cards of the same numbers name one point (collect.json_value,
+    which a point's id hashes).
     """
-    clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
-    card = {
-        "latency_cycles": 40,
-        "clock": "fridge",
-        "bits_per_cycle": 38.79,
-        "channels": 4,
-        "setup_cycles_per_transfer": 2,
-        "header_bits_per_transfer": 16,
-    }
-    section = {"controller_to_weak_buffer": card}
-    from_yaml = link_profiles.from_yaml(section, clocks, "mine")
     reference = link_profiles.logical_reference_profile()
     fridge = config.Clock.from_megahertz(250.0)
 
@@ -859,12 +786,7 @@ def test_a_python_path_card_is_the_yaml_card_of_the_same_numbers():
         header_bits_per_transfer=16,
     )
 
-    yaml_card = from_yaml.controller_to_weak_buffer
-    python_value = collect.json_value(python_card, keep_labels=False)
-    yaml_value = collect.json_value(yaml_card, keep_labels=False)
     rate = python_card.channel.capacity.input_bits_per_microsecond
-    assert python_card == yaml_card
-    assert python_value == yaml_value
     assert rate == fractions.Fraction(38790)
     assert python_card.excludes_receiver_processing is True
 

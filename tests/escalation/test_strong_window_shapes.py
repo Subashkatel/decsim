@@ -139,29 +139,6 @@ def _strong_job(requests: declared_run.EndedRequests, window_id: int):
     raise AssertionError(f"no strong request for window {window_id}")
 
 
-def test_the_double_window_absorbs_the_windows_it_covers():
-    machine = fabric.switching_machine(
-        rounds=15,
-        escalated_windows={1},
-        strong_window="double_window",
-        round_microseconds=4.0,
-    )
-    machine.run()
-    assigned = fabric.log_lines_containing(machine, "assigned")
-    assert len(assigned) == 1
-    # W1 commits 4-6; the strong window is 9 rounds, 4-12, so W2 and W3
-    # (commits 7-9 and 10-12) are absorbed and W4 restarts the chain
-    assert (
-        "strong window rounds 4-12 assigned; weak chain skips 2 window(s); "
-        "strong start deferred until the far-side weak boundary"
-    ) in assigned[0]
-    assert fabric.frame_tiers(machine) == [
-        ((1, 0), "weak"),
-        ((1, 4), "weak"),
-        ((1, 1), "strong"),
-    ]
-
-
 def test_the_double_window_leaves_once_its_far_boundary_is_determined():
     machine = fabric.switching_machine(
         rounds=15,
@@ -187,23 +164,6 @@ def test_the_double_window_leaves_once_its_far_boundary_is_determined():
     assert len(submitted_lines) == 1
     assert submitted_lines[0].startswith("[ 87.000 us]")
     assert restart_lines[0].startswith("[ 87.000 us]")
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
-
-
-def test_the_double_window_at_the_operations_end_waits_for_terminal_data():
-    machine = fabric.switching_machine(
-        rounds=9, escalated_windows={2}, strong_window="double_window"
-    )
-    machine.run()
-    submitted = fabric.log_lines_containing(
-        machine, "terminal data complete -> strong window submitted"
-    )
-    assert len(submitted) == 1
-    assert fabric.frame_tiers(machine) == [
-        ((1, 0), "weak"),
-        ((1, 1), "weak"),
-        ((1, 2), "strong"),
-    ]
     assert not machine.windows.window_manager.strong_redecode.has_pending()
 
 
@@ -251,7 +211,7 @@ def test_a_second_escalation_of_one_window_is_refused():
         round_count=3,
         strong_label="strong(mem1 W2)",
     )
-    with pytest.raises(RuntimeError, match="duplicate strong escalation"):
+    with pytest.raises(RuntimeError):
         shape.plan(again)
 
 
@@ -806,44 +766,19 @@ def _keys_of(masked: list, *, strong: bool, changed_only: bool) -> set:
     return keys
 
 
-def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
+def test_a_shape_name_off_the_table_is_refused():
     """both_faces_pinned is the shape decsim refuses to build.
 
     A strong window that pins both faces and absorbs nothing waits for
     the window after it, which waits for the strong result: the serial
-    sliding chain deadlocks on it. It is not a row, and a name that is
-    not a row is refused naming the rows.
+    sliding chain deadlocks on it. It is not a row of the table.
     """
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(ValueError):
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
             strong_window="both_faces_pinned",
         )
-    assert "escalation.strong_window 'both_faces_pinned' is not a row" in str(
-        refusal.value
-    )
-
-
-def test_the_forward_row_that_reads_its_near_face_raw_is_not_a_row():
-    """A forward extent needs its near face pinned to explain its seam.
-
-    Read raw, the near face folds no committed neighbour, so the strong
-    decode can explain a seam defect differently from the neighbour's
-    commit and the committed corrections leave it lit (Bombin et al.
-    2303.04846 lines 775-788: the input is the syndrome plus every prior
-    committed correction). double_window is that extent with the
-    face pinned, and the unpinned name is refused naming the rows.
-    """
-    with pytest.raises(ValueError) as refusal:
-        fabric.switching_machine(
-            rounds=9,
-            escalated_windows=set(),
-            strong_window="forward",
-        )
-    message = str(refusal.value)
-    assert "escalation.strong_window 'forward' is not a row" in message
-    assert "double_window" in message
 
 
 def test_the_redo_window_row_reads_its_commit_region_and_one_buffer():

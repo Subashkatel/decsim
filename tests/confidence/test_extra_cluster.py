@@ -255,6 +255,25 @@ def test_a_card_prices_the_growth_instead():
     assert computation.ticks == config.microseconds_to_ticks(0.5)
 
 
+def test_the_row_builds_from_the_threshold_and_the_weak_row():
+    """The weak row's own step and cycle count, not the host's defaults.
+
+    20 dB is 4.605 nats, which at a step of 0.2 is 23.03 steps, so the
+    growth stops on whole tick 24.
+    """
+    count = cycle_count_module.CycleCount(CLOCK, delay_cycles=3)
+    record = extra_cluster.ExtraClusterGap.Settings()
+    union_find_settings = union_find.UnionFindDecoder.Settings(
+        weight_step=0.2, timing=count
+    )
+
+    signal = record.build(union_find_settings, TWENTY_DECIBELS_NATS)
+
+    assert signal.growth_limit_ticks == 24
+    assert signal.weight_step == 0.2
+    assert signal.timing is count
+
+
 def test_a_decode_without_growth_reports_no_gap():
     signal = extra_cluster.ExtraClusterGap(TWENTY_DECIBELS_NATS, HOST_TIME)
     solve = decoding_records.DecodeResult(1, 0)

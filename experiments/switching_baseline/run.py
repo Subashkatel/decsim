@@ -129,7 +129,7 @@ def weak_alone(
         clock=machine_settings.FRIDGE_CLOCK,
         qpu=qpu,
         controller=controller(),
-        detection_events=detection_event_settings.YANG_PREPROCESSING,
+        detection_events=detection_events(),
         links=links,
         weak_syndrome_buffer=weak_syndrome_buffer,
         windows=windows,
@@ -155,6 +155,21 @@ def controller() -> controller_settings.ControllerSettings:
         readout_to_bits_cycles=0,
         packing_cycles_per_round=8,
         decision_to_pulse_cycles=8,
+    )
+
+
+def detection_events() -> detection_event_settings.DetectionEventSettings:
+    """Events formed at the controller, pipelined: 5 cycles, then 1 a round.
+
+    Syndrome preprocessing fully pipelined in registers takes 20 ns
+    (2605.04892 lines 1273-1275), 5 cycles of the 250 MHz chip clock
+    (line 1063). That paper forms the events on the decoding FPGA (lines
+    199-200); this machine forms them at the controller.
+    """
+    return detection_event_settings.DetectionEventSettings(
+        clock=machine_settings.FRIDGE_CLOCK,
+        latency_cycles=5,
+        cycles_per_round=1,
     )
 
 

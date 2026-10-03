@@ -150,16 +150,3 @@ def _check_seats(formed_at: tuple) -> None:
         raise ValueError(
             f"detection_events.formed_at names a seat twice: {list(formed_at)}"
         )
-
-
-# Yang et al.'s syndrome preprocessing, fully pipelined in FPGA registers
-# at 20 ns, 5 cycles of their 250 MHz clock (2605.04892 lines 1273-1275,
-# Table I line 1063). Yang form the syndromes in the CFM, the FPGA that
-# also decodes them (lines 199-200); decsim forms them at the
-# controller, the record's default seat, by its own choice.
-_YANG_CLOCK = config.Clock.from_megahertz(250.0)
-YANG_PREPROCESSING = DetectionEventSettings(
-    clock=_YANG_CLOCK,
-    latency_cycles=5,  # lines 1274-1275
-    cycles_per_round=1,  # a round a cycle, fully pipelined, line 1273
-)

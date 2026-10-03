@@ -188,14 +188,19 @@ def test_the_feedback_chain_is_the_frame_commit_plus_each_stage_once():
     frame_to_controller 2, and the successor's own command reaches the
     QPU one decision-to-pulse cost of 3 and one controller_to_qpu 2
     later. The command is the sequencer's operation, not a copy of it:
-    the QPU runs what the workload declared.
+    the QPU runs what the workload declared. The machine's own clock is
+    faster, and the controller, naming its own, does not take it.
     """
     first = declared_run.memory_operation(1)
     successor = declared_run.memory_operation(2, blocked_by=1)
     operations = (first, successor)
     controller = declared_run.declared_controller(decision_to_pulse_cycles=6)
+    faster_clock = config.Clock(4000)
     machine = declared_run.weak_only_run(
-        rounds=6, operations=operations, controller=controller
+        rounds=6,
+        operations=operations,
+        controller=controller,
+        clock=faster_clock,
     )
     blocker_commit = commit_tick_of(machine, (1, 0))
     to_controller = config.microseconds_to_ticks(2.0)

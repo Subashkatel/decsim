@@ -461,6 +461,7 @@ def weak_only_run(
     controller=None,
     observation=None,
     probes=(),
+    clock=None,
 ):
     """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
 
@@ -483,6 +484,7 @@ def weak_only_run(
     qpu = declared_qpu()
     frame = declared_frame()
     settings = machine_settings.MachineSettings(
+        clock=clock,
         workload=workload,
         qpu=qpu,
         weak_decoder=weak_decoder,

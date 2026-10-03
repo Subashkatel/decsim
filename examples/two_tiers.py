@@ -92,8 +92,7 @@ for distance in DISTANCES:
         strong_decoder=strong_decoder,
         switching=switching,
     )
-    # the swept cells by the paths the yaml set them at, as the results'
-    # columns name them
+    # the point's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (
             PHYSICAL_ERROR_PROBABILITY

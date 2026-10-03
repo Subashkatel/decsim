@@ -180,7 +180,7 @@ def supplied_settings(
     feedback_microseconds: float,
     decoder_microseconds: float = 0.1,
 ) -> machine_settings.MachineSettings:
-    """The machine a yaml names stim_device and a finite circuit with.
+    """The machine that samples a finite circuit on the Stim source.
 
     The Stim source is built from the workload's circuit and round map,
     whatever made them.

@@ -38,8 +38,7 @@ for distance in DISTANCES:
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
     machine = dataclasses.replace(base, weak_decoder=weak_decoder)
-    # the swept cells by the paths the yaml set them at, as the results'
-    # columns name them
+    # the point's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (
             PHYSICAL_ERROR_PROBABILITY

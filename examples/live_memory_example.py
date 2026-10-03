@@ -31,8 +31,8 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 # The one point this example runs, which names its folder in points/.
 POINT_NAME = "shot"
-# The yaml path each physical value of a point sits at: the run's
-# metadata names its values by it, as a yaml sweep's does.
+# The column each physical value of a point is named by in the results:
+# the run's metadata names its values by it.
 METADATA_PATHS = {
     "physical_error_probability": (
         "workload.arguments.physical_error_probability"
@@ -112,9 +112,9 @@ def live_settings(
 ) -> machine_settings.MachineSettings:
     """Use functional PyMatching with caller-declared service and link times.
 
-    The workload is decsim.producers live_memory on the fragments, the
-    one a yaml names, and the source is built from them as a yaml's
-    streaming_stim is, by its settings record.
+    The workload is decsim.producers live_memory on the fragments, and
+    the source is the streaming Stim source, built from them by its
+    settings record.
     """
     workload = producers.live_memory(program, prefix_round_count, patch)
     lowered = workload_settings.WorkloadSettings.running(workload)

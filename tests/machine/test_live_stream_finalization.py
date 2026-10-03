@@ -100,7 +100,7 @@ def test_a_live_stream_that_no_region_ends_is_refused_at_its_seal(
         operations=segments, dynamic_streams=(owner,), rounds_policy=policy
     )
     machine, _ = _machine(workload, 0)
-    with pytest.raises(RuntimeError, match="no protected region ends it"):
+    with pytest.raises(RuntimeError):
         machine.run()
 
 

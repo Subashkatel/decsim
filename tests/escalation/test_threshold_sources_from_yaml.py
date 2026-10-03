@@ -21,14 +21,13 @@ import shutil
 import pytest
 import yaml
 
-import decsim.build.escalation as escalation_build
-import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.collection as collection_module
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
+import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
 from decsim.experiments.experiment import load_experiment
 from tests.escalation.test_switching_mode import (
@@ -462,12 +461,7 @@ def _online_task_at(tmp_path, folder_name: str, probability: float):
 
 def _one_online_point(task) -> experiment.Experiment:
     """The task as the one point of an experiment, under a fixed name."""
-    point = experiment.Point(
-        "online",
-        task.settings,
-        task.metadata,
-        online_threshold=task.online_threshold,
-    )
+    point = experiment.Point("online", task.settings, task.metadata)
     collection = collection_module.CollectionSettings(max_shots=1)
     return experiment.Experiment("online", [point], collection)
 
@@ -711,10 +705,9 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     """The row builds its own per-point source, and that is what runs.
 
     A row that declares built_per_sweep_point has its card read and
-    builds the source itself; the instance the experiments layer puts on
-    the point's task is the row's own, and it reaches the policy the
-    root builds for the shot (build/escalation.py _threshold_source,
-    which reads the same declaration).
+    builds the source itself; the instance the point's task builds is
+    the row's own, and Machine.build hands it to the policy it builds
+    for the shot (build/escalation.py _threshold_source).
     """
     monkeypatch.setitem(
         escalation_settings.THRESHOLD_SOURCES,
@@ -737,9 +730,7 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     assert type(installed) is _OutsideLearningThreshold
     expected_nats = task.settings.switching.threshold.threshold_nats
     assert installed.threshold_nats == expected_nats
-    shot_settings = task.shot_settings()
-    engine = engine_module.Engine()
-    switching = escalation_build.Switching.build(
-        shot_settings.switching, shot_settings.weak_decoder, engine
+    machine = machine_module.Machine.build(
+        task.settings, 0, online_threshold=installed
     )
-    assert switching.policy.threshold is installed
+    assert machine.switching.policy.threshold is installed

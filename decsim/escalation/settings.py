@@ -175,9 +175,9 @@ class SwitchingSettings:
     jobs of the weak pool, so weak_decoder.units alone decides whether
     they overlap. clock, threshold_cycles and switch_cycles price the
     verdict's threshold and switch logic; clock None is the machine's
-    clock. The experiments layer installs the point's online threshold
-    source, the one instance every shot of the point shares (the
-    threshold record's for_point, collect.Task.shot_settings).
+    clock. An online threshold's calibrator is no setting: it is the
+    point's state, built by the point's task (collect.Task) and handed
+    to Machine.build.
     """
 
     confidence: ConfidenceSettings
@@ -191,9 +191,6 @@ class SwitchingSettings:
     )
     # None watches for no burst
     burst_detector: Optional[BurstDetectorSettings] = None
-    # the sweep point's live online source, shared by every shot of the
-    # point and installed per shot by the experiments layer
-    online_threshold: Optional[ports.ThresholdSource] = None
 
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)

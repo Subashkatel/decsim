@@ -432,9 +432,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
     )
     double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = declared_run.declared_switching(
-        threshold=online_settings,
-        online_threshold=online,
-        strong_window=double_window,
+        threshold=online_settings, strong_window=double_window
     )
     with pytest.raises(
         ValueError, match="online threshold calibration is serial-only"
@@ -444,6 +442,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
             escalated_windows=set(),
             strong_window="double_window",
             switching=switching,
+            online_threshold=online,
         )
 
 

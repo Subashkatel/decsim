@@ -98,11 +98,13 @@ class Task:
     """One machine settings record, a sweep point, to run seeds of.
 
     metadata is the json the caller wants to see beside every row (the
-    sweep point). online_threshold is the point's online threshold
-    source when the escalation asks for one, built once here and
-    installed on every shot's settings. record_options are what the run
-    records of the shots, which the strong id leaves out with the
-    online source.
+    sweep point). online_threshold is the point's calibrator when its
+    switching threshold learns across shots: point state, built here
+    once from the threshold record (for_point) and handed to every
+    shot's Machine.build, as the window models are. A task given one,
+    the state a resumed piece saved, keeps it. record_options are what
+    the run records of the shots, which the strong id leaves out with
+    the calibrator.
     """
 
     settings: machine_settings.MachineSettings
@@ -112,6 +114,9 @@ class Task:
 
     def __post_init__(self):
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
+        if self.online_threshold is None:
+            calibrator = _point_calibrator(self.settings.switching)
+            object.__setattr__(self, "online_threshold", calibrator)
 
     def strong_id(self) -> str:
         """sha256 of the json text of the settings and the metadata.
@@ -130,16 +135,6 @@ class Task:
         encoded = text.encode("utf8")
         digest = hashlib.sha256(encoded)
         return digest.hexdigest()
-
-    def shot_settings(self) -> machine_settings.MachineSettings:
-        """The settings one shot runs: the point's threshold source."""
-        settings = self.settings
-        if self.online_threshold is None:
-            return settings
-        switching = dataclasses.replace(
-            settings.switching, online_threshold=self.online_threshold
-        )
-        return dataclasses.replace(settings, switching=switching)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -254,9 +249,10 @@ def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
     at a large distance. A shot run on its own passes none and builds
     its own models.
     """
-    settings = task.shot_settings()
     wall_start = time.perf_counter()
-    machine = machine_module.Machine.build(settings, seed, built_models)
+    machine = machine_module.Machine.build(
+        task.settings, seed, built_models, task.online_threshold
+    )
     result = machine.run()
     wall_end = time.perf_counter()
     wall_seconds = wall_end - wall_start
@@ -293,6 +289,13 @@ def json_value(
     """
     form = _JsonForm(keep_labels, record_classes)
     return _json_in(value, form)
+
+
+def _point_calibrator(switching) -> Optional[ports.ThresholdSource]:
+    """The calibrator a point's shots share, when its threshold learns one."""
+    if switching is None:
+        return None
+    return switching.threshold.for_point()
 
 
 @dataclasses.dataclass(frozen=True)

@@ -329,8 +329,7 @@ def _show(argv: list) -> None:
     parsed = parser.parse_args(argv)
     config = experiment.load_experiment(parsed.config)
     first_point = config.first_point_task()
-    shot_settings = first_point.shot_settings()
-    config.built_machine(shot_settings, 0)
+    config.built_machine(first_point, 0)
     settings = first_point.settings
     lines = experiment.resolved_description(config, settings)
     lines.append("values:")

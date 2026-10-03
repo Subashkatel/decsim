@@ -263,7 +263,7 @@ def test_a_task_named_by_two_blocks_runs_once(tmp_path):
     assert seeds == ["0", "1"]
 
 
-def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
+def test_every_shot_of_a_point_decides_on_the_tasks_calibrator(tmp_path):
     """threshold_source online: one calibrator per point, on the task."""
     raw = _reference_yaml()
     raw["escalation"] = {
@@ -281,10 +281,12 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
             "qpu.round_period_microseconds": 1.0,
         },
     )
+    first = collect.run_shot(task, 0)
+    second = collect.run_shot(task, 1)
+
     assert task.online_threshold is not None
-    shot_settings = task.shot_settings()
-    switching = shot_settings.switching
-    assert switching.online_threshold is task.online_threshold
+    assert first.machine.switching.policy.threshold is task.online_threshold
+    assert second.machine.switching.policy.threshold is task.online_threshold
 
 
 def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
@@ -332,7 +334,7 @@ def test_a_machine_built_alone_builds_its_own_models():
             "qpu.round_period_microseconds": 1.0,
         },
     )
-    settings = task.shot_settings()
+    settings = task.settings
 
     first = machine_module.Machine.build(settings, 0)
     second = machine_module.Machine.build(settings, 1)
@@ -1017,7 +1019,7 @@ def _point_ids_of(config_path: pathlib.Path) -> list:
 
 def _task_with_links(task: collect.Task, links) -> collect.Task:
     settings = dataclasses.replace(task.settings, links=links)
-    return collect.Task(settings, task.metadata, task.online_threshold)
+    return collect.Task(settings, task.metadata)
 
 
 class _CrashingRelayDecoder:

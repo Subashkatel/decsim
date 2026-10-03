@@ -46,7 +46,7 @@ import decsim.machine as machine_module
 
 config = experiment.load_experiment("configs/examples/two_tiers.yaml")
 point = config.first_point_task()
-settings = point.shot_settings()
+settings = point.settings
 ```
 
 `settings` is a `MachineSettings`: one record per section of the yaml.

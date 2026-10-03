@@ -96,11 +96,13 @@ def switching_machine(
     scheme=None,
     weak_syndrome_buffer=None,
     decision_cycles: int = 0,
+    online_threshold=None,
 ) -> machine_module.Machine:
     """One d=3 memory operation, weak-primary switching on declared ticks.
 
     switching replaces the declared switching slot when given (a table
-    row of its own, say); scheme replaces the lookahead
+    row of its own, say), and online_threshold is the calibrator an
+    online threshold row decides on; scheme replaces the lookahead
     sliding windows with a caller's own windowing scheme; decision_cycles
     is the window side's decision, on the declared clock.
     """
@@ -180,7 +182,9 @@ def switching_machine(
         settings = dataclasses.replace(
             settings, weak_syndrome_buffer=weak_syndrome_buffer
         )
-    return machine_module.Machine.build(settings, 0)
+    return machine_module.Machine.build(
+        settings, 0, online_threshold=online_threshold
+    )
 
 
 def declared_profile(escalation_microseconds: Optional[float] = None):

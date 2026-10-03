@@ -361,7 +361,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     """
     config = experiment.load_experiment("configs/examples/two_tiers.yaml")
     point = config.first_point_task()
-    settings = point.shot_settings()
+    settings = point.settings
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
         settings.switching, settings.weak_decoder, engine
@@ -2876,7 +2876,7 @@ def timed_and_untimed_decodes(folder, arrangement):
     models = built_window_models.BuiltWindowModels()
     decodes = []
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.shot_settings()
+        settings = task.settings
         machine = machine_module.Machine.build(settings, seed, models)
         untimed = machine_module.Machine.build(settings, seed, models)
         reference = untimed.decoders.primary_decoder.decoder
@@ -3000,7 +3000,7 @@ def arrangement_predictions_and_events(folder, arrangement):
     shot_events = []
     sampled = None
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.shot_settings()
+        settings = task.settings
         machine = machine_module.Machine.build(settings, seed, models)
         result = machine.run()
         sampled = machine.observation.sampled_shots.shots_by_operation[1]

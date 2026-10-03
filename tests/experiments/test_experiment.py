@@ -8,6 +8,7 @@ today, which names its pieces.
 """
 
 import dataclasses
+import random
 
 import pytest
 
@@ -114,25 +115,21 @@ def test_a_yaml_point_keeps_the_id_its_task_has(tmp_path):
     point_id = task.strong_id()
     assert point_task.strong_id() == point_id
     assert point.name == point_id[:12]
-    assert point_task.online_threshold is not None
-    assert point_task.settings.switching.online_threshold is None
-    assert point.machine.switching.online_threshold is None
-    assert point.online_threshold is point_task.online_threshold
 
 
-def test_an_online_source_inside_a_points_machine_is_refused(tmp_path):
-    """The source is the point's run state, so it is given on the point."""
+def test_a_python_points_task_builds_its_online_calibrator(tmp_path):
+    """The calibrator is point state the task builds, seeded as today."""
     overrides = yaml_configs.online_threshold()
     config_path = yaml_configs.write_config(tmp_path, overrides)
     config = experiment.load_experiment(config_path)
-    (task,) = config.tasks()
-    switching = dataclasses.replace(
-        task.settings.switching, online_threshold=task.online_threshold
-    )
-    machine = dataclasses.replace(task.settings, switching=switching)
+    machine = config.first_point_task().settings
+    point = experiment.Point("online", machine)
 
-    with pytest.raises(ValueError, match="give it as the point's"):
-        experiment.Point("online", machine)
+    calibrator = experiment.task_of(point).online_threshold
+
+    expected = random.Random("online-threshold d=3 p=0.001")
+    generator = calibrator.random_generator
+    assert generator.getstate() == expected.getstate()
 
 
 def test_a_yaml_point_two_blocks_name_is_one_point(tmp_path):

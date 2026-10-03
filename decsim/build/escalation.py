@@ -58,6 +58,7 @@ class Switching:
         settings: escalation_settings.SwitchingSettings,
         weak_decoder: decoder_settings.DecoderPoolSettings,
         engine: engine_module.Engine,
+        online_threshold: Optional[ports.ThresholdSource] = None,
     ) -> "Switching":
         """The signal from the weak decoder, the policy, the strong side.
 
@@ -65,14 +66,16 @@ class Switching:
         settings and the point's threshold: the decode's weight step,
         the threshold it grows to, the unit's cycle count; a row reads
         what it needs and ignores the rest. The policy expects the
-        signal's source. The shape is the strong window record's row: the
-        redo window, or the double window of Toshio Sec. III C.
+        signal's source, and decides on online_threshold, the point's
+        calibrator, when the threshold learns across shots. The shape is
+        the strong window record's row: the redo window, or the double
+        window of Toshio Sec. III C.
         """
         threshold_nats = settings.threshold.threshold_nats
         signal = settings.confidence.build(
             weak_decoder.algorithm, threshold_nats
         )
-        threshold = _threshold_source(settings)
+        threshold = _threshold_source(settings, online_threshold)
         policy = escalation_policies.Switching(
             threshold=threshold,
             expected_source=signal.source,
@@ -164,11 +167,12 @@ def build_switching(
     settings: Optional[escalation_settings.SwitchingSettings],
     weak_decoder: Optional[decoder_settings.DecoderPoolSettings],
     engine: engine_module.Engine,
+    online_threshold: Optional[ports.ThresholdSource] = None,
 ) -> Optional[Switching]:
     """The switching part of a run whose slot is filled; None otherwise."""
     if settings is None:
         return None
-    return Switching.build(settings, weak_decoder, engine)
+    return Switching.build(settings, weak_decoder, engine, online_threshold)
 
 
 def build_burst_detector(
@@ -196,15 +200,18 @@ def build_burst_detector(
     )
 
 
-def _threshold_source(settings: escalation_settings.SwitchingSettings):
+def _threshold_source(
+    settings: escalation_settings.SwitchingSettings,
+    online_threshold: Optional[ports.ThresholdSource],
+):
     """The point's threshold source, built from its row's record.
 
     A row built once per point (it learns across the point's shots)
     arrives already built as online_threshold; every other row's record
     builds its source here.
     """
-    if settings.online_threshold is not None:
-        return settings.online_threshold
+    if online_threshold is not None:
+        return online_threshold
     return settings.threshold.build()
 
 

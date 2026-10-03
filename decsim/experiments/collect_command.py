@@ -279,8 +279,7 @@ def run_one_shot(
     task = experiment.task_of(point)
     settings = _with_observation(task.settings, log, trace)
     task = dataclasses.replace(task, settings=settings)
-    shot_settings = task.shot_settings()
-    machine = _built_machine(shot_settings, seed, run_file)
+    machine = _built_machine(task, seed, run_file)
     run_dir = run_folder.run_dir_for(study.name, out_dir)
     run_folder.refuse_another_tree(run_dir)
     point_id = task.strong_id()
@@ -635,13 +634,13 @@ def _with_observation(
 
 
 def _built_machine(
-    settings: machine_settings.MachineSettings,
-    seed: int,
-    run_file: pathlib.Path,
+    task: collect.Task, seed: int, run_file: pathlib.Path
 ) -> machine_module.Machine:
     """The shot's machine; a build refusal one sentence naming the file."""
     try:
-        return machine_module.Machine.build(settings, seed)
+        return machine_module.Machine.build(
+            task.settings, seed, online_threshold=task.online_threshold
+        )
     except ValueError as refused:
         raise refusal.RefusalError(f"{run_file}: {refused}") from refused
 

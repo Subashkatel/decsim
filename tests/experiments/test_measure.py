@@ -1824,8 +1824,10 @@ def test_the_strong_decodes_held_in_units_are_the_units_own_residents(
     samplers = []
     build = machine_module.Machine.build
 
-    def build_and_sample(settings, seed, built_models=None):
-        machine = build(settings, seed, built_models)
+    def build_and_sample(
+        settings, seed, built_models=None, online_threshold=None
+    ):
+        machine = build(settings, seed, built_models, online_threshold)
         sampler = StrongResidentsWaitingOnCompute(machine)
         machine.engine.action_done.connect(sampler.sample)
         samplers.append(sampler)
@@ -2454,7 +2456,7 @@ def test_a_windows_confidence_is_the_gap_its_verdict_request_ended_with(
             "qpu.round_period_microseconds": 1.0,
         },
     )
-    settings = task.shot_settings()
+    settings = task.settings
     machine = machine_module.Machine.build(settings, 0)
     requests = declared_run.EndedRequests()
     requests.attach(machine)

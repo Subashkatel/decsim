@@ -550,8 +550,8 @@ class OnlineThreshold:
             raise ValueError(
                 "an online threshold learns across a sweep point's shots, "
                 "so it is built once per point by for_point and shared: "
-                "give it to the point as its online_threshold, or set it "
-                "as the switching slot's online_threshold for one machine"
+                "a point's task builds it, and Machine.build takes it as "
+                "online_threshold for one machine"
             )
 
     def __init__(

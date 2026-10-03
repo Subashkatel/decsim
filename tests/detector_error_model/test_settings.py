@@ -54,3 +54,12 @@ def test_the_seat_past_the_weak_buffer_that_forms_is_named(formed_at, seat):
     settings = event_settings.DetectionEventSettings(formed_at=formed_at)
 
     assert settings.strong_side_seat() == seat
+
+
+@pytest.mark.parametrize("key", ["latency_cycles", "cycles_per_round"])
+def test_a_negative_formation_cycle_count_is_refused_by_its_name(key):
+    """A negative count would form a round's events before it arrived."""
+    sentence = f"detection_events.{key} must not be negative"
+
+    with pytest.raises(ValueError, match=sentence):
+        event_settings.DetectionEventSettings(**{key: -1})

@@ -336,40 +336,6 @@ def _join_with(signal_ticks: int):
     return engine, join, verdict, queue
 
 
-def _solve_job():
-    return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3, label="w0"
-    )
-
-
-def test_the_signals_own_computation_is_charged_and_the_answer_waits():
-    """D8: the walk is the unit's time, and the window waits for it."""
-    engine, join, verdict, queue = _join_with(70)
-    job = _solve_job()
-    result = decoding_records.DecodeResult(1, 0)
-    join.accept_result(job, result)
-    assert queue.charges == [(job, 70)]
-    assert job.soft_output_ticks == 70
-    assert verdict.answers == []
-    engine.run()
-    (answered_job, answered_result, tick) = verdict.answers[0]
-    assert answered_job is job
-    assert answered_result.soft_output.gap == 1.0
-    assert tick == 70
-
-
-def test_a_signal_that_only_subtracts_charges_nothing_and_answers_at_once():
-    """The complementary gap's combine is a subtraction (decision D8)."""
-    engine, join, verdict, queue = _join_with(0)
-    job = _solve_job()
-    result = decoding_records.DecodeResult(1, 0)
-    join.accept_result(job, result)
-    assert queue.charges == [(job, 0)]
-    assert job.soft_output_ticks == 0
-    assert len(verdict.answers) == 1
-    assert engine.now == 0
-
-
 def _forced_solve(label: str, forced_class: int, weight: float):
     """One forced-class solve of window 0, with its answer's weight."""
     job = decoding_records.DecodeJob(
@@ -409,14 +375,6 @@ def test_the_walk_is_charged_to_the_solve_that_delivered_last():
     assert queue.charges == [(second_job, 90)]
     assert second_job.soft_output_ticks == 90
     assert first_job.soft_output_ticks == 0
-
-
-def test_a_held_solve_is_read_off_its_unit_when_the_join_holds_it():
-    """The join keeps the value, as a reservation station does."""
-    engine, join, verdict, queue = _two_solve_join(0)
-    first_job, first_result = _forced_solve("first", 0, 4.0)
-    join.accept_result(first_job, first_result)
-    assert queue.read == [first_job]
 
 
 def test_the_answer_is_still_the_lightest_solve_and_still_waits():

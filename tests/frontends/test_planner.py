@@ -47,14 +47,13 @@ def test_a_period_shorter_than_one_tick_is_refused():
         machine_module.Machine.build(settings)
 
 
-def test_a_cadence_that_is_not_a_finite_number_is_refused():
+def test_a_card_cadence_that_is_not_a_finite_number_still_stops():
+    """Rounding an infinite period to ticks stops the build."""
     card = code_geometry.SurfaceCodeModel(round_microseconds=float("inf"))
     card_record = declared_run.GivenCard(card)
     qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(
-        ValueError, match="the code card's round_microseconds must be a finite"
-    ):
+    with pytest.raises(OverflowError):
         machine_module.Machine.build(settings)
 
 

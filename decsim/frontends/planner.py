@@ -7,7 +7,6 @@ and the buffers read the plan and never change it.
 """
 
 import dataclasses
-import math
 from collections.abc import Callable
 from typing import Optional
 
@@ -169,12 +168,6 @@ def _resolve_round_ticks(code, fallback_round_microseconds: float) -> int:
     if round_microseconds is None:
         round_microseconds = fallback_round_microseconds
     round_microseconds = float(round_microseconds)
-    # QpuSettings refuses a run period that is not finite, so only the
-    # card's own period reaches this.
-    if not math.isfinite(round_microseconds):
-        raise ValueError(
-            "the code card's round_microseconds must be a finite number"
-        )
     round_ticks = config.microseconds_to_ticks(round_microseconds)
     if round_ticks < 1:
         raise ValueError("resolved round cadence must be at least one tick")

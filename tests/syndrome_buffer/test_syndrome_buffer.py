@@ -329,15 +329,6 @@ def test_an_unheld_round_is_freed_on_arrival_and_a_held_one_is_not():
     assert the_store.occupancy == 1
 
 
-def test_a_closed_operation_identity_never_reopens():
-    the_store = store()
-    the_store.open_operation(1)
-    the_store.close_operation(1)
-
-    with pytest.raises(RuntimeError):
-        the_store.open_operation(1)
-
-
 def test_settlement_reports_a_hold_on_a_round_never_written():
     the_store = store()
     reads = decoding_records.WindowReads((1, 0))

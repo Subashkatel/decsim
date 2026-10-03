@@ -112,16 +112,21 @@ class _Record:
 def _records_by_package(checkout: pathlib.Path) -> dict:
     """Every record of decsim/, by its package, the root package first."""
     package_root = checkout / "decsim"
+    found_paths = package_root.rglob("*.py")
+    module_paths = sorted(found_paths)
     grouped = {}
-    for path in sorted(package_root.rglob("*.py")):
+    for path in module_paths:
         relative = path.relative_to(checkout)
         package = relative.parent.as_posix()
         if package.startswith(SKIPPED_PACKAGES):
             continue
         records = _records_of(path)
-        if records:
-            grouped.setdefault(package, []).extend(records)
-    return dict(sorted(grouped.items()))
+        if not records:
+            continue
+        package_records = grouped.setdefault(package, [])
+        package_records.extend(records)
+    package_names = sorted(grouped)
+    return {package: grouped[package] for package in package_names}
 
 
 def _records_of(path: pathlib.Path) -> list:
@@ -159,7 +164,8 @@ def _is_a_record(node: ast.ClassDef) -> bool:
 
 def _record_section(record: _Record, checkout: pathlib.Path) -> list:
     """One record's heading, its module and summary, and its fields."""
-    module = record.path.relative_to(checkout).as_posix()
+    module_path = record.path.relative_to(checkout)
+    module = module_path.as_posix()
     lines = [f"### `{record.name}`", "", f"`{module}`. {record.summary}", ""]
     rows = _field_rows(record.node)
     if rows:
@@ -183,7 +189,9 @@ def _field_rows(node: ast.ClassDef) -> list:
         default_cell = "required"
         if default is not None:
             default_cell = _cell(default)
-        rows.append(f"| `{name}` | {_cell(annotation)} | {default_cell} |")
+        annotation_cell = _cell(annotation)
+        row = f"| `{name}` | {annotation_cell} | {default_cell} |"
+        rows.append(row)
     return rows
 
 
@@ -200,7 +208,8 @@ def _default_text(value) -> Optional[str]:
         if keyword.arg == "default":
             return ast.unparse(keyword.value)
         if keyword.arg == "default_factory":
-            return f"{ast.unparse(keyword.value)}()"
+            factory = ast.unparse(keyword.value)
+            return f"{factory}()"
     return None
 
 

@@ -125,11 +125,13 @@ def run_page(tutorial: Tutorial, blocks: list, scratch: pathlib.Path) -> tuple:
             commands = block_commands(block.lines)
             printed = run_commands(commands, scratch)
             outputs.extend(printed)
-        elif block.info == "python":
-            printed_lines = run_python(block.lines, namespace, scratch)
-            shown = output_after(blocks, index)
-            found = python_differences(tutorial, shown, printed_lines)
-            differences.extend(found)
+            continue
+        if block.info != "python":
+            continue
+        printed_lines = run_python(block.lines, namespace, scratch)
+        shown = output_after(blocks, index)
+        found = python_differences(tutorial, shown, printed_lines)
+        differences.extend(found)
     return outputs, differences
 
 
@@ -154,7 +156,8 @@ def _run_code(code, namespace: dict) -> None:
     try:
         exec(code, namespace)
     except Exception as error:
-        print(f"{type(error).__name__}: {error}")
+        error_type = type(error)
+        print(f"{error_type.__name__}: {error}")
 
 
 def output_after(blocks: list, index: int) -> list:

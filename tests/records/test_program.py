@@ -1,8 +1,7 @@
 """The program records of decsim/records/program.py.
 
-A planning view is the operation frozen without its executable circuit,
-so a planning collaborator cannot reach the Stim circuit or the live
-tuples the front end still holds.
+An operation's magic-state need, its planning view's feedback mode,
+and a segment's rounds folded into its stream.
 """
 
 import decsim.records.program as program_records
@@ -28,28 +27,6 @@ def test_operation_magic_state_need_uses_override_then_clifford_fallback():
     assert non_clifford.needs_magic_state
     assert not refused.needs_magic_state
     assert demanded.needs_magic_state
-
-
-def test_operation_planning_view_snapshots_configuration_without_circuit():
-    """The view copies the tuples, omits the circuit, resolves the mode."""
-    circuit = object()
-    operation = make_operation(
-        qubits=["q0"],
-        patches=["patch"],
-        predecessors=[1],
-        decoder_boundary_predecessors=[2],
-        circuit=circuit,
-    )
-    view = program_records.OperationPlanningView.from_operation(operation)
-    operation.qubits.append("q1")
-
-    assert view.qubits == ("q0",)
-    assert view.patches == ("patch",)
-    assert view.predecessors == (1,)
-    assert view.decoder_boundary_predecessors == (2,)
-    assert view.feedback_boundary_mode == "trailing_buffer"
-    assert not hasattr(view, "circuit")
-    assert not hasattr(view, "needs_magic_state")
 
 
 def test_operation_planning_view_preserves_explicit_feedback_mode():

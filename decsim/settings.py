@@ -18,6 +18,8 @@ import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
+import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
@@ -26,13 +28,22 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.qpu.code_geometry as code_geometry
+import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.windows.boundary_payloads as boundary_payloads
+import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 # The yaml sections, in the order MachineSettings reads them. Each
 # section's own package owns its settings record and its plug-in table;
@@ -282,6 +293,312 @@ class MachineSettings:
             magic_state_factory=magic_state_factory,
             observation=observation,
         )
+
+
+# The shipped machines' two clock domains: the chip's, at 250 MHz
+# (2605.04892 line 1063), and the host's, at the same rate, an estimate
+# that sets edge rounding only.
+FRIDGE_CLOCK = config.Clock.from_megahertz(250.0)
+ROOM_CLOCK = config.Clock.from_megahertz(250.0)
+# The hops the weak base prices: the weak chain, the decision and the
+# pulse. The strong side keeps the reference card.
+_WEAK_BASELINE_PATH_CLOCKS = {
+    "qpu_to_controller": FRIDGE_CLOCK,
+    "controller_to_weak_buffer": FRIDGE_CLOCK,
+    "weak_buffer_to_weak_decoder": FRIDGE_CLOCK,
+    "decoder_to_decoder": FRIDGE_CLOCK,
+    "weak_decoder_to_frame": FRIDGE_CLOCK,
+    "frame_to_controller": FRIDGE_CLOCK,
+    "controller_to_qpu": FRIDGE_CLOCK,
+}
+# The hops the strong base prices: the readout and both stores' writes
+# on the chip, the strong chain on the host. The weak chain and the
+# escalation keep the reference card.
+_STRONG_BASELINE_PATH_CLOCKS = {
+    "qpu_to_controller": FRIDGE_CLOCK,
+    "controller_to_weak_buffer": FRIDGE_CLOCK,
+    "controller_to_strong_buffer": ROOM_CLOCK,
+    "strong_buffer_to_strong_decoder": ROOM_CLOCK,
+    "decoder_to_decoder": ROOM_CLOCK,
+    "strong_decoder_to_frame": ROOM_CLOCK,
+    "frame_to_controller": FRIDGE_CLOCK,
+    "controller_to_qpu": FRIDGE_CLOCK,
+}
+# The strong side's four hops, all on the host.
+_STRONG_SIDE_PATH_CLOCKS = {
+    "controller_to_strong_buffer": ROOM_CLOCK,
+    "weak_decoder_to_strong_decoder": ROOM_CLOCK,
+    "strong_buffer_to_strong_decoder": ROOM_CLOCK,
+    "strong_decoder_to_frame": ROOM_CLOCK,
+}
+
+
+def weak_decoder_baseline(
+    distance: int,
+    physical_error_probability: float,
+    round_period_microseconds: float,
+    *,
+    name: str = "weak_decoder_baseline",
+) -> MachineSettings:
+    """configs/bases/weak_decoder_baseline.yaml: the weak decoder alone.
+
+    Real PyMatching answers every window on one chip unit, charged
+    LILLIPUT's 28 ns, and each hop it prices is one fridge cycle on an
+    unbounded wire. name labels the link card and the paths it prices,
+    as the yaml reader labels them with its file's name
+    (link_profiles.from_yaml), so a run that extends this base names
+    itself.
+    """
+    reference = link_profiles.logical_reference_profile()
+    links = _one_cycle_paths(reference, _WEAK_BASELINE_PATH_CLOCKS, name)
+    unit_memory = decoder_settings.UnitMemorySettings(bits=None, word_bits=None)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=minimum_weight_perfect_matching.LILLIPUT_TIMED,
+        unit_count=1,
+        engine=decoder_settings.ESTIMATED_ENGINE,
+        unit_memory=unit_memory,
+        copies_input=True,
+        copies_boundary_fold=True,
+        result_blocks_unit=False,
+    )
+    qpu = _stim_qpu(distance, round_period_microseconds)
+    workload = memory_workload(distance, physical_error_probability, "10d")
+    return _baseline(qpu, workload, links, weak_decoder, None)
+
+
+def strong_decoder_baseline(
+    distance: int,
+    physical_error_probability: float,
+    round_period_microseconds: float,
+    *,
+    name: str = "strong_decoder_baseline",
+) -> MachineSettings:
+    """configs/bases/strong_decoder_baseline.yaml: the strong decoder alone.
+
+    Belief matching answers every window on one host unit, charged its
+    measured wall clock. Each hop it prices is one cycle on an unbounded
+    wire, of the fridge clock on the chip and the room clock on the
+    host. name labels the card, as weak_decoder_baseline's does.
+    """
+    reference = link_profiles.logical_reference_profile()
+    links = _one_cycle_paths(reference, _STRONG_BASELINE_PATH_CLOCKS, name)
+    belief_matching_decoder = belief_matching.BeliefMatchingDecoder.Settings(
+        max_iterations=30, belief_propagation_method="product_sum"
+    )
+    # the baselines' engine card, counted on the host's clock
+    engine = dataclasses.replace(
+        decoder_settings.ESTIMATED_ENGINE, clock=ROOM_CLOCK
+    )
+    unit_memory = decoder_settings.UnitMemorySettings(bits=None, word_bits=None)
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=belief_matching_decoder,
+        unit_count=1,
+        engine=engine,
+        unit_memory=unit_memory,
+        copies_input=True,
+        copies_boundary_fold=True,
+        result_blocks_unit=False,
+    )
+    qpu = _stim_qpu(distance, round_period_microseconds)
+    workload = memory_workload(distance, physical_error_probability, "10d")
+    return _baseline(qpu, workload, links, None, strong_decoder)
+
+
+def one_cycle_strong_side(
+    links: link_settings.FabricSettings, name: str
+) -> link_settings.FabricSettings:
+    """The card with the strong side's four hops one room cycle each.
+
+    A run that switches on the weak base reaches the strong decoder over
+    these hops, each an unbounded wire; every other path keeps its card.
+    name labels the card, as weak_decoder_baseline's does.
+    """
+    return _one_cycle_paths(links, _STRONG_SIDE_PATH_CLOCKS, name)
+
+
+def memory_workload(
+    distance: int,
+    physical_error_probability: float,
+    rounds_per_shot: Union[int, str],
+) -> workload_settings.WorkloadSettings:
+    """One memory shot of Stim's rotated surface code, made at the point.
+
+    One probability on all four of Stim's noise channels
+    (producers.memory_circuit); rounds_per_shot is a round count or
+    "<n>d", n rounds per unit of distance. The producer row makes it, as
+    the yaml's workload section does, so the point's record names the
+    maker and its arguments (WorkloadSettings.maker).
+    """
+    arguments = {
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": rounds_per_shot,
+        "distance": distance,
+        "physical_error_probability": physical_error_probability,
+    }
+    maker = workload_settings.ProducerWorkload.Settings(
+        function="decsim.producers:memory_circuit", arguments=arguments
+    )
+    workload = workload_settings.WorkloadSettings(
+        kind="producer", row_settings=maker
+    )
+    return workload.made()
+
+
+def _stim_qpu(
+    distance: int, round_period_microseconds: float
+) -> qpu_settings.QpuSettings:
+    """Stim samples the rotated surface code at distance, on one layout."""
+    source = stim_device.StimDevice.Settings()
+    code_card = code_geometry.SurfaceCodeModel.Settings()
+    layout = layouts.UniformLayout.Settings()
+    return qpu_settings.QpuSettings(
+        source=source,
+        code_card=code_card,
+        round_period_microseconds=round_period_microseconds,
+        distance=distance,
+        layout=layout,
+        error_model_provider=None,
+    )
+
+
+def _baseline(
+    qpu: qpu_settings.QpuSettings,
+    workload: workload_settings.WorkloadSettings,
+    links: link_settings.FabricSettings,
+    weak_decoder: Optional[decoder_settings.DecoderPoolSettings],
+    strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
+) -> MachineSettings:
+    """What both bases share, every value written out, around one decoder.
+
+    Both stores are unbounded and free, and the frame writes in one
+    fridge cycle (YANG_FRAME_UPDATE).
+    """
+    controller = _baseline_controller()
+    idle_policy = idle_policies.SeparateDecodeJobsSettings()
+    detection_events = _baseline_detection_events()
+    unbounded_buffer = syndrome_buffer_module.SyndromeBufferSettings(
+        bits=None, clock=None, write_cycles=0, read_cycles=0
+    )
+    windows = _baseline_windows()
+    decoder_manager = _baseline_decoder_manager()
+    magic_state_factory = magic_state_factories.InfiniteFactory.Settings()
+    observation = _baseline_observation()
+    return MachineSettings(
+        # the machine clock is the controller's, which every part that
+        # names no clock of its own counts its cycles on
+        clock=FRIDGE_CLOCK,
+        qpu=qpu,
+        controller=controller,
+        idle_policy=idle_policy,
+        detection_events=detection_events,
+        links=links,
+        weak_syndrome_buffer=unbounded_buffer,
+        strong_syndrome_buffer=unbounded_buffer,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        decoder_manager=decoder_manager,
+        switching=None,
+        pauli_frame=pauli_frame_module.YANG_FRAME_UPDATE,
+        workload=workload,
+        magic_state_factory=magic_state_factory,
+        observation=observation,
+    )
+
+
+def _baseline_controller() -> controller_settings.ControllerSettings:
+    """A controller whose per-round costs sit inside the round period."""
+    return controller_settings.ControllerSettings(
+        clock=FRIDGE_CLOCK,
+        readout_to_bits_cycles=0,
+        packing_cycles_per_round=0,
+        decision_to_pulse_cycles=0,
+        packing_rounds_in_flight=None,
+    )
+
+
+def _baseline_detection_events() -> (
+    detection_event_settings.DetectionEventSettings
+):
+    """The controller forms every round's detection events, at no cost."""
+    return detection_event_settings.DetectionEventSettings(
+        formed_at=("controller",),
+        clock=None,
+        latency_cycles=0,
+        cycles_per_round=0,
+    )
+
+
+def _baseline_windows() -> window_settings.WindowSettings:
+    """Sliding windows of the code distance, issued free on the machine clock.
+
+    The last window drains with a flush tail, each committed window
+    ships its boundary at once, and the hand-off is a dense seam mask.
+    """
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
+        commit_rounds=None, buffer_rounds=None
+    )
+    eager = boundary_policies.Eager.Settings()
+    dense_seam_mask = boundary_payloads.DenseSeamMask.Settings()
+    return window_settings.WindowSettings(
+        clock=None,
+        decision_cycles=0,
+        scheme=scheme,
+        terminal_policy="flush",
+        boundary_policy=eager,
+        boundary_payload=dense_seam_mask,
+    )
+
+
+def _baseline_decoder_manager() -> decoder_settings.DecoderManagerSettings:
+    """First in, first out, one region a decode, dispatch unpriced."""
+    return decoder_settings.DecoderManagerSettings(
+        scheduler=schedulers.FifoScheduler,
+        bulk_strong=False,
+        dispatch_cycles=0,
+        clock=None,
+    )
+
+
+def _baseline_observation() -> observe_settings.ObservationSettings:
+    """The results alone: no log, no trace, no extra counter."""
+    return observe_settings.ObservationSettings(
+        log="off",
+        log_component_io=False,
+        record_switching_windows=False,
+        backlog_trace=False,
+        trace="off",
+        trace_shots=(0,),
+        data_movement=False,
+    )
+
+
+def _one_cycle_paths(
+    links: link_settings.FabricSettings, path_clocks: Mapping, name: str
+) -> link_settings.FabricSettings:
+    """The card with each named path one cycle of its clock, the rest kept.
+
+    Each named path is an unbounded wire of one lane, with no setup,
+    header or protocol, labelled as the yaml reader labels the cards a
+    file writes, and the card takes the file's name.
+    """
+    source = f"configs/{name}.yaml links"
+    cards = {}
+    for path_name, clock in path_clocks.items():
+        cards[path_name] = link_profiles.path_card(
+            links,
+            path_name,
+            clock=clock,
+            latency_cycles=1,
+            bits_per_cycle=None,
+            source=source,
+            lane_count=1,
+            setup_cycles_per_transfer=0,
+            header_bits_per_transfer=0,
+            protocol=None,
+        )
+    profile_name = f"{name}.yaml"
+    return dataclasses.replace(links, **cards, profile_name=profile_name)
 
 
 def _point_facts(sections: Mapping) -> dict:

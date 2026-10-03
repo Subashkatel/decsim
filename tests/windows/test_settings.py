@@ -39,6 +39,12 @@ def test_a_python_record_defaults_to_flush_and_eager():
     assert settings.boundary_policy == boundary_policies.Eager.Settings()
 
 
+def test_a_terminal_policy_off_its_two_words_is_refused():
+    """A misspelt word lays out a last window that is neither policy's."""
+    with pytest.raises(ValueError, match="terminal_policy is one of"):
+        window_settings.WindowSettings(terminal_policy="lookahaed")
+
+
 @pytest.mark.parametrize("strong_window, boundary_row", PRESET_ROWS)
 def test_the_switching_preset_takes_lookahead_and_the_strong_windows_row(
     strong_window, boundary_row

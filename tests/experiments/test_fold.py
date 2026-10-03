@@ -22,12 +22,12 @@ import math
 import os
 import pathlib
 import random
-import shutil
 import statistics
 import types
 
 import pytest
 
+import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
@@ -36,6 +36,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.records.decoding as decoding_records
+import tests.experiments.run_files as run_files
 import tests.experiments.yaml_configs as yaml_configs
 
 CANCELLING = (1e100, 1.0, -1e100, 1.0)
@@ -82,26 +83,15 @@ def _place_of(row):
     return int(row["place"])
 
 
-# A shot of the one point below runs fifteen QEC rounds: the reference
-# workload's rounds_per_shot, which its resolved record reads back.
-ROUNDS_PER_SHOT = 15
+# A shot of the one point below runs fifteen QEC rounds, the minimal
+# machine's, which its resolved record reads back.
+ROUNDS_PER_SHOT = run_files.ROUNDS_PER_SHOT
 
 
 def _one_point_config(folder, shots, piece_shots):
-    card = {
-        "collection": {"piece_rounds": piece_shots * ROUNDS_PER_SHOT},
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": [3],
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "collection": {"max_shots": shots},
-            }
-        ],
-    }
-    return yaml_configs.write_config(folder, card)
+    piece_rounds = piece_shots * ROUNDS_PER_SHOT
+    collection = {"max_shots": shots, "piece_rounds": piece_rounds}
+    return run_files.write_run_file(folder, collection=collection)
 
 
 def _pieces_of_one_point(tmp_path, shots, piece_shots):
@@ -499,35 +489,12 @@ def _each_without_a_point(folders, name) -> None:
         _without_a_point(folder, name)
 
 
-def _each_with_a_renamed_point(folders, name, renamed) -> None:
-    for folder in folders:
-        _with_a_renamed_point(folder, name, renamed)
-
-
 def _without_columns(row: dict, columns: tuple) -> dict:
     kept = {}
     for column, value in row.items():
         if column not in columns:
             kept[column] = value
     return kept
-
-
-def _with_a_renamed_point(run_dir, name, renamed):
-    """The folder as a tree that called that latency point something else."""
-    folder = pathlib.Path(run_dir)
-    shots_path = folder / "shots.csv"
-    rows = _rows_of(shots_path)
-    for row in rows:
-        row[f"{renamed}_mean_us"] = row.pop(f"{name}_mean_us")
-        row[f"{renamed}_max_us"] = row.pop(f"{name}_max_us")
-    _write_rows(shots_path, rows)
-    samples_path = folder / "window_samples.csv"
-    samples = _rows_of(samples_path)
-    for row in samples:
-        if row["name"] != name:
-            continue
-        row["name"] = renamed
-    _write_rows(samples_path, samples)
 
 
 def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
@@ -597,57 +564,6 @@ def _each_without_a_shot_column(folders, column) -> None:
         for row in rows:
             row.pop(column)
         _write_rows(shots_path, rows)
-
-
-def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
-    """The terminal keeps the rule the columns keep, or the fold dies.
-
-    A fold writes the folder and then prints it, so a terminal line
-    that asks for a point the rows do not hold raises KeyError after
-    the folder is on disk, and command.main catches only a refusal.
-    Here two pieces lack service, as an older tree's pieces do, and the
-    summary prints its other lines and says nothing about service. The
-    terminal names its rows' points by their records in the folder it
-    is given, so the collect's records are copied beside the fold.
-    """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
-    folders = _piece_folders(experiment_dir)
-    _each_without_a_point(folders, "service")
-    out_dir = tmp_path / "folded"
-    rows = _folded(experiment_dir, folders, out_dir)
-    points_dir = experiment_dir / "points"
-    copied_points_dir = out_dir / "points"
-    shutil.copytree(points_dir, copied_points_dir)
-
-    assert "service_mean_us" not in rows[0]
-    lines = report.terminal_lines(rows, out_dir)
-    printed = "\n".join(lines)
-    assert "service time per window" not in printed
-    assert "queue wait, mean:" in printed
-    assert "ready to frame commit:" in printed
-    assert "throughput:" in printed
-
-
-def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
-    """A renamed point has no place in this tree's order of points.
-
-    A fold writes a point's counts where that point sits among this
-    tree's own, so a folder whose window samples name a point this tree
-    does not measure would fail that sort with sweep.csv and shots.csv
-    already written and a half folder left behind, so it is refused at
-    the boundary, by name.
-    """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
-    folders = _piece_folders(experiment_dir)
-    _each_with_a_renamed_point(folders, "service", "park")
-    out_dir = tmp_path / "folded"
-    with pytest.raises(refusal.RefusalError) as refused:
-        _folded(experiment_dir, folders, out_dir)
-    message = str(refused.value)
-    assert "'park'" in message
-    assert "this tree does not measure" in message
-    assert str(folders[0]) in message
-    assert not out_dir.exists()
 
 
 def test_pieces_of_one_point_that_hold_different_columns_are_refused(
@@ -745,7 +661,6 @@ def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
 # every file a fold writes from the pieces' rows
 FOLDED_FILES = (
     "sweep.csv",
-    "links.csv",
     "shots.csv",
     "shot_links.csv",
     "window_samples.csv",
@@ -826,9 +741,18 @@ def _rows_with_qpu_kind(rows, sweep, kind) -> list:
     return selected
 
 
+# the one point a confidence run collects
+CONFIDENCE_AXES = {
+    run_files.DISTANCE_PATH: (3,),
+    run_files.ROUND_PERIOD_PATH: (1.0,),
+    run_files.ERROR_RATE_PATH: (0.003,),
+}
+SWITCHING = {"machine": "switching"}
+EVERY_SHOT = {"confidence_shot_count": None}
+
+
 def test_a_switching_run_writes_both_confidence_files(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    run_dir = _confidence_run(tmp_path, overrides, 2)
+    run_dir = _confidence_run(tmp_path, SWITCHING, 2)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -842,9 +766,8 @@ def test_a_switching_run_writes_both_confidence_files(tmp_path):
 
 
 def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shot_count": "all"}
-    run_dir = _confidence_run(tmp_path, overrides, 3)
+    every = {**SWITCHING, "record_options": EVERY_SHOT}
+    run_dir = _confidence_run(tmp_path, every, 3)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -856,9 +779,8 @@ def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
 
 
 def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shot_count": 0}
-    run_dir = _confidence_run(tmp_path, overrides, 2)
+    none_sampled = {**SWITCHING, "record_options": {"confidence_shot_count": 0}}
+    run_dir = _confidence_run(tmp_path, none_sampled, 2)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -870,9 +792,8 @@ def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
 
 def test_pieces_fold_to_the_confidence_files_of_one_uncut_run(tmp_path):
     """Four one-shot pieces fold to the files one four-shot run writes."""
-    overrides = yaml_configs.fixed_threshold_switching()
-    uncut_dir = _confidence_run(tmp_path, overrides, 4, out="uncut")
-    pieces_dir = _confidence_run(tmp_path, overrides, 4, 1, out="pieces")
+    uncut_dir = _confidence_run(tmp_path, SWITCHING, 4, out="uncut")
+    pieces_dir = _confidence_run(tmp_path, SWITCHING, 4, 1, out="pieces")
     uncut_windows = uncut_dir / "window_confidence.csv"
     folded_windows = pieces_dir / "window_confidence.csv"
     uncut_histogram = uncut_dir / "confidence_histogram.csv"
@@ -895,10 +816,8 @@ def test_a_run_whose_escalation_reads_no_confidence_writes_neither_file(
 
 def test_a_piece_records_the_shots_its_confidence_rows_cover(tmp_path):
     """piece.json says what confidence it wrote: a count, all, or none."""
-    switching = yaml_configs.fixed_threshold_switching()
-    every = yaml_configs.fixed_threshold_switching()
-    every["observation"] = {"confidence_shot_count": "all"}
-    _confidence_run(tmp_path, switching, 1, out="sampled")
+    every = {**SWITCHING, "record_options": EVERY_SHOT}
+    _confidence_run(tmp_path, SWITCHING, 1, out="sampled")
     _confidence_run(tmp_path, every, 1, out="every")
     _confidence_run(tmp_path, {}, 1, out="plain")
 
@@ -920,8 +839,7 @@ def test_pieces_of_one_point_that_recorded_confidence_apart_are_refused(
     histogram would count fewer shots than the sweep row. The fold
     refuses and names the pieces, before it writes anything.
     """
-    overrides = yaml_configs.fixed_threshold_switching()
-    _confidence_run(tmp_path, overrides, 2, 1)
+    _confidence_run(tmp_path, SWITCHING, 2, 1)
     experiment_dir = tmp_path / "experiment"
     folders = _piece_folders(experiment_dir)
     older = folders[0]
@@ -943,22 +861,22 @@ def test_pieces_of_one_point_that_ran_different_commits_are_refused(
     """A resumed collect from another tree would pool two simulators.
 
     The second piece is saved as a process at another commit saves it;
-    the fold names both trees' pieces and writes nothing.
+    the fold names it and the tree run.json names, and writes nothing.
     """
     experiment_dir = _pieces_of_one_point(tmp_path, 2, 1)
     folders = _piece_folders(experiment_dir)
     later = folders[1]
     other_commit = "b" * 40
     _as_a_piece_run_at_commit(later, other_commit)
-    out_dir = tmp_path / "folded"
+    sweep_path = experiment_dir / "sweep.csv"
+    sweep_bytes = sweep_path.read_bytes()
 
     with pytest.raises(refusal.RefusalError) as refused:
-        _folded(experiment_dir, folders, out_dir)
+        collect_command.fold_the_run(experiment_dir)
 
     said = str(refused.value)
-    assert "ran different code" in said
-    assert f"{later} (commit {other_commit}" in said
-    assert not out_dir.exists()
+    assert f"{later} ran commit {other_commit}" in said
+    assert sweep_path.read_bytes() == sweep_bytes
 
 
 def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():
@@ -1020,25 +938,20 @@ def test_an_unscored_shot_is_in_neither_confidence_file():
 
 
 def _confidence_run(
-    tmp_path, overrides, shots, piece_shots=None, out="experiment"
+    tmp_path, arguments, shots, piece_shots=None, out="experiment"
 ):
-    """A one-point d3 collect of shots, in pieces if asked; its run folder."""
+    """A one-point d3 collect of shots, in pieces if asked; its run folder.
+
+    arguments are run_files.sweep's, the axes and collection aside.
+    """
+    collection = {"max_shots": shots}
     if piece_shots is not None:
-        piece_rounds = piece_shots * ROUNDS_PER_SHOT
-        overrides["collection"] = {"piece_rounds": piece_rounds}
-    overrides["sweep"] = [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.003],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": shots},
-        }
-    ]
-    config_path = yaml_configs.write_config(tmp_path, overrides)
+        collection["piece_rounds"] = piece_shots * ROUNDS_PER_SHOT
+    run_path = run_files.write_run_file(
+        tmp_path, axes=CONFIDENCE_AXES, collection=collection, **arguments
+    )
     experiment_dir = tmp_path / out
-    command.main(["run", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(run_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 

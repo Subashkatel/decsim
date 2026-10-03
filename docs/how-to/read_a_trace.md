@@ -124,16 +124,6 @@ arrive.
 
 A key the trace does not carry is refused with the keys it does carry.
 
-## 5. Write the path as a page
-
-```bash
-decsim trace follow \
-  results/<run>/trace/<id>_seed<seed>.trace.json --round 1:1 --html path.html
-```
-
-`--html` writes the same path as one self-contained page, one lane per
-component.
-
 ## What is in the file
 
 | In the file | What it is |
@@ -152,13 +142,11 @@ Residences overlap by design, because a store holds many rounds at once,
 and a viewer stacks overlapping slices on extra rows. The counter track
 is the exact occupancy; the rows are the viewer's arrangement.
 
-`decsim run` draws `timeline.png` from a trace file, not from the
-machine, so a point that traced no shot draws no timeline.
-
-`residence.csv` is read from the same files: one row per traced shot
-per structure, with the mean and longest a round or window sat there,
-and one per link path with the longest a move waited on the wire. A
-point that traced no shot writes no row, for the same reason.
+How long the data sat is read from the same files. A structure's stays
+are the complete events on its lane whose `cat` holds `residence`, each
+from `args.tick` to `args.tick` plus `dur` in ticks. A link path's waits
+are the `args.queue_wait_ticks` of the complete events on its lane whose
+`cat` holds `link`.
 
 ## Read next
 

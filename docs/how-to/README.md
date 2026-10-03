@@ -40,15 +40,14 @@ read back.
 - [How to run an experiment](run_an_experiment.md): an experiment
   script's points listed, run one at a time or as a Slurm array,
   resumed and combined.
-- [How to run a sweep on Slurm](run_a_sweep_on_slurm.md): batches of
-  pieces planned from what the last batch measured, submitted as job
-  arrays by `decsim run --slurm`, and folded by status.
+- [How to run a sweep on Slurm](run_a_sweep_on_slurm.md): one array
+  task per point and one fold job after it, submitted by `decsim run
+  --slurm`.
 - [How to read a trace and follow one round or one window](read_a_trace.md):
   a viewer for the whole shot, or one path printed by `decsim trace
   follow`.
 - [How to compare two runs](compare_two_runs.md): add shards, read two
-  rows side by side, or plot both folders, and what to check before
-  believing a difference.
+  rows side by side, and what to check before believing a difference.
 - [How to run a timing study whose numbers do not depend on your computer](run_a_timing_only_study.md):
   price the decoders with cards so the ticks are a function of the
   configuration and the seed.

@@ -10,7 +10,7 @@ way gem5's multisim names each simulation's output by its id
 
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.measure as measure
-import tests.experiments.yaml_configs as yaml_configs
+import tests.experiments.run_files as run_files
 
 
 def test_a_shots_label_is_its_point_id_and_its_seed():
@@ -47,28 +47,16 @@ def test_points_apart_only_in_basis_write_their_own_log_and_trace(tmp_path):
     Each file is named by its point's id, which the basis moves, so the
     two points write two logs and two traces.
     """
-    workload = yaml_configs.memory_workload(6)
-    workload["arguments"]["physical_error_probability"] = 0.001
-    card = {
-        "qpu": {"kind": "stim_device", "distance": 3},
-        "workload": workload,
-        "observation": {"log": "file", "trace": "chrome"},
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.code_task": [
-                        "surface_code:rotated_memory_x",
-                        "surface_code:rotated_memory_z",
-                    ]
-                },
-                "collection": {"max_shots": 1},
-            }
-        ],
-    }
-    config_path = yaml_configs.write_config(tmp_path, card)
+    bases = ("surface_code:rotated_memory_x", "surface_code:rotated_memory_z")
+    run_path = run_files.write_run_file(
+        tmp_path,
+        axes={run_files.CODE_TASK_PATH: bases},
+        machine_arguments={"rounds_per_shot": 6},
+        observation={"log": "file", "trace": "chrome"},
+    )
     experiment_dir = tmp_path / "run"
 
-    run_dir, _rows = collect_command.run_experiment(config_path, experiment_dir)
+    run_dir, _rows = collect_command.run_experiment(run_path, experiment_dir)
 
     log_folder = run_dir / "log"
     trace_folder = run_dir / "trace"
@@ -84,22 +72,18 @@ def test_a_run_of_one_point_and_one_traced_shot_writes_the_path_as_written(
     """No other shot of the run can take the file, so it keeps its name.
 
     A run of one point tracing one shot writes the study's own path as
-    the yaml writes it; any other run labels it (design NOTE 5.1).
+    the run file writes it; any other run labels it (design NOTE 5.1).
     """
-    workload = yaml_configs.memory_workload(6)
-    workload["arguments"]["physical_error_probability"] = 0.001
     written_path = tmp_path / "study.trace.json"
-    card = {
-        "qpu": {"kind": "stim_device", "distance": 3},
-        "workload": workload,
-        "observation": {"trace": str(written_path), "trace_shots": [0]},
-        "sweep": [
-            {"axes": {"qpu.distance": [3]}, "collection": {"max_shots": 1}}
-        ],
-    }
-    config_path = yaml_configs.write_config(tmp_path, card)
+    observation = {"trace": str(written_path), "trace_shots": (0,)}
+    run_path = run_files.write_run_file(
+        tmp_path,
+        axes={run_files.DISTANCE_PATH: (3,)},
+        machine_arguments={"rounds_per_shot": 6},
+        observation=observation,
+    )
     run_dir = tmp_path / "run"
 
-    collect_command.run_experiment(config_path, run_dir)
+    collect_command.run_experiment(run_path, run_dir)
 
     assert written_path.is_file()

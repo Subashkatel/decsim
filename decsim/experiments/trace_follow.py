@@ -10,13 +10,11 @@ longest residence and the longest queue wait), which is sinter's one
 flat row per thing counted (_data/_task_stats.py) applied per hop.
 
 Perfetto draws the timeline; this is the per-round path Perfetto would
-make the reader assemble by clicking through flow arrows, and `--html`
-writes it as one self-contained page with a lane per component.
+make the reader assemble by clicking through flow arrows.
 """
 
 import argparse
 import dataclasses
-import html
 from typing import Optional
 
 import decsim.config as config
@@ -117,21 +115,6 @@ def count_lines(counts: Counts) -> list:
     return lines
 
 
-def page(path: FollowedPath) -> str:
-    """One self-contained page: a lane per component, then the table.
-
-    No external resource: the lanes are divs placed by tick, so the page
-    opens from a file with no network and no viewer.
-    """
-    title = f"{path.kind} {path.key}"
-    header = _page_header(path, title)
-    lanes = _lane_section(path.hops)
-    table = _page_table(path.hops)
-    body = "\n".join([header, lanes, table])
-    named = html.escape(title)
-    return _PAGE.format(title=named, style=_STYLE, body=body)
-
-
 def main(argv: list) -> None:
     """`decsim trace follow <file> --round k:n | --window k:n`."""
     parser = argparse.ArgumentParser(prog="decsim trace")
@@ -139,7 +122,6 @@ def main(argv: list) -> None:
     parser.add_argument("file", help="the trace file one shot wrote")
     parser.add_argument("--round", default=None, help="the round, as op:index")
     parser.add_argument("--window", default=None, help="the window, as op:id")
-    parser.add_argument("--html", default=None, help="write the page here")
     parsed = parser.parse_args(argv)
     _refuse_an_unknown_action(parsed.action)
     kind, key = _followed(parsed.round, parsed.window)
@@ -149,12 +131,6 @@ def main(argv: list) -> None:
     lines = _report_lines(path)
     text = "\n".join(lines)
     print(text)
-    if parsed.html is None:
-        return
-    written = page(path)
-    with open(parsed.html, "w") as handle:
-        handle.write(written)
-    print(f"\npage: {parsed.html}")
 
 
 def _report_lines(path: FollowedPath) -> list:
@@ -570,138 +546,3 @@ def _window_index(window: str) -> str:
     """The window's own number, as the log and the trace name it: W3."""
     words = window.split(":")
     return words[1]
-
-
-def _page_header(path: FollowedPath, title: str) -> str:
-    """The page's heading: what is followed, in which shot, and the counts."""
-    lines = count_lines(path.counts)
-    counts = []
-    for line in lines:
-        escaped = html.escape(line)
-        counts.append(f"<p class='count'>{escaped}</p>")
-    text = "\n".join(counts)
-    shot = html.escape(path.process_name)
-    heading = html.escape(title)
-    return f"<h1>{heading}</h1>\n<p class='shot'>{shot}</p>\n{text}"
-
-
-def _lane_section(hops) -> str:
-    """One lane per component, the hops as boxes and the waits as gaps."""
-    if not hops:
-        return "<p class='count'>no hop carries this key</p>"
-    first, span = _span_of(hops)
-    lanes = []
-    for where in _lane_order(hops):
-        boxes = _lane_boxes(hops, where, first, span)
-        name = html.escape(where)
-        lanes.append(
-            f"<div class='lane'><div class='name'>{name}</div>"
-            f"<div class='track'>{boxes}</div></div>"
-        )
-    return "<div class='lanes'>\n" + "\n".join(lanes) + "\n</div>"
-
-
-def _span_of(hops) -> tuple:
-    """The first tick of the path and how many ticks it lasts."""
-    first = hops[0].tick
-    last = first
-    for hop in hops:
-        end = hop.tick
-        if hop.duration_ticks is not None:
-            end = hop.tick + hop.duration_ticks
-        last = max(last, end)
-    span = last - first
-    return first, max(span, 1)
-
-
-def _lane_order(hops) -> list:
-    """Every component the path touched, in the order it touched them."""
-    order = []
-    for hop in hops:
-        if hop.where in order:
-            continue
-        order.append(hop.where)
-    return order
-
-
-def _lane_boxes(hops, where: str, first: int, span: int) -> str:
-    """The boxes of one lane, placed by tick and sized by duration."""
-    boxes = []
-    for hop in hops:
-        if hop.where != where:
-            continue
-        box = _box_of(hop, first, span)
-        boxes.append(box)
-    return "".join(boxes)
-
-
-def _box_of(hop: Hop, first: int, span: int) -> str:
-    """One hop as a placed box, titled with its own row."""
-    left = (hop.tick - first) / span * 100.0
-    width = 0.0
-    if hop.duration_ticks is not None:
-        width = hop.duration_ticks / span * 100.0
-    width = max(width, 0.6)
-    cells = _cells_of(hop)
-    label = " ".join(cells)
-    titled = html.escape(label)
-    style = f"left:{left:.3f}%;width:{width:.3f}%"
-    kind = hop.transfer or "none"
-    return f"<span class='box {kind}' style='{style}' title='{titled}'></span>"
-
-
-def _page_table(hops) -> str:
-    """Every row of the printed table, as the page's table."""
-    header = ("tick (us)", "where", "what", "dur (us)", "transfer", "bits")
-    rows = [_page_row(header, "th")]
-    for hop in hops:
-        cells = _cells_of(hop)
-        row = _page_row(cells, "td")
-        rows.append(row)
-    body = "\n".join(rows)
-    return f"<table>\n{body}\n</table>"
-
-
-def _page_row(cells, tag: str) -> str:
-    """One table row of the page."""
-    written = []
-    for cell in cells:
-        escaped = html.escape(cell)
-        written.append(f"<{tag}>{escaped}</{tag}>")
-    joined = "".join(written)
-    return f"<tr>{joined}</tr>"
-
-
-_STYLE = """
-body { font: 13px/1.5 monospace; margin: 2rem; color: #111; }
-h1 { font-size: 1.2rem; margin: 0 0 .2rem 0; }
-.shot { color: #555; margin: 0 0 1rem 0; }
-.count { margin: .1rem 0; }
-.lanes { margin: 1.5rem 0; }
-.lane { display: flex; align-items: center; margin: 2px 0; }
-.name { width: 22rem; text-align: right; padding-right: .8rem; color: #333; }
-.track { position: relative; height: 16px; flex: 1;
-         background: #f2f2f2; border-radius: 2px; }
-.box { position: absolute; top: 2px; height: 12px; border-radius: 2px;
-       background: #7a7a7a; }
-.box.copy { background: #2f6fb0; }
-.box.move { background: #b06a2f; }
-.box.reference { background: #4a8f4a; }
-table { border-collapse: collapse; margin-top: 1.5rem; }
-th, td { border-bottom: 1px solid #ddd; padding: 2px 12px 2px 0;
-         text-align: left; vertical-align: top; }
-th { color: #555; }
-"""
-
-_PAGE = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{title}</title>
-<style>{style}</style>
-</head>
-<body>
-{body}
-</body>
-</html>
-"""

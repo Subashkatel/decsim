@@ -49,6 +49,9 @@ CONFIG_FOLDER = "config"
 # whose interpreter has no git of its own (a job script exports it):
 # "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
+# The sha256 of the code state patch the launcher saw, exported with
+# the dirty flag; empty when the tree was clean.
+TREE_PATCH_VARIABLE = "DECSIM_TREE_PATCH_SHA256"
 # Set, it lets a run go on from a tree git does not vouch for.
 ALLOW_DIRTY_VARIABLE = "ALLOW_DIRTY"
 # what open gives a new file before the umask filters it
@@ -104,7 +107,7 @@ def start_run(
 ) -> str:
     """The code state, the run file and run.json, before the first shot.
 
-    run_file is None for a run no file describes (the tools/ examples).
+    run_file is None for a run no file describes (the examples/ scripts).
     point_ids are the run's points in order (write_run_record). Returns
     the start time.
     """
@@ -152,12 +155,12 @@ def finish_run(
 
 
 def refuse_another_tree(run_dir: pathlib.Path) -> None:
-    """A folder whose run.json names another commit, or the same one dirty.
+    """A folder whose run.json names another commit, or other changes.
 
     A folder's rows pool the shots of every run into it, so they must
-    have run one simulator; a run asks before it writes anything. A
-    dirty flag nobody could read says nothing either way, so only two
-    read flags that differ are refused. A new folder from a tree whose
+    have run one simulator; a run asks before it writes anything. The
+    same commit clean against dirty, or dirty with another code state
+    patch, is another simulator too. A new folder from a tree whose
     commit cannot be read is refused unless ALLOW_DIRTY_VARIABLE is set,
     since its results could not say what ran.
     """
@@ -168,22 +171,39 @@ def refuse_another_tree(run_dir: pathlib.Path) -> None:
     recorded = read_json(run_path)
     recorded_git = recorded["git"]
     this_git = _git_state()
-    is_same_commit = recorded_git["commit"] == this_git["commit"]
-    flags = (recorded_git["dirty"], this_git["dirty"])
-    is_same_flag = None in flags or flags[0] == flags[1]
-    if is_same_commit and is_same_flag:
+    if is_one_tree(recorded_git, this_git):
         return
     raise refusal.RefusalError(
-        f"{run_dir} holds a run of commit {recorded_git['commit']} dirty "
-        f"{recorded_git['dirty']}, and this is commit {this_git['commit']} "
-        f"dirty {this_git['dirty']}; a folder holds one tree's results, so "
+        f"{run_dir} holds a run of {tree_text(recorded_git)}, and this is "
+        f"{tree_text(this_git)}; a folder holds one tree's results, so "
         "give --out a new folder"
     )
 
 
+def is_one_tree(one: dict, other: dict) -> bool:
+    """One commit, one dirty flag and one patch hash, each read as is.
+
+    Each is a run.json git block or a piece.json. A value nobody could
+    read is None and matches only None, and a record written before the
+    patch hash was recorded has no key, so reading it raises KeyError
+    before any shot runs.
+    """
+    return _tree_of(one) == _tree_of(other)
+
+
+def _tree_of(record: dict) -> tuple:
+    return (record["commit"], record["dirty"], record["patch_sha256"])
+
+
+def tree_text(record: dict) -> str:
+    """A run.json git block's or a piece.json's tree, for a refusal."""
+    commit, is_dirty, patch_sha256 = _tree_of(record)
+    return f"commit {commit} dirty {is_dirty} patch {patch_sha256}"
+
+
 def _refuse_an_unread_commit() -> None:
     """A tree whose commit neither git nor its .git files can name."""
-    commit, _is_dirty = _tree_reading()
+    commit, _is_dirty, _patch_sha256 = _tree_reading()
     if commit is not None or os.environ.get(ALLOW_DIRTY_VARIABLE):
         return
     checkout = _checkout()
@@ -200,16 +220,17 @@ def piece_identity() -> dict:
 
     Beside the commit, a rerun needs the interpreter and the processor
     that set the seconds a shot; the array job and task name the Slurm
-    task that ran it, which the batch's plan.csv maps back to its
-    pieces. The package versions come from the process that ran the
-    shots, with its measurements (collect.imported_module_versions).
+    task that ran it, one point's. The package versions come from the
+    process that ran the shots, with its measurements
+    (collect.imported_module_versions).
     """
-    commit, is_dirty = _tree_reading()
+    commit, is_dirty, patch_sha256 = _tree_reading()
     python_version = platform.python_version()
     processor_model = _processor_model()
     return {
         "commit": commit,
         "dirty": is_dirty,
+        "patch_sha256": patch_sha256,
         "python": python_version,
         "host": platform.node(),
         "processor_model": processor_model,
@@ -234,6 +255,27 @@ def snapshot_code_state(
     if run_file is not None:
         _copy_the_run_file(run_file, run_dir)
     checkout = _checkout()
+    patch_text = _code_state_patch(checkout)
+    if patch_text is not None:
+        patch_path = run_dir / "code_state.patch"
+        patch_path.write_text(patch_text, encoding="utf-8")
+
+
+def code_state_sha256(checkout: pathlib.Path) -> Optional[str]:
+    """The sha256 of the tree's code_state.patch; None when it has none."""
+    patch_text = _code_state_patch(checkout)
+    if patch_text is None:
+        return None
+    patch_bytes = patch_text.encode("utf-8")
+    digest = hashlib.sha256(patch_bytes)
+    return digest.hexdigest()
+
+
+def _code_state_patch(checkout: pathlib.Path) -> Optional[str]:
+    """code_state.patch's text: git diff HEAD, then each untracked file.
+
+    None when the code is its commit's, or when git cannot answer.
+    """
     diff = _git_output(
         "git", "-C", str(checkout), "diff", "HEAD", *CODE_PATHSPEC
     )
@@ -244,11 +286,10 @@ def snapshot_code_state(
     for relative in untracked:
         patch = _untracked_patch(checkout, relative)
         patches.append(patch)
-    if patches:
-        patch_path = run_dir / "code_state.patch"
-        patch_text = "\n".join(patches)
-        patch_lines = patch_text + "\n"
-        patch_path.write_text(patch_lines)
+    if not patches:
+        return None
+    patch_text = "\n".join(patches)
+    return patch_text + "\n"
 
 
 def write_run_record(
@@ -263,7 +304,7 @@ def write_run_record(
     Sampling is deterministic from (stim version, circuit, distance,
     rounds, p, seed), so run.json plus the seeds are the raw data.
     run_files are the run file and, for a yaml, the bases its extends
-    chain reads, none for a run no file describes (the tools/ examples).
+    chain reads, none for a run no file describes (the examples/ scripts).
     point_ids are the run's points in order, which is the order a fold
     writes the rows in.
     """
@@ -281,12 +322,13 @@ def write_run_record(
         write_json(staging, record)
 
 
-def recorded_run_file(run_dir: pathlib.Path) -> pathlib.Path:
-    """The run file run.json names, which a planned task loads again."""
-    run_path = run_dir / RUN_FILE
-    recorded = read_json(run_path)
-    run_files = recorded["run_files"]
-    return pathlib.Path(run_files[0])
+def copied_run_file(
+    run_file: pathlib.Path, run_dir: pathlib.Path
+) -> pathlib.Path:
+    """Where the folder keeps its copy of the run file, which a task loads."""
+    copies = _run_file_copies(run_file, run_dir)
+    _source, target = copies[0]
+    return target
 
 
 def recorded_point_ids(run_dir: pathlib.Path, first_ids: list) -> list:
@@ -398,8 +440,38 @@ def write_shot(
     asks for them. examples/deltakit_example.py and
     examples/live_memory_example.py write their shot through it too.
     """
-    _write_the_log_and_trace(machine, settings, run_dir, label)
+    observation = settings.observation
+    if observation.writes_log:
+        write_log(machine.observation, run_dir, label)
+    if observation.writes_trace:
+        trace_path = trace_path_of(observation, run_dir, label)
+        machine.observation.trace_writer.write(str(trace_path))
     _write_result(result, run_dir)
+
+
+def write_log(observation, run_dir: pathlib.Path, label: str) -> None:
+    """log/<label>.log: the engine narrator's full line record of a shot.
+
+    The same lines log: print shows live.
+    """
+    log_dir = run_dir / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    text = "\n".join(observation.log.lines)
+    log_path = log_dir / f"{label}.log"
+    contents = text + "\n"
+    log_path.write_text(contents)
+
+
+def trace_path_of(
+    observation, run_dir: pathlib.Path, label: str
+) -> pathlib.Path:
+    """Where a shot's trace goes: the named path, or trace/ in the folder."""
+    named = observation.trace_path
+    if named is not None:
+        return pathlib.Path(named)
+    trace_dir = run_dir / "trace"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    return trace_dir / f"{label}.trace.json"
 
 
 def point_records(run_dir: pathlib.Path) -> dict:
@@ -411,12 +483,6 @@ def point_records(run_dir: pathlib.Path) -> dict:
         record = read_json(path)
         records[record["id"]] = record
     return records
-
-
-def inputs_dir_of(run_dir: pathlib.Path, record: Mapping) -> pathlib.Path:
-    """Where a recorded point's workload files are."""
-    point_dir = run_dir / POINTS_FOLDER / record["name"]
-    return point_dir / INPUTS_FOLDER
 
 
 def record_seeds(run_dir: pathlib.Path, seeds_by_point: dict) -> None:
@@ -458,21 +524,6 @@ def swept_values(run_dir: pathlib.Path, point_ids: list) -> dict:
     for point_id in point_ids:
         record = records[point_id]
         values[point_id] = _cells_of(record, list(paths))
-    return values
-
-
-def resolved_values(record: dict, names: tuple) -> dict:
-    """The named parts of a point's record, each value at its dotted path.
-
-    resolved_values(record, ("settings",)) gives
-    settings.qpu.distance and every other setting as one mapping.
-    """
-    values = {}
-    for name in names:
-        part = record.get(name)
-        for path, value in experiment.value_leaves(part, (name,)):
-            dotted = ".".join(path)
-            values[dotted] = value
     return values
 
 
@@ -550,41 +601,10 @@ def _write_result(
     write_json(result_path, value)
 
 
-def _write_the_log_and_trace(
-    machine: machine_module.Machine,
-    settings: machine_settings.MachineSettings,
-    run_dir: pathlib.Path,
-    label: str,
-) -> None:
-    """The shot's log and trace, each where its knob says."""
-    observation = settings.observation
-    if observation.writes_log:
-        log_dir = run_dir / "log"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        text = "\n".join(machine.observation.log.lines)
-        log_path = log_dir / f"{label}.log"
-        contents = text + "\n"
-        log_path.write_text(contents)
-    if not observation.writes_trace:
-        return
-    trace_path = _trace_path(observation, run_dir, label)
-    machine.observation.trace_writer.write(str(trace_path))
-
-
-def _trace_path(observation, run_dir: pathlib.Path, label: str) -> pathlib.Path:
-    """Where this shot's trace goes: the named path, or trace/ in the folder."""
-    named = observation.trace_path
-    if named is not None:
-        return pathlib.Path(named)
-    trace_dir = run_dir / "trace"
-    trace_dir.mkdir(parents=True, exist_ok=True)
-    return trace_dir / f"{label}.trace.json"
-
-
 def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
     """The run file beside the results, or a yaml's whole chain in config/.
 
-    A Python run file is copied under its own name, so a plot script
+    A Python run file is copied under its own name, so an array task
     loads the copy that made the rows. A yaml goes into config/ with
     every base of its extends chain, each at its place relative to the
     others, so every `extends` still resolves. Each copy is written once
@@ -680,12 +700,6 @@ def _how_it_ran() -> dict:
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "argv": sys.argv,
     }
-
-
-def rounds_per_shot(task: collect.Task) -> int:
-    """A shot's QEC rounds as the point's plan gives them (_rounds_per_shot)."""
-    plan = _plan(task)
-    return _rounds_per_shot(plan)
 
 
 def _plan(task: collect.Task) -> plan_build.Plan:
@@ -913,16 +927,16 @@ def _git_state() -> dict:
     carries the decoder and the task's metadata in every row of its csv
     for the same reason (sinter/_data/_task_stats.py:196-204 through
     _data/_csv_out.py:56-65). decsim's run folder is where that belongs
-    here, so run.json names the commit and says whether the tree had
-    uncommitted changes.
+    here, so run.json names the commit, says whether the tree had
+    uncommitted changes, and hashes them.
     """
-    commit, is_dirty = _tree_reading()
-    return {"commit": commit, "dirty": is_dirty}
+    commit, is_dirty, patch_sha256 = _tree_reading()
+    return {"commit": commit, "dirty": is_dirty, "patch_sha256": patch_sha256}
 
 
 @functools.lru_cache(maxsize=1)
 def _tree_reading() -> tuple:
-    """(commit, dirty) of the tree this code came from, read once.
+    """(commit, dirty, patch sha256) of the tree this code came from, once.
 
     Read at the first ask, which every caller takes before its work,
     and reused by every later ask. A run writes run.json at its start
@@ -943,13 +957,14 @@ def _tree_reading() -> tuple:
     cached on it rather than recomputed per row
     (sinter/_data/_task.py:248-270).
 
-    The launcher's answer about dirtiness wins when it is given, because
-    the launcher looked at the tree as the job started, which is the
-    tree the process went on to import; this process's own git looks
-    later, and edits made after the import did not run. The container
-    image ships no git binary at all, which is why the commit falls back
-    to reading the tree's own git files and why the dirty flag is None
-    rather than clean when nobody could answer.
+    The launcher's answer about dirtiness and its patch's sha256 wins
+    when it is given, because the launcher looked at the tree as the job
+    started, which is the tree the process went on to import; this
+    process's own git looks later, and edits made after the import did
+    not run. The container image ships no git binary at all, which is
+    why the commit falls back to reading the tree's own git files and
+    why the dirty flag is None rather than clean when nobody could
+    answer.
     """
     checkout = _checkout()
     commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
@@ -958,7 +973,10 @@ def _tree_reading() -> tuple:
     is_dirty = _dirty_from_the_launcher()
     if is_dirty is None:
         is_dirty = _code_is_dirty(checkout)
-    return commit, is_dirty
+    patch_sha256 = os.environ.get(TREE_PATCH_VARIABLE)
+    if not patch_sha256:
+        patch_sha256 = code_state_sha256(checkout)
+    return commit, is_dirty, patch_sha256
 
 
 def fresh_tree_reading() -> tuple:

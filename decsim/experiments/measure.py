@@ -25,6 +25,7 @@ import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -258,16 +259,13 @@ class ShotMeasurement:
     # referee reached a different owned observable contribution
     referee_window_disagreements: int
     # path -> the run's own ledger counters plus rounds/windows context,
-    # for links.csv; the totals come straight off the ledger's counters
+    # for shot_links.csv; the totals come straight off the ledger's counters
     link_totals: dict
     sim_wall_seconds: float
     # the shot's copies, references and moves as the RunResult carries
     # them, None when observation.data_movement is off, so a run that
     # counted none writes no data-movement row rather than a row of zeros
     data_movement: Optional[dict]
-    # where this shot's Chrome trace was written, None when the shot was
-    # not one of observation.trace_shots; the residence table reads it
-    trace_path: Optional[str]
     # the burst detector's first flagged round at or after the burst's
     # onset, from round 1 on a shot with no burst, 0 when it flagged none;
     # and whether that flag came within burst_detector.catch_deadline_rounds
@@ -316,10 +314,9 @@ def measure_shot(
     label = shot_label(point_id, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
-        _write_log(observation, run_dir, label)
-    trace_path = None
+        run_folder.write_log(observation, run_dir, label)
     if run_dir is not None:
-        trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
+        _write_trace(shot, run_dir, label, only_traced_shot)
     device = shot.machine.qpu.device
     round_period_microseconds = config_module.ticks_to_microseconds(
         device.clock.period_ticks
@@ -334,7 +331,6 @@ def measure_shot(
         point_id=point_id,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
-        trace_path=trace_path,
     )
 
 
@@ -773,7 +769,7 @@ def active_decoder_kind(settings: machine_settings.MachineSettings):
     return tier_settings.algorithm.name
 
 
-def trace_path_for_shot(path: str, label: str) -> str:
+def trace_path_for_shot(path, label: str) -> str:
     """The path a swept shot writes to: the label joins the yaml's path.
 
     A sweep traces the shots trace_shots names at every point, so each
@@ -814,7 +810,6 @@ def _measurement(
     point_id: str,
     seed: int,
     wall_seconds: float,
-    trace_path: Optional[str],
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records.
 
@@ -900,7 +895,6 @@ def _measurement(
         link_totals=totals,
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,
-        trace_path=trace_path,
         burst_first_flag_round=first_flag_round,
         burst_caught_in_time=is_caught,
         window_statuses=window_statuses,
@@ -1812,9 +1806,7 @@ def _maxes(samples: dict) -> dict:
     return maxes
 
 
-def _write_trace(
-    shot, run_dir, label: str, only_traced_shot: bool
-) -> Optional[str]:
+def _write_trace(shot, run_dir, label: str, only_traced_shot: bool) -> None:
     """The shot's Chrome trace, when the section asked and named it.
 
     trace: chrome names the file by the shot's label, its point id and
@@ -1822,40 +1814,15 @@ def _write_trace(
     that label in the name, so no shot overwrites another's file, unless
     the run traces this shot alone and no other can take the path. Only
     the shots trace_shots names are written, so a sweep point of two
-    thousand shots writes one file. The file it wrote
-    comes back, so the shot's measurement can say where its trace is; a
-    shot that was not traced returns None.
+    thousand shots writes one file.
     """
     observation = shot.task.settings.observation
     if not observation.writes_trace:
-        return None
+        return
     if shot.seed not in observation.trace_shots:
-        return None
+        return
     writer = shot.machine.observation.trace_writer
-    path = observation.trace_path
-    if path is None:
-        trace_dir = run_dir / "trace"
-        trace_dir.mkdir(parents=True, exist_ok=True)
-        path = trace_dir / f"{label}.trace.json"
-    elif not only_traced_shot:
+    path = run_folder.trace_path_of(observation, run_dir, label)
+    if observation.trace_path is not None and not only_traced_shot:
         path = trace_path_for_shot(path, label)
-    written = str(path)
-    writer.write(written)
-    return written
-
-
-def _write_log(
-    observation: observation_module.Observation, run_dir, label: str
-) -> None:
-    """One file per shot with the engine narrator's full line record.
-
-    The same lines log: print shows live. The Chrome trace of the data
-    path is a separate file under trace/, written for the shots
-    observation.trace_shots names.
-    """
-    log_dir = run_dir / "log"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    text = "\n".join(observation.log.lines)
-    log_path = log_dir / f"{label}.log"
-    contents = text + "\n"
-    log_path.write_text(contents)
+    writer.write(str(path))

@@ -75,7 +75,7 @@ weak_decoder:
 
 observation:
   data_movement: true               # the copy, reference and move counters
-  trace: chrome                     # one traced shot a point, for residence.csv
+  trace: chrome                     # one traced shot a point
   trace_shots: [0]
   check_windows_with: none
   log_component_io: false

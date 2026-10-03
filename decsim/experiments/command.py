@@ -2,21 +2,19 @@
 
 sinter's shape (sinter/_command/_main.py:1-40): one command, one
 subcommand per word, and each verb's module imported only when that verb
-runs, so `decsim show` never loads matplotlib and `decsim plot` never
-loads Stim. The console script and `python -m decsim` both land here.
+runs, so `decsim show` and `decsim trace` never load Stim. The console
+script and `python -m decsim` both land here.
 
     decsim run <run file> [--out DIR] [--processes N] [--only NAME]
         [--shots N]
     decsim run <run file> --list
     decsim run <run file> --seed S [--only NAME] [--out DIR] [--log ...]
         [--trace]
-    decsim run <run file> --slurm --tasks N [--cores C] [--hours H]
-        [--memory-mb M] [--out DIR] [--dry-run]
-    decsim status <results folder>
+    decsim run <run file> --slurm [--cores C] [--hours H] [--memory-mb M]
+        [--out DIR] [--dry-run]
+    decsim run --fold --out DIR
     decsim show <yaml>
-    decsim diff <run_dir> <run_dir>
-    decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
-    decsim trace follow <file> --round k:n | --window k:n [--html PATH]
+    decsim trace follow <file> --round k:n | --window k:n
 
 What the experiments layer refuses reaches the user as one sentence and
 exit 1 (decsim/experiments/refusal.py); anything else keeps its
@@ -64,12 +62,15 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 
 def _run(argv: list) -> None:
-    """An experiment's points, one point, one shot, Slurm, or a task."""
+    """An experiment's points, one point, one shot, Slurm, a task, a fold."""
     parser = _run_parser()
     parsed = parser.parse_args(argv)
     _check_the_run_arguments(parser, parsed)
-    if parsed.batch is not None:
-        _run_a_batch_task(parsed)
+    if parsed.fold:
+        _fold(parsed)
+        return
+    if parsed.task is not None:
+        _run_a_task(parsed)
         return
     if parsed.list:
         _list_the_points(parsed.run_file)
@@ -84,49 +85,47 @@ def _run(argv: list) -> None:
 
 
 def _launch_on_slurm(parsed) -> None:
-    """One step of the batch loop: the next batch planned and submitted."""
+    """Every point recorded, then one array task each and one fold."""
     import decsim.experiments.plan_command as plan_command
 
     job = plan_command.JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
     plan_command.launch(
-        parsed.run_file,
-        parsed.out,
-        parsed.tasks,
-        job,
-        dry_run=parsed.dry_run,
+        parsed.run_file, parsed.out, job, dry_run=parsed.dry_run
     )
 
 
-def _run_a_batch_task(parsed) -> None:
-    """One array task: its share of a batch's plan, on a tree git names."""
+def _run_a_task(parsed) -> None:
+    """One array task: one point to its stop, on a tree git names."""
     import decsim.experiments.collect_command as collect_command
     import decsim.experiments.plan_command as plan_command
 
     plan_command.refuse_an_unnamed_tree()
-    results_dir = pathlib.Path(parsed.out)
-    collect_command.run_planned(
-        results_dir, parsed.batch, parsed.task, processes=parsed.processes
+    run_path = pathlib.Path(parsed.run_file)
+    run_dir = pathlib.Path(parsed.out)
+    collect_command.run_task(
+        run_path, run_dir, parsed.task, processes=parsed.processes
     )
 
 
-def _collect(parsed) -> None:
-    """Every chosen point collected until it stops, then the summary."""
+def _fold(parsed) -> None:
+    """A results folder's saved pieces folded; nothing run."""
     import decsim.experiments.collect_command as collect_command
-    import decsim.experiments.report as report
 
-    run_dir, rows = collect_command.run_experiment(
+    run_dir = pathlib.Path(parsed.out)
+    collect_command.fold_the_run(run_dir)
+
+
+def _collect(parsed) -> None:
+    """Every chosen point collected until it stops."""
+    import decsim.experiments.collect_command as collect_command
+
+    collect_command.run_experiment(
         parsed.run_file,
         parsed.out,
         processes=parsed.processes,
         only=parsed.only,
         shot_count=parsed.shots,
     )
-    if not rows:
-        return
-    lines = report.terminal_lines(rows, run_dir)
-    text = "\n".join(lines)
-    print(text)
-    print(f"\nevery column: {run_dir}/sweep.csv")
 
 
 def _run_one_shot(parsed) -> None:
@@ -160,9 +159,8 @@ def _list_the_points(run_file: str) -> None:
 def _run_parser():
     """The run command's arguments, all here, where the command page reads them.
 
-    The Slurm defaults are the ones the batches have been run with: four
-    cores, a day of walltime, 4096 MB a piece before one is measured.
-    --batch and --task are an array task's entry, which the loop writes.
+    The Slurm defaults are four cores, a day of walltime and 16384 MB a
+    task. --task is an array task's entry, which run.sbatch writes.
     """
     import argparse
 
@@ -215,10 +213,7 @@ def _run_parser():
     parser.add_argument(
         "--slurm",
         action="store_true",
-        help="run the experiment as batches of Slurm arrays",
-    )
-    parser.add_argument(
-        "--tasks", type=int, default=None, help="the most tasks a batch has"
+        help="run each point as one task of a Slurm array, then fold",
     )
     parser.add_argument(
         "--cores", type=int, default=4, help="pieces a task runs at once"
@@ -227,18 +222,17 @@ def _run_parser():
         "--hours", type=int, default=24, help="a task's walltime"
     )
     parser.add_argument(
-        "--memory-mb",
-        type=int,
-        default=4096,
-        help="one piece's memory before its point has a measured peak",
+        "--memory-mb", type=int, default=16384, help="a task's memory"
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="print the sbatch lines and submit nothing",
+        help="write the sbatch files and submit nothing",
     )
     parser.add_argument(
-        "--batch", type=int, default=None, help=argparse.SUPPRESS
+        "--fold",
+        action="store_true",
+        help="fold the --out folder's saved pieces and run nothing",
     )
     parser.add_argument(
         "--task", type=int, default=None, help=argparse.SUPPRESS
@@ -260,16 +254,17 @@ def _shot_count(text: str) -> int:
 
 def _check_the_run_arguments(parser, parsed) -> None:
     """The run's arguments name one thing to do."""
-    if parsed.batch is not None:
-        _check_the_task_arguments(parser, parsed)
+    if parsed.fold:
+        if parsed.out is None:
+            parser.error("--fold folds a results folder; name it with --out")
         return
     if parsed.run_file is None:
         parser.error("name the run file")
+    if parsed.task is not None and parsed.out is None:
+        parser.error("--task runs one point into a folder; name it with --out")
     if parsed.slurm:
         _check_the_slurm_arguments(parser, parsed)
         return
-    if parsed.tasks is not None or parsed.dry_run:
-        parser.error("--tasks and --dry-run go with --slurm")
     _check_the_local_arguments(parser, parsed)
 
 
@@ -288,30 +283,13 @@ def _check_the_local_arguments(parser, parsed) -> None:
 
 
 def _check_the_slurm_arguments(parser, parsed) -> None:
-    """A Slurm run plans every point to its stop, in tasks of a shape."""
-    if parsed.tasks is None:
-        parser.error("--slurm deals each batch to at most --tasks tasks")
+    """A Slurm run runs every point to its stop, one task each."""
     chosen = (parsed.only, parsed.shots, parsed.seed)
     if any(option is not None for option in chosen):
         parser.error(
             "--slurm runs every point to its stop; --only, --shots and "
             "--seed run locally"
         )
-
-
-def _check_the_task_arguments(parser, parsed) -> None:
-    """An array task reads its run file from the folder its batch is in."""
-    if parsed.task is None or parsed.out is None:
-        parser.error("--batch runs one task of a batch; name --task and --out")
-    if parsed.run_file is not None:
-        parser.error("--batch reads the run file from the folder; name none")
-
-
-def _status(argv: list) -> None:
-    """An experiment's pieces folded, and where each point stands."""
-    import decsim.experiments.status_command as status_command
-
-    status_command.main(argv)
 
 
 def _show(argv: list) -> None:
@@ -337,36 +315,6 @@ def _show(argv: list) -> None:
     lines.extend(value_lines)
     text = "\n".join(lines)
     print(text)
-
-
-def _diff(argv: list) -> None:
-    """How two run folders differ: settings, inputs, then results."""
-    import decsim.experiments.diff_command as diff_command
-
-    diff_command.main(argv)
-
-
-def _plot(argv: list) -> None:
-    """One figure of decsim's own records, drawn from a run folder."""
-    import argparse
-
-    import decsim.experiments.plots as plots
-
-    parser = argparse.ArgumentParser(prog="decsim plot")
-    parser.add_argument(
-        "run_dir", help="the folder to read, or a trace file to draw"
-    )
-    parser.add_argument(
-        "--figure", default="timeline", help="which figure to draw"
-    )
-    parser.add_argument(
-        "--out",
-        default=None,
-        help="where the figure goes; beside its source if unset",
-    )
-    parsed = parser.parse_args(argv)
-    out_path = plots.figure(parsed.figure, parsed.run_dir, parsed.out)
-    print(out_path)
 
 
 def _trace(argv: list) -> None:
@@ -399,9 +347,6 @@ def _report_no_verb(verb: Optional[str]) -> None:
 # Each verb and the function that runs it, in the order usage lists them.
 _RUN_BY_VERB = {
     "run": _run,
-    "status": _status,
     "show": _show,
-    "diff": _diff,
-    "plot": _plot,
     "trace": _trace,
 }

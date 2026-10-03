@@ -9,7 +9,7 @@ that run, so if your screen disagrees with the page, the page is out of
 date and worth reporting.
 
 - [Your first run](first_run.md): install, run one shot, open the run
-  folder, read a figure, and follow one round of syndrome data through
+  folder, read its rows, and follow one round of syndrome data through
   the machine. Ten minutes.
 - [Your first sweep](first_sweep.md): run a small sweep on four
   processes, read its exact error bars, stop it and pick it up again.

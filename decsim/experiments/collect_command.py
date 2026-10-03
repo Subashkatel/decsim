@@ -6,12 +6,13 @@ saves each piece's additive facts in the results folder the moment it
 ends (pieces). A point stops by its collection's rule on the contiguous
 prefix of its seeds (collection), and no piece past the stop is
 started. Then the pieces are folded into the results folder, one row
-per point, beside the figures and the residence and wait table of the
-traced shots (report, run_folder, plots, residence). A piece already
-saved is counted and not run again, so a killed collect resumes where
-it stopped; rerunning the same experiment reproduces the same rows
-(only the wall-clock column varies), and so does running it with a
-process pool, as long as each point stops at the same piece.
+per point (report, run_folder). A piece already saved is counted and
+not run again, so a killed collect resumes where it stopped; rerunning
+the same experiment reproduces the same rows (only the wall-clock
+column varies), and so does running it with a process pool, as long as
+each point stops at the same piece. On Slurm each array task collects
+one point and folds nothing, and one fold job folds them all
+(plan_command).
 """
 
 import dataclasses
@@ -29,14 +30,11 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.pieces as pieces
-import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
-import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
 import decsim.records.results as result_records
-import decsim.records.round_plans as round_plans
 import decsim.settings as machine_settings
 
 
@@ -48,8 +46,7 @@ class PointCollection:
     shots.csv, as the report does (collection.PrefixTracker), so the
     collector stops on the shot the report's row stops on. saved maps
     the first seed of each piece saved before this collect to its
-    count, whatever collection cut it, and planned lists the (first
-    seed, count) of the pieces batch plans named. pending holds the (first seed,
+    count, whatever collection cut it. pending holds the (first seed,
     count) of the pieces handed out past the counted prefix, in seed
     order; they are counted once they are all saved, so the prefix
     stays contiguous whatever order the pool ends them in. last_piece
@@ -66,7 +63,6 @@ class PointCollection:
     piece_shots: int
     rounds_per_shot: int
     saved: dict
-    planned: list = dataclasses.field(default_factory=list)
     next_seed: int = 0
     pending: list = dataclasses.field(default_factory=list)
     last_piece: Optional[tuple] = None
@@ -111,17 +107,6 @@ class PointCollection:
         if self.tracker.stop_kind is not None:
             _say_the_point_stopped(self)
 
-    def count_the_saved(self, run_dir: pathlib.Path) -> None:
-        """The saved pieces from the next seed on, up to a gap, counted.
-
-        A plan and a status read a point's prefix this way, shot by
-        shot, as a collect reads it before it runs a piece.
-        """
-        prefix = pieces.contiguous_ranges(self.saved, self.next_seed)
-        for first_seed, count in prefix:
-            self._make_pending(first_seed, count)
-        self.count_the_pending(run_dir)
-
     def rule(self) -> collection_module.PointRule:
         """What the point's summary reads its prefix by."""
         is_adaptive = self.task.online_threshold is not None
@@ -144,16 +129,15 @@ class PointCollection:
         """The next piece made pending; its unit, or None when it is saved.
 
         A saved piece that starts at the next seed is taken whole, and a
-        new one ends where the next saved piece starts or a planned piece
-        starts or ends, so a collect run again under a raised cap or
-        target, or beside a batch's tasks, runs no seed twice.
+        new one ends where the next saved piece starts, so a collect run
+        again under a raised cap or target runs no seed twice.
         """
         first_seed = self.next_seed
         saved_count = self.saved.get(first_seed)
         if saved_count is not None:
             self._make_pending(first_seed, saved_count)
             return None
-        seeds_free = self._seeds_before_a_boundary(first_seed)
+        seeds_free = self._seeds_before_the_next_piece(first_seed)
         new_count = min(count, seeds_free)
         task = self.task_as_its_last_piece_left_it(run_dir)
         self._make_pending(first_seed, new_count)
@@ -164,21 +148,12 @@ class PointCollection:
         self.pending.append((first_seed, count))
         self.last_piece = (first_seed, count)
 
-    def _seeds_before_a_boundary(self, first_seed: int) -> float:
-        """The seeds from first_seed to the next piece's edge, or infinity.
-
-        An edge is where a saved piece starts, or where a planned piece
-        starts or ends.
-        """
-        edges = list(self.saved)
-        for planned_first, planned_count in self.planned:
-            planned_end = planned_first + planned_count
-            edges.append(planned_first)
-            edges.append(planned_end)
-        later_edges = [edge for edge in edges if edge > first_seed]
-        if not later_edges:
+    def _seeds_before_the_next_piece(self, first_seed: int) -> float:
+        """The seeds from first_seed to the next saved piece, or infinity."""
+        later_starts = [start for start in self.saved if start > first_seed]
+        if not later_starts:
             return math.inf
-        return min(later_edges) - first_seed
+        return min(later_starts) - first_seed
 
     def _next_piece_count(self) -> int:
         """The next piece's shots: a piece, or what is left below max_shots."""
@@ -234,17 +209,11 @@ def collect_experiment(
     every point of the experiment, the order the fold writes its rows
     in whichever points ran. Returns the folded rows.
     """
-    _check_processes(processes)
-    run_folder.refuse_another_tree(run_dir)
-    every_id = _experiment_point_ids(study)
     chosen = _chosen_points(study, only)
-    points = recorded_points(run_dir, chosen)
-    point_ids = _point_ids(points)
-    saved_pieces = pieces.folders_of(run_dir, point_ids)
-    report.refuse_pieces_of_another_tree(saved_pieces)
-    run_folder.accept_raised_stop_rules(run_dir, run_file, every_id)
-    started_utc = run_folder.start_run(run_dir, run_file, every_id)
-    _echo_description(chosen, run_file, run_dir)
+    every_id, points, started_utc = start_the_folder(
+        study, chosen, run_dir, run_file
+    )
+    print(f"run dir: {run_dir}\n", file=sys.stderr)
     measure_shot = _shot_measure(points, run_dir)
     _collect_until_stopped(points, run_dir, measure_shot, processes)
     folded_ids = run_folder.recorded_point_ids(run_dir, every_id)
@@ -252,6 +221,63 @@ def collect_experiment(
     rows = fold_the_folder(run_dir, folded_ids, folders)
     run_folder.finish_run(run_dir, run_file, every_id, started_utc)
     return rows
+
+
+def start_the_folder(
+    study: experiment.Experiment,
+    chosen: experiment.Experiment,
+    run_dir: pathlib.Path,
+    run_file: pathlib.Path,
+) -> tuple:
+    """The folder checked, the chosen points recorded, run.json written.
+
+    Returns every point's id in the experiment's order, the chosen
+    points' collections, and the start time.
+    """
+    _refuse_another_tree(run_dir)
+    every_id = _experiment_point_ids(study)
+    points = recorded_points(run_dir, chosen)
+    run_folder.accept_raised_stop_rules(run_dir, run_file, every_id)
+    started_utc = run_folder.start_run(run_dir, run_file, every_id)
+    return every_id, points, started_utc
+
+
+def run_task(
+    run_file: pathlib.Path,
+    run_dir: pathlib.Path,
+    index: int,
+    *,
+    processes: int = 1,
+) -> None:
+    """One array task: the experiment's index-th point to its stop.
+
+    The launcher recorded every point and wrote run.json, so a task
+    checks that the folder ran this tree, records its point again, the
+    same record, and collects it from its saved pieces on. It folds
+    nothing: the fold job folds every task's pieces once the array has
+    ended (plan_command).
+    """
+    _check_processes(processes)
+    study = experiment.load(run_file)
+    _refuse_another_tree(run_dir)
+    point = study.points[index]
+    chosen = study.only(point.name)
+    points = recorded_points(run_dir, chosen)
+    measure_shot = _shot_measure(points, run_dir)
+    _collect_until_stopped(points, run_dir, measure_shot, processes)
+
+
+def fold_the_run(run_dir: pathlib.Path) -> list:
+    """Every recorded point's saved pieces folded; nothing run.
+
+    The points are the ones the folder recorded, in run.json's order,
+    so a point the run file no longer makes is still folded.
+    """
+    run_path = run_dir / run_folder.RUN_FILE
+    run_record = run_folder.read_json(run_path)
+    point_ids = run_folder.recorded_point_ids(run_dir, run_record["points"])
+    folders = pieces.folders_of(run_dir, point_ids)
+    return fold_the_folder(run_dir, point_ids, folders)
 
 
 def run_one_shot(
@@ -281,7 +307,7 @@ def run_one_shot(
     task = dataclasses.replace(task, settings=settings)
     machine = _built_machine(task, seed, run_file)
     run_dir = run_folder.run_dir_for(study.name, out_dir)
-    run_folder.refuse_another_tree(run_dir)
+    _refuse_another_tree(run_dir)
     point_id = task.strong_id()
     _refuse_a_name_recorded_for_another_point(run_dir, point.name, point_id)
     run_points = _run_points(run_dir, point_id)
@@ -309,47 +335,28 @@ def fold_the_folder(
     fold is built whole in a staging folder and moved in only then, in
     place of the last fold, so a fold that is refused (two pieces of a
     point with different columns) leaves the last one as it was. Then
-    each record names the seeds its pieces hold, and the figure is
-    drawn.
+    each record names the seeds its pieces hold.
     """
+    pieces.refuse_pieces_of_another_tree(run_dir, folders)
     with tempfile.TemporaryDirectory(dir=run_dir, prefix=".") as staged:
         staging = pathlib.Path(staged)
         rows = _fold_into_the_staging(run_dir, folders, point_ids, staging)
         run_folder.publish_the_fold(staging, run_dir)
     seeds_by_point = pieces.seed_ranges_of(folders)
     run_folder.record_seeds(run_dir, seeds_by_point)
-    plots.plots(run_dir)
     return rows
 
 
-def run_planned(
-    run_dir: pathlib.Path,
-    batch_number: int,
-    task_number: int,
-    *,
-    processes: int = 1,
-) -> None:
-    """One task of a batch's plan, its pieces run and saved.
+def _refuse_another_tree(run_dir: pathlib.Path) -> None:
+    """This tree, and every piece the folder saved, are run.json's tree.
 
-    run_dir is the results folder. The plan recorded its points, so the
-    task loads the run file run.json names and only reads the records.
-    A piece already saved is skipped, so a task run again runs only what
-    it had not saved. Each piece records its batch and task, and the
-    task's run.json goes in batches/<k>/<task>/.
+    A new folder has neither run.json nor a piece, so its pieces are
+    not asked about.
     """
-    _check_processes(processes)
-    run_dir = pathlib.Path(run_dir)
-    batch_folder = pieces.batch_dir(run_dir, batch_number)
-    plan_path = batch_folder / pieces.PLAN_FILE
-    task_pieces = _pieces_of_the_task(plan_path, task_number)
-    run_file = run_folder.recorded_run_file(run_dir)
-    study = experiment.load(run_file)
-    point_ids = [piece.point_id for piece in task_pieces]
-    task_dir = batch_folder / str(task_number)
-    started_utc = run_folder.start_run(task_dir, None, point_ids)
-    facts = {"batch": batch_number, "task": task_number}
-    _run_the_planned_pieces(study, run_dir, task_pieces, facts, processes)
-    run_folder.finish_run(task_dir, None, point_ids, started_utc)
+    run_folder.refuse_another_tree(run_dir)
+    saved = pieces.every_folder(run_dir)
+    if saved:
+        pieces.refuse_pieces_of_another_tree(run_dir, saved)
 
 
 def recorded_points(
@@ -360,7 +367,7 @@ def recorded_points(
     Every point's record is built first, which runs its build, so a
     point the build refuses stops the run before any shot, and a point
     whose name the folder holds for another machine is refused. Only
-    then are the records written, so a refused plan or collect leaves
+    then are the records written, so a refused launch or run leaves
     the results folder as it was. Returns each point's collection
     state, in the experiment's order.
     """
@@ -373,10 +380,9 @@ def recorded_points(
         run_folder.write_point_record(
             run_dir, resolved_point.task, resolved_point.record
         )
-    planned = pieces.planned_pieces(run_dir)
     points = []
     for resolved_point in resolved:
-        point = _point_collection(run_dir, resolved_point, planned)
+        point = _point_collection(run_dir, resolved_point)
         points.append(point)
     return points
 
@@ -410,177 +416,57 @@ def _fold_into_the_staging(
     point_ids: list,
     staging: pathlib.Path,
 ) -> list:
-    """Every file of the fold written into staging; the rows."""
+    """Every file of the fold written into staging; the rows.
+
+    An online point's calibrator, as its prefix left it, gives its
+    trajectory file and one row of threshold_summary.csv.
+    """
     records = run_folder.point_records(run_dir)
     swept = run_folder.swept_values(run_dir, point_ids)
     rules = {}
+    summary_rows = []
     for point_id in point_ids:
         record = records[point_id]
         rules[point_id] = collection_module.PointRule.from_record(record)
-        _write_the_recorded_trajectory(run_dir, folders, record, staging, swept)
+        calibrator = _recorded_calibrator(run_dir, folders, record)
+        if calibrator is None:
+            continue
+        algorithm = record["experiment"]["algorithm"]
+        point = report.point_columns((point_id, algorithm))
+        _write_online_threshold_record(point, calibrator, staging, swept)
+        summary_row = _threshold_summary_row(point, calibrator)
+        summary_rows.append(summary_row)
+    if summary_rows:
+        summary_path = staging / "threshold_summary.csv"
+        report.write_csv(summary_rows, summary_path, swept)
     rows = report.fold_pieces(run_dir, folders, point_ids, staging, rules)
-    residence_rows = residence.rows_in(folders)
-    residence.write_residence(residence_rows, staging, swept)
     return rows
 
 
-def _write_the_recorded_trajectory(
-    run_dir: pathlib.Path,
-    folders: list,
-    record: dict,
-    staging: pathlib.Path,
-    swept: dict,
-) -> None:
-    """An online point's trajectory, from the state its prefix ended on."""
+def _recorded_calibrator(
+    run_dir: pathlib.Path, folders: list, record: dict
+) -> Optional[threshold_sources.OnlineThreshold]:
+    """An online point's calibrator as its prefix ended; None if none."""
     facts = record["experiment"]
     if not facts["adaptive"]:
-        return
+        return None
     point_id = record["id"]
     point_folders = pieces.point_folders(folders, point_id)
     saved = pieces.saved_counts(point_folders)
     prefix = pieces.contiguous_ranges(saved, 0)
     if not prefix:
-        return
+        return None
     first_seed, count = prefix[-1]
     folder = pieces.piece_dir(run_dir, point_id, first_seed, count)
-    calibrator = pieces.read_state(folder)
-    algorithm = facts["algorithm"]
-    _write_online_threshold_record(
-        point_id, algorithm, calibrator, staging, swept
-    )
-
-
-def _pieces_of_the_task(plan_path: pathlib.Path, task_number: int) -> list:
-    """The plan's pieces dealt to one task; a task with none is refused."""
-    task_pieces = []
-    for task, piece in pieces.read_plan(plan_path):
-        if task == task_number:
-            task_pieces.append(piece)
-    if not task_pieces:
-        raise refusal.RefusalError(
-            f"{plan_path} deals no piece to task {task_number}"
-        )
-    return task_pieces
-
-
-def _run_the_planned_pieces(
-    study: experiment.Experiment,
-    run_dir: pathlib.Path,
-    task_pieces: list,
-    facts: dict,
-    processes: int,
-) -> None:
-    """The task's planned pieces run and saved; saved ones skipped.
-
-    The independent pieces share the pool; then an online point's
-    pieces run one after another in seed order, each from the
-    calibrator the piece before it saved.
-    """
-    task_by_point = {}
-    for point in study.points:
-        task = experiment.task_of(point)
-        task_by_point[task.strong_id()] = task
-    units = _planned_units(run_dir, task_pieces, task_by_point)
-    tasks = task_by_point.values()
-    measure_shot = _shot_measure_of_tasks(list(tasks), run_dir)
-    save = functools.partial(_save_the_piece, run_dir, facts)
-    independent, online = _independent_and_online(units)
-    collect.run_units(
-        independent, measure_shot, on_unit_done=save, processes=processes
-    )
-    for unit in online:
-        resumed = _resumed_from_the_piece_before(run_dir, unit)
-        collect.run_units([resumed], measure_shot, on_unit_done=save)
-
-
-def _independent_and_online(units: list) -> tuple:
-    """The units split, since only independent shots may run in any order.
-
-    An online piece starts from the calibrator its piece before saved, so
-    it runs after that piece, one at a time; the rest share the pool.
-    """
-    independent = []
-    online = []
-    for unit in units:
-        if unit.task.online_threshold is None:
-            independent.append(unit)
-        else:
-            online.append(unit)
-    return independent, online
-
-
-def _planned_units(
-    run_dir: pathlib.Path, task_pieces: list, task_by_point: dict
-) -> list:
-    """The planned pieces' seeds no saved piece holds, as work units.
-
-    A piece saved whole, or its seeds saved under another cut by a plain
-    collect, runs nothing; one partly saved runs the seeds left, so no
-    seed is saved twice.
-    """
-    units = []
-    for piece in task_pieces:
-        task = task_by_point.get(piece.point_id)
-        if task is None:
-            _refuse_a_point_gone_from_the_run_file(run_dir, piece)
-        point_folders = pieces.folders_of(run_dir, [piece.point_id])
-        saved = pieces.saved_counts(point_folders)
-        unsaved = pieces.uncovered_ranges(saved, piece.first_seed, piece.count)
-        for first_seed, count in unsaved:
-            unit = collect.Unit(task, first_seed, count)
-            units.append(unit)
-    return units
-
-
-def _refuse_a_point_gone_from_the_run_file(
-    run_dir: pathlib.Path, piece: round_plans.PlannedPiece
-) -> None:
-    """The sentence for a planned point its run file no longer makes."""
-    run_file = run_folder.recorded_run_file(run_dir)
-    raise refusal.RefusalError(
-        f"the plan's point {piece.point_id} is no point of {run_file} now; "
-        "the run file or a maker it calls changed since the plan was "
-        "written, so plan again"
-    )
-
-
-def _resumed_from_the_piece_before(
-    run_dir: pathlib.Path, unit: collect.Unit
-) -> collect.Unit:
-    """An online point's unit, its calibrator as the piece before it left it.
-
-    The plan deals an online point's pieces to one task in seed order,
-    so the piece before is saved, by an earlier batch or just now.
-    """
-    if unit.first_seed == 0:
-        return unit
-    point_id = unit.task.strong_id()
-    point_folders = pieces.folders_of(run_dir, [point_id])
-    saved = pieces.saved_counts(point_folders)
-    for first_seed, count in saved.items():
-        if first_seed + count != unit.first_seed:
-            continue
-        folder = pieces.piece_dir(run_dir, point_id, first_seed, count)
-        task = _task_as_the_piece_left_it(unit.task, folder)
-        return dataclasses.replace(unit, task=task)
-    raise refusal.RefusalError(
-        f"the point {point_id} has no saved piece ending at seed "
-        f"{unit.first_seed}, whose calibrator its piece starts from; plan "
-        "again"
-    )
+    return pieces.read_state(folder)
 
 
 def _shot_measure(points: list, run_dir: pathlib.Path):
-    """The measure every shot of these points' collections runs through."""
-    tasks = [point.task for point in points]
-    return _shot_measure_of_tasks(tasks, run_dir)
-
-
-def _shot_measure_of_tasks(tasks: list, run_dir: pathlib.Path):
-    """The measure every shot runs through, written for a worker process.
+    """The measure every shot of these points runs through.
 
     It is a partial of a module-level function, so a pool can pickle it.
     """
+    tasks = [point.task for point in points]
     only_traced_shot = _traces_one_shot(tasks)
     return functools.partial(
         measure.measure_shot,
@@ -675,15 +561,6 @@ def _operation_line(row) -> str:
         f"observables {row.logical_observables}, "
         f"truth {row.observable_truth}"
     )
-
-
-def _point_ids(points: list) -> list:
-    """The points' ids in the experiment's order."""
-    point_ids = []
-    for point in points:
-        point_id = point.task.strong_id()
-        point_ids.append(point_id)
-    return point_ids
 
 
 @dataclasses.dataclass(frozen=True)
@@ -785,38 +662,17 @@ def _run_points(run_dir: pathlib.Path, point_id: str) -> list:
 
 
 def _point_collection(
-    run_dir: pathlib.Path, resolved: _ResolvedPoint, planned: dict
+    run_dir: pathlib.Path, resolved: _ResolvedPoint
 ) -> PointCollection:
-    """A recorded point's collection state, its pieces sized by its rounds.
-
-    planned maps a point id to its planned pieces, as batch plans name
-    them (pieces.planned_pieces). A point whose shots send no detector
-    data has no rounds to size a piece by or to score, and is refused
-    here, before any shot runs, as sinter's Task refuses a task it cannot
-    count when it is built (sinter/_data/_task.py:127-149).
-    """
+    """A recorded point's collection state, its pieces sized by its rounds."""
     point_id = resolved.record["id"]
     rounds_per_shot = resolved.record["rounds_per_shot"]
-    if rounds_per_shot == 0:
-        metadata = collect.metadata_text(resolved.task.metadata)
-        raise refusal.RefusalError(
-            f"the point {metadata} runs no operation that sends detector "
-            "data, so its shots have no rounds to size a piece by or to "
-            "score; decsim run needs a workload whose operations emit "
-            "detector data (decsim run times the others)"
-        )
     settings = resolved.settings
     piece_shots = settings.piece_shots(rounds_per_shot)
     point_folders = pieces.folders_of(run_dir, [point_id])
     saved = pieces.saved_counts(point_folders)
-    point_planned = planned.get(point_id, [])
     return PointCollection(
-        resolved.task,
-        settings,
-        piece_shots,
-        rounds_per_shot,
-        saved,
-        point_planned,
+        resolved.task, settings, piece_shots, rounds_per_shot, saved
     )
 
 
@@ -848,7 +704,7 @@ def _collect_until_stopped(
     split among the points still running, so no point runs far past its
     stop.
     """
-    save = functools.partial(_save_the_piece, run_dir, {})
+    save = functools.partial(_save_the_piece, run_dir)
     while True:
         units = _next_share_of_the_pool(points, run_dir, processes)
         if not units:
@@ -898,42 +754,23 @@ def _say_the_point_stopped(point: PointCollection) -> None:
 
 def _save_the_piece(
     run_dir: pathlib.Path,
-    facts: dict,
     unit: collect.Unit,
     outcome: result_records.UnitOutcome,
 ) -> None:
     """One unit's measurements saved as its piece.
 
-    facts are the lines every piece of the run takes in piece.json: a
-    planned piece's batch and task, none for a local run. The piece
-    counts the rounds its shots ran, since a shot's cost grows with its
-    rounds, and the peak memory and the package versions of the process
-    that ran it. An adaptive
-    point's piece keeps its calibrator as the unit's shots left it.
+    The piece records the peak memory and the package versions of the
+    process that ran it. An adaptive point's piece keeps its calibrator
+    as the unit's shots left it.
     """
     point_id = unit.task.strong_id()
     rows = outcome.rows
-    rounds = sum(row.executed_rounds for row in rows)
     piece_facts = {
-        **facts,
-        "rounds": rounds,
         "peak_memory_mb": outcome.peak_memory_mb,
         "packages": outcome.module_versions,
     }
     state = unit.task.online_threshold
     pieces.write(run_dir, point_id, unit.first_seed, rows, piece_facts, state)
-
-
-def _echo_description(
-    study: experiment.Experiment,
-    run_file: pathlib.Path,
-    run_dir: pathlib.Path,
-) -> None:
-    """The resolved experiment, before the first shot, on stderr."""
-    description = experiment.description(study, run_file)
-    description.append(f"run dir: {run_dir}\n")
-    description_text = "\n".join(description)
-    print(description_text, file=sys.stderr)
 
 
 def _say_the_threshold(calibrator) -> None:
@@ -951,8 +788,7 @@ def _final_threshold_db(summary: dict) -> float:
 
 
 def _write_online_threshold_record(
-    point_id: str,
-    algorithm,
+    point: dict,
     calibrator,
     run_dir: pathlib.Path,
     swept: dict,
@@ -962,16 +798,30 @@ def _write_online_threshold_record(
     Every audit and target move, plus every 100th window, and a summary
     line on stderr. The gap unit inside the calibrator is nats; the csv
     converts to the paper's decibels. The file is named by the point's
-    id, as its resolved/ record is, and its rows carry the point's id,
-    swept values and algorithm, as every other csv's rows do.
+    id, and its rows carry the point's id, swept values and algorithm,
+    as every other csv's rows do.
     """
     _say_the_threshold(calibrator)
     summary = calibrator.summary()
     threshold_db = _final_threshold_db(summary)
-    point = report.point_columns((point_id, algorithm))
     rows = _trajectory_rows(point, calibrator, summary, threshold_db)
+    point_id = point["point_id"]
     record_path = pathlib.Path(run_dir) / f"online_threshold_{point_id}.csv"
     report.write_csv(rows, record_path, swept)
+
+
+def _threshold_summary_row(point: dict, calibrator) -> dict:
+    """The calibrator's counters at the point's end, its threshold in dB.
+
+    Every counter calibrator.summary() holds, the ones the stderr line
+    prints among them, with the final threshold converted from nats.
+    """
+    summary = calibrator.summary()
+    threshold_db = _final_threshold_db(summary)
+    row = {**point, **summary}
+    del row["threshold"]
+    row["threshold_db"] = threshold_db
+    return row
 
 
 def _trajectory_rows(

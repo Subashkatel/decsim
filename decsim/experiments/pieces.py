@@ -11,13 +11,8 @@ the counts its save file already holds
 (sinter/_collection/_collection.py:387-397). A staging folder a killed
 writer left is no piece and is passed over; no writer can tell from
 another host whether its owner is still writing, so none removes it.
-
-A batch's plan, batches/<k>/plan.csv, is a list of pieces, each with
-the task it was dealt to; `decsim run --slurm` writes it and each task
-of the batch's arrays runs its share of it.
 """
 
-import csv
 import hashlib
 import json
 import os
@@ -29,21 +24,13 @@ from typing import Optional
 
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
-import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
 import decsim.ports as ports
-import decsim.records.round_plans as round_plans
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
 # an adaptive point's calibrator as its piece left it (design 6.5)
 STATE_FILE = "state.pickle"
-
-# A batch's folder, batches/<k>/, and its plan: a row per piece, its
-# task first.
-BATCHES_FOLDER = "batches"
-PLAN_FILE = "plan.csv"
-PLAN_COLUMNS = ("task", "point_id", "first_seed", "count")
 
 
 def piece_dir(
@@ -65,9 +52,8 @@ def write(
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
-    facts are the piece's own lines of piece.json, beside the counts
-    read off its shots and the confidence it recorded
-    (report.confidence_shot_count_of). state is an adaptive point's
+    facts are the piece's own lines of piece.json, beside the confidence
+    it recorded (report.confidence_shot_count_of). state is an adaptive point's
     calibrator after the piece's last shot, which the point's next piece
     starts from; it is pickled beside the files and its sha256 goes in
     piece.json.
@@ -78,8 +64,6 @@ def write(
     staging.mkdir(parents=True)
     record = report.record_of(measurements)
     report.write_record(record, staging, None)
-    _write_residence(staging, measurements)
-    counts = _counts_of(record.shots)
     identity = run_folder.piece_identity()
     confidence_shot_count = report.confidence_shot_count_of(measurements)
     piece = {
@@ -87,7 +71,6 @@ def write(
         "first_seed": first_seed,
         "count": count,
         "confidence_shot_count": confidence_shot_count,
-        **counts,
         **facts,
         **identity,
     }
@@ -112,6 +95,40 @@ def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
         written = _whole_pieces(point_dir)
         folders.extend(written)
     return folders
+
+
+def every_folder(experiment_dir: pathlib.Path) -> list:
+    """Every whole piece the folder holds, of whichever point."""
+    pieces_dir = experiment_dir / PIECES_FOLDER
+    point_dirs = sorted(pieces_dir.glob("*"))
+    point_ids = [point_dir.name for point_dir in point_dirs]
+    return folders_of(experiment_dir, point_ids)
+
+
+def refuse_pieces_of_another_tree(run_dir: pathlib.Path, folders: list) -> None:
+    """Every piece ran the tree the folder's run.json names.
+
+    A folder's rows pool its pieces under its one run.json, so a piece
+    another tree saved would be skipped as done, folded, and reported
+    as this tree's. A collect asks before it records a point or runs a
+    shot, and the fold asks again of the pieces it folds. run.json's
+    tree is read first, so a fold of a folder with no piece yet still
+    stops on a run.json an older tree wrote.
+    """
+    run_path = run_dir / run_folder.RUN_FILE
+    run_record = run_folder.read_json(run_path)
+    folder_tree = run_record["git"]
+    folder_text = run_folder.tree_text(folder_tree)
+    for folder in folders:
+        piece = read_piece(folder)
+        if run_folder.is_one_tree(folder_tree, piece):
+            continue
+        raise refusal.RefusalError(
+            f"{folder} ran {run_folder.tree_text(piece)}, and {run_path} "
+            f"names {folder_text}; a folder holds "
+            "one tree's results, so collect into a new folder, or move "
+            "that tree's pieces out of this one"
+        )
 
 
 def point_folders(folders: list, point_id: str) -> list:
@@ -144,31 +161,6 @@ def contiguous_ranges(saved: dict, first_seed: int) -> list:
         count = saved[next_seed]
         ranges.append((next_seed, count))
         next_seed += count
-    return ranges
-
-
-def uncovered_ranges(saved: dict, first_seed: int, count: int) -> list:
-    """The parts of seeds [first_seed, first_seed + count) no saved piece holds.
-
-    saved maps each saved piece's first seed to its count, as
-    saved_counts gives it, whatever collection cut it. Returns (first
-    seed, count) ranges in seed order; none when every seed is saved.
-    """
-    end_seed = first_seed + count
-    ranges = []
-    next_seed = first_seed
-    saved_items = saved.items()
-    for saved_first, saved_count in sorted(saved_items):
-        saved_end = saved_first + saved_count
-        if saved_end <= next_seed or saved_first >= end_seed:
-            continue
-        if saved_first > next_seed:
-            gap_count = saved_first - next_seed
-            ranges.append((next_seed, gap_count))
-        next_seed = max(next_seed, saved_end)
-    if next_seed < end_seed:
-        tail_count = end_seed - next_seed
-        ranges.append((next_seed, tail_count))
     return ranges
 
 
@@ -213,57 +205,6 @@ def read_state(folder: pathlib.Path) -> ports.ThresholdSource:
     return pickle.loads(state_bytes)
 
 
-def planned_pieces(experiment_dir: pathlib.Path) -> dict:
-    """Every batch's planned pieces, by point id, as (first seed, count).
-
-    Each seed range once, in seed order, however many batches planned it.
-    """
-    planned = {}
-    for batch_folder in batch_dirs(experiment_dir):
-        plan_path = batch_folder / PLAN_FILE
-        for _task, piece in read_plan(plan_path):
-            point_pieces = planned.setdefault(piece.point_id, set())
-            point_pieces.add((piece.first_seed, piece.count))
-    return {
-        point_id: sorted(point_pieces)
-        for point_id, point_pieces in planned.items()
-    }
-
-
-def read_plan(plan_path: pathlib.Path) -> list:
-    """A plan.csv's pieces as (task, PlannedPiece), in the file's order."""
-    with open(plan_path, newline="") as handle:
-        reader = csv.DictReader(handle)
-        rows = list(reader)
-    planned = []
-    for row in rows:
-        piece = round_plans.PlannedPiece(
-            row["point_id"],
-            int(row["first_seed"]),
-            int(row["count"]),
-        )
-        task = int(row["task"])
-        planned.append((task, piece))
-    return planned
-
-
-def batch_dir(experiment_dir: pathlib.Path, batch_number: int) -> pathlib.Path:
-    """Batch k's folder, batches/<k>/."""
-    return experiment_dir / BATCHES_FOLDER / str(batch_number)
-
-
-def batch_dirs(experiment_dir: pathlib.Path) -> list:
-    """The experiment's batch folders that hold a plan, in batch order."""
-    found = experiment_dir.glob(f"{BATCHES_FOLDER}/*/{PLAN_FILE}")
-    folders = [path.parent for path in found]
-    return sorted(folders, key=batch_number_of)
-
-
-def batch_number_of(batch_folder: pathlib.Path) -> int:
-    """The batch number k of a batches/<k> folder."""
-    return int(batch_folder.name)
-
-
 def _staging_dir(folder: pathlib.Path) -> pathlib.Path:
     """A hidden folder beside the piece that only this writer uses.
 
@@ -292,15 +233,6 @@ def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
         shutil.rmtree(staging)
 
 
-def _write_residence(staging: pathlib.Path, measurements: list) -> None:
-    """The residence rows of the piece's traced shots, when it traced any."""
-    residence_rows = residence.rows_of(measurements)
-    if not residence_rows:
-        return
-    residence_path = staging / residence.PIECE_FILE
-    report.write_csv(residence_rows, residence_path)
-
-
 def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:
     """The state pickled into the staging folder; its sha256."""
     state_bytes = pickle.dumps(state)
@@ -327,32 +259,3 @@ def _range_of(folder: pathlib.Path) -> tuple:
     last_seed = int(last_text)
     count = last_seed - first_seed + 1
     return (first_seed, count)
-
-
-def _counts_of(shots: list) -> dict:
-    """The piece's shot counts, the lines a planner reads without its rows.
-
-    core_seconds is the shots' own simulated wall time, the cost a
-    planner deals pieces by. The window status counts are the summary's
-    own sums (report.STATUS_SUMS), so a status reads without the rows
-    why a piece's shots went unscored, as sinter keeps its discards
-    beside its shots (sinter/_data/_task_stats.py:71).
-    """
-    scored_shots = _sum_of(shots, "is_scored")
-    counts = {
-        "scored_shots": scored_shots,
-        "failures": _sum_of(shots, "logical_failure"),
-        "unscored_shots": len(shots) - scored_shots,
-        "core_seconds": _sum_of(shots, "sim_wall_seconds"),
-    }
-    for name in report.STATUS_SUMS:
-        counts[name] = _sum_of(shots, name)
-    return counts
-
-
-def _sum_of(shots: list, column: str):
-    """One column summed over the piece's shot rows."""
-    values = []
-    for row in shots:
-        values.append(row[column])
-    return sum(values)

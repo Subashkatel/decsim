@@ -28,7 +28,7 @@ __pycache__/
 /slurm-*.out
 
 # Run output. A results folder's summaries (sweep.csv, stats.csv and
-# the like), run.json, code state, script copy and plots are tracked, so
+# the like), run.json, code state and script copy are tracked, so
 # every experiment's evidence has one place; each point's records and
 # working CSV, the pieces, the batches, the traces and the logs stay
 # with the run.

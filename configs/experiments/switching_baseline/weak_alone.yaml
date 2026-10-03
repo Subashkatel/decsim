@@ -1,7 +1,7 @@
 # Experiment 1's paired reference: switching_baseline.yaml's machine and
 # shots with no escalation, every window kept by the weak tier. Each
-# shot's samples depend on the seed alone, so `decsim diff` pairs the two
-# runs shot by shot. The machine differs only in the escalation block.
+# shot's samples depend on the seed alone, so the two runs' shots.csv
+# rows pair on the seed. The machine differs only in the escalation block.
 extends: switching_baseline.yaml
 
 escalation:
